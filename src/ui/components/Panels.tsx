@@ -29,6 +29,20 @@ export function DateField({ value, onChange, placeholder, allowEmpty, testId }: 
   );
 }
 
+/** A number box that saves when you press Enter or leave it, not on every keystroke. */
+export function NumberField({ value, onCommit, min, max, step, testId, title }: { value: number; onCommit: (n: number) => void; min?: number; max?: number; step?: number; testId?: string; title?: string }) {
+  const [text, setText] = useState(String(value));
+  useEffect(() => setText(String(value)), [value]);
+  const commit = () => {
+    const n = Number(text);
+    if (!text.trim() || !Number.isFinite(n)) { setText(String(value)); return; }
+    const c = Math.min(max ?? Infinity, Math.max(min ?? -Infinity, n));
+    if (c !== value) onCommit(c);
+    setText(String(c));
+  };
+  return <input type="number" value={text} min={min} max={max} step={step} title={title} onChange={(e: any) => setText(e.target.value)} onBlur={commit} onKeyDown={(e: any) => e.key === 'Enter' && commit()} data-testid={testId} />;
+}
+
 export function TopBar() {
   const s = useStore();
   const w = s.world!;
@@ -82,6 +96,7 @@ export function ToolBar() {
   const owners = w.all('entity').filter((e) => e.type_id === 'polity' || e.type_id === 'faction').sort((a, b) => a.name.localeCompare(b.name));
   const rec = s.recordEventId ? w.get('event', s.recordEventId) : null;
   return (
+    <>
     <div className="toolbar">
       {TOOLS.map((t) => (
         <button key={t.id} className={s.tool === t.id ? 'on' : ''} title={t.hint} onClick={() => s.set({ tool: t.id })} data-testid={`tool-${t.id}`}>{t.name}</button>
@@ -95,22 +110,26 @@ export function ToolBar() {
             </select>
           </label>
           {s.tool === 'lasso' && (
-            <>
-              <label className="inline" title="Rounds the corners of your stroke">Smooth <input type="range" min={0} max={4} step={1} value={s.stroke.smoothness} onChange={(e: any) => s.set({ stroke: { ...s.stroke, smoothness: Number(e.target.value) } })} /></label>
-              <label className="inline" title="Adds natural irregularity (fixed once drawn)">Irregular <input type="range" min={0} max={20} step={1} value={s.stroke.irregularity} onChange={(e: any) => s.set({ stroke: { ...s.stroke, irregularity: Number(e.target.value), seed: (s.stroke.seed % 9973) + 1 } })} /></label>
-              <label className="inline" title="Lower keeps more points of your stroke">Detail <input type="range" min={0.3} max={6} step={0.1} value={7 - s.stroke.precision} onChange={(e: any) => s.set({ stroke: { ...s.stroke, precision: 7 - Number(e.target.value) } })} /></label>
-            </>
+            <details className="brush-settings">
+              <summary title="How freehand outlines are cleaned up">Brush settings ▾</summary>
+              <div className="popover">
+                <label title="Rounds the corners of your outline">Smoothing <input type="range" min={0} max={4} step={1} value={s.stroke.smoothness} onChange={(e: any) => s.set({ stroke: { ...s.stroke, smoothness: Number(e.target.value) } })} /></label>
+                <label title="Adds natural-looking irregularity. It is fixed once drawn and never changes afterwards.">Irregularity <input type="range" min={0} max={20} step={1} value={s.stroke.irregularity} onChange={(e: any) => s.set({ stroke: { ...s.stroke, irregularity: Number(e.target.value), seed: (s.stroke.seed % 9973) + 1 } })} /></label>
+                <label title="Higher keeps more of the small wiggles in your outline">Detail <input type="range" min={0.3} max={6} step={0.1} value={7 - s.stroke.precision} onChange={(e: any) => s.set({ stroke: { ...s.stroke, precision: 7 - Number(e.target.value) } })} /></label>
+              </div>
+            </details>
           )}
         </>
       )}
-      <div className="spacer" />
-      {rec && (
-        <span className="recording" data-testid="recording">
-          ● Recording into “{rec.name}”
-          <button onClick={() => s.set({ recordEventId: null })}>Stop</button>
-        </span>
-      )}
     </div>
+    {rec && (
+      <div className="record-banner" data-testid="recording">
+        <span className="rec-text">● Recording into “{rec.name}”</span>
+        <span className="muted-red">Everything you draw is added to this event{compare(s.time, fromStore(rec.start_day, rec.start_ms)) > 0 ? `, as a change on ${fmt(s.time)}` : ''}.</span>
+        <button onClick={() => s.set({ recordEventId: null })}>Stop</button>
+      </div>
+    )}
+    </>
   );
 }
 
@@ -243,7 +262,11 @@ function EntityPanel({ id }: { id: string }) {
       <div className="stat">On {fmt(s.time)}: {parcels ? `${Math.round(areaSr * (radius / 1000) ** 2).toLocaleString()} km²` : 'no territory'} </div>
       {(e.type_id === 'polity' || e.type_id === 'faction') && <button onClick={() => s.set({ paintValue: id, tool: 'lasso' })}>Draw territory for {e.name}</button>}
       <h4>Territorial changes</h4>
-      {changes.map((f) => { const ev = w.get('event', f.event_id); return ev ? <div key={f.id} className="row" onClick={() => s.set({ selection: { kind: 'event', id: ev.id }, time: ev.id === BASE_EVENT_ID ? s.time : fromStore(ev.start_day, ev.start_ms) })}>{ev.id === BASE_EVENT_ID ? 'Base world' : fmt(fromStore(ev.start_day, ev.start_ms))} · {ev.name}</div> : null; })}
+      {[...new Set(changes.map((f) => f.event_id))].map((eid) => w.get('event', eid)).filter((ev) => !!ev).sort((a, b) => a!.start_day - b!.start_day || a!.start_ms - b!.start_ms).map((ev) => (
+        <div key={ev!.id} className="row" onClick={() => s.set({ selection: { kind: 'event', id: ev!.id }, time: ev!.id === BASE_EVENT_ID ? s.time : fromStore(ev!.start_day, ev!.start_ms) })}>
+          {ev!.id === BASE_EVENT_ID ? 'Base world (from the beginning)' : <><span className="date">{fmt(fromStore(ev!.start_day, ev!.start_ms))}</span> {ev!.name}</>}
+        </div>
+      ))}
       {!changes.length && <div className="muted">None yet.</div>}
       <button className="danger" onClick={() => { if (confirm(`Delete ${e.name}? Events that refer to it will be flagged in History Health.`)) { s.execute((wd) => cmd.deleteEntity(wd, id)); s.set({ selection: null }); } }}>Delete</button>
     </div>
@@ -297,9 +320,9 @@ function EventPanel({ id }: { id: string }) {
       {!base && <>
         <label>Name<input value={name} onChange={(ev: any) => setName(ev.target.value)} onBlur={() => name.trim() && name !== e.name && s.execute((wd) => cmd.updateEvent(wd, id, { name: name.trim() }))} /></label>
         <label>Type<select value={e.type_id} onChange={(ev: any) => s.execute((wd) => cmd.updateEvent(wd, id, { type_id: ev.target.value }))}>{w.all('event_type').filter((t) => t.id !== 'base').map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
-        <label>Starts<DateField value={start} onChange={(t) => t && s.execute((wd) => cmd.updateEvent(wd, id, { start: t }))} /></label>
-        <label>Ends<DateField value={end} allowEmpty placeholder="(instantaneous)" onChange={(t) => s.execute((wd) => cmd.updateEvent(wd, id, { end: t }))} /></label>
-        <label title="When two events change the same place at the same instant, the higher precedence wins">Precedence<input type="number" value={e.precedence} onChange={(ev: any) => s.execute((wd) => cmd.updateEvent(wd, id, { precedence: Number(ev.target.value) || 0 }))} /></label>
+        <label>Starts<DateField value={start} onChange={(t) => t && s.execute((wd) => cmd.updateEvent(wd, id, { start: t }))} testId="event-panel-start" /></label>
+        <label>Ends<DateField value={end} allowEmpty placeholder="(instantaneous)" onChange={(t) => s.execute((wd) => cmd.updateEvent(wd, id, { end: t }))} testId="event-panel-end" /></label>
+        <label title="When two events change the same place at the same instant, the higher precedence wins">Precedence<NumberField value={e.precedence} step={1} onCommit={(n) => s.execute((wd) => cmd.updateEvent(wd, id, { precedence: Math.round(n) }))} /></label>
         <label>Description<textarea rows={4} value={desc} onChange={(ev: any) => setDesc(ev.target.value)} onBlur={() => desc !== e.description && s.execute((wd) => cmd.updateEvent(wd, id, { description: desc }))} /></label>
         <div className="buttons">
           {s.recordEventId === id

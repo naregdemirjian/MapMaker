@@ -7,7 +7,7 @@ import { defaultShot, timeAt, cameraAt, RESOLUTIONS, FRAME_RATES, type ShotSetti
 import { PASS_DEFS, runExport } from '../../presentation/export-driver.ts';
 import { PROJECTIONS, type ProjectionName } from '../../render-engine/camera.ts';
 import { parseJSON } from '../../temporal-engine/engine.ts';
-import { DateField, fmt } from './Panels.tsx';
+import { DateField, NumberField } from './Panels.tsx';
 import { currentShot } from './MapView.tsx';
 
 function saveShot(id: string, next: ShotSettings) {
@@ -115,15 +115,15 @@ export function ShotEditor() {
         </select></label>
         <h4>Screen time</h4>
         <div className="two">
-          <label>Seconds<input type="number" min={0.1} step={0.5} value={Number(seconds.toFixed(3))} onChange={(e: any) => setFrames(shot.fps, Math.max(0.1, Number(e.target.value)))} data-testid="shot-seconds" /></label>
+          <label>Seconds<NumberField min={0.1} max={3600} step={0.5} value={Number(seconds.toFixed(3))} onCommit={(n) => setFrames(shot.fps, n)} testId="shot-seconds" /></label>
           <label>Frame rate<select value={shot.fps} onChange={(e: any) => setFrames(Number(e.target.value), seconds)}>{FRAME_RATES.map((f) => <option key={f} value={f}>{f} fps</option>)}</select></label>
         </div>
         <label>Resolution<select value={res} onChange={(e: any) => { const r = RESOLUTIONS.find((x) => x.id === e.target.value); if (r) update({ width: r.width, height: r.height }); }}>
           {RESOLUTIONS.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}{res === 'custom' && <option value="custom">Custom {shot.width} x {shot.height}</option>}
         </select></label>
         <div className="two">
-          <label>Width<input type="number" value={shot.width} onChange={(e: any) => update({ width: Math.max(16, Math.round(Number(e.target.value))) })} /></label>
-          <label>Height<input type="number" value={shot.height} onChange={(e: any) => update({ height: Math.max(16, Math.round(Number(e.target.value))) })} /></label>
+          <label>Width<NumberField min={16} max={16384} step={1} value={shot.width} onCommit={(n) => update({ width: Math.round(n) })} /></label>
+          <label>Height<NumberField min={16} max={16384} step={1} value={shot.height} onCommit={(n) => update({ height: Math.round(n) })} /></label>
         </div>
         <h4>Camera</h4>
         <p className="muted">Drag and scroll the preview to frame a view, then store it.</p>

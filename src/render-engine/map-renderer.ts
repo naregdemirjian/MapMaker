@@ -45,6 +45,28 @@ export interface LabelInfo { text: string; x: number; y: number; size: number }
 
 interface FaceGeo { geo: GeoPermissibleObjects; area: number; centroid: [number, number] }
 
+interface TransitionGroup {
+  a: Assignment;
+  faces: number[];
+  states: FaceState[];
+  advance: boolean;
+  /** How far the change has progressed (0 to 1, eased). */
+  progress: number;
+  /** For an advancing front: the area reached so far (null before anything is reached). */
+  disc: Path2D | null;
+  region: Path2D;
+  /** The parcels whose owner actually changes. */
+  changing: Path2D;
+}
+
+/** Everything except the given shape (use with the even-odd rule). */
+function outsideOf(shape: Path2D): Path2D {
+  const p = new Path2D();
+  p.rect(-1e6, -1e6, 2e6, 2e6);
+  p.addPath(shape);
+  return p;
+}
+
 export class MapRenderer {
   private geoCache = new WeakMap<Arrangement, { rev: number; faces: Map<number, FaceGeo> }>();
   private pathCache = new Map<string, Path2D>();
@@ -112,49 +134,42 @@ export class MapRenderer {
       if (!layer || layer.space_id !== spaceId || layer.kind !== 'partition') continue;
       const ls = parseJSON<{ fillOpacity?: number; borderWidth?: number }>(layer.style, {});
       const states = engine.partitionState(spaceId, layerId, t);
+      const tg = this.transitionGroups(view, arr, engine, states, t);
 
       if (opts.passes.has('fills')) {
-        ctx.globalAlpha = ls.fillOpacity ?? 0.78;
+        // The layer is painted fully opaque in a scratch buffer and laid onto the map once at the
+        // layer's opacity: neighbouring parcels then never show seams, and fades mix correctly.
+        const lc = this.scratch(ctx);
         const byColor = new Map<string, Path2D>();
-        const transitions = new Map<string, { a: Assignment; faces: number[]; states: FaceState[] }>();
         for (const [face, st] of states) {
-          if (st.transition) {
-            const key = st.assignment!.effectId;
-            let g = transitions.get(key);
-            if (!g) transitions.set(key, (g = { a: st.assignment!, faces: [], states: [] }));
-            g.faces.push(face);
-            g.states.push(st);
-            continue;
-          }
-          const c = colorOf(st.value);
+          const c = colorOf(tg.of.has(face) ? st.transition!.from : st.value);
           if (!c) continue;
           let p = byColor.get(c);
           if (!p) byColor.set(c, (p = new Path2D()));
           p.addPath(this.facePath(view, arr, face));
         }
-        for (const [c, p] of byColor) { ctx.fillStyle = c; ctx.fill(p, 'evenodd'); }
-        for (const g of transitions.values()) this.drawTransition(ctx, view, arr, engine, g, colorOf, style, t, ls.fillOpacity ?? 0.78);
-        ctx.globalAlpha = 1;
+        for (const [c, p] of byColor) { lc.fillStyle = c; lc.fill(p, 'evenodd'); }
+        for (const g of tg.groups.values()) this.drawTransition(lc, g, colorOf);
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.globalAlpha = ls.fillOpacity ?? 0.78;
+        ctx.drawImage(lc.canvas as CanvasImageSource, 0, 0);
+        ctx.restore();
+        // The advancing front is highlighted on top, at full strength.
+        for (const g of tg.groups.values()) {
+          if (!g.advance || !g.disc) continue;
+          ctx.save();
+          ctx.clip(g.changing, 'evenodd');
+          ctx.strokeStyle = style.frontGlow;
+          ctx.lineWidth = 2.2 * view.unit;
+          ctx.shadowColor = style.frontGlow;
+          ctx.shadowBlur = 10 * view.unit;
+          ctx.stroke(g.disc);
+          ctx.restore();
+        }
       }
 
-      if (opts.passes.has('borders')) {
-        const lines: number[][][] = [];
-        for (const s of arr.segments.values()) {
-          const a = states.get(s.left_face), b = states.get(s.right_face);
-          if (!a || !b) continue;
-          if ((a.value ?? '') === (b.value ?? '') && !a.transition && !b.transition) continue;
-          if (!a.value && !b.value) continue;
-          const va = arr.vertices.get(s.a)!, vb = arr.vertices.get(s.b)!;
-          lines.push([[va.lon / E7, va.lat / E7], [vb.lon / E7, vb.lat / E7]]);
-        }
-        if (lines.length) {
-          ctx.strokeStyle = style.border;
-          ctx.lineWidth = (ls.borderWidth ?? style.borderWidth) * u;
-          ctx.lineJoin = 'round';
-          ctx.lineCap = 'round';
-          ctx.stroke(new Path2D(geoPath(view.projection)({ type: 'MultiLineString', coordinates: lines }) ?? ''));
-        }
-      }
+      if (opts.passes.has('borders')) this.drawBorders(ctx, view, arr, states, tg, style, (ls.borderWidth ?? style.borderWidth) * u);
 
       if (opts.passes.has('labels')) labels.push(...this.layerLabels(view, arr, states, entities));
     }
@@ -164,67 +179,147 @@ export class MapRenderer {
     ctx.restore();
   }
 
-  private drawTransition(
-    ctx: CanvasRenderingContext2D, view: View, arr: Arrangement, engine: Engine,
-    g: { a: Assignment; faces: number[]; states: FaceState[] }, colorOf: (v: string | null) => string | null,
-    style: MapStyle, t: Instant, opacity: number,
-  ): void {
-    const region = new Path2D();
-    for (const f of g.faces) region.addPath(this.facePath(view, arr, f));
-    const drawPrevious = () => g.faces.forEach((f, i) => {
-      const c = colorOf(g.states[i].transition?.from ?? null);
-      if (c) { ctx.fillStyle = c; ctx.fill(this.facePath(view, arr, f), 'evenodd'); }
-    });
-    const spec = g.a.transition!;
-    const toColor = colorOf(g.a.value);
-    const progress = g.states[0].transition?.progress ?? 0;
-    if (spec.style === 'advance' && spec.origin) {
-      const r = (engine.frontRadius(g.a, t) * 180) / Math.PI;
-      if (r <= 0) { drawPrevious(); return; }
-      const circle = geoCircle().center(toLonLat(spec.origin)).radius(Math.min(r, 179.9)).precision(0.5)();
-      const disc = new Path2D(geoPath(view.projection)(circle) ?? '');
-      ctx.save();
-      ctx.clip(region, 'evenodd');
-      // Not yet reached: the previous owners.
-      ctx.save();
-      const outside = new Path2D();
-      outside.rect(-1e6, -1e6, 2e6, 2e6);
-      outside.addPath(disc);
-      ctx.clip(outside, 'evenodd');
-      drawPrevious();
-      ctx.restore();
-      // Reached: the new owner, and the advancing frontier highlighted.
-      if (toColor) { ctx.fillStyle = toColor; ctx.fill(disc, 'evenodd'); }
-      ctx.globalAlpha = 1;
-      ctx.strokeStyle = style.frontGlow;
-      ctx.lineWidth = 2.2 * view.unit;
-      ctx.shadowColor = style.frontGlow;
-      ctx.shadowBlur = 10 * view.unit;
-      ctx.stroke(disc);
-      ctx.shadowBlur = 0;
-      ctx.globalAlpha = opacity;
-      ctx.restore();
-    } else {
-      ctx.globalAlpha = opacity * (1 - progress);
-      drawPrevious();
-      if (toColor) { ctx.globalAlpha = opacity * progress; ctx.fillStyle = toColor; ctx.fill(region, 'evenodd'); }
-      ctx.globalAlpha = opacity;
+  /** Parcels that are part of an animated change at this moment, grouped by the change they belong to. */
+  private transitionGroups(view: View, arr: Arrangement, engine: Engine, states: Map<number, FaceState>, t: Instant): { groups: Map<string, TransitionGroup>; of: Map<number, TransitionGroup> } {
+    const groups = new Map<string, TransitionGroup>(), of = new Map<number, TransitionGroup>();
+    for (const [face, st] of states) {
+      const spec = st.assignment?.transition;
+      if (!st.transition || !spec) continue;
+      const key = st.assignment!.effectId;
+      let g = groups.get(key);
+      if (!g) {
+        const advance = spec.style === 'advance' && !!spec.origin;
+        g = { a: st.assignment!, faces: [], states: [], advance, progress: st.transition.progress, disc: null, region: new Path2D(), changing: new Path2D() };
+        if (advance) {
+          const r = (engine.frontRadius(st.assignment!, t) * 180) / Math.PI;
+          if (r > 0) {
+            const circle = geoCircle().center(toLonLat(spec.origin!)).radius(Math.min(r, 179.9)).precision(0.5)();
+            g.disc = new Path2D(geoPath(view.projection)(circle) ?? '');
+          }
+        }
+        groups.set(key, g);
+      }
+      g.faces.push(face);
+      g.states.push(st);
+      of.set(face, g);
+      const path = this.facePath(view, arr, face);
+      g.region.addPath(path);
+      if ((st.transition.from ?? '') !== (st.value ?? '')) g.changing.addPath(path);
     }
+    return { groups, of };
+  }
+
+  /**
+   * Paint a change in progress over the previous owners (already painted), in the opaque layer
+   * buffer: an advancing front fills the reached area with the new owner; a fade mixes the new
+   * owner in. Territory that becomes nobody's is erased from the layer, never from the map below.
+   */
+  private drawTransition(lc: CanvasRenderingContext2D, g: TransitionGroup, colorOf: (v: string | null) => string | null): void {
+    const toColor = colorOf(g.a.value);
+    const shape = g.advance ? g.disc : g.changing;
+    if (!shape) return; // the front has not reached anything yet
+    lc.save();
+    if (g.advance) lc.clip(g.changing, 'evenodd');
+    else lc.globalAlpha = Math.min(1, Math.max(0, g.progress));
+    if (toColor) lc.fillStyle = toColor;
+    else { lc.globalCompositeOperation = 'destination-out'; lc.fillStyle = '#000'; }
+    lc.fill(shape, 'evenodd');
+    lc.restore();
+  }
+
+  private scratchCanvas: OffscreenCanvas | null = null;
+  private scratchCtx: CanvasRenderingContext2D | null = null;
+
+  /** A cleared buffer the size of the target, with the target's current transform. */
+  private scratch(ctx: CanvasRenderingContext2D): CanvasRenderingContext2D {
+    const w = ctx.canvas.width, h = ctx.canvas.height;
+    if (!this.scratchCanvas || this.scratchCanvas.width !== w || this.scratchCanvas.height !== h) {
+      this.scratchCanvas = new OffscreenCanvas(w, h);
+      // Match the target's memory placement so copying between them stays cheap.
+      const willReadFrequently = !!ctx.getContextAttributes?.().willReadFrequently;
+      this.scratchCtx = this.scratchCanvas.getContext('2d', { willReadFrequently }) as unknown as CanvasRenderingContext2D;
+    }
+    const sc = this.scratchCtx!;
+    sc.setTransform(1, 0, 0, 1, 0, 0);
+    sc.globalAlpha = 1;
+    sc.globalCompositeOperation = 'source-over';
+    sc.clearRect(0, 0, w, h);
+    sc.setTransform(ctx.getTransform());
+    return sc;
+  }
+
+  /**
+   * Borders are drawn where neighbouring parcels have different owners. During an animated change
+   * they follow the animation: inside the advancing front the new owners decide, outside it the
+   * previous owners do, and the front itself is the moving border. Fades cross-fade the two sets.
+   */
+  private drawBorders(
+    ctx: CanvasRenderingContext2D, view: View, arr: Arrangement, states: Map<number, FaceState>,
+    tg: { groups: Map<string, TransitionGroup>; of: Map<number, TransitionGroup> }, style: MapStyle, width: number,
+  ): void {
+    const differs = (x: string | null, y: string | null) => (x ?? '') !== (y ?? '');
+    const plain: number[][][] = [];
+    const inside = new Map<TransitionGroup, number[][][]>(), outside = new Map<TransitionGroup, number[][][]>();
+    const add = (m: Map<TransitionGroup, number[][][]>, g: TransitionGroup, line: number[][]) => { let l = m.get(g); if (!l) m.set(g, (l = [])); l.push(line); };
+    for (const s of arr.segments.values()) {
+      const a = states.get(s.left_face), b = states.get(s.right_face);
+      if (!a || !b) continue;
+      const ga = tg.of.get(s.left_face), gb = tg.of.get(s.right_face);
+      const now = differs(a.value, b.value);
+      const before = ga || gb ? differs(ga ? a.transition!.from : a.value, gb ? b.transition!.from : b.value) : now;
+      if (!now && !before) continue;
+      const va = arr.vertices.get(s.a)!, vb = arr.vertices.get(s.b)!;
+      const line = [[va.lon / E7, va.lat / E7], [vb.lon / E7, vb.lat / E7]];
+      // Unaffected by any animation, a border both before and after, or where two animations meet.
+      if ((!ga && !gb) || (now && before) || (ga && gb && ga !== gb)) { plain.push(line); continue; }
+      add(now ? inside : outside, (ga ?? gb)!, line);
+    }
+    const path = (lines: number[][][]) => new Path2D(geoPath(view.projection)({ type: 'MultiLineString', coordinates: lines }) ?? '');
+    ctx.save();
+    ctx.strokeStyle = style.border;
+    ctx.lineWidth = width;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    if (plain.length) ctx.stroke(path(plain));
+    for (const g of tg.groups.values()) {
+      const ins = inside.get(g), outs = outside.get(g);
+      if (g.advance) {
+        if (!g.disc) { if (outs) ctx.stroke(path(outs)); continue; }
+        if (ins) { ctx.save(); ctx.clip(g.disc, 'evenodd'); ctx.stroke(path(ins)); ctx.restore(); }
+        if (outs) { ctx.save(); ctx.clip(outsideOf(g.disc), 'evenodd'); ctx.stroke(path(outs)); ctx.restore(); }
+        ctx.save(); ctx.clip(g.changing, 'evenodd'); ctx.stroke(g.disc); ctx.restore();
+      } else {
+        if (ins) { ctx.globalAlpha = g.progress; ctx.stroke(path(ins)); }
+        if (outs) { ctx.globalAlpha = 1 - g.progress; ctx.stroke(path(outs)); }
+        ctx.globalAlpha = 1;
+      }
+    }
+    ctx.restore();
   }
 
   private layerLabels(view: View, arr: Arrangement, states: Map<number, FaceState>, entities: Map<string, { name: string }>): LabelInfo[] {
     const byOwner = new Map<string, { area: number; sx: number; sy: number; sz: number; best: FaceGeo | null }>();
-    for (const [face, st] of states) {
-      const v = st.transition ? st.transition.from : st.value;
-      if (!v) continue;
-      const g = this.faceGeo(arr, face);
-      if (g.area <= 0 || g.area > 2 * Math.PI) continue;
+    const bestArea = new Map<string, number>();
+    // During an animated change a parcel counts partly for its previous owner and partly for its new
+    // one, in proportion to how far the change has progressed, so labels glide instead of jumping.
+    const add = (v: string | null, g: FaceGeo, weight: number) => {
+      if (!v || weight <= 0) return;
+      const area = g.area * weight;
       let o = byOwner.get(v);
       if (!o) byOwner.set(v, (o = { area: 0, sx: 0, sy: 0, sz: 0, best: null }));
       const [lon, lat] = g.centroid.map((d) => (d * Math.PI) / 180);
-      o.sx += g.area * Math.cos(lat) * Math.cos(lon); o.sy += g.area * Math.cos(lat) * Math.sin(lon); o.sz += g.area * Math.sin(lat);
-      o.area += g.area;
-      if (!o.best || g.area > o.best.area) o.best = g;
+      o.sx += area * Math.cos(lat) * Math.cos(lon); o.sy += area * Math.cos(lat) * Math.sin(lon); o.sz += area * Math.sin(lat);
+      o.area += area;
+      if (!o.best || area > (bestArea.get(v) ?? 0)) { o.best = g; bestArea.set(v, area); }
+    };
+    for (const [face, st] of states) {
+      const g = this.faceGeo(arr, face);
+      if (g.area <= 0 || g.area > 2 * Math.PI) continue;
+      if (st.transition) {
+        const p = Math.min(1, Math.max(0, st.transition.progress));
+        add(st.transition.from, g, 1 - p);
+        add(st.value, g, p);
+      } else add(st.value, g, 1);
     }
     const out: LabelInfo[] = [];
     const scale = view.projection.scale();

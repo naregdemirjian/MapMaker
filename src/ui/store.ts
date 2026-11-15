@@ -5,10 +5,9 @@ import { useSyncExternalStore } from 'react';
 import { Api, ApiError, type JournalState, type ProjectInfo } from './api.ts';
 import { World } from '../world-model/world.ts';
 import { Engine } from '../temporal-engine/engine.ts';
-import { invertDiffs } from '../world-model/schema.ts';
 import type { CommandResult } from '../domain/commands.ts';
-import { type Instant, gregorian } from '../core-time/index.ts';
-import { type Camera, defaultCamera } from '../render-engine/camera.ts';
+import { type Instant, gregorian, toJSONValue, fromJSONValue } from '../core-time/index.ts';
+import { type Camera, defaultCamera, PROJECTIONS } from '../render-engine/camera.ts';
 import { MapRenderer } from '../render-engine/map-renderer.ts';
 import type { Vec3 } from '../geo-kernel/vec.ts';
 import type { StrokeSettings } from '../render-engine/stroke.ts';
@@ -59,12 +58,45 @@ class AppStore {
   presentCamera: Camera | null = null;
   playing = false;
   dialog: string | null = null;
+  /** Set when a change could not be saved; editing stops until the project is reloaded from disk. */
+  offline: string | null = null;
   readonly renderer = new MapRenderer();
   private queue: Promise<unknown> = Promise.resolve();
+  private halted = false;
   private toastSeq = 0;
+  private viewTimer: ReturnType<typeof setTimeout> | undefined;
 
   subscribe = (cb: () => void) => { this.listeners.add(cb); return () => { this.listeners.delete(cb); }; };
-  notify() { this.version++; for (const l of this.listeners) l(); }
+  notify() { this.version++; for (const l of this.listeners) l(); this.saveViewSoon(); }
+
+  /** Remember where the user was looking (per project, in this browser), so reopening returns there. */
+  private saveViewSoon() {
+    const id = this.projectId;
+    if (!id) return;
+    clearTimeout(this.viewTimer);
+    this.viewTimer = setTimeout(() => {
+      if (this.projectId !== id) return;
+      try {
+        localStorage.setItem(`mapmaker.view.${id}`, JSON.stringify({ spaceId: this.spaceId, time: toJSONValue(this.time), cameras: [...this.cameras.entries()] }));
+      } catch { /* storage may be unavailable */ }
+    }, 500);
+  }
+
+  private restoreView(id: string) {
+    const w = this.world!;
+    this.cameras = new Map();
+    this.time = gregorian.fromCivil({ year: 2000 });
+    try {
+      const v = JSON.parse(localStorage.getItem(`mapmaker.view.${id}`) ?? 'null') as { spaceId?: string; time?: unknown; cameras?: [string, Camera][] } | null;
+      if (!v) return;
+      if (v.spaceId && w.get('map_space', v.spaceId)) this.spaceId = v.spaceId;
+      for (const [k, c] of v.cameras ?? []) {
+        const ok = c && [c.lon, c.lat, c.zoom, c.rotation].every((n) => typeof n === 'number' && Number.isFinite(n)) && PROJECTIONS.some((p) => p.id === c.projection);
+        if (ok && w.get('map_space', k)) this.cameras.set(k, c);
+      }
+      if (v.time) this.time = fromJSONValue(v.time as Parameters<typeof fromJSONValue>[0]);
+    } catch { /* a damaged view record is ignored */ }
+  }
   set(patch: Partial<AppStore>) { Object.assign(this, patch); this.notify(); }
 
   toast(text: string, kind: Toast['kind'] = 'info') {
@@ -106,9 +138,14 @@ class AppStore {
       this.journal = data.journal;
       const spaces = this.world.all('map_space').sort((a, b) => a.sort_order - b.sort_order);
       this.spaceId = spaces[0]?.id ?? '';
+      this.restoreView(id);
       this.layerId = this.world.all('layer').find((l) => l.space_id === this.spaceId && l.kind === 'partition')?.id ?? '';
       this.selection = null;
       this.recordEventId = null;
+      this.pending = null;
+      this.shotId = null;
+      this.halted = false;
+      this.offline = null;
       this.fitTimeline();
       try { localStorage.setItem('mapmaker.lastProject', id); } catch { /* storage may be unavailable */ }
     } finally {
@@ -139,6 +176,7 @@ class AppStore {
   /** Run a command locally, then save it. Returns the command's result, or undefined if it failed. */
   execute<T>(fn: (w: World, e: Engine) => CommandResult<T>): T | undefined {
     if (!this.world || !this.engine || !this.projectId) return undefined;
+    if (this.halted) { this.toast('Changes cannot be saved right now, so editing is paused.', 'error'); return undefined; }
     let r: CommandResult<T>;
     try {
       r = fn(this.world, this.engine);
@@ -152,13 +190,20 @@ class AppStore {
       const projectId = this.projectId;
       const world = this.world;
       this.queue = this.queue.then(async () => {
+        // Once a save has failed, later changes were built on top of it: none of them are sent, and
+        // the project is reloaded from disk (the only trustworthy copy) as soon as that is possible.
+        if (this.halted || this.world !== world) return;
         try {
           const res = await Api.commit(projectId, r.label, r.diffs, this.journal.head);
           this.journal = res.journal;
         } catch (e) {
-          if (this.world === world) world.applyDiffs(invertDiffs(r.diffs));
-          this.toast(`Could not save "${r.label}": ${(e as Error).message}`, 'error');
-          if (e instanceof ApiError && e.status === 409) await this.reload();
+          this.halted = true;
+          if (e instanceof ApiError && e.status === 409) {
+            this.toast(`"${r.label}" was not saved because the project changed on disk. The project has been reloaded.`, 'error');
+            await this.reloadFromDisk();
+          } else {
+            this.offline = `Your last change ("${r.label}") could not be saved: ${(e as Error).message}`;
+          }
         }
         this.notify();
       });
@@ -169,21 +214,39 @@ class AppStore {
   /** Wait until every pending save has reached the disk. */
   flush(): Promise<unknown> { return this.queue; }
 
+  /** Replace the in-memory project with what is on disk, discarding anything that was not saved. */
+  async reloadFromDisk(): Promise<boolean> {
+    try {
+      await Api.app();
+      await this.reload();
+      this.halted = false;
+      this.offline = null;
+      return true;
+    } catch (e) {
+      this.offline = `Map Maker's background service cannot be reached: ${(e as Error).message}`;
+      return false;
+    } finally {
+      this.notify();
+    }
+  }
+
   undo() { this.historyStep('undo'); }
   redo() { this.historyStep('redo'); }
 
   private historyStep(which: 'undo' | 'redo') {
-    if (!this.projectId) return;
+    if (!this.projectId || this.halted) return;
     const id = this.projectId;
     this.queue = this.queue.then(async () => {
+      if (this.halted) return;
       try {
         const res = which === 'undo' ? await Api.undo(id) : await Api.redo(id);
         if (res.diffs.length && this.world) this.world.applyDiffs(res.diffs);
         this.journal = res.journal;
         if (res.label) this.toast(`${which === 'undo' ? 'Undid' : 'Redid'}: ${res.label}`);
       } catch (e) {
-        this.toast((e as Error).message, 'error');
-        await this.reload();
+        this.halted = true;
+        this.offline = `${which === 'undo' ? 'Undo' : 'Redo'} failed: ${(e as Error).message}`;
+        if (e instanceof ApiError) await this.reloadFromDisk();
       }
       this.validateSelection();
       this.notify();

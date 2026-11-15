@@ -297,4 +297,27 @@ export function ProjectPicker() {
   );
 }
 
+/** Shown when a change could not be saved. Editing stays paused until the project is reloaded from disk. */
+export function OfflineNotice() {
+  const s = useStore();
+  const [trying, setTrying] = useState(false);
+  if (!s.offline) return null;
+  const retry = async () => {
+    setTrying(true);
+    const ok = await s.reloadFromDisk();
+    setTrying(false);
+    if (ok) s.toast('Reconnected. The project was reloaded from disk.');
+  };
+  return (
+    <div className="modal-back blocking">
+      <div className="modal" role="alertdialog" aria-label="Changes are not being saved" data-testid="offline-notice">
+        <div className="modal-head"><h2>Changes are not being saved</h2></div>
+        <p>{s.offline}</p>
+        <p className="muted">This usually means the black Map Maker window was closed. Start Map Maker again (double-click “Start Map Maker”), then click Reconnect. Everything saved before this point is safe; the change above, and anything after it, will need to be redone.</p>
+        <div className="modal-actions"><button className="primary" disabled={trying} onClick={retry} data-testid="reconnect">{trying ? 'Trying…' : 'Reconnect'}</button></div>
+      </div>
+    </div>
+  );
+}
+
 export { store };

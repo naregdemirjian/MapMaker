@@ -3,7 +3,7 @@ import { useStore, store } from './store.ts';
 import { TopBar, Outliner, ToolBar, Inspector, Toasts } from './components/Panels.tsx';
 import { MapView } from './components/MapView.tsx';
 import { Timeline } from './components/Timeline.tsx';
-import { EditPrompt, NewWorldDialog, NewEventDialog, VersionsDialog, HealthDialog, ProjectPicker } from './components/Dialogs.tsx';
+import { EditPrompt, NewWorldDialog, NewEventDialog, VersionsDialog, HealthDialog, ProjectPicker, OfflineNotice } from './components/Dialogs.tsx';
 import { ShotsPanel, ShotEditor, ShotTimeline } from './components/Presentation.tsx';
 
 export function App() {
@@ -37,6 +37,7 @@ export function App() {
       {s.dialog === 'new-event' && <NewEventDialog />}
       {s.dialog === 'versions' && <VersionsDialog />}
       {s.dialog === 'health' && <HealthDialog />}
+      <OfflineNotice />
       <Toasts />
       {s.busy && <div className="busy">{s.busy}</div>}
     </div>

@@ -4,7 +4,7 @@ import {
   makeView, screenToLonLat, lonLatToScreen, panCamera, zoomCameraAt, radiansPerPixel, type View, type Camera,
 } from '../../render-engine/camera.ts';
 import { DEFAULT_STYLE, type PassName } from '../../render-engine/map-renderer.ts';
-import { processLasso, densify, orientInteriorLeft, signedArea, splitLoops, type Pt } from '../../render-engine/stroke.ts';
+import { processLasso, densify, orientInteriorLeft, signedArea, splitLoops, type Pt, dedupe } from '../../render-engine/stroke.ts';
 import { lonLatToVec, E7 } from '../../geo-kernel/vec.ts';
 import { cameraAt, timeAt, overlaysAt, drawOverlays, type ShotSettings } from '../../presentation/sequence.ts';
 import { parseJSON } from '../../temporal-engine/engine.ts';
@@ -257,9 +257,11 @@ export function MapView() {
   }
 
   function finishPolygon() {
-    if (polygon.length < 3) { setPolygon([]); return; }
-    const loops = splitLoops(polygon).map(orientInteriorLeft).map((r) => densify(r, 6, true));
-    finishShape(loops, polygon[0]);
+    // A double-click to finish also places its point twice; repeated points are dropped.
+    const pts = dedupe(polygon, 1);
+    if (pts.length < 3) { setPolygon([]); setCursor(null); return; }
+    const loops = splitLoops(pts).map(orientInteriorLeft).map((r) => densify(r, 6, true));
+    finishShape(loops, pts[0]);
     setPolygon([]);
     setCursor(null);
   }

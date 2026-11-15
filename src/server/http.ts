@@ -118,10 +118,10 @@ export function createAppServer(opts: ServerOptions): { server: Server; registry
       if (parts.length === 4 && method === 'POST') {
         const settings = await json<ExportSettings>(req);
         const job = startJob(db.dir, { ...settings, appVersion: opts.appVersion, projectHead: db.journalState().head });
-        jobs.set(job.id, job);
+        jobs.set(`${id}/${job.id}`, job);
         return send(res, 201, { jobId: job.id, dir: job.dir });
       }
-      const job = jobs.get(parts[4]);
+      const job = jobs.get(`${id}/${parts[4]}`);
       if (!job) throw new HttpError(404, 'Unknown export job');
       if (parts[5] === 'frames' && method === 'POST') {
         const pass = url.searchParams.get('pass') ?? '';
@@ -133,7 +133,7 @@ export function createAppServer(opts: ServerOptions): { server: Server; registry
       }
       if (parts[5] === 'finish' && method === 'POST') {
         const out = finishJob(job);
-        jobs.delete(job.id);
+        jobs.delete(`${id}/${job.id}`);
         return send(res, 200, { dir: job.dir, ...out, checksums: job.checksums });
       }
     }

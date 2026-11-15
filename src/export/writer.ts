@@ -1,6 +1,6 @@
 // Export jobs on the data-service side: frames rendered by the map engine arrive as raw RGBA pixels,
 // are encoded here and written as numbered image sequences with a manifest and a compositing guide.
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { encodePNG } from './png.ts';
@@ -34,7 +34,9 @@ const safe = (s: string) => s.replace(/[^\w\-]+/g, '_').replace(/^_+|_+$/g, '') 
 
 export function startJob(projectDir: string, settings: ExportSettings): ExportJob {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-  const id = `${safe(settings.shotName)}_${stamp}`;
+  // Never reuse a folder: two exports of the same shot started in the same second get _2, _3, ...
+  let id = `${safe(settings.shotName)}_${stamp}`;
+  for (let n = 2; existsSync(join(projectDir, 'exports', id)); n++) id = `${safe(settings.shotName)}_${stamp}_${n}`;
   const dir = join(projectDir, 'exports', id);
   for (const p of settings.passes) mkdirSync(join(dir, safe(p.name)), { recursive: true });
   return { id, dir, settings, checksums: {}, startedAt: new Date().toISOString() };
@@ -46,7 +48,11 @@ export function frameFileName(job: ExportJob, pass: string, frame: number): stri
 
 /** Encode and write one frame of one pass. Returns the checksum of the pixels (for determinism checks). */
 export function writeFrame(job: ExportJob, pass: string, frame: number, width: number, height: number, rgba: Uint8Array): { file: string; sha256: string } {
-  if (!job.settings.passes.some((p) => p.name === pass)) throw new Error(`Unknown pass ${pass}`);
+  const st = job.settings;
+  if (!st.passes.some((p) => p.name === pass)) throw new Error(`Unknown pass ${pass}`);
+  if (width !== st.width || height !== st.height) throw new Error(`Frame is ${width}x${height} but the export is ${st.width}x${st.height}`);
+  if (rgba.length !== width * height * 4) throw new Error(`Frame data has ${rgba.length} bytes, expected ${width * height * 4}`);
+  if (!Number.isInteger(frame) || frame < st.frameStart || frame > st.frameEnd) throw new Error(`Frame ${frame} is outside ${st.frameStart}-${st.frameEnd}`);
   const sha256 = createHash('sha256').update(rgba).digest('hex');
   const png = encodePNG(width, height, rgba);
   const file = join(job.dir, safe(pass), frameFileName(job, pass, frame));

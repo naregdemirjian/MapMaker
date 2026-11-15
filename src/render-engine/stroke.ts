@@ -26,10 +26,11 @@ export function simplify(points: Pt[], tolerance: number): Pt[] {
     const [a, b] = stack.pop()!;
     let best = -1, bestD = tolerance;
     const [ax, ay] = points[a], [bx, by] = points[b];
-    const len = Math.hypot(bx - ax, by - ay) || 1e-12;
+    const len = Math.hypot(bx - ax, by - ay);
     for (let i = a + 1; i < b; i++) {
       const [px, py] = points[i];
-      const d = Math.abs((bx - ax) * (ay - py) - (ax - px) * (by - ay)) / len;
+      // When the two ends meet (a closed outline), measure from the end point itself.
+      const d = len < 1e-9 ? Math.hypot(px - ax, py - ay) : Math.abs((bx - ax) * (ay - py) - (ax - px) * (by - ay)) / len;
       if (d > bestD) { bestD = d; best = i; }
     }
     if (best >= 0) { keep[best] = 1; stack.push([a, best], [best, b]); }
@@ -136,11 +137,23 @@ export function splitLoops(ring: Pt[], minArea = 4): Pt[][] {
   return out;
 }
 
+/** Remove consecutive points that are (almost) the same. */
+export function dedupe(points: Pt[], eps = 0.25): Pt[] {
+  const out: Pt[] = [];
+  for (const p of points) {
+    const q = out[out.length - 1];
+    if (!q || Math.hypot(p[0] - q[0], p[1] - q[1]) > eps) out.push(p);
+  }
+  return out;
+}
+
 export interface StrokeSettings { smoothness: number; irregularity: number; precision: number; seed: number }
 
 /** Turn a raw freehand lasso into clean, simple loops ready to unproject (interior on the left). */
 export function processLasso(raw: Pt[], s: StrokeSettings): Pt[][] {
-  let p = simplify(raw, Math.max(0.3, s.precision));
+  let p = simplify(dedupe(raw), Math.max(0.3, s.precision));
+  // The outline is closed automatically: drop end points that return to the start.
+  while (p.length > 3 && Math.hypot(p[p.length - 1][0] - p[0][0], p[p.length - 1][1] - p[0][1]) < 1.5) p = p.slice(0, -1);
   if (p.length < 3) return [];
   if (s.smoothness > 0) p = smooth(p, Math.round(s.smoothness), true);
   if (s.irregularity > 0) p = roughen(p, s.irregularity, s.seed, true);
