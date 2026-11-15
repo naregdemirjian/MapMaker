@@ -2,7 +2,7 @@
 // in-memory world and returns the exact row diffs to save (and to undo). Commands never draw anything.
 import { World, Tx, newId } from '../world-model/world.ts';
 import {
-  Engine, canonicalFaces, hashFaces, parseJSON, type Resolution, type TransitionSpec, type AnnexIntent,
+  Engine, canonicalFaces, leafDescendants, hashFaces, parseJSON, type Resolution, type TransitionSpec, type AnnexIntent,
 } from '../temporal-engine/engine.ts';
 import { type Instant, toStore, NEG_INF, compare } from '../core-time/index.ts';
 import {
@@ -133,20 +133,22 @@ export interface EventInput {
   name: string; type_id?: string; start: Instant; end?: Instant | null; precision?: string; description?: string; precedence?: number;
 }
 
-export function createEvent(world: World, e: EventInput): CommandResult<string> {
+function insertEventIn(tx: Tx, e: EventInput): string {
   if (!e.name.trim()) throw new Error('Give the event a name.');
   if (e.end && compare(e.end, e.start) < 0) throw new Error('An event cannot end before it starts.');
-  return run(world, `Create event "${e.name}"`, (tx) => {
-    const id = newId('evt');
-    const [sd, sm] = toStore(e.start);
-    const end = e.end ? toStore(e.end) : null;
-    tx.insert('event', {
-      id, type_id: e.type_id ?? 'general', branch_id: MAIN_BRANCH, name: e.name.trim(), start_day: sd, start_ms: sm,
-      end_day: end ? end[0] : null, end_ms: end ? end[1] : null, precision: e.precision ?? 'day', precedence: e.precedence ?? 0,
-      description: e.description ?? '', fields: '{}', presentation: '{}', created_seq: world.nextSeq('event'), variant_group: null, variant_active: 1,
-    });
-    return id;
+  const id = newId('evt');
+  const [sd, sm] = toStore(e.start);
+  const end = e.end ? toStore(e.end) : null;
+  tx.insert('event', {
+    id, type_id: e.type_id ?? 'general', branch_id: MAIN_BRANCH, name: e.name.trim(), start_day: sd, start_ms: sm,
+    end_day: end ? end[0] : null, end_ms: end ? end[1] : null, precision: e.precision ?? 'day', precedence: e.precedence ?? 0,
+    description: e.description ?? '', fields: '{}', presentation: '{}', created_seq: tx.world.nextSeq('event'), variant_group: null, variant_active: 1,
   });
+  return id;
+}
+
+export function createEvent(world: World, e: EventInput): CommandResult<string> {
+  return run(world, `Create event "${e.name}"`, (tx) => insertEventIn(tx, e));
 }
 
 export function updateEvent(world: World, id: string, patch: Partial<EventInput> & { variant_group?: string | null; variant_active?: number }): CommandResult {
@@ -263,7 +265,9 @@ function correctPeriod(tx: Tx, engine: Engine, spaceId: string, layerId: string,
 export interface PaintInput {
   spaceId: string; layerId: string;
   /** Closed ring as unit vectors, interior on the left (counter-clockwise on the map). */
-  ring: Vec3[];
+  ring?: Vec3[];
+  /** Several rings painted together (e.g. a lasso split where it crossed itself). */
+  rings?: Vec3[][];
   value: string | null;
   snap: number;
   mode: EditMode;
@@ -274,16 +278,44 @@ export interface PaintInput {
 export function paintTerritory(world: World, engine: Engine, p: PaintInput): CommandResult<{ faces: number[] }> {
   const who = p.value ? world.get('entity', p.value)?.name ?? 'someone' : 'nobody';
   return run(world, p.mode.kind === 'new' ? `Give territory to ${who}` : `Correct territory to ${who}`, (tx) => {
-    const path = tx.kernel(p.spaceId, (arr) => arr.insertPath(p.ring, { closed: true, snap: p.snap }));
-    const arr = world.arrangement(p.spaceId);
-    const inside = [...arr.facesLeftOf(path)];
-    if (p.mode.kind === 'new') {
-      insertAssignEffect(tx, { eventId: p.mode.eventId, spaceId: p.spaceId, layerId: p.layerId, faces: canonicalFaces(arr, inside), value: p.value, at: p.mode.at ?? null, transition: p.transition ?? null, intent: { op: 'paint', value: p.value } });
-    } else {
-      correctPeriod(tx, engine, p.spaceId, p.layerId, inside, p.value, p.mode.t);
-    }
-    return { faces: inside };
+    const faces: number[] = [];
+    paintInside(tx, engine, p, faces);
+    return { faces };
   });
+}
+
+function paintInside(tx: Tx, engine: Engine, p: PaintInput, out: number[] = []): string {
+  const world = tx.world;
+  const rings = p.rings ?? (p.ring ? [p.ring] : []);
+  if (rings.length === 0) throw new Error('Nothing to paint.');
+  // Collect each ring's inside right after inserting it: a later ring may split earlier borders,
+  // and pieces of split parcels are covered through their parent (children inherit).
+  const insideAll = new Set<number>();
+  for (const r of rings) {
+    const path = tx.kernel(p.spaceId, (arr) => arr.insertPath(r, { closed: true, snap: p.snap }));
+    for (const f of world.arrangement(p.spaceId).facesLeftOf(path)) insideAll.add(f);
+  }
+  const arr = world.arrangement(p.spaceId);
+  const inside = [...leafDescendants(arr, insideAll)];
+  if (p.mode.kind === 'new') {
+    insertAssignEffect(tx, { eventId: p.mode.eventId, spaceId: p.spaceId, layerId: p.layerId, faces: canonicalFaces(arr, inside), value: p.value, at: p.mode.at ?? null, transition: p.transition ?? null, intent: { op: 'paint', value: p.value } });
+  } else {
+    correctPeriod(tx, engine, p.spaceId, p.layerId, inside, p.value, p.mode.t);
+  }
+  out.push(...inside);
+  return 'paint';
+}
+
+/** Create an event and give it a territorial change, as one undoable step. */
+export function paintWithNewEvent(world: World, engine: Engine, e: EventInput, p: Omit<PaintInput, 'mode'>): CommandResult<{ eventId: string }> {
+  const painted = { label: '' };
+  const r = run(world, `Create event "${e.name}"`, (tx) => {
+    const eventId = insertEventIn(tx, e);
+    const inner = paintInside(tx, engine, { ...p, mode: { kind: 'new', eventId } });
+    painted.label = inner;
+    return { eventId };
+  });
+  return r;
 }
 
 /** Give a set of existing parcels to an owner (used by the region picker and fill tool). */

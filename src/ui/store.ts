@@ -1,0 +1,225 @@
+// Interface state and the bridge between the interface, the in-memory world and the data service.
+// Commands run locally first (so the map updates immediately), then are saved in order; if saving
+// fails, the local change is reversed and the project reloaded from disk.
+import { useSyncExternalStore } from 'react';
+import { Api, ApiError, type JournalState, type ProjectInfo } from './api.ts';
+import { World } from '../world-model/world.ts';
+import { Engine } from '../temporal-engine/engine.ts';
+import { invertDiffs } from '../world-model/schema.ts';
+import type { CommandResult } from '../domain/commands.ts';
+import { type Instant, gregorian } from '../core-time/index.ts';
+import { type Camera, defaultCamera } from '../render-engine/camera.ts';
+import { MapRenderer } from '../render-engine/map-renderer.ts';
+import type { Vec3 } from '../geo-kernel/vec.ts';
+import type { StrokeSettings } from '../render-engine/stroke.ts';
+
+export type Mode = 'world' | 'present';
+export type Tool = 'select' | 'lasso' | 'polygon' | 'vertex';
+export type Selection =
+  | { kind: 'entity'; id: string }
+  | { kind: 'event'; id: string }
+  | { kind: 'point'; lon: number; lat: number }
+  | { kind: 'shot'; id: string }
+  | null;
+
+export type PendingEdit =
+  | { kind: 'paint'; spaceId: string; layerId: string; rings: Vec3[][]; value: string | null; sample: [number, number] | null; origin: [number, number]; snap: number }
+  | { kind: 'vertex'; spaceId: string; vertexId: number; to: Vec3 };
+
+export interface Toast { id: number; text: string; kind: 'info' | 'error' }
+
+class AppStore {
+  version = 0;
+  private listeners = new Set<() => void>();
+  appVersion = '';
+  projectsDir = '';
+  projects: ProjectInfo[] = [];
+  projectId: string | null = null;
+  projectDir = '';
+  world: World | null = null;
+  engine: Engine | null = null;
+  journal: JournalState = { head: 0, canUndo: false, canRedo: false, undoLabel: null, redoLabel: null };
+  mode: Mode = 'world';
+  spaceId = '';
+  layerId = '';
+  time: Instant = gregorian.fromCivil({ year: 2000 });
+  tool: Tool = 'select';
+  selection: Selection = null;
+  paintValue: string | null = null;
+  recordEventId: string | null = null;
+  cameras = new Map<string, Camera>();
+  stroke: StrokeSettings = { smoothness: 1, irregularity: 0, precision: 1.2, seed: 1 };
+  pending: PendingEdit | null = null;
+  toasts: Toast[] = [];
+  busy: string | null = null;
+  timeline = { start: 900, end: 2100 };
+  shotId: string | null = null;
+  shotFrame = 0;
+  /** Unsaved camera adjustment in presentation mode (cleared when the frame changes). */
+  presentCamera: Camera | null = null;
+  playing = false;
+  dialog: string | null = null;
+  readonly renderer = new MapRenderer();
+  private queue: Promise<unknown> = Promise.resolve();
+  private toastSeq = 0;
+
+  subscribe = (cb: () => void) => { this.listeners.add(cb); return () => { this.listeners.delete(cb); }; };
+  notify() { this.version++; for (const l of this.listeners) l(); }
+  set(patch: Partial<AppStore>) { Object.assign(this, patch); this.notify(); }
+
+  toast(text: string, kind: Toast['kind'] = 'info') {
+    const id = ++this.toastSeq;
+    this.toasts = [...this.toasts, { id, text, kind }];
+    this.notify();
+    setTimeout(() => { this.toasts = this.toasts.filter((t) => t.id !== id); this.notify(); }, kind === 'error' ? 7000 : 3500);
+  }
+
+  get camera(): Camera {
+    let c = this.cameras.get(this.spaceId);
+    if (!c) { c = defaultCamera(); this.cameras.set(this.spaceId, c); }
+    return c;
+  }
+  setCamera(c: Camera) { this.cameras.set(this.spaceId, c); this.notify(); }
+
+  async loadApp() {
+    const info = await Api.app();
+    this.appVersion = info.version;
+    this.projectsDir = info.projectsDir;
+    this.projects = await Api.projects();
+    this.notify();
+  }
+
+  async createProject(name: string, worldName: string, radiusKm: number) {
+    const info = await Api.createProject(name, { name: worldName, radiusKm });
+    await this.openProject(info.id);
+  }
+
+  async openProject(id: string) {
+    this.busy = 'Opening project…';
+    this.notify();
+    try {
+      const data = await Api.open(id);
+      this.world = World.fromSnapshot(data.snapshot);
+      this.engine = new Engine(this.world);
+      this.projectId = id;
+      this.projectDir = data.dir;
+      this.journal = data.journal;
+      const spaces = this.world.all('map_space').sort((a, b) => a.sort_order - b.sort_order);
+      this.spaceId = spaces[0]?.id ?? '';
+      this.layerId = this.world.all('layer').find((l) => l.space_id === this.spaceId && l.kind === 'partition')?.id ?? '';
+      this.selection = null;
+      this.recordEventId = null;
+      this.fitTimeline();
+      try { localStorage.setItem('mapmaker.lastProject', id); } catch { /* storage may be unavailable */ }
+    } finally {
+      this.busy = null;
+      this.notify();
+    }
+  }
+
+  closeProject() {
+    this.projectId = null;
+    this.world = null;
+    this.engine = null;
+    this.selection = null;
+    this.mode = 'world';
+    void this.loadApp();
+    this.notify();
+  }
+
+  async reload() {
+    if (this.projectId) {
+      const keepSpace = this.spaceId, keepLayer = this.layerId;
+      await this.openProject(this.projectId);
+      if (this.world?.get('map_space', keepSpace)) { this.spaceId = keepSpace; this.layerId = keepLayer; }
+      this.notify();
+    }
+  }
+
+  /** Run a command locally, then save it. Returns the command's result, or undefined if it failed. */
+  execute<T>(fn: (w: World, e: Engine) => CommandResult<T>): T | undefined {
+    if (!this.world || !this.engine || !this.projectId) return undefined;
+    let r: CommandResult<T>;
+    try {
+      r = fn(this.world, this.engine);
+    } catch (e) {
+      this.toast((e as Error).message, 'error');
+      this.notify();
+      return undefined;
+    }
+    this.notify();
+    if (r.diffs.length) {
+      const projectId = this.projectId;
+      const world = this.world;
+      this.queue = this.queue.then(async () => {
+        try {
+          const res = await Api.commit(projectId, r.label, r.diffs, this.journal.head);
+          this.journal = res.journal;
+        } catch (e) {
+          if (this.world === world) world.applyDiffs(invertDiffs(r.diffs));
+          this.toast(`Could not save "${r.label}": ${(e as Error).message}`, 'error');
+          if (e instanceof ApiError && e.status === 409) await this.reload();
+        }
+        this.notify();
+      });
+    }
+    return r.result;
+  }
+
+  /** Wait until every pending save has reached the disk. */
+  flush(): Promise<unknown> { return this.queue; }
+
+  undo() { this.historyStep('undo'); }
+  redo() { this.historyStep('redo'); }
+
+  private historyStep(which: 'undo' | 'redo') {
+    if (!this.projectId) return;
+    const id = this.projectId;
+    this.queue = this.queue.then(async () => {
+      try {
+        const res = which === 'undo' ? await Api.undo(id) : await Api.redo(id);
+        if (res.diffs.length && this.world) this.world.applyDiffs(res.diffs);
+        this.journal = res.journal;
+        if (res.label) this.toast(`${which === 'undo' ? 'Undid' : 'Redid'}: ${res.label}`);
+      } catch (e) {
+        this.toast((e as Error).message, 'error');
+        await this.reload();
+      }
+      this.validateSelection();
+      this.notify();
+    });
+  }
+
+  validateSelection() {
+    const s = this.selection;
+    if (!s || !this.world) return;
+    if (s.kind === 'entity' && !this.world.get('entity', s.id)) this.selection = null;
+    if (s.kind === 'event' && !this.world.get('event', s.id)) this.selection = null;
+    if (s.kind === 'shot' && !this.world.get('sequence', s.id)) this.selection = null;
+    if (this.recordEventId && !this.world.get('event', this.recordEventId)) this.recordEventId = null;
+    if (this.shotId && !this.world.get('sequence', this.shotId)) this.shotId = null;
+  }
+
+  setTime(t: Instant) { this.time = t; this.notify(); }
+
+  fitTimeline() {
+    if (!this.world) return;
+    const ys = this.world.all('event').filter((e) => e.id !== 'evt_base').flatMap((e) => {
+      const a = (e.start_day / 365.2425) + 1970;
+      const b = e.end_day !== null ? (e.end_day / 365.2425) + 1970 : a;
+      return [a, b];
+    });
+    if (ys.length === 0) { this.timeline = { start: 900, end: 2100 }; return; }
+    const lo = Math.min(...ys), hi = Math.max(...ys);
+    const pad = Math.max(5, (hi - lo) * 0.15);
+    this.timeline = { start: lo - pad, end: hi + pad };
+  }
+}
+
+export const store = new AppStore();
+export type Store = AppStore;
+
+export function useStore(): AppStore {
+  useSyncExternalStore(store.subscribe, () => store.version);
+  return store;
+}

@@ -293,3 +293,15 @@ test('very distant dates work the same way', () => {
   assert.equal(s.at(0, 0, instant(3e14)), B);
   assert.equal(s.at(0, 0, instant(-3e14)), A);
 });
+
+test('painting several rings at once (a lasso that crossed itself) covers exactly their union', () => {
+  const s = setup();
+  const A = s.ent('A'), B = s.ent('B');
+  s.correct(square(0, 0, 20), A, NEG_INF);
+  const ev = s.event('Two-pronged advance', Y(1800));
+  // two overlapping squares painted in one command
+  cmd.paintTerritory(s.world, s.engine, { spaceId: s.spaceId, layerId: s.layerId, rings: [ring(square(-4, 0, 5)), ring(square(4, 0, 5))], value: B, snap: 1e-7, mode: { kind: 'new', eventId: ev } });
+  for (const [x, y] of [[-8, 0], [0, 0], [8, 0], [-4, 4], [4, -4]]) assert.equal(s.at(x, y, Y(1900)), B, `${x},${y}`);
+  for (const [x, y] of [[-15, 0], [15, 0], [0, 8], [0, -8]]) assert.equal(s.at(x, y, Y(1900)), A, `${x},${y}`);
+  assert.deepEqual(s.world.arrangement(s.spaceId).validate(), []);
+});
