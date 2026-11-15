@@ -130,7 +130,7 @@ test('killing the app mid-save never corrupts the project', async () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('named versions restore as a new, undoable step; backups hold full copies', () => {
+test('named versions and backups restore as a new, undoable step; backups hold full copies', () => {
   const root = temp();
   try {
     const reg = new ProjectRegistry(root);
@@ -154,6 +154,14 @@ test('named versions restore as a new, undoable step; backups hold full copies',
     assert.ok(existsSync(b.file));
     assert.equal(worldTables(readSnapshot(b.file)), later);
     assert.ok(readdirSync(db.backupDir()).length >= 2);
+    // Restoring a backup works like restoring a version: a new step that can be undone.
+    s.save(cmd.createEntity(s.world, { type_id: 'polity', name: 'C' }));
+    const afterBackup = worldTables(db.snapshot());
+    db.restoreBackup(b.file.split(/[\\/]/).pop()!);
+    assert.equal(worldTables(db.snapshot()), later);
+    db.undo();
+    assert.equal(worldTables(db.snapshot()), afterBackup);
+    assert.throws(() => db.restoreBackup('../project.db'), /no longer exists/);
     reg.closeAll();
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

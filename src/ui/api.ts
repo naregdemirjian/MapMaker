@@ -40,6 +40,7 @@ export const Api = {
   restoreVersion: (id: string, vid: number) => call<{ diffs: RowDiff[]; journal: JournalState }>('POST', `${p(id)}/versions/${vid}/restore`),
   backups: (id: string) => call<BackupInfo[]>('GET', `${p(id)}/backups`),
   backupNow: (id: string) => call<BackupInfo>('POST', `${p(id)}/backups`),
+  restoreBackup: (id: string, name: string) => call<{ diffs: RowDiff[]; journal: JournalState }>('POST', `${p(id)}/backups/restore?name=${encodeURIComponent(name)}`),
   showFolder: (id: string, which: 'project' | 'exports') => call<{ ok: boolean }>('POST', `${p(id)}/show-folder?which=${which}`),
   startExport: (id: string, settings: unknown) => call<{ jobId: string; dir: string }>('POST', `${p(id)}/exports`, settings),
   sendFrame: (id: string, job: string, pass: string, frame: number, w: number, h: number, rgba: Uint8Array) =>

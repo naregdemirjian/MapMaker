@@ -2,7 +2,7 @@
 // only thing that writes to project databases. In the later Electron build, the same handlers move
 // behind Electron's internal messaging; nothing else changes.
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join, extname } from 'node:path';
 import { spawn } from 'node:child_process';
 import { ProjectRegistry } from './projects.ts';
@@ -106,12 +106,15 @@ export function createAppServer(opts: ServerOptions): { server: Server; registry
       if (parts[5] === 'restore' && method === 'POST') return send(res, 200, db.restoreVersion(Number(parts[4])));
     }
     if (action === 'backups') {
+      if (parts[4] === 'restore' && method === 'POST') return send(res, 200, db.restoreBackup(url.searchParams.get('name') ?? ''));
       if (method === 'GET') return send(res, 200, db.backups());
       if (method === 'POST') return send(res, 201, db.backupNow());
     }
     if (action === 'show-folder' && method === 'POST') {
       const which = url.searchParams.get('which');
-      openInFileBrowser(which === 'exports' ? join(db.dir, 'exports') : db.dir);
+      const folder = which === 'exports' ? join(db.dir, 'exports') : db.dir;
+      mkdirSync(folder, { recursive: true });
+      openInFileBrowser(folder);
       return send(res, 200, { ok: true });
     }
     if (action === 'exports') {

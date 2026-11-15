@@ -47,8 +47,7 @@ export class ProjectRegistry {
     const db = ProjectDb.open(dir);
     const world = new World();
     const seeded = seedProject(world, name.trim() || id, firstWorld);
-    db.commit(seeded.label, seeded.diffs, null, true);
-    db.backupNow();
+    db.commit(seeded.label, seeded.diffs, null, true); // the first save also takes the first backup
     this.open.set(id, db);
     return { id, name: id, dir, modified: new Date().toISOString() };
   }
@@ -59,7 +58,10 @@ export class ProjectRegistry {
       const dir = this.dirOf(id);
       if (!existsSync(join(dir, 'project.db'))) throw Object.assign(new Error('That project does not exist.'), { status: 404 });
       db = ProjectDb.open(dir);
-      try { db.backupNow(); } catch { /* opening must not fail because a backup could not be written */ }
+      // A backup on opening, unless one was taken in the last few minutes.
+      if (Date.now() - db.lastBackupAt > 5 * 60_000) {
+        try { db.backupNow(); } catch { /* opening must not fail because a backup could not be written */ }
+      }
       this.open.set(id, db);
     }
     return db;

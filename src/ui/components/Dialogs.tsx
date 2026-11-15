@@ -38,12 +38,17 @@ function PaintPrompt({ p }: { p: Extract<PendingEdit, { kind: 'paint' }> }) {
   const events = w.all('event').filter((x) => x.id !== BASE_EVENT_ID).sort((a, b) => a.start_day - b.start_day || a.start_ms - b.start_ms);
 
   let periodFrom = 'the beginning', periodTo = 'the end of time';
+  let lasts = 'Nothing later changes this area yet, so the change lasts until you record a later one.';
   if (p.sample) {
     const face = w.arrangement(p.spaceId).locate(lonLatToVec(p.sample[0], p.sample[1]));
     const a = e.latest(p.spaceId, p.layerId, face, s.time);
     if (a) periodFrom = a.eventId === BASE_EVENT_ID ? 'the base world' : fmt(a.t);
     const next = e.nextChange(p.spaceId, p.layerId, [face], s.time);
-    if (next) periodTo = fmt(next);
+    if (next) {
+      periodTo = fmt(next);
+      const nextEvent = w.get('event', e.latest(p.spaceId, p.layerId, face, next)?.eventId ?? '');
+      lasts = `It lasts until ${fmt(next)}${nextEvent ? `, when “${nextEvent.name}” changes it` : ''}.`;
+    }
   }
   const close = () => s.set({ pending: null });
   const confirm = () => {
@@ -68,7 +73,7 @@ function PaintPrompt({ p }: { p: Extract<PendingEdit, { kind: 'paint' }> }) {
       <p className="muted">You drew an area for <b>{who}</b> while looking at <b>{fmt(s.time, 'minute')}</b>.</p>
       <div className={`choice ${choice === 'new' ? 'on' : ''}`} onClick={() => setChoice('new')} data-testid="choice-new">
         <b>A new change from {fmt(s.time)}</b>
-        <div className="muted">History before this date stays as it is. The change lasts until something later changes it.</div>
+        <div className="muted" data-testid="new-change-lasts">History before this date stays as it is. {lasts}</div>
         {choice === 'new' && (
           <div className="choice-body" onClick={(ev: any) => ev.stopPropagation()}>
             <label>Event
@@ -193,17 +198,24 @@ export function VersionsDialog() {
     s.toast('Version saved.');
     await refresh();
   };
-  const restore = async (v: VersionInfo) => {
-    if (!confirm(`Restore "${v.label}"? This is added as a new step, so you can undo it.`)) return;
+  const applyRestore = async (what: string, call: () => Promise<{ diffs: Parameters<NonNullable<typeof s.world>['applyDiffs']>[0]; journal: typeof s.journal }>) => {
+    if (!confirm(`Restore ${what}? This is added as a new step, so you can undo it.`)) return;
     await s.flush();
-    const r = await Api.restoreVersion(s.projectId!, v.id);
-    s.world!.applyDiffs(r.diffs);
-    s.journal = r.journal;
-    s.validateSelection();
-    s.toast(`Restored "${v.label}".`);
+    try {
+      const r = await call();
+      s.world!.applyDiffs(r.diffs);
+      s.journal = r.journal;
+      s.validateSelection();
+      s.toast(`Restored ${what}.`);
+    } catch (e) {
+      s.toast(`Could not restore ${what}: ${(e as Error).message}`, 'error');
+      await s.reloadFromDisk();
+    }
     s.notify();
     await refresh();
   };
+  const restore = (v: VersionInfo) => applyRestore(`"${v.label}"`, () => Api.restoreVersion(s.projectId!, v.id));
+  const restoreBackup = (b: BackupInfo) => applyRestore(`the backup from ${new Date(b.created_at).toLocaleString()}`, () => Api.restoreBackup(s.projectId!, b.file.split(/[\\/]/).pop()!));
   return (
     <Modal title="Versions and backups" onClose={close} wide>
       <p className="muted">Everything is saved automatically as you work. A version is a named restore point you can return to at any time.</p>
@@ -214,7 +226,8 @@ export function VersionsDialog() {
       <h4>Versions</h4>
       <div className="list">{versions.map((v) => <div key={v.id} className="row"><span>{v.label}</span><span className="muted"> · {new Date(v.created_at).toLocaleString()}</span><button className="small" onClick={() => restore(v)}>Restore</button></div>)}{!versions.length && <div className="muted">No named versions yet.</div>}</div>
       <h4>Automatic backups</h4>
-      <div className="list">{backups.slice(0, 12).map((b) => <div key={b.file} className="row"><span>{new Date(b.created_at).toLocaleString()}</span><span className="muted"> · {(b.bytes / 1024).toFixed(0)} KB</span></div>)}</div>
+      <p className="muted">Taken automatically every hour while you work and whenever a project is opened. The newest 24 are kept, then one a day for 30 days and one a week for a year.</p>
+      <div className="list">{backups.map((b) => <div key={b.file} className="row"><span>{new Date(b.created_at).toLocaleString()}</span><span className="muted"> · {(b.bytes / 1024).toFixed(0)} KB</span><button className="small" onClick={() => restoreBackup(b)}>Restore</button></div>)}{!backups.length && <div className="muted">No backups yet.</div>}</div>
       <div className="modal-actions">
         <button onClick={async () => { await Api.backupNow(s.projectId!); await refresh(); s.toast('Backup written.'); }}>Back up now</button>
         <button onClick={() => Api.showFolder(s.projectId!, 'project')}>Show project folder</button>

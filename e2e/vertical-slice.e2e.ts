@@ -252,6 +252,7 @@ try {
     const { cx, cy } = await centre();
     await drawLasso(blob(cx - 120, cy, 110, 80));
     await page.getByTestId('choice-new').waitFor();
+    assert.match((await page.getByTestId('new-change-lasts').textContent()) ?? '', /Nothing later changes this area yet/);
     await screenshot('what-does-this-drawing-mean');
     await page.getByTestId('choice-correct').click();
     await page.getByTestId('confirm-edit').click();
@@ -353,8 +354,31 @@ try {
     assert.equal(await ownerAt(P.conq, '31 December 1449 23:59'), A);
     assert.equal(await ownerAt(P.conq, '1 January 1450'), B);
     await setDate('1300');
+    // Drawing over the area at an earlier date: the prompt says how long such a change would last.
+    await page.getByTestId('tool-lasso').click();
+    const c = await toPage(P.conq);
+    await drawLasso(blob(c[0], c[1], 12, 10));
+    assert.match((await page.getByTestId('new-change-lasts').textContent()) ?? '', /until 1 January 1450, when “Test border war” changes it/);
+    await page.getByRole('button', { name: 'Cancel' }).click();
+    assert.equal(await ownerAt(P.conq, '1300'), A, 'cancelling changes nothing');
     await page.getByTitle('Next change').click();
     await expectDate('1 January 1450', 'the "next change" button jumps to the event');
+  });
+
+  await step('Restore the saved version, then undo the restore', async () => {
+    await saved();
+    page.once('dialog', (d) => void d.accept());
+    await page.getByRole('button', { name: 'Versions' }).click();
+    await page.locator('.modal .row', { hasText: 'Two countries drawn' }).getByRole('button', { name: 'Restore' }).click();
+    await waitOwner(P.conq, '1451', A);
+    assert.equal(await page.locator('.left .row', { hasText: EVENT }).count(), 0, 'the event recorded after that version is gone');
+    assert.ok((await page.locator('.modal .row', { hasText: 'KB' }).getByRole('button', { name: 'Restore' }).count()) >= 1, 'automatic backups can be restored too');
+    await screenshot('versions-and-backups');
+    await page.locator('.modal-actions').getByRole('button', { name: 'Close' }).click();
+    await saved();
+    await page.getByTestId('undo').click();
+    await waitOwner(P.conq, '1451', B);
+    await page.locator('.left .row', { hasText: EVENT }).waitFor();
   });
 
   await step('Close Map Maker completely, start it again and reopen the project', async () => {

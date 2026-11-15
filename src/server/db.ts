@@ -58,8 +58,13 @@ export class ProjectDb {
     if (ok !== 'ok') throw new IntegrityError(`The project database failed its integrity check (${ok}). Restore a backup.`);
     db.exec(ddl());
     p.migrate();
+    // The hourly backup timer carries on from the newest backup already on disk.
+    p.lastBackup = p.backups().reduce((m, b) => Math.max(m, Date.parse(b.created_at)), 0);
     return p;
   }
+
+  /** When the newest backup was taken (milliseconds since 1970; 0 if there is none). */
+  get lastBackupAt(): number { return this.lastBackup; }
 
   private migrate(): void {
     const row = this.db.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get() as { value: string } | undefined;
@@ -209,6 +214,15 @@ export class ProjectDb {
     const diffs = diffSnapshots(this.snapshot(), target);
     const label = `Restore version "${(this.db.prepare('SELECT label FROM version WHERE id = ?').get(id) as { label: string }).label}"`;
     const journal = this.commit(label, diffs, null);
+    return { diffs, journal };
+  }
+
+  /** Bring the project back to an automatic backup, as a new step that can itself be undone. */
+  restoreBackup(name: string): { diffs: RowDiff[]; journal: JournalState } {
+    const file = join(this.backupDir(), name);
+    if (!/^backup-[\w.\-]+\.db$/.test(name) || !existsSync(file)) throw Object.assign(new Error('That backup no longer exists.'), { status: 404 });
+    const diffs = diffSnapshots(this.snapshot(), readSnapshot(file));
+    const journal = this.commit(`Restore backup of ${statSync(file).mtime.toISOString().slice(0, 16).replace('T', ' ')}`, diffs, null);
     return { diffs, journal };
   }
 
