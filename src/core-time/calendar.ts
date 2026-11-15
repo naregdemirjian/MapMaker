@@ -1,0 +1,172 @@
+// Calendars translate instants to and from human dates. The Gregorian calendar comes first
+// (proleptic, astronomical year numbering internally: year 0 = 1 BCE). Fictional calendars
+// implement the same Calendar interface later; the stored instants never change.
+import { type Instant, MS_PER_DAY, instant, isFiniteInstant } from './instant.ts';
+
+export type Precision = 'exact' | 'millisecond' | 'second' | 'minute' | 'hour' | 'day' | 'month' | 'year' | 'decade' | 'century' | 'millennium' | 'circa';
+
+export interface CivilDate {
+  year: number; // astronomical: 0 = 1 BCE, -1 = 2 BCE
+  month: number; // 1-12
+  day: number; // 1-31
+  hour: number;
+  minute: number;
+  second: number;
+  millisecond: number;
+}
+
+export interface Calendar {
+  readonly id: string;
+  readonly name: string;
+  toCivil(t: Instant): CivilDate;
+  fromCivil(c: Partial<CivilDate> & { year: number }): Instant;
+  format(t: Instant, precision?: Precision): string;
+  parse(text: string): { instant: Instant; precision: Precision } | null;
+}
+
+const fdiv = (a: number, b: number) => Math.floor(a / b);
+
+/** Days since 1970-01-01 for a proleptic Gregorian date (Howard Hinnant's algorithm; valid over the whole safe-integer range). */
+export function daysFromCivil(year: number, month: number, day: number): number {
+  const y = year - (month <= 2 ? 1 : 0);
+  const era = fdiv(y, 400);
+  const yoe = y - era * 400;
+  const doy = fdiv(153 * (month + (month > 2 ? -3 : 9)) + 2, 5) + day - 1;
+  const doe = yoe * 365 + fdiv(yoe, 4) - fdiv(yoe, 100) + doy;
+  return era * 146097 + doe - 719468;
+}
+
+export function civilFromDays(days: number): { year: number; month: number; day: number } {
+  const z = days + 719468;
+  const era = fdiv(z, 146097);
+  const doe = z - era * 146097;
+  const yoe = fdiv(doe - fdiv(doe, 1460) + fdiv(doe, 36524) - fdiv(doe, 146096), 365);
+  const doy = doe - (365 * yoe + fdiv(yoe, 4) - fdiv(yoe, 100));
+  const mp = fdiv(5 * doy + 2, 153);
+  const d = doy - fdiv(153 * mp + 2, 5) + 1;
+  const m = mp < 10 ? mp + 3 : mp - 9;
+  return { year: yoe + era * 400 + (m <= 2 ? 1 : 0), month: m, day: d };
+}
+
+export function isLeapYear(y: number): boolean {
+  return (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+}
+
+export function daysInMonth(y: number, m: number): number {
+  return [31, isLeapYear(y) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][m - 1];
+}
+
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const pad = (n: number, w = 2) => String(Math.abs(n)).padStart(w, '0');
+
+function groupDigits(n: number): string {
+  const s = String(n);
+  return s.length > 5 ? s.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : s;
+}
+
+/** Year label for display: "1203", "500 BCE", "1 BCE" (= astronomical year 0). */
+export function formatYear(year: number): string {
+  return year <= 0 ? `${groupDigits(1 - year)} BCE` : groupDigits(year);
+}
+
+export const gregorian: Calendar = {
+  id: 'gregorian',
+  name: 'Gregorian',
+
+  toCivil(t) {
+    if (!isFiniteInstant(t)) throw new RangeError('Cannot convert an infinite instant to a date');
+    const { year, month, day } = civilFromDays(t.day);
+    let ms = t.ms;
+    const hour = Math.floor(ms / 3_600_000); ms -= hour * 3_600_000;
+    const minute = Math.floor(ms / 60_000); ms -= minute * 60_000;
+    const second = Math.floor(ms / 1000); ms -= second * 1000;
+    return { year, month, day, hour, minute, second, millisecond: ms };
+  },
+
+  fromCivil(c) {
+    const month = c.month ?? 1;
+    const day = c.day ?? 1;
+    if (month < 1 || month > 12) throw new RangeError(`Month out of range: ${month}`);
+    if (day < 1 || day > daysInMonth(c.year, month)) throw new RangeError(`Day out of range: ${day}`);
+    const ms = ((c.hour ?? 0) * 3600 + (c.minute ?? 0) * 60 + (c.second ?? 0)) * 1000 + (c.millisecond ?? 0);
+    if (ms < 0 || ms >= MS_PER_DAY) throw new RangeError('Time of day out of range');
+    return instant(daysFromCivil(c.year, month, day), ms);
+  },
+
+  format(t, precision = 'minute') {
+    if (t.day === -Infinity) return 'the beginning of time';
+    if (t.day === Infinity) return 'the end of time';
+    const c = this.toCivil(t);
+    const y = formatYear(c.year);
+    switch (precision) {
+      case 'millennium': return `${formatYear(c.year)} (millennium)`;
+      case 'century':
+      case 'decade':
+      case 'year': return y;
+      case 'circa': return `c. ${y}`;
+      case 'month': return `${MONTHS[c.month - 1]} ${y}`;
+      case 'day': return `${c.day} ${MONTHS[c.month - 1]} ${y}`;
+      case 'hour':
+      case 'minute': return `${c.day} ${MONTHS[c.month - 1]} ${y}, ${pad(c.hour)}:${pad(c.minute)}`;
+      case 'second': return `${c.day} ${MONTHS[c.month - 1]} ${y}, ${pad(c.hour)}:${pad(c.minute)}:${pad(c.second)}`;
+      default: return `${c.day} ${MONTHS[c.month - 1]} ${y}, ${pad(c.hour)}:${pad(c.minute)}:${pad(c.second)}.${pad(c.millisecond, 3)}`;
+    }
+  },
+
+  parse(text) {
+    let s = text.trim().replace(/\s+/g, ' ');
+    let circa = false;
+    const circaMatch = /^(c\.|ca\.|circa|about)\s*/i.exec(s);
+    if (circaMatch) { circa = true; s = s.slice(circaMatch[0].length); }
+    let era: 'BCE' | 'CE' | null = null;
+    const eraMatch = /\s*\b(BCE|BC|B\.C\.|CE|AD|A\.D\.)$/i.exec(s);
+    if (eraMatch) { era = /^B/i.test(eraMatch[1]) ? 'BCE' : 'CE'; s = s.slice(0, eraMatch.index).trim(); }
+    if (/^(AD|A\.D\.) /i.test(s)) { era = 'CE'; s = s.replace(/^(AD|A\.D\.) /i, ''); }
+    const toAstro = (y: number) => (era === 'BCE' ? 1 - y : y);
+
+    try {
+      // ISO-like: [-]YYYY[-MM[-DD]][(T| )HH:MM[:SS[.mmm]]]
+      const iso = /^([+-]?\d[\d,]*)(?:-(\d{1,2})(?:-(\d{1,2}))?)?(?:[T ](\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?)?$/.exec(s);
+      if (iso) {
+        const year = toAstro(Number(iso[1].replace(/,/g, '')));
+        if (era === 'BCE' && Number(iso[1].replace(/,/g, '')) < 1) return null;
+        const month = iso[2] ? Number(iso[2]) : undefined;
+        const day = iso[3] ? Number(iso[3]) : undefined;
+        const t = this.fromCivil({
+          year, month, day,
+          hour: iso[4] ? Number(iso[4]) : 0, minute: iso[5] ? Number(iso[5]) : 0,
+          second: iso[6] ? Number(iso[6]) : 0, millisecond: iso[7] ? Number(iso[7].padEnd(3, '0')) : 0,
+        });
+        const precision: Precision = circa ? 'circa' : iso[7] ? 'millisecond' : iso[6] ? 'second' : iso[4] ? 'minute' : day ? 'day' : month ? 'month' : 'year';
+        return { instant: t, precision };
+      }
+      // "14 May 1203[, 06:00]" or "May 1203"
+      const named = /^(?:(\d{1,2}) )?([A-Za-z]+)\.? ([+-]?\d[\d,]*)(?:,? (\d{1,2}):(\d{2})(?::(\d{2}))?)?$/.exec(s);
+      if (named) {
+        const mi = MONTHS.findIndex((m) => m.toLowerCase().startsWith(named[2].toLowerCase().slice(0, 3)));
+        if (mi < 0 || named[2].length < 3) return null;
+        const year = toAstro(Number(named[3].replace(/,/g, '')));
+        const day = named[1] ? Number(named[1]) : undefined;
+        const t = this.fromCivil({ year, month: mi + 1, day, hour: named[4] ? Number(named[4]) : 0, minute: named[5] ? Number(named[5]) : 0, second: named[6] ? Number(named[6]) : 0 });
+        const precision: Precision = circa ? 'circa' : named[6] ? 'second' : named[4] ? 'minute' : day ? 'day' : 'month';
+        return { instant: t, precision };
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  },
+};
+
+/** Round an instant down to a calendar unit; used for timeline tick generation. */
+export function floorTo(t: Instant, unit: 'year' | 'month' | 'day' | 'hour' | 'minute' | 'second', stepYears = 1): Instant {
+  const c = gregorian.toCivil(t);
+  switch (unit) {
+    case 'year': return gregorian.fromCivil({ year: Math.floor(c.year / stepYears) * stepYears });
+    case 'month': return gregorian.fromCivil({ year: c.year, month: c.month });
+    case 'day': return instant(t.day, 0);
+    case 'hour': return instant(t.day, Math.floor(t.ms / 3_600_000) * 3_600_000);
+    case 'minute': return instant(t.day, Math.floor(t.ms / 60_000) * 60_000);
+    default: return instant(t.day, Math.floor(t.ms / 1000) * 1000);
+  }
+}

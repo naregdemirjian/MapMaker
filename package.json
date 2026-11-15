@@ -1,0 +1,32 @@
+{
+  "name": "map-maker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Bespoke historical world-building and map animation software for a single independent feature film.",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "start": "node --disable-warning=ExperimentalWarning dist/server.mjs",
+    "dev": "node scripts/build.mjs && node --disable-warning=ExperimentalWarning dist/server.mjs",
+    "test": "node --disable-warning=ExperimentalWarning --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc -p tsconfig.json",
+    "e2e": "node --disable-warning=ExperimentalWarning e2e/vertical-slice.e2e.ts"
+  },
+  "dependencies": {
+    "d3-geo": "3.1.1",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "robust-predicates": "3.0.3"
+  },
+  "devDependencies": {
+    "@types/d3-geo": "3.1.1",
+    "@types/geojson": "7946.0.16",
+    "@types/node": "26.6.3",
+    "esbuild": "0.28.2",
+    "playwright": "1.63.0",
+    "typescript": "6.0.3"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  }
+}
