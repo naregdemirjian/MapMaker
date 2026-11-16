@@ -59,6 +59,11 @@ export class Arrangement {
   private topo: Topology | null = null;
   /** Bumped on every geometric change; renderers use it to invalidate caches. */
   revision = 0;
+  /**
+   * Set by the world before an edit: does any recorded history refer to this face? When it is not
+   * set, every face is treated as referenced (the original, always-correct behaviour).
+   */
+  isReferenced: ((faceId: number) => boolean) | null = null;
 
   private constructor(spaceId: string, rootFace: number, ids: IdSource) {
     this.spaceId = spaceId;
@@ -201,6 +206,14 @@ export class Arrangement {
 
   private putSegment(s: SegmentRow): void {
     const before = this.segments.get(s.id) ?? null;
+    if (before && before.a === s.a && before.b === s.b) {
+      // Only the face labels change: the geometry, and so the spatial index, stay as they are.
+      this.record('segment', s.id, { ...before }, { ...s });
+      this.segments.set(s.id, { ...s });
+      this.topo = null;
+      this.revision++;
+      return;
+    }
     if (before) this.unindexSegment(s.id);
     this.record('segment', s.id, before ? { ...before } : null, { ...s });
     this.indexSegment({ ...s });
@@ -221,6 +234,7 @@ export class Arrangement {
     const before = this.faces.get(f.id) ?? null;
     this.record('face', f.id, before ? { ...before } : null, { ...f });
     this.faces.set(f.id, { ...f });
+    this.revision++;
   }
 
   v(id: number): Vec3 {
@@ -579,6 +593,24 @@ export class Arrangement {
     for (const [o, list] of [...byOrigin.entries()].sort((a, b) => a[0] - b[0])) {
       const face = this.faces.get(o);
       if (list.length === 1 && face && face.is_leaf) { finalId[list[0]] = o; continue; }
+      if (face && face.is_leaf && this.isReferenced && !this.isReferenced(o)) {
+        // Nothing in history refers to this parcel, so its pieces have nothing of its own to inherit.
+        // The piece that already carries most of its borders keeps its identity (no relabelling);
+        // the others become its siblings, inheriting exactly what it inherits from its ancestors.
+        let keep = list[0], keepN = -1;
+        for (const ri of list) {
+          let n2 = 0;
+          for (const ci of regions[ri]) for (const h of t.cycles[ci]) if (this.he(h, t).label === o) n2++;
+          if (n2 > keepN) { keep = ri; keepN = n2; }
+        }
+        for (const ri of list) {
+          if (ri === keep) { finalId[ri] = o; continue; }
+          const id = this.ids.next('face');
+          this.putFace({ id, space_id: this.spaceId, parent_id: face.parent_id, is_leaf: 1 });
+          finalId[ri] = id;
+        }
+        continue;
+      }
       if (face && face.is_leaf) this.putFace({ ...face, is_leaf: 0 });
       for (const ri of list) {
         const id = this.ids.next('face');

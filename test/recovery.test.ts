@@ -172,3 +172,27 @@ test('a long chain of mixed edits undoes and redoes exactly, state by state, acr
     reg2.closeAll();
   });
 });
+
+test('undo history written before compression was introduced still undoes correctly', () => {
+  withProject((root, reg, id) => {
+    const db = reg.get(id);
+    const w = World.fromSnapshot(db.snapshot());
+    const r = cmd.createEntity(w, { type_id: 'polity', name: 'Old style' });
+    const before = sorted(db.snapshot());
+    db.commit(r.label, r.diffs, db.journalState().head);
+    reg.closeAll();
+    // Rewrite that journal entry the old way: plain JSON.
+    const raw = new DatabaseSync(join(root, `${id}.mapmaker`, 'project.db'));
+    const row = raw.prepare("SELECT seq, diffs FROM journal WHERE state = 'done' ORDER BY seq DESC LIMIT 1").get() as { seq: number; diffs: string };
+    assert.ok(row.diffs.startsWith('z1:'), 'new entries are compressed');
+    raw.prepare('UPDATE journal SET diffs = ? WHERE seq = ?').run(JSON.stringify(r.diffs), row.seq);
+    raw.close();
+    const reg2 = new ProjectRegistry(root);
+    const db2 = reg2.get(id);
+    db2.undo();
+    assert.equal(sorted(db2.snapshot()), before);
+    db2.redo();
+    assert.equal((db2.snapshot() as { entity: Array<{ name: string }> }).entity.some((e) => e.name === 'Old style'), true);
+    reg2.closeAll();
+  });
+});

@@ -60,8 +60,12 @@ export function parseJSON<T>(text: string, fallback: T): T {
   try { return JSON.parse(text) as T; } catch { return fallback; }
 }
 
-/** Children of every face (lineage tree). */
+const kidsCache = new WeakMap<Arrangement, { revision: number; map: Map<number, number[]> }>();
+
+/** Children of every face (lineage tree). Cached per map revision; callers must not modify it. */
 export function childrenMap(arr: Arrangement): Map<number, number[]> {
+  const cached = kidsCache.get(arr);
+  if (cached && cached.revision === arr.revision) return cached.map;
   const m = new Map<number, number[]>();
   for (const f of arr.faces.values()) {
     if (f.parent_id === null) continue;
@@ -69,6 +73,7 @@ export function childrenMap(arr: Arrangement): Map<number, number[]> {
     if (!l) m.set(f.parent_id, (l = []));
     l.push(f.id);
   }
+  kidsCache.set(arr, { revision: arr.revision, map: m });
   return m;
 }
 
@@ -363,9 +368,21 @@ export class Engine {
         this.conflictList.push({ kind: 'simultaneous', effectId: A.id, eventId: A.event_id, otherEventId: B.event_id, message: `Changes the same area at the same moment as "${nb}". The one later in the precedence order wins.` });
       }
     }
-    // Overlapping transitions.
+    // Overlapping transitions: only pairs that share land are compared (found through a land index).
     const trans = [...this.effectAssignments.entries()].filter(([, l]) => l.length && l[0].transition).map(([id, l]) => ({ id, a: l[0] }));
-    for (let i = 0; i < trans.length; i++) for (let j = i + 1; j < trans.length; j++) {
+    const transOnLeaf = new Map<string, number[]>();
+    trans.forEach((x, i) => {
+      const ef = layerOfEffect.get(x.id)!;
+      for (const leaf of leavesOfEffect(x.id)) {
+        const k = `${ef.layer_id}:${leaf}`;
+        const l = transOnLeaf.get(k);
+        if (l) l.push(i); else transOnLeaf.set(k, [i]);
+      }
+    });
+    const pairs = new Set<number>();
+    for (const l of transOnLeaf.values()) for (let p = 0; p < l.length; p++) for (let q = p + 1; q < l.length; q++) pairs.add(l[p] * trans.length + l[q]);
+    for (const key of [...pairs].sort((a, b) => a - b)) {
+      const i = Math.floor(key / trans.length), j = key % trans.length;
       const x = trans[i], y = trans[j];
       if (x.a.eventId === y.a.eventId) continue;
       if (compare(x.a.t, y.a.end) >= 0 || compare(y.a.t, x.a.end) >= 0) continue;

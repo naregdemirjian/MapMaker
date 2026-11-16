@@ -5,6 +5,7 @@
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import { mkdirSync, existsSync, readdirSync, statSync, unlinkSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
+import { deflateRawSync, inflateRawSync } from 'node:zlib';
 import { TABLES, TABLE_NAMES, SCHEMA_VERSION, type RowDiff, type TableName, type AnyRow, invertDiffs } from '../world-model/schema.ts';
 import type { Snapshot } from '../world-model/world.ts';
 
@@ -39,6 +40,18 @@ export function listBackups(dir: string): BackupInfo[] {
 export interface JournalState { head: number; canUndo: boolean; canRedo: boolean; undoLabel: string | null; redoLabel: string | null }
 export interface VersionInfo { id: number; label: string; kind: string; created_at: string; journal_seq: number }
 export interface BackupInfo { file: string; created_at: string; bytes: number }
+
+/**
+ * Journal entries (the undo history) are stored compressed: they are highly repetitive, and the
+ * compressed form is typically a tenth of the size. Older uncompressed entries still read correctly.
+ */
+export function packDiffs(diffs: RowDiff[]): string {
+  return 'z1:' + deflateRawSync(Buffer.from(JSON.stringify(diffs), 'utf8'), { level: 6 }).toString('base64');
+}
+export function unpackDiffs(text: string): RowDiff[] {
+  if (text.startsWith('z1:')) return JSON.parse(inflateRawSync(Buffer.from(text.slice(3), 'base64')).toString('utf8')) as RowDiff[];
+  return JSON.parse(text) as RowDiff[];
+}
 
 const sqlType = (t: string) => (t.startsWith('int') ? 'INTEGER' : t.startsWith('real') ? 'REAL' : 'TEXT');
 
@@ -183,7 +196,7 @@ export class ProjectDb {
     if (baseHead !== null && baseHead !== this.journalState().head) throw new ConflictError('The project changed since this edit was started. Reloading.');
     this.applyAtomically(diffs, () => {
       this.db.prepare("DELETE FROM journal WHERE state = 'undone'").run();
-      this.db.prepare('INSERT INTO journal (label, created_at, diffs, state) VALUES (?, ?, ?, ?)').run(label, new Date().toISOString(), JSON.stringify(diffs), fixed ? 'fixed' : 'done');
+      this.db.prepare('INSERT INTO journal (label, created_at, diffs, state) VALUES (?, ?, ?, ?)').run(label, new Date().toISOString(), packDiffs(diffs), fixed ? 'fixed' : 'done');
     });
     this.maybeBackup();
     return this.journalState();
@@ -192,7 +205,7 @@ export class ProjectDb {
   undo(): { diffs: RowDiff[]; label: string; journal: JournalState } | null {
     const e = this.db.prepare("SELECT seq, label, diffs FROM journal WHERE state = 'done' ORDER BY seq DESC LIMIT 1").get() as { seq: number; label: string; diffs: string } | undefined;
     if (!e) return null;
-    const inverse = invertDiffs(JSON.parse(e.diffs) as RowDiff[]);
+    const inverse = invertDiffs(unpackDiffs(e.diffs));
     this.applyAtomically(inverse, () => this.db.prepare("UPDATE journal SET state = 'undone' WHERE seq = ?").run(e.seq));
     return { diffs: inverse, label: e.label, journal: this.journalState() };
   }
@@ -200,7 +213,7 @@ export class ProjectDb {
   redo(): { diffs: RowDiff[]; label: string; journal: JournalState } | null {
     const e = this.db.prepare("SELECT seq, label, diffs FROM journal WHERE state = 'undone' ORDER BY seq ASC LIMIT 1").get() as { seq: number; label: string; diffs: string } | undefined;
     if (!e) return null;
-    const forward = JSON.parse(e.diffs) as RowDiff[];
+    const forward = unpackDiffs(e.diffs);
     this.applyAtomically(forward, () => this.db.prepare("UPDATE journal SET state = 'done' WHERE seq = ?").run(e.seq));
     return { diffs: forward, label: e.label, journal: this.journalState() };
   }

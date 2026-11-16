@@ -91,6 +91,28 @@ export class World {
     }
   }
 
+  /**
+   * When on (the default), splitting a parcel that no recorded change refers to keeps its identity
+   * for its largest piece, instead of relabelling every border around it. History is identical either
+   * way (proved by test/split-identity.test.ts); this only avoids needless rewriting.
+   */
+  optimiseSplits = true;
+
+  /** Which parcels of a map any change (active or not, in any layer) refers to directly. */
+  referencedFaces(spaceId: string): (faceId: number) => boolean {
+    const set = new Set<number>();
+    for (const ef of this.all('effect')) {
+      if (ef.space_id !== spaceId) continue;
+      let res: { set?: Array<[number[], unknown]> };
+      try { res = JSON.parse(ef.resolution); } catch { return () => true; } // unreadable: assume everything is referenced
+      for (const entry of res.set ?? []) {
+        if (!Array.isArray(entry) || !Array.isArray(entry[0])) return () => true;
+        for (const f of entry[0]) set.add(f);
+      }
+    }
+    return (f) => set.has(f);
+  }
+
   snapshot(): Snapshot {
     const s: Snapshot = {};
     for (const t of TABLE_NAMES) {
@@ -161,6 +183,7 @@ export class Tx {
   /** Run a parcel-map operation; its row changes (and any root-face change) are recorded. */
   kernel<T>(spaceId: string, fn: (arr: Arrangement) => T): T {
     const arr = this.world.arrangement(spaceId);
+    arr.isReferenced = this.world.optimiseSplits ? this.world.referencedFaces(spaceId) : null;
     arr.begin();
     let result: T;
     try {
@@ -168,6 +191,8 @@ export class Tx {
     } catch (e) {
       arr.rollback();
       throw e;
+    } finally {
+      arr.isReferenced = null;
     }
     const kd = arr.commit();
     for (const c of kd.changes) this.diffs.push({ table: c.table, before: c.before as AnyRow | null, after: c.after as AnyRow | null });
