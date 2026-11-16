@@ -243,6 +243,54 @@ try {
     await h.saved();
   });
 
+  await h.step('Zooming in the middle of a brush stroke does not change the shape being drawn', async () => {
+    await page.locator('.left .row', { hasText: 'Political' }).locator('span').first().click();
+    await h.newCountry('Zoomland');
+    await page.getByTestId('tool-lasso').click();
+    const { cx, cy } = await h.centre();
+    // A circle on the map, about 120 px across at the current zoom, planned in map positions.
+    const c = await h.toLL([cx + 220, cy + 140]);
+    const edge = await h.toLL([cx + 280, cy + 140]);
+    const R = Math.abs(edge[0] - c[0]);
+    const at = (k: number): LL => [c[0] + R * Math.cos((2 * Math.PI * k) / 24), c[1] + R * 0.8 * Math.sin((2 * Math.PI * k) / 24)];
+    const first = await h.toPage(at(0));
+    await page.mouse.move(first[0], first[1]);
+    await page.mouse.down();
+    for (let k = 1; k <= 24; k++) {
+      if (k === 8 || k === 16) { // zoom in (2x), then out a little, while the button is still held
+        const z0 = await page.evaluate(() => (window as any).__mapmaker.store.camera.zoom);
+        await page.mouse.wheel(0, k === 8 ? -400 : 120);
+        await page.waitForTimeout(80);
+        assert.notEqual(await page.evaluate(() => (window as any).__mapmaker.store.camera.zoom), z0, 'the map zoomed mid-stroke');
+      }
+      const q = await h.toPage(at(k % 24));
+      await page.mouse.move(q[0], q[1], { steps: 2 });
+    }
+    await page.mouse.up();
+    // The outline the app received spans exactly the circle drawn on the map (within 1.5°).
+    const box = await page.evaluate(() => {
+      const ring = (window as any).__mapmaker.store.pending.rings[0] as number[][];
+      const ll = ring.map((v) => [Math.atan2(v[1], v[0]) * 180 / Math.PI, Math.asin(v[2]) * 180 / Math.PI]);
+      return [Math.min(...ll.map((q) => q[0])), Math.max(...ll.map((q) => q[0])), Math.min(...ll.map((q) => q[1])), Math.max(...ll.map((q) => q[1]))];
+    });
+    const planned = [c[0] - R, c[0] + R, c[1] - 0.8 * R, c[1] + 0.8 * R];
+    box.forEach((b, i) => assert.ok(Math.abs(b - planned[i]) < 1.5, `outline extent ${box.map((x) => x.toFixed(1))} matches the circle drawn ${planned.map((x) => x.toFixed(1))}`));
+    await page.getByTestId('choice-correct').click();
+    await page.getByTestId('confirm-edit').click();
+    await h.saved();
+    const date = await page.getByTestId('current-date').inputValue();
+    assert.equal(await h.ownerAt(c, date), 'Zoomland', 'the centre of the drawn circle');
+    assert.equal(await h.ownerAt([c[0] + R * 0.7, c[1]], date), 'Zoomland', 'inside, near the edge');
+    // Inside the part of the circle drawn before zooming (directions 30° and 60°, 80% of the way out).
+    for (const deg of [30, 60]) {
+      const q: LL = [c[0] + 0.8 * R * Math.cos((deg * Math.PI) / 180), c[1] + 0.8 * R * 0.8 * Math.sin((deg * Math.PI) / 180)];
+      assert.equal(await h.ownerAt(q, date), 'Zoomland', `inside the part drawn before zooming (${deg}°)`);
+    }
+    assert.notEqual(await h.ownerAt([c[0] + R * 1.5, c[1]], date), 'Zoomland', 'outside the circle drawn on the map');
+    assert.notEqual(await h.ownerAt([c[0], c[1] + R * 1.4], date), 'Zoomland', 'outside the circle drawn on the map');
+    await h.screenshot('zoomed-mid-stroke');
+  });
+
   let colours: Record<string, string> = {};
   await h.step('A shot with a camera move at 2.39:1 and 25 fps; inspect every exported pass', async () => {
     colours = await page.evaluate((names) => Object.fromEntries(names.map((n) => [n, (window as any).__mapmaker.store.world.all('entity').find((e: any) => e.name === n).color])), [A, B]);

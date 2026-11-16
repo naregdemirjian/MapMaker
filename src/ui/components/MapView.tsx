@@ -15,6 +15,8 @@ import * as cmd from '../../domain/commands.ts';
 type Drag =
   | { kind: 'none' }
   | { kind: 'pan'; x: number; y: number; moved: number; startX: number; startY: number }
+  // Brush points are kept as map positions (longitude, latitude), so zooming or panning in the
+  // middle of a stroke never changes the shape being drawn.
   | { kind: 'lasso'; points: Pt[] }
   | { kind: 'vertex'; vid: number; x: number; y: number; moved: number };
 
@@ -39,6 +41,7 @@ export function MapView() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [size, setSize] = useState({ w: 800, h: 600 });
   const drag = useRef<Drag>({ kind: 'none' });
+  /** Points of the precise shape being placed, as map positions (longitude, latitude). */
   const [polygon, setPolygon] = useState<Pt[]>([]);
   const [cursor, setCursor] = useState<Pt | null>(null);
   const [hoverVertex, setHoverVertex] = useState<number | null>(null);
@@ -135,7 +138,8 @@ export function MapView() {
         }
       }
     }
-    const pts = drag.current.kind === 'lasso' ? drag.current.points : polygon.length ? [...polygon, ...(cursor ? [cursor] : [])] : null;
+    const toScreen = (ll: Pt[]) => ll.map((q) => lonLatToScreen(v, q[0], q[1])).filter((q): q is Pt => !!q);
+    const pts = drag.current.kind === 'lasso' ? toScreen(drag.current.points) : polygon.length ? [...toScreen(polygon), ...(cursor ? [cursor] : [])] : null;
     if (pts && pts.length > 1) {
       const owner = s.paintValue ? w.get('entity', s.paintValue) : null;
       ctx.save();
@@ -149,7 +153,7 @@ export function MapView() {
       ctx.lineWidth = 2;
       ctx.stroke();
       ctx.restore();
-      if (polygon.length) for (const p of polygon) { ctx.fillStyle = '#fff'; ctx.fillRect(p[0] - 3, p[1] - 3, 6, 6); }
+      if (polygon.length) for (const p of toScreen(polygon)) { ctx.fillStyle = '#fff'; ctx.fillRect(p[0] - 3, p[1] - 3, 6, 6); }
     }
   }
 
@@ -201,8 +205,13 @@ export function MapView() {
       drag.current = { kind: 'pan', x: e.clientX, y: e.clientY, moved: 0, startX: p[0], startY: p[1] };
       return;
     }
-    if (!presentation && e.button === 0 && s.tool === 'lasso') { drag.current = { kind: 'lasso', points: [p] }; force((n) => n + 1); return; }
-    if (!presentation && e.button === 0 && s.tool === 'polygon') { setPolygon((poly) => [...poly, p]); return; }
+    if (!presentation && e.button === 0 && (s.tool === 'lasso' || s.tool === 'polygon')) {
+      const ll = screenToLonLat(view, p[0], p[1]);
+      if (!ll) return; // outside the map
+      if (s.tool === 'lasso') { drag.current = { kind: 'lasso', points: [ll] }; force((n) => n + 1); }
+      else setPolygon((poly) => [...poly, ll]);
+      return;
+    }
     if (wantsPan) drag.current = { kind: 'pan', x: e.clientX, y: e.clientY, moved: 0, startX: p[0], startY: p[1] };
   }
 
@@ -218,7 +227,9 @@ export function MapView() {
     }
     if (d.kind === 'lasso') {
       const last = d.points[d.points.length - 1];
-      if (Math.hypot(p[0] - last[0], p[1] - last[1]) > 2) { d.points.push(p); force((n) => n + 1); }
+      const lastScreen = lonLatToScreen(view, last[0], last[1]);
+      const ll = screenToLonLat(view, p[0], p[1]);
+      if (ll && (!lastScreen || Math.hypot(p[0] - lastScreen[0], p[1] - lastScreen[1]) > 2)) { d.points.push(ll); force((n) => n + 1); }
       return;
     }
     if (d.kind === 'vertex') { d.moved += 1; setCursor(p); return; }
@@ -240,9 +251,11 @@ export function MapView() {
       return;
     }
     if (d.kind === 'lasso') {
-      if (d.points.length < 4) { force((n) => n + 1); return; }
-      const loops = processLasso(d.points, store.stroke);
-      finishShape(loops, d.points[0]);
+      // Cleaned up at the current zoom, so smoothing and detail match what is on screen now.
+      const screen = d.points.map((q) => lonLatToScreen(view, q[0], q[1])).filter((q): q is Pt => !!q);
+      if (screen.length < 4) { force((n) => n + 1); return; }
+      const loops = processLasso(screen, store.stroke);
+      finishShape(loops, screen[0]);
       force((n) => n + 1);
       return;
     }
@@ -260,7 +273,7 @@ export function MapView() {
 
   function finishPolygon() {
     // A double-click to finish also places its point twice; repeated points are dropped.
-    const pts = dedupe(polygon, 1);
+    const pts = dedupe(polygon.map((q) => lonLatToScreen(view, q[0], q[1])).filter((q): q is Pt => !!q), 1);
     if (pts.length < 3) { setPolygon([]); setCursor(null); return; }
     const loops = splitLoops(pts).map(orientInteriorLeft).map((r) => densify(r, 6, true));
     finishShape(loops, pts[0]);
