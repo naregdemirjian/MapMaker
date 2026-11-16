@@ -144,6 +144,30 @@ for (const scale of SCALES) {
   console.log(`wrote ${file}`);
 }
 
+// Today's countries (1:50m), for 'Add today's countries': names, codes, continent, whether a nation,
+// a map colour group, and their shapes in the same compact encoding.
+{
+  const text = await load('ne_50m_admin_0_countries');
+  sources.push({ file: 'ne_50m_admin_0_countries.geojson', sha256: createHash('sha256').update(text).digest('hex') });
+  const flags = existsSync(join(root, 'data', 'flags', 'index.json')) ? new Set(JSON.parse(readFileSync(join(root, 'data', 'flags', 'index.json'), 'utf8')).map((f) => f.code)) : new Set();
+  const countries = [];
+  for (const f of JSON.parse(text).features) {
+    const p = f.properties;
+    const nation = p.TYPE === 'Sovereign country' || p.TYPE === 'Sovereignty' || (p.TYPE === 'Country' && p.SOVEREIGNT === p.ADMIN) || ['Israel', 'Kosovo', 'Palestine'].includes(p.NAME);
+    const iso2 = String(p.ISO_A2_EH ?? '').toLowerCase();
+    const name = p.NAME_EN === "People's Republic of China" ? 'China' : p.NAME_EN === 'East Timor' ? 'Timor-Leste' : p.NAME_EN;
+    const polys = f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates;
+    countries.push({
+      name, iso2: /^[a-z]{2}$/.test(iso2) ? iso2 : null, iso3: p.ISO_A3_EH && p.ISO_A3_EH !== '-99' ? p.ISO_A3_EH : null,
+      continent: p.CONTINENT, subregion: p.SUBREGION, nation, color: p.MAPCOLOR9, flag: flags.has(iso2) ? iso2 : null,
+      polygons: polys.map((poly) => poly.map(encode).filter((r) => r.length >= 6)).filter((poly) => poly.length),
+    });
+  }
+  countries.sort((a, b) => a.name.localeCompare(b.name));
+  writeFileSync(join(outDir, 'countries-50m.json'), JSON.stringify({ format: 'mapmaker-countries-1', dataset: 'natural-earth', version: VERSION, quantum: QUANTUM, countries }));
+  console.log(`countries: ${countries.length} (${countries.filter((c) => c.nation).length} nations)`);
+}
+
 const record = {
   id: 'natural-earth',
   name: 'Natural Earth',
@@ -151,7 +175,7 @@ const record = {
   source: 'https://www.naturalearthdata.com/ (files from https://github.com/nvkelso/natural-earth-vector)',
   licence: 'Public domain',
   credit: 'Made with Natural Earth. Free vector and raster map data @ naturalearthdata.com.',
-  usedFor: 'Earth basemap: land, lakes, coastlines and present-day country borders (reference only) at 1:110m, 1:50m and 1:10m',
+  usedFor: "Earth basemap: land, lakes, coastlines and present-day country borders (reference only) at 1:110m, 1:50m and 1:10m; today's countries (1:50m) to add to a map",
   retrieved: new Date().toISOString().slice(0, 10),
   converted: `Coordinates rounded to ${QUANTUM} degrees; at 1:10m, land and lakes cut into ${TILE}-degree tiles and lines into pieces (for drawing speed); nothing else changed.`,
   sources,

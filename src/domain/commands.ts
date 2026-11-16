@@ -11,6 +11,7 @@ import {
 import type { Vec3 } from '../geo-kernel/vec.ts';
 import { worldSettings, type BasemapSource } from '../world-model/world-settings.ts';
 import type { LabelStyle, CountryLabel } from '../render-engine/label-style.ts';
+import { ringFromMapPoints } from '../render-engine/stroke.ts';
 
 export interface CommandResult<T = unknown> { label: string; diffs: RowDiff[]; result: T }
 
@@ -366,6 +367,71 @@ export function eventShown(world: World, eventId: string, filter: Set<string> | 
 }
 export const UNGROUPED = '__ungrouped';
 
+// ---------------------------------------------------------------- today's countries
+
+export interface CountryToAdd {
+  name: string;
+  /** Each polygon: its outline, then its holes, as [lon, lat] points. */
+  polygons: Array<Array<Array<[number, number]>>>;
+  color?: string;
+  /** A picture to fill it with (for example its flag), for countries created now. */
+  fill?: CountryFill;
+}
+
+/**
+ * Add countries and their territory in one step: each country is created (or an existing one with
+ * the same name is used) and its land is painted as a correction or as part of an event. All outlines
+ * go into the map together, so the map's structure is rebuilt once however many countries there are.
+ */
+export function addCountries(world: World, engine: Engine, o: { spaceId: string; layerId: string; countries: CountryToAdd[]; mode: EditMode; snap?: number }): CommandResult<{ entities: string[] }> {
+  checkTarget(world, { spaceId: o.spaceId, layerId: o.layerId, mode: o.mode });
+  if (!o.countries.length) throw new Error('Choose at least one country.');
+  return run(world, o.countries.length === 1 ? `Add ${o.countries[0].name}` : `Add ${o.countries.length} countries`, (tx) => {
+    const existing = new Map(world.all('entity').filter((e) => e.type_id === 'polity' || e.type_id === 'faction').map((e) => [e.name.toLowerCase(), e.id]));
+    const entities: string[] = [];
+    // Outlines: each polygon's outer ring and holes, oriented with the area they surround on the left.
+    const rings: Vec3[][] = [];
+    const parts: Array<Array<{ outer: number; holes: number[] }>> = [];
+    for (const c of o.countries) {
+      const polys: Array<{ outer: number; holes: number[] }> = [];
+      for (const poly of c.polygons) {
+        const outer = ringFromMapPoints(poly[0], 1);
+        if (!outer) continue;
+        const entry = { outer: rings.push(outer) - 1, holes: [] as number[] };
+        for (const h of poly.slice(1)) { const hr = ringFromMapPoints(h, 1); if (hr) entry.holes.push(rings.push(hr) - 1); }
+        polys.push(entry);
+      }
+      parts.push(polys);
+    }
+    const paths = tx.kernel(o.spaceId, (arr) => arr.insertPaths(rings, { closed: true, snap: o.snap ?? 1e-8 }));
+    const arr = world.arrangement(o.spaceId);
+    const lefts = arr.facesLeftOfMany(paths);
+    const insideOf = (i: number) => (arr.isSimpleCycle(paths[i]) ? lefts[i] : arr.facesWoundBy(paths[i]));
+    const corrections: Array<{ leaves: Iterable<number>; value: string | null }> = [];
+    o.countries.forEach((c, k) => {
+      let id = existing.get(c.name.toLowerCase());
+      if (!id) {
+        id = newId('ent');
+        const style = c.fill?.asset ? JSON.stringify({ fill: c.fill }) : '{}';
+        tx.insert('entity', { id, type_id: 'polity', branch_id: MAIN_BRANCH, name: c.name, color: c.color ?? suggestColor(world), notes: '', created_seq: world.nextSeq('entity'), style });
+        existing.set(c.name.toLowerCase(), id);
+      }
+      entities.push(id);
+      const faces = new Set<number>();
+      for (const p of parts[k]) {
+        const holes = new Set<number>();
+        for (const h of p.holes) for (const f of leafDescendants(arr, insideOf(h))) holes.add(f);
+        for (const f of leafDescendants(arr, insideOf(p.outer))) if (!holes.has(f)) faces.add(f);
+      }
+      if (!faces.size) return;
+      if (o.mode.kind === 'new') insertAssignEffect(tx, { eventId: o.mode.eventId, spaceId: o.spaceId, layerId: o.layerId, faces: canonicalFaces(arr, [...faces]), value: id, at: o.mode.at ?? null, intent: { op: 'paint', value: id } });
+      else corrections.push({ leaves: faces, value: id });
+    });
+    if (o.mode.kind === 'correct' && corrections.length) correctPeriods(tx, engine, o.spaceId, o.layerId, corrections, o.mode.t);
+    return { entities };
+  });
+}
+
 // ---------------------------------------------------------------- territory
 
 export type EditMode =
@@ -391,31 +457,51 @@ function insertAssignEffect(tx: Tx, o: { eventId: string; spaceId: string; layer
 
 /** "Correct this period": change the value from the moment the current one was set, inside that same change. */
 function correctPeriod(tx: Tx, engine: Engine, spaceId: string, layerId: string, leaves: Iterable<number>, value: string | null, t: Instant): void {
+  correctPeriods(tx, engine, spaceId, layerId, [{ leaves, value }], t);
+}
+
+/**
+ * Several corrections of the period being viewed at once: every change they fall under is read
+ * first, then each is written once (one re-reading of history however many items there are).
+ */
+function correctPeriods(tx: Tx, engine: Engine, spaceId: string, layerId: string, items: Array<{ leaves: Iterable<number>; value: string | null }>, t: Instant): void {
   const world = tx.world;
   const arr = world.arrangement(spaceId);
-  const groups = new Map<string, number[]>();
-  for (const leaf of leaves) {
-    const a = engine.latest(spaceId, layerId, leaf, t);
-    const key = a ? a.effectId : '';
-    let l = groups.get(key);
-    if (!l) groups.set(key, (l = []));
-    l.push(leaf);
+  // effect id ('' = nothing set it yet) -> the sets of parcels and their new owners, in item order
+  const byEffect = new Map<string, Array<[number[], string | null]>>();
+  for (const { leaves, value } of items) {
+    const groups = new Map<string, number[]>();
+    for (const leaf of leaves) {
+      const a = engine.latest(spaceId, layerId, leaf, t);
+      const key = a ? a.effectId : '';
+      let l = groups.get(key);
+      if (!l) groups.set(key, (l = []));
+      l.push(leaf);
+    }
+    for (const [effectId, faces] of groups) {
+      let l = byEffect.get(effectId);
+      if (!l) byEffect.set(effectId, (l = []));
+      l.push([canonicalFaces(arr, faces), value]);
+    }
   }
-  for (const [effectId, faces] of groups) {
-    const canon = canonicalFaces(arr, faces);
+  for (const [effectId, sets] of byEffect) {
     if (effectId) {
       const ef = world.get('effect', effectId)!;
       const res = parseJSON<Resolution>(ef.resolution, { set: [] });
-      res.set.push([canon, value]);
+      res.set.push(...sets);
       tx.patch('effect', effectId, { resolution: JSON.stringify(res) });
+      continue;
+    }
+    // Nothing set it yet: correct the base world.
+    const base = world.all('effect').find((f) => f.event_id === BASE_EVENT_ID && f.layer_id === layerId && f.kind === 'assign');
+    if (base) {
+      const res = parseJSON<Resolution>(base.resolution, { set: [] });
+      res.set.push(...sets);
+      tx.patch('effect', base.id, { resolution: JSON.stringify(res) });
     } else {
-      // Nothing set it yet: correct the base world.
-      const base = world.all('effect').find((f) => f.event_id === BASE_EVENT_ID && f.layer_id === layerId && f.kind === 'assign');
-      if (base) {
-        const res = parseJSON<Resolution>(base.resolution, { set: [] });
-        res.set.push([canon, value]);
-        tx.patch('effect', base.id, { resolution: JSON.stringify(res) });
-      } else insertAssignEffect(tx, { eventId: BASE_EVENT_ID, spaceId, layerId, faces: canon, value });
+      const id = insertAssignEffect(tx, { eventId: BASE_EVENT_ID, spaceId, layerId, faces: sets[0][0], value: sets[0][1] });
+      // The change's assignments are its resolution sets: the first is written by insertAssignEffect.
+      if (sets.length > 1) tx.patch('effect', id, { resolution: JSON.stringify({ set: sets }) });
     }
   }
 }

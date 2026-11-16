@@ -84,3 +84,24 @@ for (const seed of [1, 2, 3, 4]) {
     }
   });
 }
+
+test('regression: neighbours whose shared border differs by tiny offsets (imported data) insert cleanly', () => {
+  for (const seed of [11, 12, 13]) {
+    const world = new World();
+    const space = cmd.seedProject(world, 'Overlap').result.spaceId;
+    const r = rng(seed);
+    // A wiggly shared border from (0,0) to (0,10), and two areas on either side of it. The right-hand
+    // area repeats the border with offsets of about 2e-6 degrees (as rounding in real data does).
+    const border: Array<[number, number]> = [];
+    for (let i = 0; i <= 200; i++) border.push([Math.sin(i / 7) * 0.3, i * 0.05]);
+    const jitter = () => r.float(-2e-6, 2e-6);
+    const left = [...border, [-5, 10], [-5, 0]] as Array<[number, number]>;
+    const right = [...border.map(([x, y]) => [x + jitter(), y + jitter()] as [number, number]).reverse(), [5, 0], [5, 10]] as Array<[number, number]>;
+    // Left is drawn going north along the border: its inside (west) on the left after reversing.
+    const rings = [ring([...left].reverse(), 0.5), ring(right, 0.5)];
+    cmd.run(world, 'import', (tx) => tx.kernel(space, (arr) => arr.insertPaths(rings, { closed: true, snap: 1e-8 })));
+    const arr = world.arrangement(space);
+    assert.deepEqual(arr.validate(), [], `seed ${seed}`);
+    assert.deepEqual(arr.checkTopology(), [], `seed ${seed}`);
+  }
+});

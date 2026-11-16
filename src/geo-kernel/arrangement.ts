@@ -342,10 +342,11 @@ export class Arrangement {
     return x;
   }
 
-  private splitSegmentAtVertex(segId: number, x: number, tol: number): void {
+  private splitSegmentAtVertex(segId: number, x: number, tol: number, depth = 0): void {
     const s = this.segments.get(segId)!;
     this.deleteSegment(segId);
-    const steps = [...this.insertPiece(s.a, x, tol, s.left_face, s.right_face, 0), ...this.insertPiece(x, s.b, tol, s.left_face, s.right_face, 0)];
+    // The depth carries on through splits, so chains of splits (nearly overlapping borders) always end.
+    const steps = [...this.insertPiece(s.a, x, tol, s.left_face, s.right_face, depth + 1), ...this.insertPiece(x, s.b, tol, s.left_face, s.right_face, depth + 1)];
     this.splitLog?.set(segId, steps);
   }
 
@@ -431,9 +432,21 @@ export class Arrangement {
         const pa = this.v(s.a), pb = this.v(s.b);
         if (arcsCross(pu, pw, pa, pb) !== 'cross') continue;
         const X = arcIntersection(pu, pw, pa, pb);
-        let xid = this.nearestVertex(X, tol);
-        if (xid === null) xid = this.newVertex(X);
-        if (xid !== s.a && xid !== s.b) this.splitSegmentAtVertex(sid, xid, tol);
+        let xid: number | null;
+        const onBoth = distanceToArc(X, pu, pw).dist <= tol + 1e-12 && distanceToArc(X, pa, pb).dist <= tol + 1e-12;
+        if (onBoth) {
+          xid = this.nearestVertex(X, tol);
+          if (xid === null) xid = this.newVertex(X);
+        } else {
+          // Nearly parallel arcs (borders that almost overlap): the computed crossing is rounding
+          // noise. They meet where one ends closest to the other, so they share that point.
+          const cands = [
+            { id: s.a, d: distanceToArc(pa, pu, pw).dist }, { id: s.b, d: distanceToArc(pb, pu, pw).dist },
+            { id: u, d: distanceToArc(pu, pa, pb).dist }, { id: w, d: distanceToArc(pw, pa, pb).dist },
+          ].sort((p, q) => p.d - q.d || p.id - q.id);
+          xid = cands[0].id;
+        }
+        if (xid !== s.a && xid !== s.b) this.splitSegmentAtVertex(sid, xid, tol, depth);
         if (xid !== u && xid !== w) splits.push({ t: angle(pu, this.v(xid)), id: xid });
       }
     }
@@ -1018,6 +1031,30 @@ export class Arrangement {
       for (const g of adj.get(f) ?? []) if (!seen.has(g)) { seen.add(g); queue.push(g); }
     }
     return seen;
+  }
+
+  /**
+   * facesLeftOf for many paths at once (imports): the adjacency between faces is built once and
+   * each path only blocks its own segments.
+   */
+  facesLeftOfMany(paths: PathStep[][]): Array<Set<number>> {
+    const adj = new Map<number, Array<[number, number]>>();
+    for (const s of this.segments.values()) {
+      if (s.left_face === s.right_face) continue;
+      (adj.get(s.left_face) ?? adj.set(s.left_face, []).get(s.left_face)!).push([s.right_face, s.id]);
+      (adj.get(s.right_face) ?? adj.set(s.right_face, []).get(s.right_face)!).push([s.left_face, s.id]);
+    }
+    return paths.map((path) => {
+      const barrier = new Set(path.map((st) => st.seg));
+      const seen = new Set<number>();
+      for (const st of this.netPath(path)) { const s = this.segments.get(st.seg)!; seen.add(st.fwd ? s.left_face : s.right_face); }
+      const queue = [...seen];
+      while (queue.length) {
+        const f = queue.pop()!;
+        for (const [g, sid] of adj.get(f) ?? []) if (!barrier.has(sid) && !seen.has(g)) { seen.add(g); queue.push(g); }
+      }
+      return seen;
+    });
   }
 
   /**

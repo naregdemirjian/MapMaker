@@ -69,7 +69,7 @@ test('basemap: the dataset record names its source, version and licence', () => 
   const ne = records.find((r) => r.id === 'natural-earth')!;
   assert.equal(ne.licence, 'Public domain');
   assert.equal(ne.version, 'v5.1.2');
-  assert.equal((ne.sources as unknown[]).length, 12);
+  assert.equal((ne.sources as unknown[]).length, 13);
 });
 
 test('world basemap setting: Earth starts with it, new worlds do not unless asked, and changes undo', () => {
