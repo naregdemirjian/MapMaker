@@ -11,6 +11,8 @@ import { currentShot } from './components/MapView.tsx';
 // It changes nothing; everything the tests do to the project goes through the interface itself.
 (window as unknown as { __mapmaker: unknown }).__mapmaker = {
   store,
+  /** A view of the map for a camera and size (for off-screen comparisons in tests). */
+  viewOf(camera: Parameters<typeof makeView>[0], width: number, height: number) { return makeView(camera, width, height); },
   /** Who owns the place at (lon, lat) on the date written in `date`, on the layer being drawn on. */
   ownerAt(lon: number, lat: number, date: string) {
     const s = store;

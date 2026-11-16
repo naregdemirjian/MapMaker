@@ -10,6 +10,7 @@ import { cameraAt, timeAt, overlaysAt, drawOverlays, type ShotSettings } from '.
 import { parseJSON } from '../../temporal-engine/engine.ts';
 import { compare, fromStore } from '../../core-time/index.ts';
 import { basemapSourceOf } from '../../world-model/world-settings.ts';
+import { loadBasemapDetail, pixelsPerDegree, DETAIL_PIXELS_PER_DEGREE } from '../../render-engine/basemap.ts';
 import * as cmd from '../../domain/commands.ts';
 
 type Drag =
@@ -78,6 +79,10 @@ export function MapView() {
     const layers = s.world.all('layer').filter((l) => l.space_id === s.spaceId && l.kind === 'partition' && (shot ? (shot.layers.length ? shot.layers.includes(l.id) : l.visible) : l.visible)).sort((a, b) => a.sort_order - b.sort_order).map((l) => l.id);
     const passes = new Set<PassName>(['background', 'land', 'fills', 'borders']);
     const basemap = basemapSourceOf(s.world.get('map_space', s.spaceId)) === 'natural-earth' ? s.basemap : null;
+    // Close up, load the detailed coastlines (once) and redraw when they arrive.
+    if (basemap && pixelsPerDegree(view) > DETAIL_PIXELS_PER_DEGREE && !basemap.scales.some((sc) => sc.scale === '10m')) {
+      loadBasemapDetail(basemap).then(() => store.notify(), (e: Error) => store.toast(e.message, 'error'));
+    }
     if (!shot || shot.graticule) passes.add('graticule');
     if (!shot || shot.labels) passes.add('labels');
     try {

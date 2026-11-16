@@ -17,7 +17,7 @@ import * as cmd from '../src/domain/commands.ts';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const load = (scale: string): BasemapScale =>
   decodeBasemap(JSON.parse(readFileSync(join(root, 'data', 'natural-earth', `ne-${scale}.json`), 'utf8')) as BasemapFile);
-const scales = { '110m': load('110m'), '50m': load('50m') };
+const scales = { '110m': load('110m'), '50m': load('50m'), '10m': load('10m') };
 
 const LAND: Array<[string, number, number]> = [
   ['Paris', 2.35, 48.86], ['Nairobi', 36.82, -1.29], ['Brasília', -47.88, -15.79], ['Ulaanbaatar', 106.9, 47.9],
@@ -69,7 +69,7 @@ test('basemap: the dataset record names its source, version and licence', () => 
   const ne = records.find((r) => r.id === 'natural-earth')!;
   assert.equal(ne.licence, 'Public domain');
   assert.equal(ne.version, 'v5.1.2');
-  assert.equal((ne.sources as unknown[]).length, 8);
+  assert.equal((ne.sources as unknown[]).length, 12);
 });
 
 test('world basemap setting: Earth starts with it, new worlds do not unless asked, and changes undo', () => {
@@ -135,4 +135,18 @@ test('coastline clipping setting: on unless switched off, per layer, other style
   world.applyDiffs(invertDiffs(r.diffs));
   assert.equal(style().clipToLand, undefined);
   assert.throws(() => cmd.setLayerClipToLand(world, 'layer_missing', true), /no longer exists/);
+});
+
+test('basemap 1:10m: cut into tiles, the land keeps its exact area and every piece fits in a 10° tile', () => {
+  const b = scales['10m'];
+  const area = (m: GeoJSON.MultiPolygon) => m.coordinates.reduce((a, p) => a + geoArea({ type: 'Polygon', coordinates: p }), 0);
+  // Tiling must neither drop nor double any land: same area as the 1:50m land, within the
+  // difference in detail between the two scales.
+  const a10 = area(b.land), a50 = area(scales['50m'].land);
+  assert.ok(Math.abs(a10 - a50) / a50 < 0.01, `1:10m land ${a10.toFixed(4)} vs 1:50m ${a50.toFixed(4)} sr`);
+  for (const box of b.boxes.land) {
+    assert.ok(box[2] - box[0] <= 10 + 1e-6 && box[3] - box[1] <= 10 + 1e-6, `piece ${box} fits in a tile`);
+  }
+  // Coastline and border pieces are short, and consecutive pieces join up.
+  assert.ok(b.coastline.coordinates.every((l) => l.length <= 401));
 });

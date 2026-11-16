@@ -8,7 +8,7 @@ import { MapRenderer, DEFAULT_STYLE, type PassName } from '../render-engine/map-
 import { makeView } from '../render-engine/camera.ts';
 import { type ShotSettings, timeAt, cameraAt, overlaysAt, drawOverlays } from './sequence.ts';
 import { gregorian } from '../core-time/index.ts';
-import { basemapSourceOf, loadBasemap, loadDatasetRecords, type Basemap } from '../render-engine/basemap.ts';
+import { basemapSourceOf, loadBasemap, loadBasemapDetail, loadDatasetRecords, type Basemap } from '../render-engine/basemap.ts';
 
 export interface ExportPassDef { name: string; label: string; blend: string; passes: PassName[]; overlays: boolean; background: boolean; note?: string }
 
@@ -31,7 +31,8 @@ export function visibleLayers(world: World, shot: ShotSettings): string[] {
 
 /** The basemap a shot's world shows (loaded on first use), or null. */
 export async function basemapFor(world: World, spaceId: string): Promise<Basemap | null> {
-  return basemapSourceOf(world.get('map_space', spaceId)) === 'natural-earth' ? loadBasemap() : null;
+  // Every detail level is loaded before exporting, so frames never depend on what was loaded when.
+  return basemapSourceOf(world.get('map_space', spaceId)) === 'natural-earth' ? loadBasemapDetail(await loadBasemap()) : null;
 }
 
 /** Render one frame of one pass into a 2D context of the given size. */

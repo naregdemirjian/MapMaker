@@ -28,8 +28,11 @@ function boxOf(points: Iterable<number[]>): Box {
   return b;
 }
 
-/** Every scale available, coarsest first. */
+/** Every scale loaded so far, coarsest first (1:10m joins later, see loadBasemapDetail). */
 export interface Basemap { version: string; scales: BasemapScale[] }
+
+/** Above this many pixels per degree the finest scale (1:10m, about 200 m) is used. */
+export const DETAIL_PIXELS_PER_DEGREE = 24;
 
 export { basemapSourceOf, type BasemapSource } from '../world-model/world-settings.ts';
 
@@ -106,15 +109,39 @@ export function loadBasemap(baseUrl = 'data/natural-earth/'): Promise<Basemap> {
   return loading;
 }
 
+let loadingDetail: Promise<BasemapScale> | null = null;
+
+/** Add the finest scale (1:10m, 9 MB) to a loaded basemap; downloaded once, when first needed. */
+export function loadBasemapDetail(base: Basemap, baseUrl = 'data/natural-earth/'): Promise<Basemap> {
+  if (base.scales.some((s) => s.scale === '10m')) return Promise.resolve(base);
+  if (!loadingDetail) {
+    loadingDetail = fetch(`${baseUrl}ne-10m.json`).then(async (res) => {
+      if (!res.ok) throw new Error('The detailed coastlines could not be loaded.');
+      return decodeBasemap(await res.json() as BasemapFile);
+    });
+    loadingDetail.catch(() => { loadingDetail = null; });
+  }
+  return loadingDetail.then((scale) => {
+    if (!base.scales.some((s) => s.scale === '10m')) base.scales.push(scale);
+    return base;
+  });
+}
+
 /** Pixels per degree of longitude at the centre of the view. */
 export function pixelsPerDegree(view: View): number {
   return (view.projection.scale() * Math.PI) / 180;
 }
 
-/** The detail to draw: 1:110m for whole-world views, 1:50m once a degree is more than 6 pixels wide. */
+/**
+ * The detail to draw: 1:110m for whole-world views, 1:50m once a degree is more than 6 pixels
+ * wide, 1:10m (when loaded) above DETAIL_PIXELS_PER_DEGREE.
+ */
 export function chooseScale(basemap: Basemap, view: View): BasemapScale {
-  const s = basemap.scales;
-  return pixelsPerDegree(view) > 6 ? s[s.length - 1] : s[0];
+  const by = (name: string) => basemap.scales.find((s) => s.scale === name);
+  const ppd = pixelsPerDegree(view);
+  if (ppd > DETAIL_PIXELS_PER_DEGREE) { const d = by('10m'); if (d) return d; }
+  if (ppd > 6) { const m = by('50m'); if (m) return m; }
+  return by('110m') ?? basemap.scales[0];
 }
 
 /**
@@ -253,7 +280,8 @@ export class LandMask {
   static build(basemap: Basemap, width = 2880): LandMask | null {
     if (typeof OffscreenCanvas === 'undefined') return null;
     const height = width / 2;
-    const b = basemap.scales[basemap.scales.length - 1];
+    // Always 1:50m, so where labels go never depends on whether 1:10m has loaded yet.
+    const b = basemap.scales.find((s) => s.scale === '50m') ?? basemap.scales[basemap.scales.length - 1];
     const canvas = new OffscreenCanvas(width, height);
     const ctx = canvas.getContext('2d', { willReadFrequently: true }) as unknown as CanvasRenderingContext2D;
     const projection = geoEquirectangular().scale(width / (2 * Math.PI)).translate([width / 2, height / 2]).precision(0);
