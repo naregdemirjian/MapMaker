@@ -21,16 +21,19 @@ model, the history engine, the parcel kernel, storage or the export writer.
   2026: about 210 ms per 1080p frame with 24,500 parcels (fine for export, about 5 frames a second when scrubbing).
 - **Way back.** Replace this one module once packages can be installed.
 
-### D2. Local service and browser instead of an Electron app (interim)
+### D2. Local service and browser instead of an Electron app (reversed, 16 November 2026)
 
-- **Why.** Electron was not installed and could not be downloaded.
-- **What was built.** The data service (`dist/server.mjs`) runs with Node.js and serves the interface to the browser,
-  on this computer only. `Start Map Maker.bat` starts it and opens the browser. This service is the same component that
-  Electron's main process would host.
-- **Consequences.** The user installs Node.js once instead of running a Map Maker installer, and the app opens in a
-  browser tab instead of its own window. Closing the black console window quits the app; the interface then pauses
-  editing and says so.
-- **Way back.** Wrap the same service and interface in Electron and build a Windows installer.
+- **Why it existed.** Electron could not be downloaded in the first session.
+- **Reversed.** `src/desktop/main.ts` is the Electron main process: it hosts the same data service in-process (still
+  HTTP on 127.0.0.1, on a stable port so remembered views survive restarts) and shows the interface in the app's own
+  window; one copy at a time. electron-builder makes an NSIS installer (`Map Maker Setup <version>.exe`, per-user,
+  installation folder can be changed, Start menu and desktop shortcuts). The GitHub Actions run "Windows build and
+  tests" builds it on Windows and runs every test there first. Tested by `e2e/desktop.e2e.ts`.
+- **Kept.** The browser version (`Start Map Maker.bat`) still works and uses the same files and projects.
+- **Not done.** The installer is unsigned (Windows SmartScreen warns once); signing needs a certificate the user would
+  buy. No automatic updates: a new version is installed over the old one, projects are untouched.
+- **Building the installer on Linux** needs Wine; without it, `npx electron-builder --win --dir
+  -c.win.signAndEditExecutable=false` produces the unpacked app for inspection.
 
 ### D3. Node's built-in SQLite instead of better-sqlite3
 

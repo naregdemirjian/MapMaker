@@ -22,22 +22,29 @@ The approved architecture is the Claude Doc "Map Maker — Technical Architectur
   slow: see "Performance" below.
 - **Roadmap position.** Stages 1 and 3 mostly done; 0 and 2 partly done; parts of 4, 5 and 6 built early. Stages 7–13
   (military, terrain, environment, heatmaps, space maps…) not started. `REQUIREMENTS.md` classifies every requirement.
+- **Desktop app and Windows installer (D2 reversed).** Electron shell hosting the same service; NSIS installer built
+  and every test run on Windows by GitHub Actions ("Windows build and tests").
 - **Coastline clipping done.** Territory painted loosely over the sea ends at the coast (per-layer switch), lakes stay
   water, labels stay on land.
 - **Biggest open issues.** (1) The geometry kernel rebuilds the whole map's structure on every edit; this must become incremental
-  before real boundaries are loaded into it as parcel edges. (2) D1 and D2 (Canvas renderer, browser instead of
-  Electron) still to reverse; D4 (loose interface types) is reversed.
+  before real boundaries are loaded into it as parcel edges. (2) D1 (Canvas renderer instead of deck.gl) still to
+  reverse; D2 and D4 are reversed.
 
 ## How to run it
 
-On the user's Windows PC: install Node.js LTS (22.13 or newer) once, then double-click `Start Map Maker.bat`.
-The browser opens on the app. Projects are stored in `Documents\Map Maker Projects\<name>.mapmaker\`.
+On the user's Windows PC: install `Map Maker Setup <version>.exe`, downloaded from the latest "Windows build and tests"
+run on GitHub (Actions tab, Artifacts). Or, without installing: install Node.js LTS (22.13 or newer) once, then
+double-click `Start Map Maker.bat`; the browser opens on the app. Either way projects are stored in
+`Documents\Map Maker Projects\<name>.mapmaker\`.
 
 For development (Linux or Windows, Node 22.18 or newer):
 
 | Command | What it does |
 | --- | --- |
-| `node scripts/build.mjs` | Builds `dist/server.mjs` (the data service) and `dist/ui/` (the interface) |
+| `node scripts/build.mjs` | Builds `dist/server.mjs` (the data service), `dist/desktop/main.mjs` (the desktop app) and `dist/ui/` (the interface) |
+| `npx electron .` (Linux without a screen: `xvfb-run -a npx electron --no-sandbox .`) | Runs the desktop app (build first) |
+| `npm run dist:win` | Builds the Windows installer into `release/` (on Windows; on Linux it needs Wine) |
+| `xvfb-run -a node --disable-warning=ExperimentalWarning e2e/desktop.e2e.ts` | The 5-step desktop app test (build first) |
 | `node --disable-warning=ExperimentalWarning dist/server.mjs --port 4317 --projects <folder> [--open]` | Runs the app |
 | `npm test` | 96 unit, randomised and scenario tests |
 | `node --disable-warning=ExperimentalWarning test/geo-kernel.stress.ts <seeds> <rings>` | Long randomised kernel run |
@@ -64,6 +71,7 @@ TypeScript runs directly under Node's type stripping: imports carry `.ts` extens
 | `src/world-model/` | Tables and the in-memory world | Every row type, the diff format (`before`/`after` per row) used for saving and undo, and transactions. |
 | `src/temporal-engine/` | Reconstructs history | Compiles events into per-parcel timelines; answers "who holds this place at time t" exactly, including mid-transition; detects simultaneous, overlapping, stale and broken changes. Caches are rebuilt from the tables and never saved. |
 | `src/domain/commands.ts` | Every user action | Each command returns its row diffs, which become one undo step. |
+| `src/desktop/` | Desktop app | Electron main process: hosts the data service in-process and opens the interface in its own window. |
 | `src/server/` | Local data service | SQLite project file (WAL, full sync, integrity check on open), journal for undo and redo, versions, rolling backups, export writer, HTTP bound to this computer only. |
 | `src/render-engine/` | Drawing the map | Camera and projections (d3-geo), the map renderer (fills, borders, labels, transitions), the Earth basemap (`basemap.ts`: decoding, choice of detail, culling to the view), stroke processing for the freehand brush. |
 | `data/` | Shipped map data | Natural Earth basemap files and `datasets.json` (source, version, licence, credit of every dataset); copied to `dist/ui/data/` by the build. |
@@ -82,7 +90,7 @@ The approved roadmap has 14 stages (0–13). Where each stands:
 
 | Stage | Status | Done | Still to do |
 | --- | --- | --- | --- |
-| 0 Groundwork | Mostly done | Sphere-safe kernel, two-part time, SQLite storage, transparent PNG export, pannable/zoomable/rotatable map, Natural Earth basemap | Electron shell and Windows installer; reference-image render tests |
+| 0 Groundwork | Mostly done | Sphere-safe kernel, two-part time, SQLite storage, transparent PNG export, pannable/zoomable/rotatable map, Natural Earth basemap, Electron shell, Windows installer built automatically | Installer test on the user's PC; reference-image render tests |
 | 1 Project, storage, world model | Mostly done | Projects, schema, undo journal, autosave, versions, backups with restore, crash safety, multiple worlds, entities with names, colours, notes; outliner and inspector | Migration tests (only schema version 1 exists); per-world event filtering (see DECISIONS.md D8) |
 | 2 Parcel map and territory editing | Partly done | Production kernel, territory brush, precise shape tool, border-point editing, snapping, smoothing, irregularity, political fills, derived borders, labels, present-day borders as a guide | Border pen, explicit split and merge tools, administrative boundaries as parcel edges, region picker, coastline clipping |
 | 3 Time and event engine | Mostly done | Instants, Gregorian calendar, events, effects with intention, compiler, any-date reconstruction, zoomable timeline, edit prompt, record mode, History Health with keep and re-apply, precedence and overlap rules | Custom event types (interface), date comparison, dated border-point moves |
@@ -110,6 +118,7 @@ All pass as of 16 November 2026 (96 unit and randomised tests, 17 + 9 interface 
 | `test/camera.test.ts` | 7 | Screen/map round trips in every projection, rotation and zoom 0–14; zoom keeps the cursor point fixed; city-level precision; panning across 180° |
 | `test/basemap.test.ts` | 12 | Natural Earth files decode correctly at both scales (land about 29% of the planet, no inside-out polygons, known places on land and at sea across 180° and the poles); dataset record; per-world setting and per-layer clipping setting with undo; culling never drops anything on screen (160 random views) |
 | `e2e/vertical-slice.e2e.ts` | 17 steps | The vertical slice in Chrome: projects, drawing, Earth's geography and data sources, border points, versions, events, dates, version restore and undo, full restart, animation, export with data credits, identical re-export, 1080p, coastline clipping |
+| `e2e/desktop.e2e.ts` | 5 steps | The Electron app: own window, own data service on this computer only, project written to disk, one copy at a time, close and reopen with contents intact |
 | `e2e/workflows.e2e.ts` | 9 steps | Precise shapes; occupation layer; hiding layers; alternative versions; annexation; deleting and undoing events; fades; a second world; a camera move at 2.39:1 and 25 fps with frame timing, history in the pixels and pass stacking checked; square size, Natural Earth projection, 23.976 fps, transparency |
 
 Checked by hand: 4K and 8K exports; the unzipped package starts and works; requests from other hosts are refused.
@@ -138,7 +147,8 @@ Remaining bottlenecks:
 
 ## Known bugs and limitations
 
-1. **Not yet run on Windows.** The launcher, Windows paths and Explorer integration are untested until the user tries them.
+1. **Not yet run on the user's PC.** The tests run on a Windows machine in GitHub Actions; the installer and the
+   launcher have not yet been tried by the user.
 2. **Coastline detail.** The basemap's finest detail is 1:50m (about 1 km); city-scale coastlines (1:10m, OpenStreetMap)
    are not included yet. Areas in the inspector include parts clipped away at the coast.
 3. **Large maps are slow to edit and render** (see Performance).
@@ -171,12 +181,13 @@ Remaining bottlenecks:
 | --- | --- | --- |
 | 15–16 Nov 2026 | Stage work from an empty folder: time system and kernel; world model, engine and commands; data service; interface; end-to-end fixes; documentation (0.1.0) | `2a564fc` → `0966b07` |
 | 16 Nov 2026 | Testing and refinement: scenario, geometry, world, recovery, camera and A/B tests; second interface test; benchmark; 11 defects fixed; performance work (0.2.0) | `6a3c64a` → `343d84c` |
-| 16 Nov 2026 (2nd) | Package installs work; Natural Earth basemap (land, lakes, coastlines, present-day borders guide), land export pass, data sources dialog and export credits; coastline clipping with land-aware labels; real React types (D4 reversed) | `071deac` → latest |
+| 16 Nov 2026 (2nd) | Package installs work; Natural Earth basemap (land, lakes, coastlines, present-day borders guide), land export pass, data sources dialog and export credits; coastline clipping with land-aware labels; real React types (D4 reversed); desktop app, Windows installer and Windows test run (D2 reversed) | `071deac` → latest |
 
 ## Next priorities
 
-1. The user runs `Start Map Maker.bat` on Windows and reports what happens.
-2. Reverse D2 (Electron and installer) and D1 (deck.gl renderer).
+1. The user installs the desktop app from the GitHub Actions artifact (or runs `Start Map Maker.bat`) and reports
+   what happens.
+2. Reverse D1 (deck.gl renderer).
 3. With the user's agreement: make the geometry kernel's rebuild incremental (needed before real boundaries become parcel edges).
 4. Finish Stage 2: border pen, split and merge tools, region picker, administrative boundaries, coastline clipping.
 5. Finish Stage 3: custom event types, date comparison, dated border-point moves, per-world event lists.
