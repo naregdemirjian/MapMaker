@@ -1,7 +1,7 @@
 // Export jobs on the data-service side: frames rendered by the map engine arrive as raw RGBA pixels,
 // are encoded here and written as numbered image sequences with a manifest and a compositing guide.
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, isAbsolute, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { encodePNG } from './png.ts';
 
@@ -22,6 +22,15 @@ export interface ExportSettings {
   notes?: string;
   /** Credit lines for the datasets drawn in the frames. */
   credits?: string[];
+  /** Folder to export into (absolute path); empty or absent: the project's own exports folder. */
+  exportDir?: string | null;
+}
+
+/** The folder a project's exports go into, unless a shot chooses another. */
+export function exportRoot(projectDir: string, exportDir?: string | null): string {
+  if (!exportDir || !exportDir.trim()) return join(projectDir, 'exports');
+  if (!isAbsolute(exportDir.trim())) throw Object.assign(new Error('Choose a full folder path to export into (for example D:\\Film\\Maps).'), { status: 400 });
+  return resolve(exportDir.trim());
 }
 
 export interface ExportJob {
@@ -37,10 +46,15 @@ const safe = (s: string) => s.replace(/[^\w\-]+/g, '_').replace(/^_+|_+$/g, '') 
 export function startJob(projectDir: string, settings: ExportSettings): ExportJob {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   // Never reuse a folder: two exports of the same shot started in the same second get _2, _3, ...
+  const root = exportRoot(projectDir, settings.exportDir);
   let id = `${safe(settings.shotName)}_${stamp}`;
-  for (let n = 2; existsSync(join(projectDir, 'exports', id)); n++) id = `${safe(settings.shotName)}_${stamp}_${n}`;
-  const dir = join(projectDir, 'exports', id);
-  for (const p of settings.passes) mkdirSync(join(dir, safe(p.name)), { recursive: true });
+  for (let n = 2; existsSync(join(root, id)); n++) id = `${safe(settings.shotName)}_${stamp}_${n}`;
+  const dir = join(root, id);
+  try {
+    for (const p of settings.passes) mkdirSync(join(dir, safe(p.name)), { recursive: true });
+  } catch (e) {
+    throw Object.assign(new Error(`Map Maker cannot write to ${root} (${(e as Error).message.split(':')[0]}). Choose another folder.`), { status: 400 });
+  }
   return { id, dir, settings, checksums: {}, startedAt: new Date().toISOString() };
 }
 
@@ -97,7 +111,7 @@ export function finishJob(job: ExportJob): { manifest: string; guide: string } {
     '  3. Stack the passes on video tracks in this order, bottom track first:',
     ...s.passes.map((p, i) => `       V${i + 1}  ${p.label.padEnd(22)} blend mode: ${p.blend}${p.note ? `  (${p.note})` : ''}`),
     '',
-    'The "beauty" pass, if present, is everything combined: use it to check your composite.',
+    'The "All" pass, if present, is everything combined: use it to check your composite.',
     '',
     ...(s.credits?.length ? ['Map data (credit in your film where the licence asks for it):', ...s.credits.map((c) => `  ${c}`), ''] : []),
     `Rendered from project version ${s.projectHead} with Map Maker ${s.appVersion}.`,

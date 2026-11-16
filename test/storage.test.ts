@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, existsSync, readdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -189,4 +189,22 @@ test('PNG encoder round-trips pixels exactly, including transparency', () => {
     }
   }
   assert.deepEqual(out, px);
+});
+
+test('exports go to the chosen folder, or the project folder when none is chosen; relative paths are refused', async () => {
+  const { startJob, exportRoot } = await import('../src/export/writer.ts');
+  const root = temp();
+  try {
+    const projectDir = join(root, 'P.mapmaker');
+    const base = { shotName: 'Shot 1', width: 4, height: 4, fps: 24, frameStart: 0, frameEnd: 0, passes: [{ name: 'all', label: 'All', blend: 'Normal' }], transparent: false, projectHead: 1, appVersion: 'test' };
+    assert.equal(exportRoot(projectDir, null), join(projectDir, 'exports'));
+    assert.equal(exportRoot(projectDir, '   '), join(projectDir, 'exports'));
+    const chosen = join(root, 'My exports', 'Maps');
+    const job = startJob(projectDir, { ...base, exportDir: chosen });
+    assert.ok(job.dir.startsWith(chosen) && existsSync(join(job.dir, 'all')), 'the chosen folder is created and used');
+    assert.throws(() => startJob(projectDir, { ...base, exportDir: 'relative/folder' }), /full folder path/);
+    // A folder that cannot be made (a file stands where the folder should be) is reported plainly.
+    writeFileSync(join(root, 'a-file'), 'x');
+    assert.throws(() => startJob(projectDir, { ...base, exportDir: join(root, 'a-file', 'Maps') }), /cannot write to/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

@@ -52,7 +52,7 @@ export function ShotEditor() {
   const shot = currentShot();
   const row = s.shotId ? w.get('sequence', s.shotId) : null;
   const [name, setName] = useState(row?.name ?? '');
-  const [passes, setPasses] = useState<string[]>(['background', 'land', 'fills', 'borders', 'labels', 'overlays', 'beauty']);
+  const [passes, setPasses] = useState<string[]>(['background', 'land', 'fills', 'borders', 'labels', 'overlays', 'all']);
   const [progress, setProgress] = useState<null | { done: number; total: number; label: string }>(null);
   const [result, setResult] = useState<null | { dir: string; frames: number; seconds: number }>(null);
   const cancel = useRef(false);
@@ -102,71 +102,102 @@ export function ShotEditor() {
     }
     setProgress(null);
   };
+  const chooseFolder = async () => {
+    try {
+      const r = await Api.chooseFolder(shot.exportDir ?? undefined);
+      if (r.path) update({ exportDir: r.path });
+    } catch (e) {
+      s.toast((e as Error).message, 'error');
+    }
+  };
   return (
     <aside className="right" data-testid="shot-editor">
-      <div className="panel">
-        <h3>Shot</h3>
-        <label>Name<input value={name} onChange={(e) => setName(e.target.value)} onBlur={() => name.trim() && name !== row.name && s.execute((wd) => cmd.updateSequence(wd, row.id, { name: name.trim() }))} /></label>
-        <h4>History shown</h4>
-        <label>From<DateField value={startT} onChange={(t) => setTimeKey('start', t)} testId="shot-from" /></label>
-        <label>To<DateField value={endT} onChange={(t) => setTimeKey('end', t)} testId="shot-to" /></label>
-        <label>Pacing<select value={shot.time[0].ease} onChange={(e) => update({ time: shot.time.map((k) => ({ ...k, ease: e.target.value as Ease })) })}>
-          <option value="linear">Even</option><option value="smooth">Ease in and out</option>
-        </select></label>
-        <h4>Screen time</h4>
-        <div className="two">
-          <label>Seconds<NumberField min={0.1} max={3600} step={0.5} value={Number(seconds.toFixed(3))} onCommit={(n) => setFrames(shot.fps, n)} testId="shot-seconds" /></label>
-          <label>Frame rate<select value={shot.fps} onChange={(e) => setFrames(Number(e.target.value), seconds)}>{FRAME_RATES.map((f) => <option key={f} value={f}>{f} fps</option>)}</select></label>
-        </div>
-        <label>Resolution<select value={res} onChange={(e) => { const r = RESOLUTIONS.find((x) => x.id === e.target.value); if (r) update({ width: r.width, height: r.height }); }}>
-          {RESOLUTIONS.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}{res === 'custom' && <option value="custom">Custom {shot.width} x {shot.height}</option>}
-        </select></label>
-        <div className="two">
-          <label>Width<NumberField min={16} max={16384} step={1} value={shot.width} onCommit={(n) => update({ width: Math.round(n) })} /></label>
-          <label>Height<NumberField min={16} max={16384} step={1} value={shot.height} onCommit={(n) => update({ height: Math.round(n) })} /></label>
-        </div>
-        <h4>Camera</h4>
-        <p className="muted">Drag and scroll the preview to frame a view, then store it.</p>
-        <div className="buttons">
-          <button onClick={() => setCameraKey('start')} data-testid="set-start-view">Use this view at the start</button>
-          <button onClick={() => setCameraKey('end')} data-testid="set-end-view">Use this view at the end</button>
-        </div>
-        <label>Projection<select value={shot.camera[0].camera.projection} onChange={(e) => update({ camera: shot.camera.map((k) => ({ ...k, camera: { ...k.camera, projection: e.target.value as ProjectionName } })) })}>
-          {PROJECTIONS.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-        </select></label>
-        <label>Rotation (degrees)<input type="number" value={Math.round(liveCamera.rotation)} onChange={(e) => s.set({ presentCamera: { ...liveCamera, rotation: Number(e.target.value) } })} /></label>
-        <h4>Text</h4>
-        <label className="check"><input type="checkbox" checked={!!dateOverlay} onChange={(e) => update({ overlays: e.target.checked ? [...shot.overlays, defaultShot(shot.spaceId, liveCamera, startT, endT, shot.fps, seconds).overlays[0]] : shot.overlays.filter((o) => o.kind !== 'date') })} /> Show the date</label>
-        {dateOverlay && <label>Date detail<select value={dateOverlay.datePrecision} onChange={(e) => update({ overlays: shot.overlays.map((o) => (o.kind === 'date' ? { ...o, datePrecision: e.target.value as Precision } : o)) })}>
-          <option value="year">Year</option><option value="month">Month</option><option value="day">Day</option><option value="minute">Hour and minute</option><option value="second">Seconds</option>
-        </select></label>}
-        <label>Title<input value={title?.text ?? ''} placeholder="(none)" onChange={(e) => {
-          const text = e.target.value;
-          const rest = shot.overlays.filter((o) => o.id !== 'title');
-          update({ overlays: text ? [...rest, { id: 'title', kind: 'text', text, x: 0.5, y: 0.1, size: 56, color: '#f4efe6', background: null, align: 'center', inFrame: 0, outFrame: shot.frames - 1, fade: Math.round(shot.fps / 2), datePrecision: 'day' }] : rest });
-        }} /></label>
-        <h4>Look</h4>
-        <label className="check"><input type="checkbox" checked={shot.graticule} onChange={(e) => update({ graticule: e.target.checked })} /> Latitude and longitude grid</label>
-        <label className="check"><input type="checkbox" checked={shot.labels} onChange={(e) => update({ labels: e.target.checked })} /> Country labels</label>
-        <label className="check"><input type="checkbox" checked={shot.transparent} onChange={(e) => update({ transparent: e.target.checked })} /> Transparent background (beauty pass)</label>
-        <h4>Export for Premiere</h4>
-        {PASS_DEFS.map((d) => (
-          <label key={d.name} className="check"><input type="checkbox" checked={passes.includes(d.name)} onChange={(e) => setPasses(e.target.checked ? [...passes, d.name] : passes.filter((p) => p !== d.name))} /> {d.label}</label>
-        ))}
-        <p className="muted">{shot.frames} frames × {passes.length} passes at {shot.width} x {shot.height}, PNG with transparency.</p>
-        {progress ? (
-          <div className="progress"><div className="bar"><div style={{ width: `${(100 * progress.done) / progress.total}%` }} /></div>
-            <span>{progress.label}: {progress.done} / {progress.total}</span><button onClick={() => (cancel.current = true)}>Cancel</button></div>
-        ) : (
-          <div className="buttons">
-            <button onClick={() => doExport(0.25)} data-testid="export-preview">Export preview (¼ size)</button>
-            <button className="primary" onClick={() => doExport(1)} data-testid="export-full">Export</button>
+      <div className="panel shot-panel">
+        <Group title="Shot">
+          <label>Name<input value={name} onChange={(e) => setName(e.target.value)} onBlur={() => name.trim() && name !== row.name && s.execute((wd) => cmd.updateSequence(wd, row.id, { name: name.trim() }))} /></label>
+        </Group>
+        <Group title="Output quality">
+          <label>Resolution<select value={res} onChange={(e) => { const r = RESOLUTIONS.find((x) => x.id === e.target.value); if (r) update({ width: r.width, height: r.height }); }}>
+            {RESOLUTIONS.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}{res === 'custom' && <option value="custom">Custom {shot.width} x {shot.height}</option>}
+          </select></label>
+          <div className="two">
+            <label>Width<NumberField min={16} max={16384} step={1} value={shot.width} onCommit={(n) => update({ width: Math.round(n) })} /></label>
+            <label>Height<NumberField min={16} max={16384} step={1} value={shot.height} onCommit={(n) => update({ height: Math.round(n) })} /></label>
           </div>
-        )}
-        {result && <div className="ok-box" data-testid="export-result">Wrote {result.frames} frames in {result.seconds.toFixed(1)} s.<br /><span className="path">{result.dir}</span><br /><button onClick={() => Api.showFolder(s.projectId!, 'exports')}>Show exports folder</button></div>}
+          <label>Frame rate<select value={shot.fps} onChange={(e) => setFrames(Number(e.target.value), seconds)}>{FRAME_RATES.map((f) => <option key={f} value={f}>{f} fps</option>)}</select></label>
+          <label className="check"><input type="checkbox" checked={shot.transparent} onChange={(e) => update({ transparent: e.target.checked })} /> Transparent background (in "All")</label>
+          <p className="muted">PNG image sequences, 8-bit with transparency.</p>
+        </Group>
+        <Group title="Timing">
+          <label>History shown from<DateField value={startT} onChange={(t) => setTimeKey('start', t)} testId="shot-from" /></label>
+          <label>to<DateField value={endT} onChange={(t) => setTimeKey('end', t)} testId="shot-to" /></label>
+          <label>Pacing<select value={shot.time[0].ease} onChange={(e) => update({ time: shot.time.map((k) => ({ ...k, ease: e.target.value as Ease })) })}>
+            <option value="linear">Even</option><option value="smooth">Ease in and out</option>
+          </select></label>
+          <label>Screen time (seconds)<NumberField min={0.1} max={3600} step={0.5} value={Number(seconds.toFixed(3))} onCommit={(n) => setFrames(shot.fps, n)} testId="shot-seconds" /></label>
+        </Group>
+        <Group title="Camera">
+          <p className="muted">Drag and scroll the preview to frame a view, then store it.</p>
+          <div className="buttons">
+            <button onClick={() => setCameraKey('start')} data-testid="set-start-view">Use this view at the start</button>
+            <button onClick={() => setCameraKey('end')} data-testid="set-end-view">Use this view at the end</button>
+          </div>
+          <label>Projection<select value={shot.camera[0].camera.projection} onChange={(e) => update({ camera: shot.camera.map((k) => ({ ...k, camera: { ...k.camera, projection: e.target.value as ProjectionName } })) })}>
+            {PROJECTIONS.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select></label>
+          <label>Rotation (degrees)<input type="number" value={Math.round(liveCamera.rotation)} onChange={(e) => s.set({ presentCamera: { ...liveCamera, rotation: Number(e.target.value) } })} /></label>
+        </Group>
+        <Group title="Look">
+          <label className="check"><input type="checkbox" checked={shot.graticule} onChange={(e) => update({ graticule: e.target.checked })} /> Latitude and longitude grid</label>
+          <label className="check"><input type="checkbox" checked={shot.labels} onChange={(e) => update({ labels: e.target.checked })} /> Country labels</label>
+        </Group>
+        <Group title="Text">
+          <label className="check"><input type="checkbox" checked={!!dateOverlay} onChange={(e) => update({ overlays: e.target.checked ? [...shot.overlays, defaultShot(shot.spaceId, liveCamera, startT, endT, shot.fps, seconds).overlays[0]] : shot.overlays.filter((o) => o.kind !== 'date') })} /> Show the date</label>
+          {dateOverlay && <label>Date detail<select value={dateOverlay.datePrecision} onChange={(e) => update({ overlays: shot.overlays.map((o) => (o.kind === 'date' ? { ...o, datePrecision: e.target.value as Precision } : o)) })}>
+            <option value="year">Year</option><option value="month">Month</option><option value="day">Day</option><option value="minute">Hour and minute</option><option value="second">Seconds</option>
+          </select></label>}
+          <label>Title<input value={title?.text ?? ''} placeholder="(none)" onChange={(e) => {
+            const text = e.target.value;
+            const rest = shot.overlays.filter((o) => o.id !== 'title');
+            update({ overlays: text ? [...rest, { id: 'title', kind: 'text', text, x: 0.5, y: 0.1, size: 56, color: '#f4efe6', background: null, align: 'center', inFrame: 0, outFrame: shot.frames - 1, fade: Math.round(shot.fps / 2), datePrecision: 'day' }] : rest });
+          }} /></label>
+        </Group>
+        <Group title="Export">
+          <h4>What to export</h4>
+          {PASS_DEFS.map((d) => (
+            <label key={d.name} className="check" title={d.note ?? ''}><input type="checkbox" checked={passes.includes(d.name)} onChange={(e) => setPasses(e.target.checked ? [...passes, d.name] : passes.filter((p) => p !== d.name))} data-testid={`pass-${d.name}`} /> {d.label}</label>
+          ))}
+          <h4>Where</h4>
+          <div className="folder-field">
+            <input value={shot.exportDir ?? ''} placeholder="The project's exports folder" onChange={(e) => update({ exportDir: e.target.value || null })} data-testid="export-dir" title="A full folder path. Each export makes its own folder inside it." />
+            <button className="small" onClick={chooseFolder} data-testid="choose-export-dir">Choose…</button>
+            {shot.exportDir && <button className="small" onClick={() => update({ exportDir: null })} title="Back to the project's exports folder">Reset</button>}
+          </div>
+          <p className="muted">{shot.frames} frames × {passes.length} layers at {shot.width} x {shot.height}.</p>
+          {progress ? (
+            <div className="progress"><div className="bar"><div style={{ width: `${(100 * progress.done) / progress.total}%` }} /></div>
+              <span>{progress.label}: {progress.done} / {progress.total}</span><button onClick={() => (cancel.current = true)}>Cancel</button></div>
+          ) : (
+            <div className="buttons">
+              <button onClick={() => doExport(0.25)} data-testid="export-preview">Export preview (¼ size)</button>
+              <button className="primary" onClick={() => doExport(1)} data-testid="export-full">Export</button>
+            </div>
+          )}
+          {result && <div className="ok-box" data-testid="export-result">Wrote {result.frames} frames in {result.seconds.toFixed(1)} s.<br /><span className="path">{result.dir}</span><br /><button onClick={() => Api.showFolder(s.projectId!, 'exports', shot.exportDir ?? undefined)}>Show the export folder</button></div>}
+        </Group>
         <button className="danger" onClick={() => { if (confirm(`Delete the shot "${row.name}"?`)) { s.execute((wd) => cmd.deleteSequence(wd, row.id)); s.set({ shotId: null }); } }}>Delete shot</button>
       </div>
     </aside>
+  );
+}
+
+/** A collapsible group of settings. */
+function Group({ title, children, open = true }: { title: string; children: React.ReactNode; open?: boolean }) {
+  return (
+    <details className="settings-group" open={open}>
+      <summary>{title}</summary>
+      <div className="settings-body">{children}</div>
+    </details>
   );
 }
 

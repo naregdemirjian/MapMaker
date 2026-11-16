@@ -22,8 +22,14 @@ if (!app.requestSingleInstanceLock()) {
   // Map Maker is already open: that window is brought forward instead (see 'second-instance').
   app.quit();
 } else {
-  const { server, registry } = createAppServer({ projectsDir, staticDir, appVersion: version });
   let window: BrowserWindow | null = null;
+  const chooseFolder = async (start?: string) => {
+    const r = window
+      ? await dialog.showOpenDialog(window, { title: 'Where should Map Maker export?', defaultPath: start, properties: ['openDirectory', 'createDirectory'] })
+      : await dialog.showOpenDialog({ title: 'Where should Map Maker export?', defaultPath: start, properties: ['openDirectory', 'createDirectory'] });
+    return r.canceled ? null : r.filePaths[0] ?? null;
+  };
+  const { server, registry } = createAppServer({ projectsDir, staticDir, appVersion: version, chooseFolder });
 
   const listen = (port: number, attempts = 20): Promise<string> => new Promise((resolve, reject) => {
     const onError = (e: NodeJS.ErrnoException) => {

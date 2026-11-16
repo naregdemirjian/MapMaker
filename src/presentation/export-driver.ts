@@ -19,7 +19,7 @@ export const PASS_DEFS: ExportPassDef[] = [
   { name: 'borders', label: 'Borders', blend: 'Normal', passes: ['borders'], overlays: false, background: false },
   { name: 'labels', label: 'Labels', blend: 'Normal', passes: ['labels'], overlays: false, background: false },
   { name: 'overlays', label: 'Text overlays', blend: 'Normal', passes: [], overlays: true, background: false, note: 'dates and titles' },
-  { name: 'beauty', label: 'Beauty (everything)', blend: 'Normal', passes: ['background', 'graticule', 'land', 'fills', 'borders', 'labels'], overlays: true, background: true, note: 'reference: compare your composite with this' },
+  { name: 'all', label: 'All', blend: 'Normal', passes: ['background', 'graticule', 'land', 'fills', 'borders', 'labels'], overlays: true, background: true, note: 'everything combined: compare your composite with this' },
 ];
 
 export function visibleLayers(world: World, shot: ShotSettings): string[] {
@@ -41,7 +41,7 @@ export function renderFrame(ctx: CanvasRenderingContext2D, renderer: MapRenderer
   const passes = new Set<PassName>(def.passes.filter((p) => (p !== 'graticule' || shot.graticule) && (p !== 'labels' || shot.labels)));
   ctx.clearRect(0, 0, width, height);
   if (passes.size) {
-    const transparent = def.name === 'beauty' ? shot.transparent : !def.background;
+    const transparent = def.name === 'all' ? shot.transparent : !def.background;
     renderer.render(ctx, view, world, engine, shot.spaceId, t, { passes, transparent, layerIds: visibleLayers(world, shot), basemap });
   }
   if (def.overlays) drawOverlays(ctx, width, height, overlaysAt(shot, frame, t), width / 1920, DEFAULT_STYLE.font);
@@ -65,6 +65,7 @@ export async function runExport(o: {
   const credits = basemap ? (await loadDatasetRecords()).filter((d) => d.id === 'natural-earth').map((d) => `${d.name} ${d.version} (${d.licence}): ${d.credit}`) : [];
   const job = await Api.startExport(o.projectId, {
     credits,
+    exportDir: o.shot.exportDir ?? null,
     shotName: o.scale === 1 ? o.shotName : `${o.shotName} (preview)`, width, height, fps: o.shot.fps, frameStart: f0, frameEnd: f1,
     passes: defs.map((d) => ({ name: d.name, label: d.label, blend: d.blend, note: d.note })), transparent: o.shot.transparent,
     historicalRange: [gregorian.format(timeAt(o.shot, f0), 'minute'), gregorian.format(timeAt(o.shot, f1), 'minute')],

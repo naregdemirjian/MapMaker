@@ -472,7 +472,7 @@ try {
     assert.deepEqual(m.resolution, [480, 270]);
     assert.deepEqual(m.frames, [0, 23]);
     const passes: string[] = m.passes.map((p: any) => p.name);
-    assert.deepEqual(passes.sort(), ['background', 'beauty', 'borders', 'fills', 'labels', 'land', 'overlays']);
+    assert.deepEqual(passes.sort(), ['all', 'background', 'borders', 'fills', 'labels', 'land', 'overlays']);
     for (const pass of passes) {
       const files: string[] = readdirSync(join(ex.dir, pass)).filter((f) => f.endsWith('.png'));
       assert.equal(files.length, 24, `${pass}: 24 frames`);
@@ -496,8 +496,8 @@ try {
     assert.ok(near(c23.slice(0, 3), hexRGB(colours[B])), `frame 24 shows B's colour (${c23} vs ${colours[B]})`);
     assert.ok(c0[3] > 150 && c0[3] < 255, 'territory fills are semi-transparent');
     assert.equal(pixel(f0, 2, 2)[3], 0, 'the fills pass has a transparent background');
-    const beauty = decodePNG(readFileSync(file('beauty', 0)));
-    assert.equal(pixel(beauty, 2, 2)[3], 255, 'the beauty pass has a solid background');
+    const beauty = decodePNG(readFileSync(file('all', 0)));
+    assert.equal(pixel(beauty, 2, 2)[3], 255, 'the All pass has a solid background');
   });
 
   await step('Export the same shot again after reloading: identical pixels', async () => {
@@ -515,11 +515,11 @@ try {
     for (const label of ['Background', 'Labels', 'Text overlays']) await page.getByLabel(label, { exact: true }).uncheck();
     const full = await runExport('export-full');
     assert.deepEqual(full.manifest.resolution, [1920, 1080]);
-    for (const pass of ['fills', 'borders', 'beauty']) assert.equal(readdirSync(join(full.dir, pass)).filter((f) => f.endsWith('.png')).length, 24);
-    const frames = readdirSync(join(full.dir, 'beauty')).sort();
-    const img = decodePNG(readFileSync(join(full.dir, 'beauty', frames[12])));
+    for (const pass of ['fills', 'borders', 'all']) assert.equal(readdirSync(join(full.dir, pass)).filter((f) => f.endsWith('.png')).length, 24);
+    const frames = readdirSync(join(full.dir, 'all')).sort();
+    const img = decodePNG(readFileSync(join(full.dir, 'all', frames[12])));
     assert.equal(img.width, 1920);
-    copyFileSync(join(full.dir, 'beauty', frames[12]), join(OUT, 'exported-beauty-frame-13.png'));
+    copyFileSync(join(full.dir, 'all', frames[12]), join(OUT, 'exported-all-frame-13.png'));
     for (const pass of ['fills', 'borders']) copyFileSync(join(full.dir, pass, readdirSync(join(full.dir, pass)).sort()[12]), join(OUT, `exported-${pass}-frame-13.png`));
   });
 

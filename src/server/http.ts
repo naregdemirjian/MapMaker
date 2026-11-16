@@ -9,7 +9,29 @@ import { ProjectRegistry } from './projects.ts';
 import { startJob, writeFrame, finishJob, type ExportJob, type ExportSettings } from '../export/writer.ts';
 import type { RowDiff } from '../world-model/schema.ts';
 
-export interface ServerOptions { projectsDir: string; staticDir: string; appVersion: string }
+export interface ServerOptions {
+  projectsDir: string; staticDir: string; appVersion: string;
+  /** Show the system's folder picker (the desktop app provides Electron's); returns the chosen path or null. */
+  chooseFolder?: (start?: string) => Promise<string | null>;
+}
+
+/** The system folder picker for the browser version: Windows' own dialog, or zenity on Linux. */
+function systemFolderPicker(start?: string): Promise<string | null> | null {
+  const run = (cmd: string, args: string[]) => new Promise<string | null>((resolve, reject) => {
+    const p = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+    let out = '';
+    p.stdout.on('data', (d: Buffer) => { out += d.toString('utf8'); });
+    p.on('error', reject);
+    p.on('exit', () => resolve(out.trim() || null));
+  });
+  if (process.platform === 'win32') {
+    const init = start ? `$f.SelectedPath = '${start.replace(/'/g, "''")}';` : '';
+    const script = `Add-Type -AssemblyName System.Windows.Forms; $f = New-Object System.Windows.Forms.FolderBrowserDialog; $f.Description = 'Where should Map Maker export?'; $f.ShowNewFolderButton = $true; ${init} $w = New-Object System.Windows.Forms.Form; $w.TopMost = $true; if ($f.ShowDialog($w) -eq 'OK') { [Console]::OutputEncoding = [Text.Encoding]::UTF8; $f.SelectedPath }`;
+    return run('powershell.exe', ['-NoProfile', '-STA', '-Command', script]);
+  }
+  if (process.platform === 'linux' && existsSync('/usr/bin/zenity')) return run('zenity', ['--file-selection', '--directory', '--title=Where should Map Maker export?', ...(start ? [`--filename=${start}/`] : [])]);
+  return null;
+}
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
@@ -74,6 +96,12 @@ export function createAppServer(opts: ServerOptions): { server: Server; registry
     }
 
     if (parts[1] === 'app' && method === 'GET') return send(res, 200, { version: opts.appVersion, projectsDir: registry.root, platform: process.platform });
+    if (parts[1] === 'choose-folder' && method === 'POST') {
+      const body = await json<{ start?: string }>(req);
+      const pick = opts.chooseFolder ? opts.chooseFolder(body.start) : systemFolderPicker(body.start);
+      if (!pick) throw new HttpError(501, 'This computer has no folder picker Map Maker can open. Type the folder path instead.');
+      return send(res, 200, { path: await pick });
+    }
     if (parts[1] !== 'projects') throw new HttpError(404, 'Unknown API');
 
     if (parts.length === 2) {
@@ -113,7 +141,8 @@ export function createAppServer(opts: ServerOptions): { server: Server; registry
     }
     if (action === 'show-folder' && method === 'POST') {
       const which = url.searchParams.get('which');
-      const folder = which === 'exports' ? join(db.dir, 'exports') : db.dir;
+      const custom = url.searchParams.get('dir');
+      const folder = custom && existsSync(custom) ? custom : which === 'exports' ? join(db.dir, 'exports') : db.dir;
       mkdirSync(folder, { recursive: true });
       openInFileBrowser(folder);
       return send(res, 200, { ok: true });

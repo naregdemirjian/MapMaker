@@ -1,9 +1,9 @@
 // Second interface test: the workflows the first test does not cover, and a close inspection of
 // exported files. Run after building: node --disable-warning=ExperimentalWarning e2e/workflows.e2e.ts
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { Harness, blob, readPNG, pixel, hexRGB, near, compositeOver, type LL } from './harness.ts';
+import { Harness, ROOT, blob, readPNG, pixel, hexRGB, near, compositeOver, type LL } from './harness.ts';
 
 const h = new Harness('workflows', 4395);
 const P: Record<string, LL> = {};
@@ -360,7 +360,7 @@ try {
     assert.deepEqual(m.resolution, [480, 201], '2.39:1 at a quarter size');
     assert.equal(m.fps, 25);
     assert.deepEqual(m.frames, [0, 24]);
-    for (const pass of ['background', 'land', 'fills', 'borders', 'labels', 'overlays', 'beauty']) assert.equal(ex.frames(pass).length, 25, pass);
+    for (const pass of ['background', 'land', 'fills', 'borders', 'labels', 'overlays', 'all']) assert.equal(ex.frames(pass).length, 25, pass);
     assert.match(readFileSync(join(ex.dir, 'COMPOSITING_GUIDE.txt'), 'utf8'), /25 fps/);
 
     // Frame timing: evenly spaced through the chosen range, first and last exactly on the ends.
@@ -387,7 +387,7 @@ try {
     // The separate passes stacked with Premiere's Normal blend reproduce the full picture.
     for (const f of [0, 12, 24]) {
       const layers = ['background', 'land', 'fills', 'borders', 'labels', 'overlays'].map((p) => readPNG(ex.frames(p)[f]));
-      const beauty = readPNG(ex.frames('beauty')[f]);
+      const beauty = readPNG(ex.frames('all')[f]);
       const n = beauty.width * beauty.height;
       const comp = compositeOver(layers, n);
       let sum = 0, bad = 0;
@@ -408,13 +408,18 @@ try {
     await w.fill('1000'); await w.press('Enter');
     await hgt.fill('1000'); await hgt.press('Enter');
     await page.locator('label', { hasText: 'Projection' }).locator('select').selectOption('naturalEarth');
-    await page.getByLabel('Transparent background (beauty pass)').check();
+    await page.getByLabel(/Transparent background/).check();
     for (const label of ['Background', 'Territory fills', 'Borders', 'Labels', 'Text overlays']) await page.getByLabel(label, { exact: true }).uncheck();
+    // Export into a folder of the user's choosing (typed here; "Choose…" opens the system folder picker).
+    const custom = join(ROOT, '.tmp', 'workflows-chosen-export-folder');
+    rmSync(custom, { recursive: true, force: true });
+    await page.getByTestId('export-dir').fill(custom);
     await h.saved();
     const ex = await exportShot('export-full');
+    assert.ok(ex.dir.startsWith(custom), `exported into the chosen folder (${ex.dir})`);
     assert.deepEqual(ex.manifest.resolution, [1000, 1000]);
     assert.equal(ex.manifest.fps, 23.976);
-    const frames = ex.frames('beauty');
+    const frames = ex.frames('all');
     assert.equal(frames.length, 2);
     const img = readPNG(frames[0]);
     assert.equal(img.width, 1000); assert.equal(img.height, 1000);

@@ -152,3 +152,12 @@ p.error { color: #ff9aa8; }
 .group-new input { flex: 1; }
 .group-checks { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
 .key { font-size: 10px; opacity: 0.7; border: 1px solid currentColor; border-radius: 3px; padding: 0 3px; margin-left: 4px; }
+
+/* Grouped settings (shot and export panel) */
+.settings-group { border: 1px solid var(--line); border-radius: 6px; margin: 0 0 8px; background: var(--panel2); }
+.settings-group > summary { cursor: pointer; padding: 7px 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; font-size: 11px; color: var(--muted); list-style: none; }
+.settings-group > summary::before { content: '▸ '; }
+.settings-group[open] > summary::before { content: '▾ '; }
+.settings-group .settings-body { padding: 2px 10px 10px; display: flex; flex-direction: column; gap: 6px; }
+.folder-field { display: flex; gap: 6px; }
+.folder-field input { flex: 1; min-width: 0; }

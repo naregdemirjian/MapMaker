@@ -26,6 +26,8 @@ export interface ShotSettings {
   graticule: boolean;
   labels: boolean;
   transparent: boolean;
+  /** Folder to export into; empty or absent: the project's exports folder. */
+  exportDir?: string | null;
 }
 
 export const RESOLUTIONS = [

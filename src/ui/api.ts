@@ -43,7 +43,8 @@ export const Api = {
   backups: (id: string) => call<BackupInfo[]>('GET', `${p(id)}/backups`),
   backupNow: (id: string) => call<BackupInfo>('POST', `${p(id)}/backups`),
   restoreBackup: (id: string, name: string) => call<{ diffs: RowDiff[]; journal: JournalState }>('POST', `${p(id)}/backups/restore?name=${encodeURIComponent(name)}`),
-  showFolder: (id: string, which: 'project' | 'exports') => call<{ ok: boolean }>('POST', `${p(id)}/show-folder?which=${which}`),
+  showFolder: (id: string, which: 'project' | 'exports', dir?: string) => call<{ ok: boolean }>('POST', `${p(id)}/show-folder?which=${which}${dir ? `&dir=${encodeURIComponent(dir)}` : ''}`),
+  chooseFolder: (start?: string) => call<{ path: string | null }>('POST', '/api/choose-folder', { start }),
   startExport: (id: string, settings: unknown) => call<{ jobId: string; dir: string }>('POST', `${p(id)}/exports`, settings),
   sendFrame: (id: string, job: string, pass: string, frame: number, w: number, h: number, rgba: Uint8Array) =>
     call<{ file: string; sha256: string }>('POST', `${p(id)}/exports/${encodeURIComponent(job)}/frames?pass=${encodeURIComponent(pass)}&frame=${frame}&w=${w}&h=${h}`, undefined, rgba),
