@@ -9,6 +9,7 @@ import type { CommandResult } from '../domain/commands.ts';
 import { type Instant, gregorian, toJSONValue, fromJSONValue } from '../core-time/index.ts';
 import { type Camera, defaultCamera, PROJECTIONS } from '../render-engine/camera.ts';
 import { MapRenderer } from '../render-engine/map-renderer.ts';
+import { loadBasemap, type Basemap } from '../render-engine/basemap.ts';
 import type { Vec3 } from '../geo-kernel/vec.ts';
 import type { StrokeSettings } from '../render-engine/stroke.ts';
 
@@ -61,6 +62,10 @@ class AppStore {
   /** Set when a change could not be saved; editing stops until the project is reloaded from disk. */
   offline: string | null = null;
   readonly renderer = new MapRenderer();
+  /** Earth's geography (Natural Earth), loaded once in the background. */
+  basemap: Basemap | null = null;
+  /** Show present-day country borders over the land while drawing (never exported). */
+  referenceBorders = false;
   private queue: Promise<unknown> = Promise.resolve();
   private halted = false;
   private toastSeq = 0;
@@ -114,6 +119,7 @@ class AppStore {
   setCamera(c: Camera) { this.cameras.set(this.spaceId, c); this.notify(); }
 
   async loadApp() {
+    loadBasemap().then((b) => this.set({ basemap: b }), (e: Error) => this.toast(e.message, 'error'));
     const info = await Api.app();
     this.appVersion = info.version;
     this.projectsDir = info.projectsDir;

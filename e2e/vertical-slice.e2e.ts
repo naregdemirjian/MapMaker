@@ -441,7 +441,7 @@ try {
     assert.deepEqual(m.resolution, [480, 270]);
     assert.deepEqual(m.frames, [0, 23]);
     const passes: string[] = m.passes.map((p: any) => p.name);
-    assert.deepEqual(passes.sort(), ['background', 'beauty', 'borders', 'fills', 'labels', 'overlays']);
+    assert.deepEqual(passes.sort(), ['background', 'beauty', 'borders', 'fills', 'labels', 'land', 'overlays']);
     for (const pass of passes) {
       const files: string[] = readdirSync(join(ex.dir, pass)).filter((f) => f.endsWith('.png'));
       assert.equal(files.length, 24, `${pass}: 24 frames`);

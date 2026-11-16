@@ -3,6 +3,7 @@ import { useStore, store, type Tool } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
 import { type Instant, gregorian, fromStore, formatYear, compare, NEG_INF } from '../../core-time/index.ts';
 import { BASE_EVENT_ID, type EffectRow } from '../../world-model/schema.ts';
+import { basemapSourceOf } from '../../world-model/world-settings.ts';
 import { parseJSON, leafDescendants, type Resolution, type TransitionSpec } from '../../temporal-engine/engine.ts';
 import { lonLatToVec } from '../../geo-kernel/vec.ts';
 import { stepChange } from './Timeline.tsx';
@@ -148,6 +149,7 @@ export function Outliner() {
   const [newEntity, setNewEntity] = useState<null | { name: string; type: string }>(null);
   const layers = w.all('layer').filter((l) => l.space_id === s.spaceId).sort((a, b) => a.sort_order - b.sort_order);
   const types = w.all('entity_type');
+  const currentSpace = w.get('map_space', s.spaceId);
   const political = w.all('entity').filter((e) => e.type_id === 'polity' || e.type_id === 'faction').sort((a, b) => a.name.localeCompare(b.name));
   const others = w.all('entity').filter((e) => e.type_id !== 'polity' && e.type_id !== 'faction' && e.type_id !== 'body').sort((a, b) => a.name.localeCompare(b.name));
   const events = w.all('event').filter((e) => e.id !== BASE_EVENT_ID).sort((a, b) => a.start_day - b.start_day || a.start_ms - b.start_ms);
@@ -170,6 +172,19 @@ export function Outliner() {
             {sp.name}<span className="muted"> · radius {Math.round((sp.radius_m ?? 0) / 1000).toLocaleString()} km</span>
           </div>
         ))}
+        {currentSpace && (
+          <div className="world-options">
+            <label className="check" title="Land, lakes and coastlines from Natural Earth, drawn under the territories">
+              <input type="checkbox" data-testid="basemap-toggle" checked={basemapSourceOf(currentSpace) === 'natural-earth'}
+                onChange={(e: any) => s.execute((wd) => cmd.setWorldBasemap(wd, currentSpace.id, e.target.checked ? 'natural-earth' : 'none'))} /> Earth's geography
+            </label>
+            {basemapSourceOf(currentSpace) === 'natural-earth' && (
+              <label className="check" title="Today's country borders as a drawing aid. Never exported.">
+                <input type="checkbox" data-testid="reference-borders-toggle" checked={s.referenceBorders} onChange={(e: any) => s.set({ referenceBorders: e.target.checked })} /> Present-day borders (guide)
+              </label>
+            )}
+          </div>
+        )}
       </Section>
       <Section title="Layers" onAdd={() => { const name = prompt('Name of the new layer (for example "Religion" or "Military control")'); if (name?.trim()) { const id = s.execute((wd) => cmd.createLayer(wd, s.spaceId, name.trim())); if (id) s.set({ layerId: id }); } }} addLabel="Layer">
         {layers.map((l) => (

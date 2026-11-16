@@ -13,9 +13,11 @@ import type { Instant } from '../core-time/index.ts';
 import type { View } from './camera.ts';
 import type { Arrangement } from '../geo-kernel/arrangement.ts';
 import { E7 } from '../geo-kernel/vec.ts';
+import { BasemapPainter, type Basemap } from './basemap.ts';
 
-export type PassName = 'background' | 'graticule' | 'fills' | 'borders' | 'labels';
-export const ALL_PASSES: PassName[] = ['background', 'graticule', 'fills', 'borders', 'labels'];
+export type PassName = 'background' | 'graticule' | 'land' | 'fills' | 'borders' | 'labels';
+/** Drawing order. The grid lies under the land, so stacked export passes match the full picture. */
+export const ALL_PASSES: PassName[] = ['background', 'graticule', 'land', 'fills', 'borders', 'labels'];
 
 export interface MapStyle {
   ocean: string;
@@ -39,6 +41,10 @@ export interface RenderOptions {
   transparent: boolean;
   layerIds: string[]; // partition layers to draw, bottom to top
   style?: MapStyle;
+  /** Earth's geography under the territories (the 'land' pass); null or absent draws none. */
+  basemap?: Basemap | null;
+  /** Present-day country borders over the land, as a drawing aid (never part of an export). */
+  referenceBorders?: boolean;
 }
 
 export interface LabelInfo { text: string; x: number; y: number; size: number }
@@ -71,6 +77,7 @@ export class MapRenderer {
   private geoCache = new WeakMap<Arrangement, { rev: number; faces: Map<number, FaceGeo> }>();
   private pathCache = new Map<string, Path2D>();
   private pathCacheView = '';
+  private basemapPainter = new BasemapPainter();
   lastLabels: LabelInfo[] = [];
 
   /** Spherical geometry of a parcel (cached until the parcel map changes). */
@@ -123,6 +130,10 @@ export class MapRenderer {
       ctx.strokeStyle = style.graticule;
       ctx.lineWidth = 0.8 * u;
       ctx.stroke(new Path2D(geoPath(view.projection)(geoGraticule10()) ?? ''));
+    }
+    if (opts.passes.has('land') && opts.basemap) {
+      const oceanBelow = opts.passes.has('background') && !opts.transparent;
+      this.basemapPainter.draw(ctx, view, opts.basemap, { referenceBorders: !!opts.referenceBorders, oceanColor: oceanBelow ? style.ocean : undefined });
     }
 
     const entities = new Map(world.all('entity').map((e) => [e.id, e]));

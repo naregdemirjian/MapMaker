@@ -8,16 +8,18 @@ import { MapRenderer, DEFAULT_STYLE, type PassName } from '../render-engine/map-
 import { makeView } from '../render-engine/camera.ts';
 import { type ShotSettings, timeAt, cameraAt, overlaysAt, drawOverlays } from './sequence.ts';
 import { gregorian } from '../core-time/index.ts';
+import { basemapSourceOf, loadBasemap, type Basemap } from '../render-engine/basemap.ts';
 
 export interface ExportPassDef { name: string; label: string; blend: string; passes: PassName[]; overlays: boolean; background: boolean; note?: string }
 
 export const PASS_DEFS: ExportPassDef[] = [
   { name: 'background', label: 'Background', blend: 'Normal', passes: ['background', 'graticule'], overlays: false, background: true, note: 'ocean and grid' },
+  { name: 'land', label: 'Land (Natural Earth)', blend: 'Normal', passes: ['land'], overlays: false, background: false, note: 'land, lakes and coastlines; empty for worlds without the Earth basemap' },
   { name: 'fills', label: 'Territory fills', blend: 'Normal', passes: ['fills'], overlays: false, background: false, note: 'lower the opacity in Premiere to taste' },
   { name: 'borders', label: 'Borders', blend: 'Normal', passes: ['borders'], overlays: false, background: false },
   { name: 'labels', label: 'Labels', blend: 'Normal', passes: ['labels'], overlays: false, background: false },
   { name: 'overlays', label: 'Text overlays', blend: 'Normal', passes: [], overlays: true, background: false, note: 'dates and titles' },
-  { name: 'beauty', label: 'Beauty (everything)', blend: 'Normal', passes: ['background', 'graticule', 'fills', 'borders', 'labels'], overlays: true, background: true, note: 'reference: compare your composite with this' },
+  { name: 'beauty', label: 'Beauty (everything)', blend: 'Normal', passes: ['background', 'graticule', 'land', 'fills', 'borders', 'labels'], overlays: true, background: true, note: 'reference: compare your composite with this' },
 ];
 
 export function visibleLayers(world: World, shot: ShotSettings): string[] {
@@ -27,15 +29,20 @@ export function visibleLayers(world: World, shot: ShotSettings): string[] {
     .map((l) => l.id);
 }
 
+/** The basemap a shot's world shows (loaded on first use), or null. */
+export async function basemapFor(world: World, spaceId: string): Promise<Basemap | null> {
+  return basemapSourceOf(world.get('map_space', spaceId)) === 'natural-earth' ? loadBasemap() : null;
+}
+
 /** Render one frame of one pass into a 2D context of the given size. */
-export function renderFrame(ctx: CanvasRenderingContext2D, renderer: MapRenderer, world: World, engine: Engine, shot: ShotSettings, frame: number, def: ExportPassDef, width: number, height: number): void {
+export function renderFrame(ctx: CanvasRenderingContext2D, renderer: MapRenderer, world: World, engine: Engine, shot: ShotSettings, frame: number, def: ExportPassDef, width: number, height: number, basemap: Basemap | null = null): void {
   const t = timeAt(shot, frame);
   const view = makeView(cameraAt(shot, frame), width, height);
   const passes = new Set<PassName>(def.passes.filter((p) => (p !== 'graticule' || shot.graticule) && (p !== 'labels' || shot.labels)));
   ctx.clearRect(0, 0, width, height);
   if (passes.size) {
     const transparent = def.name === 'beauty' ? shot.transparent : !def.background;
-    renderer.render(ctx, view, world, engine, shot.spaceId, t, { passes, transparent, layerIds: visibleLayers(world, shot) });
+    renderer.render(ctx, view, world, engine, shot.spaceId, t, { passes, transparent, layerIds: visibleLayers(world, shot), basemap });
   }
   if (def.overlays) drawOverlays(ctx, width, height, overlaysAt(shot, frame, t), width / 1920, DEFAULT_STYLE.font);
 }
@@ -52,6 +59,8 @@ export async function runExport(o: {
   if (!defs.length) throw new Error('Choose at least one pass to export.');
   const [f0, f1] = o.frameRange ?? [0, o.shot.frames - 1];
   const started = performance.now();
+  // Loaded before the first frame, so every frame is drawn from the same complete data.
+  const basemap = await basemapFor(o.world, o.shot.spaceId);
   const job = await Api.startExport(o.projectId, {
     shotName: o.scale === 1 ? o.shotName : `${o.shotName} (preview)`, width, height, fps: o.shot.fps, frameStart: f0, frameEnd: f1,
     passes: defs.map((d) => ({ name: d.name, label: d.label, blend: d.blend, note: d.note })), transparent: o.shot.transparent,
@@ -66,7 +75,7 @@ export async function runExport(o: {
   for (let frame = f0; frame <= f1; frame++) {
     for (const def of defs) {
       if (o.isCancelled?.()) throw new Error('Export cancelled.');
-      renderFrame(ctx, renderer, o.world, o.engine, o.shot, frame, def, width, height);
+      renderFrame(ctx, renderer, o.world, o.engine, o.shot, frame, def, width, height, basemap);
       const data = ctx.getImageData(0, 0, width, height).data;
       await Api.sendFrame(o.projectId, job.jobId, def.name, frame, width, height, new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
       o.onProgress?.(++done, total);

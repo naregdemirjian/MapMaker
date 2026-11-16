@@ -211,7 +211,7 @@ try {
     assert.deepEqual(m.resolution, [480, 201], '2.39:1 at a quarter size');
     assert.equal(m.fps, 25);
     assert.deepEqual(m.frames, [0, 24]);
-    for (const pass of ['background', 'fills', 'borders', 'labels', 'overlays', 'beauty']) assert.equal(ex.frames(pass).length, 25, pass);
+    for (const pass of ['background', 'land', 'fills', 'borders', 'labels', 'overlays', 'beauty']) assert.equal(ex.frames(pass).length, 25, pass);
     assert.match(readFileSync(join(ex.dir, 'COMPOSITING_GUIDE.txt'), 'utf8'), /25 fps/);
 
     // Frame timing: evenly spaced through the chosen range, first and last exactly on the ends.
@@ -237,7 +237,7 @@ try {
 
     // The separate passes stacked with Premiere's Normal blend reproduce the full picture.
     for (const f of [0, 12, 24]) {
-      const layers = ['background', 'fills', 'borders', 'labels', 'overlays'].map((p) => readPNG(ex.frames(p)[f]));
+      const layers = ['background', 'land', 'fills', 'borders', 'labels', 'overlays'].map((p) => readPNG(ex.frames(p)[f]));
       const beauty = readPNG(ex.frames('beauty')[f]);
       const n = beauty.width * beauty.height;
       const comp = compositeOver(layers, n);

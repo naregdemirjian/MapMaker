@@ -9,6 +9,7 @@ import {
   BASE_EVENT_ID, MAIN_BRANCH, SCHEMA_VERSION, type RowDiff, type EffectRow, type EventRow, type EntityRow, type LayerKind,
 } from '../world-model/schema.ts';
 import type { Vec3 } from '../geo-kernel/vec.ts';
+import { worldSettings, type BasemapSource } from '../world-model/world-settings.ts';
 
 export interface CommandResult<T = unknown> { label: string; diffs: RowDiff[]; result: T }
 
@@ -67,11 +68,11 @@ export function seedProject(world: World, name: string, firstWorld = { name: 'Ea
       end_day: null, end_ms: null, precision: 'exact', precedence: 0, description: 'How the world is before any recorded event.',
       fields: '{}', presentation: '{}', created_seq: 0, variant_group: null, variant_active: 1,
     });
-    return { spaceId: createWorldIn(tx, firstWorld.name, firstWorld.radiusKm) };
+    return { spaceId: createWorldIn(tx, firstWorld.name, firstWorld.radiusKm, 'natural-earth') };
   });
 }
 
-function createWorldIn(tx: Tx, name: string, radiusKm: number): string {
+function createWorldIn(tx: Tx, name: string, radiusKm: number, basemap: BasemapSource): string {
   const w = tx.world;
   const spaceId = newId('space');
   const bodyId = newId('ent');
@@ -79,7 +80,7 @@ function createWorldIn(tx: Tx, name: string, radiusKm: number): string {
   const root = w.ids.next('face');
   tx.insert('map_space', {
     id: spaceId, name, kind: 'sphere', body_id: bodyId, radius_m: radiusKm * 1000, unit: null, parent_space_id: null,
-    root_face: root, sort_order: w.all('map_space').length, settings: JSON.stringify({ projection: 'equirectangular' }),
+    root_face: root, sort_order: w.all('map_space').length, settings: JSON.stringify({ projection: 'equirectangular', basemap }),
   });
   tx.insert('face', { id: root, space_id: spaceId, parent_id: null, is_leaf: 1 });
   tx.insert('layer', {
@@ -89,9 +90,17 @@ function createWorldIn(tx: Tx, name: string, radiusKm: number): string {
   return spaceId;
 }
 
-export function createWorld(world: World, name: string, radiusKm: number): CommandResult<string> {
+export function createWorld(world: World, name: string, radiusKm: number, basemap: BasemapSource = 'none'): CommandResult<string> {
   if (!(radiusKm > 0)) throw new Error('A world needs a positive radius.');
-  return run(world, `Create world "${name}"`, (tx) => createWorldIn(tx, name, radiusKm));
+  return run(world, `Create world "${name}"`, (tx) => createWorldIn(tx, name, radiusKm, basemap));
+}
+
+/** Show or hide Earth's geography (Natural Earth) under a world's territories. */
+export function setWorldBasemap(world: World, spaceId: string, basemap: BasemapSource): CommandResult {
+  const space = world.get('map_space', spaceId);
+  if (!space) throw new Error('That world no longer exists.');
+  const label = basemap === 'none' ? `Hide Earth's geography on "${space.name}"` : `Show Earth's geography on "${space.name}"`;
+  return run(world, label, (tx) => { tx.update('map_space', { ...space, settings: JSON.stringify({ ...worldSettings(space), basemap }) }); });
 }
 
 export function createLayer(world: World, spaceId: string, name: string, kind: LayerKind = 'partition'): CommandResult<string> {

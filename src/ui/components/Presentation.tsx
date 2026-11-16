@@ -52,7 +52,7 @@ export function ShotEditor() {
   const shot = currentShot();
   const row = s.shotId ? w.get('sequence', s.shotId) : null;
   const [name, setName] = useState(row?.name ?? '');
-  const [passes, setPasses] = useState<string[]>(['background', 'fills', 'borders', 'labels', 'overlays', 'beauty']);
+  const [passes, setPasses] = useState<string[]>(['background', 'land', 'fills', 'borders', 'labels', 'overlays', 'beauty']);
   const [progress, setProgress] = useState<null | { done: number; total: number; label: string }>(null);
   const [result, setResult] = useState<null | { dir: string; frames: number; seconds: number }>(null);
   const cancel = useRef(false);

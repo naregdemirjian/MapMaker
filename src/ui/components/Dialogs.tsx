@@ -135,9 +135,10 @@ export function NewWorldDialog() {
   const s = useStore();
   const [name, setName] = useState('');
   const [km, setKm] = useState('6371');
+  const [earth, setEarth] = useState(false);
   const close = () => s.set({ dialog: null });
   const create = () => {
-    const id = s.execute((w) => cmd.createWorld(w, name.trim() || 'New world', Number(km)));
+    const id = s.execute((w) => cmd.createWorld(w, name.trim() || 'New world', Number(km), earth ? 'natural-earth' : 'none'));
     if (id) { s.set({ spaceId: id, layerId: s.world!.all('layer').find((l) => l.space_id === id)?.id ?? '', selection: null }); close(); }
   };
   return (
@@ -145,7 +146,8 @@ export function NewWorldDialog() {
       <p className="muted">A world is a planet, moon or other body with its own map, territories and history. Fictional worlds start as an empty sphere; terrain tools come in a later stage.</p>
       <label>Name<input autoFocus value={name} onChange={(e: any) => setName(e.target.value)} placeholder="e.g. Aster Prime" /></label>
       <label>Radius (km)<input type="number" value={km} onChange={(e: any) => setKm(e.target.value)} /></label>
-      <div className="presets">{WORLD_PRESETS.map((p) => <button key={p.name} className="small" onClick={() => { setName(p.name); setKm(String(p.km)); }}>{p.name}</button>)}</div>
+      <div className="presets">{WORLD_PRESETS.map((p) => <button key={p.name} className="small" onClick={() => { setName(p.name); setKm(String(p.km)); setEarth(p.name === 'Earth'); }}>{p.name}</button>)}</div>
+      <label className="check"><input type="checkbox" checked={earth} onChange={(e: any) => setEarth(e.target.checked)} data-testid="new-world-earth" /> Start with Earth's geography (land, lakes and coastlines)</label>
       <div className="modal-actions"><button onClick={close}>Cancel</button><button className="primary" onClick={create}>Create world</button></div>
     </Modal>
   );
