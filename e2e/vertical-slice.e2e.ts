@@ -658,6 +658,37 @@ try {
     await page.getByTestId('label-shown').check();
   });
 
+  await step("Add today's countries: all of Europe with their flags, as an event", async () => {
+    await page.getByTestId('mode-world').click().catch(() => undefined);
+    await setDate('1460');
+    await page.getByTestId('open-add-countries').click();
+    await page.getByTestId('add-countries').waitFor();
+    await page.getByTestId('continent-Europe').click();
+    await page.getByTestId('countries-flags').check();
+    await page.getByTestId('countries-as-event').check();
+    const label = await page.getByTestId('add-countries-go').innerText();
+    const n = Number(/Add (\d+)/.exec(label)?.[1]);
+    assert.ok(n >= 40 && n <= 50, `about 45 European nations chosen (${label})`);
+    await screenshot('add-countries-dialog');
+    await page.getByTestId('add-countries-go').click();
+    await page.getByTestId('add-countries').waitFor({ state: 'detached', timeout: 60000 });
+    await page.evaluate(() => (window as any).__mapmaker.store.flush());
+    assert.equal(await ownerAt([2.35, 48.86], '1461'), 'France', 'Paris is French after the event');
+    assert.equal(await ownerAt([13.4, 52.5], '1461'), 'Germany', 'Berlin');
+    assert.equal(await ownerAt([2.35, 48.86], '1459'), null, 'and nobody\'s before it');
+    const ev = await page.evaluate(() => (window as any).__mapmaker.store.world.all('event').find((e: any) => e.name === 'Present-day borders'));
+    assert.ok(ev, 'the event was created');
+    // Look at Europe.
+    await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 12, lat: 50, zoom: 2.3, rotation: 0, projection: 'mercator' }));
+    await page.waitForTimeout(600);
+    await screenshot('europe-today');
+    // One undo takes it all back.
+    await page.getByTestId('undo').click();
+    await page.waitForFunction(() => !(window as any).__mapmaker.store.world.all('event').some((e: any) => e.name === 'Present-day borders'));
+    assert.equal(await ownerAt([2.35, 48.86], '1461'), null);
+    await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 0, lat: 0, zoom: 0, rotation: 0, projection: 'equirectangular' }));
+  });
+
   await step('History Health reports no problems', async () => {
     await page.getByTestId('mode-world').click();
     await page.getByTestId('health').click();

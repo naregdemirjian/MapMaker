@@ -245,6 +245,7 @@ export function Outliner() {
         )}
         {political.map(entityRow)}
         {political.length > 0 && <button className="link pad-link" onClick={() => s.set({ dialog: 'label-style' })} data-testid="open-label-style">Label style for all countries…</button>}
+        {currentSpace && basemapSourceOf(currentSpace) === 'natural-earth' && <button className="link pad-link" onClick={() => s.set({ dialog: 'add-countries' })} data-testid="open-add-countries">Add today's countries…</button>}
         {!political.length && !newEntity && <div className="muted pad">None yet.</div>}
       </Section>
       {others.length > 0 && <Section title="Characters, cities and others">{others.map(entityRow)}</Section>}

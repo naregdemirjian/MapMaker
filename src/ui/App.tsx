@@ -6,6 +6,7 @@ import { Timeline } from './components/Timeline.tsx';
 import { EditPrompt, NewWorldDialog, NewEventDialog, VersionsDialog, HealthDialog, DataSourcesDialog, ProjectPicker, OfflineNotice } from './components/Dialogs.tsx';
 import { ShotsPanel, ShotEditor, ShotTimeline } from './components/Presentation.tsx';
 import { LabelStyleDialog } from './components/LabelStyles.tsx';
+import { AddCountriesDialog } from './components/AddCountries.tsx';
 
 export function App() {
   const s = useStore();
@@ -40,6 +41,7 @@ export function App() {
       {s.dialog === 'health' && <HealthDialog />}
       {s.dialog === 'data-sources' && <DataSourcesDialog />}
       {s.dialog === 'label-style' && <LabelStyleDialog onClose={() => s.set({ dialog: null })} />}
+      {s.dialog === 'add-countries' && <AddCountriesDialog onClose={() => s.set({ dialog: null })} />}
       <OfflineNotice />
       <Toasts />
       {s.busy && <div className="busy">{s.busy}</div>}
