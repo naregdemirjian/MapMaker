@@ -16,8 +16,8 @@ model, the history engine, the parcel kernel, storage or the export writer.
 - **What was built.** `src/render-engine/map-renderer.ts` draws with the browser's 2D canvas, using the same inputs the
   deck.gl renderer will use: the world, the engine, a time and a camera.
 - **Consequences.** Correct and deterministic output, including 8K frames. The cost is speed with very dense data
-  (detailed terrain, thousands of features), which the planned WebGL renderer handles better. Not yet measured, because
-  no large data exists yet.
+  (detailed terrain, thousands of features), which the planned WebGL renderer handles better. Measured on 16 November
+  2026: about 210 ms per 1080p frame with 24,500 parcels (fine for export, about 5 frames a second when scrubbing).
 - **Way back.** Replace this one module once packages can be installed.
 
 ### D2. Local service and browser instead of an Electron app (interim)
