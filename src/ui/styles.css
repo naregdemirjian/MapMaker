@@ -137,3 +137,4 @@ table.kv { border-collapse: collapse; width: 100%; font-size: 13px; }
 table.kv th { text-align: left; font-weight: 500; color: var(--muted); padding: 3px 12px 3px 0; vertical-align: top; white-space: nowrap; }
 table.kv td { padding: 3px 0; overflow-wrap: anywhere; }
 p.error { color: #ff9aa8; }
+.layer-option { padding: 2px 10px 6px 34px; font-size: 12px; }

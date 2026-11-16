@@ -116,6 +116,14 @@ export function updateLayer(world: World, id: string, patch: Partial<{ name: str
   return run(world, 'Change layer', (tx) => tx.patch('layer', id, patch));
 }
 
+/** Whether a layer's territory ends at the coast (on worlds that show Earth's geography). */
+export function setLayerClipToLand(world: World, id: string, clip: boolean): CommandResult {
+  const layer = world.get('layer', id);
+  if (!layer) throw new Error('That layer no longer exists.');
+  const style = { ...parseJSON<Record<string, unknown>>(layer.style, {}), clipToLand: clip };
+  return run(world, clip ? `End "${layer.name}" at the coast` : `Let "${layer.name}" cover the sea`, (tx) => tx.patch('layer', id, { style: JSON.stringify(style) }));
+}
+
 // ---------------------------------------------------------------- entities
 
 export function createEntity(world: World, e: { type_id: string; name: string; color?: string; notes?: string }): CommandResult<string> {

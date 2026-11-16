@@ -164,42 +164,74 @@ interface Paths { land: Path2D; lakes: Path2D; coastline: Path2D; borders: Path2
 export class BasemapPainter {
   private key = '';
   private paths: Paths | null = null;
+  private vis: ReturnType<typeof visibleBounds> = null;
+  private scaleUsed: BasemapScale | null = null;
 
-  draw(ctx: CanvasRenderingContext2D, view: View, basemap: Basemap, o: { referenceBorders: boolean; style?: BasemapStyle; oceanColor?: string }): void {
+  /** The projected paths for this view (land, lakes, coastline; the reference borders on request). */
+  pathsFor(view: View, basemap: Basemap, referenceBorders = false): Paths {
     const b = chooseScale(basemap, view);
-    const key = `${view.key}|${b.scale}|${o.referenceBorders}`;
+    const key = `${view.key}|${b.scale}`;
     if (key !== this.key || !this.paths) {
       // Only the items that can be on screen are projected (a regional view touches a few percent
       // of the data); d3 writes straight into each Path2D.
-      const vis = visibleBounds(view);
-      const pick = <T,>(items: T[], boxes: Box[]) => (vis ? items.filter((_, i) => boxIntersects(boxes[i], vis)) : items);
-      const draw = (g: GeoJSON.GeometryObject) => { const p2 = new Path2D(); geoPath(view.projection, p2 as unknown as CanvasRenderingContext2D)(g); return p2; };
-      const poly = (k: 'land' | 'lakes') => draw({ type: 'MultiPolygon', coordinates: pick(b[k].coordinates, b.boxes[k]) });
-      const line = (k: 'coastline' | 'borders') => draw({ type: 'MultiLineString', coordinates: pick(b[k].coordinates, b.boxes[k]) });
-      this.paths = { land: poly('land'), lakes: poly('lakes'), coastline: line('coastline'), borders: o.referenceBorders ? line('borders') : null };
+      this.vis = visibleBounds(view);
+      this.scaleUsed = b;
+      this.paths = { land: this.project(view, b, 'land'), lakes: this.project(view, b, 'lakes'), coastline: this.project(view, b, 'coastline'), borders: null };
       this.key = key;
     }
+    if (referenceBorders && !this.paths.borders) this.paths.borders = this.project(view, this.scaleUsed!, 'borders');
+    return this.paths;
+  }
+
+  private project(view: View, b: BasemapScale, k: 'land' | 'lakes' | 'coastline' | 'borders'): Path2D {
+    const vis = this.vis;
+    const items = (b[k].coordinates as unknown[]).filter((_, i) => !vis || boxIntersects(b.boxes[k][i], vis));
+    const geo = (k === 'land' || k === 'lakes'
+      ? { type: 'MultiPolygon', coordinates: items }
+      : { type: 'MultiLineString', coordinates: items }) as GeoJSON.GeometryObject;
+    const p2 = new Path2D();
+    geoPath(view.projection, p2 as unknown as CanvasRenderingContext2D)(geo);
+    return p2;
+  }
+
+  draw(ctx: CanvasRenderingContext2D, view: View, basemap: Basemap, o: { referenceBorders: boolean; style?: BasemapStyle; oceanColor?: string }): void {
+    const paths = this.pathsFor(view, basemap, o.referenceBorders);
     const st = o.style ?? DEFAULT_BASEMAP_STYLE;
     const u = view.unit;
     ctx.save();
     ctx.fillStyle = st.land;
-    ctx.fill(this.paths.land, 'nonzero');
+    ctx.fill(paths.land, 'nonzero');
     // Lakes are cut out of the land, so they show whatever lies beneath (the ocean, or nothing).
     ctx.globalCompositeOperation = 'destination-out';
-    ctx.fill(this.paths.lakes);
+    ctx.fill(paths.lakes);
     ctx.globalCompositeOperation = 'source-over';
-    if (o.oceanColor) { ctx.fillStyle = o.oceanColor; ctx.fill(this.paths.lakes); }
+    if (o.oceanColor) { ctx.fillStyle = o.oceanColor; ctx.fill(paths.lakes); }
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
     ctx.strokeStyle = st.coast;
     ctx.lineWidth = 0.8 * u;
-    ctx.stroke(this.paths.coastline);
-    if (this.paths.borders) {
+    ctx.stroke(paths.coastline);
+    if (o.referenceBorders && paths.borders) {
       ctx.strokeStyle = st.reference;
       ctx.lineWidth = 0.9 * u;
       ctx.setLineDash([4 * u, 3 * u]);
-      ctx.stroke(this.paths.borders);
+      ctx.stroke(paths.borders);
     }
+    ctx.restore();
+  }
+
+  /**
+   * Keep only what lies on land in a buffer: everything over the sea or over lakes is erased.
+   * Used to end territory at the coast (coastline clipping).
+   */
+  maskToLand(ctx: CanvasRenderingContext2D, view: View, basemap: Basemap): void {
+    const paths = this.pathsFor(view, basemap);
+    ctx.save();
+    ctx.fillStyle = '#000';
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.fill(paths.land, 'nonzero');
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.fill(paths.lakes);
     ctx.restore();
   }
 }

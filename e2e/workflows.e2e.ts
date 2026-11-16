@@ -27,6 +27,9 @@ try {
     await page.getByTestId('project-name').fill('Workflows Test');
     await page.getByTestId('project-create').click();
     await page.getByTestId('map-canvas').waitFor();
+    // These countries are drawn over the Atlantic: keep their territory over the sea
+    // (coastline clipping is checked in the vertical-slice test).
+    await page.getByTestId('clip-to-land').uncheck();
     await h.newCountry(A);
     await page.getByTestId('tool-polygon').click();
     const { cx, cy } = await h.centre();

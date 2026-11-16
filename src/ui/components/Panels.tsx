@@ -195,6 +195,12 @@ export function Outliner() {
             {l.id === s.layerId && <span className="muted"> · drawing here</span>}
           </div>
         ))}
+        {layers.filter((l) => l.id === s.layerId && currentSpace && basemapSourceOf(currentSpace) === 'natural-earth').map((l) => (
+          <label key={`clip-${l.id}`} className="check layer-option" title="Territory painted over the sea or lakes is not shown there. Untick for sea claims or maritime zones.">
+            <input type="checkbox" data-testid="clip-to-land" checked={parseJSON<{ clipToLand?: boolean }>(l.style, {}).clipToLand !== false}
+              onChange={(e: any) => s.execute((wd) => cmd.setLayerClipToLand(wd, l.id, e.target.checked))} /> Territory ends at the coast
+          </label>
+        ))}
       </Section>
       <Section title="Countries and factions" onAdd={() => setNewEntity({ name: '', type: 'polity' })} addLabel="New">
         {newEntity && (

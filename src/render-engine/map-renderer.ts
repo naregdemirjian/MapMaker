@@ -144,15 +144,20 @@ export class MapRenderer {
     // the fills of every layer, then the borders of every layer, then the labels. Stacking the
     // exported passes in Premiere then reproduces the full picture exactly, with several layers too.
     const drawsLayers = opts.passes.has('fills') || opts.passes.has('borders') || opts.passes.has('labels');
-    const prepared: Array<{ ls: { fillOpacity?: number; borderWidth?: number }; states: Map<number, FaceState>; tg: ReturnType<MapRenderer['transitionGroups']> }> = [];
+    type LayerStyle = { fillOpacity?: number; borderWidth?: number; clipToLand?: boolean };
+    const prepared: Array<{ ls: LayerStyle; states: Map<number, FaceState>; tg: ReturnType<MapRenderer['transitionGroups']>; clip: boolean }> = [];
     for (const layerId of drawsLayers ? opts.layerIds : []) {
       const layer = world.get('layer', layerId);
       if (!layer || layer.space_id !== spaceId || layer.kind !== 'partition') continue;
       const states = engine.partitionState(spaceId, layerId, t);
-      prepared.push({ ls: parseJSON<{ fillOpacity?: number; borderWidth?: number }>(layer.style, {}), states, tg: this.transitionGroups(view, arr, engine, states, t) });
+      const ls = parseJSON<LayerStyle>(layer.style, {});
+      // Coastline clipping: territory ends at the coast unless the layer is set to cover the sea.
+      const clip = !!opts.basemap && ls.clipToLand !== false;
+      prepared.push({ ls, states, tg: this.transitionGroups(view, arr, engine, states, t), clip });
     }
 
-    if (opts.passes.has('fills')) for (const { ls, states, tg } of prepared) {
+    const land = (): Path2D => this.basemapPainter.pathsFor(view, opts.basemap!).land;
+    if (opts.passes.has('fills')) for (const { ls, states, tg, clip } of prepared) {
       // Each layer is painted fully opaque in a scratch buffer and laid onto the map once at the
       // layer's opacity: neighbouring parcels then never show seams, and fades mix correctly.
       const lc = this.scratch(ctx);
@@ -165,6 +170,7 @@ export class MapRenderer {
       }
       for (const [c, faces] of byColor) { lc.fillStyle = c; lc.fill(this.groupPath(view, arr, faces), 'evenodd'); }
       for (const g of tg.groups.values()) this.drawTransition(lc, g, colorOf);
+      if (clip) this.basemapPainter.maskToLand(lc, view, opts.basemap!);
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.globalAlpha = ls.fillOpacity ?? 0.78;
@@ -174,6 +180,7 @@ export class MapRenderer {
       for (const g of tg.groups.values()) {
         if (!g.advance || !g.disc) continue;
         ctx.save();
+        if (clip) ctx.clip(land());
         ctx.clip(g.changing, 'evenodd');
         ctx.strokeStyle = style.frontGlow;
         ctx.lineWidth = 2.2 * view.unit;
@@ -184,7 +191,12 @@ export class MapRenderer {
       }
     }
 
-    if (opts.passes.has('borders')) for (const { ls, states, tg } of prepared) this.drawBorders(ctx, view, arr, states, tg, style, (ls.borderWidth ?? style.borderWidth) * u);
+    if (opts.passes.has('borders')) for (const { ls, states, tg, clip } of prepared) {
+      ctx.save();
+      if (clip) ctx.clip(land());
+      this.drawBorders(ctx, view, arr, states, tg, style, (ls.borderWidth ?? style.borderWidth) * u);
+      ctx.restore();
+    }
 
     if (opts.passes.has('labels')) for (const { states } of prepared) labels.push(...this.layerLabels(view, arr, states, entities));
 

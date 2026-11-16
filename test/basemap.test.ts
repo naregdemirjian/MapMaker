@@ -122,3 +122,17 @@ test('basemap culling: no point that lands on screen is ever left out (random vi
   }
   assert.ok(culledViews > 100, `culling applied in ${culledViews} views`);
 });
+
+test('coastline clipping setting: on unless switched off, per layer, other style kept, undoable', () => {
+  const world = new World();
+  const earth = cmd.seedProject(world, 'Clip').result.spaceId;
+  const layer = world.all('layer').find((l) => l.space_id === earth)!;
+  const style = () => JSON.parse(world.get('layer', layer.id)!.style);
+  assert.equal(style().clipToLand, undefined, 'not stored: the renderer treats it as on');
+  const r = cmd.setLayerClipToLand(world, layer.id, false);
+  assert.equal(style().clipToLand, false);
+  assert.equal(style().fillOpacity, 0.78, 'other style settings kept');
+  world.applyDiffs(invertDiffs(r.diffs));
+  assert.equal(style().clipToLand, undefined);
+  assert.throws(() => cmd.setLayerClipToLand(world, 'layer_missing', true), /no longer exists/);
+});
