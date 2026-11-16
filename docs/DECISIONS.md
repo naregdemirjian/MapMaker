@@ -124,8 +124,10 @@ seams, and makes fades between two owners mix colours correctly.
 
 All events belong to the one project. The user decides how they are grouped: by country, by world, or in groups of their
 own. The timeline gets a control to choose which groups (and so which events) it shows. Maps, layers and territorial
-history still belong to each world. Not built yet (Stage 3/4). Assumption to confirm when building: an event can belong
-to more than one group.
+history still belong to each world. **Built 16 November 2026:** groups are made, renamed, recoloured and deleted from
+"Groups" on the timeline; an event can be in several groups (the assumption to confirm; easy to restrict if not wanted);
+"Not in a group" is its own choice; the filter changes only which events are listed, never the map; a new event joins
+the groups being shown. Stored in project file format 2 (tables `event_group`, `event_group_member`).
 
 ### D9. Animated changes: borders and labels follow the animation
 

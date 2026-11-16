@@ -23,7 +23,10 @@ The approved architecture is the Claude Doc "Map Maker — Technical Architectur
 - **Roadmap position.** Stages 1 and 3 mostly done; 0 and 2 partly done; parts of 4, 5 and 6 built early. Stages 7–13
   (military, terrain, environment, heatmaps, space maps…) not started. `REQUIREMENTS.md` classifies every requirement.
 - **Desktop app and Windows installer (D2 reversed).** Electron shell hosting the same service; NSIS installer built
-  and every test run on Windows by GitHub Actions ("Windows build and tests").
+  and every test run on Windows by GitHub Actions ("Windows build and tests"). The first Windows run found one real
+  Windows bug (a damaged file left open, blocking recovery), now fixed; since then everything passes on Windows.
+- **Event groups (D8).** Groups made on the timeline; an event can be in several; the timeline and events list show
+  the chosen groups. First project-file upgrade (format 1 to 2), with a backup before upgrading.
 - **Coastline clipping done.** Territory painted loosely over the sea ends at the coast (per-layer switch), lakes stay
   water, labels stay on land.
 - **Biggest open issues.** (1) The geometry kernel rebuilds the whole map's structure on every edit; this must become incremental
@@ -46,10 +49,10 @@ For development (Linux or Windows, Node 22.18 or newer):
 | `npm run dist:win` | Builds the Windows installer into `release/` (on Windows; on Linux it needs Wine) |
 | `xvfb-run -a node --disable-warning=ExperimentalWarning e2e/desktop.e2e.ts` | The 5-step desktop app test (build first) |
 | `node --disable-warning=ExperimentalWarning dist/server.mjs --port 4317 --projects <folder> [--open]` | Runs the app |
-| `npm test` | 96 unit, randomised and scenario tests |
+| `npm test` | 100 unit, randomised and scenario tests |
 | `node --disable-warning=ExperimentalWarning test/geo-kernel.stress.ts <seeds> <rings>` | Long randomised kernel run |
 | `node --disable-warning=ExperimentalWarning e2e/vertical-slice.e2e.ts` | The 17-step interface test in Chrome (build first); screenshots in `e2e/output/` |
-| `node --disable-warning=ExperimentalWarning e2e/workflows.e2e.ts` | The 9-step workflow and export-inspection test; screenshots in `e2e/output/workflows/` |
+| `node --disable-warning=ExperimentalWarning e2e/workflows.e2e.ts` | The 10-step workflow and export-inspection test; screenshots in `e2e/output/workflows/` |
 | `node --disable-warning=ExperimentalWarning test/perf.bench.ts 100 300 1000 [--keep <folder>]` | Performance benchmark (minutes at 1000) |
 | `node node_modules/typescript/bin/tsc -p tsconfig.json` | Type check (must report nothing) |
 
@@ -91,7 +94,7 @@ The approved roadmap has 14 stages (0–13). Where each stands:
 | Stage | Status | Done | Still to do |
 | --- | --- | --- | --- |
 | 0 Groundwork | Mostly done | Sphere-safe kernel, two-part time, SQLite storage, transparent PNG export, pannable/zoomable/rotatable map, Natural Earth basemap, Electron shell, Windows installer built automatically | Installer test on the user's PC; reference-image render tests |
-| 1 Project, storage, world model | Mostly done | Projects, schema, undo journal, autosave, versions, backups with restore, crash safety, multiple worlds, entities with names, colours, notes; outliner and inspector | Migration tests (only schema version 1 exists); per-world event filtering (see DECISIONS.md D8) |
+| 1 Project, storage, world model | Mostly done | Projects, schema with upgrades (version 2; upgrade from 1 tested), undo journal, autosave, versions, backups with restore, crash safety, multiple worlds, entities with names, colours, notes; event groups with a timeline filter (D8); outliner and inspector | Automatic groups (by world, by country) if wanted |
 | 2 Parcel map and territory editing | Partly done | Production kernel, territory brush, precise shape tool, border-point editing, snapping, smoothing, irregularity, political fills, derived borders, labels, present-day borders as a guide | Border pen, explicit split and merge tools, administrative boundaries as parcel edges, region picker, coastline clipping |
 | 3 Time and event engine | Mostly done | Instants, Gregorian calendar, events, effects with intention, compiler, any-date reconstruction, zoomable timeline, edit prompt, record mode, History Health with keep and re-apply, precedence and overlap rules | Custom event types (interface), date comparison, dated border-point moves |
 | 4 Layers, entities, lore | Started | Unlimited custom layers (territory kind), alternative versions of events | Area, line and point layers; relationships; lifespans; cities; search; GeoJSON and CSV export |
@@ -101,7 +104,7 @@ The approved roadmap has 14 stages (0–13). Where each stands:
 
 ## Tests
 
-All pass as of 16 November 2026 (96 unit and randomised tests, 17 + 9 interface steps).
+All pass as of 16 November 2026, on Linux and on Windows (100 unit and randomised tests, 17 + 10 + 5 interface steps).
 
 | Suite | Count | What it proves |
 | --- | --- | --- |
@@ -119,7 +122,8 @@ All pass as of 16 November 2026 (96 unit and randomised tests, 17 + 9 interface 
 | `test/basemap.test.ts` | 12 | Natural Earth files decode correctly at both scales (land about 29% of the planet, no inside-out polygons, known places on land and at sea across 180° and the poles); dataset record; per-world setting and per-layer clipping setting with undo; culling never drops anything on screen (160 random views) |
 | `e2e/vertical-slice.e2e.ts` | 17 steps | The vertical slice in Chrome: projects, drawing, Earth's geography and data sources, border points, versions, events, dates, version restore and undo, full restart, animation, export with data credits, identical re-export, 1080p, coastline clipping |
 | `e2e/desktop.e2e.ts` | 5 steps | The Electron app: own window, own data service on this computer only, project written to disk, one copy at a time, close and reopen with contents intact |
-| `e2e/workflows.e2e.ts` | 9 steps | Precise shapes; occupation layer; hiding layers; alternative versions; annexation; deleting and undoing events; fades; a second world; a camera move at 2.39:1 and 25 fps with frame timing, history in the pixels and pass stacking checked; square size, Natural Earth projection, 23.976 fps, transparency |
+| `test/event-groups.test.ts` | 4 | Event group commands with undo (several groups per event, filter rules, deletion keeps events, alternatives keep groups); a version 1 project file upgraded on opening (backup first, content and undo history intact, old backups restorable without rolling the format back); a file from a newer version refused untouched |
+| `e2e/workflows.e2e.ts` | 10 steps | Precise shapes; occupation layer; hiding layers; alternative versions; annexation; deleting and undoing events; fades; a second world; a camera move at 2.39:1 and 25 fps with frame timing, history in the pixels and pass stacking checked; square size, Natural Earth projection, 23.976 fps, transparency |
 
 Checked by hand: 4K and 8K exports; the unzipped package starts and works; requests from other hosts are refused.
 
@@ -154,7 +158,8 @@ Remaining bottlenecks:
 3. **Large maps are slow to edit and render** (see Performance).
 4. **Two animations meeting.** Where two simultaneous animated changes touch, their shared border is drawn throughout instead of following each front.
 5. **Animation taking over another animation.** When a change starts while an earlier one is still animating the same area, the earlier one is shown at its starting state.
-6. **Events are listed for all worlds** (D8; decision pending with the user).
+6. **Event groups are made by hand** (D8). Automatic groups, such as "every event that changes this world", are not
+   built; tell me if they would help.
 7. **A control or occupation layer looks like a second fill** over the political layer; hatching and outline styles are needed.
 8. **New layers and alternative versions are named in the browser's own small prompt box**, which is plain but works.
 9. **View memory is per browser** and is lost if the app's port changes.
@@ -181,7 +186,7 @@ Remaining bottlenecks:
 | --- | --- | --- |
 | 15–16 Nov 2026 | Stage work from an empty folder: time system and kernel; world model, engine and commands; data service; interface; end-to-end fixes; documentation (0.1.0) | `2a564fc` → `0966b07` |
 | 16 Nov 2026 | Testing and refinement: scenario, geometry, world, recovery, camera and A/B tests; second interface test; benchmark; 11 defects fixed; performance work (0.2.0) | `6a3c64a` → `343d84c` |
-| 16 Nov 2026 (2nd) | Package installs work; Natural Earth basemap (land, lakes, coastlines, present-day borders guide), land export pass, data sources dialog and export credits; coastline clipping with land-aware labels; real React types (D4 reversed); desktop app, Windows installer and Windows test run (D2 reversed) | `071deac` → latest |
+| 16 Nov 2026 (2nd) | Package installs work; Natural Earth basemap (land, lakes, coastlines, present-day borders guide), land export pass, data sources dialog and export credits; coastline clipping with land-aware labels; real React types (D4 reversed); desktop app, Windows installer and Windows test run (D2 reversed); Windows fix; event groups and the first file-format upgrade | `071deac` → latest |
 
 ## Next priorities
 
@@ -190,5 +195,5 @@ Remaining bottlenecks:
 2. Reverse D1 (deck.gl renderer).
 3. With the user's agreement: make the geometry kernel's rebuild incremental (needed before real boundaries become parcel edges).
 4. Finish Stage 2: border pen, split and merge tools, region picker, administrative boundaries, coastline clipping.
-5. Finish Stage 3: custom event types, date comparison, dated border-point moves, per-world event lists.
+5. Finish Stage 3: custom event types, date comparison, dated border-point moves.
 6. Stage 4: line, point and area layers, layer styles (hatching, outlines), relationships, lifespans.
