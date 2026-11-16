@@ -145,7 +145,12 @@ test('a project saved by a newer version of Map Maker is refused, not damaged', 
     const raw = new DatabaseSync(file);
     raw.exec(`UPDATE meta SET value = '${SCHEMA_VERSION + 1}' WHERE key = 'schema_version'; PRAGMA wal_checkpoint(TRUNCATE);`);
     raw.close();
-    assert.throws(() => ProjectDb.open(join(root, `${info.id}.mapmaker`)), /newer version of Map Maker/);
+    // Pretend the newer version dropped a table this version knows: opening must not recreate it.
+    const tables = () => { const d = new DatabaseSync(file, { readOnly: true }); try { return d.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all().map((r) => (r as { name: string }).name).join(); } finally { d.close(); } };
+    const w = new DatabaseSync(file); w.exec('DROP TABLE sequence; PRAGMA wal_checkpoint(TRUNCATE);'); w.close();
+    const before = tables();
+    assert.throws(() => ProjectDb.open(join(root, `${info.id}.mapmaker`)), (e: Error & { code?: string }) => /newer version of Map Maker/.test(e.message) && e.code === 'newer-version');
+    assert.equal(tables(), before, 'nothing is written to a newer file');
     const check = new DatabaseSync(file, { readOnly: true });
     assert.equal((check.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get() as { value: string }).value, String(SCHEMA_VERSION + 1));
     check.close();

@@ -90,19 +90,27 @@ export class ProjectDb {
   static open(dir: string): ProjectDb {
     mkdirSync(dir, { recursive: true });
     const damaged = (detail: string) => new IntegrityError(`This project's file is damaged and cannot be opened safely (${detail.split('\n')[0].slice(0, 160)}).`);
-    let db: DatabaseSync;
+    let db: DatabaseSync | undefined;
     let ok: string;
     try {
       db = new DatabaseSync(ProjectDb.databasePath(dir));
       db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL; PRAGMA busy_timeout = 5000;');
       ok = (db.prepare('PRAGMA quick_check').get() as { quick_check: string }).quick_check;
     } catch (e) {
+      // Close the file before reporting: on Windows an open file cannot be moved aside for recovery.
+      try { db?.close(); } catch { /* ignore */ }
       throw damaged((e as Error).message);
     }
     const p = new ProjectDb(dir, db);
     if (ok !== 'ok') { try { db.close(); } catch { /* ignore */ } throw damaged(ok); }
-    db.exec(ddl());
-    p.migrate();
+    try {
+      p.refuseNewerFormat(); // before anything is written to the file
+      db.exec(ddl());
+      p.migrate();
+    } catch (e) {
+      try { db.close(); } catch { /* ignore */ }
+      throw e;
+    }
     // The hourly backup timer carries on from the newest backup already on disk.
     p.lastBackup = p.backups().reduce((m, b) => Math.max(m, Date.parse(b.created_at)), 0);
     return p;
@@ -111,10 +119,22 @@ export class ProjectDb {
   /** When the newest backup was taken (milliseconds since 1970; 0 if there is none). */
   get lastBackupAt(): number { return this.lastBackup; }
 
+  private fileFormat(): number | null {
+    const hasMeta = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'meta'").get();
+    const row = hasMeta ? this.db.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get() as { value: string } | undefined : undefined;
+    return row ? Number(row.value) : null;
+  }
+
+  private refuseNewerFormat(): void {
+    const v = this.fileFormat();
+    if (v !== null && v > SCHEMA_VERSION) {
+      // Not damage: the file is fine, this copy of Map Maker is too old for it. No recovery is offered.
+      throw Object.assign(new IntegrityError('This project was saved by a newer version of Map Maker. Please install the newer version to open it.'), { code: 'newer-version', status: 409 });
+    }
+  }
+
   private migrate(): void {
-    const row = this.db.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get() as { value: string } | undefined;
-    const v = row ? Number(row.value) : SCHEMA_VERSION;
-    if (v > SCHEMA_VERSION) throw new IntegrityError('This project was saved by a newer version of Map Maker. Please update the app.');
+    const v = this.fileFormat() ?? SCHEMA_VERSION;
     if (v === SCHEMA_VERSION) return;
     // Each upgrade is preceded by an automatic backup, so the file as it was can always be restored.
     this.backupNow();
