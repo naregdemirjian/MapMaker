@@ -11,6 +11,8 @@ import { mkdirSync, rmSync, readFileSync, readdirSync, existsSync, copyFileSync 
 import { join, resolve } from 'node:path';
 import { inflateSync } from 'node:zlib';
 import assert from 'node:assert/strict';
+import { geoContains } from 'd3-geo';
+import { decodeBasemap, type BasemapFile } from '../src/render-engine/basemap.ts';
 
 type LL = [number, number];
 type Pt = [number, number];
@@ -117,6 +119,15 @@ const toLL = async (p: Pt): Promise<LL> => { const ll = await hook<LL | null>('p
 const toPage = async (ll: LL): Promise<Pt> => { const p = await hook<Pt | null>('lonLatToPage', ll[0], ll[1]); assert.ok(p, `${ll} is not visible`); return p; };
 const ownerAt = (ll: LL, date: string) => hook<string | null>('ownerAt', ll[0], ll[1], date);
 const entityId = (name: string) => page.evaluate((n) => (window as any).__mapmaker.store.world.all('entity').find((e: any) => e.name === n)?.id as string, name);
+
+/** The colour drawn at a map position in the world-building view. */
+const canvasPixel = (ll: LL) => page.evaluate(([lon, lat]) => {
+  const p = (window as any).__mapmaker.lonLatToPage(lon, lat);
+  const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement;
+  const r = c.getBoundingClientRect(), k = c.width / r.width;
+  return Array.from(c.getContext('2d')!.getImageData(Math.round((p[0] - r.left) * k), Math.round((p[1] - r.top) * k), 1, 1).data).slice(0, 3);
+}, ll);
+const colourDiff = (a: number[], b: number[]) => Math.max(...a.map((v, i) => Math.abs(v - b[i])));
 
 async function setDate(text: string): Promise<void> {
   const f = page.getByTestId('current-date');
@@ -240,6 +251,26 @@ try {
     assert.ok(after.zoom > before.zoom + 0.9, 'zoomed in');
     assert.ok(after.lon < before.lon - 10, 'moved the map');
     await screenshot('zoomed-and-moved');
+  });
+
+  await step("Earth's geography: land drawn, present-day borders as a guide, data sources listed", async () => {
+    // Land and sea differ in the picture: a pixel in Africa and one in the Atlantic.
+    await page.waitForFunction(() => (window as any).__mapmaker.store.basemap);
+    const land = await canvasPixel([20, 5]), sea = await canvasPixel([-30, 10]);
+    assert.ok(colourDiff(land, sea) > 20, `land ${land} and sea ${sea} look different`);
+    await page.getByTestId('reference-borders-toggle').check();
+    await screenshot('present-day-borders-guide');
+    await page.getByTestId('reference-borders-toggle').uncheck();
+    await page.getByTestId('data-sources').click();
+    await page.getByTestId('dataset-natural-earth').waitFor();
+    assert.match(await page.getByTestId('dataset-natural-earth').innerText(), /Public domain/);
+    await screenshot('data-sources');
+    await page.locator('.modal button.primary', { hasText: 'Close' }).click();
+    await page.locator('.modal').waitFor({ state: 'detached' });
+    // The test countries are drawn over the Atlantic; their territory is kept over the sea until the
+    // coastline clipping step switches clipping back on.
+    assert.ok(await page.getByTestId('clip-to-land').isChecked(), 'territory ends at the coast by default');
+    await page.getByTestId('clip-to-land').uncheck();
   });
 
   await step('Create a country and draw its territory', async () => {
@@ -441,12 +472,17 @@ try {
     assert.deepEqual(m.resolution, [480, 270]);
     assert.deepEqual(m.frames, [0, 23]);
     const passes: string[] = m.passes.map((p: any) => p.name);
-    assert.deepEqual(passes.sort(), ['background', 'beauty', 'borders', 'fills', 'labels', 'overlays']);
+    assert.deepEqual(passes.sort(), ['background', 'beauty', 'borders', 'fills', 'labels', 'land', 'overlays']);
     for (const pass of passes) {
       const files: string[] = readdirSync(join(ex.dir, pass)).filter((f) => f.endsWith('.png'));
       assert.equal(files.length, 24, `${pass}: 24 frames`);
     }
     assert.ok(existsSync(join(ex.dir, 'COMPOSITING_GUIDE.txt')));
+    // Earth's geography is drawn, and its credit travels with the export.
+    assert.equal(m.dataCredits.length, 1);
+    assert.match(m.dataCredits[0], /^Natural Earth v5\.1\.2 \(Public domain\)/);
+    assert.match(readFileSync(join(ex.dir, 'COMPOSITING_GUIDE.txt'), 'utf8'), /Made with Natural Earth/);
+    assert.equal(new Set(Object.values(m.checksums.land as Record<string, string>)).size, 1, 'the land pass is the same in every frame');
     // The background does not change during the shot; the territory does.
     const bg = Object.values(m.checksums.background as Record<string, string>);
     assert.equal(new Set(bg).size, 1, 'the background pass is the same in every frame');
@@ -485,6 +521,58 @@ try {
     assert.equal(img.width, 1920);
     copyFileSync(join(full.dir, 'beauty', frames[12]), join(OUT, 'exported-beauty-frame-13.png'));
     for (const pass of ['fills', 'borders']) copyFileSync(join(full.dir, pass, readdirSync(join(full.dir, pass)).sort()[12]), join(OUT, `exported-${pass}-frame-13.png`));
+  });
+
+  await step('Coastline clipping: territory over the sea disappears, territory on land stays', async () => {
+    await page.getByTestId('mode-world').click();
+    await page.getByTestId('map-canvas').waitFor();
+    await setDate('2000');
+    const b = decodeBasemap(JSON.parse(readFileSync(join(ROOT, 'data', 'natural-earth', 'ne-110m.json'), 'utf8')) as BasemapFile);
+    const onLand = (ll: LL) => geoContains(b.land, ll);
+    const clearOfCoast = (ll: LL) => [[-1, 0], [1, 0], [0, -1], [0, 1]].every(([dx, dy]) => onLand([ll[0] + dx, ll[1] + dy]) === onLand(ll));
+    // Sample a grid over the map; keep owned points well away from any coast.
+    const { cx, cy } = await centre();
+    const samples: Array<{ ll: LL; land: boolean }> = [];
+    for (let x = cx - 360; x <= cx + 360; x += 24) for (let y = cy - 200; y <= cy + 200; y += 24) {
+      const ll = await hook<LL | null>('pageToLonLat', x, y);
+      if (!ll || !clearOfCoast(ll) || !(await ownerAt(ll, '2000'))) continue;
+      samples.push({ ll, land: onLand(ll) });
+    }
+    // Labels are drawn on top of everything; points under them (before or after clipping) are left out.
+    type Label = { text: string; x: number; y: number; size: number };
+    const readLabels = () => page.evaluate(() => (window as any).__mapmaker.store.renderer.lastLabels as Label[]);
+    const canvasBox = await page.getByTestId('map-canvas').boundingBox();
+    const labelsBefore = await readLabels();
+    const underLabel = async (ll: LL, labels: Label[]) => {
+      const [px, py] = await toPage(ll);
+      const x = px - canvasBox!.x, y = py - canvasBox!.y;
+      return labels.some((l) => Math.abs(x - l.x) < l.text.length * l.size * 0.35 + 6 && Math.abs(y - l.y) < l.size * 0.6 + 6);
+    };
+    for (let i = samples.length - 1; i >= 0; i--) if (await underLabel(samples[i].ll, labelsBefore)) samples.splice(i, 1);
+    let seaSamples = samples.filter((p) => !p.land), landSamples = samples.filter((p) => p.land);
+    assert.ok(seaSamples.length >= 10 && landSamples.length >= 5, `${seaSamples.length} sea and ${landSamples.length} land samples inside the countries`);
+    const before = new Map<string, number[]>();
+    for (const p of samples) before.set(String(p.ll), await canvasPixel(p.ll));
+    const ocean = await canvasPixel([-30, 40]); // open sea, no territory
+    for (const p of seaSamples) assert.ok(colourDiff(before.get(String(p.ll))!, ocean) > 20, 'unclipped: territory is drawn over the sea');
+
+    await page.getByTestId('clip-to-land').check();
+    await page.waitForTimeout(150);
+    // Once clipped, every label stands on land.
+    const labelsAfter = await readLabels();
+    assert.equal(labelsAfter.length, 2);
+    for (const l of labelsAfter) {
+      const ll = await toLL([l.x + canvasBox!.x, l.y + canvasBox!.y]);
+      assert.ok(onLand(ll), `the label "${l.text}" is on land (${ll})`);
+    }
+    for (let i = samples.length - 1; i >= 0; i--) if (await underLabel(samples[i].ll, labelsAfter)) samples.splice(i, 1);
+    seaSamples = samples.filter((p) => !p.land); landSamples = samples.filter((p) => p.land);
+    for (const p of seaSamples) assert.ok(colourDiff(await canvasPixel(p.ll), ocean) <= 8, `clipped: the sea at ${p.ll} shows the ocean`);
+    for (const p of landSamples) assert.ok(colourDiff(await canvasPixel(p.ll), before.get(String(p.ll))!) <= 8, `clipped: the land at ${p.ll} keeps its territory colour`);
+    await screenshot('coastline-clipping');
+    // Undo brings the territory back over the sea.
+    await page.getByTestId('undo').click();
+    await page.waitForFunction(() => !(document.querySelector('[data-testid=clip-to-land]') as HTMLInputElement).checked);
   });
 
   await step('History Health reports no problems', async () => {

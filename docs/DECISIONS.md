@@ -7,7 +7,8 @@ architecture, with the reason and the way back. Newest first within each section
 
 The approved development set-up assumed a session that can install packages and a private GitHub repository. The
 first development session had neither: package installs were switched off and no repository was connected. D1–D4 follow
-from that. Each is confined to one layer of the system, so returning to the approved form does not touch the world
+from that. **Update, second session of 16 November 2026:** `npm install` and downloads now work, and the project is on
+GitHub, so each of D1–D4 can now be reversed; they are reversed one at a time, each with its own tests. Each is confined to one layer of the system, so returning to the approved form does not touch the world
 model, the history engine, the parcel kernel, storage or the export writer.
 
 ### D1. Canvas 2D map renderer instead of deck.gl (interim)
@@ -20,16 +21,19 @@ model, the history engine, the parcel kernel, storage or the export writer.
   2026: about 210 ms per 1080p frame with 24,500 parcels (fine for export, about 5 frames a second when scrubbing).
 - **Way back.** Replace this one module once packages can be installed.
 
-### D2. Local service and browser instead of an Electron app (interim)
+### D2. Local service and browser instead of an Electron app (reversed, 16 November 2026)
 
-- **Why.** Electron was not installed and could not be downloaded.
-- **What was built.** The data service (`dist/server.mjs`) runs with Node.js and serves the interface to the browser,
-  on this computer only. `Start Map Maker.bat` starts it and opens the browser. This service is the same component that
-  Electron's main process would host.
-- **Consequences.** The user installs Node.js once instead of running a Map Maker installer, and the app opens in a
-  browser tab instead of its own window. Closing the black console window quits the app; the interface then pauses
-  editing and says so.
-- **Way back.** Wrap the same service and interface in Electron and build a Windows installer.
+- **Why it existed.** Electron could not be downloaded in the first session.
+- **Reversed.** `src/desktop/main.ts` is the Electron main process: it hosts the same data service in-process (still
+  HTTP on 127.0.0.1, on a stable port so remembered views survive restarts) and shows the interface in the app's own
+  window; one copy at a time. electron-builder makes an NSIS installer (`Map Maker Setup <version>.exe`, per-user,
+  installation folder can be changed, Start menu and desktop shortcuts). The GitHub Actions run "Windows build and
+  tests" builds it on Windows and runs every test there first. Tested by `e2e/desktop.e2e.ts`.
+- **Kept.** The browser version (`Start Map Maker.bat`) still works and uses the same files and projects.
+- **Not done.** The installer is unsigned (Windows SmartScreen warns once); signing needs a certificate the user would
+  buy. No automatic updates: a new version is installed over the old one, projects are untouched.
+- **Building the installer on Linux** needs Wine; without it, `npx electron-builder --win --dir
+  -c.win.signAndEditExecutable=false` produces the unpacked app for inspection.
 
 ### D3. Node's built-in SQLite instead of better-sqlite3
 
@@ -37,12 +41,12 @@ model, the history engine, the parcel kernel, storage or the export writer.
 - **Consequences.** The same SQLite file format and features (write-ahead log, full sync, VACUUM INTO). Requires
   Node.js 22.13 or newer. This may simply be kept.
 
-### D4. Minimal React type declarations (interim)
+### D4. Minimal React type declarations (reversed, 16 November 2026)
 
-- **Why.** React's type package was missing.
-- **Consequences.** The interface code (`src/ui/`) gets weaker type checking than the rest. The core modules are fully
-  checked.
-- **Way back.** Install `@types/react` and remove `types/react-shim.d.ts`.
+- **Why it existed.** React's type package was missing in the first session.
+- **Reversed.** `@types/react` and `@types/react-dom` 19.2 are installed and the shim is gone; the interface's event
+  handlers lost their `any` annotations, so all of `src/ui/` is now checked as strictly as the rest. Doing so found two
+  loosely typed menu values (now cast to their exact types); no behaviour changed.
 
 ### D5. Tests use Node's own test runner instead of Vitest and fast-check
 
@@ -54,6 +58,33 @@ model, the history engine, the parcel kernel, storage or the export writer.
 Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
+
+### D19. The Earth basemap is reference geography, outside the parcel map
+
+Natural Earth land, lakes and coastlines are drawn in their own pass (`land`) between the grid and the territory fills.
+They are not loaded into the geometry kernel, so they cost nothing when editing and never change history. Coastline
+clipping and real boundaries as parcel edges will build on the same data later. The data ships with the app (1.6 MB),
+converted by `scripts/fetch-natural-earth.mjs`; `data/datasets.json` records source, version, licence and credit line.
+The grid is drawn beneath the land so the export passes stack back into the full picture.
+
+### D20. Present-day borders are a drawing guide only
+
+They are dashed, shown only while drawing (a switch under Worlds), never in shots or exports: the film's borders are
+the ones drawn in the project.
+
+### D22. Coastline clipping happens when drawing, not in the parcel map
+
+Territory fills (including animated changes) and borders are clipped to the land minus lakes when drawn. The parcel map
+and history keep the shapes as painted, so switching clipping off for a layer (sea claims, maritime zones) loses
+nothing, and a later dated coastline (sea-level change, Stage 8) will reshape countries automatically, as the approved
+architecture asks. Labels of clipped layers are placed and sized from the land part only, using a 1/8-degree land mask
+and a 10 × 10 grid of sample points per parcel (cached until the map changes). Still to do: areas shown in the
+inspector include the sea.
+
+### D21. Which worlds show Earth's geography
+
+Stored per world. The first world of a new project (Earth) shows it; worlds created later show it only if "Start with
+Earth's geography" is ticked; worlds saved before this setting existed show it when they have Earth's radius.
 
 ### D14. One drawing order for the full picture and the export passes
 
@@ -93,8 +124,10 @@ seams, and makes fades between two owners mix colours correctly.
 
 All events belong to the one project. The user decides how they are grouped: by country, by world, or in groups of their
 own. The timeline gets a control to choose which groups (and so which events) it shows. Maps, layers and territorial
-history still belong to each world. Not built yet (Stage 3/4). Assumption to confirm when building: an event can belong
-to more than one group.
+history still belong to each world. **Built 16 November 2026:** groups are made, renamed, recoloured and deleted from
+"Groups" on the timeline; an event can be in several groups (the assumption to confirm; easy to restrict if not wanted);
+"Not in a group" is its own choice; the filter changes only which events are listed, never the map; a new event joins
+the groups being shown. Stored in project file format 2 (tables `event_group`, `event_group_member`).
 
 ### D9. Animated changes: borders and labels follow the animation
 

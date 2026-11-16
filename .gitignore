@@ -3,3 +3,4 @@ dist/
 .tmp/
 e2e/output/
 *.log
+release/

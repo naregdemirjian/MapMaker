@@ -90,19 +90,27 @@ export class ProjectDb {
   static open(dir: string): ProjectDb {
     mkdirSync(dir, { recursive: true });
     const damaged = (detail: string) => new IntegrityError(`This project's file is damaged and cannot be opened safely (${detail.split('\n')[0].slice(0, 160)}).`);
-    let db: DatabaseSync;
+    let db: DatabaseSync | undefined;
     let ok: string;
     try {
       db = new DatabaseSync(ProjectDb.databasePath(dir));
       db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL; PRAGMA busy_timeout = 5000;');
       ok = (db.prepare('PRAGMA quick_check').get() as { quick_check: string }).quick_check;
     } catch (e) {
+      // Close the file before reporting: on Windows an open file cannot be moved aside for recovery.
+      try { db?.close(); } catch { /* ignore */ }
       throw damaged((e as Error).message);
     }
     const p = new ProjectDb(dir, db);
     if (ok !== 'ok') { try { db.close(); } catch { /* ignore */ } throw damaged(ok); }
-    db.exec(ddl());
-    p.migrate();
+    try {
+      p.refuseNewerFormat(); // before anything is written to the file
+      db.exec(ddl());
+      p.migrate();
+    } catch (e) {
+      try { db.close(); } catch { /* ignore */ }
+      throw e;
+    }
     // The hourly backup timer carries on from the newest backup already on disk.
     p.lastBackup = p.backups().reduce((m, b) => Math.max(m, Date.parse(b.created_at)), 0);
     return p;
@@ -111,11 +119,34 @@ export class ProjectDb {
   /** When the newest backup was taken (milliseconds since 1970; 0 if there is none). */
   get lastBackupAt(): number { return this.lastBackup; }
 
+  private fileFormat(): number | null {
+    const hasMeta = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'meta'").get();
+    const row = hasMeta ? this.db.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get() as { value: string } | undefined : undefined;
+    return row ? Number(row.value) : null;
+  }
+
+  private refuseNewerFormat(): void {
+    const v = this.fileFormat();
+    if (v !== null && v > SCHEMA_VERSION) {
+      // Not damage: the file is fine, this copy of Map Maker is too old for it. No recovery is offered.
+      throw Object.assign(new IntegrityError('This project was saved by a newer version of Map Maker. Please install the newer version to open it.'), { code: 'newer-version', status: 409 });
+    }
+  }
+
   private migrate(): void {
-    const row = this.db.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get() as { value: string } | undefined;
-    const v = row ? Number(row.value) : SCHEMA_VERSION;
-    if (v > SCHEMA_VERSION) throw new IntegrityError('This project was saved by a newer version of Map Maker. Please update the app.');
-    // Future schema versions add migration steps here, each preceded by an automatic backup.
+    const v = this.fileFormat() ?? SCHEMA_VERSION;
+    if (v === SCHEMA_VERSION) return;
+    // Each upgrade is preceded by an automatic backup, so the file as it was can always be restored.
+    this.backupNow();
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      // 1 -> 2: the event group tables, already created (empty) by the table definitions above.
+      this.db.prepare("UPDATE meta SET value = ? WHERE key = 'schema_version'").run(String(SCHEMA_VERSION));
+      this.db.exec('COMMIT');
+    } catch (e) {
+      this.db.exec('ROLLBACK');
+      throw e;
+    }
   }
 
   close(): void {
@@ -314,7 +345,9 @@ export function readSnapshot(file: string): Snapshot {
   const db = new DatabaseSync(file, { readOnly: true });
   try {
     const s: Record<string, AnyRow[]> = {};
-    for (const t of TABLE_NAMES) s[t] = db.prepare(`SELECT * FROM ${t}`).all() as unknown as AnyRow[];
+    // Files from older versions lack newer tables: those are simply empty.
+    const present = new Set((db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>).map((r) => r.name));
+    for (const t of TABLE_NAMES) s[t] = present.has(t) ? db.prepare(`SELECT * FROM ${t}`).all() as unknown as AnyRow[] : [];
     return s as Snapshot;
   } finally {
     db.close();
@@ -325,8 +358,14 @@ export function readSnapshot(file: string): Snapshot {
 export function diffSnapshots(from: Snapshot, to: Snapshot): RowDiff[] {
   const diffs: RowDiff[] = [];
   // Deletions in reverse dependency order, inserts and updates in forward order.
-  const order: TableName[] = ['meta', 'entity_type', 'event_type', 'map_space', 'face', 'vertex', 'segment', 'layer', 'entity', 'event', 'effect', 'sequence'];
-  const keyed = (rows: AnyRow[] | undefined, t: TableName) => new Map((rows ?? []).map((r) => [(r as unknown as Record<string, string | number>)[TABLES[t].key], r]));
+  const order: TableName[] = ['meta', 'entity_type', 'event_type', 'map_space', 'face', 'vertex', 'segment', 'layer', 'entity', 'event', 'effect', 'sequence', 'event_group', 'event_group_member'];
+  const keyedAll = (rows: AnyRow[] | undefined, t: TableName) => new Map((rows ?? []).map((r) => [(r as unknown as Record<string, string | number>)[TABLES[t].key], r]));
+  // The file format version describes the file, not the project's content: never restored.
+  const keyed = (rows: AnyRow[] | undefined, t: TableName) => {
+    const m = keyedAll(rows, t);
+    if (t === 'meta') m.delete('schema_version');
+    return m;
+  };
   for (const t of [...order].reverse()) {
     const a = keyed(from[t] as AnyRow[], t), b = keyed(to[t] as AnyRow[], t);
     for (const [k, row] of a) if (!b.has(k)) diffs.push({ table: t, before: row, after: null });

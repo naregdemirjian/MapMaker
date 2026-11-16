@@ -10,23 +10,66 @@
     "dev": "node scripts/build.mjs && node --disable-warning=ExperimentalWarning dist/server.mjs",
     "test": "node --disable-warning=ExperimentalWarning --test \"test/**/*.test.ts\"",
     "typecheck": "tsc -p tsconfig.json",
-    "e2e": "node --disable-warning=ExperimentalWarning e2e/vertical-slice.e2e.ts"
-  },
-  "dependencies": {
-    "d3-geo": "3.1.1",
-    "react": "19.2.8",
-    "react-dom": "19.2.8",
-    "robust-predicates": "3.0.3"
+    "e2e": "node --disable-warning=ExperimentalWarning e2e/vertical-slice.e2e.ts",
+    "desktop": "node scripts/build.mjs && electron .",
+    "dist:win": "node scripts/build.mjs && electron-builder --win --x64 --publish never",
+    "icon": "node --disable-warning=ExperimentalWarning scripts/make-icon.ts"
   },
   "devDependencies": {
     "@types/d3-geo": "3.1.1",
     "@types/geojson": "7946.0.16",
     "@types/node": "26.6.3",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.7",
+    "d3-geo": "3.1.1",
+    "electron": "45.3.2",
+    "electron-builder": "26.18.0",
     "esbuild": "0.28.2",
     "playwright": "1.63.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "robust-predicates": "3.0.3",
     "typescript": "6.0.3"
   },
   "engines": {
     "node": ">=22.18.0"
+  },
+  "main": "dist/desktop/main.mjs",
+  "author": "Map Maker",
+  "build": {
+    "appId": "com.mapmaker.desktop",
+    "productName": "Map Maker",
+    "copyright": "Map Maker",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "!dist/**/*.map",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Map Maker",
+      "artifactName": "Map Maker Setup ${version}.${ext}",
+      "deleteAppDataOnUninstall": false
+    },
+    "publish": null
   }
 }

@@ -1,9 +1,10 @@
 // Builds the two runnable parts of Map Maker:
 //   dist/ui/      the browser interface (React + map engine), one bundled script
 //   dist/server.mjs  the local data service (Node built-ins only, no native modules)
+//   dist/desktop/main.mjs  the desktop app (Electron main process hosting the same service)
 // Both are self-contained, so the dist folder runs on any machine with Node.js >= 22.18.
 import { build } from 'esbuild';
-import { mkdirSync, copyFileSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdirSync, copyFileSync, writeFileSync, readFileSync, cpSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -39,7 +40,23 @@ await build({
   logLevel: 'warning',
 });
 
+// The desktop app's main process (Electron). Electron itself is provided at run time.
+await build({
+  entryPoints: [join(root, 'src/desktop/main.ts')],
+  bundle: true,
+  format: 'esm',
+  platform: 'node',
+  target: 'node22',
+  outfile: join(out, 'desktop/main.mjs'),
+  external: ['electron'],
+  sourcemap: true,
+  define,
+  logLevel: 'warning',
+});
+
 copyFileSync(join(root, 'src/ui/index.html'), join(out, 'ui/index.html'));
 copyFileSync(join(root, 'src/ui/styles.css'), join(out, 'ui/styles.css'));
+// Map data (Natural Earth basemap and the dataset licence records) is served with the interface.
+cpSync(join(root, 'data'), join(out, 'ui/data'), { recursive: true });
 writeFileSync(join(out, 'BUILD.txt'), `Map Maker ${pkg.version}\nBuilt ${new Date().toISOString()}\n`);
-console.log('Built dist/ui/app.js and dist/server.mjs');
+console.log('Built dist/ui/app.js, dist/server.mjs and dist/desktop/main.mjs');

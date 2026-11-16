@@ -7,10 +7,12 @@ import { BASE_EVENT_ID } from '../../world-model/schema.ts';
 import type { TransitionSpec } from '../../temporal-engine/engine.ts';
 import { lonLatToVec } from '../../geo-kernel/vec.ts';
 import { DateField, fmt } from './Panels.tsx';
+import { loadDatasetRecords, type DatasetRecord } from '../../render-engine/basemap.ts';
+import { GroupChecks } from './EventGroups.tsx';
 
-function Modal({ title, children, onClose, wide }: { title: string; children: any; onClose: () => void; wide?: boolean }) {
+function Modal({ title, children, onClose, wide }: { title: string; children: React.ReactNode; onClose: () => void; wide?: boolean }) {
   return (
-    <div className="modal-back" onPointerDown={(e: any) => e.target === e.currentTarget && onClose()}>
+    <div className="modal-back" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className={`modal ${wide ? 'wide' : ''}`} role="dialog" aria-label={title}>
         <div className="modal-head"><h2>{title}</h2><button className="close" onClick={onClose} aria-label="Close">×</button></div>
         {children}
@@ -75,20 +77,20 @@ function PaintPrompt({ p }: { p: Extract<PendingEdit, { kind: 'paint' }> }) {
         <b>A new change from {fmt(s.time)}</b>
         <div className="muted" data-testid="new-change-lasts">History before this date stays as it is. {lasts}</div>
         {choice === 'new' && (
-          <div className="choice-body" onClick={(ev: any) => ev.stopPropagation()}>
+          <div className="choice-body" onClick={(ev) => ev.stopPropagation()}>
             <label>Event
-              <select value={target} onChange={(ev: any) => setTarget(ev.target.value)} data-testid="event-target">
+              <select value={target} onChange={(ev) => setTarget(ev.target.value)} data-testid="event-target">
                 <option value="new-event">A new event…</option>
                 {events.map((x) => <option key={x.id} value={x.id}>{fmt(fromStore(x.start_day, x.start_ms))} · {x.name}</option>)}
               </select>
             </label>
             {target === 'new-event' && <>
-              <label>Event name<input value={evName} onChange={(ev: any) => setEvName(ev.target.value)} data-testid="new-event-name" /></label>
+              <label>Event name<input value={evName} onChange={(ev) => setEvName(ev.target.value)} data-testid="new-event-name" /></label>
               <label>Ends (optional, for animated changes)<DateField value={end} allowEmpty placeholder="(happens at once)" onChange={setEnd} testId="new-event-end" /></label>
             </>}
             {(target !== 'new-event' ? w.get('event', target)?.end_day !== null : !!end) && (
               <label>How it spreads
-                <select value={style} onChange={(ev: any) => setStyle(ev.target.value)} data-testid="spread-style">
+                <select value={style} onChange={(ev) => setStyle(ev.target.value as typeof style)} data-testid="spread-style">
                   <option value="instant">At once</option>
                   <option value="advance">Advancing front, from where you started drawing</option>
                   <option value="fade">Fade over the event's duration</option>
@@ -135,18 +137,48 @@ export function NewWorldDialog() {
   const s = useStore();
   const [name, setName] = useState('');
   const [km, setKm] = useState('6371');
+  const [earth, setEarth] = useState(false);
   const close = () => s.set({ dialog: null });
   const create = () => {
-    const id = s.execute((w) => cmd.createWorld(w, name.trim() || 'New world', Number(km)));
+    const id = s.execute((w) => cmd.createWorld(w, name.trim() || 'New world', Number(km), earth ? 'natural-earth' : 'none'));
     if (id) { s.set({ spaceId: id, layerId: s.world!.all('layer').find((l) => l.space_id === id)?.id ?? '', selection: null }); close(); }
   };
   return (
     <Modal title="New world" onClose={close}>
       <p className="muted">A world is a planet, moon or other body with its own map, territories and history. Fictional worlds start as an empty sphere; terrain tools come in a later stage.</p>
-      <label>Name<input autoFocus value={name} onChange={(e: any) => setName(e.target.value)} placeholder="e.g. Aster Prime" /></label>
-      <label>Radius (km)<input type="number" value={km} onChange={(e: any) => setKm(e.target.value)} /></label>
-      <div className="presets">{WORLD_PRESETS.map((p) => <button key={p.name} className="small" onClick={() => { setName(p.name); setKm(String(p.km)); }}>{p.name}</button>)}</div>
+      <label>Name<input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Aster Prime" /></label>
+      <label>Radius (km)<input type="number" value={km} onChange={(e) => setKm(e.target.value)} /></label>
+      <div className="presets">{WORLD_PRESETS.map((p) => <button key={p.name} className="small" onClick={() => { setName(p.name); setKm(String(p.km)); setEarth(p.name === 'Earth'); }}>{p.name}</button>)}</div>
+      <label className="check"><input type="checkbox" checked={earth} onChange={(e) => setEarth(e.target.checked)} data-testid="new-world-earth" /> Start with Earth's geography (land, lakes and coastlines)</label>
       <div className="modal-actions"><button onClick={close}>Cancel</button><button className="primary" onClick={create}>Create world</button></div>
+    </Modal>
+  );
+}
+
+export function DataSourcesDialog() {
+  const s = useStore();
+  const [records, setRecords] = useState<DatasetRecord[] | null>(null);
+  const [error, setError] = useState('');
+  useEffect(() => { loadDatasetRecords().then(setRecords, (e: Error) => setError(e.message)); }, []);
+  const close = () => s.set({ dialog: null });
+  return (
+    <Modal title="Data sources" onClose={close} wide>
+      <p className="muted">Real-world data that Map Maker ships with. Each export lists the credit lines for the data it shows in its manifest and compositing guide.</p>
+      {error && <p className="error">{error}</p>}
+      {!records && !error && <p className="muted">Loading…</p>}
+      {records?.map((d) => (
+        <div key={d.id} className="dataset" data-testid={`dataset-${d.id}`}>
+          <h4>{d.name} <span className="muted">{d.version}</span></h4>
+          <table className="kv"><tbody>
+            <tr><th>Used for</th><td>{d.usedFor}</td></tr>
+            <tr><th>Licence</th><td>{d.licence}</td></tr>
+            <tr><th>Credit line</th><td>{d.credit}</td></tr>
+            <tr><th>Source</th><td>{d.source}</td></tr>
+            <tr><th>Retrieved</th><td>{d.retrieved}{d.converted ? ` · ${d.converted}` : ''}</td></tr>
+          </tbody></table>
+        </div>
+      ))}
+      <div className="modal-actions"><button className="primary" onClick={close}>Close</button></div>
     </Modal>
   );
 }
@@ -160,20 +192,23 @@ export function NewEventDialog() {
   const [end, setEnd] = useState<Instant | null>(null);
   const [desc, setDesc] = useState('');
   const [record, setRecord] = useState(true);
+  // A new event joins the groups the timeline is showing, so it does not disappear from view.
+  const [groups, setGroups] = useState<string[]>(() => (s.eventFilter ?? []).filter((g) => g !== cmd.UNGROUPED));
   const close = () => s.set({ dialog: null });
   const create = () => {
     if (!start) { s.toast('Give the event a start date.', 'error'); return; }
-    const id = s.execute((wd) => cmd.createEvent(wd, { name, type_id: type, start, end, description: desc }));
+    const id = s.execute((wd) => cmd.createEvent(wd, { name, type_id: type, start, end, description: desc, groups }));
     if (id) { s.set({ selection: { kind: 'event', id }, time: start, recordEventId: record ? id : s.recordEventId, tool: record && s.tool === 'select' ? 'lasso' : s.tool }); close(); }
   };
   return (
     <Modal title="New event" onClose={close}>
-      <label>Name<input autoFocus value={name} onChange={(e: any) => setName(e.target.value)} placeholder="e.g. Fall of the Northern March" data-testid="event-name" /></label>
-      <label>Type<select value={type} onChange={(e: any) => setType(e.target.value)}>{w.all('event_type').filter((t) => t.id !== 'base').map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
+      <label>Name<input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Fall of the Northern March" data-testid="event-name" /></label>
+      <label>Type<select value={type} onChange={(e) => setType(e.target.value)}>{w.all('event_type').filter((t) => t.id !== 'base').map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
       <label>Starts<DateField value={start} onChange={setStart} testId="event-start" /></label>
       <label>Ends (optional)<DateField value={end} allowEmpty placeholder="(happens at once)" onChange={setEnd} testId="event-end" /></label>
-      <label>Description<textarea rows={3} value={desc} onChange={(e: any) => setDesc(e.target.value)} /></label>
-      <label className="check"><input type="checkbox" checked={record} onChange={(e: any) => setRecord(e.target.checked)} /> Record what I draw next into this event</label>
+      <label>Description<textarea rows={3} value={desc} onChange={(e) => setDesc(e.target.value)} /></label>
+      {w.all('event_group').length > 0 && <><h4>Groups</h4><GroupChecks value={groups} onChange={setGroups} /></>}
+      <label className="check"><input type="checkbox" checked={record} onChange={(e) => setRecord(e.target.checked)} /> Record what I draw next into this event</label>
       <div className="modal-actions"><button onClick={close}>Cancel</button><button className="primary" onClick={create} data-testid="event-create">Create event</button></div>
     </Modal>
   );
@@ -220,7 +255,7 @@ export function VersionsDialog() {
     <Modal title="Versions and backups" onClose={close} wide>
       <p className="muted">Everything is saved automatically as you work. A version is a named restore point you can return to at any time.</p>
       <div className="row-form">
-        <input value={label} placeholder="Version name, e.g. Before rewriting the war" onChange={(e: any) => setLabel(e.target.value)} onKeyDown={(e: any) => e.key === 'Enter' && save()} />
+        <input value={label} placeholder="Version name, e.g. Before rewriting the war" onChange={(e) => setLabel(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && save()} />
         <button className="primary" onClick={save}>Save version</button>
       </div>
       <h4>Versions</h4>
@@ -298,10 +333,10 @@ export function ProjectPicker() {
           {!s.projects.length && <div className="muted">No projects yet.</div>}
         </div>
         <h3>New project</h3>
-        <label>Project name<input value={name} onChange={(e: any) => setName(e.target.value)} placeholder="e.g. The Long Night" data-testid="project-name" /></label>
+        <label>Project name<input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. The Long Night" data-testid="project-name" /></label>
         <div className="two">
-          <label>First world<input value={worldName} onChange={(e: any) => setWorldName(e.target.value)} /></label>
-          <label>Radius (km)<input type="number" value={km} onChange={(e: any) => setKm(e.target.value)} /></label>
+          <label>First world<input value={worldName} onChange={(e) => setWorldName(e.target.value)} /></label>
+          <label>Radius (km)<input type="number" value={km} onChange={(e) => setKm(e.target.value)} /></label>
         </div>
         <button className="primary" disabled={busy} onClick={create} data-testid="project-create">Create project</button>
         <p className="muted small-note">Projects are stored in {s.projectsDir}</p>

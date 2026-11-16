@@ -4,6 +4,8 @@ import {
   type Instant, toApproxYear, fromApproxYear, gregorian, formatYear, floorTo, instant, add, compare, fromStore, MS_PER_DAY,
 } from '../../core-time/index.ts';
 import { BASE_EVENT_ID } from '../../world-model/schema.ts';
+import * as cmd from '../../domain/commands.ts';
+import { GroupFilter, eventFilterSet } from './EventGroups.tsx';
 
 const RULER = 26;
 const LANE = 20;
@@ -120,7 +122,9 @@ export function Timeline() {
       if (x >= 0 && x <= w) ctx.fillRect(x - 0.5, RULER - 4, 1.5, 4);
     }
     // event bars in lanes
-    const events = s.world.all('event').filter((e) => e.id !== BASE_EVENT_ID).sort((a, b) => a.start_day - b.start_day || a.start_ms - b.start_ms);
+    const filter = eventFilterSet();
+    const events = s.world.all('event').filter((e) => e.id !== BASE_EVENT_ID && cmd.eventShown(s.world!, e.id, filter)).sort((a, b) => a.start_day - b.start_day || a.start_ms - b.start_ms);
+    const groupColor = new Map(s.world.all('event_group').map((g) => [g.id, g.color]));
     const laneEnds: number[] = [];
     bars.current = [];
     for (const e of events) {
@@ -141,6 +145,9 @@ export function Timeline() {
       ctx.globalAlpha = e.variant_group && !e.variant_active ? 0.4 : 1;
       ctx.fillStyle = recording ? '#d1495b' : selected ? '#ffd166' : '#4f7ca8';
       ctx.beginPath(); ctx.roundRect(x0, y, x1 - x0, LANE - 6, 3); ctx.fill();
+      // The colours of the event's groups, as stripes along the bar's top edge.
+      const gs = cmd.groupsOfEvent(s.world, e.id);
+      gs.forEach((g, i) => { ctx.fillStyle = groupColor.get(g) ?? '#888'; const gw = (x1 - x0) / gs.length; ctx.fillRect(x0 + i * gw, y, gw, 3); });
       ctx.fillStyle = '#e8eef4';
       ctx.fillText(label, Math.max(x0, 0) + (x1 - x0 > tw + 8 ? 4 : x1 - x0 + 4), y + (LANE - 6) / 2);
       ctx.globalAlpha = 1;
@@ -168,7 +175,7 @@ export function Timeline() {
   const localX = (e: { clientX: number }) => e.clientX - ref.current!.getBoundingClientRect().left;
   const localY = (e: { clientY: number }) => e.clientY - ref.current!.getBoundingClientRect().top;
 
-  function onDown(e: PointerEvent & { currentTarget: HTMLCanvasElement }) {
+  function onDown(e: React.PointerEvent<HTMLCanvasElement>) {
     e.currentTarget.setPointerCapture(e.pointerId);
     const x = localX(e), y = localY(e);
     if (e.button === 1 || e.button === 2 || e.shiftKey) { drag.current = { kind: 'pan', x, start, end }; return; }
@@ -182,7 +189,7 @@ export function Timeline() {
     store.setTime(timeAtX(x));
   }
 
-  function onMove(e: PointerEvent) {
+  function onMove(e: React.PointerEvent<HTMLCanvasElement>) {
     const d = drag.current;
     if (!d) return;
     const x = localX(e);
@@ -224,9 +231,10 @@ export function Timeline() {
         onPointerMove={onMove}
         onPointerUp={() => (drag.current = null)}
         onDoubleClick={() => { store.fitTimeline(); store.notify(); }}
-        onContextMenu={(e: Event) => e.preventDefault()}
+        onContextMenu={(e) => e.preventDefault()}
         data-testid="timeline"
       />
+      <GroupFilter />
     </div>
   );
 }

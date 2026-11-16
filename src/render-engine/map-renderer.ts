@@ -13,9 +13,11 @@ import type { Instant } from '../core-time/index.ts';
 import type { View } from './camera.ts';
 import type { Arrangement } from '../geo-kernel/arrangement.ts';
 import { E7 } from '../geo-kernel/vec.ts';
+import { BasemapPainter, landMaskOf, type Basemap, type LandMask } from './basemap.ts';
 
-export type PassName = 'background' | 'graticule' | 'fills' | 'borders' | 'labels';
-export const ALL_PASSES: PassName[] = ['background', 'graticule', 'fills', 'borders', 'labels'];
+export type PassName = 'background' | 'graticule' | 'land' | 'fills' | 'borders' | 'labels';
+/** Drawing order. The grid lies under the land, so stacked export passes match the full picture. */
+export const ALL_PASSES: PassName[] = ['background', 'graticule', 'land', 'fills', 'borders', 'labels'];
 
 export interface MapStyle {
   ocean: string;
@@ -39,6 +41,10 @@ export interface RenderOptions {
   transparent: boolean;
   layerIds: string[]; // partition layers to draw, bottom to top
   style?: MapStyle;
+  /** Earth's geography under the territories (the 'land' pass); null or absent draws none. */
+  basemap?: Basemap | null;
+  /** Present-day country borders over the land, as a drawing aid (never part of an export). */
+  referenceBorders?: boolean;
 }
 
 export interface LabelInfo { text: string; x: number; y: number; size: number }
@@ -71,6 +77,7 @@ export class MapRenderer {
   private geoCache = new WeakMap<Arrangement, { rev: number; faces: Map<number, FaceGeo> }>();
   private pathCache = new Map<string, Path2D>();
   private pathCacheView = '';
+  private basemapPainter = new BasemapPainter();
   lastLabels: LabelInfo[] = [];
 
   /** Spherical geometry of a parcel (cached until the parcel map changes). */
@@ -124,6 +131,10 @@ export class MapRenderer {
       ctx.lineWidth = 0.8 * u;
       ctx.stroke(new Path2D(geoPath(view.projection)(geoGraticule10()) ?? ''));
     }
+    if (opts.passes.has('land') && opts.basemap) {
+      const oceanBelow = opts.passes.has('background') && !opts.transparent;
+      this.basemapPainter.draw(ctx, view, opts.basemap, { referenceBorders: !!opts.referenceBorders, oceanColor: oceanBelow ? style.ocean : undefined });
+    }
 
     const entities = new Map(world.all('entity').map((e) => [e.id, e]));
     const colorOf = (v: string | null) => (v ? entities.get(v)?.color ?? '#888888' : null);
@@ -133,15 +144,20 @@ export class MapRenderer {
     // the fills of every layer, then the borders of every layer, then the labels. Stacking the
     // exported passes in Premiere then reproduces the full picture exactly, with several layers too.
     const drawsLayers = opts.passes.has('fills') || opts.passes.has('borders') || opts.passes.has('labels');
-    const prepared: Array<{ ls: { fillOpacity?: number; borderWidth?: number }; states: Map<number, FaceState>; tg: ReturnType<MapRenderer['transitionGroups']> }> = [];
+    type LayerStyle = { fillOpacity?: number; borderWidth?: number; clipToLand?: boolean };
+    const prepared: Array<{ ls: LayerStyle; states: Map<number, FaceState>; tg: ReturnType<MapRenderer['transitionGroups']>; clip: boolean }> = [];
     for (const layerId of drawsLayers ? opts.layerIds : []) {
       const layer = world.get('layer', layerId);
       if (!layer || layer.space_id !== spaceId || layer.kind !== 'partition') continue;
       const states = engine.partitionState(spaceId, layerId, t);
-      prepared.push({ ls: parseJSON<{ fillOpacity?: number; borderWidth?: number }>(layer.style, {}), states, tg: this.transitionGroups(view, arr, engine, states, t) });
+      const ls = parseJSON<LayerStyle>(layer.style, {});
+      // Coastline clipping: territory ends at the coast unless the layer is set to cover the sea.
+      const clip = !!opts.basemap && ls.clipToLand !== false;
+      prepared.push({ ls, states, tg: this.transitionGroups(view, arr, engine, states, t), clip });
     }
 
-    if (opts.passes.has('fills')) for (const { ls, states, tg } of prepared) {
+    const land = (): Path2D => this.basemapPainter.pathsFor(view, opts.basemap!).land;
+    if (opts.passes.has('fills')) for (const { ls, states, tg, clip } of prepared) {
       // Each layer is painted fully opaque in a scratch buffer and laid onto the map once at the
       // layer's opacity: neighbouring parcels then never show seams, and fades mix correctly.
       const lc = this.scratch(ctx);
@@ -154,6 +170,7 @@ export class MapRenderer {
       }
       for (const [c, faces] of byColor) { lc.fillStyle = c; lc.fill(this.groupPath(view, arr, faces), 'evenodd'); }
       for (const g of tg.groups.values()) this.drawTransition(lc, g, colorOf);
+      if (clip) this.basemapPainter.maskToLand(lc, view, opts.basemap!);
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.globalAlpha = ls.fillOpacity ?? 0.78;
@@ -163,6 +180,7 @@ export class MapRenderer {
       for (const g of tg.groups.values()) {
         if (!g.advance || !g.disc) continue;
         ctx.save();
+        if (clip) ctx.clip(land());
         ctx.clip(g.changing, 'evenodd');
         ctx.strokeStyle = style.frontGlow;
         ctx.lineWidth = 2.2 * view.unit;
@@ -173,9 +191,14 @@ export class MapRenderer {
       }
     }
 
-    if (opts.passes.has('borders')) for (const { ls, states, tg } of prepared) this.drawBorders(ctx, view, arr, states, tg, style, (ls.borderWidth ?? style.borderWidth) * u);
+    if (opts.passes.has('borders')) for (const { ls, states, tg, clip } of prepared) {
+      ctx.save();
+      if (clip) ctx.clip(land());
+      this.drawBorders(ctx, view, arr, states, tg, style, (ls.borderWidth ?? style.borderWidth) * u);
+      ctx.restore();
+    }
 
-    if (opts.passes.has('labels')) for (const { states } of prepared) labels.push(...this.layerLabels(view, arr, states, entities));
+    if (opts.passes.has('labels')) for (const { states, clip } of prepared) labels.push(...this.layerLabels(view, arr, states, entities, clip ? landMaskOf(opts.basemap!) : null));
 
     if (opts.passes.has('labels')) this.drawLabels(ctx, labels, style, u);
     this.lastLabels = labels;
@@ -320,7 +343,48 @@ export class MapRenderer {
     ctx.restore();
   }
 
-  private layerLabels(view: View, arr: Arrangement, states: Map<number, FaceState>, entities: Map<string, { name: string }>): LabelInfo[] {
+  private landCache = new WeakMap<Arrangement, { rev: number; mask: LandMask; faces: Map<number, LandSample> }>();
+
+  /**
+   * The part of a parcel that is on land, as a grid of sample points (each standing for an equal share
+   * of the parcel's area). Cached until the parcel map changes.
+   */
+  private landSample(arr: Arrangement, face: number, mask: LandMask): LandSample {
+    let c = this.landCache.get(arr);
+    if (!c || c.rev !== arr.revision || c.mask !== mask) { c = { rev: arr.revision, mask, faces: new Map() }; this.landCache.set(arr, c); }
+    let s = c.faces.get(face);
+    if (s) return s;
+    const g = this.faceGeo(arr, face);
+    const rings = (g.geo as GeoJSON.Polygon).coordinates ?? [];
+    let w = Infinity, so = Infinity, e = -Infinity, n = -Infinity;
+    for (const r of rings) for (const [x, y] of r) { if (x < w) w = x; if (x > e) e = x; if (y < so) so = y; if (y > n) n = y; }
+    const N = 10, pts: number[] = [];
+    let inside = 0;
+    for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
+      const p: [number, number] = [w + ((i + 0.5) / N) * (e - w), so + ((j + 0.5) / N) * (n - so)];
+      if (!insideGeo(g.geo, p)) continue;
+      inside++;
+      if (mask.onLand(p[0], p[1])) pts.push(p[0], p[1]);
+    }
+    if (inside === 0) { // a thin sliver the grid missed: judge it by its centre
+      inside = 1;
+      if (mask.onLand(g.centroid[0], g.centroid[1])) pts.push(g.centroid[0], g.centroid[1]);
+    }
+    // Unit vectors of the samples and their sum, so labels need no trigonometry per frame.
+    const vec = new Float64Array((pts.length / 2) * 3);
+    const sum: [number, number, number] = [0, 0, 0];
+    for (let i = 0, k = 0; i < pts.length; i += 2, k += 3) {
+      const lon = (pts[i] * Math.PI) / 180, lat = (pts[i + 1] * Math.PI) / 180;
+      vec[k] = Math.cos(lat) * Math.cos(lon); vec[k + 1] = Math.cos(lat) * Math.sin(lon); vec[k + 2] = Math.sin(lat);
+      sum[0] += vec[k]; sum[1] += vec[k + 1]; sum[2] += vec[k + 2];
+    }
+    s = { pts, vec, sum, weight: g.area / inside, land: (g.area * (pts.length / 2)) / inside };
+    c.faces.set(face, s);
+    return s;
+  }
+
+  private layerLabels(view: View, arr: Arrangement, states: Map<number, FaceState>, entities: Map<string, { name: string }>, mask: LandMask | null = null): LabelInfo[] {
+    if (mask) return this.landLabels(view, arr, states, entities, mask);
     const byOwner = new Map<string, { area: number; sx: number; sy: number; sz: number; best: FaceGeo | null }>();
     const bestArea = new Map<string, number>();
     // During an animated change a parcel counts partly for its previous owner and partly for its new
@@ -364,6 +428,59 @@ export class MapRenderer {
     return out;
   }
 
+  /**
+   * Labels for a layer clipped at the coast: placed and sized from the land part of each territory
+   * only, so they never sit over the sea. A territory entirely at sea has no label.
+   */
+  private landLabels(view: View, arr: Arrangement, states: Map<number, FaceState>, entities: Map<string, { name: string }>, mask: LandMask): LabelInfo[] {
+    type Acc = { area: number; sx: number; sy: number; sz: number; samples: LandSample[]; best: FaceGeo | null; bestLand: number };
+    const byOwner = new Map<string, Acc>();
+    const add = (v: string | null, face: number, weight: number) => {
+      if (!v || weight <= 0) return;
+      const s = this.landSample(arr, face, mask);
+      if (!s.pts.length) return;
+      let o = byOwner.get(v);
+      if (!o) byOwner.set(v, (o = { area: 0, sx: 0, sy: 0, sz: 0, samples: [], best: null, bestLand: 0 }));
+      const wt = s.weight * weight;
+      o.sx += wt * s.sum[0]; o.sy += wt * s.sum[1]; o.sz += wt * s.sum[2];
+      o.area += s.land * weight;
+      o.samples.push(s);
+      if (s.land * weight > o.bestLand) { o.bestLand = s.land * weight; o.best = this.faceGeo(arr, face); }
+    };
+    for (const [face, st] of states) {
+      const g = this.faceGeo(arr, face);
+      if (g.area <= 0 || g.area > 2 * Math.PI) continue;
+      if (st.transition) {
+        const p = Math.min(1, Math.max(0, st.transition.progress));
+        add(st.transition.from, face, 1 - p);
+        add(st.value, face, p);
+      } else add(st.value, face, 1);
+    }
+    const out: LabelInfo[] = [];
+    const scale = view.projection.scale();
+    for (const [id, o] of byOwner) {
+      const name = entities.get(id)?.name;
+      const len = Math.hypot(o.sx, o.sy, o.sz);
+      if (!name || !o.best || len < 1e-12) continue;
+      const ux = o.sx / len, uy = o.sy / len, uz = o.sz / len;
+      let pos: [number, number] = [Math.atan2(uy, ux) * 180 / Math.PI, Math.asin(uz) * 180 / Math.PI];
+      // The weighted centre, when it is on land inside the largest land piece (labels glide during
+      // animations); otherwise the land sample nearest to it.
+      if (!(mask.onLand(pos[0], pos[1]) && insideGeo(o.best.geo, pos))) {
+        let bestDot = -2;
+        for (const s of o.samples) for (let i = 0, k = 0; i < s.pts.length; i += 2, k += 3) {
+          const d = ux * s.vec[k] + uy * s.vec[k + 1] + uz * s.vec[k + 2];
+          if (d > bestDot) { bestDot = d; pos = [s.pts[i], s.pts[i + 1]]; }
+        }
+      }
+      const p = view.projection(pos);
+      if (!p) continue;
+      const size = Math.max(10 * view.unit, Math.min(44 * view.unit, Math.sqrt(o.area) * scale * 0.18));
+      out.push({ text: name, x: p[0], y: p[1], size });
+    }
+    return out;
+  }
+
   private drawLabels(ctx: CanvasRenderingContext2D, labels: LabelInfo[], style: MapStyle, u: number): void {
     const placed: Array<[number, number, number, number]> = [];
     const sorted = [...labels].sort((a, b) => b.size - a.size || a.text.localeCompare(b.text));
@@ -384,6 +501,8 @@ export class MapRenderer {
     void u;
   }
 }
+
+interface LandSample { pts: number[]; vec: Float64Array; sum: [number, number, number]; weight: number; land: number }
 
 function toLonLat(v: [number, number, number]): [number, number] {
   return [Math.atan2(v[1], v[0]) * 180 / Math.PI, Math.asin(Math.max(-1, Math.min(1, v[2]))) * 180 / Math.PI];

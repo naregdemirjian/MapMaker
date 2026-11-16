@@ -20,6 +20,8 @@ export interface ExportSettings {
   appVersion: string;
   historicalRange?: [string, string];
   notes?: string;
+  /** Credit lines for the datasets drawn in the frames. */
+  credits?: string[];
 }
 
 export interface ExportJob {
@@ -77,6 +79,7 @@ export function finishJob(job: ExportJob): { manifest: string; guide: string } {
     transparentBackground: s.transparent,
     alpha: 'straight (unpremultiplied), 8-bit PNG, sRGB',
     passes: s.passes,
+    dataCredits: s.credits ?? [],
     checksums: job.checksums,
   };
   const manifestPath = join(job.dir, 'manifest.json');
@@ -96,6 +99,7 @@ export function finishJob(job: ExportJob): { manifest: string; guide: string } {
     '',
     'The "beauty" pass, if present, is everything combined: use it to check your composite.',
     '',
+    ...(s.credits?.length ? ['Map data (credit in your film where the licence asks for it):', ...s.credits.map((c) => `  ${c}`), ''] : []),
     `Rendered from project version ${s.projectHead} with Map Maker ${s.appVersion}.`,
   ];
   const guidePath = join(job.dir, 'COMPOSITING_GUIDE.txt');

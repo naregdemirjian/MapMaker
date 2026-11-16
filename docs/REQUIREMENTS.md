@@ -1,7 +1,7 @@
 # Map Maker: requirements checklist
 
 Every major requirement from the master specification and the user's later answers, with its implementation and test
-status. Last updated: 16 November 2026 (version 0.2.0, after the first testing and refinement stage).
+status. Last updated: 16 November 2026 (version 0.2.0 plus the Earth basemap, second session of 16 November).
 
 **Status** (the user's classification):
 **Tested** = fully implemented and tested ·
@@ -18,7 +18,7 @@ status. Last updated: 16 November 2026 (version 0.2.0, after the first testing a
 | Requirement | Status | Evidence | Notes |
 | --- | --- | --- | --- |
 | Single user, local, offline, no accounts or cloud | Tested | `e2e/*` | The data service only accepts connections from this computer |
-| Runs on the user's Windows 10 PC | Needs testing | none on Windows | Built and tested on Linux in Chrome. Interim form: local service + browser (DECISIONS D2). Not yet run on Windows |
+| Runs on the user's Windows 10 PC | Needs testing | every test on Windows (GitHub Actions, Windows Server) | Desktop app with installer (D2 reversed); all unit and interface tests pass on Windows, including the desktop app. Not yet tried on the user's own PC |
 | Projects: create, open, switch | Tested | `storage`, `e2e/vertical-slice` | |
 | Autosave of every change as one atomic step | Tested | `storage`, `recovery` | |
 | Survives closing and restarting the app | Tested | `e2e/vertical-slice` step 10 (service stopped and restarted) | |
@@ -29,7 +29,7 @@ status. Last updated: 16 November 2026 (version 0.2.0, after the first testing a
 | Damaged project files detected, never used silently | Tested | `recovery` (damaged page, destroyed header, truncation) | New in 0.2.0 |
 | Recovery of a damaged project from its newest healthy backup | Tested | `recovery` (also skips damaged backups) | New in 0.2.0; offered by the interface when a project will not open. Its interface path is not driven by an automated test |
 | Malformed data inside a project reported, never crashes | Tested | `recovery` | Reported in History Health as broken references |
-| Schema migrations for future versions | Partial | none | Mechanism in place; only schema version 1 exists |
+| Schema migrations for future versions | Tested | `event-groups` | Version 1 files upgrade to version 2 on opening, after a backup; newer files are refused untouched |
 | Reopening returns to the same view and date | Tested | `e2e/vertical-slice` step 10 | Remembered by the browser per project |
 
 ## Map, geography and coordinates
@@ -38,9 +38,10 @@ status. Last updated: 16 November 2026 (version 0.2.0, after the first testing a
 | --- | --- | --- | --- |
 | Interactive map: pan, zoom, rotate | Tested | `camera`, `e2e/vertical-slice` step 2 | Fixed in 0.2.0: wheel zoom jumped away from the cursor |
 | Coordinate handling, any projection, zoom 0 to city level | Tested | `camera` (round trips to 0.001 px; sub-metre at zoom 16) | |
-| Map styles and geographical detail | Partial | | One style. Per-layer opacity and border width are stored but have no editor. No terrain, coastlines, rivers or cities (Stages 8, 10) |
-| Earth basemap with real data (coastlines, borders) | Blocked | | Natural Earth data cannot be downloaded in this development environment. Proposal: a session with network access, or the user downloads the files, plus a GeoJSON import (Stage 0/2) |
-| Existing administrative boundaries | Blocked | | Same reason (GADM / Natural Earth). Region picker and coastline clipping depend on it (Stage 2) |
+| Map styles and geographical detail | Partial | `basemap` | One style. Land, lakes and coastlines on Earth (1:110m and 1:50m). Per-layer opacity and border width are stored but have no editor. No terrain, rivers or cities (Stages 8, 10) |
+| Earth basemap with real data (coastlines, borders) | Tested | `basemap` (decoding, land share, places on land and sea across 180° and the poles, randomised culling), `e2e/vertical-slice` steps 3 and 13 | Natural Earth v5.1.2: land, lakes, coastlines, and present-day borders as a dashed drawing guide (never exported). Per-world switch, undoable. 1:10m (city-scale coasts) not yet included |
+| Existing administrative boundaries | Partial | | Present-day country borders are shown as a guide only. Loading them as parcel edges (region picker) is still to do (Stage 2) |
+| Coastline clipping (paint loosely over the sea) | Tested | `e2e/vertical-slice` step 16 (grid of points inside two countries: sea shows the ocean, land keeps the colour, labels on land, undo), `basemap` | At drawing time, per layer ("Territory ends at the coast", on by default). Lakes stay water. Areas in the inspector still include the sea; coastlines do not yet change over time (Stage 8) |
 | Custom boundaries that follow no real division | Tested | `scenarios`, `geometry-worlds`, `e2e/*` | |
 | Freehand drawing (territory brush) | Tested | `stroke`, `e2e/*` | Smoothing, irregularity, detail |
 | Precise point-by-point shapes | Tested | `e2e/workflows` step 1 | |
@@ -63,7 +64,7 @@ status. Last updated: 16 November 2026 (version 0.2.0, after the first testing a
 | Fictional planet with custom geography, no real data needed | Partial | `geometry-worlds`, `e2e/workflows` | Territories can be drawn on a blank world of any radius. Terrain and planet generation not implemented (Stage 8) |
 | No Earth-specific assumptions | Tested | `geometry-worlds` (areas follow each world's radius) | |
 | Custom projections | Partial | `camera`, `e2e/workflows` step 8 | Four projections for shots. The world-building view has no projection choice; flat (non-spherical) coordinate systems are not implemented |
-| Separate timelines per world | Partial | `geometry-worlds` | Territorial history is per world. Events and entities are shared by the project (DECISIONS D8); the event list shows every world's events (decision pending with the user) |
+| Separate timelines per world | Tested | `geometry-worlds`, `event-groups`, `e2e/workflows` step 7 | Territorial history is per world. Events belong to the project and are grouped by the user (D8): the timeline shows the chosen groups; an event can be in several |
 | Moon, planets, solar system, exoplanets, nearby stars (50 light-years), Milky Way, galaxies | Not implemented | | Blank spheres with correct radii only (Stages 8, 11) |
 
 ## Time and history
@@ -159,4 +160,6 @@ status. Last updated: 16 November 2026 (version 0.2.0, after the first testing a
 | TIFF sequences | Not implemented | | Stage 10 |
 | SVG | Not implemented | | Stage 10 |
 | Selected geographical regions | Partial | | By framing the camera; no crop tool |
+| Dataset credits travel with exports | Tested | `e2e/vertical-slice` step 13 | `manifest.json` (`dataCredits`) and `COMPOSITING_GUIDE.txt`; all datasets listed with licences under Worlds > Data sources and credits |
+| Land as its own export pass | Tested | `e2e/*` (passes still stack into the full picture) | Empty for worlds without Earth's geography |
 | Shots pinned to a saved version | Not implemented | | The manifest records the project's save point |

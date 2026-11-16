@@ -9,6 +9,7 @@ import { lonLatToVec, E7 } from '../../geo-kernel/vec.ts';
 import { cameraAt, timeAt, overlaysAt, drawOverlays, type ShotSettings } from '../../presentation/sequence.ts';
 import { parseJSON } from '../../temporal-engine/engine.ts';
 import { compare, fromStore } from '../../core-time/index.ts';
+import { basemapSourceOf } from '../../world-model/world-settings.ts';
 import * as cmd from '../../domain/commands.ts';
 
 type Drag =
@@ -72,11 +73,12 @@ export function MapView() {
     ctx.clearRect(0, 0, c.width, c.height);
     ctx.setTransform(dpr, 0, 0, dpr, frame.x * dpr, frame.y * dpr);
     const layers = s.world.all('layer').filter((l) => l.space_id === s.spaceId && l.kind === 'partition' && (shot ? (shot.layers.length ? shot.layers.includes(l.id) : l.visible) : l.visible)).sort((a, b) => a.sort_order - b.sort_order).map((l) => l.id);
-    const passes = new Set<PassName>(['background', 'fills', 'borders']);
+    const passes = new Set<PassName>(['background', 'land', 'fills', 'borders']);
+    const basemap = basemapSourceOf(s.world.get('map_space', s.spaceId)) === 'natural-earth' ? s.basemap : null;
     if (!shot || shot.graticule) passes.add('graticule');
     if (!shot || shot.labels) passes.add('labels');
     try {
-      s.renderer.render(ctx, view, s.world, s.engine, s.spaceId, time, { passes, transparent: !!shot?.transparent, layerIds: layers });
+      s.renderer.render(ctx, view, s.world, s.engine, s.spaceId, time, { passes, transparent: !!shot?.transparent, layerIds: layers, basemap, referenceBorders: !shot && s.referenceBorders });
     } catch (e) {
       console.error(e);
     }
@@ -185,7 +187,7 @@ export function MapView() {
 
   const snapRadians = () => Math.max(5e-9, 4 * radiansPerPixel(view));
 
-  function onPointerDown(e: PointerEvent & { currentTarget: HTMLCanvasElement }) {
+  function onPointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
     if (!s.world) return;
     e.currentTarget.setPointerCapture(e.pointerId);
     const p = local(e);
@@ -204,7 +206,7 @@ export function MapView() {
     if (wantsPan) drag.current = { kind: 'pan', x: e.clientX, y: e.clientY, moved: 0, startX: p[0], startY: p[1] };
   }
 
-  function onPointerMove(e: PointerEvent) {
+  function onPointerMove(e: React.PointerEvent<HTMLCanvasElement>) {
     const p = local(e);
     const d = drag.current;
     if (d.kind === 'pan') {
@@ -228,7 +230,7 @@ export function MapView() {
     }
   }
 
-  function onPointerUp(e: PointerEvent) {
+  function onPointerUp(e: React.PointerEvent<HTMLCanvasElement>) {
     const d = drag.current;
     drag.current = { kind: 'none' };
     const p = local(e);
@@ -298,7 +300,7 @@ export function MapView() {
     return () => window.removeEventListener('keydown', key);
   });
 
-  function onDoubleClick(e: MouseEvent) {
+  function onDoubleClick(e: React.MouseEvent<HTMLCanvasElement>) {
     if (presentation) return;
     if (s.tool === 'polygon') { finishPolygon(); return; }
     if (s.tool === 'vertex' && s.world) {
@@ -322,7 +324,7 @@ export function MapView() {
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onDoubleClick={onDoubleClick}
-        onContextMenu={(e: Event) => e.preventDefault()}
+        onContextMenu={(e) => e.preventDefault()}
         data-testid="map-canvas"
       />
       {!presentation && <MapHud view={view} />}
