@@ -168,7 +168,7 @@ export function Timeline() {
   const localX = (e: { clientX: number }) => e.clientX - ref.current!.getBoundingClientRect().left;
   const localY = (e: { clientY: number }) => e.clientY - ref.current!.getBoundingClientRect().top;
 
-  function onDown(e: PointerEvent & { currentTarget: HTMLCanvasElement }) {
+  function onDown(e: React.PointerEvent<HTMLCanvasElement>) {
     e.currentTarget.setPointerCapture(e.pointerId);
     const x = localX(e), y = localY(e);
     if (e.button === 1 || e.button === 2 || e.shiftKey) { drag.current = { kind: 'pan', x, start, end }; return; }
@@ -182,7 +182,7 @@ export function Timeline() {
     store.setTime(timeAtX(x));
   }
 
-  function onMove(e: PointerEvent) {
+  function onMove(e: React.PointerEvent<HTMLCanvasElement>) {
     const d = drag.current;
     if (!d) return;
     const x = localX(e);
@@ -224,7 +224,7 @@ export function Timeline() {
         onPointerMove={onMove}
         onPointerUp={() => (drag.current = null)}
         onDoubleClick={() => { store.fitTimeline(); store.notify(); }}
-        onContextMenu={(e: Event) => e.preventDefault()}
+        onContextMenu={(e) => e.preventDefault()}
         data-testid="timeline"
       />
     </div>

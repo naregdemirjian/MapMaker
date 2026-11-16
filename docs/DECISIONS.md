@@ -38,12 +38,12 @@ model, the history engine, the parcel kernel, storage or the export writer.
 - **Consequences.** The same SQLite file format and features (write-ahead log, full sync, VACUUM INTO). Requires
   Node.js 22.13 or newer. This may simply be kept.
 
-### D4. Minimal React type declarations (interim)
+### D4. Minimal React type declarations (reversed, 16 November 2026)
 
-- **Why.** React's type package was missing.
-- **Consequences.** The interface code (`src/ui/`) gets weaker type checking than the rest. The core modules are fully
-  checked.
-- **Way back.** Install `@types/react` and remove `types/react-shim.d.ts`.
+- **Why it existed.** React's type package was missing in the first session.
+- **Reversed.** `@types/react` and `@types/react-dom` 19.2 are installed and the shim is gone; the interface's event
+  handlers lost their `any` annotations, so all of `src/ui/` is now checked as strictly as the rest. Doing so found two
+  loosely typed menu values (now cast to their exact types); no behaviour changed.
 
 ### D5. Tests use Node's own test runner instead of Vitest and fast-check
 

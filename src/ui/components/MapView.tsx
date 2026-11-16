@@ -187,7 +187,7 @@ export function MapView() {
 
   const snapRadians = () => Math.max(5e-9, 4 * radiansPerPixel(view));
 
-  function onPointerDown(e: PointerEvent & { currentTarget: HTMLCanvasElement }) {
+  function onPointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
     if (!s.world) return;
     e.currentTarget.setPointerCapture(e.pointerId);
     const p = local(e);
@@ -206,7 +206,7 @@ export function MapView() {
     if (wantsPan) drag.current = { kind: 'pan', x: e.clientX, y: e.clientY, moved: 0, startX: p[0], startY: p[1] };
   }
 
-  function onPointerMove(e: PointerEvent) {
+  function onPointerMove(e: React.PointerEvent<HTMLCanvasElement>) {
     const p = local(e);
     const d = drag.current;
     if (d.kind === 'pan') {
@@ -230,7 +230,7 @@ export function MapView() {
     }
   }
 
-  function onPointerUp(e: PointerEvent) {
+  function onPointerUp(e: React.PointerEvent<HTMLCanvasElement>) {
     const d = drag.current;
     drag.current = { kind: 'none' };
     const p = local(e);
@@ -300,7 +300,7 @@ export function MapView() {
     return () => window.removeEventListener('keydown', key);
   });
 
-  function onDoubleClick(e: MouseEvent) {
+  function onDoubleClick(e: React.MouseEvent<HTMLCanvasElement>) {
     if (presentation) return;
     if (s.tool === 'polygon') { finishPolygon(); return; }
     if (s.tool === 'vertex' && s.world) {
@@ -324,7 +324,7 @@ export function MapView() {
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onDoubleClick={onDoubleClick}
-        onContextMenu={(e: Event) => e.preventDefault()}
+        onContextMenu={(e) => e.preventDefault()}
         data-testid="map-canvas"
       />
       {!presentation && <MapHud view={view} />}

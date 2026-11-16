@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useStore, store } from '../store.ts';
 import { Api } from '../api.ts';
 import * as cmd from '../../domain/commands.ts';
-import { type Instant, add, fromJSONValue, toJSONValue, fromStore, compare, gregorian } from '../../core-time/index.ts';
+import { type Instant, add, fromJSONValue, toJSONValue, fromStore, compare, gregorian, type Precision } from '../../core-time/index.ts';
 import { defaultShot, timeAt, cameraAt, RESOLUTIONS, FRAME_RATES, type ShotSettings, type Ease } from '../../presentation/sequence.ts';
 import { PASS_DEFS, runExport } from '../../presentation/export-driver.ts';
 import { PROJECTIONS, type ProjectionName } from '../../render-engine/camera.ts';
@@ -106,19 +106,19 @@ export function ShotEditor() {
     <aside className="right" data-testid="shot-editor">
       <div className="panel">
         <h3>Shot</h3>
-        <label>Name<input value={name} onChange={(e: any) => setName(e.target.value)} onBlur={() => name.trim() && name !== row.name && s.execute((wd) => cmd.updateSequence(wd, row.id, { name: name.trim() }))} /></label>
+        <label>Name<input value={name} onChange={(e) => setName(e.target.value)} onBlur={() => name.trim() && name !== row.name && s.execute((wd) => cmd.updateSequence(wd, row.id, { name: name.trim() }))} /></label>
         <h4>History shown</h4>
         <label>From<DateField value={startT} onChange={(t) => setTimeKey('start', t)} testId="shot-from" /></label>
         <label>To<DateField value={endT} onChange={(t) => setTimeKey('end', t)} testId="shot-to" /></label>
-        <label>Pacing<select value={shot.time[0].ease} onChange={(e: any) => update({ time: shot.time.map((k) => ({ ...k, ease: e.target.value as Ease })) })}>
+        <label>Pacing<select value={shot.time[0].ease} onChange={(e) => update({ time: shot.time.map((k) => ({ ...k, ease: e.target.value as Ease })) })}>
           <option value="linear">Even</option><option value="smooth">Ease in and out</option>
         </select></label>
         <h4>Screen time</h4>
         <div className="two">
           <label>Seconds<NumberField min={0.1} max={3600} step={0.5} value={Number(seconds.toFixed(3))} onCommit={(n) => setFrames(shot.fps, n)} testId="shot-seconds" /></label>
-          <label>Frame rate<select value={shot.fps} onChange={(e: any) => setFrames(Number(e.target.value), seconds)}>{FRAME_RATES.map((f) => <option key={f} value={f}>{f} fps</option>)}</select></label>
+          <label>Frame rate<select value={shot.fps} onChange={(e) => setFrames(Number(e.target.value), seconds)}>{FRAME_RATES.map((f) => <option key={f} value={f}>{f} fps</option>)}</select></label>
         </div>
-        <label>Resolution<select value={res} onChange={(e: any) => { const r = RESOLUTIONS.find((x) => x.id === e.target.value); if (r) update({ width: r.width, height: r.height }); }}>
+        <label>Resolution<select value={res} onChange={(e) => { const r = RESOLUTIONS.find((x) => x.id === e.target.value); if (r) update({ width: r.width, height: r.height }); }}>
           {RESOLUTIONS.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}{res === 'custom' && <option value="custom">Custom {shot.width} x {shot.height}</option>}
         </select></label>
         <div className="two">
@@ -131,27 +131,27 @@ export function ShotEditor() {
           <button onClick={() => setCameraKey('start')} data-testid="set-start-view">Use this view at the start</button>
           <button onClick={() => setCameraKey('end')} data-testid="set-end-view">Use this view at the end</button>
         </div>
-        <label>Projection<select value={shot.camera[0].camera.projection} onChange={(e: any) => update({ camera: shot.camera.map((k) => ({ ...k, camera: { ...k.camera, projection: e.target.value as ProjectionName } })) })}>
+        <label>Projection<select value={shot.camera[0].camera.projection} onChange={(e) => update({ camera: shot.camera.map((k) => ({ ...k, camera: { ...k.camera, projection: e.target.value as ProjectionName } })) })}>
           {PROJECTIONS.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select></label>
-        <label>Rotation (degrees)<input type="number" value={Math.round(liveCamera.rotation)} onChange={(e: any) => s.set({ presentCamera: { ...liveCamera, rotation: Number(e.target.value) } })} /></label>
+        <label>Rotation (degrees)<input type="number" value={Math.round(liveCamera.rotation)} onChange={(e) => s.set({ presentCamera: { ...liveCamera, rotation: Number(e.target.value) } })} /></label>
         <h4>Text</h4>
-        <label className="check"><input type="checkbox" checked={!!dateOverlay} onChange={(e: any) => update({ overlays: e.target.checked ? [...shot.overlays, defaultShot(shot.spaceId, liveCamera, startT, endT, shot.fps, seconds).overlays[0]] : shot.overlays.filter((o) => o.kind !== 'date') })} /> Show the date</label>
-        {dateOverlay && <label>Date detail<select value={dateOverlay.datePrecision} onChange={(e: any) => update({ overlays: shot.overlays.map((o) => (o.kind === 'date' ? { ...o, datePrecision: e.target.value } : o)) })}>
+        <label className="check"><input type="checkbox" checked={!!dateOverlay} onChange={(e) => update({ overlays: e.target.checked ? [...shot.overlays, defaultShot(shot.spaceId, liveCamera, startT, endT, shot.fps, seconds).overlays[0]] : shot.overlays.filter((o) => o.kind !== 'date') })} /> Show the date</label>
+        {dateOverlay && <label>Date detail<select value={dateOverlay.datePrecision} onChange={(e) => update({ overlays: shot.overlays.map((o) => (o.kind === 'date' ? { ...o, datePrecision: e.target.value as Precision } : o)) })}>
           <option value="year">Year</option><option value="month">Month</option><option value="day">Day</option><option value="minute">Hour and minute</option><option value="second">Seconds</option>
         </select></label>}
-        <label>Title<input value={title?.text ?? ''} placeholder="(none)" onChange={(e: any) => {
+        <label>Title<input value={title?.text ?? ''} placeholder="(none)" onChange={(e) => {
           const text = e.target.value;
           const rest = shot.overlays.filter((o) => o.id !== 'title');
           update({ overlays: text ? [...rest, { id: 'title', kind: 'text', text, x: 0.5, y: 0.1, size: 56, color: '#f4efe6', background: null, align: 'center', inFrame: 0, outFrame: shot.frames - 1, fade: Math.round(shot.fps / 2), datePrecision: 'day' }] : rest });
         }} /></label>
         <h4>Look</h4>
-        <label className="check"><input type="checkbox" checked={shot.graticule} onChange={(e: any) => update({ graticule: e.target.checked })} /> Latitude and longitude grid</label>
-        <label className="check"><input type="checkbox" checked={shot.labels} onChange={(e: any) => update({ labels: e.target.checked })} /> Country labels</label>
-        <label className="check"><input type="checkbox" checked={shot.transparent} onChange={(e: any) => update({ transparent: e.target.checked })} /> Transparent background (beauty pass)</label>
+        <label className="check"><input type="checkbox" checked={shot.graticule} onChange={(e) => update({ graticule: e.target.checked })} /> Latitude and longitude grid</label>
+        <label className="check"><input type="checkbox" checked={shot.labels} onChange={(e) => update({ labels: e.target.checked })} /> Country labels</label>
+        <label className="check"><input type="checkbox" checked={shot.transparent} onChange={(e) => update({ transparent: e.target.checked })} /> Transparent background (beauty pass)</label>
         <h4>Export for Premiere</h4>
         {PASS_DEFS.map((d) => (
-          <label key={d.name} className="check"><input type="checkbox" checked={passes.includes(d.name)} onChange={(e: any) => setPasses(e.target.checked ? [...passes, d.name] : passes.filter((p) => p !== d.name))} /> {d.label}</label>
+          <label key={d.name} className="check"><input type="checkbox" checked={passes.includes(d.name)} onChange={(e) => setPasses(e.target.checked ? [...passes, d.name] : passes.filter((p) => p !== d.name))} /> {d.label}</label>
         ))}
         <p className="muted">{shot.frames} frames × {passes.length} passes at {shot.width} x {shot.height}, PNG with transparency.</p>
         {progress ? (
@@ -194,7 +194,7 @@ export function ShotTimeline() {
       <div className="shot-controls">
         <button onClick={() => s.set({ playing: !s.playing })} data-testid="play">{s.playing ? 'Pause' : 'Play'}</button>
         <button onClick={() => s.set({ shotFrame: 0, presentCamera: null, playing: false })}>⏮</button>
-        <input type="range" min={0} max={shot.frames - 1} value={s.shotFrame} onChange={(e: any) => s.set({ shotFrame: Number(e.target.value), presentCamera: null, playing: false })} className="frame-slider" data-testid="frame-slider" />
+        <input type="range" min={0} max={shot.frames - 1} value={s.shotFrame} onChange={(e) => s.set({ shotFrame: Number(e.target.value), presentCamera: null, playing: false })} className="frame-slider" data-testid="frame-slider" />
         <button onClick={() => s.set({ shotFrame: shot.frames - 1, presentCamera: null, playing: false })}>⏭</button>
         <span className="frame-info" data-testid="frame-info">Frame {s.shotFrame + 1} / {shot.frames} · {(s.shotFrame / shot.fps).toFixed(2)} s · <b>{gregorian.format(t, 'minute')}</b></span>
       </div>

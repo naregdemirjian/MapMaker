@@ -25,8 +25,8 @@ The approved architecture is the Claude Doc "Map Maker — Technical Architectur
 - **Coastline clipping done.** Territory painted loosely over the sea ends at the coast (per-layer switch), lakes stay
   water, labels stay on land.
 - **Biggest open issues.** (1) The geometry kernel rebuilds the whole map's structure on every edit; this must become incremental
-  before real boundaries are loaded into it as parcel edges. (2) D1–D4 (Canvas renderer, browser instead of Electron,
-  loose interface types) still to reverse.
+  before real boundaries are loaded into it as parcel edges. (2) D1 and D2 (Canvas renderer, browser instead of
+  Electron) still to reverse; D4 (loose interface types) is reversed.
 
 ## How to run it
 
@@ -148,7 +148,6 @@ Remaining bottlenecks:
 7. **A control or occupation layer looks like a second fill** over the political layer; hatching and outline styles are needed.
 8. **New layers and alternative versions are named in the browser's own small prompt box**, which is plain but works.
 9. **View memory is per browser** and is lost if the app's port changes.
-10. **Interface type checking is loose** (D4).
 
 ## Defects found and fixed in the testing stage (0.2.0)
 
@@ -172,14 +171,13 @@ Remaining bottlenecks:
 | --- | --- | --- |
 | 15–16 Nov 2026 | Stage work from an empty folder: time system and kernel; world model, engine and commands; data service; interface; end-to-end fixes; documentation (0.1.0) | `2a564fc` → `0966b07` |
 | 16 Nov 2026 | Testing and refinement: scenario, geometry, world, recovery, camera and A/B tests; second interface test; benchmark; 11 defects fixed; performance work (0.2.0) | `6a3c64a` → `343d84c` |
-| 16 Nov 2026 (2nd) | Package installs work; Natural Earth basemap (land, lakes, coastlines, present-day borders guide), land export pass, data sources dialog and export credits; coastline clipping with land-aware labels | `071deac` → latest |
+| 16 Nov 2026 (2nd) | Package installs work; Natural Earth basemap (land, lakes, coastlines, present-day borders guide), land export pass, data sources dialog and export credits; coastline clipping with land-aware labels; real React types (D4 reversed) | `071deac` → latest |
 
 ## Next priorities
 
 1. The user runs `Start Map Maker.bat` on Windows and reports what happens.
-2. Reverse D4 (real React types), D2 (Electron and installer),
-   D1 (deck.gl renderer).
-3. With the user's agreement: make the geometry kernel's rebuild incremental (needed before real coastlines).
+2. Reverse D2 (Electron and installer) and D1 (deck.gl renderer).
+3. With the user's agreement: make the geometry kernel's rebuild incremental (needed before real boundaries become parcel edges).
 4. Finish Stage 2: border pen, split and merge tools, region picker, administrative boundaries, coastline clipping.
 5. Finish Stage 3: custom event types, date comparison, dated border-point moves, per-world event lists.
 6. Stage 4: line, point and area layers, layer styles (hatching, outlines), relationships, lifespans.
