@@ -330,6 +330,52 @@ try {
     assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.selection), null, 'nothing is selected after a right-click');
   });
 
+  await h.step('Border pen: draw in pieces, zoom between them, close and reopen, carry on, finish', async () => {
+    await h.setDate('1985');
+    await page.getByTestId('tool-pen').click();
+    await page.getByTestId('paint-owner').selectOption({ label: 'Zoomland' });
+    const { cx, cy } = await h.centre();
+    // A square planned in map positions.
+    const a = await h.toLL([cx + 120, cy - 180]), b = await h.toLL([cx + 220, cy - 80]);
+    const corners: LL[] = [a, [b[0], a[1]], b, [a[0], b[1]]];
+    const draftPoints = () => page.evaluate(() => (window as any).__mapmaker.store.draft?.points.length ?? 0);
+    // Piece 1: two sides in one drag.
+    let q = await h.toPage(corners[0]);
+    await page.mouse.move(q[0], q[1]); await page.mouse.down();
+    for (const k of [1, 2]) { q = await h.toPage(corners[k]); await page.mouse.move(q[0], q[1], { steps: 8 }); }
+    await page.mouse.up();
+    const afterPiece1 = await draftPoints();
+    assert.ok(afterPiece1 >= 3, `the first piece is kept after letting go (${afterPiece1} points)`);
+    // Zoom out a little between pieces, then click the last corner (a piece of one point).
+    await page.mouse.move(cx, cy); await page.mouse.wheel(0, 150); await page.waitForTimeout(100);
+    q = await h.toPage(corners[3]); await page.mouse.click(q[0], q[1]);
+    assert.equal(await draftPoints(), afterPiece1 + 1);
+    await page.getByTestId('draft-undo').click();
+    assert.equal(await draftPoints(), afterPiece1, 'the last piece is taken back');
+    q = await h.toPage(corners[3]); await page.mouse.click(q[0], q[1]);
+    await page.getByTestId('draft-name').fill('Zoomland claim');
+    await page.waitForTimeout(500); // drafts are saved in the project folder shortly after each change
+    await h.screenshot('border-pen-draft');
+    // Close and reopen: the draft is still there.
+    await page.reload();
+    await page.locator('.project-row').first().click();
+    await page.getByTestId('map-canvas').waitFor();
+    await page.waitForFunction(() => (window as any).__mapmaker.store.drafts.length === 1);
+    await page.getByTestId('tool-pen').click();
+    assert.equal(await page.getByTestId('draft-name').inputValue(), 'Zoomland claim');
+    assert.equal(await draftPoints(), afterPiece1 + 1, 'every point survived closing the app');
+    // Finish with Enter, apply with Enter.
+    await page.keyboard.press('Enter');
+    await page.getByTestId('choice-correct').waitFor();
+    await page.keyboard.press('Enter');
+    await page.getByTestId('choice-correct').waitFor({ state: 'detached' });
+    await h.saved();
+    const mid: LL = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    assert.equal(await h.ownerAt(mid, '1985'), 'Zoomland', 'the finished border painted the square');
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.drafts.length), 0, 'the finished draft is gone');
+    await page.getByTestId('tool-select').click();
+  });
+
   let colours: Record<string, string> = {};
   await h.step('A shot with a camera move at 2.39:1 and 25 fps; inspect every exported pass', async () => {
     colours = await page.evaluate((names) => Object.fromEntries(names.map((n) => [n, (window as any).__mapmaker.store.world.all('entity').find((e: any) => e.name === n).color])), [A, B]);

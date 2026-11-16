@@ -2,7 +2,7 @@
 // Commands run locally first (so the map updates immediately), then are saved in order; if saving
 // fails, the local change is reversed and the project reloaded from disk.
 import { useSyncExternalStore } from 'react';
-import { Api, ApiError, type JournalState, type ProjectInfo } from './api.ts';
+import { Api, ApiError, type JournalState, type ProjectInfo, type BorderDraft } from './api.ts';
 import { World } from '../world-model/world.ts';
 import { Engine } from '../temporal-engine/engine.ts';
 import type { CommandResult } from '../domain/commands.ts';
@@ -15,7 +15,7 @@ import type { Vec3 } from '../geo-kernel/vec.ts';
 import type { StrokeSettings } from '../render-engine/stroke.ts';
 
 export type Mode = 'world' | 'present';
-export type Tool = 'select' | 'lasso' | 'polygon' | 'vertex';
+export type Tool = 'select' | 'lasso' | 'polygon' | 'pen' | 'vertex';
 export type Selection =
   | { kind: 'entity'; id: string }
   | { kind: 'event'; id: string }
@@ -24,7 +24,7 @@ export type Selection =
   | null;
 
 export type PendingEdit =
-  | { kind: 'paint'; spaceId: string; layerId: string; rings: Vec3[][]; value: string | null; sample: [number, number] | null; origin: [number, number]; snap: number }
+  | { kind: 'paint'; spaceId: string; layerId: string; rings: Vec3[][]; value: string | null; sample: [number, number] | null; origin: [number, number]; snap: number; draftId?: string }
   | { kind: 'vertex'; spaceId: string; vertexId: number; to: Vec3 };
 
 export interface Toast { id: number; text: string; kind: 'info' | 'error' }
@@ -172,6 +172,9 @@ class AppStore {
       const spaces = this.world.all('map_space').sort((a, b) => a.sort_order - b.sort_order);
       this.spaceId = spaces[0]?.id ?? '';
       this.restoreView(id);
+      this.drafts = [];
+      this.draftId = null;
+      Api.drafts(id).then((d) => { if (this.projectId === id) this.set({ drafts: d, draftId: d.find((x) => x.spaceId === this.spaceId)?.id ?? null }); }, () => undefined);
       this.layerId = this.world.all('layer').find((l) => l.space_id === this.spaceId && l.kind === 'partition')?.id ?? '';
       this.selection = null;
       this.recordEventId = null;
@@ -185,6 +188,69 @@ class AppStore {
       this.busy = null;
       this.notify();
     }
+  }
+
+  // ---------------------------------------------------------------- border pen drafts
+
+  /** Unfinished border-pen lines of the open project (kept in its folder, outside the history). */
+  drafts: BorderDraft[] = [];
+  draftId: string | null = null;
+  private draftTimer: ReturnType<typeof setTimeout> | undefined;
+
+  get draft(): BorderDraft | null { return this.drafts.find((d) => d.id === this.draftId) ?? null; }
+  /** Finish the current draft (set by the map view, which knows the zoom for snapping). */
+  finishDraft: () => void = () => {};
+
+  private saveDraftsSoon() {
+    const id = this.projectId;
+    if (!id) return;
+    clearTimeout(this.draftTimer);
+    const drafts = this.drafts;
+    this.draftTimer = setTimeout(() => { Api.saveDrafts(id, drafts).catch((e: Error) => this.toast(`The border draft could not be saved: ${e.message}`, 'error')); }, 300);
+  }
+
+  private changeDraft(id: string, change: (d: BorderDraft) => BorderDraft | null) {
+    this.drafts = this.drafts.flatMap((d) => { if (d.id !== id) return [d]; const n = change(d); return n ? [{ ...n, updated: new Date().toISOString() }] : []; });
+    if (this.draftId && !this.drafts.some((d) => d.id === this.draftId)) this.draftId = null;
+    this.saveDraftsSoon();
+    this.notify();
+  }
+
+  /** Start a new draft on the map being viewed (it becomes the current one). */
+  newDraft(): string {
+    const n = this.drafts.filter((d) => d.spaceId === this.spaceId).length + 1;
+    const d: BorderDraft = { id: `draft_${Date.now().toString(36)}_${Math.round(Math.random() * 1e6).toString(36)}`, name: `Border draft ${n}`, spaceId: this.spaceId, owner: this.paintValue, points: [], pieces: [], updated: new Date().toISOString() };
+    this.drafts = [...this.drafts, d];
+    this.draftId = d.id;
+    this.saveDraftsSoon();
+    this.notify();
+    return d.id;
+  }
+
+  /** Add a point to the current draft; `newPiece` starts a new piece (pressing again after letting go). */
+  penAdd(ll: [number, number], newPiece: boolean) {
+    const id = this.draft && this.draft.spaceId === this.spaceId ? this.draftId! : this.newDraft();
+    this.changeDraft(id, (d) => ({ ...d, points: [...d.points, ll], pieces: newPiece ? [...d.pieces, d.points.length] : d.pieces }));
+  }
+
+  /** Take back the last piece drawn. */
+  penUndoPiece() {
+    const d = this.draft;
+    if (!d || !d.pieces.length) return;
+    const from = d.pieces[d.pieces.length - 1];
+    this.changeDraft(d.id, (x) => ({ ...x, points: x.points.slice(0, from), pieces: x.pieces.slice(0, -1) }));
+  }
+
+  discardDraft(id: string) { this.changeDraft(id, () => null); }
+  renameDraft(id: string, name: string) { this.changeDraft(id, (d) => ({ ...d, name })); }
+  setDraftOwner(id: string, owner: string | null) { this.changeDraft(id, (d) => ({ ...d, owner })); }
+
+  /** Make another draft the current one (and show its map and owner). */
+  resumeDraft(id: string) {
+    const d = this.drafts.find((x) => x.id === id);
+    if (!d) return;
+    const layerId = d.spaceId === this.spaceId ? this.layerId : this.world?.all('layer').find((l) => l.space_id === d.spaceId && l.kind === 'partition')?.id ?? '';
+    this.set({ draftId: id, spaceId: d.spaceId, layerId, paintValue: d.owner, tool: 'pen' });
   }
 
   closeProject() {

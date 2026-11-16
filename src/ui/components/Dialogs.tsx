@@ -78,6 +78,8 @@ function PaintPrompt({ p }: { p: Extract<PendingEdit, { kind: 'paint' }> }) {
       s.execute((wd, en) => cmd.paintTerritory(wd, en, { ...base, mode: { kind: 'new', eventId: target, at }, transition: ev.end_day !== null ? transition : null }));
       s.set({ lastPaintEvent: target });
     }
+    // A border-pen draft is done once it has been applied.
+    if (p.draftId && !s.offline) s.discardDraft(p.draftId);
     close();
   };
   useEffect(() => {

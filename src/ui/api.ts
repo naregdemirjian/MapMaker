@@ -7,6 +7,15 @@ export interface ProjectInfo { id: string; name: string; dir: string; modified: 
 export interface VersionInfo { id: number; label: string; kind: string; created_at: string; journal_seq: number }
 export interface BackupInfo { file: string; created_at: string; bytes: number }
 
+/** An unfinished border drawn with the border pen (map positions), kept between sessions. */
+export interface BorderDraft {
+  id: string; name: string; spaceId: string; owner: string | null;
+  points: Array<[number, number]>;
+  /** Index of the first point of each piece drawn (so the last piece can be taken back). */
+  pieces: number[];
+  updated: string;
+}
+
 export class ApiError extends Error {
   status: number;
   code?: string;
@@ -51,6 +60,8 @@ export const Api = {
     if (!res.ok) throw new ApiError(res.status, body.error ?? `Upload failed (${res.status})`, body.code);
     return body;
   },
+  drafts: (id: string) => call<BorderDraft[]>('GET', `${p(id)}/drafts`),
+  saveDrafts: (id: string, drafts: BorderDraft[]) => call<{ ok: boolean }>('PUT', `${p(id)}/drafts`, drafts),
   chooseFolder: (start?: string) => call<{ path: string | null }>('POST', '/api/choose-folder', { start }),
   startExport: (id: string, settings: unknown) => call<{ jobId: string; dir: string }>('POST', `${p(id)}/exports`, settings),
   sendFrame: (id: string, job: string, pass: string, frame: number, w: number, h: number, rgba: Uint8Array) =>

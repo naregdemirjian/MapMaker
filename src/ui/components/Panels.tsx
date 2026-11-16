@@ -91,8 +91,34 @@ const TOOLS: Array<{ id: Tool; name: string; hint: string }> = [
   { id: 'select', name: 'Select', hint: 'Click to inspect a place; drag to move the map; wheel to zoom; Alt+wheel to rotate.' },
   { id: 'lasso', name: 'Territory brush', hint: 'Draw around an area freehand. It is given to the owner chosen on the right.' },
   { id: 'polygon', name: 'Precise shape', hint: 'Click points; double-click or Enter to finish; Esc to cancel.' },
+  { id: 'pen', name: 'Border pen', hint: 'Draw a border at your own pace: drag or click, let go, pan and zoom, carry on later. Enter finishes; Backspace takes back the last piece. Drafts are kept with the project.' },
   { id: 'vertex', name: 'Border points', hint: 'Drag a border point to correct the border shape for all time. Double-click a border to add a point; Delete removes the point under the cursor.' },
 ];
+
+/** The border pen's draft: which one, take back a piece, finish, discard, resume another. */
+function PenControls() {
+  const s = useStore();
+  const d = s.draft && s.draft.spaceId === s.spaceId ? s.draft : null;
+  const others = s.drafts.filter((x) => x.id !== d?.id);
+  return (
+    <div className="pen-controls" data-testid="pen-controls">
+      {d ? <>
+        <input className="draft-name" value={d.name} onChange={(e) => s.renameDraft(d.id, e.target.value)} title="Name of this draft" data-testid="draft-name" />
+        <span className="muted">{d.points.length} points</span>
+        <button className="small" disabled={!d.pieces.length} onClick={() => s.penUndoPiece()} title="Backspace" data-testid="draft-undo">Take back last piece</button>
+        <button className="small primary" disabled={d.points.length < 3} onClick={() => s.finishDraft()} data-testid="draft-finish">Finish <span className="key">Enter</span></button>
+        <button className="small danger" onClick={() => { if (confirm(`Discard "${d.name}"?`)) s.discardDraft(d.id); }} data-testid="draft-discard">Discard</button>
+        <button className="small" onClick={() => s.newDraft()} title="Keep this draft and start another">New draft</button>
+      </> : <span className="muted">Press on the map to start a border. Let go and carry on whenever you like.</span>}
+      {others.length > 0 && (
+        <select value="" onChange={(e) => e.target.value && s.resumeDraft(e.target.value)} title="Carry on with another draft" data-testid="draft-resume">
+          <option value="">Other drafts ({others.length})…</option>
+          {others.map((x) => <option key={x.id} value={x.id}>{x.name} · {x.points.length} points{x.spaceId !== s.spaceId ? ` · ${s.world?.get('map_space', x.spaceId)?.name ?? 'another map'}` : ''}</option>)}
+        </select>
+      )}
+    </div>
+  );
+}
 
 export function ToolBar() {
   const s = useStore();
@@ -105,14 +131,15 @@ export function ToolBar() {
       {TOOLS.map((t) => (
         <button key={t.id} className={s.tool === t.id ? 'on' : ''} title={t.hint} onClick={() => s.set({ tool: t.id })} data-testid={`tool-${t.id}`}>{t.name}</button>
       ))}
-      {(s.tool === 'lasso' || s.tool === 'polygon') && (
+      {(s.tool === 'lasso' || s.tool === 'polygon' || s.tool === 'pen') && (
         <>
           <label className="inline">Give to
-            <select value={s.paintValue ?? ''} onChange={(e) => s.set({ paintValue: e.target.value || null })} data-testid="paint-owner">
+            <select value={s.paintValue ?? ''} onChange={(e) => { s.set({ paintValue: e.target.value || null }); if (s.tool === 'pen' && s.draft) s.setDraftOwner(s.draft.id, e.target.value || null); }} data-testid="paint-owner">
               <option value="">Nobody (clear territory)</option>
               {owners.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
             </select>
           </label>
+          {s.tool === 'pen' && <PenControls />}
           {s.tool === 'lasso' && (
             <details className="brush-settings">
               <summary title="How freehand outlines are cleaned up">Brush settings ▾</summary>

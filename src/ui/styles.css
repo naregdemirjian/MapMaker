@@ -187,3 +187,5 @@ label.file-button.small { padding: 3px 8px; font-size: 12px; }
 .flag-grid .flag img { width: 64px; height: 48px; object-fit: cover; border: 1px solid var(--line); }
 .flag-grid .flag span { text-align: center; line-height: 1.2; }
 .flag-grid .flag.on { border-color: var(--accent); }
+.pen-controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.pen-controls .draft-name { width: 150px; }

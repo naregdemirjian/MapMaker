@@ -1,6 +1,9 @@
 // Screen-space processing of drawn strokes before they become geometry: simplification, smoothing,
 // controlled irregularity (seeded, so it never changes after drawing), self-crossing removal and
 // orientation. All functions are pure.
+import { geoArea } from 'd3-geo';
+import { lonLatToVec, slerp, type Vec3 } from '../geo-kernel/vec.ts';
+
 export type Pt = [number, number];
 
 export function signedArea(r: Pt[]): number {
@@ -158,4 +161,32 @@ export function processLasso(raw: Pt[], s: StrokeSettings): Pt[][] {
   if (s.smoothness > 0) p = smooth(p, Math.round(s.smoothness), true);
   if (s.irregularity > 0) p = roughen(p, s.irregularity, s.seed, true);
   return splitLoops(p).map(orientInteriorLeft).map((r) => densify(r, 6, true));
+}
+
+/**
+ * A closed outline from map positions (the border pen): used exactly as drawn, with no smoothing,
+ * whatever zoom each piece was drawn at. Oriented so the smaller side is inside (on the left), and
+ * divided into short great-circle steps for the kernel. Null if it encloses nothing.
+ */
+export function ringFromMapPoints(points: Array<[number, number]>, maxStepDeg = 0.5): Vec3[] | null {
+  const pts: Array<[number, number]> = [];
+  for (const p of points) {
+    const last = pts[pts.length - 1];
+    if (!last || Math.abs(last[0] - p[0]) > 1e-9 || Math.abs(last[1] - p[1]) > 1e-9) pts.push(p);
+  }
+  while (pts.length > 1 && Math.abs(pts[0][0] - pts[pts.length - 1][0]) < 1e-9 && Math.abs(pts[0][1] - pts[pts.length - 1][1]) < 1e-9) pts.pop();
+  if (pts.length < 3) return null;
+  // d3 reads a ring going clockwise round a small area as that area; the kernel wants the inside on
+  // the left (anticlockwise). geoArea above a hemisphere means the ring already goes anticlockwise.
+  const area = geoArea({ type: 'Polygon', coordinates: [[...pts, pts[0]]] });
+  const ordered = area > 2 * Math.PI ? pts : [...pts].reverse();
+  const out: Vec3[] = [];
+  for (let i = 0; i < ordered.length; i++) {
+    const a = lonLatToVec(ordered[i][0], ordered[i][1]);
+    const b = lonLatToVec(ordered[(i + 1) % ordered.length][0], ordered[(i + 1) % ordered.length][1]);
+    const ang = (Math.acos(Math.max(-1, Math.min(1, a[0] * b[0] + a[1] * b[1] + a[2] * b[2]))) * 180) / Math.PI;
+    const n = Math.max(1, Math.ceil(ang / maxStepDeg));
+    for (let k = 0; k < n; k++) out.push(slerp(a, b, k / n));
+  }
+  return out;
 }

@@ -2,7 +2,7 @@
 // only thing that writes to project databases. In the later Electron build, the same handlers move
 // behind Electron's internal messaging; nothing else changes.
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
-import { readFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, existsSync, mkdirSync, writeFileSync, renameSync } from 'node:fs';
 import { join, extname } from 'node:path';
 import { spawn } from 'node:child_process';
 import { ProjectRegistry } from './projects.ts';
@@ -123,6 +123,19 @@ export function createAppServer(opts: ServerOptions): { server: Server; registry
     if (action === 'commit' && method === 'POST') {
       const body = await json<{ label: string; diffs: RowDiff[]; baseHead: number }>(req);
       return send(res, 200, { journal: db.commit(body.label, body.diffs, body.baseHead) });
+    }
+    // Border drafts (unfinished border-pen lines): working notes kept in the project folder, outside
+    // the history, so they survive closing the app and never clutter undo.
+    if (action === 'drafts') {
+      const file = join(db.dir, 'drafts.json');
+      if (method === 'GET') return send(res, 200, existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : []);
+      if (method === 'PUT') {
+        const drafts = await json<unknown>(req);
+        if (!Array.isArray(drafts)) throw new HttpError(400, 'Drafts must be a list.');
+        writeFileSync(`${file}.tmp`, JSON.stringify(drafts));
+        renameSync(`${file}.tmp`, file);
+        return send(res, 200, { ok: true });
+      }
     }
     if (action === 'assets') {
       if (parts.length === 4 && method === 'POST') {

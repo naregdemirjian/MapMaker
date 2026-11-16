@@ -4,7 +4,8 @@ import {
   makeView, screenToLonLat, lonLatToScreen, panCamera, zoomCameraAt, radiansPerPixel, type View, type Camera,
 } from '../../render-engine/camera.ts';
 import { DEFAULT_STYLE, type PassName } from '../../render-engine/map-renderer.ts';
-import { processLasso, densify, orientInteriorLeft, signedArea, splitLoops, type Pt, dedupe } from '../../render-engine/stroke.ts';
+import { processLasso, densify, orientInteriorLeft, signedArea, splitLoops, type Pt, dedupe, ringFromMapPoints } from '../../render-engine/stroke.ts';
+import { geoCentroid } from 'd3-geo';
 import { lonLatToVec, E7 } from '../../geo-kernel/vec.ts';
 import { cameraAt, timeAt, overlaysAt, drawOverlays, type ShotSettings } from '../../presentation/sequence.ts';
 import { transitionOptions, drawShotOverlays } from '../../presentation/export-driver.ts';
@@ -20,7 +21,9 @@ type Drag =
   // Brush points are kept as map positions (longitude, latitude), so zooming or panning in the
   // middle of a stroke never changes the shape being drawn.
   | { kind: 'lasso'; points: Pt[] }
-  | { kind: 'vertex'; vid: number; x: number; y: number; moved: number };
+  | { kind: 'vertex'; vid: number; x: number; y: number; moved: number }
+  // The border pen: points go straight into the current draft (map positions).
+  | { kind: 'pen' };
 
 export function currentShot(): ShotSettings | null {
   const w = store.world;
@@ -145,6 +148,24 @@ export function MapView() {
       }
     }
     const toScreen = (ll: Pt[]) => ll.map((q) => lonLatToScreen(v, q[0], q[1])).filter((q): q is Pt => !!q);
+    // The border pen's current draft: its line, where it started (it closes there) and where it ends.
+    const draft = s.tool === 'pen' ? s.draft : null;
+    if (draft && draft.spaceId === s.spaceId && draft.points.length) {
+      const pts = toScreen(draft.points);
+      const owner = draft.owner ? w.get('entity', draft.owner) : null;
+      ctx.save();
+      ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      ctx.strokeStyle = owner?.color ?? '#ffffff';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath(); pts.forEach((q, i) => (i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]))); ctx.stroke();
+      // How it will close: a dashed line from the end back to the start.
+      if (pts.length > 2) { ctx.setLineDash([5, 5]); ctx.globalAlpha = 0.6; ctx.beginPath(); ctx.moveTo(pts[pts.length - 1][0], pts[pts.length - 1][1]); ctx.lineTo(pts[0][0], pts[0][1]); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1; }
+      ctx.fillStyle = '#ffd166'; ctx.beginPath(); ctx.arc(pts[0][0], pts[0][1], 5, 0, Math.PI * 2); ctx.fill();
+      const end = pts[pts.length - 1];
+      ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(end[0], end[1], 4, 0, Math.PI * 2); ctx.fill();
+      if (cursor && drag.current.kind !== 'pen') { ctx.setLineDash([3, 4]); ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(end[0], end[1]); ctx.lineTo(cursor[0], cursor[1]); ctx.stroke(); }
+      ctx.restore();
+    }
     const pts = drag.current.kind === 'lasso' ? toScreen(drag.current.points) : polygon.length ? [...toScreen(polygon), ...(cursor ? [cursor] : [])] : null;
     if (pts && pts.length > 1) {
       const owner = s.paintValue ? w.get('entity', s.paintValue) : null;
@@ -211,6 +232,13 @@ export function MapView() {
       drag.current = { kind: 'pan', x: e.clientX, y: e.clientY, moved: 0, startX: p[0], startY: p[1] };
       return;
     }
+    if (!presentation && e.button === 0 && s.tool === 'pen') {
+      const ll = screenToLonLat(view, p[0], p[1]);
+      if (!ll) return;
+      drag.current = { kind: 'pen' };
+      store.penAdd(ll, true); // a new piece, joined straight to where the draft ended
+      return;
+    }
     if (!presentation && e.button === 0 && (s.tool === 'lasso' || s.tool === 'polygon')) {
       const ll = screenToLonLat(view, p[0], p[1]);
       if (!ll) return; // outside the map
@@ -239,6 +267,15 @@ export function MapView() {
       return;
     }
     if (d.kind === 'vertex') { d.moved += 1; setCursor(p); return; }
+    if (d.kind === 'pen') {
+      const pts = store.draft?.points ?? [];
+      const last = pts[pts.length - 1];
+      const lastScreen = last ? lonLatToScreen(view, last[0], last[1]) : null;
+      const ll = screenToLonLat(view, p[0], p[1]);
+      if (ll && (!lastScreen || Math.hypot(p[0] - lastScreen[0], p[1] - lastScreen[1]) > 2)) store.penAdd(ll, false);
+      return;
+    }
+    if (s.tool === 'pen' && !presentation) setCursor(p);
     if (polygon.length) setCursor(p);
     if (s.tool === 'vertex' && s.world && !presentation) {
       const ll = screenToLonLat(view, p[0], p[1]);
@@ -258,6 +295,7 @@ export function MapView() {
       if (ll) store.set({ selection: { kind: 'point', lon: ll[0], lat: ll[1] } });
       return;
     }
+    if (d.kind === 'pen') return; // the draft is saved; carry on whenever you like
     if (d.kind === 'lasso') {
       // Cleaned up at the current zoom, so smoothing and detail match what is on screen now.
       const screen = d.points.map((q) => lonLatToScreen(view, q[0], q[1])).filter((q): q is Pt => !!q);
@@ -278,6 +316,20 @@ export function MapView() {
       store.set({ pending: { kind: 'vertex', spaceId: store.spaceId, vertexId: d.vid, to } });
     }
   }
+
+  /** Close the current border-pen draft into an area and ask what it means (as for the brush). */
+  function finishDraft() {
+    const d = store.draft;
+    if (!d) return;
+    const ring = ringFromMapPoints(d.points);
+    if (!ring) { store.toast('Draw at least three points before finishing the border.', 'error'); return; }
+    const layerId = store.layerId;
+    if (!layerId) { store.toast('This map has no political layer to draw on.', 'error'); return; }
+    if (d.spaceId !== store.spaceId) { store.toast('This draft belongs to another map.', 'error'); return; }
+    const c = geoCentroid({ type: 'Polygon', coordinates: [[...d.points, d.points[0]]] }) as [number, number];
+    store.set({ pending: { kind: 'paint', spaceId: store.spaceId, layerId, rings: [ring], value: d.owner, sample: Number.isFinite(c[0]) ? c : null, origin: d.points[0], snap: snapRadians(), draftId: d.id } });
+  }
+  store.finishDraft = finishDraft;
 
   function finishPolygon() {
     // A double-click to finish also places its point twice; repeated points are dropped.
@@ -311,6 +363,10 @@ export function MapView() {
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       if (e.key === 'Escape') { setPolygon([]); setCursor(null); drag.current = { kind: 'none' }; force((n) => n + 1); }
       if (e.key === 'Enter' && polygon.length) finishPolygon();
+      if (e.key === 'Enter' && store.tool === 'pen' && !store.pending) finishDraft();
+      if ((e.key === 'Backspace' || (e.key.toLowerCase() === 'z' && (e.ctrlKey || e.metaKey))) && store.tool === 'pen' && store.draft?.pieces.length) {
+        e.preventDefault(); e.stopImmediatePropagation(); store.penUndoPiece();
+      }
       if ((e.key === 'Delete' || e.key === 'Backspace') && store.tool === 'vertex' && hoverVertex !== null && !presentation) {
         const vid = hoverVertex;
         setHoverVertex(null);

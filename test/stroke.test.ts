@@ -66,3 +66,26 @@ test('simplification keeps closed outlines and drops repeated points', () => {
   assert.ok(simplify(pts, 1).length > 8);
   assert.equal(dedupe([[0, 0], [0, 0], [0.1, 0], [5, 5], [5, 5]]).length, 2);
 });
+
+test('border pen: a closed draft paints the small area it surrounds, whichever way round it was drawn', async () => {
+  const { ringFromMapPoints } = await import('../src/render-engine/stroke.ts');
+  const { World } = await import('../src/world-model/world.ts');
+  const { Engine } = await import('../src/temporal-engine/engine.ts');
+  const cmd = await import('../src/domain/commands.ts');
+  const { NEG_INF } = await import('../src/core-time/index.ts');
+  const { lonLatToVec } = await import('../src/geo-kernel/vec.ts');
+  const square: Array<[number, number]> = [[10, 10], [20, 10], [20, 20], [10, 20]];
+  for (const pts of [square, [...square].reverse()]) {
+    const world = new World();
+    const space = cmd.seedProject(world, 'Pen').result.spaceId;
+    const layer = world.all('layer')[0].id;
+    const engine = new Engine(world);
+    const A = cmd.createEntity(world, { type_id: 'polity', name: 'A' }).result;
+    const ring = ringFromMapPoints(pts)!;
+    cmd.paintTerritory(world, engine, { spaceId: space, layerId: layer, ring, value: A, snap: 1e-7, mode: { kind: 'correct', t: NEG_INF } });
+    assert.equal(engine.valueAtPoint(space, layer, lonLatToVec(15, 15), NEG_INF), A);
+    assert.equal(engine.valueAtPoint(space, layer, lonLatToVec(-100, -40), NEG_INF), null);
+  }
+  assert.equal(ringFromMapPoints([[0, 0], [1, 1]]), null, 'two points enclose nothing');
+  assert.equal(ringFromMapPoints([[0, 0], [0, 0], [1, 1], [0, 0]]), null, 'repeated points are dropped');
+});
