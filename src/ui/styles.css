@@ -172,3 +172,5 @@ p.error { color: #ff9aa8; }
 .country-label { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
 .own-look > summary { cursor: pointer; color: var(--muted); margin: 4px 0; }
 button.link.pad-link { padding: 4px 10px 8px; }
+label.file-button { display: inline-flex; align-items: center; background: var(--panel2); border: 1px solid var(--line); border-radius: 5px; padding: 5px 10px; cursor: pointer; color: var(--text); }
+label.file-button input[type=file] { display: none; }

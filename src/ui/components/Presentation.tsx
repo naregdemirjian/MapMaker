@@ -5,6 +5,8 @@ import * as cmd from '../../domain/commands.ts';
 import { type Instant, add, fromJSONValue, toJSONValue, fromStore, compare, gregorian, type Precision } from '../../core-time/index.ts';
 import { defaultShot, timeAt, cameraAt, RESOLUTIONS, FRAME_RATES, shotTransitions, type ShotSettings, type Ease, type ShotTransitions } from '../../presentation/sequence.ts';
 import { PASS_DEFS, runExport } from '../../presentation/export-driver.ts';
+import { eventsBoxOf, type EventsBox } from '../../presentation/events-box.ts';
+import { LABEL_FONTS } from '../../render-engine/label-style.ts';
 import { PROJECTIONS, type ProjectionName } from '../../render-engine/camera.ts';
 import { parseJSON } from '../../temporal-engine/engine.ts';
 import { DateField, NumberField } from './Panels.tsx';
@@ -102,6 +104,12 @@ export function ShotEditor() {
     }
     setProgress(null);
   };
+  const box = eventsBoxOf(shot.eventsBox);
+  const setBox = (patch: Partial<EventsBox>) => update({ eventsBox: { ...box, ...patch } });
+  const uploadBoxImage = async (file: File | undefined) => {
+    if (!file) return;
+    try { const a = await Api.uploadAsset(s.projectId!, file); setBox({ image: a.file }); } catch (e) { s.toast((e as Error).message, 'error'); }
+  };
   const tr = shotTransitions(shot);
   const setTr = (patch: Partial<ShotTransitions>) => update({ transitions: { ...tr, ...patch } });
   const chooseFolder = async () => {
@@ -182,6 +190,69 @@ export function ShotEditor() {
               <label>Line width<NumberField min={0} max={40} step={0.5} value={tr.front.width} onCommit={(n) => setTr({ front: { ...tr.front, width: n } })} /></label>
               <label>Glow<NumberField min={0} max={80} step={1} value={tr.front.glow} onCommit={(n) => setTr({ front: { ...tr.front, glow: n } })} /></label>
             </div>}
+          </>}
+        </Group>
+        <Group title="Current events box" open={box.show}>
+          <label className="check"><input type="checkbox" checked={box.show} onChange={(e) => setBox({ show: e.target.checked })} data-testid="events-box-show" /> Show the events happening on screen</label>
+          {box.show && <>
+            <label>Position<select value={box.corner} onChange={(e) => setBox({ corner: e.target.value as EventsBox['corner'] })} data-testid="events-box-corner">
+              <option value="bottom-right">Bottom right</option><option value="bottom-left">Bottom left</option><option value="top-right">Top right</option><option value="top-left">Top left</option><option value="custom">Custom</option>
+            </select></label>
+            {box.corner === 'custom' && <div className="two">
+              <label>Left (% of width)<NumberField min={0} max={100} step={1} value={Math.round(box.x * 100)} onCommit={(n) => setBox({ x: n / 100 })} /></label>
+              <label>Top (% of height)<NumberField min={0} max={100} step={1} value={Math.round(box.y * 100)} onCommit={(n) => setBox({ y: n / 100 })} /></label>
+            </div>}
+            <label>Heading<input value={box.title} placeholder="(none)" onChange={(e) => setBox({ title: e.target.value })} data-testid="events-box-title" /></label>
+            <label className="check"><input type="checkbox" checked={box.showDate} onChange={(e) => setBox({ showDate: e.target.checked })} /> Show the date and time</label>
+            {box.showDate && <label>Date detail<select value={box.datePrecision} onChange={(e) => setBox({ datePrecision: e.target.value as Precision })}>
+              <option value="year">Year</option><option value="month">Month</option><option value="day">Day</option><option value="minute">Hour and minute</option><option value="second">Seconds</option>
+            </select></label>}
+            <div className="two">
+              <label>Most events listed<NumberField min={0} max={20} step={1} value={box.maxEvents} onCommit={(n) => setBox({ maxEvents: Math.round(n) })} /></label>
+              <label>Events without an end stay (s)<NumberField min={0} max={60} step={0.5} value={box.linger} onCommit={(n) => setBox({ linger: n })} /></label>
+            </div>
+            <label>Fade in and out (s)<NumberField min={0} max={10} step={0.1} value={box.fade} onCommit={(n) => setBox({ fade: n })} /></label>
+            <label className="check"><input type="checkbox" checked={box.showDescription} onChange={(e) => setBox({ showDescription: e.target.checked })} /> Show each event's description</label>
+            {w.all('event_group').length > 0 && <>
+              <label className="check"><input type="checkbox" checked={box.groups === null} onChange={(e) => setBox({ groups: e.target.checked ? null : [] })} /> Events of every group</label>
+              {box.groups !== null && w.all('event_group').map((g) => (
+                <label key={g.id} className="check"><input type="checkbox" checked={box.groups!.includes(g.id)} onChange={(e) => setBox({ groups: e.target.checked ? [...box.groups!, g.id] : box.groups!.filter((x) => x !== g.id) })} /><span className="swatch" style={{ background: g.color }} />{g.name}</label>
+              ))}
+            </>}
+            <h4>Look</h4>
+            <label>Font<select value={box.font} onChange={(e) => setBox({ font: e.target.value })}>{(LABEL_FONTS.includes(box.font) ? LABEL_FONTS : [box.font, ...LABEL_FONTS]).map((f) => <option key={f} value={f}>{f}</option>)}</select></label>
+            <div className="two">
+              <label>Heading size<NumberField min={6} max={200} step={1} value={box.titleSize} onCommit={(n) => setBox({ titleSize: n })} /></label>
+              <label>Date size<NumberField min={6} max={200} step={1} value={box.dateSize} onCommit={(n) => setBox({ dateSize: n })} /></label>
+              <label>Event size<NumberField min={6} max={200} step={1} value={box.textSize} onCommit={(n) => setBox({ textSize: n })} /></label>
+              <label>Width<NumberField min={80} max={1920} step={10} value={box.width} onCommit={(n) => setBox({ width: n })} /></label>
+            </div>
+            <div className="two">
+              <label>Heading colour<input type="color" value={box.titleColor} onChange={(e) => setBox({ titleColor: e.target.value })} /></label>
+              <label>Date colour<input type="color" value={box.dateColor} onChange={(e) => setBox({ dateColor: e.target.value })} /></label>
+              <label>Event colour<input type="color" value={box.textColor} onChange={(e) => setBox({ textColor: e.target.value })} /></label>
+              <label>Bullet colour<input type="color" value={box.accentColor} onChange={(e) => setBox({ accentColor: e.target.value })} /></label>
+              <label>Background<input type="color" value={box.background} onChange={(e) => setBox({ background: e.target.value })} /></label>
+              <label>Background opacity (%)<NumberField min={0} max={100} step={5} value={Math.round(box.backgroundOpacity * 100)} onCommit={(n) => setBox({ backgroundOpacity: n / 100 })} /></label>
+              <label>Border colour<input type="color" value={box.borderColor} onChange={(e) => setBox({ borderColor: e.target.value })} /></label>
+              <label>Border width<NumberField min={0} max={40} step={0.5} value={box.borderWidth} onCommit={(n) => setBox({ borderWidth: n })} /></label>
+              <label>Corner rounding<NumberField min={0} max={200} step={1} value={box.radius} onCommit={(n) => setBox({ radius: n })} /></label>
+              <label>Inner spacing<NumberField min={0} max={200} step={1} value={box.padding} onCommit={(n) => setBox({ padding: n })} /></label>
+              <label>Distance from the edge<NumberField min={0} max={500} step={1} value={box.margin} onCommit={(n) => setBox({ margin: n })} /></label>
+              <label>Fixed height (0 = fit)<NumberField min={0} max={2000} step={10} value={box.height} onCommit={(n) => setBox({ height: n })} /></label>
+            </div>
+            <h4>Your own graphic</h4>
+            <div className="buttons">
+              <label className="file-button">{box.image ? 'Replace the graphic…' : 'Use a picture of your own…'}<input type="file" accept="image/*" onChange={(e) => uploadBoxImage(e.target.files?.[0])} data-testid="events-box-image" /></label>
+              {box.image && <button className="small" onClick={() => setBox({ image: null })}>Remove</button>}
+            </div>
+            {box.image && <>
+              <label>Fit<select value={box.imageFit} onChange={(e) => setBox({ imageFit: e.target.value as EventsBox['imageFit'] })}>
+                <option value="cover">Cover the box</option><option value="contain">Fit inside the box</option><option value="stretch">Stretch to the box</option>
+              </select></label>
+              <label>Picture opacity (%)<NumberField min={0} max={100} step={5} value={Math.round(box.imageOpacity * 100)} onCommit={(n) => setBox({ imageOpacity: n / 100 })} /></label>
+              <p className="muted">Tip: set the background opacity to 0 to show only your graphic.</p>
+            </>}
           </>}
         </Group>
         <Group title="Look">

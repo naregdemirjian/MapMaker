@@ -10,6 +10,7 @@ import { type Instant, gregorian, toJSONValue, fromJSONValue } from '../core-tim
 import { type Camera, defaultCamera, PROJECTIONS } from '../render-engine/camera.ts';
 import { MapRenderer } from '../render-engine/map-renderer.ts';
 import { loadBasemap, type Basemap } from '../render-engine/basemap.ts';
+import { setAssetBase } from '../render-engine/assets.ts';
 import type { Vec3 } from '../geo-kernel/vec.ts';
 import type { StrokeSettings } from '../render-engine/stroke.ts';
 
@@ -165,6 +166,7 @@ class AppStore {
       this.world = World.fromSnapshot(data.snapshot);
       this.engine = new Engine(this.world);
       this.projectId = id;
+      setAssetBase(`/api/projects/${encodeURIComponent(id)}/assets/`, () => this.notify());
       this.projectDir = data.dir;
       this.journal = data.journal;
       const spaces = this.world.all('map_space').sort((a, b) => a.sort_order - b.sort_order);

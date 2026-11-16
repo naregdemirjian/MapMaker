@@ -7,7 +7,7 @@ import { DEFAULT_STYLE, type PassName } from '../../render-engine/map-renderer.t
 import { processLasso, densify, orientInteriorLeft, signedArea, splitLoops, type Pt, dedupe } from '../../render-engine/stroke.ts';
 import { lonLatToVec, E7 } from '../../geo-kernel/vec.ts';
 import { cameraAt, timeAt, overlaysAt, drawOverlays, type ShotSettings } from '../../presentation/sequence.ts';
-import { transitionOptions } from '../../presentation/export-driver.ts';
+import { transitionOptions, drawShotOverlays } from '../../presentation/export-driver.ts';
 import { parseJSON } from '../../temporal-engine/engine.ts';
 import { compare, fromStore } from '../../core-time/index.ts';
 import { basemapSourceOf } from '../../world-model/world-settings.ts';
@@ -92,7 +92,7 @@ export function MapView() {
       console.error(e);
     }
     if (shot) {
-      drawOverlays(ctx, frame.w, frame.h, overlaysAt(shot, s.shotFrame, time), frame.w / 1920, DEFAULT_STYLE.font);
+      drawShotOverlays(ctx, frame.w, frame.h, s.world, shot, s.shotFrame, time);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.strokeStyle = 'rgba(255,255,255,0.35)';
       ctx.lineWidth = 1;

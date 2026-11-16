@@ -1,7 +1,8 @@
 // Second interface test: the workflows the first test does not cover, and a close inspection of
 // exported files. Run after building: node --disable-warning=ExperimentalWarning e2e/workflows.e2e.ts
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync, existsSync, rmSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync, rmSync, writeFileSync } from 'node:fs';
+import { encodePNG } from '../src/export/png.ts';
 import { join } from 'node:path';
 import { Harness, ROOT, blob, readPNG, pixel, hexRGB, near, compositeOver, type LL } from './harness.ts';
 
@@ -399,6 +400,34 @@ try {
       assert.ok(sum / n < 1.5, `frame ${f}: average difference ${(sum / n).toFixed(2)} levels`);
       assert.ok(bad / n < 0.005, `frame ${f}: ${(100 * bad / n).toFixed(2)}% of pixels differ noticeably`);
     }
+  });
+
+  await h.step('Current events box with a graphic of its own, in the exported overlays', async () => {
+    // A solid magenta picture stands in for the user's graphic.
+    const graphic = join(ROOT, '.tmp', 'events-box-graphic.png');
+    const px = new Uint8Array(64 * 32 * 4);
+    for (let i = 0; i < px.length; i += 4) { px[i] = 255; px[i + 1] = 0; px[i + 2] = 255; px[i + 3] = 255; }
+    writeFileSync(graphic, encodePNG(64, 32, px));
+    await page.locator('summary', { hasText: 'Current events box' }).click();
+    await page.getByTestId('events-box-show').check();
+    await page.getByTestId('events-box-title').fill('On screen now');
+    await page.getByTestId('events-box-image').setInputFiles(graphic);
+    await page.locator('label', { hasText: 'Background opacity' }).locator('input').fill('0');
+    await page.locator('label', { hasText: 'Background opacity' }).locator('input').press('Enter');
+    await page.waitForFunction(() => (window as any).__mapmaker.store.world.all('sequence')[0].settings.includes('"image":"'));
+    await h.saved();
+    await page.getByTestId('frame-slider').fill('24');
+    await h.screenshot('events-box');
+    const ex = await exportShot('export-preview');
+    const img = readPNG(ex.frames('overlays')[24]);
+    // Bottom-right corner, inside the box (margin 48 and rounding 12 at a quarter of 1920).
+    const c = pixel(img, img.width - 12 - 6, img.height - 12 - 6);
+    assert.ok(c[0] > 200 && c[1] < 60 && c[2] > 200 && c[3] > 200, `the box shows the user's graphic (${c})`);
+    assert.equal(pixel(img, Math.round(img.width / 2), Math.round(img.height / 2))[3], 0, 'the rest of the overlay layer stays transparent');
+    assert.ok(readdirSync(join(h.projects, 'Workflows Test.mapmaker', 'assets')).some((f) => f.endsWith('.png')), 'the graphic is kept in the project');
+    // Hide the box again for the following steps.
+    await page.getByTestId('events-box-show').uncheck();
+    await h.saved();
   });
 
   await h.step('A square custom size, another projection, 23.976 fps and a transparent full picture', async () => {

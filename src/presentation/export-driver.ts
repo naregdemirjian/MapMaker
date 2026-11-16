@@ -7,7 +7,10 @@ import type { Engine } from '../temporal-engine/engine.ts';
 import { MapRenderer, DEFAULT_STYLE, type PassName } from '../render-engine/map-renderer.ts';
 import { makeView } from '../render-engine/camera.ts';
 import { type ShotSettings, timeAt, cameraAt, overlaysAt, drawOverlays, shotTransitions, screenSecondsSince } from './sequence.ts';
-import { gregorian } from '../core-time/index.ts';
+import { gregorian, type Instant } from '../core-time/index.ts';
+import { eventsBoxOf, currentEvents, drawEventsBox } from './events-box.ts';
+import { eventShown } from '../domain/commands.ts';
+import { preloadImages } from '../render-engine/assets.ts';
 import { basemapSourceOf, loadBasemap, loadBasemapDetail, loadDatasetRecords, type Basemap } from '../render-engine/basemap.ts';
 
 export interface ExportPassDef { name: string; label: string; blend: string; passes: PassName[]; overlays: boolean; background: boolean; note?: string }
@@ -27,6 +30,16 @@ export function visibleLayers(world: World, shot: ShotSettings): string[] {
     .filter((l) => l.space_id === shot.spaceId && l.kind === 'partition' && (shot.layers.length ? shot.layers.includes(l.id) : !!l.visible))
     .sort((a, b) => a.sort_order - b.sort_order)
     .map((l) => l.id);
+}
+
+/** Text overlays and the current-events box of a shot frame (the same in the preview and exports). */
+export function drawShotOverlays(ctx: CanvasRenderingContext2D, width: number, height: number, world: World, shot: ShotSettings, frame: number, t: Instant): void {
+  drawOverlays(ctx, width, height, overlaysAt(shot, frame, t), width / 1920, DEFAULT_STYLE.font);
+  const box = eventsBoxOf(shot.eventsBox);
+  if (!box.show) return;
+  const groups = box.groups ? new Set(box.groups) : null;
+  const events = currentEvents(world, box, t, (t0) => screenSecondsSince(shot, frame, t0), (id) => eventShown(world, id, groups));
+  drawEventsBox(ctx, width, height, width / 1920, box, t, events);
 }
 
 /** The shot's transition settings for one frame, as the renderer takes them. */
@@ -50,7 +63,7 @@ export function renderFrame(ctx: CanvasRenderingContext2D, renderer: MapRenderer
     const transparent = def.name === 'all' ? shot.transparent : !def.background;
     renderer.render(ctx, view, world, engine, shot.spaceId, t, { passes, transparent, layerIds: visibleLayers(world, shot), basemap, transitions: transitionOptions(shot, frame) });
   }
-  if (def.overlays) drawOverlays(ctx, width, height, overlaysAt(shot, frame, t), width / 1920, DEFAULT_STYLE.font);
+  if (def.overlays) drawShotOverlays(ctx, width, height, world, shot, frame, t);
 }
 
 export interface ExportResult { dir: string; checksums: Record<string, Record<number, string>>; frames: number; seconds: number }
@@ -67,6 +80,7 @@ export async function runExport(o: {
   const started = performance.now();
   // Loaded before the first frame, so every frame is drawn from the same complete data.
   const basemap = await basemapFor(o.world, o.shot.spaceId);
+  await preloadImages([eventsBoxOf(o.shot.eventsBox).image]);
   // Credit lines for the data drawn in these frames (written into the manifest and the guide).
   const credits = basemap ? (await loadDatasetRecords()).filter((d) => d.id === 'natural-earth').map((d) => `${d.name} ${d.version} (${d.licence}): ${d.credit}`) : [];
   const job = await Api.startExport(o.projectId, {

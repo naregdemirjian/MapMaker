@@ -30,6 +30,8 @@ export interface ShotSettings {
   exportDir?: string | null;
   /** How border changes animate in this shot (absent: as recorded). */
   transitions?: ShotTransitions;
+  /** The 'current events' box (absent: not shown). See events-box.ts. */
+  eventsBox?: Partial<import('./events-box.ts').EventsBox>;
 }
 
 export type TransitionEasing = 'linear' | 'smooth' | 'in' | 'out';

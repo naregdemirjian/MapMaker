@@ -44,6 +44,13 @@ export const Api = {
   backupNow: (id: string) => call<BackupInfo>('POST', `${p(id)}/backups`),
   restoreBackup: (id: string, name: string) => call<{ diffs: RowDiff[]; journal: JournalState }>('POST', `${p(id)}/backups/restore?name=${encodeURIComponent(name)}`),
   showFolder: (id: string, which: 'project' | 'exports', dir?: string) => call<{ ok: boolean }>('POST', `${p(id)}/show-folder?which=${which}${dir ? `&dir=${encodeURIComponent(dir)}` : ''}`),
+  /** Add a file (picture or video) to the project; returns its asset name. */
+  uploadAsset: async (id: string, file: File): Promise<{ file: string; url: string; type: string }> => {
+    const res = await fetch(`${p(id)}/assets?name=${encodeURIComponent(file.name)}`, { method: 'POST', body: file });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new ApiError(res.status, body.error ?? `Upload failed (${res.status})`, body.code);
+    return body;
+  },
   chooseFolder: (start?: string) => call<{ path: string | null }>('POST', '/api/choose-folder', { start }),
   startExport: (id: string, settings: unknown) => call<{ jobId: string; dir: string }>('POST', `${p(id)}/exports`, settings),
   sendFrame: (id: string, job: string, pass: string, frame: number, w: number, h: number, rgba: Uint8Array) =>

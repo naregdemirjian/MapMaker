@@ -7,6 +7,7 @@ import { join, extname } from 'node:path';
 import { spawn } from 'node:child_process';
 import { ProjectRegistry } from './projects.ts';
 import { startJob, writeFrame, finishJob, type ExportJob, type ExportSettings } from '../export/writer.ts';
+import { saveAsset, serveAsset } from './assets.ts';
 import type { RowDiff } from '../world-model/schema.ts';
 
 export interface ServerOptions {
@@ -122,6 +123,14 @@ export function createAppServer(opts: ServerOptions): { server: Server; registry
     if (action === 'commit' && method === 'POST') {
       const body = await json<{ label: string; diffs: RowDiff[]; baseHead: number }>(req);
       return send(res, 200, { journal: db.commit(body.label, body.diffs, body.baseHead) });
+    }
+    if (action === 'assets') {
+      if (parts.length === 4 && method === 'POST') {
+        const name = url.searchParams.get('name') ?? '';
+        const saved = saveAsset(db.dir, name, await readBody(req, 4 * 1024 * 1024 * 1024));
+        return send(res, 201, { ...saved, url: `/api/projects/${encodeURIComponent(id)}/assets/${saved.file}` });
+      }
+      if (parts.length === 5 && method === 'GET') return serveAsset(db.dir, parts[4], req, res);
     }
     if (action === 'undo' && method === 'POST') return send(res, 200, db.undo() ?? { diffs: [], journal: db.journalState() });
     if (action === 'redo' && method === 'POST') return send(res, 200, db.redo() ?? { diffs: [], journal: db.journalState() });
