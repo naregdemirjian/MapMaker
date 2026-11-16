@@ -89,12 +89,12 @@ Neighbouring parcels drawn separately at partial opacity leave hairline seams wh
 each territory layer fully opaque into a scratch buffer and compositing it once at the layer's opacity removes the
 seams, and makes fades between two owners mix colours correctly.
 
-### D8. Entities and events belong to the project; maps, layers and territorial history belong to each world
+### D8. Events belong to the project; the user groups them (decided by the user, 16 November 2026)
 
-One empire or one war can then span several worlds, which interstellar territory (Stage 11) needs. Each world still has
-its own map, layers and territorial history. Open point: the outliner and timeline currently list every event in the
-project. The proposal is to give each event a home world and show a world's own events by default, with a "show all
-worlds" switch.
+All events belong to the one project. The user decides how they are grouped: by country, by world, or in groups of their
+own. The timeline gets a control to choose which groups (and so which events) it shows. Maps, layers and territorial
+history still belong to each world. Not built yet (Stage 3/4). Assumption to confirm when building: an event can belong
+to more than one group.
 
 ### D9. Animated changes: borders and labels follow the animation
 
