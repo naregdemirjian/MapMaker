@@ -333,28 +333,38 @@ export class Arrangement {
    * Returns the inserted path as directed segments, in input order.
    */
   insertPath(points: Vec3[], opts: { closed: boolean; snap: number }): PathStep[] {
+    return this.insertPaths([points], opts)[0];
+  }
+
+  /**
+   * Insert several polylines, then rebuild the faces once (much faster than one at a time on a large
+   * map). Returns each inserted path, expressed in the segments that exist at the end.
+   */
+  insertPaths(lines: Vec3[][], opts: { closed: boolean; snap: number }): PathStep[][] {
     const tol = Math.max(opts.snap, MIN_SNAP);
-    const ids: number[] = [];
-    for (const p of points) {
-      const id = this.vertexFor(p, tol);
-      if (ids.length === 0 || ids[ids.length - 1] !== id) ids.push(id);
-    }
-    if (opts.closed && ids.length > 1 && ids[0] !== ids[ids.length - 1]) ids.push(ids[0]);
-    if (opts.closed && ids.length < 4) throw new TopologyError('The shape is too small to form an area at this zoom level.');
-    const raw: PathStep[] = [];
+    const raws: PathStep[][] = [];
     this.splitLog = new Map();
-    let path: PathStep[];
+    let paths: PathStep[][];
     try {
-      for (let i = 0; i + 1 < ids.length; i++) {
+      for (const points of lines) {
+        const ids: number[] = [];
+        for (const p of points) {
+          const id = this.vertexFor(p, tol);
+          if (ids.length === 0 || ids[ids.length - 1] !== id) ids.push(id);
+        }
+        if (opts.closed && ids.length > 1 && ids[0] !== ids[ids.length - 1]) ids.push(ids[0]);
+        if (opts.closed && ids.length < 4) throw new TopologyError('The shape is too small to form an area at this zoom level.');
+        const raw: PathStep[] = [];
         // Endpoints may have been moved into existing segments by later snapping; vertices persist.
-        raw.push(...this.insertPiece(ids[i], ids[i + 1], tol, 0, 0, 0));
+        for (let i = 0; i + 1 < ids.length; i++) raw.push(...this.insertPiece(ids[i], ids[i + 1], tol, 0, 0, 0));
+        raws.push(raw);
       }
-      path = raw.flatMap((st) => this.resolveStep(st));
+      paths = raws.map((raw) => raw.flatMap((st) => this.resolveStep(st)));
     } finally {
       this.splitLog = null;
     }
     this.rebuildFaces();
-    return path;
+    return paths;
   }
 
   /** Insert one arc u->w, splitting at crossings and routing through nearby vertices. */
@@ -806,7 +816,36 @@ export class Arrangement {
     return hit.side > 0 ? hit.seg.left_face : hit.seg.right_face;
   }
 
-  /** Faces reached from the left side of a path without crossing the path (the inside of a ring). */
+  /**
+   * Whether a path is one simple loop: walked once, never touching or crossing itself. Its left side
+   * is then exactly the area it encloses (facesLeftOf needs no further check).
+   */
+  isSimpleCycle(path: PathStep[]): boolean {
+    const count = new Map<number, number>();
+    for (const st of path) count.set(st.seg, (count.get(st.seg) ?? 0) + (st.fwd ? 1 : -1));
+    const nextOf = new Map<number, number>();
+    let start = -1, n = 0;
+    for (const [sid, c] of count) {
+      if (c === 0) continue;
+      if (c !== 1 && c !== -1) return false;
+      const s = this.segments.get(sid)!;
+      const from = c > 0 ? s.a : s.b, to = c > 0 ? s.b : s.a;
+      if (nextOf.has(from)) return false; // two ways out of one point: it touches itself
+      nextOf.set(from, to);
+      start = from;
+      n++;
+    }
+    if (n < 3) return false;
+    let x = start;
+    for (let i = 0; i < n; i++) { const y = nextOf.get(x); if (y === undefined) return false; x = y; }
+    if (x !== start) return false;
+    // Walking from the start must visit every step before returning.
+    let len = 0;
+    x = start;
+    do { x = nextOf.get(x)!; len++; } while (x !== start && len <= n);
+    return len === n;
+  }
+
   /** The steps of a path whose segments are walked a net number of times (out-and-back pieces enclose nothing). */
   netPath(path: PathStep[]): PathStep[] {
     const count = new Map<number, number>();

@@ -462,8 +462,9 @@ function paintInside(tx: Tx, engine: Engine, p: PaintInput, out: number[] = []):
   // Collect each ring's inside right after inserting it: a later ring may split earlier borders,
   // and pieces of split parcels are covered through their parent (children inherit).
   const insideAll = new Set<number>();
-  for (const r of rings) {
-    const path = tx.kernel(p.spaceId, (arr) => arr.insertPath(r, { closed: true, snap: p.snap }));
+  // All rings go in together (one rebuild of the map's structure); each is then read in turn.
+  const paths = tx.kernel(p.spaceId, (arr) => arr.insertPaths(rings, { closed: true, snap: p.snap }));
+  for (const path of paths) {
     const arr = world.arrangement(p.spaceId);
     // A simple outline paints what lies on its left (so shapes larger than a hemisphere work).
     // Check that against the area the outline encloses, computed independently from its points: if
@@ -472,9 +473,12 @@ function paintInside(tx: Tx, engine: Engine, p: PaintInput, out: number[] = []):
     let inside = arr.facesLeftOf(path);
     const enclosed = arr.pathLeftArea(path);
     const full = 4 * Math.PI;
-    let covered = 0;
-    for (const f of leafDescendants(arr, inside)) covered += arr.faceArea(f);
-    if (enclosed < 1e-15 || enclosed > full - 1e-15 || Math.abs(covered - enclosed) > 1e-9 + 1e-6 * enclosed) {
+    // A simple loop encloses exactly its left side; only other outlines need the area comparison
+    // (which on a large map costs more than the rest of the edit).
+    const simple = enclosed > 1e-15 && enclosed < full - 1e-15 && arr.isSimpleCycle(path);
+    let covered = enclosed;
+    if (!simple) { covered = 0; for (const f of leafDescendants(arr, inside)) covered += arr.faceArea(f); }
+    if (!simple && (enclosed < 1e-15 || enclosed > full - 1e-15 || Math.abs(covered - enclosed) > 1e-9 + 1e-6 * enclosed)) {
       inside = arr.facesWoundBy(path);
       let wound = 0;
       for (const f of leafDescendants(arr, inside)) wound += arr.faceArea(f);

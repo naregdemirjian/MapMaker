@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { World } from '../src/world-model/world.ts';
-import { Engine } from '../src/temporal-engine/engine.ts';
+import { Engine, leafDescendants } from '../src/temporal-engine/engine.ts';
 import * as cmd from '../src/domain/commands.ts';
 import { gregorian, NEG_INF } from '../src/core-time/index.ts';
 import { lonLatToVec, type Vec3 } from '../src/geo-kernel/vec.ts';
@@ -224,5 +224,39 @@ test('regression: an outline that crosses itself next to an existing country nev
   } catch (e) {
     assert.ok(!(e instanceof TypeError), `a clean refusal at most, not ${(e as Error).message}`);
   }
+  s.valid();
+});
+
+test('a path judged a simple loop always encloses exactly its left side (randomised)', () => {
+  const s = setup();
+  for (let i = 0; i < 6; i++) s.paintRing(ring(square(-40 + i * 15, 10, 9)), i % 2 ? s.A : s.B);
+  const r = rng(7);
+  let simple = 0, other = 0;
+  for (let n = 0; n < 300; n++) {
+    const cx = r.float(-60, 60), cy = r.float(-30, 40);
+    const k = r.int(3, 14);
+    const pts: Array<[number, number]> = [];
+    const star = r.bool(0.6);
+    for (let i = 0; i < k; i++) {
+      if (star) { const a = (i / k) * Math.PI * 2, rad = r.float(2, 12); pts.push([cx + rad * Math.cos(a), cy + rad * Math.sin(a) * 0.8]); }
+      else pts.push([cx + r.float(-10, 10), cy + r.float(-8, 8)]);
+    }
+    try {
+      cmd.run(s.world, 'check', (tx) => {
+        const path = tx.kernel(s.spaceId, (arr) => arr.insertPath(ring(pts, 0.5), { closed: true, snap: 1e-7 }));
+        const arr = s.world.arrangement(s.spaceId);
+        if (!arr.isSimpleCycle(path)) { other++; throw new Error('roll back'); }
+        simple++;
+        const enclosed = arr.pathLeftArea(path);
+        let covered = 0;
+        for (const f of leafDescendants(arr, arr.facesLeftOf(path))) covered += arr.faceArea(f);
+        assert.ok(Math.abs(covered - enclosed) <= 1e-9 + 1e-6 * enclosed, `simple loop ${n}: covered ${covered} vs enclosed ${enclosed}`);
+        throw new Error('roll back'); // leave the map as it was
+      });
+    } catch (e) {
+      if ((e as Error).message !== 'roll back' && !(e instanceof Error && /too small|encloses/.test(e.message))) throw e;
+    }
+  }
+  assert.ok(simple > 100 && other > 30, `both kinds were tried (${simple} simple, ${other} not)`);
   s.valid();
 });
