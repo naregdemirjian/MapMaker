@@ -7,7 +7,8 @@ architecture, with the reason and the way back. Newest first within each section
 
 The approved development set-up assumed a session that can install packages and a private GitHub repository. The
 first development session had neither: package installs were switched off and no repository was connected. D1–D4 follow
-from that. Each is confined to one layer of the system, so returning to the approved form does not touch the world
+from that. **Update, second session of 16 November 2026:** `npm install` and downloads now work, and the project is on
+GitHub, so each of D1–D4 can now be reversed; they are reversed one at a time, each with its own tests. Each is confined to one layer of the system, so returning to the approved form does not touch the world
 model, the history engine, the parcel kernel, storage or the export writer.
 
 ### D1. Canvas 2D map renderer instead of deck.gl (interim)
@@ -54,6 +55,24 @@ model, the history engine, the parcel kernel, storage or the export writer.
 Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
+
+### D19. The Earth basemap is reference geography, outside the parcel map
+
+Natural Earth land, lakes and coastlines are drawn in their own pass (`land`) between the grid and the territory fills.
+They are not loaded into the geometry kernel, so they cost nothing when editing and never change history. Coastline
+clipping and real boundaries as parcel edges will build on the same data later. The data ships with the app (1.6 MB),
+converted by `scripts/fetch-natural-earth.mjs`; `data/datasets.json` records source, version, licence and credit line.
+The grid is drawn beneath the land so the export passes stack back into the full picture.
+
+### D20. Present-day borders are a drawing guide only
+
+They are dashed, shown only while drawing (a switch under Worlds), never in shots or exports: the film's borders are
+the ones drawn in the project.
+
+### D21. Which worlds show Earth's geography
+
+Stored per world. The first world of a new project (Earth) shows it; worlds created later show it only if "Start with
+Earth's geography" is ticked; worlds saved before this setting existed show it when they have Earth's radius.
 
 ### D14. One drawing order for the full picture and the export passes
 

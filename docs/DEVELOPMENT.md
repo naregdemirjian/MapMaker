@@ -7,8 +7,12 @@ Companion files: [REQUIREMENTS.md](REQUIREMENTS.md) (checklist against the maste
 The approved architecture is the Claude Doc "Map Maker — Technical Architecture & Development Plan"
 (https://claude.ai/artifact/2JShAV3AWt6iECtNgBTsJN). All twelve of its decisions were approved on 15 November 2026.
 
-## Status at a glance (16 November 2026, version 0.2.0)
+## Status at a glance (16 November 2026, version 0.2.0 + Earth basemap)
 
+- **Earth basemap done (second session, 16 November).** Natural Earth land, lakes and coastlines are drawn under the
+  territories, with present-day borders as an optional drawing guide; a "Data sources and credits" dialog; exports carry
+  the credit lines. Package installs and downloads now work in development sessions, and the code is on GitHub
+  (`naregdemirjian/MapMaker`), so D1–D4 can now be reversed.
 - **Testing and refinement stage done.** 84 automated tests and two interface tests (24 steps in Chrome) pass. The stage
   found and fixed 11 defects, including two that could damage history or geometry (an outline enclosing no area could
   repaint the whole world; territory commands accepted a layer from another world) and one that made separate export
@@ -18,9 +22,10 @@ The approved architecture is the Claude Doc "Map Maker — Technical Architectur
   slow: see "Performance" below.
 - **Roadmap position.** Stages 1 and 3 mostly done; 0 and 2 partly done; parts of 4, 5 and 6 built early. Stages 7–13
   (military, terrain, environment, heatmaps, space maps…) not started. `REQUIREMENTS.md` classifies every requirement.
-- **Biggest open issues.** (1) The approved development set-up (package installs and a private GitHub repository) is
-  still missing, which keeps D1–D4 in place and blocks the Earth data. (2) The geometry kernel rebuilds the whole map's
-  structure on every edit; this must become incremental before real Earth data is loaded.
+- **Biggest open issues.** (1) Territories are not yet clipped to the coastlines (they cover the sea where painted
+  loosely). (2) The geometry kernel rebuilds the whole map's structure on every edit; this must become incremental
+  before real boundaries are loaded into it as parcel edges. (3) D1–D4 (Canvas renderer, browser instead of Electron,
+  loose interface types) still to reverse.
 
 ## How to run it
 
@@ -33,15 +38,18 @@ For development (Linux or Windows, Node 22.18 or newer):
 | --- | --- |
 | `node scripts/build.mjs` | Builds `dist/server.mjs` (the data service) and `dist/ui/` (the interface) |
 | `node --disable-warning=ExperimentalWarning dist/server.mjs --port 4317 --projects <folder> [--open]` | Runs the app |
-| `npm test` | 84 unit, randomised and scenario tests |
+| `npm test` | 95 unit, randomised and scenario tests |
 | `node --disable-warning=ExperimentalWarning test/geo-kernel.stress.ts <seeds> <rings>` | Long randomised kernel run |
-| `node --disable-warning=ExperimentalWarning e2e/vertical-slice.e2e.ts` | The 15-step interface test in Chrome (build first); screenshots in `e2e/output/` |
+| `node --disable-warning=ExperimentalWarning e2e/vertical-slice.e2e.ts` | The 16-step interface test in Chrome (build first); screenshots in `e2e/output/` |
 | `node --disable-warning=ExperimentalWarning e2e/workflows.e2e.ts` | The 9-step workflow and export-inspection test; screenshots in `e2e/output/workflows/` |
 | `node --disable-warning=ExperimentalWarning test/perf.bench.ts 100 300 1000 [--keep <folder>]` | Performance benchmark (minutes at 1000) |
 | `node node_modules/typescript/bin/tsc -p tsconfig.json` | Type check (must report nothing) |
 
-Offline sessions without package installs: run `scripts/link-local-packages.sh` to link the preinstalled packages into
-`node_modules/`. With package installs available, `npm install` replaces this.
+Run `npm install` once per fresh checkout. (Offline sessions without package installs could use
+`scripts/link-local-packages.sh` to link preinstalled packages; no longer needed.)
+
+Map data: `data/natural-earth/ne-110m.json` and `ne-50m.json` are committed, so nothing is downloaded at run time.
+`node scripts/fetch-natural-earth.mjs` re-downloads Natural Earth and regenerates them and `data/datasets.json`.
 
 TypeScript runs directly under Node's type stripping: imports carry `.ts` extensions, type-only imports use
 `import type`, and enums or constructor parameter properties are not allowed.
@@ -56,7 +64,8 @@ TypeScript runs directly under Node's type stripping: imports carry `.ts` extens
 | `src/temporal-engine/` | Reconstructs history | Compiles events into per-parcel timelines; answers "who holds this place at time t" exactly, including mid-transition; detects simultaneous, overlapping, stale and broken changes. Caches are rebuilt from the tables and never saved. |
 | `src/domain/commands.ts` | Every user action | Each command returns its row diffs, which become one undo step. |
 | `src/server/` | Local data service | SQLite project file (WAL, full sync, integrity check on open), journal for undo and redo, versions, rolling backups, export writer, HTTP bound to this computer only. |
-| `src/render-engine/` | Drawing the map | Camera and projections (d3-geo), the map renderer (fills, borders, labels, transitions), stroke processing for the freehand brush. |
+| `src/render-engine/` | Drawing the map | Camera and projections (d3-geo), the map renderer (fills, borders, labels, transitions), the Earth basemap (`basemap.ts`: decoding, choice of detail, culling to the view), stroke processing for the freehand brush. |
+| `data/` | Shipped map data | Natural Earth basemap files and `datasets.json` (source, version, licence, credit of every dataset); copied to `dist/ui/data/` by the build. |
 | `src/presentation/` | Shots and export | Shot settings (time remap, camera keys, overlays) and the export driver that renders frames off screen at the exact output size. |
 | `src/export/` | Files on disk | PNG encoder, export folders, `manifest.json`, `COMPOSITING_GUIDE.txt`. |
 | `src/ui/` | The interface | React. `store.ts` holds the session state and saves every command; components for the map, timeline, panels, dialogs and presentation mode. |
@@ -72,9 +81,9 @@ The approved roadmap has 14 stages (0–13). Where each stands:
 
 | Stage | Status | Done | Still to do |
 | --- | --- | --- | --- |
-| 0 Groundwork | Partly done | Sphere-safe kernel, two-part time, SQLite storage, transparent PNG export, pannable/zoomable/rotatable map | Electron shell and Windows installer; Natural Earth basemap; reference-image render tests |
+| 0 Groundwork | Mostly done | Sphere-safe kernel, two-part time, SQLite storage, transparent PNG export, pannable/zoomable/rotatable map, Natural Earth basemap | Electron shell and Windows installer; reference-image render tests |
 | 1 Project, storage, world model | Mostly done | Projects, schema, undo journal, autosave, versions, backups with restore, crash safety, multiple worlds, entities with names, colours, notes; outliner and inspector | Migration tests (only schema version 1 exists); per-world event filtering (see DECISIONS.md D8) |
-| 2 Parcel map and territory editing | Partly done | Production kernel, territory brush, precise shape tool, border-point editing, snapping, smoothing, irregularity, political fills, derived borders, labels | Border pen, explicit split and merge tools, administrative boundaries, region picker, coastline clipping (all need the basemap data) |
+| 2 Parcel map and territory editing | Partly done | Production kernel, territory brush, precise shape tool, border-point editing, snapping, smoothing, irregularity, political fills, derived borders, labels, present-day borders as a guide | Border pen, explicit split and merge tools, administrative boundaries as parcel edges, region picker, coastline clipping |
 | 3 Time and event engine | Mostly done | Instants, Gregorian calendar, events, effects with intention, compiler, any-date reconstruction, zoomable timeline, edit prompt, record mode, History Health with keep and re-apply, precedence and overlap rules | Custom event types (interface), date comparison, dated border-point moves |
 | 4 Layers, entities, lore | Started | Unlimited custom layers (territory kind), alternative versions of events | Area, line and point layers; relationships; lifespans; cities; search; GeoJSON and CSV export |
 | 5 First shots and export | Mostly done | Shots, time remap, start and end camera, date and title overlays, PNG sequences with passes and transparency at any resolution up to 8K and every listed frame rate, preview, manifest, compositing guide, deterministic output | Multi-key camera, styles, version-pinned shots, the Premiere checklist on the user's PC |
@@ -83,7 +92,7 @@ The approved roadmap has 14 stages (0–13). Where each stands:
 
 ## Tests
 
-All pass as of 16 November 2026.
+All pass as of 16 November 2026 (95 unit and randomised tests, 16 + 9 interface steps).
 
 | Suite | Count | What it proves |
 | --- | --- | --- |
@@ -98,7 +107,8 @@ All pass as of 16 November 2026.
 | `test/split-identity.test.ts` | 7 | The split-identity optimisation leaves history identical (6 random histories, with and without) and stops coastline relabelling |
 | `test/stroke.test.ts` | 7 | Freehand outlines: closed, open, figure-eight, tiny, orientation, reproducible irregularity |
 | `test/camera.test.ts` | 7 | Screen/map round trips in every projection, rotation and zoom 0–14; zoom keeps the cursor point fixed; city-level precision; panning across 180° |
-| `e2e/vertical-slice.e2e.ts` | 15 steps | The vertical slice in Chrome: projects, drawing, border points, versions, events, dates, version restore and undo, full restart, animation, export, identical re-export, 1080p |
+| `test/basemap.test.ts` | 11 | Natural Earth files decode correctly at both scales (land about 29% of the planet, no inside-out polygons, known places on land and at sea across 180° and the poles); dataset record; per-world setting with undo; culling never drops anything on screen (160 random views) |
+| `e2e/vertical-slice.e2e.ts` | 16 steps | The vertical slice in Chrome: projects, drawing, Earth's geography and data sources, border points, versions, events, dates, version restore and undo, full restart, animation, export with data credits, identical re-export, 1080p |
 | `e2e/workflows.e2e.ts` | 9 steps | Precise shapes; occupation layer; hiding layers; alternative versions; annexation; deleting and undoing events; fades; a second world; a camera move at 2.39:1 and 25 fps with frame timing, history in the pixels and pass stacking checked; square size, Natural Earth projection, 23.976 fps, transparency |
 
 Checked by hand: 4K and 8K exports; the unzipped package starts and works; requests from other hosts are refused.
@@ -128,7 +138,8 @@ Remaining bottlenecks:
 ## Known bugs and limitations
 
 1. **Not yet run on Windows.** The launcher, Windows paths and Explorer integration are untested until the user tries them.
-2. **No Earth basemap** (blocked: the data cannot be downloaded here).
+2. **Territories are not clipped to the coastlines.** Painted loosely, a country covers the sea. Coastline clipping is
+   next. The basemap's finest detail is 1:50m (about 1 km); city-scale coastlines (1:10m, OpenStreetMap) are not included yet.
 3. **Large maps are slow to edit and render** (see Performance).
 4. **Two animations meeting.** Where two simultaneous animated changes touch, their shared border is drawn throughout instead of following each front.
 5. **Animation taking over another animation.** When a change starts while an earlier one is still animating the same area, the earlier one is shown at its starting state.
@@ -159,13 +170,14 @@ Remaining bottlenecks:
 | Date | Work | Commits |
 | --- | --- | --- |
 | 15–16 Nov 2026 | Stage work from an empty folder: time system and kernel; world model, engine and commands; data service; interface; end-to-end fixes; documentation (0.1.0) | `2a564fc` → `0966b07` |
-| 16 Nov 2026 | Testing and refinement: scenario, geometry, world, recovery, camera and A/B tests; second interface test; benchmark; 11 defects fixed; performance work (0.2.0) | `6a3c64a` → latest |
+| 16 Nov 2026 | Testing and refinement: scenario, geometry, world, recovery, camera and A/B tests; second interface test; benchmark; 11 defects fixed; performance work (0.2.0) | `6a3c64a` → `343d84c` |
+| 16 Nov 2026 (2nd) | Package installs work; Natural Earth basemap (land, lakes, coastlines, present-day borders guide), land export pass, data sources dialog and export credits | `071deac` → latest |
 
 ## Next priorities
 
 1. The user runs `Start Map Maker.bat` on Windows and reports what happens.
-2. Restore the approved development set-up (package installs, private GitHub repository); then Electron with an
-   installer, the deck.gl renderer (D1, D2), and the Earth data with a GeoJSON import.
+2. Coastline clipping (territories end at the coast), then reverse D4 (real React types), D2 (Electron and installer),
+   D1 (deck.gl renderer).
 3. With the user's agreement: make the geometry kernel's rebuild incremental (needed before real coastlines).
 4. Finish Stage 2: border pen, split and merge tools, region picker, administrative boundaries, coastline clipping.
 5. Finish Stage 3: custom event types, date comparison, dated border-point moves, per-world event lists.
