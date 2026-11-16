@@ -127,7 +127,7 @@ export class World {
     return s;
   }
 
-  nextSeq(table: 'entity' | 'event' | 'sequence'): number {
+  nextSeq(table: 'entity' | 'event' | 'sequence' | 'event_group'): number {
     let m = 0;
     for (const r of this.all(table)) m = Math.max(m, r.created_seq);
     return m + 1;

@@ -27,11 +27,16 @@ export interface EffectRow {
   id: string; event_id: string; ordinal: number; kind: EffectKind; space_id: string | null; layer_id: string | null;
   at_day: number | null; at_ms: number | null; transition: Json; intent: Json; resolution: Json; basis_hash: string;
 }
+/** A group of events chosen by the user (by country, by world, or any grouping of their own). */
+export interface EventGroupRow { id: string; name: string; color: string; sort_order: number; created_seq: number }
+/** Membership of an event in a group; an event can belong to several groups. Key: `${group_id}|${event_id}`. */
+export interface EventGroupMemberRow { id: string; group_id: string; event_id: string }
 export interface SequenceRow { id: string; name: string; created_seq: number; settings: Json }
 
 export interface Rows {
   meta: MetaRow; map_space: MapSpaceRow; entity_type: EntityTypeRow; entity: EntityRow; layer: LayerRow;
   event_type: EventTypeRow; event: EventRow; effect: EffectRow; sequence: SequenceRow;
+  event_group: EventGroupRow; event_group_member: EventGroupMemberRow;
   vertex: VertexRow; segment: SegmentRow; face: FaceRow;
 }
 export type TableName = keyof Rows;
@@ -50,6 +55,8 @@ export const TABLES: { [K in TableName]: TableDef } = {
   event: { key: 'id', columns: { id: 'text', type_id: 'text', branch_id: 'text', name: 'text', start_day: 'int', start_ms: 'int', end_day: 'int?', end_ms: 'int?', precision: 'text', precedence: 'int', description: 'text', fields: 'text', presentation: 'text', created_seq: 'int', variant_group: 'text?', variant_active: 'int' } },
   effect: { key: 'id', columns: { id: 'text', event_id: 'text', ordinal: 'int', kind: 'text', space_id: 'text?', layer_id: 'text?', at_day: 'int?', at_ms: 'int?', transition: 'text', intent: 'text', resolution: 'text', basis_hash: 'text' } },
   sequence: { key: 'id', columns: { id: 'text', name: 'text', created_seq: 'int', settings: 'text' } },
+  event_group: { key: 'id', columns: { id: 'text', name: 'text', color: 'text', sort_order: 'int', created_seq: 'int' } },
+  event_group_member: { key: 'id', columns: { id: 'text', group_id: 'text', event_id: 'text' } },
   vertex: { key: 'id', kernel: true, columns: { id: 'int', space_id: 'text', lon: 'int', lat: 'int' } },
   segment: { key: 'id', kernel: true, columns: { id: 'int', space_id: 'text', a: 'int', b: 'int', left_face: 'int', right_face: 'int' } },
   face: { key: 'id', kernel: true, columns: { id: 'int', space_id: 'text', parent_id: 'int?', is_leaf: 'int' } },
@@ -68,6 +75,10 @@ export function invertDiffs(diffs: RowDiff[]): RowDiff[] {
   return [...diffs].reverse().map((d) => ({ table: d.table, before: d.after, after: d.before }));
 }
 
-export const SCHEMA_VERSION = 1;
+/**
+ * The project file format. 1: first release. 2: event groups (tables event_group, event_group_member).
+ * Older files are upgraded when opened (see ProjectDb.migrate), after an automatic backup.
+ */
+export const SCHEMA_VERSION = 2;
 export const BASE_EVENT_ID = 'evt_base';
 export const MAIN_BRANCH = 'main';

@@ -197,6 +197,7 @@ export function deleteEvent(world: World, id: string): CommandResult {
   const name = world.get('event', id)?.name ?? '';
   return run(world, `Delete event "${name}"`, (tx) => {
     for (const ef of world.all('effect').filter((f) => f.event_id === id)) tx.remove('effect', ef.id);
+    for (const m of world.all('event_group_member').filter((g) => g.event_id === id)) tx.remove('event_group_member', m.id);
     tx.remove('event', id);
   });
 }
@@ -213,6 +214,8 @@ export function createVariant(world: World, eventId: string, name: string): Comm
     const id = newId('evt');
     tx.insert('event', { ...ev, id, name, variant_group: group, variant_active: 1, created_seq: world.nextSeq('event') });
     for (const ef of world.all('effect').filter((f) => f.event_id === ev.id)) tx.insert('effect', { ...ef, id: newId('eff'), event_id: id });
+    // The alternative belongs to the same groups as the original.
+    for (const m of world.all('event_group_member').filter((g) => g.event_id === ev.id)) insertMember(tx, m.group_id, id);
     return id;
   });
 }
@@ -224,6 +227,78 @@ export function activateVariant(world: World, eventId: string): CommandResult {
     for (const other of world.all('event')) if (other.variant_group === ev.variant_group) tx.patch('event', other.id, { variant_active: other.id === eventId ? 1 : 0 });
   });
 }
+
+// ---------------------------------------------------------------- event groups
+// Events belong to the project; the user groups them (by country, by world, or groups of their own)
+// and chooses which groups the timeline shows (DECISIONS D8). An event can be in several groups.
+
+const GROUP_COLORS = ['#4f9bd9', '#e0a458', '#7bc47f', '#d1495b', '#a77dc2', '#5fb7b0', '#c9b458', '#e07a9a'];
+
+function insertMember(tx: Tx, groupId: string, eventId: string): void {
+  const id = `${groupId}|${eventId}`;
+  if (!tx.world.get('event_group_member', id)) tx.insert('event_group_member', { id, group_id: groupId, event_id: eventId });
+}
+
+export function createEventGroup(world: World, name: string, color?: string): CommandResult<string> {
+  const n = name.trim();
+  if (!n) throw new Error('Give the group a name.');
+  if (world.all('event_group').some((g) => g.name.toLowerCase() === n.toLowerCase())) throw new Error(`There is already a group called "${n}".`);
+  return run(world, `Create event group "${n}"`, (tx) => {
+    const id = newId('grp');
+    const count = world.all('event_group').length;
+    tx.insert('event_group', { id, name: n, color: color ?? GROUP_COLORS[count % GROUP_COLORS.length], sort_order: count, created_seq: world.nextSeq('event_group') });
+    return id;
+  });
+}
+
+export function updateEventGroup(world: World, id: string, patch: { name?: string; color?: string }): CommandResult {
+  const g = world.get('event_group', id);
+  if (!g) throw new Error('That group no longer exists.');
+  const name = patch.name?.trim();
+  if (patch.name !== undefined && !name) throw new Error('Give the group a name.');
+  if (name && world.all('event_group').some((o) => o.id !== id && o.name.toLowerCase() === name.toLowerCase())) throw new Error(`There is already a group called "${name}".`);
+  return run(world, `Change event group "${g.name}"`, (tx) => { tx.patch('event_group', id, { ...(name ? { name } : {}), ...(patch.color ? { color: patch.color } : {}) }); });
+}
+
+/** Delete a group. Its events stay; they only leave the group. */
+export function deleteEventGroup(world: World, id: string): CommandResult {
+  const g = world.get('event_group', id);
+  if (!g) throw new Error('That group no longer exists.');
+  return run(world, `Delete event group "${g.name}"`, (tx) => {
+    for (const m of world.all('event_group_member').filter((x) => x.group_id === id)) tx.remove('event_group_member', m.id);
+    tx.remove('event_group', id);
+  });
+}
+
+/** Put an event in exactly these groups (taking it out of any others). */
+export function setEventGroups(world: World, eventId: string, groupIds: string[]): CommandResult {
+  const ev = world.get('event', eventId);
+  if (!ev || ev.id === BASE_EVENT_ID) throw new Error('Choose an event first.');
+  for (const g of groupIds) if (!world.get('event_group', g)) throw new Error('That group no longer exists.');
+  const want = new Set(groupIds);
+  return run(world, `Change the groups of "${ev.name}"`, (tx) => {
+    for (const m of world.all('event_group_member').filter((x) => x.event_id === eventId)) if (!want.has(m.group_id)) tx.remove('event_group_member', m.id);
+    for (const g of want) insertMember(tx, g, eventId);
+  });
+}
+
+/** The groups an event belongs to, in display order. */
+export function groupsOfEvent(world: World, eventId: string): string[] {
+  const order = new Map(world.all('event_group').map((g) => [g.id, g.sort_order]));
+  return world.all('event_group_member').filter((m) => m.event_id === eventId).map((m) => m.group_id).sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
+}
+
+/**
+ * Whether an event is shown under a group filter: null shows every event; otherwise the event shows
+ * if it is in a chosen group, or if it is in no group and 'ungrouped' is chosen.
+ */
+export function eventShown(world: World, eventId: string, filter: Set<string> | null): boolean {
+  if (!filter) return true;
+  const groups = world.all('event_group_member').filter((m) => m.event_id === eventId);
+  if (!groups.length) return filter.has(UNGROUPED);
+  return groups.some((m) => filter.has(m.group_id));
+}
+export const UNGROUPED = '__ungrouped';
 
 // ---------------------------------------------------------------- territory
 

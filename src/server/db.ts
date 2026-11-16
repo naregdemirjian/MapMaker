@@ -115,7 +115,18 @@ export class ProjectDb {
     const row = this.db.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get() as { value: string } | undefined;
     const v = row ? Number(row.value) : SCHEMA_VERSION;
     if (v > SCHEMA_VERSION) throw new IntegrityError('This project was saved by a newer version of Map Maker. Please update the app.');
-    // Future schema versions add migration steps here, each preceded by an automatic backup.
+    if (v === SCHEMA_VERSION) return;
+    // Each upgrade is preceded by an automatic backup, so the file as it was can always be restored.
+    this.backupNow();
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      // 1 -> 2: the event group tables, already created (empty) by the table definitions above.
+      this.db.prepare("UPDATE meta SET value = ? WHERE key = 'schema_version'").run(String(SCHEMA_VERSION));
+      this.db.exec('COMMIT');
+    } catch (e) {
+      this.db.exec('ROLLBACK');
+      throw e;
+    }
   }
 
   close(): void {
@@ -314,7 +325,9 @@ export function readSnapshot(file: string): Snapshot {
   const db = new DatabaseSync(file, { readOnly: true });
   try {
     const s: Record<string, AnyRow[]> = {};
-    for (const t of TABLE_NAMES) s[t] = db.prepare(`SELECT * FROM ${t}`).all() as unknown as AnyRow[];
+    // Files from older versions lack newer tables: those are simply empty.
+    const present = new Set((db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>).map((r) => r.name));
+    for (const t of TABLE_NAMES) s[t] = present.has(t) ? db.prepare(`SELECT * FROM ${t}`).all() as unknown as AnyRow[] : [];
     return s as Snapshot;
   } finally {
     db.close();
@@ -325,8 +338,14 @@ export function readSnapshot(file: string): Snapshot {
 export function diffSnapshots(from: Snapshot, to: Snapshot): RowDiff[] {
   const diffs: RowDiff[] = [];
   // Deletions in reverse dependency order, inserts and updates in forward order.
-  const order: TableName[] = ['meta', 'entity_type', 'event_type', 'map_space', 'face', 'vertex', 'segment', 'layer', 'entity', 'event', 'effect', 'sequence'];
-  const keyed = (rows: AnyRow[] | undefined, t: TableName) => new Map((rows ?? []).map((r) => [(r as unknown as Record<string, string | number>)[TABLES[t].key], r]));
+  const order: TableName[] = ['meta', 'entity_type', 'event_type', 'map_space', 'face', 'vertex', 'segment', 'layer', 'entity', 'event', 'effect', 'sequence', 'event_group', 'event_group_member'];
+  const keyedAll = (rows: AnyRow[] | undefined, t: TableName) => new Map((rows ?? []).map((r) => [(r as unknown as Record<string, string | number>)[TABLES[t].key], r]));
+  // The file format version describes the file, not the project's content: never restored.
+  const keyed = (rows: AnyRow[] | undefined, t: TableName) => {
+    const m = keyedAll(rows, t);
+    if (t === 'meta') m.delete('schema_version');
+    return m;
+  };
   for (const t of [...order].reverse()) {
     const a = keyed(from[t] as AnyRow[], t), b = keyed(to[t] as AnyRow[], t);
     for (const [k, row] of a) if (!b.has(k)) diffs.push({ table: t, before: row, after: null });
