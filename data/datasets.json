@@ -1,0 +1,47 @@
+[
+  {
+    "id": "natural-earth",
+    "name": "Natural Earth",
+    "version": "v5.1.2",
+    "source": "https://www.naturalearthdata.com/ (files from https://github.com/nvkelso/natural-earth-vector)",
+    "licence": "Public domain",
+    "credit": "Made with Natural Earth. Free vector and raster map data @ naturalearthdata.com.",
+    "usedFor": "Earth basemap: land, lakes, coastlines and present-day country borders (reference only) at 1:110m and 1:50m",
+    "retrieved": "2026-11-16",
+    "converted": "Coordinates rounded to 0.0001 degrees; nothing else changed.",
+    "sources": [
+      {
+        "file": "ne_110m_land.geojson",
+        "sha256": "9e0729ee253ca7d7a5c4ae9395fb1902264c5377c52e224d13dd85010e2835d9"
+      },
+      {
+        "file": "ne_110m_lakes.geojson",
+        "sha256": "eb02ecc86c82004fccbf979058bfabbbd6c2d07968c7844d38eb1c9152d2ffc9"
+      },
+      {
+        "file": "ne_110m_coastline.geojson",
+        "sha256": "851f581ff5ffb844deed8ae1a9ce22e3c4bb3d74fa342cadb5d8e39b41ae7c3c"
+      },
+      {
+        "file": "ne_110m_admin_0_boundary_lines_land.geojson",
+        "sha256": "d42479fd79552cca4eec7f85fcdca717a790d29ff06be7676f1af0568c6d3f7c"
+      },
+      {
+        "file": "ne_50m_land.geojson",
+        "sha256": "e874b27a51d146452be360cafb3cc50c86001074a67d534113e6534682f9826b"
+      },
+      {
+        "file": "ne_50m_lakes.geojson",
+        "sha256": "d350b75978b26fe839b797c2c529b2fb8f47fb3983c03f4964e36d5df9378a52"
+      },
+      {
+        "file": "ne_50m_coastline.geojson",
+        "sha256": "271f1c4c1908312bac6b29d158ea1356544beafc129f260005300913aa5ea283"
+      },
+      {
+        "file": "ne_50m_admin_0_boundary_lines_land.geojson",
+        "sha256": "2faac4f6b34386f3d21b6e018cf151f241f00e5c936d44dd17d7d9bfb147fa48"
+      }
+    ]
+  }
+]

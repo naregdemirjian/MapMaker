@@ -3,7 +3,7 @@
 //   dist/server.mjs  the local data service (Node built-ins only, no native modules)
 // Both are self-contained, so the dist folder runs on any machine with Node.js >= 22.18.
 import { build } from 'esbuild';
-import { mkdirSync, copyFileSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdirSync, copyFileSync, writeFileSync, readFileSync, cpSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -41,5 +41,7 @@ await build({
 
 copyFileSync(join(root, 'src/ui/index.html'), join(out, 'ui/index.html'));
 copyFileSync(join(root, 'src/ui/styles.css'), join(out, 'ui/styles.css'));
+// Map data (Natural Earth basemap and the dataset licence records) is served with the interface.
+cpSync(join(root, 'data'), join(out, 'ui/data'), { recursive: true });
 writeFileSync(join(out, 'BUILD.txt'), `Map Maker ${pkg.version}\nBuilt ${new Date().toISOString()}\n`);
 console.log('Built dist/ui/app.js and dist/server.mjs');
