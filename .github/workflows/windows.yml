@@ -1,0 +1,58 @@
+# Builds and tests Map Maker on Windows, and produces the Windows installer.
+# The installer appears under "Artifacts" on the run's page (Actions tab): "Map Maker Setup <version>.exe".
+name: Windows build and tests
+
+on:
+  push:
+    branches: [main, 'claude/**']
+    paths: ['src/**', 'test/**', 'e2e/**', 'scripts/**', 'data/**', 'build/**', 'package.json', 'package-lock.json', 'tsconfig.json', 'Start Map Maker.bat', '.github/workflows/windows.yml']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install packages
+        run: npm ci
+      - name: Type check
+        run: node node_modules/typescript/bin/tsc -p tsconfig.json
+      - name: Unit, randomised and scenario tests
+        run: npm test
+      - name: Build
+        run: node scripts/build.mjs
+      - name: Install Chromium for the interface tests
+        run: npx playwright install chromium
+      - name: Interface test (vertical slice, in Chromium)
+        run: node --disable-warning=ExperimentalWarning e2e/vertical-slice.e2e.ts
+      - name: Interface test (workflows, in Chromium)
+        run: node --disable-warning=ExperimentalWarning e2e/workflows.e2e.ts
+      - name: Interface test (desktop app)
+        run: node --disable-warning=ExperimentalWarning e2e/desktop.e2e.ts
+      - name: Build the Windows installer
+        run: npx electron-builder --win --x64 --publish never
+      - name: Keep the installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Map Maker installer (Windows)
+          path: release/*.exe
+          if-no-files-found: error
+          retention-days: 30
+      - name: Keep the test screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Test screenshots (Windows)
+          path: e2e/output/
+          if-no-files-found: ignore
+          retention-days: 14
