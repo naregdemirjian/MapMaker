@@ -9,8 +9,8 @@ import { makeView } from '../render-engine/camera.ts';
 import { type ShotSettings, timeAt, cameraAt, overlaysAt, drawOverlays, shotTransitions, screenSecondsSince } from './sequence.ts';
 import { gregorian, type Instant } from '../core-time/index.ts';
 import { eventsBoxOf, currentEvents, drawEventsBox } from './events-box.ts';
-import { eventShown } from '../domain/commands.ts';
-import { preloadImages } from '../render-engine/assets.ts';
+import { eventShown, entityStyle } from '../domain/commands.ts';
+import { preloadImages, prepareVideos } from '../render-engine/assets.ts';
 import { basemapSourceOf, loadBasemap, loadBasemapDetail, loadDatasetRecords, type Basemap } from '../render-engine/basemap.ts';
 
 export interface ExportPassDef { name: string; label: string; blend: string; passes: PassName[]; overlays: boolean; background: boolean; note?: string }
@@ -61,7 +61,7 @@ export function renderFrame(ctx: CanvasRenderingContext2D, renderer: MapRenderer
   ctx.clearRect(0, 0, width, height);
   if (passes.size) {
     const transparent = def.name === 'all' ? shot.transparent : !def.background;
-    renderer.render(ctx, view, world, engine, shot.spaceId, t, { passes, transparent, layerIds: visibleLayers(world, shot), basemap, transitions: transitionOptions(shot, frame) });
+    renderer.render(ctx, view, world, engine, shot.spaceId, t, { passes, transparent, layerIds: visibleLayers(world, shot), basemap, transitions: transitionOptions(shot, frame), mediaSeconds: frame / shot.fps, mediaChannel: 'export' });
   }
   if (def.overlays) drawShotOverlays(ctx, width, height, world, shot, frame, t);
 }
@@ -80,7 +80,10 @@ export async function runExport(o: {
   const started = performance.now();
   // Loaded before the first frame, so every frame is drawn from the same complete data.
   const basemap = await basemapFor(o.world, o.shot.spaceId);
-  await preloadImages([eventsBoxOf(o.shot.eventsBox).image]);
+  // Pictures and videos: every picture loaded, and every video sought to its frame before drawing.
+  const fills = o.world.all('entity').map((e) => entityStyle(e).fill).filter((f): f is NonNullable<typeof f> => !!f?.asset);
+  const videoFills = fills.filter((f) => f.kind === 'video').map((f) => ({ file: f.asset!, play: f }));
+  await preloadImages([eventsBoxOf(o.shot.eventsBox).image, ...fills.filter((f) => f.kind === 'image').map((f) => f.asset)]);
   // Credit lines for the data drawn in these frames (written into the manifest and the guide).
   const credits = basemap ? (await loadDatasetRecords()).filter((d) => d.id === 'natural-earth').map((d) => `${d.name} ${d.version} (${d.licence}): ${d.credit}`) : [];
   const job = await Api.startExport(o.projectId, {
@@ -99,6 +102,7 @@ export async function runExport(o: {
   for (let frame = f0; frame <= f1; frame++) {
     for (const def of defs) {
       if (o.isCancelled?.()) throw new Error('Export cancelled.');
+      if (videoFills.length) await prepareVideos(videoFills, frame / o.shot.fps);
       renderFrame(ctx, renderer, o.world, o.engine, o.shot, frame, def, width, height, basemap);
       const data = ctx.getImageData(0, 0, width, height).data;
       await Api.sendFrame(o.projectId, job.jobId, def.name, frame, width, height, new Uint8Array(data.buffer, data.byteOffset, data.byteLength));

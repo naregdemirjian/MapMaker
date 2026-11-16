@@ -17,6 +17,7 @@ import type { Arrangement } from '../geo-kernel/arrangement.ts';
 import { E7 } from '../geo-kernel/vec.ts';
 import { BasemapPainter, landMaskOf, type Basemap, type LandMask } from './basemap.ts';
 import { resolveLabelStyle, labelSize, labelFont, labelText, type LabelStyle, type CountryLabel } from './label-style.ts';
+import { imageNow, videoNow, drawImageFit, type MediaChannel } from './assets.ts';
 
 type LabelEntity = { name: string; style?: string };
 
@@ -52,7 +53,17 @@ export interface RenderOptions {
   referenceBorders?: boolean;
   /** A shot's way of animating border changes; absent: as recorded (world-building view). */
   transitions?: ShotTransitionOptions;
+  /** Screen seconds into the shot, for video fills (0 or absent: the first frame). */
+  mediaSeconds?: number;
+  /** 'export' for exports (videos sought beforehand by prepareVideos); 'live' otherwise. */
+  mediaChannel?: MediaChannel;
 }
+
+/** A picture or video fill (see domain/commands.ts CountryFill). */
+interface CountryFillLike { kind: 'color' | 'image' | 'video'; asset?: string; fit?: 'cover' | 'contain' | 'stretch' | 'tile'; tileSize?: number; play?: 'loop' | 'once'; speed?: number; start?: number }
+
+/** x, y, width, height on screen. */
+type Box2 = [number, number, number, number];
 
 export type TransitionEase = 'linear' | 'smooth' | 'in' | 'out';
 
@@ -172,6 +183,17 @@ export class MapRenderer {
     }
 
     const entities = new Map(world.all('entity').map((e) => [e.id, e]));
+    this.mediaSeconds = opts.mediaSeconds ?? 0;
+    this.mediaChannel = opts.mediaChannel ?? 'live';
+    // Pictures and videos filling territory, by owner.
+    const fills = new Map<string, CountryFillLike | null>();
+    const fillOf = (v: string): CountryFillLike | null => {
+      if (fills.has(v)) return fills.get(v)!;
+      const f = parseJSON<{ fill?: CountryFillLike }>(entities.get(v)?.style ?? '{}', {})?.fill ?? null;
+      const ok = f && f.asset && (f.kind === 'image' || f.kind === 'video') ? f : null;
+      fills.set(v, ok);
+      return ok;
+    };
     // Label looks: the project's general style, then each country's own settings.
     const general = parseJSON<Partial<LabelStyle>>(world.get('meta', 'label_style')?.value ?? '{}', {});
     this.labelLook = (id: string, name: string) => {
@@ -205,15 +227,40 @@ export class MapRenderer {
       // Each layer is painted fully opaque in a scratch buffer and laid onto the map once at the
       // layer's opacity: neighbouring parcels then never show seams, and fades mix correctly.
       const lc = this.scratch(ctx);
-      const byColor = new Map<string, number[]>();
+      // Owners filled with a picture or video are drawn on their own; the rest are grouped by colour.
+      const byColor = new Map<string, number[]>(), byMedia = new Map<string, number[]>();
       for (const [face, st] of states) {
-        const c = colorOf(tg.of.has(face) ? st.transition!.from : st.value);
+        const v = tg.of.has(face) ? st.transition!.from : st.value;
+        if (!v) continue;
+        if (fillOf(v)) { const l = byMedia.get(v); if (l) l.push(face); else byMedia.set(v, [face]); continue; }
+        const c = colorOf(v);
         if (!c) continue;
         const l = byColor.get(c);
         if (l) l.push(face); else byColor.set(c, [face]);
       }
       for (const [c, faces] of byColor) { lc.fillStyle = c; lc.fill(this.groupPath(view, arr, faces), 'evenodd'); }
-      for (const g of tg.groups.values()) this.drawTransition(lc, g, colorOf);
+      // Pictures are placed by the bounding box of the owner's whole territory (so a flag does not
+      // jump between the owner's pieces); an owner whose picture is not loaded yet shows its colour.
+      const ownerBox = new Map<string, Box2>();
+      const boxOf = (v: string) => {
+        let b = ownerBox.get(v);
+        if (!b) {
+          const faces: number[] = [];
+          for (const [f, st] of states) if (st.value === v || (tg.of.has(f) && st.transition!.from === v)) faces.push(f);
+          b = this.screenBox(view, arr, faces);
+          ownerBox.set(v, b);
+        }
+        return b;
+      };
+      const paint = (c: CanvasRenderingContext2D, v: string | null, shape: Path2D) => {
+        const media = v ? fillOf(v) : null;
+        if (v && media && this.paintMedia(c, media, shape, boxOf(v), view.unit)) return;
+        const col = colorOf(v);
+        if (col) { c.fillStyle = col; c.fill(shape, 'evenodd'); }
+        else { c.save(); c.globalCompositeOperation = 'destination-out'; c.fillStyle = '#000'; c.fill(shape, 'evenodd'); c.restore(); }
+      };
+      for (const [v, faces] of byMedia) paint(lc, v, this.groupPath(view, arr, faces));
+      for (const g of tg.groups.values()) this.drawTransition(lc, g, paint);
       if (clip) this.basemapPainter.maskToLand(lc, view, opts.basemap!);
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -397,18 +444,52 @@ export class MapRenderer {
    * buffer: an advancing front fills the reached area with the new owner; a fade mixes the new
    * owner in. Territory that becomes nobody's is erased from the layer, never from the map below.
    */
-  private drawTransition(lc: CanvasRenderingContext2D, g: TransitionGroup, colorOf: (v: string | null) => string | null): void {
-    const toColor = colorOf(g.a.value);
+  private drawTransition(lc: CanvasRenderingContext2D, g: TransitionGroup, paint: (c: CanvasRenderingContext2D, v: string | null, shape: Path2D) => void): void {
     const shape = g.advance ? g.disc : g.changing;
     if (!shape) return; // the front has not reached anything yet
     lc.save();
     if (g.advance) lc.clip(g.changing, 'evenodd');
     else lc.globalAlpha = Math.min(1, Math.max(0, g.progress));
-    if (toColor) lc.fillStyle = toColor;
-    else { lc.globalCompositeOperation = 'destination-out'; lc.fillStyle = '#000'; }
-    lc.fill(shape, 'evenodd');
+    paint(lc, g.a.value, shape);
     lc.restore();
   }
+
+  /** The screen rectangle of a set of parcels (the whole view for a parcel covering the planet). */
+  private screenBox(view: View, arr: Arrangement, faces: number[]): Box2 {
+    const polys: number[][][][] = [];
+    for (const f of faces) {
+      const g = this.faceGeo(arr, f);
+      if ((g.geo as { type: string }).type !== 'Polygon') return [0, 0, view.width, view.height];
+      polys.push((g.geo as GeoJSON.Polygon).coordinates);
+    }
+    if (!polys.length) return [0, 0, view.width, view.height];
+    const [[x0, y0], [x1, y1]] = geoPath(view.projection).bounds({ type: 'MultiPolygon', coordinates: polys });
+    return Number.isFinite(x0) && x1 > x0 && y1 > y0 ? [x0, y0, x1 - x0, y1 - y0] : [0, 0, view.width, view.height];
+  }
+
+  /** Fill a shape with a picture or video frame; false if it cannot be drawn yet. */
+  private paintMedia(c: CanvasRenderingContext2D, fill: CountryFillLike, shape: Path2D, box: Box2, unit: number): boolean {
+    const src = fill.kind === 'video' ? videoNow(fill.asset, this.mediaSeconds, fill, this.mediaChannel) : imageNow(fill.asset);
+    if (!src) return false;
+    c.save();
+    c.clip(shape, 'evenodd');
+    if (fill.fit === 'tile') {
+      const w = (src as HTMLVideoElement).videoWidth || src.width, h = (src as HTMLVideoElement).videoHeight || src.height;
+      const pattern = c.createPattern(src, 'repeat');
+      if (pattern && w && h) {
+        const size = (fill.tileSize ?? 120) * unit;
+        pattern.setTransform(new DOMMatrix().translate(box[0], box[1]).scale(size / w));
+        c.fillStyle = pattern;
+        c.fill(shape, 'evenodd');
+      }
+    } else drawImageFit(c, src, box[0], box[1], box[2], box[3], fill.fit ?? 'cover');
+    c.restore();
+    return true;
+  }
+
+  /** Screen seconds into the shot (videos show the frame for this moment); 0 while editing. */
+  private mediaSeconds = 0;
+  private mediaChannel: MediaChannel = 'live';
 
   private scratchCanvas: OffscreenCanvas | null = null;
   private scratchCtx: CanvasRenderingContext2D | null = null;

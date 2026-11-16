@@ -632,6 +632,32 @@ try {
     await page.evaluate(() => (window as any).__mapmaker.store.flush());
   });
 
+  await step("A country filled with a flag (France) instead of its colour", async () => {
+    await page.getByTestId('mode-world').click().catch(() => undefined);
+    await page.locator('.left .row', { hasText: A }).click();
+    await setDate('1451');
+    await page.getByTestId('label-shown').uncheck(); // the label would cover the point measured
+    await page.waitForTimeout(150);
+    const before = await canvasPixel(P.westA);
+    await page.getByTestId('choose-flag').click();
+    await page.getByTestId('flag-search').fill('France');
+    await page.getByTestId('flag-fr').click();
+    await page.waitForFunction(() => (window as any).__mapmaker.store.world.all('entity').some((e: any) => e.style.includes('data/flags/fr.svg')));
+    await page.waitForTimeout(400); // the flag picture loads, then the map redraws
+    const after = await canvasPixel(P.westA);
+    assert.ok(before[0] > before[2] + 40, `A's own colour is red-orange (${before})`);
+    const orange = (c: number[]) => c[0] > c[2] + 40 && c[1] < 140;
+    assert.ok(!orange(after) && colourDiff(after, before) > 60, `A shows the French flag, not its colour (${before} -> ${after})`);
+    assert.match(await page.getByTestId('country-fill').innerText(), /Filled with a flag/);
+    await screenshot('flag-fill');
+    // Back to its colour.
+    await page.getByTestId('fill-color').click();
+    await page.waitForTimeout(150);
+    const back = await canvasPixel(P.westA);
+    assert.ok(back[0] > back[2] + 40, `colour again (${back})`);
+    await page.getByTestId('label-shown').check();
+  });
+
   await step('History Health reports no problems', async () => {
     await page.getByTestId('mode-world').click();
     await page.getByTestId('health').click();

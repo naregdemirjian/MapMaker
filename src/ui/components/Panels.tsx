@@ -9,6 +9,7 @@ import { lonLatToVec } from '../../geo-kernel/vec.ts';
 import { stepChange } from './Timeline.tsx';
 import { GroupChecks, eventVisible } from './EventGroups.tsx';
 import { CountryLabelSection } from './LabelStyles.tsx';
+import { CountryFillSection, FillSwatch } from './CountryFill.tsx';
 
 export const fmt = (t: Instant, precision: 'year' | 'day' | 'minute' = 'day') => gregorian.format(t, precision);
 
@@ -163,7 +164,7 @@ export function Outliner() {
   };
   const entityRow = (e: { id: string; name: string; color: string; type_id: string }) => (
     <div key={e.id} className={`row ${s.selection?.kind === 'entity' && s.selection.id === e.id ? 'sel' : ''}`} onClick={() => s.set({ selection: { kind: 'entity', id: e.id } })}>
-      <span className="swatch" style={{ background: e.color }} />{e.name}
+      <FillSwatch entity={e} />{e.name}
     </div>
   );
   return (
@@ -296,7 +297,7 @@ function EntityPanel({ id }: { id: string }) {
         </div>
       ))}
       {!changes.length && <div className="muted">None yet.</div>}
-      {(e.type_id === 'polity' || e.type_id === 'faction') && <CountryLabelSection id={id} />}
+      {(e.type_id === 'polity' || e.type_id === 'faction') && <><CountryFillSection id={id} /><CountryLabelSection id={id} /></>}
       <button className="danger" onClick={() => { if (confirm(`Delete ${e.name}? Events that refer to it will be flagged in History Health.`)) { s.execute((wd) => cmd.deleteEntity(wd, id)); s.set({ selection: null }); } }}>Delete</button>
     </div>
   );

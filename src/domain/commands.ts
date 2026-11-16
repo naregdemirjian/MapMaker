@@ -127,8 +127,24 @@ export function setLayerClipToLand(world: World, id: string, clip: boolean): Com
 
 // ---------------------------------------------------------------- looks: label styles, entity styles
 
+/** How a country's territory is filled: its colour (default), a picture, or a video. */
+export interface CountryFill {
+  kind: 'color' | 'image' | 'video';
+  /** A project asset name, or a file shipped with the app (for example 'data/flags/fr.svg'). */
+  asset?: string;
+  /** How the picture covers the territory: cover (cropped), contain, stretch, or tile (repeat). */
+  fit?: 'cover' | 'contain' | 'stretch' | 'tile';
+  /** Tile size in pixels of a 1920-wide frame. */
+  tileSize?: number;
+  /** Videos: loop, or play once and hold the last frame. */
+  play?: 'loop' | 'once';
+  speed?: number;
+  /** Videos: seconds into the video at the start of a shot. */
+  start?: number;
+}
+
 /** What is stored in entity.style (JSON). */
-export interface EntityStyle { label?: CountryLabel }
+export interface EntityStyle { label?: CountryLabel; fill?: CountryFill }
 
 export function entityStyle(e: { style?: string } | null | undefined): EntityStyle {
   return parseJSON<EntityStyle>(e?.style ?? '{}', {}) ?? {};
@@ -151,7 +167,7 @@ export function setGeneralLabelStyle(world: World, patch: Partial<Record<keyof L
 }
 
 /** Change parts of an entity's look. `label: null` returns its label to the general style. */
-export function setEntityStyle(world: World, id: string, patch: { label?: CountryLabel | null }): CommandResult {
+export function setEntityStyle(world: World, id: string, patch: { label?: CountryLabel | null; fill?: CountryFill | null }): CommandResult {
   const e = world.get('entity', id);
   if (!e) throw new Error('That country no longer exists.');
   const next: EntityStyle = { ...entityStyle(e) };
@@ -159,6 +175,11 @@ export function setEntityStyle(world: World, id: string, patch: { label?: Countr
   else if (patch.label !== undefined) {
     const clean = Object.fromEntries(Object.entries(patch.label).filter(([, v]) => v !== undefined && v !== null && v !== '')) as CountryLabel;
     if (Object.keys(clean).length) next.label = clean; else delete next.label;
+  }
+  if (patch.fill === null || patch.fill?.kind === 'color') delete next.fill;
+  else if (patch.fill) {
+    if (!patch.fill.asset) throw new Error('Choose a picture or video first.');
+    next.fill = patch.fill;
   }
   return run(world, `Change the look of "${e.name}"`, (tx) => { tx.patch('entity', id, { style: JSON.stringify(next) }); });
 }

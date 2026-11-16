@@ -173,4 +173,17 @@ p.error { color: #ff9aa8; }
 .own-look > summary { cursor: pointer; color: var(--muted); margin: 4px 0; }
 button.link.pad-link { padding: 4px 10px 8px; }
 label.file-button { display: inline-flex; align-items: center; background: var(--panel2); border: 1px solid var(--line); border-radius: 5px; padding: 5px 10px; cursor: pointer; color: var(--text); }
-label.file-button input[type=file] { display: none; }
+label.file-button input[type=file] { display: none !important; }
+
+/* Country fills */
+.swatch.picture { background-size: cover; background-position: center; }
+.swatch.video { color: #fff; font-size: 8px; display: inline-flex; align-items: center; justify-content: center; }
+.country-fill { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.fill-now { display: flex; align-items: center; gap: 6px; }
+.fill-now button { margin-left: auto; }
+label.file-button.small { padding: 3px 8px; font-size: 12px; }
+.flag-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; max-height: 56vh; overflow-y: auto; margin: 10px 0; }
+.flag-grid .flag { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px; font-size: 11px; }
+.flag-grid .flag img { width: 64px; height: 48px; object-fit: cover; border: 1px solid var(--line); }
+.flag-grid .flag span { text-align: center; line-height: 1.2; }
+.flag-grid .flag.on { border-color: var(--accent); }

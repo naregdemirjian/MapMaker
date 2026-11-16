@@ -59,5 +59,15 @@
         "sha256": "74d9c16229c095fde65943a9919e337682f044bcebccb120764f38edf3b70f4a"
       }
     ]
+  },
+  {
+    "id": "flag-icons",
+    "name": "flag-icons",
+    "version": "7.6.0",
+    "source": "https://github.com/lipis/flag-icons (npm package flag-icons); nation names from Natural Earth",
+    "licence": "MIT (the drawings); national flags themselves are generally not subject to copyright",
+    "credit": "Flag drawings: flag-icons by Panayiotis Lipiridis and contributors, MIT licence.",
+    "usedFor": "Flags of today's 197 nations, offered as country fills (optional)",
+    "retrieved": "2026-11-16"
   }
 ]

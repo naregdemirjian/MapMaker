@@ -430,6 +430,59 @@ try {
     await h.saved();
   });
 
+  await h.step('A country filled with a video: it plays through the shot in the exported frames', async () => {
+    // A 2-second test video made in the browser: green for one second, then blue.
+    const b64 = await page.evaluate(async () => {
+      const c = document.createElement('canvas'); c.width = 64; c.height = 48;
+      const g = c.getContext('2d')!;
+      const rec = new MediaRecorder(c.captureStream(30), { mimeType: 'video/webm' });
+      const chunks: Blob[] = [];
+      rec.ondataavailable = (e) => chunks.push(e.data);
+      const done = new Promise((r) => (rec.onstop = r));
+      rec.start();
+      const t0 = performance.now();
+      await new Promise<void>((resolve) => {
+        const tick = () => {
+          const t = performance.now() - t0;
+          g.fillStyle = t < 1000 ? '#00ff00' : '#0000ff'; g.fillRect(0, 0, 64, 48);
+          if (t < 2100) requestAnimationFrame(tick); else resolve();
+        };
+        tick();
+      });
+      rec.stop(); await done;
+      const buf = new Uint8Array(await new Blob(chunks, { type: 'video/webm' }).arrayBuffer());
+      let s = ''; for (const x of buf) s += String.fromCharCode(x);
+      return btoa(s);
+    });
+    const video = join(ROOT, '.tmp', 'fill-test.webm');
+    writeFileSync(video, Buffer.from(b64, 'base64'));
+    await page.getByTestId('mode-world').click();
+    await page.locator('.left .row', { hasText: A }).click();
+    await page.getByTestId('fill-upload-video').setInputFiles(video);
+    await page.getByTestId('fill-play').waitFor();
+    await page.getByTestId('fill-play').selectOption('once');
+    await page.locator('.country-fill label', { hasText: 'Speed' }).locator('input').fill('2');
+    await h.saved();
+    await page.getByTestId('mode-present').click();
+    await page.locator('.left .row', { hasText: 'Shot 1' }).click();
+    await page.getByTestId('shot-editor').waitFor();
+    const ex = await exportShot('export-preview');
+    const at = async (f: number) => {
+      const p = await page.evaluate(([lon, lat, fr]) => (window as any).__mapmaker.exportPixel(lon, lat, fr, 0.25), [P.a[0], P.a[1], f] as const);
+      return pixel(readPNG(ex.frames('fills')[f]), p[0], p[1]);
+    };
+    const first = await at(0), last = await at(ex.frames('fills').length - 1);
+    assert.ok(first[1] > first[2] + 60 && first[1] > first[0] + 60, `first frame shows the video's green (${first})`);
+    assert.ok(last[2] > last[1] + 60 && last[2] > last[0] + 60, `last frame shows the video's blue: it played (${last})`);
+    await page.getByTestId('mode-world').click();
+    await page.locator('.left .row', { hasText: A }).click();
+    await page.getByTestId('fill-color').click();
+    await h.saved();
+    await page.getByTestId('mode-present').click();
+    await page.locator('.left .row', { hasText: 'Shot 1' }).click();
+    await page.getByTestId('shot-editor').waitFor();
+  });
+
   await h.step('A square custom size, another projection, 23.976 fps and a transparent full picture', async () => {
     await page.locator('label', { hasText: 'Frame rate' }).locator('select').selectOption('23.976');
     await page.getByTestId('shot-seconds').fill('0.1'); await page.getByTestId('shot-seconds').press('Enter');
