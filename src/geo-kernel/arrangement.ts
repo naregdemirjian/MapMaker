@@ -754,10 +754,43 @@ export class Arrangement {
   }
 
   /** Faces reached from the left side of a path without crossing the path (the inside of a ring). */
+  /** The steps of a path whose segments are walked a net number of times (out-and-back pieces enclose nothing). */
+  netPath(path: PathStep[]): PathStep[] {
+    const count = new Map<number, number>();
+    for (const st of path) count.set(st.seg, (count.get(st.seg) ?? 0) + (st.fwd ? 1 : -1));
+    return path.filter((st) => (count.get(st.seg) ?? 0) !== 0);
+  }
+
+  /**
+   * The area enclosed on the left of a set of closed cycles, in steradians, between 0 and 4π.
+   * Computed directly from the path's vertices, independently of the face structure, so it can be
+   * used to check what a paint operation is about to change.
+   */
+  pathLeftArea(path: PathStep[]): number {
+    const edges: Array<[Vec3, Vec3]> = [];
+    for (const st of this.netPath(path)) {
+      const s = this.segments.get(st.seg)!;
+      edges.push(st.fwd ? [this.v(s.a), this.v(s.b)] : [this.v(s.b), this.v(s.a)]);
+    }
+    if (edges.length < 3) return 0;
+    // A reference point well away from the antipode of every vertex keeps every triangle defined.
+    const refs: Vec3[] = [PINF, normalize([-0.53, 0.27, 0.8]), normalize([0.71, 0.66, -0.24]), normalize([0.1, -0.9, -0.4])];
+    const ref = refs.find((r) => edges.every(([u]) => dot(r, u) > -1 + 1e-6)) ?? refs[0];
+    let sum = 0;
+    for (const [u, w] of edges) {
+      const det = dot(ref, cross(u, w));
+      const den = 1 + dot(ref, u) + dot(u, w) + dot(w, ref);
+      sum += 2 * Math.atan2(det, den);
+    }
+    const full = 4 * Math.PI;
+    sum %= full;
+    return sum < 0 ? sum + full : sum;
+  }
+
   facesLeftOf(path: PathStep[]): Set<number> {
     const barrier = new Set(path.map((s) => s.seg));
     const start = new Set<number>();
-    for (const st of path) {
+    for (const st of this.netPath(path)) {
       const s = this.segments.get(st.seg)!;
       start.add(st.fwd ? s.left_face : s.right_face);
     }

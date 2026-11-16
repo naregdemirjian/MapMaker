@@ -284,8 +284,21 @@ export function paintTerritory(world: World, engine: Engine, p: PaintInput): Com
   });
 }
 
+/** Refuse territory edits that would refer to the wrong map, a missing layer, event or owner. */
+function checkTarget(world: World, o: { spaceId: string; layerId: string; value?: string | null; mode?: EditMode; eventId?: string }): void {
+  const layer = world.get('layer', o.layerId);
+  if (!world.get('map_space', o.spaceId)) throw new Error('That world no longer exists.');
+  if (!layer) throw new Error('That layer no longer exists.');
+  if (layer.space_id !== o.spaceId) throw new Error(`The layer "${layer.name}" belongs to another world.`);
+  if (layer.kind !== 'partition') throw new Error(`The layer "${layer.name}" does not hold territory.`);
+  if (o.value && !world.get('entity', o.value)) throw new Error('That owner no longer exists.');
+  const eventId = o.eventId ?? (o.mode?.kind === 'new' ? o.mode.eventId : undefined);
+  if (eventId && !world.get('event', eventId)) throw new Error('That event no longer exists.');
+}
+
 function paintInside(tx: Tx, engine: Engine, p: PaintInput, out: number[] = []): string {
   const world = tx.world;
+  checkTarget(world, p);
   const rings = p.rings ?? (p.ring ? [p.ring] : []);
   if (rings.length === 0) throw new Error('Nothing to paint.');
   // Collect each ring's inside right after inserting it: a later ring may split earlier borders,
@@ -293,7 +306,19 @@ function paintInside(tx: Tx, engine: Engine, p: PaintInput, out: number[] = []):
   const insideAll = new Set<number>();
   for (const r of rings) {
     const path = tx.kernel(p.spaceId, (arr) => arr.insertPath(r, { closed: true, snap: p.snap }));
-    for (const f of world.arrangement(p.spaceId).facesLeftOf(path)) insideAll.add(f);
+    const arr = world.arrangement(p.spaceId);
+    const inside = arr.facesLeftOf(path);
+    // Safety check: the parcels about to change must cover exactly the area the outline encloses.
+    // An outline that folds back on itself, crosses itself, or collapses when snapped would otherwise
+    // be able to repaint far more than was drawn. Refusing undoes the geometry too (the command is
+    // one transaction).
+    const enclosed = arr.pathLeftArea(path);
+    const full = 4 * Math.PI;
+    if (enclosed < 1e-15 || enclosed > full - 1e-15) throw new Error('This outline encloses no area (it may be too thin at this zoom level). Draw it a little wider.');
+    let covered = 0;
+    for (const f of leafDescendants(arr, inside)) covered += arr.faceArea(f);
+    if (Math.abs(covered - enclosed) > 1e-9 + 1e-6 * enclosed) throw new Error('This outline crosses or folds back on itself. Draw it as separate shapes.');
+    for (const f of inside) insideAll.add(f);
   }
   const arr = world.arrangement(p.spaceId);
   const inside = [...leafDescendants(arr, insideAll)];
@@ -322,6 +347,7 @@ export function paintWithNewEvent(world: World, engine: Engine, e: EventInput, p
 export function assignFaces(world: World, engine: Engine, o: { spaceId: string; layerId: string; leaves: number[]; value: string | null; mode: EditMode; transition?: TransitionSpec | null }): CommandResult {
   const who = o.value ? world.get('entity', o.value)?.name ?? 'someone' : 'nobody';
   return run(world, `Give territory to ${who}`, (tx) => {
+    checkTarget(world, o);
     const arr = world.arrangement(o.spaceId);
     if (o.mode.kind === 'new') insertAssignEffect(tx, { eventId: o.mode.eventId, spaceId: o.spaceId, layerId: o.layerId, faces: canonicalFaces(arr, o.leaves), value: o.value, at: o.mode.at ?? null, transition: o.transition ?? null });
     else correctPeriod(tx, engine, o.spaceId, o.layerId, o.leaves, o.value, o.mode.t);
@@ -332,6 +358,8 @@ export function assignFaces(world: World, engine: Engine, o: { spaceId: string; 
 export function annex(world: World, engine: Engine, o: { spaceId: string; layerId: string; eventId: string; from: string; to: string; at?: Instant | null; transition?: TransitionSpec | null }): CommandResult<string> {
   const a = world.get('entity', o.from)?.name ?? '?', b = world.get('entity', o.to)?.name ?? '?';
   return run(world, `${b} annexes ${a}`, (tx) => {
+    checkTarget(world, { spaceId: o.spaceId, layerId: o.layerId, value: o.to, eventId: o.eventId });
+    if (!world.get('entity', o.from)) throw new Error('That owner no longer exists.');
     const id = newId('eff');
     const at = o.at ? toStore(o.at) : null;
     const row: EffectRow = {

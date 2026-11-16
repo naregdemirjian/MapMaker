@@ -112,7 +112,9 @@ export class Engine {
   private timelines = new Map<string, Map<number, Assignment[]>>();
   private effectAssignments = new Map<string, Assignment[]>();
   private changeTimes: Instant[] = [];
-  conflicts: Conflict[] = [];
+  private conflictList: Conflict[] = [];
+  /** Problems found in the history, always current with the tables. */
+  get conflicts(): Conflict[] { this.ensure(); return this.conflictList; }
 
   private readonly world: World;
 
@@ -134,18 +136,18 @@ export class Engine {
     const w = this.world;
     this.timelines.clear();
     this.effectAssignments.clear();
-    this.conflicts = [];
+    this.conflictList = [];
     const events = new Map(w.all('event').map((e) => [e.id, e]));
     const times = new Map<string, Instant>();
     const effects = w.all('effect').sort((a, b) => a.ordinal - b.ordinal || (a.id < b.id ? -1 : 1));
     for (const ef of effects) {
       const ev = events.get(ef.event_id);
-      if (!ev) { this.conflicts.push({ kind: 'broken', effectId: ef.id, eventId: ef.event_id, message: 'This change belongs to an event that no longer exists.' }); continue; }
+      if (!ev) { this.conflictList.push({ kind: 'broken', effectId: ef.id, eventId: ef.event_id, message: 'This change belongs to an event that no longer exists.' }); continue; }
       if (!this.isActiveEvent(ev)) continue;
       if (ef.kind !== 'assign' && ef.kind !== 'annex') continue;
       const layer = ef.layer_id ? w.get('layer', ef.layer_id) : undefined;
       const arr = ef.space_id ? w.arrangements.get(ef.space_id) : undefined;
-      if (!layer || !arr) { this.conflicts.push({ kind: 'broken', effectId: ef.id, eventId: ev.id, message: 'This change refers to a layer or map that no longer exists.' }); continue; }
+      if (!layer || !arr) { this.conflictList.push({ kind: 'broken', effectId: ef.id, eventId: ev.id, message: 'This change refers to a layer or map that no longer exists.' }); continue; }
       const t = effectTime(ef, ev);
       const spec = parseJSON<TransitionSpec | null>(ef.transition, null);
       const end = eventEnd(ev);
@@ -156,9 +158,9 @@ export class Engine {
       const res = parseJSON<Resolution>(ef.resolution, { set: [] });
       const list: Assignment[] = [];
       res.set.forEach(([faces, value], entry) => {
-        if (value && !w.get('entity', value)) this.conflicts.push({ kind: 'broken', effectId: ef.id, eventId: ev.id, message: 'This change gives territory to someone who no longer exists.' });
+        if (value && !w.get('entity', value)) this.conflictList.push({ kind: 'broken', effectId: ef.id, eventId: ev.id, message: 'This change gives territory to someone who no longer exists.' });
         for (const face of faces) {
-          if (!arr.faces.has(face)) { this.conflicts.push({ kind: 'broken', effectId: ef.id, eventId: ev.id, message: `Parcel ${face} no longer exists.` }); continue; }
+          if (!arr.faces.has(face)) { this.conflictList.push({ kind: 'broken', effectId: ef.id, eventId: ev.id, message: `Parcel ${face} no longer exists.` }); continue; }
           const a: Assignment = {
             t, end: compiled ? end! : t, value, effectId: ef.id, eventId: ev.id, precedence: ev.precedence,
             eventSeq: ev.created_seq, ordinal: ef.ordinal, entry, face, transition: compiled,
@@ -358,7 +360,7 @@ export class Engine {
         if (reported.has(key) || !overlapping(A.id, B.id)) continue;
         reported.add(key);
         const nb = events.get(B.event_id)?.name ?? 'another event';
-        this.conflicts.push({ kind: 'simultaneous', effectId: A.id, eventId: A.event_id, otherEventId: B.event_id, message: `Changes the same area at the same moment as "${nb}". The one later in the precedence order wins.` });
+        this.conflictList.push({ kind: 'simultaneous', effectId: A.id, eventId: A.event_id, otherEventId: B.event_id, message: `Changes the same area at the same moment as "${nb}". The one later in the precedence order wins.` });
       }
     }
     // Overlapping transitions.
@@ -370,7 +372,7 @@ export class Engine {
       if (!overlapping(x.id, y.id)) continue;
       const [first, second] = orderCmp(x.a, y.a) <= 0 ? [x, y] : [y, x];
       const n1 = events.get(first.a.eventId)?.name ?? 'an earlier event';
-      this.conflicts.push({ kind: 'overlap', effectId: second.id, eventId: second.a.eventId, otherEventId: first.a.eventId, message: `Overlaps "${n1}" in the same area. From its start, this later change takes over the shared area.` });
+      this.conflictList.push({ kind: 'overlap', effectId: second.id, eventId: second.a.eventId, otherEventId: first.a.eventId, message: `Overlaps "${n1}" in the same area. From its start, this later change takes over the shared area.` });
     }
     // Intentions worked out from an older version of history.
     for (const ef of effects) {
@@ -382,7 +384,7 @@ export class Engine {
       const basis = this.basisFor(ef, intent.from);
       if (hashFaces(basis) !== ef.basis_hash) {
         const who = w.get('entity', intent.from)?.name ?? 'the original owner';
-        this.conflicts.push({ kind: 'stale', effectId: ef.id, eventId: ev.id, message: `This was worked out when ${who} held different territory. Keep it as stored, or re-apply the intention.` });
+        this.conflictList.push({ kind: 'stale', effectId: ef.id, eventId: ev.id, message: `This was worked out when ${who} held different territory. Keep it as stored, or re-apply the intention.` });
       }
     }
   }
