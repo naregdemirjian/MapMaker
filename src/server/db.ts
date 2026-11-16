@@ -9,7 +9,32 @@ import { TABLES, TABLE_NAMES, SCHEMA_VERSION, type RowDiff, type TableName, type
 import type { Snapshot } from '../world-model/world.ts';
 
 export class ConflictError extends Error { status = 409; }
-export class IntegrityError extends Error { status = 500; }
+/** The project file is damaged. `code: 'damaged'` lets the interface offer recovery from a backup. */
+export class IntegrityError extends Error { status = 500; code = 'damaged'; }
+
+/** True when an SQLite file opens and passes a quick integrity check. Never modifies the file. */
+export function isHealthyDatabase(file: string): boolean {
+  let db: DatabaseSync | null = null;
+  try {
+    db = new DatabaseSync(file, { readOnly: true });
+    return (db.prepare('PRAGMA quick_check').get() as { quick_check: string }).quick_check === 'ok';
+  } catch {
+    return false;
+  } finally {
+    try { db?.close(); } catch { /* ignore */ }
+  }
+}
+
+/** Automatic backups in a project folder, newest first (readable without opening the project). */
+export function listBackups(dir: string): BackupInfo[] {
+  const bdir = join(dir, 'backups');
+  if (!existsSync(bdir)) return [];
+  return readdirSync(bdir).filter((f) => /^backup-.*\.db$/.test(f)).map((f) => {
+    const file = join(bdir, f);
+    const st = statSync(file);
+    return { file, created_at: st.mtime.toISOString(), bytes: st.size };
+  }).sort((a, b) => b.created_at.localeCompare(a.created_at));
+}
 
 export interface JournalState { head: number; canUndo: boolean; canRedo: boolean; undoLabel: string | null; redoLabel: string | null }
 export interface VersionInfo { id: number; label: string; kind: string; created_at: string; journal_seq: number }
@@ -51,11 +76,18 @@ export class ProjectDb {
   /** Open (or create) the project database in a project folder. */
   static open(dir: string): ProjectDb {
     mkdirSync(dir, { recursive: true });
-    const db = new DatabaseSync(ProjectDb.databasePath(dir));
-    db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL; PRAGMA busy_timeout = 5000;');
+    const damaged = (detail: string) => new IntegrityError(`This project's file is damaged and cannot be opened safely (${detail.split('\n')[0].slice(0, 160)}).`);
+    let db: DatabaseSync;
+    let ok: string;
+    try {
+      db = new DatabaseSync(ProjectDb.databasePath(dir));
+      db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL; PRAGMA busy_timeout = 5000;');
+      ok = (db.prepare('PRAGMA quick_check').get() as { quick_check: string }).quick_check;
+    } catch (e) {
+      throw damaged((e as Error).message);
+    }
     const p = new ProjectDb(dir, db);
-    const ok = (db.prepare('PRAGMA quick_check').get() as { quick_check: string }).quick_check;
-    if (ok !== 'ok') throw new IntegrityError(`The project database failed its integrity check (${ok}). Restore a backup.`);
+    if (ok !== 'ok') { try { db.close(); } catch { /* ignore */ } throw damaged(ok); }
     db.exec(ddl());
     p.migrate();
     // The hourly backup timer carries on from the newest backup already on disk.
@@ -262,15 +294,7 @@ export class ProjectDb {
     for (const b of list) if (!keep.has(b.file)) { try { unlinkSync(b.file); } catch { /* ignore */ } }
   }
 
-  backups(): BackupInfo[] {
-    const dir = this.backupDir();
-    if (!existsSync(dir)) return [];
-    return readdirSync(dir).filter((f) => /^backup-.*\.db$/.test(f)).map((f) => {
-      const file = join(dir, f);
-      const st = statSync(file);
-      return { file, created_at: st.mtime.toISOString(), bytes: st.size };
-    }).sort((a, b) => b.created_at.localeCompare(a.created_at));
-  }
+  backups(): BackupInfo[] { return listBackups(this.dir); }
 }
 
 export function readSnapshot(file: string): Snapshot {

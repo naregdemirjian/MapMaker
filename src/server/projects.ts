@@ -1,8 +1,8 @@
 // The folder of projects. Each project is a folder "<Name>.mapmaker" holding project.db,
 // versions/, backups/ and exports/. Copying the folder moves the whole project.
-import { existsSync, mkdirSync, readdirSync, statSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { ProjectDb } from './db.ts';
+import { ProjectDb, isHealthyDatabase, listBackups } from './db.ts';
 import { World } from '../world-model/world.ts';
 import { seedProject } from '../domain/commands.ts';
 
@@ -65,6 +65,29 @@ export class ProjectRegistry {
       this.open.set(id, db);
     }
     return db;
+  }
+
+  /**
+   * Recover a damaged project from its newest healthy automatic backup. The damaged files are moved
+   * into a "damaged" folder inside the project (never deleted). Changes made after that backup are lost.
+   */
+  recover(id: string): { restoredFrom: string; damagedFolder: string } {
+    const dir = this.dirOf(id);
+    if (!existsSync(dir)) throw Object.assign(new Error('That project does not exist.'), { status: 404 });
+    const open = this.open.get(id);
+    if (open) { open.close(); this.open.delete(id); }
+    const backup = listBackups(dir).find((b) => isHealthyDatabase(b.file));
+    if (!backup) throw Object.assign(new Error('No usable backup was found for this project.'), { status: 409 });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const damagedFolder = join(dir, 'damaged', stamp);
+    mkdirSync(damagedFolder, { recursive: true });
+    for (const suffix of ['', '-wal', '-shm']) {
+      const f = join(dir, 'project.db' + suffix);
+      if (existsSync(f)) renameSync(f, join(damagedFolder, 'project.db' + suffix));
+    }
+    copyFileSync(backup.file, join(dir, 'project.db'));
+    this.get(id); // opens, checks and takes a fresh backup of the recovered state
+    return { restoredFrom: backup.created_at, damagedFolder };
   }
 
   closeAll(): void {

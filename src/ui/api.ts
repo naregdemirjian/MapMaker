@@ -9,7 +9,8 @@ export interface BackupInfo { file: string; created_at: string; bytes: number }
 
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) { super(message); this.status = status; }
+  code?: string;
+  constructor(status: number, message: string, code?: string) { super(message); this.status = status; this.code = code; }
 }
 
 async function call<T>(method: string, path: string, body?: unknown, raw?: Uint8Array): Promise<T> {
@@ -20,7 +21,7 @@ async function call<T>(method: string, path: string, body?: unknown, raw?: Uint8
   });
   const text = await res.text();
   const data = text ? JSON.parse(text) : null;
-  if (!res.ok) throw new ApiError(res.status, data?.error ?? res.statusText);
+  if (!res.ok) throw new ApiError(res.status, data?.error ?? res.statusText, data?.code);
   return data as T;
 }
 
@@ -31,6 +32,7 @@ export const Api = {
   projects: () => call<ProjectInfo[]>('GET', '/api/projects'),
   createProject: (name: string, world?: { name: string; radiusKm: number }) => call<ProjectInfo>('POST', '/api/projects', { name, world }),
   open: (id: string) => call<{ id: string; snapshot: Snapshot; journal: JournalState; dir: string }>('GET', p(id)),
+  recover: (id: string) => call<{ restoredFrom: string; damagedFolder: string }>('POST', `${p(id)}/recover`),
   commit: (id: string, label: string, diffs: RowDiff[], baseHead: number) => call<{ journal: JournalState }>('POST', `${p(id)}/commit`, { label, diffs, baseHead }),
   undo: (id: string) => call<{ diffs: RowDiff[]; label?: string; journal: JournalState }>('POST', `${p(id)}/undo`),
   redo: (id: string) => call<{ diffs: RowDiff[]; label?: string; journal: JournalState }>('POST', `${p(id)}/redo`),

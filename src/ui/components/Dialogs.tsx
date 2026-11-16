@@ -291,7 +291,7 @@ export function ProjectPicker() {
         <h3>Open a project</h3>
         <div className="list">
           {s.projects.map((p: ProjectInfo) => (
-            <div key={p.id} className="row project-row" onClick={() => s.openProject(p.id)} data-testid={`project-${p.id}`}>
+            <div key={p.id} className="row project-row" onClick={() => s.openOrRecover(p.id)} data-testid={`project-${p.id}`}>
               <b>{p.name}</b><span className="muted"> · last changed {new Date(p.modified).toLocaleString()}</span>
             </div>
           ))}

@@ -126,6 +126,25 @@ class AppStore {
     await this.openProject(info.id);
   }
 
+  /** Open a project; if its file is damaged, offer to recover it from its newest healthy backup. */
+  async openOrRecover(id: string) {
+    try {
+      await this.openProject(id);
+    } catch (e) {
+      if (e instanceof ApiError && e.code === 'damaged') {
+        const ok = confirm(`${e.message}\n\nRestore it from its most recent healthy automatic backup? Changes made after that backup will be lost. The damaged file is kept in the project's "damaged" folder.`);
+        if (!ok) return;
+        try {
+          const r = await Api.recover(id);
+          await this.openProject(id);
+          this.toast(`Recovered from the backup of ${new Date(r.restoredFrom).toLocaleString()}.`);
+        } catch (e2) {
+          this.toast(`Could not recover the project: ${(e2 as Error).message}`, 'error');
+        }
+      } else this.toast(`Could not open the project: ${(e as Error).message}`, 'error');
+    }
+  }
+
   async openProject(id: string) {
     this.busy = 'Opening project…';
     this.notify();

@@ -86,8 +86,9 @@ export function createAppServer(opts: ServerOptions): { server: Server; registry
     }
 
     const id = parts[2];
-    const db = registry.get(id);
     const action = parts[3];
+    if (action === 'recover' && method === 'POST') return send(res, 200, registry.recover(id));
+    const db = registry.get(id);
 
     if (!action && method === 'GET') return send(res, 200, { id, snapshot: db.snapshot(), journal: db.journalState(), dir: db.dir });
     if (action === 'commit' && method === 'POST') {
@@ -147,7 +148,7 @@ export function createAppServer(opts: ServerOptions): { server: Server; registry
     handle(req, res).catch((e: Error & { status?: number }) => {
       const status = e.status ?? 500;
       if (status >= 500) console.error(e);
-      if (!res.headersSent) send(res, status, { error: e.message });
+      if (!res.headersSent) send(res, status, { error: e.message, code: (e as { code?: string }).code });
       else res.end();
     });
   });
