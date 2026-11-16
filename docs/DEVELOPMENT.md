@@ -65,6 +65,8 @@ Map data: `data/natural-earth/ne-110m.json` and `ne-50m.json` are committed, so 
 TypeScript runs directly under Node's type stripping: imports carry `.ts` extensions, type-only imports use
 `import type`, and enums or constructor parameter properties are not allowed.
 
+Terminology: the interface calls them **maps** (DECISIONS D24); the code and older notes say map space or world.
+
 ## Code map
 
 | Folder | Role | Key facts |

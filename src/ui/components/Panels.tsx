@@ -63,7 +63,7 @@ export function TopBar() {
         <button className={s.mode === 'world' ? 'on' : ''} onClick={() => s.set({ mode: 'world', presentCamera: null, playing: false })} data-testid="mode-world">World-building</button>
         <button className={s.mode === 'present' ? 'on' : ''} onClick={() => s.set({ mode: 'present' })} data-testid="mode-present">Presentation</button>
       </div>
-      <select value={s.spaceId} onChange={(e) => switchSpace(e.target.value)} title="Which world you are looking at">
+      <select value={s.spaceId} onChange={(e) => switchSpace(e.target.value)} title="Which map you are looking at">
         {spaces.map((sp) => <option key={sp.id} value={sp.id}>{sp.name}</option>)}
       </select>
       {s.mode === 'world' && (
@@ -167,7 +167,7 @@ export function Outliner() {
   );
   return (
     <aside className="left">
-      <Section title="Worlds" onAdd={() => s.set({ dialog: 'new-world' })} addLabel="World">
+      <Section title="Maps" onAdd={() => s.set({ dialog: 'new-world' })} addLabel="Map">
         {w.all('map_space').sort((a, b) => a.sort_order - b.sort_order).map((sp) => (
           <div key={sp.id} className={`row ${sp.id === s.spaceId ? 'sel' : ''}`} onClick={() => s.set({ spaceId: sp.id, layerId: w.all('layer').find((l) => l.space_id === sp.id && l.kind === 'partition')?.id ?? '' })}>
             {sp.name}<span className="muted"> · radius {Math.round((sp.radius_m ?? 0) / 1000).toLocaleString()} km</span>
@@ -290,7 +290,7 @@ function EntityPanel({ id }: { id: string }) {
       <h4>Territorial changes</h4>
       {[...new Set(changes.map((f) => f.event_id))].map((eid) => w.get('event', eid)).filter((ev) => !!ev).sort((a, b) => a!.start_day - b!.start_day || a!.start_ms - b!.start_ms).map((ev) => (
         <div key={ev!.id} className="row" onClick={() => s.set({ selection: { kind: 'event', id: ev!.id }, time: ev!.id === BASE_EVENT_ID ? s.time : fromStore(ev!.start_day, ev!.start_ms) })}>
-          {ev!.id === BASE_EVENT_ID ? 'Base world (from the beginning)' : <><span className="date">{fmt(fromStore(ev!.start_day, ev!.start_ms))}</span> {ev!.name}</>}
+          {ev!.id === BASE_EVENT_ID ? 'Starting map (from the beginning)' : <><span className="date">{fmt(fromStore(ev!.start_day, ev!.start_ms))}</span> {ev!.name}</>}
         </div>
       ))}
       {!changes.length && <div className="muted">None yet.</div>}
@@ -342,7 +342,7 @@ function EventPanel({ id }: { id: string }) {
   };
   return (
     <div className="panel" data-testid="event-panel">
-      <h3>{base ? 'Base world' : e.name}</h3>
+      <h3>{base ? 'Starting map' : e.name}</h3>
       {!base && <>
         <label>Name<input value={name} onChange={(ev) => setName(ev.target.value)} onBlur={() => name.trim() && name !== e.name && s.execute((wd) => cmd.updateEvent(wd, id, { name: name.trim() }))} /></label>
         <label>Type<select value={e.type_id} onChange={(ev) => s.execute((wd) => cmd.updateEvent(wd, id, { type_id: ev.target.value }))}>{w.all('event_type').filter((t) => t.id !== 'base').map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
@@ -433,7 +433,7 @@ function PointPanel({ lon, lat }: { lon: number; lat: number }) {
       <div className="stat" data-testid="point-owner">
         On {fmt(s.time, 'minute')}: {owner ? <><span className="swatch" style={{ background: owner.color }} /> <b>{owner.name}</b></> : <b>nobody</b>}
       </div>
-      {ev && <div>Since {ev.id === BASE_EVENT_ID ? 'the base world' : <>{fmt(a!.t, 'day')} (<a onClick={() => s.set({ selection: { kind: 'event', id: ev.id } })}>{ev.name}</a>)</>}</div>}
+      {ev && <div>Since {ev.id === BASE_EVENT_ID ? 'the starting map' : <>{fmt(a!.t, 'day')} (<a onClick={() => s.set({ selection: { kind: 'event', id: ev.id } })}>{ev.name}</a>)</>}</div>}
       <div>{next ? <>Until {fmt(next, 'day')}</> : 'No later change recorded'}</div>
       {owner && <button onClick={() => s.set({ selection: { kind: 'entity', id: owner.id } })}>Open {owner.name}</button>}
     </div>

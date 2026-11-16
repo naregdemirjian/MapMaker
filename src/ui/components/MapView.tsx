@@ -175,7 +175,7 @@ export function MapView() {
     const sample = interiorSample(screenRings[0]);
     const sampleLL = sample ? screenToLonLat(view, sample[0], sample[1]) : null;
     const layerId = store.layerId;
-    if (!layerId) { store.toast('This world has no political layer to draw on.', 'error'); return; }
+    if (!layerId) { store.toast('This map has no political layer to draw on.', 'error'); return; }
     if (store.recordEventId) {
       const ev = w.get('event', store.recordEventId);
       if (!ev) return;
@@ -359,7 +359,7 @@ function MapHud({ view }: { view: View }) {
       <div className="hud-buttons">
         <button title="Zoom in" onClick={() => s.setCamera({ ...s.camera, zoom: s.camera.zoom + 0.5 })}>+</button>
         <button title="Zoom out" onClick={() => s.setCamera({ ...s.camera, zoom: s.camera.zoom - 0.5 })}>−</button>
-        <button title="Whole world" onClick={() => s.setCamera({ ...s.camera, lon: 0, lat: 0, zoom: 0, rotation: 0 })}>⌂</button>
+        <button title="Whole map" onClick={() => s.setCamera({ ...s.camera, lon: 0, lat: 0, zoom: 0, rotation: 0 })}>⌂</button>
       </div>
     </div>
   );

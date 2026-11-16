@@ -59,6 +59,29 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D24. Maps, not worlds (the user, 16 November 2026)
+
+The top-level category is simply **maps**: a map may be a planet, a city, the solar system or the galaxy. The interface
+says "Maps", "+ Map", "New map" and "Starting map" (the state before any event). Inside the code a map is still a
+`map_space` (and older notes say "world"); nothing in project files changed. Flat maps (city plans, the solar system,
+the galaxy) need the plane version of the kernel, due with the space-maps stage.
+
+### D23. Outlines are painted exactly as drawn, even when they cross themselves (the user, 16 November 2026)
+
+Replaces the refusal in D17. A simple outline paints what lies on its left; an outline that crosses, folds back or
+overlaps itself paints every area it goes around (non-zero winding number; the largest-area class is the outside).
+
+### D25. Drawing flow (the user, 16 November 2026)
+
+After drawing, "Correct this period" is preselected and Enter applies. A new change offers the event the last drawing
+went into (else the selected event, else one starting at the date being viewed), so several border changes share one
+event. A right-click on the map deselects. Brush points are kept as map positions, so zooming mid-stroke changes nothing.
+
+### Answers recorded 16 November 2026
+
+Events may belong to several groups (kept). No automatic event groups. The engine redesign (incremental kernel updates)
+is approved.
+
 ### D19. The Earth basemap is reference geography, outside the parcel map
 
 Natural Earth land, lakes and coastlines are drawn in their own pass (`land`) between the grid and the territory fills.

@@ -27,7 +27,7 @@ while Map Maker is closed. Don't keep projects inside OneDrive or Dropbox while 
 
 ## What it can do now (version 0.2.0 and later)
 
-- Create projects and worlds (Earth, the Moon, planets or your own), countries and factions.
+- Create projects and maps (Earth, the Moon, planets or your own), countries and factions.
 - Draw territory freehand or point by point, and correct borders by dragging their points.
 - Record history as dated events; move through time and see the map exactly as it was on any date, from millennia down
   to milliseconds.

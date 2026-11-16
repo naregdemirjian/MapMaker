@@ -91,14 +91,14 @@ function createWorldIn(tx: Tx, name: string, radiusKm: number, basemap: BasemapS
 }
 
 export function createWorld(world: World, name: string, radiusKm: number, basemap: BasemapSource = 'none'): CommandResult<string> {
-  if (!(radiusKm > 0)) throw new Error('A world needs a positive radius.');
-  return run(world, `Create world "${name}"`, (tx) => createWorldIn(tx, name, radiusKm, basemap));
+  if (!(radiusKm > 0)) throw new Error('A round map needs a positive radius.');
+  return run(world, `Create map "${name}"`, (tx) => createWorldIn(tx, name, radiusKm, basemap));
 }
 
 /** Show or hide Earth's geography (Natural Earth) under a world's territories. */
 export function setWorldBasemap(world: World, spaceId: string, basemap: BasemapSource): CommandResult {
   const space = world.get('map_space', spaceId);
-  if (!space) throw new Error('That world no longer exists.');
+  if (!space) throw new Error('That map no longer exists.');
   const label = basemap === 'none' ? `Hide Earth's geography on "${space.name}"` : `Show Earth's geography on "${space.name}"`;
   return run(world, label, (tx) => { tx.update('map_space', { ...space, settings: JSON.stringify({ ...worldSettings(space), basemap }) }); });
 }
@@ -175,7 +175,7 @@ export function createEvent(world: World, e: EventInput & { groups?: string[] })
 }
 
 export function updateEvent(world: World, id: string, patch: Partial<EventInput> & { variant_group?: string | null; variant_active?: number }): CommandResult {
-  if (id === BASE_EVENT_ID && (patch.start || patch.end)) throw new Error('The base world has no date.');
+  if (id === BASE_EVENT_ID && (patch.start || patch.end)) throw new Error('The starting map has no date.');
   return run(world, 'Edit event', (tx) => {
     const ev = world.get('event', id);
     if (!ev) throw new Error('Unknown event');
@@ -199,7 +199,7 @@ export function updateEvent(world: World, id: string, patch: Partial<EventInput>
 }
 
 export function deleteEvent(world: World, id: string): CommandResult {
-  if (id === BASE_EVENT_ID) throw new Error('The base world cannot be deleted.');
+  if (id === BASE_EVENT_ID) throw new Error('The starting map cannot be deleted.');
   const name = world.get('event', id)?.name ?? '';
   return run(world, `Delete event "${name}"`, (tx) => {
     for (const ef of world.all('effect').filter((f) => f.event_id === id)) tx.remove('effect', ef.id);
@@ -385,9 +385,9 @@ export function paintTerritory(world: World, engine: Engine, p: PaintInput): Com
 /** Refuse territory edits that would refer to the wrong map, a missing layer, event or owner. */
 function checkTarget(world: World, o: { spaceId: string; layerId: string; value?: string | null; mode?: EditMode; eventId?: string }): void {
   const layer = world.get('layer', o.layerId);
-  if (!world.get('map_space', o.spaceId)) throw new Error('That world no longer exists.');
+  if (!world.get('map_space', o.spaceId)) throw new Error('That map no longer exists.');
   if (!layer) throw new Error('That layer no longer exists.');
-  if (layer.space_id !== o.spaceId) throw new Error(`The layer "${layer.name}" belongs to another world.`);
+  if (layer.space_id !== o.spaceId) throw new Error(`The layer "${layer.name}" belongs to another map.`);
   if (layer.kind !== 'partition') throw new Error(`The layer "${layer.name}" does not hold territory.`);
   if (o.value && !world.get('entity', o.value)) throw new Error('That owner no longer exists.');
   const eventId = o.eventId ?? (o.mode?.kind === 'new' ? o.mode.eventId : undefined);

@@ -53,7 +53,7 @@ function PaintPrompt({ p }: { p: Extract<PendingEdit, { kind: 'paint' }> }) {
   if (p.sample) {
     const face = w.arrangement(p.spaceId).locate(lonLatToVec(p.sample[0], p.sample[1]));
     const a = e.latest(p.spaceId, p.layerId, face, s.time);
-    if (a) periodFrom = a.eventId === BASE_EVENT_ID ? 'the base world' : fmt(a.t);
+    if (a) periodFrom = a.eventId === BASE_EVENT_ID ? 'the starting map' : fmt(a.t);
     const next = e.nextChange(p.spaceId, p.layerId, [face], s.time);
     if (next) {
       periodTo = fmt(next);
@@ -162,17 +162,17 @@ export function NewWorldDialog() {
   const [earth, setEarth] = useState(false);
   const close = () => s.set({ dialog: null });
   const create = () => {
-    const id = s.execute((w) => cmd.createWorld(w, name.trim() || 'New world', Number(km), earth ? 'natural-earth' : 'none'));
+    const id = s.execute((w) => cmd.createWorld(w, name.trim() || 'New map', Number(km), earth ? 'natural-earth' : 'none'));
     if (id) { s.set({ spaceId: id, layerId: s.world!.all('layer').find((l) => l.space_id === id)?.id ?? '', selection: null }); close(); }
   };
   return (
-    <Modal title="New world" onClose={close}>
-      <p className="muted">A world is a planet, moon or other body with its own map, territories and history. Fictional worlds start as an empty sphere; terrain tools come in a later stage.</p>
+    <Modal title="New map" onClose={close}>
+      <p className="muted">Each map has its own geography, layers and territorial history; events and countries are shared by the whole project. A round map is a planet or moon: Earth, another real body, or one you invent (it starts as an empty sphere). Flat maps (a city plan, the solar system, the galaxy) come with the space-maps stage.</p>
       <label>Name<input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Aster Prime" /></label>
       <label>Radius (km)<input type="number" value={km} onChange={(e) => setKm(e.target.value)} /></label>
       <div className="presets">{WORLD_PRESETS.map((p) => <button key={p.name} className="small" onClick={() => { setName(p.name); setKm(String(p.km)); setEarth(p.name === 'Earth'); }}>{p.name}</button>)}</div>
       <label className="check"><input type="checkbox" checked={earth} onChange={(e) => setEarth(e.target.checked)} data-testid="new-world-earth" /> Start with Earth's geography (land, lakes and coastlines)</label>
-      <div className="modal-actions"><button onClick={close}>Cancel</button><button className="primary" onClick={create}>Create world</button></div>
+      <div className="modal-actions"><button onClick={close}>Cancel</button><button className="primary" onClick={create}>Create map</button></div>
     </Modal>
   );
 }
@@ -357,7 +357,7 @@ export function ProjectPicker() {
         <h3>New project</h3>
         <label>Project name<input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. The Long Night" data-testid="project-name" /></label>
         <div className="two">
-          <label>First world<input value={worldName} onChange={(e) => setWorldName(e.target.value)} /></label>
+          <label>First map<input value={worldName} onChange={(e) => setWorldName(e.target.value)} /></label>
           <label>Radius (km)<input type="number" value={km} onChange={(e) => setKm(e.target.value)} /></label>
         </div>
         <button className="primary" disabled={busy} onClick={create} data-testid="project-create">Create project</button>

@@ -161,10 +161,10 @@ try {
   });
 
   await h.step('A second world keeps its own map and history', async () => {
-    await page.getByRole('button', { name: '+ World' }).click();
+    await page.getByRole('button', { name: '+ Map' }).click();
     await page.getByPlaceholder('e.g. Aster Prime').fill('Aster');
     await page.locator('.modal label', { hasText: 'Radius' }).locator('input').fill('3000');
-    await page.getByRole('button', { name: 'Create world' }).click();
+    await page.getByRole('button', { name: 'Create map' }).click();
     await page.waitForFunction(() => (window as any).__mapmaker.store.world.get('map_space', (window as any).__mapmaker.store.spaceId)?.name === 'Aster');
     assert.equal(await h.ownerAt(P.a, '1500'), null, 'Aster starts blank at the same coordinates');
     await h.newCountry(C);

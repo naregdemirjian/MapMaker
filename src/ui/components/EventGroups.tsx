@@ -70,7 +70,7 @@ export function GroupFilter() {
             </label>
           </div>
           <div className="group-new">
-            <input placeholder="New group, e.g. a country or a world" value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && create()} data-testid="new-group-name" />
+            <input placeholder="New group, e.g. a country, a war or a region" value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && create()} data-testid="new-group-name" />
             <button className="small" onClick={create} data-testid="new-group-create">Add</button>
           </div>
           <p className="muted">The filter only changes which events are listed; the map always shows the full history.</p>
