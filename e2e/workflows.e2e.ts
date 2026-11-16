@@ -183,6 +183,66 @@ try {
     await page.locator('header select').first().selectOption({ label: 'Earth' });
   });
 
+  await h.step('Event groups: make groups on the timeline, put events in several, filter what the timeline lists', async () => {
+    const listed = () => page.evaluate(() => Array.from(document.querySelectorAll('.left .row')).map((r) => r.textContent ?? '').filter((t) => /\d{4}/.test(t)));
+    const has = (rows: string[], name: string) => rows.some((r) => r.includes(name));
+    const groupsOn = page.getByTestId('group-filter-button');
+    await groupsOn.click();
+    for (const g of ['West', 'Treaties']) {
+      await page.getByTestId('new-group-name').fill(g);
+      await page.getByTestId('new-group-create').click();
+      await page.getByTestId(`group-show-${g}`).waitFor();
+    }
+    await h.screenshot('event-groups-popover');
+    await page.locator('.group-popover .close').click();
+    // Occupation of the west: West; Border treaty: West and Treaties (more than one group).
+    for (const [event, groups] of [['Occupation of the west', ['West']], ['Border treaty', ['West', 'Treaties']]] as const) {
+      await page.locator('.left .row', { hasText: event }).first().click();
+      for (const g of groups) await page.getByTestId(`event-group-${g}`).check();
+    }
+    await h.saved();
+    // Filter: only Treaties.
+    await groupsOn.click();
+    await page.getByTestId('group-show-West').uncheck();
+    await page.getByTestId('group-show-ungrouped').uncheck();
+    let rows = await listed();
+    assert.ok(has(rows, 'Border treaty') && !has(rows, 'Occupation of the west') && !has(rows, 'Union'), `only the Treaties group is listed: ${rows}`);
+    assert.match(await page.getByTestId('events-hidden').innerText(), /hidden by the group filter/);
+    assert.match(await groupsOn.innerText(), /1 of 3 groups/);
+    // A new event made while filtering joins the shown group, so it stays visible.
+    await page.locator('.group-popover .close').click();
+    await page.getByRole('button', { name: '+ Event' }).click();
+    await page.getByTestId('event-name').fill('Second treaty');
+    await page.getByTestId('event-start').fill('1960');
+    assert.ok(await page.locator('.modal').getByTestId('event-group-Treaties').isChecked(), 'the shown group is pre-ticked');
+    await page.locator('.modal label', { hasText: 'Record what I draw next' }).locator('input').uncheck();
+    await page.getByTestId('event-create').click();
+    await h.saved();
+    rows = await listed();
+    assert.ok(has(rows, 'Second treaty'), 'the new event is listed');
+    await h.screenshot('timeline-filtered-to-treaties');
+    // The filter changes only the lists: the map still shows every event's history.
+    assert.equal(await h.ownerAt(P.b, '2011'), null, 'the fade (in no shown group) still applies');
+    // Remembered after reloading the page.
+    await page.waitForTimeout(800); // the view (with the filter) is remembered half a second after the last change
+    await page.reload();
+    await page.locator('.project-row').first().click();
+    await page.getByTestId('map-canvas').waitFor();
+    await page.waitForFunction(() => /1 of 3 groups/.test(document.querySelector('[data-testid=group-filter-button]')?.textContent ?? ''), null, { timeout: 5000 })
+      .catch(async () => assert.fail(`the filter is remembered after reloading (button: "${await page.getByTestId('group-filter-button').textContent()}")`));
+    // Deleting a group keeps its events; show everything again.
+    await page.getByTestId('group-filter-button').click();
+    page.once('dialog', (d) => d.accept());
+    await page.locator('.group-row', { hasText: 'West' }).getByRole('button', { name: 'Delete' }).click();
+    await page.locator('.group-popover').getByRole('button', { name: 'Show all' }).click();
+    await page.locator('.group-popover .close').click();
+    rows = await listed();
+    for (const e of ['Occupation of the west', 'Border treaty', 'Union', 'Second treaty']) assert.ok(has(rows, e), `${e} is listed again`);
+    const members = await page.evaluate(() => (window as any).__mapmaker.store.world.all('event_group_member').length);
+    assert.equal(members, 2, 'Border treaty and Second treaty remain in Treaties');
+    await h.saved();
+  });
+
   let colours: Record<string, string> = {};
   await h.step('A shot with a camera move at 2.39:1 and 25 fps; inspect every exported pass', async () => {
     colours = await page.evaluate((names) => Object.fromEntries(names.map((n) => [n, (window as any).__mapmaker.store.world.all('entity').find((e: any) => e.name === n).color])), [A, B]);

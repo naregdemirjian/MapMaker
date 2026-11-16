@@ -7,6 +7,7 @@ import { basemapSourceOf } from '../../world-model/world-settings.ts';
 import { parseJSON, leafDescendants, type Resolution, type TransitionSpec } from '../../temporal-engine/engine.ts';
 import { lonLatToVec } from '../../geo-kernel/vec.ts';
 import { stepChange } from './Timeline.tsx';
+import { GroupChecks, eventVisible } from './EventGroups.tsx';
 
 export const fmt = (t: Instant, precision: 'year' | 'day' | 'minute' = 'day') => gregorian.format(t, precision);
 
@@ -218,13 +219,16 @@ export function Outliner() {
       </Section>
       {others.length > 0 && <Section title="Characters, cities and others">{others.map(entityRow)}</Section>}
       <Section title="Events" onAdd={() => s.set({ dialog: 'new-event' })} addLabel="Event">
-        {events.map((e) => (
+        {events.filter((e) => eventVisible(w, e.id)).map((e) => (
           <div key={e.id} className={`row ${s.selection?.kind === 'event' && s.selection.id === e.id ? 'sel' : ''} ${e.variant_group && !e.variant_active ? 'dim' : ''}`}
             onClick={() => s.set({ selection: { kind: 'event', id: e.id }, time: fromStore(e.start_day, e.start_ms) })}>
             <span className="date">{fmt(fromStore(e.start_day, e.start_ms), e.precision === 'year' ? 'year' : 'day')}</span> {e.name}
           </div>
         ))}
         {!events.length && <div className="muted pad">No events yet.</div>}
+        {events.some((e) => !eventVisible(w, e.id)) && (
+          <div className="muted pad" data-testid="events-hidden">{events.filter((e) => !eventVisible(w, e.id)).length} hidden by the group filter · <button className="link" onClick={() => s.set({ eventFilter: null })}>show all</button></div>
+        )}
       </Section>
     </aside>
   );
@@ -346,6 +350,8 @@ function EventPanel({ id }: { id: string }) {
         <label>Ends<DateField value={end} allowEmpty placeholder="(instantaneous)" onChange={(t) => s.execute((wd) => cmd.updateEvent(wd, id, { end: t }))} testId="event-panel-end" /></label>
         <label title="When two events change the same place at the same instant, the higher precedence wins">Precedence<NumberField value={e.precedence} step={1} onCommit={(n) => s.execute((wd) => cmd.updateEvent(wd, id, { precedence: Math.round(n) }))} /></label>
         <label>Description<textarea rows={4} value={desc} onChange={(ev) => setDesc(ev.target.value)} onBlur={() => desc !== e.description && s.execute((wd) => cmd.updateEvent(wd, id, { description: desc }))} /></label>
+        <h4>Groups</h4>
+        <GroupChecks eventId={id} />
         <div className="buttons">
           {s.recordEventId === id
             ? <button onClick={() => s.set({ recordEventId: null })}>Stop recording</button>

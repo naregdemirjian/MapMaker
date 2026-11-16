@@ -164,8 +164,14 @@ function insertEventIn(tx: Tx, e: EventInput): string {
   return id;
 }
 
-export function createEvent(world: World, e: EventInput): CommandResult<string> {
-  return run(world, `Create event "${e.name}"`, (tx) => insertEventIn(tx, e));
+/** Create an event; `groups` puts it in those event groups in the same step. */
+export function createEvent(world: World, e: EventInput & { groups?: string[] }): CommandResult<string> {
+  for (const g of e.groups ?? []) if (!world.get('event_group', g)) throw new Error('That group no longer exists.');
+  return run(world, `Create event "${e.name}"`, (tx) => {
+    const id = insertEventIn(tx, e);
+    for (const g of e.groups ?? []) insertMember(tx, g, id);
+    return id;
+  });
 }
 
 export function updateEvent(world: World, id: string, patch: Partial<EventInput> & { variant_group?: string | null; variant_active?: number }): CommandResult {

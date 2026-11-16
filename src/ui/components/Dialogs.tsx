@@ -8,6 +8,7 @@ import type { TransitionSpec } from '../../temporal-engine/engine.ts';
 import { lonLatToVec } from '../../geo-kernel/vec.ts';
 import { DateField, fmt } from './Panels.tsx';
 import { loadDatasetRecords, type DatasetRecord } from '../../render-engine/basemap.ts';
+import { GroupChecks } from './EventGroups.tsx';
 
 function Modal({ title, children, onClose, wide }: { title: string; children: React.ReactNode; onClose: () => void; wide?: boolean }) {
   return (
@@ -191,10 +192,12 @@ export function NewEventDialog() {
   const [end, setEnd] = useState<Instant | null>(null);
   const [desc, setDesc] = useState('');
   const [record, setRecord] = useState(true);
+  // A new event joins the groups the timeline is showing, so it does not disappear from view.
+  const [groups, setGroups] = useState<string[]>(() => (s.eventFilter ?? []).filter((g) => g !== cmd.UNGROUPED));
   const close = () => s.set({ dialog: null });
   const create = () => {
     if (!start) { s.toast('Give the event a start date.', 'error'); return; }
-    const id = s.execute((wd) => cmd.createEvent(wd, { name, type_id: type, start, end, description: desc }));
+    const id = s.execute((wd) => cmd.createEvent(wd, { name, type_id: type, start, end, description: desc, groups }));
     if (id) { s.set({ selection: { kind: 'event', id }, time: start, recordEventId: record ? id : s.recordEventId, tool: record && s.tool === 'select' ? 'lasso' : s.tool }); close(); }
   };
   return (
@@ -204,6 +207,7 @@ export function NewEventDialog() {
       <label>Starts<DateField value={start} onChange={setStart} testId="event-start" /></label>
       <label>Ends (optional)<DateField value={end} allowEmpty placeholder="(happens at once)" onChange={setEnd} testId="event-end" /></label>
       <label>Description<textarea rows={3} value={desc} onChange={(e) => setDesc(e.target.value)} /></label>
+      {w.all('event_group').length > 0 && <><h4>Groups</h4><GroupChecks value={groups} onChange={setGroups} /></>}
       <label className="check"><input type="checkbox" checked={record} onChange={(e) => setRecord(e.target.checked)} /> Record what I draw next into this event</label>
       <div className="modal-actions"><button onClick={close}>Cancel</button><button className="primary" onClick={create} data-testid="event-create">Create event</button></div>
     </Modal>

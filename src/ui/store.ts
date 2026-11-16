@@ -59,6 +59,8 @@ class AppStore {
   presentCamera: Camera | null = null;
   playing = false;
   dialog: string | null = null;
+  /** Event groups the timeline shows (null: every event). Remembered per project. */
+  eventFilter: string[] | null = null;
   /** Set when a change could not be saved; editing stops until the project is reloaded from disk. */
   offline: string | null = null;
   readonly renderer = new MapRenderer();
@@ -82,7 +84,7 @@ class AppStore {
     this.viewTimer = setTimeout(() => {
       if (this.projectId !== id) return;
       try {
-        localStorage.setItem(`mapmaker.view.${id}`, JSON.stringify({ spaceId: this.spaceId, time: toJSONValue(this.time), cameras: [...this.cameras.entries()] }));
+        localStorage.setItem(`mapmaker.view.${id}`, JSON.stringify({ spaceId: this.spaceId, time: toJSONValue(this.time), cameras: [...this.cameras.entries()], eventFilter: this.eventFilter }));
       } catch { /* storage may be unavailable */ }
     }, 500);
   }
@@ -91,14 +93,16 @@ class AppStore {
     const w = this.world!;
     this.cameras = new Map();
     this.time = gregorian.fromCivil({ year: 2000 });
+    this.eventFilter = null;
     try {
-      const v = JSON.parse(localStorage.getItem(`mapmaker.view.${id}`) ?? 'null') as { spaceId?: string; time?: unknown; cameras?: [string, Camera][] } | null;
+      const v = JSON.parse(localStorage.getItem(`mapmaker.view.${id}`) ?? 'null') as { spaceId?: string; time?: unknown; cameras?: [string, Camera][]; eventFilter?: unknown } | null;
       if (!v) return;
       if (v.spaceId && w.get('map_space', v.spaceId)) this.spaceId = v.spaceId;
       for (const [k, c] of v.cameras ?? []) {
         const ok = c && [c.lon, c.lat, c.zoom, c.rotation].every((n) => typeof n === 'number' && Number.isFinite(n)) && PROJECTIONS.some((p) => p.id === c.projection);
         if (ok && w.get('map_space', k)) this.cameras.set(k, c);
       }
+      if (Array.isArray(v.eventFilter)) this.eventFilter = v.eventFilter.filter((g): g is string => typeof g === 'string' && (g === '__ungrouped' || !!w.get('event_group', g)));
       if (v.time) this.time = fromJSONValue(v.time as Parameters<typeof fromJSONValue>[0]);
     } catch { /* a damaged view record is ignored */ }
   }
