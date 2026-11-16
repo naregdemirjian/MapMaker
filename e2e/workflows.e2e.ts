@@ -404,7 +404,7 @@ try {
   await h.step('A square custom size, another projection, 23.976 fps and a transparent full picture', async () => {
     await page.locator('label', { hasText: 'Frame rate' }).locator('select').selectOption('23.976');
     await page.getByTestId('shot-seconds').fill('0.1'); await page.getByTestId('shot-seconds').press('Enter');
-    const w = page.locator('label', { hasText: 'Width' }).locator('input'), hgt = page.locator('label', { hasText: 'Height' }).locator('input');
+    const w = page.getByRole('spinbutton', { name: 'Width', exact: true }), hgt = page.getByRole('spinbutton', { name: 'Height', exact: true });
     await w.fill('1000'); await w.press('Enter');
     await hgt.fill('1000'); await hgt.press('Enter');
     await page.locator('label', { hasText: 'Projection' }).locator('select').selectOption('naturalEarth');

@@ -179,7 +179,7 @@ export function ShotEditor() {
             <label className="check"><input type="checkbox" checked={tr.front.show} onChange={(e) => setTr({ front: { ...tr.front, show: e.target.checked } })} /> Show the moving front</label>
             {tr.front.show && <div className="two">
               <label>Colour<input type="color" value={tr.front.color} onChange={(e) => setTr({ front: { ...tr.front, color: e.target.value } })} /></label>
-              <label>Width<NumberField min={0} max={40} step={0.5} value={tr.front.width} onCommit={(n) => setTr({ front: { ...tr.front, width: n } })} /></label>
+              <label>Line width<NumberField min={0} max={40} step={0.5} value={tr.front.width} onCommit={(n) => setTr({ front: { ...tr.front, width: n } })} /></label>
               <label>Glow<NumberField min={0} max={80} step={1} value={tr.front.glow} onCommit={(n) => setTr({ front: { ...tr.front, glow: n } })} /></label>
             </div>}
           </>}
