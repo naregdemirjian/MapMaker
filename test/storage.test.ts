@@ -92,7 +92,7 @@ test('saving is atomic and refuses changes based on a different state', () => {
     const before = worldTables(db.snapshot());
     const head = db.journalState().head;
     assert.throws(() => db.commit('stale', [], head - 1), ConflictError);
-    const fakeEntity = { id: 'ent_x', type_id: 'polity', branch_id: 'main', name: 'X', color: '#fff', notes: '', created_seq: 1 };
+    const fakeEntity = { id: 'ent_x', type_id: 'polity', branch_id: 'main', name: 'X', color: '#fff', notes: '', created_seq: 1, style: '{}' };
     const wrongBefore = { ...fakeEntity, id: 'ent_missing' };
     assert.throws(() => db.commit('bad', [
       { table: 'entity', before: null, after: fakeEntity },

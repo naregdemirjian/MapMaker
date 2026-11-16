@@ -14,7 +14,11 @@ export interface MapSpaceRow {
   unit: string | null; parent_space_id: string | null; root_face: number; sort_order: number; settings: Json;
 }
 export interface EntityTypeRow { id: string; name: string; category: string; builtin: number }
-export interface EntityRow { id: string; type_id: string; branch_id: string; name: string; color: string; notes: string; created_seq: number }
+export interface EntityRow {
+  id: string; type_id: string; branch_id: string; name: string; color: string; notes: string; created_seq: number;
+  /** Look of the entity on the map (JSON): label overrides, fills. Added in file format 3. */
+  style: Json;
+}
 export interface LayerRow { id: string; space_id: string; kind: LayerKind; name: string; sort_order: number; visible: number; style: Json; export_pass: string }
 export interface EventTypeRow { id: string; name: string; builtin: number; fields: Json }
 export interface EventRow {
@@ -43,13 +47,17 @@ export type TableName = keyof Rows;
 export type AnyRow = Rows[TableName];
 
 type ColType = 'text' | 'int' | 'real' | 'text?' | 'int?' | 'real?';
-export interface TableDef { key: string; columns: Record<string, ColType>; kernel?: boolean }
+export interface TableDef {
+  key: string; columns: Record<string, ColType>; kernel?: boolean;
+  /** Values for columns added after a table was first released: rows written before have none. */
+  defaults?: Record<string, string | number>;
+}
 
 export const TABLES: { [K in TableName]: TableDef } = {
   meta: { key: 'key', columns: { key: 'text', value: 'text' } },
   map_space: { key: 'id', columns: { id: 'text', name: 'text', kind: 'text', body_id: 'text?', radius_m: 'real?', unit: 'text?', parent_space_id: 'text?', root_face: 'int', sort_order: 'int', settings: 'text' } },
   entity_type: { key: 'id', columns: { id: 'text', name: 'text', category: 'text', builtin: 'int' } },
-  entity: { key: 'id', columns: { id: 'text', type_id: 'text', branch_id: 'text', name: 'text', color: 'text', notes: 'text', created_seq: 'int' } },
+  entity: { key: 'id', columns: { id: 'text', type_id: 'text', branch_id: 'text', name: 'text', color: 'text', notes: 'text', created_seq: 'int', style: 'text' }, defaults: { style: '{}' } },
   layer: { key: 'id', columns: { id: 'text', space_id: 'text', kind: 'text', name: 'text', sort_order: 'int', visible: 'int', style: 'text', export_pass: 'text' } },
   event_type: { key: 'id', columns: { id: 'text', name: 'text', builtin: 'int', fields: 'text' } },
   event: { key: 'id', columns: { id: 'text', type_id: 'text', branch_id: 'text', name: 'text', start_day: 'int', start_ms: 'int', end_day: 'int?', end_ms: 'int?', precision: 'text', precedence: 'int', description: 'text', fields: 'text', presentation: 'text', created_seq: 'int', variant_group: 'text?', variant_active: 'int' } },
@@ -77,8 +85,22 @@ export function invertDiffs(diffs: RowDiff[]): RowDiff[] {
 
 /**
  * The project file format. 1: first release. 2: event groups (tables event_group, event_group_member).
- * Older files are upgraded when opened (see ProjectDb.migrate), after an automatic backup.
+ * 3: entity.style (label looks and fills). Older files are upgraded when opened (see ProjectDb.migrate),
+ * after an automatic backup.
  */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
+
+/** A row with values for any columns it predates (old backups, old undo history). */
+export function withDefaults<T extends AnyRow>(table: TableName, row: T): T {
+  const d = TABLES[table].defaults;
+  if (!d) return row;
+  const r = row as unknown as Record<string, unknown>;
+  let missing = false;
+  for (const k of Object.keys(d)) if (r[k] === undefined || r[k] === null) { missing = true; break; }
+  if (!missing) return row;
+  const out: Record<string, unknown> = { ...r };
+  for (const [k, v] of Object.entries(d)) if (out[k] === undefined || out[k] === null) out[k] = v;
+  return out as unknown as T;
+}
 export const BASE_EVENT_ID = 'evt_base';
 export const MAIN_BRANCH = 'main';

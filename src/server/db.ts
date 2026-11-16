@@ -6,7 +6,7 @@ import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import { mkdirSync, existsSync, readdirSync, statSync, unlinkSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { deflateRawSync, inflateRawSync } from 'node:zlib';
-import { TABLES, TABLE_NAMES, SCHEMA_VERSION, type RowDiff, type TableName, type AnyRow, invertDiffs } from '../world-model/schema.ts';
+import { TABLES, TABLE_NAMES, SCHEMA_VERSION, type RowDiff, type TableName, type AnyRow, invertDiffs, withDefaults } from '../world-model/schema.ts';
 import type { Snapshot } from '../world-model/world.ts';
 
 export class ConflictError extends Error { status = 409; }
@@ -141,6 +141,17 @@ export class ProjectDb {
     this.db.exec('BEGIN IMMEDIATE');
     try {
       // 1 -> 2: the event group tables, already created (empty) by the table definitions above.
+      // 2 -> 3 (and any later column): columns a table gained since it was created are added, with
+      // their default for the rows already there.
+      for (const t of TABLE_NAMES) {
+        const have = new Set((this.db.prepare(`PRAGMA table_info(${t})`).all() as Array<{ name: string }>).map((c) => c.name));
+        for (const [c, ty] of Object.entries(TABLES[t].columns)) {
+          if (have.has(c)) continue;
+          const def = TABLES[t].defaults?.[c];
+          const lit = def === undefined ? '' : typeof def === 'number' ? ` NOT NULL DEFAULT ${def}` : ` NOT NULL DEFAULT '${String(def).replace(/'/g, "''")}'`;
+          this.db.exec(`ALTER TABLE ${t} ADD COLUMN ${c} ${sqlType(ty)}${lit}`);
+        }
+      }
       this.db.prepare("UPDATE meta SET value = ? WHERE key = 'schema_version'").run(String(SCHEMA_VERSION));
       this.db.exec('COMMIT');
     } catch (e) {
@@ -178,14 +189,15 @@ export class ProjectDb {
     const key = def.key;
     const keyOf = (r: AnyRow) => (r as unknown as Record<string, unknown>)[key] as string | number;
     const vals = (r: AnyRow) => cols.map((c) => {
-      const v = (r as unknown as Record<string, unknown>)[c];
+      const v = (withDefaults(d.table, r) as unknown as Record<string, unknown>)[c];
       return v === undefined ? null : (v as string | number | null);
     });
     if (d.before) {
       const cur = this.stmt(`SELECT * FROM ${d.table} WHERE ${key} = ?`).get(keyOf(d.before)) as Record<string, unknown> | undefined;
       if (!cur) throw new ConflictError(`${d.table} ${keyOf(d.before)} is missing from the project`);
+      const before = withDefaults(d.table, d.before) as unknown as Record<string, unknown>;
       for (const c of cols) {
-        const a = cur[c] ?? null, b = (d.before as unknown as Record<string, unknown>)[c] ?? null;
+        const a = cur[c] ?? null, b = before[c] ?? null;
         if (a !== b) throw new ConflictError(`${d.table} ${keyOf(d.before)} changed unexpectedly (${c})`);
       }
     }
@@ -347,7 +359,7 @@ export function readSnapshot(file: string): Snapshot {
     const s: Record<string, AnyRow[]> = {};
     // Files from older versions lack newer tables: those are simply empty.
     const present = new Set((db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>).map((r) => r.name));
-    for (const t of TABLE_NAMES) s[t] = present.has(t) ? db.prepare(`SELECT * FROM ${t}`).all() as unknown as AnyRow[] : [];
+    for (const t of TABLE_NAMES) s[t] = present.has(t) ? (db.prepare(`SELECT * FROM ${t}`).all() as unknown as AnyRow[]).map((r) => withDefaults(t, r)) : [];
     return s as Snapshot;
   } finally {
     db.close();

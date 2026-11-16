@@ -3,7 +3,7 @@
 // transaction (a command being executed) or applied from storage (load, undo, redo).
 import { Arrangement, type IdSource, type KernelTable, type KernelRow } from '../geo-kernel/arrangement.ts';
 import {
-  TABLES, TABLE_NAMES, type RowDiff, type TableName, type Rows, type AnyRow, type MapSpaceRow, rowKey, invertDiffs,
+  TABLES, TABLE_NAMES, type RowDiff, type TableName, type Rows, type AnyRow, type MapSpaceRow, rowKey, invertDiffs, withDefaults,
 } from './schema.ts';
 
 export type Snapshot = { [K in TableName]?: Rows[K][] };
@@ -32,7 +32,7 @@ export class World {
     const w = new World();
     for (const t of TABLE_NAMES) {
       if (TABLES[t].kernel) continue;
-      for (const row of (s[t] ?? []) as AnyRow[]) w.tables.get(t)!.set(rowKey(t, row), { ...row });
+      for (const row of (s[t] ?? []) as AnyRow[]) w.tables.get(t)!.set(rowKey(t, row), { ...withDefaults(t, row) });
     }
     for (const t of ['vertex', 'segment', 'face'] as const) for (const r of s[t] ?? []) w.counters[t] = Math.max(w.counters[t], r.id);
     for (const sp of w.all('map_space')) {
@@ -79,7 +79,7 @@ export class World {
     }
     const map = this.tables.get(d.table)!;
     if (d.before) map.delete(rowKey(d.table, d.before));
-    if (d.after) map.set(rowKey(d.table, d.after), { ...d.after });
+    if (d.after) map.set(rowKey(d.table, d.after), { ...withDefaults(d.table, d.after) });
     if (d.table === 'map_space') {
       const sp = (d.after ?? d.before) as MapSpaceRow;
       if (!d.after) this.arrangements.delete(sp.id);

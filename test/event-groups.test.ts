@@ -80,7 +80,7 @@ test('event groups: deleting an event removes its memberships; an alternative ve
 /** Turn a project file into exactly what version 1 of Map Maker wrote. */
 function makeVersion1(file: string): void {
   const db = new DatabaseSync(file);
-  db.exec("DROP TABLE event_group; DROP TABLE event_group_member; UPDATE meta SET value = '1' WHERE key = 'schema_version';");
+  db.exec("DROP TABLE event_group; DROP TABLE event_group_member; ALTER TABLE entity DROP COLUMN style; UPDATE meta SET value = '1' WHERE key = 'schema_version';");
   db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
   db.close();
 }
@@ -104,7 +104,6 @@ test('a version 1 project file is upgraded when opened: backup first, content in
     const db2 = reg2.get(info.id);
     const meta = () => Object.fromEntries(db2.snapshot().meta!.map((m) => [m.key, m.value]));
     assert.equal(meta().schema_version, String(SCHEMA_VERSION));
-    assert.equal(SCHEMA_VERSION, 2);
     // A backup taken before upgrading still holds the file exactly as version 1 wrote it.
     const versionOf = (f: string) => { const d = new DatabaseSync(f, { readOnly: true }); try { return (d.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get() as { value: string }).value; } finally { d.close(); } };
     const preUpgrade = db2.backups().filter((b) => versionOf(b.file) === '1');
@@ -154,5 +153,40 @@ test('a project saved by a newer version of Map Maker is refused, not damaged', 
     const check = new DatabaseSync(file, { readOnly: true });
     assert.equal((check.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get() as { value: string }).value, String(SCHEMA_VERSION + 1));
     check.close();
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a version 2 file gains entity styles when opened; its old undo history still undoes and redoes', () => {
+  const root = temp();
+  try {
+    const reg = new ProjectRegistry(root);
+    const info = reg.create('Version 2 Film');
+    const db = reg.get(info.id);
+    const world = World.fromSnapshot(db.snapshot());
+    // Undo history as version 2 wrote it: entity rows without a style column.
+    const r = cmd.createEntity(world, { type_id: 'polity', name: 'Varn' });
+    const old = r.diffs.map((d) => ({ ...d, after: d.after ? Object.fromEntries(Object.entries(d.after).filter(([k]) => k !== 'style')) : null })) as typeof r.diffs;
+    db.commit(r.label, old, db.journalState().head);
+    reg.closeAll();
+    const file = ProjectDb.databasePath(join(root, `${info.id}.mapmaker`));
+    const raw = new DatabaseSync(file);
+    raw.exec("ALTER TABLE entity DROP COLUMN style; UPDATE meta SET value = '2' WHERE key = 'schema_version'; PRAGMA wal_checkpoint(TRUNCATE);");
+    raw.close();
+
+    const reg2 = new ProjectRegistry(root);
+    const db2 = reg2.get(info.id);
+    const varn = db2.snapshot().entity!.find((e) => e.name === 'Varn')!;
+    assert.equal(varn.style, '{}', 'existing countries get an empty style');
+    db2.undo();
+    assert.ok(!db2.snapshot().entity!.some((e) => e.name === 'Varn'), 'the old step undoes');
+    db2.redo();
+    assert.equal(db2.snapshot().entity!.find((e) => e.name === 'Varn')!.style, '{}', 'and redoes, with the default style');
+    const w2 = World.fromSnapshot(db2.snapshot());
+    const st = cmd.setEntityStyle(w2, varn.id, { label: { color: '#ff0000' } });
+    db2.commit(st.label, st.diffs, db2.journalState().head);
+    reg2.closeAll();
+    const reg3 = new ProjectRegistry(root);
+    assert.equal(JSON.parse(reg3.get(info.id).snapshot().entity!.find((e) => e.name === 'Varn')!.style).label.color, '#ff0000');
+    reg3.closeAll();
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

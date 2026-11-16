@@ -575,6 +575,36 @@ try {
     await page.waitForFunction(() => !(document.querySelector('[data-testid=clip-to-land]') as HTMLInputElement).checked);
   });
 
+  await step('Label looks: one style for all labels, and a country with its own text and colour, another hidden', async () => {
+    type L = { text: string; style: { color: string; uppercase: boolean; font: string } };
+    const labels = () => page.evaluate(() => (window as any).__mapmaker.store.renderer.lastLabels.map((l: any) => ({ text: l.text, style: l.style }))) as Promise<L[]>;
+    await page.getByTestId('open-label-style').click();
+    await page.getByTestId('label-style-dialog').waitFor();
+    await page.getByTestId('general-label-uppercase').check();
+    await page.getByTestId('general-label-font').selectOption('Georgia');
+    await page.getByTestId('general-label-color').fill('#ffe08a');
+    await screenshot('label-style-dialog');
+    await page.getByTestId('label-style-dialog').getByRole('button', { name: 'Done' }).click();
+    let ls = await labels();
+    assert.ok(ls.length >= 1 && ls.every((l) => l.text === l.text.toUpperCase() && l.style.font === 'Georgia' && l.style.color === '#ffe08a'), `all labels follow the general style: ${JSON.stringify(ls)}`);
+    // Country A: its own text and colour. Country B: no label.
+    await page.locator('.left .row', { hasText: A }).click();
+    await page.getByTestId('label-text').fill('Republic of A');
+    await page.getByTestId('label-text').press('Tab');
+    await page.locator('.own-look > summary').click();
+    await page.getByTestId('country-label-color').fill('#ff4040');
+    await page.locator('.left .row', { hasText: B }).click();
+    await page.getByTestId('label-shown').uncheck();
+    await page.waitForTimeout(150);
+    ls = await labels();
+    assert.deepEqual(ls.map((l) => l.text).sort(), ['REPUBLIC OF A'], `A shows its own text in capitals, B is hidden: ${ls.map((l) => l.text)}`);
+    assert.equal(ls[0].style.color, '#ff4040', "A's own colour");
+    assert.equal(ls[0].style.font, 'Georgia', 'other settings still come from the general style');
+    await screenshot('label-looks');
+    // The look is saved with the project.
+    await page.evaluate(() => (window as any).__mapmaker.store.flush());
+  });
+
   await step('History Health reports no problems', async () => {
     await page.getByTestId('mode-world').click();
     await page.getByTestId('health').click();

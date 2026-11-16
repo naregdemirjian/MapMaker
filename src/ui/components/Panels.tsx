@@ -8,6 +8,7 @@ import { parseJSON, leafDescendants, type Resolution, type TransitionSpec } from
 import { lonLatToVec } from '../../geo-kernel/vec.ts';
 import { stepChange } from './Timeline.tsx';
 import { GroupChecks, eventVisible } from './EventGroups.tsx';
+import { CountryLabelSection } from './LabelStyles.tsx';
 
 export const fmt = (t: Instant, precision: 'year' | 'day' | 'minute' = 'day') => gregorian.format(t, precision);
 
@@ -215,6 +216,7 @@ export function Outliner() {
           </div>
         )}
         {political.map(entityRow)}
+        {political.length > 0 && <button className="link pad-link" onClick={() => s.set({ dialog: 'label-style' })} data-testid="open-label-style">Label style for all countries…</button>}
         {!political.length && !newEntity && <div className="muted pad">None yet.</div>}
       </Section>
       {others.length > 0 && <Section title="Characters, cities and others">{others.map(entityRow)}</Section>}
@@ -294,6 +296,7 @@ function EntityPanel({ id }: { id: string }) {
         </div>
       ))}
       {!changes.length && <div className="muted">None yet.</div>}
+      {(e.type_id === 'polity' || e.type_id === 'faction') && <CountryLabelSection id={id} />}
       <button className="danger" onClick={() => { if (confirm(`Delete ${e.name}? Events that refer to it will be flagged in History Health.`)) { s.execute((wd) => cmd.deleteEntity(wd, id)); s.set({ selection: null }); } }}>Delete</button>
     </div>
   );

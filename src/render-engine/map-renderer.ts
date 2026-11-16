@@ -14,6 +14,9 @@ import type { View } from './camera.ts';
 import type { Arrangement } from '../geo-kernel/arrangement.ts';
 import { E7 } from '../geo-kernel/vec.ts';
 import { BasemapPainter, landMaskOf, type Basemap, type LandMask } from './basemap.ts';
+import { resolveLabelStyle, labelSize, labelFont, labelText, type LabelStyle, type CountryLabel } from './label-style.ts';
+
+type LabelEntity = { name: string; style?: string };
 
 export type PassName = 'background' | 'graticule' | 'land' | 'fills' | 'borders' | 'labels';
 /** Drawing order. The grid lies under the land, so stacked export passes match the full picture. */
@@ -47,7 +50,7 @@ export interface RenderOptions {
   referenceBorders?: boolean;
 }
 
-export interface LabelInfo { text: string; x: number; y: number; size: number }
+export interface LabelInfo { text: string; x: number; y: number; size: number; style: LabelStyle; entityId: string }
 
 interface FaceGeo { geo: GeoPermissibleObjects; area: number; centroid: [number, number] }
 
@@ -137,6 +140,14 @@ export class MapRenderer {
     }
 
     const entities = new Map(world.all('entity').map((e) => [e.id, e]));
+    // Label looks: the project's general style, then each country's own settings.
+    const general = parseJSON<Partial<LabelStyle>>(world.get('meta', 'label_style')?.value ?? '{}', {});
+    this.labelLook = (id: string, name: string) => {
+      const own = parseJSON<{ label?: CountryLabel }>(entities.get(id)?.style ?? '{}', {})?.label ?? null;
+      if (own?.hidden) return null;
+      const st = resolveLabelStyle(general, own);
+      return { style: st, text: labelText(name, st, own) };
+    };
     const colorOf = (v: string | null) => (v ? entities.get(v)?.color ?? '#888888' : null);
     const labels: LabelInfo[] = [];
 
@@ -383,7 +394,7 @@ export class MapRenderer {
     return s;
   }
 
-  private layerLabels(view: View, arr: Arrangement, states: Map<number, FaceState>, entities: Map<string, { name: string }>, mask: LandMask | null = null): LabelInfo[] {
+  private layerLabels(view: View, arr: Arrangement, states: Map<number, FaceState>, entities: Map<string, LabelEntity>, mask: LandMask | null = null): LabelInfo[] {
     if (mask) return this.landLabels(view, arr, states, entities, mask);
     const byOwner = new Map<string, { area: number; sx: number; sy: number; sz: number; best: FaceGeo | null }>();
     const bestArea = new Map<string, number>();
@@ -422,17 +433,22 @@ export class MapRenderer {
       }
       const p = view.projection(pos);
       if (!p) continue;
-      const size = Math.max(10 * view.unit, Math.min(44 * view.unit, Math.sqrt(o.area) * scale * 0.18));
-      out.push({ text: name, x: p[0], y: p[1], size });
+      const look = this.labelLook(id, name);
+      if (!look) continue;
+      const size = labelSize(look.style, (Math.sqrt(o.area) * scale * 0.18) / view.unit) * view.unit;
+      out.push({ text: look.text, x: p[0], y: p[1], size, style: look.style, entityId: id });
     }
     return out;
   }
+
+  /** The look of one country's label (null: hidden); set for each frame by render(). */
+  private labelLook: (id: string, name: string) => { style: LabelStyle; text: string } | null = (_id, name) => ({ style: resolveLabelStyle(), text: name });
 
   /**
    * Labels for a layer clipped at the coast: placed and sized from the land part of each territory
    * only, so they never sit over the sea. A territory entirely at sea has no label.
    */
-  private landLabels(view: View, arr: Arrangement, states: Map<number, FaceState>, entities: Map<string, { name: string }>, mask: LandMask): LabelInfo[] {
+  private landLabels(view: View, arr: Arrangement, states: Map<number, FaceState>, entities: Map<string, LabelEntity>, mask: LandMask): LabelInfo[] {
     type Acc = { area: number; sx: number; sy: number; sz: number; samples: LandSample[]; best: FaceGeo | null; bestLand: number };
     const byOwner = new Map<string, Acc>();
     const add = (v: string | null, face: number, weight: number) => {
@@ -475,31 +491,45 @@ export class MapRenderer {
       }
       const p = view.projection(pos);
       if (!p) continue;
-      const size = Math.max(10 * view.unit, Math.min(44 * view.unit, Math.sqrt(o.area) * scale * 0.18));
-      out.push({ text: name, x: p[0], y: p[1], size });
+      const look = this.labelLook(id, name);
+      if (!look) continue;
+      const size = labelSize(look.style, (Math.sqrt(o.area) * scale * 0.18) / view.unit) * view.unit;
+      out.push({ text: look.text, x: p[0], y: p[1], size, style: look.style, entityId: id });
     }
     return out;
   }
 
-  private drawLabels(ctx: CanvasRenderingContext2D, labels: LabelInfo[], style: MapStyle, u: number): void {
+  private drawLabels(ctx: CanvasRenderingContext2D, labels: LabelInfo[], _style: MapStyle, _u: number): void {
     const placed: Array<[number, number, number, number]> = [];
     const sorted = [...labels].sort((a, b) => b.size - a.size || a.text.localeCompare(b.text));
+    ctx.save();
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round';
     for (const l of sorted) {
-      ctx.font = `600 ${l.size.toFixed(1)}px ${style.font}`;
+      const st = l.style;
+      ctx.font = labelFont(st, l.size);
+      const spacing = st.letterSpacing * l.size;
+      (ctx as CanvasRenderingContext2D & { letterSpacing?: string }).letterSpacing = `${spacing.toFixed(2)}px`;
       const w = ctx.measureText(l.text).width;
+      // Larger labels win where labels would overlap.
       const box: [number, number, number, number] = [l.x - w / 2, l.y - l.size / 2, l.x + w / 2, l.y + l.size / 2];
       if (placed.some((b) => !(box[2] < b[0] || box[0] > b[2] || box[3] < b[1] || box[1] > b[3]))) continue;
       placed.push(box);
-      ctx.lineWidth = Math.max(2, l.size * 0.16);
-      ctx.strokeStyle = style.labelHalo;
-      ctx.strokeText(l.text, l.x, l.y);
-      ctx.fillStyle = style.labelColor;
-      ctx.fillText(l.text, l.x, l.y);
+      // With letter spacing the text grows to the right; shift it back so it stays centred.
+      const x = l.x + spacing / 2;
+      ctx.globalAlpha = st.opacity;
+      if (st.haloWidth > 0) {
+        ctx.lineWidth = Math.max(1, l.size * st.haloWidth);
+        ctx.strokeStyle = st.haloColor;
+        ctx.strokeText(l.text, x, l.y);
+      }
+      ctx.fillStyle = st.color;
+      ctx.fillText(l.text, x, l.y);
     }
-    void u;
+    ctx.restore();
   }
+
 }
 
 interface LandSample { pts: number[]; vec: Float64Array; sum: [number, number, number]; weight: number; land: number }

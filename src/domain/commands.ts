@@ -10,6 +10,7 @@ import {
 } from '../world-model/schema.ts';
 import type { Vec3 } from '../geo-kernel/vec.ts';
 import { worldSettings, type BasemapSource } from '../world-model/world-settings.ts';
+import type { LabelStyle, CountryLabel } from '../render-engine/label-style.ts';
 
 export interface CommandResult<T = unknown> { label: string; diffs: RowDiff[]; result: T }
 
@@ -76,7 +77,7 @@ function createWorldIn(tx: Tx, name: string, radiusKm: number, basemap: BasemapS
   const w = tx.world;
   const spaceId = newId('space');
   const bodyId = newId('ent');
-  tx.insert('entity', { id: bodyId, type_id: 'body', branch_id: MAIN_BRANCH, name, color: '#7a8b99', notes: '', created_seq: w.nextSeq('entity') });
+  tx.insert('entity', { id: bodyId, type_id: 'body', branch_id: MAIN_BRANCH, name, color: '#7a8b99', notes: '', created_seq: w.nextSeq('entity'), style: '{}' });
   const root = w.ids.next('face');
   tx.insert('map_space', {
     id: spaceId, name, kind: 'sphere', body_id: bodyId, radius_m: radiusKm * 1000, unit: null, parent_space_id: null,
@@ -124,13 +125,51 @@ export function setLayerClipToLand(world: World, id: string, clip: boolean): Com
   return run(world, clip ? `End "${layer.name}" at the coast` : `Let "${layer.name}" cover the sea`, (tx) => tx.patch('layer', id, { style: JSON.stringify(style) }));
 }
 
+// ---------------------------------------------------------------- looks: label styles, entity styles
+
+/** What is stored in entity.style (JSON). */
+export interface EntityStyle { label?: CountryLabel }
+
+export function entityStyle(e: { style?: string } | null | undefined): EntityStyle {
+  return parseJSON<EntityStyle>(e?.style ?? '{}', {}) ?? {};
+}
+
+/** The project's general label style (all country labels), as stored. */
+export function generalLabelStyle(world: World): Partial<LabelStyle> {
+  return parseJSON<Partial<LabelStyle>>(world.get('meta', 'label_style')?.value ?? '{}', {}) ?? {};
+}
+
+/** Change the general label style (only the fields given; null resets a field to the default). */
+export function setGeneralLabelStyle(world: World, patch: Partial<Record<keyof LabelStyle, unknown>>): CommandResult {
+  const next: Record<string, unknown> = { ...generalLabelStyle(world) };
+  for (const [k, v] of Object.entries(patch)) { if (v === null) delete next[k]; else next[k] = v; }
+  return run(world, 'Change the look of all labels', (tx) => {
+    const row = world.get('meta', 'label_style');
+    const value = JSON.stringify(next);
+    if (row) tx.update('meta', { key: 'label_style', value }); else tx.insert('meta', { key: 'label_style', value });
+  });
+}
+
+/** Change parts of an entity's look. `label: null` returns its label to the general style. */
+export function setEntityStyle(world: World, id: string, patch: { label?: CountryLabel | null }): CommandResult {
+  const e = world.get('entity', id);
+  if (!e) throw new Error('That country no longer exists.');
+  const next: EntityStyle = { ...entityStyle(e) };
+  if (patch.label === null) delete next.label;
+  else if (patch.label !== undefined) {
+    const clean = Object.fromEntries(Object.entries(patch.label).filter(([, v]) => v !== undefined && v !== null && v !== '')) as CountryLabel;
+    if (Object.keys(clean).length) next.label = clean; else delete next.label;
+  }
+  return run(world, `Change the look of "${e.name}"`, (tx) => { tx.patch('entity', id, { style: JSON.stringify(next) }); });
+}
+
 // ---------------------------------------------------------------- entities
 
 export function createEntity(world: World, e: { type_id: string; name: string; color?: string; notes?: string }): CommandResult<string> {
   if (!e.name.trim()) throw new Error('Give it a name.');
   return run(world, `Create "${e.name}"`, (tx) => {
     const id = newId('ent');
-    tx.insert('entity', { id, type_id: e.type_id, branch_id: MAIN_BRANCH, name: e.name.trim(), color: e.color ?? suggestColor(world), notes: e.notes ?? '', created_seq: world.nextSeq('entity') });
+    tx.insert('entity', { id, type_id: e.type_id, branch_id: MAIN_BRANCH, name: e.name.trim(), color: e.color ?? suggestColor(world), notes: e.notes ?? '', created_seq: world.nextSeq('entity'), style: '{}' });
     return id;
   });
 }
