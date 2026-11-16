@@ -10,7 +10,8 @@
     "dev": "node scripts/build.mjs && node --disable-warning=ExperimentalWarning dist/server.mjs",
     "test": "node --disable-warning=ExperimentalWarning --test \"test/**/*.test.ts\"",
     "typecheck": "tsc -p tsconfig.json",
-    "e2e": "node --disable-warning=ExperimentalWarning e2e/vertical-slice.e2e.ts"
+    "e2e": "node --disable-warning=ExperimentalWarning e2e/vertical-slice.e2e.ts",
+    "desktop": "node scripts/build.mjs && electron ."
   },
   "dependencies": {
     "d3-geo": "3.1.1",
@@ -24,11 +25,13 @@
     "@types/node": "26.6.3",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.7",
+    "electron": "45.3.2",
     "esbuild": "0.28.2",
     "playwright": "1.63.0",
     "typescript": "6.0.3"
   },
   "engines": {
     "node": ">=22.18.0"
-  }
+  },
+  "main": "dist/desktop/main.mjs"
 }
