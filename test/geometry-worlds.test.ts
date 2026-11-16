@@ -200,3 +200,16 @@ test('undoing one world\'s edit restores exactly that world', () => {
   assert.equal(sorted(), before, 'the same rows (their order in memory may differ)');
   s.valid(); s.valid(aster);
 });
+
+test('regression: an outline that crosses itself next to an existing country never crashes the kernel', () => {
+  const s = setup();
+  s.paintRing(ring(square(10, 45, 8)), s.A);
+  // A figure-eight drawn as one outline across A's border: its second half splits its first half.
+  const r = ring([[12, 40], [20, 50], [20, 40], [12, 50]]);
+  try {
+    s.paintRing(r, s.A);
+  } catch (e) {
+    assert.ok(!(e instanceof TypeError), `a clean refusal at most, not ${(e as Error).message}`);
+  }
+  s.valid();
+});

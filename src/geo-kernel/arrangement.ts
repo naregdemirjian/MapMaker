@@ -306,8 +306,22 @@ export class Arrangement {
   private splitSegmentAtVertex(segId: number, x: number, tol: number): void {
     const s = this.segments.get(segId)!;
     this.deleteSegment(segId);
-    this.insertPiece(s.a, x, tol, s.left_face, s.right_face, 0);
-    this.insertPiece(x, s.b, tol, s.left_face, s.right_face, 0);
+    const steps = [...this.insertPiece(s.a, x, tol, s.left_face, s.right_face, 0), ...this.insertPiece(x, s.b, tol, s.left_face, s.right_face, 0)];
+    this.splitLog?.set(segId, steps);
+  }
+
+  /**
+   * Segments split while a path is being inserted, with the pieces that replaced them (in the
+   * original a -> b direction). A path that crosses or touches itself splits its own earlier
+   * segments; the returned path is re-expressed in the segments that exist at the end.
+   */
+  private splitLog: Map<number, PathStep[]> | null = null;
+
+  private resolveStep(step: PathStep): PathStep[] {
+    const rep = this.splitLog?.get(step.seg);
+    if (!rep) return [step];
+    const parts = rep.flatMap((r) => this.resolveStep(r));
+    return step.fwd ? parts : parts.reverse().map((r) => ({ seg: r.seg, fwd: !r.fwd }));
   }
 
   // ---------------------------------------------------------------- insertion with noding
@@ -327,10 +341,17 @@ export class Arrangement {
     }
     if (opts.closed && ids.length > 1 && ids[0] !== ids[ids.length - 1]) ids.push(ids[0]);
     if (opts.closed && ids.length < 4) throw new TopologyError('The shape is too small to form an area at this zoom level.');
-    const path: PathStep[] = [];
-    for (let i = 0; i + 1 < ids.length; i++) {
-      // Endpoints may have been moved into existing segments by later snapping; vertices persist.
-      path.push(...this.insertPiece(ids[i], ids[i + 1], tol, 0, 0, 0));
+    const raw: PathStep[] = [];
+    this.splitLog = new Map();
+    let path: PathStep[];
+    try {
+      for (let i = 0; i + 1 < ids.length; i++) {
+        // Endpoints may have been moved into existing segments by later snapping; vertices persist.
+        raw.push(...this.insertPiece(ids[i], ids[i + 1], tol, 0, 0, 0));
+      }
+      path = raw.flatMap((st) => this.resolveStep(st));
+    } finally {
+      this.splitLog = null;
     }
     this.rebuildFaces();
     return path;
