@@ -88,10 +88,18 @@ export function zoomCameraAt(cam: Camera, width: number, height: number, x: numb
   const anchor = screenToLonLat(v0, x, y);
   const next: Camera = { ...cam, zoom: Math.max(-1, Math.min(22, cam.zoom + delta)) };
   if (!anchor) return next;
-  const v1 = makeView(next, width, height);
-  const p = lonLatToScreen(v1, anchor[0], anchor[1]);
-  if (!p) return next;
-  return panCamera(next, v1, p[0] - x, p[1] - y);
+  // Move the map so the point that was under the cursor is under it again. Panning is linear in
+  // degrees, which is exact for the equirectangular projection and close for the others, so the
+  // correction is repeated until the point is within a hundredth of a pixel.
+  let cam2 = next;
+  for (let i = 0; i < 6; i++) {
+    const v1 = makeView(cam2, width, height);
+    const p = lonLatToScreen(v1, anchor[0], anchor[1]);
+    if (!p) break;
+    if (Math.hypot(p[0] - x, p[1] - y) < 0.01) break;
+    cam2 = panCamera(cam2, v1, x - p[0], y - p[1]);
+  }
+  return cam2;
 }
 
 export function interpolateCamera(a: Camera, b: Camera, f: number): Camera {
