@@ -5,11 +5,13 @@
 // renderer; deck.gl could not be installed in the offline build environment, so this backend sits
 // behind the same inputs (world, engine, view, time, options) and can be replaced without touching
 // the world model, the engine, the interface or the export pipeline.
-import { geoPath, geoGraticule10, geoCircle, geoCentroid, type GeoPermissibleObjects } from 'd3-geo';
+import { geoPath, geoGraticule10, geoCircle, geoCentroid, geoArea, type GeoPermissibleObjects } from 'd3-geo';
 import type { World } from '../world-model/world.ts';
-import type { Engine, FaceState, Assignment } from '../temporal-engine/engine.ts';
+import type { Engine, FaceState, Assignment, CompiledTransition } from '../temporal-engine/engine.ts';
 import { parseJSON } from '../temporal-engine/engine.ts';
-import type { Instant } from '../core-time/index.ts';
+import { type Instant, compare, diffMs } from '../core-time/index.ts';
+import { BASE_EVENT_ID } from '../world-model/schema.ts';
+import type { Vec3 } from '../geo-kernel/vec.ts';
 import type { View } from './camera.ts';
 import type { Arrangement } from '../geo-kernel/arrangement.ts';
 import { E7 } from '../geo-kernel/vec.ts';
@@ -48,6 +50,32 @@ export interface RenderOptions {
   basemap?: Basemap | null;
   /** Present-day country borders over the land, as a drawing aid (never part of an export). */
   referenceBorders?: boolean;
+  /** A shot's way of animating border changes; absent: as recorded (world-building view). */
+  transitions?: ShotTransitionOptions;
+}
+
+export type TransitionEase = 'linear' | 'smooth' | 'in' | 'out';
+
+/** Shot transition settings as the renderer needs them (see presentation/sequence.ts ShotTransitions). */
+export interface ShotTransitionOptions {
+  mode: 'recorded' | 'all' | 'instant';
+  style: 'advance' | 'fade' | 'wipe';
+  angle: number;
+  timing: 'seconds' | 'event';
+  seconds: number;
+  easing: TransitionEase;
+  restyleRecorded: boolean;
+  front: { show: boolean; color: string; width: number; glow: number };
+  /** Screen seconds since the frame that showed instant t (Infinity if before the shot). */
+  secondsSince: (t: Instant) => number;
+}
+
+function ease(kind: string | undefined, p: number): number {
+  const x = Math.min(1, Math.max(0, p));
+  if (kind === 'smooth') return x * x * (3 - 2 * x);
+  if (kind === 'in') return x * x;
+  if (kind === 'out') return 1 - (1 - x) * (1 - x);
+  return x;
 }
 
 export interface LabelInfo { text: string; x: number; y: number; size: number; style: LabelStyle; entityId: string }
@@ -58,10 +86,12 @@ interface TransitionGroup {
   a: Assignment;
   faces: number[];
   states: FaceState[];
+  /** A front moves across the change (advancing circle or straight wipe); otherwise it fades. */
   advance: boolean;
+  spec: CompiledTransition;
   /** How far the change has progressed (0 to 1, eased). */
   progress: number;
-  /** For an advancing front: the area reached so far (null before anything is reached). */
+  /** For a moving front: the area reached so far (null before anything is reached). */
   disc: Path2D | null;
   region: Path2D;
   /** The parcels whose owner actually changes. */
@@ -82,6 +112,8 @@ export class MapRenderer {
   private pathCacheView = '';
   private basemapPainter = new BasemapPainter();
   lastLabels: LabelInfo[] = [];
+  /** The animated changes drawn in the last frame (style and eased progress), for checks and tests. */
+  lastTransitions: Array<{ style: string; progress: number }> = [];
 
   /** Spherical geometry of a parcel (cached until the parcel map changes). */
   faceGeo(arr: Arrangement, face: number): FaceGeo {
@@ -160,13 +192,14 @@ export class MapRenderer {
     for (const layerId of drawsLayers ? opts.layerIds : []) {
       const layer = world.get('layer', layerId);
       if (!layer || layer.space_id !== spaceId || layer.kind !== 'partition') continue;
-      const states = engine.partitionState(spaceId, layerId, t);
+      const states = opts.transitions ? this.shotStates(engine, spaceId, layerId, t, engine.partitionState(spaceId, layerId, t), opts.transitions) : engine.partitionState(spaceId, layerId, t);
       const ls = parseJSON<LayerStyle>(layer.style, {});
       // Coastline clipping: territory ends at the coast unless the layer is set to cover the sea.
       const clip = !!opts.basemap && ls.clipToLand !== false;
       prepared.push({ ls, states, tg: this.transitionGroups(view, arr, engine, states, t), clip });
     }
 
+    this.lastTransitions = prepared.flatMap((p) => [...p.tg.groups.values()].map((g) => ({ style: g.spec.style, progress: g.progress })));
     const land = (): Path2D => this.basemapPainter.pathsFor(view, opts.basemap!).land;
     if (opts.passes.has('fills')) for (const { ls, states, tg, clip } of prepared) {
       // Each layer is painted fully opaque in a scratch buffer and laid onto the map once at the
@@ -188,15 +221,16 @@ export class MapRenderer {
       ctx.drawImage(lc.canvas as CanvasImageSource, 0, 0);
       ctx.restore();
       // The advancing front is highlighted on top, at full strength.
-      for (const g of tg.groups.values()) {
+      const front = opts.transitions?.front ?? { show: true, color: style.frontGlow, width: 2.2, glow: 10 };
+      if (front.show) for (const g of tg.groups.values()) {
         if (!g.advance || !g.disc) continue;
         ctx.save();
         if (clip) ctx.clip(land());
         ctx.clip(g.changing, 'evenodd');
-        ctx.strokeStyle = style.frontGlow;
-        ctx.lineWidth = 2.2 * view.unit;
-        ctx.shadowColor = style.frontGlow;
-        ctx.shadowBlur = 10 * view.unit;
+        ctx.strokeStyle = front.color;
+        ctx.lineWidth = front.width * view.unit;
+        ctx.shadowColor = front.color;
+        ctx.shadowBlur = front.glow * view.unit;
         ctx.stroke(g.disc);
         ctx.restore();
       }
@@ -236,24 +270,52 @@ export class MapRenderer {
     return p;
   }
 
+  /**
+   * A shot's way of animating changes, applied to the recorded states: no animation at all, every
+   * change animated, or recorded animations restyled. History is never changed, only what is drawn.
+   */
+  private shotStates(engine: Engine, spaceId: string, layerId: string, t: Instant, states: Map<number, FaceState>, o: ShotTransitionOptions): Map<number, FaceState> {
+    if (o.mode === 'recorded' && !o.restyleRecorded) return states;
+    const spec: CompiledTransition = { style: o.style, origin: null, maxDist: 0, easing: o.easing, angle: o.angle, shot: true };
+    const progressOf = (a: Assignment): number => {
+      if (o.timing === 'event' && compare(a.end, a.t) > 0) return diffMs(a.t, t) / Math.max(1, diffMs(a.t, a.end));
+      return o.secondsSince(a.t) / Math.max(1e-3, o.seconds);
+    };
+    const out = new Map<number, FaceState>();
+    for (const [f, st] of states) {
+      const a = st.assignment;
+      if (o.mode === 'instant') { out.set(f, st.transition ? { value: st.value, assignment: a } : st); continue; }
+      if (st.transition) {
+        if (!o.restyleRecorded) { out.set(f, st); continue; }
+        const p = progressOf(a!);
+        out.set(f, p >= 1 || !(p >= 0) ? { value: st.value, assignment: a } : { ...st, transition: { ...st.transition, progress: p, spec } });
+        continue;
+      }
+      if (o.mode !== 'all' || !a || a.eventId === BASE_EVENT_ID) { out.set(f, st); continue; }
+      const p = progressOf(a);
+      if (!(p >= 0 && p < 1)) { out.set(f, st); continue; }
+      const prior = engine.latest(spaceId, layerId, f, t, a);
+      const from = prior ? prior.value : null;
+      if ((from ?? '') === (st.value ?? '')) { out.set(f, st); continue; }
+      out.set(f, { value: st.value, assignment: a, transition: { from, progress: p, spec, prior } });
+    }
+    return out;
+  }
+
   /** Parcels that are part of an animated change at this moment, grouped by the change they belong to. */
   private transitionGroups(view: View, arr: Arrangement, engine: Engine, states: Map<number, FaceState>, t: Instant): { groups: Map<string, TransitionGroup>; of: Map<number, TransitionGroup> } {
+    void engine; void t;
     const groups = new Map<string, TransitionGroup>(), of = new Map<number, TransitionGroup>();
     for (const [face, st] of states) {
-      const spec = st.assignment?.transition;
-      if (!st.transition || !spec) continue;
-      const key = st.assignment!.effectId;
+      if (!st.transition || !st.assignment) continue;
+      const spec = st.transition.spec;
+      const key = st.assignment.effectId;
       let g = groups.get(key);
       if (!g) {
-        const advance = spec.style === 'advance' && !!spec.origin;
-        g = { a: st.assignment!, faces: [], states: [], advance, progress: st.transition.progress, disc: null, region: new Path2D(), changing: new Path2D() };
-        if (advance) {
-          const r = (engine.frontRadius(st.assignment!, t) * 180) / Math.PI;
-          if (r > 0) {
-            const circle = geoCircle().center(toLonLat(spec.origin!)).radius(Math.min(r, 179.9)).precision(0.5)();
-            g.disc = new Path2D(geoPath(view.projection)(circle) ?? '');
-          }
-        }
+        const advance = spec.style === 'advance' || spec.style === 'wipe';
+        // Shot-made animations use the shot's easing; recorded fronts their own; recorded fades stay even.
+        const progress = spec.shot || spec.style === 'advance' ? ease(spec.easing, st.transition.progress) : st.transition.progress;
+        g = { a: st.assignment, faces: [], states: [], advance, spec, progress, disc: null, region: new Path2D(), changing: new Path2D() };
         groups.set(key, g);
       }
       g.faces.push(face);
@@ -263,7 +325,71 @@ export class MapRenderer {
       g.region.addPath(path);
       if ((st.transition.from ?? '') !== (st.value ?? '')) g.changing.addPath(path);
     }
+    // The area each moving front has reached: a circle from its origin, or a straight wipe.
+    for (const g of groups.values()) {
+      if (!g.advance || g.progress <= 0) continue;
+      if (g.spec.style === 'wipe') { g.disc = this.wipeShape(view, arr, g); continue; }
+      let origin = g.spec.origin, maxDist = g.spec.maxDist;
+      if (!origin || !maxDist) ({ origin, maxDist } = this.reachOf(arr, g.faces));
+      const r = (g.progress * maxDist * 180) / Math.PI;
+      if (r <= 0) continue;
+      const circle = geoCircle().center(toLonLat(origin)).radius(Math.min(r, 179.9)).precision(0.5)();
+      g.disc = new Path2D(geoPath(view.projection)(circle) ?? '');
+    }
     return { groups, of };
+  }
+
+  /** Where a front starts when the change has no recorded origin: the middle of the change, and how far it must go. */
+  private reachOf(arr: Arrangement, faces: number[]): { origin: Vec3; maxDist: number } {
+    let sx = 0, sy = 0, sz = 0;
+    for (const f of faces) {
+      const g = this.faceGeo(arr, f);
+      const [lon, lat] = g.centroid.map((d) => (d * Math.PI) / 180);
+      sx += g.area * Math.cos(lat) * Math.cos(lon); sy += g.area * Math.cos(lat) * Math.sin(lon); sz += g.area * Math.sin(lat);
+    }
+    const len = Math.hypot(sx, sy, sz) || 1;
+    const origin: Vec3 = [sx / len, sy / len, sz / len];
+    let maxDist = 1e-6;
+    for (const f of faces) for (const ring of arr.faceRingsLonLat(f)) for (const [lon, lat] of ring) {
+      const la = (lat * Math.PI) / 180, lo = (lon * Math.PI) / 180;
+      const d = Math.acos(Math.max(-1, Math.min(1, origin[0] * Math.cos(la) * Math.cos(lo) + origin[1] * Math.cos(la) * Math.sin(lo) + origin[2] * Math.sin(la))));
+      if (d > maxDist) maxDist = d;
+    }
+    return { origin, maxDist };
+  }
+
+  /** A straight front sweeping across the change in the shot's direction (in longitude/latitude). */
+  private wipeShape(view: View, arr: Arrangement, g: TransitionGroup): Path2D | null {
+    const ang = (((g.spec as CompiledTransition & { angle?: number }).angle ?? 0) * Math.PI) / 180;
+    const dx = Math.cos(ang), dy = Math.sin(ang);
+    let lo = Infinity, hi = -Infinity;
+    for (const f of g.faces) for (const ring of arr.faceRingsLonLat(f)) for (const [lon, lat] of ring) {
+      const u = lon * dx + lat * dy;
+      if (u < lo) lo = u; if (u > hi) hi = u;
+    }
+    if (!(hi > lo)) return null;
+    const u = lo + g.progress * (hi - lo);
+    // The half of the longitude/latitude rectangle behind the front, densified so it follows the projection.
+    const rect: Array<[number, number]> = [[-180, -90], [180, -90], [180, 90], [-180, 90]];
+    const behind: Array<[number, number]> = [];
+    for (let i = 0; i < 4; i++) {
+      const a = rect[i], b = rect[(i + 1) % 4];
+      const ua = a[0] * dx + a[1] * dy - u, ub = b[0] * dx + b[1] * dy - u;
+      if (ua <= 0) behind.push(a);
+      if ((ua < 0) !== (ub < 0)) { const k = ua / (ua - ub); behind.push([a[0] + k * (b[0] - a[0]), a[1] + k * (b[1] - a[1])]); }
+    }
+    if (behind.length < 3) return null;
+    const dense: Array<[number, number]> = [];
+    for (let i = 0; i < behind.length; i++) {
+      const a = behind[i], b = behind[(i + 1) % behind.length];
+      const n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 1));
+      for (let k = 0; k < n; k++) dense.push([a[0] + ((b[0] - a[0]) * k) / n, Math.max(-89.999, Math.min(89.999, a[1] + ((b[1] - a[1]) * k) / n))]);
+    }
+    dense.push(dense[0]);
+    // d3 wants the inside on the right (clockwise); try one way round and keep it if it is not inside-out.
+    const poly = { type: 'Polygon' as const, coordinates: [dense.slice().reverse()] };
+    const p = new Path2D(geoPath(view.projection)(geoArea(poly) > 2 * Math.PI ? { type: 'Polygon', coordinates: [dense] } : poly) ?? '');
+    return p;
   }
 
   /**

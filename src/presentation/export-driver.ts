@@ -6,7 +6,7 @@ import type { World } from '../world-model/world.ts';
 import type { Engine } from '../temporal-engine/engine.ts';
 import { MapRenderer, DEFAULT_STYLE, type PassName } from '../render-engine/map-renderer.ts';
 import { makeView } from '../render-engine/camera.ts';
-import { type ShotSettings, timeAt, cameraAt, overlaysAt, drawOverlays } from './sequence.ts';
+import { type ShotSettings, timeAt, cameraAt, overlaysAt, drawOverlays, shotTransitions, screenSecondsSince } from './sequence.ts';
 import { gregorian } from '../core-time/index.ts';
 import { basemapSourceOf, loadBasemap, loadBasemapDetail, loadDatasetRecords, type Basemap } from '../render-engine/basemap.ts';
 
@@ -29,6 +29,11 @@ export function visibleLayers(world: World, shot: ShotSettings): string[] {
     .map((l) => l.id);
 }
 
+/** The shot's transition settings for one frame, as the renderer takes them. */
+export function transitionOptions(shot: ShotSettings, frame: number) {
+  return { ...shotTransitions(shot), secondsSince: (t0: Parameters<typeof screenSecondsSince>[2]) => screenSecondsSince(shot, frame, t0) };
+}
+
 /** The basemap a shot's world shows (loaded on first use), or null. */
 export async function basemapFor(world: World, spaceId: string): Promise<Basemap | null> {
   // Every detail level is loaded before exporting, so frames never depend on what was loaded when.
@@ -43,7 +48,7 @@ export function renderFrame(ctx: CanvasRenderingContext2D, renderer: MapRenderer
   ctx.clearRect(0, 0, width, height);
   if (passes.size) {
     const transparent = def.name === 'all' ? shot.transparent : !def.background;
-    renderer.render(ctx, view, world, engine, shot.spaceId, t, { passes, transparent, layerIds: visibleLayers(world, shot), basemap });
+    renderer.render(ctx, view, world, engine, shot.spaceId, t, { passes, transparent, layerIds: visibleLayers(world, shot), basemap, transitions: transitionOptions(shot, frame) });
   }
   if (def.overlays) drawOverlays(ctx, width, height, overlaysAt(shot, frame, t), width / 1920, DEFAULT_STYLE.font);
 }

@@ -7,12 +7,12 @@ import { BASE_EVENT_ID, type EffectRow, type EventRow } from '../world-model/sch
 import { type Vec3, angle, e7ToVec, lonLatToVec } from '../geo-kernel/vec.ts';
 import type { Arrangement } from '../geo-kernel/arrangement.ts';
 
-export type TransitionStyle = 'instant' | 'advance' | 'fade';
+export type TransitionStyle = 'instant' | 'advance' | 'fade' | 'wipe';
 export interface TransitionSpec { style: TransitionStyle; origin?: [number, number]; easing?: 'linear' | 'smooth' }
 export interface Resolution { set: Array<[number[], string | null]> }
 export interface AnnexIntent { op: 'annex'; from: string; to: string }
 
-export interface CompiledTransition { style: TransitionStyle; origin: Vec3 | null; maxDist: number; easing: 'linear' | 'smooth' }
+export interface CompiledTransition { style: TransitionStyle; origin: Vec3 | null; maxDist: number; easing: 'linear' | 'smooth' | 'in' | 'out'; /** Wipe direction in degrees (shot-level wipes). */ angle?: number; /** Made by a shot's transition settings, not recorded. */ shot?: boolean }
 
 /** One assignment of a value to a parcel (or an ancestor parcel) of a partition layer. */
 export interface Assignment {

@@ -7,6 +7,7 @@ import { DEFAULT_STYLE, type PassName } from '../../render-engine/map-renderer.t
 import { processLasso, densify, orientInteriorLeft, signedArea, splitLoops, type Pt, dedupe } from '../../render-engine/stroke.ts';
 import { lonLatToVec, E7 } from '../../geo-kernel/vec.ts';
 import { cameraAt, timeAt, overlaysAt, drawOverlays, type ShotSettings } from '../../presentation/sequence.ts';
+import { transitionOptions } from '../../presentation/export-driver.ts';
 import { parseJSON } from '../../temporal-engine/engine.ts';
 import { compare, fromStore } from '../../core-time/index.ts';
 import { basemapSourceOf } from '../../world-model/world-settings.ts';
@@ -86,7 +87,7 @@ export function MapView() {
     if (!shot || shot.graticule) passes.add('graticule');
     if (!shot || shot.labels) passes.add('labels');
     try {
-      s.renderer.render(ctx, view, s.world, s.engine, s.spaceId, time, { passes, transparent: !!shot?.transparent, layerIds: layers, basemap, referenceBorders: !shot && s.referenceBorders });
+      s.renderer.render(ctx, view, s.world, s.engine, s.spaceId, time, { passes, transparent: !!shot?.transparent, layerIds: layers, basemap, referenceBorders: !shot && s.referenceBorders, transitions: shot ? transitionOptions(shot, s.shotFrame) : undefined });
     } catch (e) {
       console.error(e);
     }

@@ -523,6 +523,33 @@ try {
     for (const pass of ['fills', 'borders']) copyFileSync(join(full.dir, pass, readdirSync(join(full.dir, pass)).sort()[12]), join(OUT, `exported-${pass}-frame-13.png`));
   });
 
+  await step('Shot transitions: as recorded, none at all, or every change restyled (a wipe)', async () => {
+    const drawn = () => page.evaluate(() => (window as any).__mapmaker.store.renderer.lastTransitions as Array<{ style: string; progress: number }>);
+    await page.getByTestId('mode-present').click();
+    await page.getByTestId('shot-editor').waitFor();
+    await page.getByTestId('frame-slider').fill('12');
+    await page.waitForTimeout(100);
+    let tr = await drawn();
+    assert.ok(tr.length === 1 && tr[0].style === 'advance' && tr[0].progress > 0 && tr[0].progress < 1, `as recorded: the advancing front is mid-way (${JSON.stringify(tr)})`);
+    await page.getByTestId('transition-mode').selectOption('instant');
+    await page.waitForTimeout(100);
+    assert.deepEqual(await drawn(), [], 'no animation: the border changes at once');
+    await screenshot('shot-no-animation');
+    await page.getByTestId('transition-mode').selectOption('all');
+    await page.getByTestId('transition-restyle').check();
+    await page.getByTestId('transition-style-shot').selectOption('wipe');
+    await page.locator('label', { hasText: 'Length' }).locator('select').selectOption('event');
+    await page.waitForTimeout(100);
+    tr = await drawn();
+    assert.ok(tr.length === 1 && tr[0].style === 'wipe' && tr[0].progress > 0 && tr[0].progress < 1, `restyled as a wipe over the event's length (${JSON.stringify(tr)})`);
+    await screenshot('shot-wipe');
+    // Back to the recorded animation, so later steps see the shot as it was.
+    await page.getByTestId('transition-mode').selectOption('recorded');
+    await page.getByTestId('transition-restyle').uncheck();
+    await page.evaluate(() => (window as any).__mapmaker.store.flush());
+    await page.getByTestId('mode-world').click();
+  });
+
   await step('Coastline clipping: territory over the sea disappears, territory on land stays', async () => {
     await page.getByTestId('mode-world').click();
     await page.getByTestId('map-canvas').waitFor();

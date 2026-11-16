@@ -28,6 +28,53 @@ export interface ShotSettings {
   transparent: boolean;
   /** Folder to export into; empty or absent: the project's exports folder. */
   exportDir?: string | null;
+  /** How border changes animate in this shot (absent: as recorded). */
+  transitions?: ShotTransitions;
+}
+
+export type TransitionEasing = 'linear' | 'smooth' | 'in' | 'out';
+
+/** How a shot shows border changes. Applied when drawing; history is never changed. */
+export interface ShotTransitions {
+  /** recorded: each change as recorded (animated or not); all: every change animates; instant: none do. */
+  mode: 'recorded' | 'all' | 'instant';
+  /** Style for changes the shot animates: an advancing front, a fade, or a straight wipe. */
+  style: 'advance' | 'fade' | 'wipe';
+  /** Wipe direction in degrees: 0 moves eastward, 90 northward, 180 westward, 270 southward. */
+  angle: number;
+  /** seconds: each change takes `seconds` of screen time; event: the event's own length (instant events use seconds). */
+  timing: 'seconds' | 'event';
+  seconds: number;
+  easing: TransitionEasing;
+  /** Also give changes recorded with their own animation this style and timing. */
+  restyleRecorded: boolean;
+  /** The moving front line of advancing and wiping changes. */
+  front: { show: boolean; color: string; width: number; glow: number };
+}
+
+export const DEFAULT_TRANSITIONS: ShotTransitions = {
+  mode: 'recorded', style: 'advance', angle: 0, timing: 'seconds', seconds: 1.5, easing: 'smooth', restyleRecorded: false,
+  front: { show: true, color: '#ffe9a6', width: 2.2, glow: 10 },
+};
+
+export function shotTransitions(shot: ShotSettings): ShotTransitions {
+  const t = shot.transitions;
+  return { ...DEFAULT_TRANSITIONS, ...(t ?? {}), front: { ...DEFAULT_TRANSITIONS.front, ...(t?.front ?? {}) } };
+}
+
+/**
+ * Screen seconds between the frame showing instant `t0` and frame `frame`: transitions timed in
+ * screen seconds stay the same length whatever the shot's pacing. Infinity when t0 is before the
+ * shot starts (that change is over).
+ */
+export function screenSecondsSince(shot: ShotSettings, frame: number, t0: Instant): number {
+  const last = shot.frames - 1;
+  const cmp = (f: number) => { const x = timeAt(shot, f); return x.day !== t0.day ? x.day - t0.day : x.ms - t0.ms; };
+  if (cmp(0) > 0) return Infinity;
+  if (cmp(last) < 0) return -Infinity;
+  let lo = 0, hi = last;
+  for (let i = 0; i < 40 && hi - lo > 1e-4; i++) { const mid = (lo + hi) / 2; if (cmp(mid) < 0) lo = mid; else hi = mid; }
+  return (frame - hi) / shot.fps;
 }
 
 export const RESOLUTIONS = [

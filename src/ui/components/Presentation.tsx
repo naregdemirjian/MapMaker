@@ -3,7 +3,7 @@ import { useStore, store } from '../store.ts';
 import { Api } from '../api.ts';
 import * as cmd from '../../domain/commands.ts';
 import { type Instant, add, fromJSONValue, toJSONValue, fromStore, compare, gregorian, type Precision } from '../../core-time/index.ts';
-import { defaultShot, timeAt, cameraAt, RESOLUTIONS, FRAME_RATES, type ShotSettings, type Ease } from '../../presentation/sequence.ts';
+import { defaultShot, timeAt, cameraAt, RESOLUTIONS, FRAME_RATES, shotTransitions, type ShotSettings, type Ease, type ShotTransitions } from '../../presentation/sequence.ts';
 import { PASS_DEFS, runExport } from '../../presentation/export-driver.ts';
 import { PROJECTIONS, type ProjectionName } from '../../render-engine/camera.ts';
 import { parseJSON } from '../../temporal-engine/engine.ts';
@@ -102,6 +102,8 @@ export function ShotEditor() {
     }
     setProgress(null);
   };
+  const tr = shotTransitions(shot);
+  const setTr = (patch: Partial<ShotTransitions>) => update({ transitions: { ...tr, ...patch } });
   const chooseFolder = async () => {
     try {
       const r = await Api.chooseFolder(shot.exportDir ?? undefined);
@@ -146,6 +148,41 @@ export function ShotEditor() {
             {PROJECTIONS.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select></label>
           <label>Rotation (degrees)<input type="number" value={Math.round(liveCamera.rotation)} onChange={(e) => s.set({ presentCamera: { ...liveCamera, rotation: Number(e.target.value) } })} /></label>
+        </Group>
+        <Group title="Transitions">
+          <label>Border changes<select value={tr.mode} onChange={(e) => setTr({ mode: e.target.value as ShotTransitions['mode'] })} data-testid="transition-mode">
+            <option value="recorded">As recorded (animated where you set an animation)</option>
+            <option value="all">Animate every change</option>
+            <option value="instant">No animation: change instantly</option>
+          </select></label>
+          {tr.mode !== 'instant' && <>
+            <label className="check"><input type="checkbox" checked={tr.restyleRecorded} onChange={(e) => setTr({ restyleRecorded: e.target.checked })} data-testid="transition-restyle" /> {tr.mode === 'all' ? 'Changes recorded with their own animation use these settings too' : 'Use the settings below for recorded animations too'}</label>
+            {(tr.mode === 'all' || tr.restyleRecorded) && <>
+              <label>Style<select value={tr.style} onChange={(e) => setTr({ style: e.target.value as ShotTransitions['style'] })} data-testid="transition-style-shot">
+                <option value="advance">Advancing front (from where the drawing started, or the middle)</option>
+                <option value="fade">Fade</option>
+                <option value="wipe">Wipe in one direction</option>
+              </select></label>
+              {tr.style === 'wipe' && <label>Direction<select value={tr.angle} onChange={(e) => setTr({ angle: Number(e.target.value) })}>
+                {[[0, 'Eastward →'], [45, 'North-east ↗'], [90, 'Northward ↑'], [135, 'North-west ↖'], [180, 'Westward ←'], [225, 'South-west ↙'], [270, 'Southward ↓'], [315, 'South-east ↘']].map(([v, n]) => <option key={v} value={v}>{n}</option>)}
+              </select></label>}
+              <label>Length<select value={tr.timing} onChange={(e) => setTr({ timing: e.target.value as ShotTransitions['timing'] })}>
+                <option value="seconds">Fixed screen time</option>
+                <option value="event">The event's length (events without an end use screen time)</option>
+              </select></label>
+              <label>Screen time per change (seconds)<NumberField min={0.05} max={120} step={0.25} value={tr.seconds} onCommit={(n) => setTr({ seconds: n })} testId="transition-seconds" /></label>
+              <label>Easing<select value={tr.easing} onChange={(e) => setTr({ easing: e.target.value as ShotTransitions['easing'] })}>
+                <option value="smooth">Ease in and out</option><option value="linear">Even</option><option value="in">Ease in (start slow)</option><option value="out">Ease out (end slow)</option>
+              </select></label>
+            </>}
+            <h4>Front line</h4>
+            <label className="check"><input type="checkbox" checked={tr.front.show} onChange={(e) => setTr({ front: { ...tr.front, show: e.target.checked } })} /> Show the moving front</label>
+            {tr.front.show && <div className="two">
+              <label>Colour<input type="color" value={tr.front.color} onChange={(e) => setTr({ front: { ...tr.front, color: e.target.value } })} /></label>
+              <label>Width<NumberField min={0} max={40} step={0.5} value={tr.front.width} onCommit={(n) => setTr({ front: { ...tr.front, width: n } })} /></label>
+              <label>Glow<NumberField min={0} max={80} step={1} value={tr.front.glow} onCommit={(n) => setTr({ front: { ...tr.front, glow: n } })} /></label>
+            </div>}
+          </>}
         </Group>
         <Group title="Look">
           <label className="check"><input type="checkbox" checked={shot.graticule} onChange={(e) => update({ graticule: e.target.checked })} /> Latitude and longitude grid</label>
