@@ -55,6 +55,34 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D14. One drawing order for the full picture and the export passes
+
+All layers' fills, then all layers' borders, then labels. Borders stay visible on top of every layer, and the export
+passes stacked in Premiere reproduce the full picture (tested to within 2.6 of 255 levels).
+
+### D15. Splitting a parcel nothing refers to keeps its identity
+
+When a parcel that no recorded change refers to is split, its largest piece keeps its id and the other pieces become its
+siblings (same parent). History is identical (proved by `test/split-identity.test.ts`); without this, every new island
+drawn in open ocean relabelled every coastline in the world, inflating saves and the undo history. Parcels that history
+does refer to still split into new children as before.
+
+### D16. The undo history is stored compressed
+
+Journal entries are deflate-compressed (`z1:` prefix). Older plain entries still read. Files are about 30 times smaller.
+
+### D17. Every paint is checked against the area its outline encloses
+
+The kernel computes the area enclosed by the drawn outline directly from its points and compares it with the area of the
+parcels about to change. A mismatch (an outline that folds back, crosses itself or collapses when snapped) refuses the
+edit and undoes its geometry. Territory edits also check that the layer belongs to the world being edited.
+
+### D18. Damaged projects are recovered from the newest healthy backup
+
+A project that fails its integrity check is never opened. The interface offers recovery from the newest backup that passes
+its own check; the damaged files are moved into the project's `damaged` folder, never deleted.
+
+
 ### D7. Territory layers are painted opaque off screen, then laid onto the map once
 
 Neighbouring parcels drawn separately at partial opacity leave hairline seams where the ocean shows through. Painting

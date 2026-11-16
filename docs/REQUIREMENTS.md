@@ -1,156 +1,162 @@
 # Map Maker: requirements checklist
 
-Every requirement from the master specification and the user's later answers, with its current state. Grouped by the
-specification's topics. "Stage" is the stage of the approved roadmap where the requirement is built.
+Every major requirement from the master specification and the user's later answers, with its implementation and test
+status. Last updated: 16 November 2026 (version 0.2.0, after the first testing and refinement stage).
 
-Status: **Done** = works in the interface and is tested · **Partial** = some of it works (the gap is stated) ·
-**Not started** · **Interim** = works, but not yet in the approved form (see DECISIONS.md).
+**Status** (the user's classification):
+**Tested** = fully implemented and tested ·
+**Needs testing** = implemented but not adequately tested ·
+**Partial** = some of it exists, important parts are missing ·
+**Not implemented** ·
+**Blocked** = technically limited at present (reason and proposal given).
 
-Last updated: 16 November 2026 (version 0.1.0).
+**Evidence** names the automated tests (`test/…` unit and randomised tests, `e2e/…` interface tests driven in Chrome).
+"Stage" is the stage of the approved roadmap where the missing part is due.
 
-## Platform, projects and saving
+## Platform and storage
 
-| Requirement | Status | Stage | Notes |
+| Requirement | Status | Evidence | Notes |
 | --- | --- | --- | --- |
-| Single user, local, no accounts, cloud or collaboration | Done | 0 | The service accepts connections from this computer only |
-| Runs on the user's Windows 10 PC (32 GB RAM, 200 GB free) | Interim | 0 | Local service + browser, started with `Start Map Maker.bat`; Electron installer pending (D2); not yet run on Windows |
-| Simple interface for a software novice; no terminal or git needed | Partial | 0 | One double-click to start; needs Node.js installed once |
-| Create, open and switch projects | Done | 1 | |
-| Autosave of every change | Done | 1 | Each action is saved as one atomic step |
-| Undo and redo, kept across sessions | Done | 1 | |
-| Named versions, restorable | Done | 1 | Restoring is itself undoable |
-| Automatic backups, restorable | Done | 1 | Hourly while working and on opening; 24 newest, daily for 30 days, weekly for a year |
-| Crash recovery: a crash never corrupts the project | Done | 1 | Tested by killing the process mid-save |
-| Integrity check on opening | Done | 1 | |
-| Schema migrations for future versions | Partial | 1 | Mechanism in place; only version 1 exists, so no migration tests yet |
-| Reopening returns to the same view and date | Done | 1 | Remembered per project by the browser |
+| Single user, local, offline, no accounts or cloud | Tested | `e2e/*` | The data service only accepts connections from this computer |
+| Runs on the user's Windows 10 PC | Needs testing | none on Windows | Built and tested on Linux in Chrome. Interim form: local service + browser (DECISIONS D2). Not yet run on Windows |
+| Projects: create, open, switch | Tested | `storage`, `e2e/vertical-slice` | |
+| Autosave of every change as one atomic step | Tested | `storage`, `recovery` | |
+| Survives closing and restarting the app | Tested | `e2e/vertical-slice` step 10 (service stopped and restarted) | |
+| Undo and redo, kept across sessions | Tested | `recovery` (120 random steps, state compared at every step), `e2e/*` | |
+| Named versions, restorable (restoring is undoable) | Tested | `storage`, `e2e/vertical-slice` step 9 | |
+| Automatic backups, restorable | Tested | `storage`, `e2e/vertical-slice` | Hourly while working and on opening; 24 newest, daily for 30 days, weekly for a year |
+| Crash safety: a crash mid-save never corrupts | Tested | `storage` (process killed during saves, repeatedly) | |
+| Damaged project files detected, never used silently | Tested | `recovery` (damaged page, destroyed header, truncation) | New in 0.2.0 |
+| Recovery of a damaged project from its newest healthy backup | Tested | `recovery` (also skips damaged backups) | New in 0.2.0; offered by the interface when a project will not open. Its interface path is not driven by an automated test |
+| Malformed data inside a project reported, never crashes | Tested | `recovery` | Reported in History Health as broken references |
+| Schema migrations for future versions | Partial | none | Mechanism in place; only schema version 1 exists |
+| Reopening returns to the same view and date | Tested | `e2e/vertical-slice` step 10 | Remembered by the browser per project |
 
-## Worlds and bodies
+## Map, geography and coordinates
 
-| Requirement | Status | Stage | Notes |
+| Requirement | Status | Evidence | Notes |
 | --- | --- | --- | --- |
-| Several independent worlds per project, each with its own map, layers and territorial history | Done | 1 | Entities and events are shared by the project (D8) |
-| Nothing hardcoded to Earth | Done | 1 | Earth is an ordinary world with a radius; presets for the Moon, Mars, Mercury, Venus, Ganymede, Titan |
-| Earth follows real history up to today; appearance does not change by date | Not started | 8 | Needs the Earth data wizard |
-| Moon, planets and moons of the solar system with real surface data | Partial | 8, 11 | Blank spheres with correct radii; surface data not started |
-| Solar system map | Not started | 11 | |
-| Known exoplanets and systems, unknown looks chosen by the user | Not started | 11 | |
-| Nearby stars map, 50 light-years | Not started | 11 | Radius confirmed by the user |
-| Milky Way map and other galaxies | Not started | 11 | |
-| Flat maps only | Done | 0 | |
-| Fictional worlds created in the app; import is minor | Partial | 8 | Blank worlds can be created; planet generator and sculpting not started |
+| Interactive map: pan, zoom, rotate | Tested | `camera`, `e2e/vertical-slice` step 2 | Fixed in 0.2.0: wheel zoom jumped away from the cursor |
+| Coordinate handling, any projection, zoom 0 to city level | Tested | `camera` (round trips to 0.001 px; sub-metre at zoom 16) | |
+| Map styles and geographical detail | Partial | | One style. Per-layer opacity and border width are stored but have no editor. No terrain, coastlines, rivers or cities (Stages 8, 10) |
+| Earth basemap with real data (coastlines, borders) | Blocked | | Natural Earth data cannot be downloaded in this development environment. Proposal: a session with network access, or the user downloads the files, plus a GeoJSON import (Stage 0/2) |
+| Existing administrative boundaries | Blocked | | Same reason (GADM / Natural Earth). Region picker and coastline clipping depend on it (Stage 2) |
+| Custom boundaries that follow no real division | Tested | `scenarios`, `geometry-worlds`, `e2e/*` | |
+| Freehand drawing (territory brush) | Tested | `stroke`, `e2e/*` | Smoothing, irregularity, detail |
+| Precise point-by-point shapes | Tested | `e2e/workflows` step 1 | |
+| Vertex editing: move | Tested | `geo-kernel`, `e2e/vertical-slice` step 5 | Moves that would cross a border are refused |
+| Vertex editing: add and remove | Needs testing | `geo-kernel` | Kernel tested; the interface gestures (double-click a border, Delete) are not driven by an automated test |
+| Splitting and merging regions | Partial | `geometry-worlds`, `scenarios` | Drawing splits and merges territory correctly (borders appear and vanish, history keeps the pieces). No dedicated split or merge tools, no border pen (Stage 2) |
+| Invalid or complex geometry handled safely | Tested | `geometry-worlds`, `geo-kernel.stress` | Fixed in 0.2.0: an outline enclosing no area or folding back could repaint the whole world |
+| Geometry stored precisely | Tested | `geometry-worlds` (1e-7°, about 1 cm; exact after reopening) | |
+| Shapes across the poles, the 180° line, larger than a hemisphere, metres across | Tested | `geometry-worlds`, `geo-kernel` | |
+| Overlapping geographical entities | Partial | `scenarios`, `e2e/workflows` | Territories overlap freely across layers. Within one territory layer each place has one owner at a time (by design). Overlapping areas, lines and points of other kinds await those layer kinds (Stage 4) |
+| Geography-aware and terrain-aware drawing | Not implemented | | Needs terrain data; will not be claimed until tested on real data (Stage 12) |
+| Strategic and military drawing assistance | Not implemented | | Stage 12 |
+| Geographical modification (coasts, rivers, terrain changing over time) | Not implemented | | Stage 8 |
 
-## Map and navigation
+## Worlds
 
-| Requirement | Status | Stage | Notes |
+| Requirement | Status | Evidence | Notes |
 | --- | --- | --- | --- |
-| Interactive map: pan, zoom, rotate | Done | 0 | |
-| Equirectangular default; Equal Earth, Natural Earth, Mercator | Partial | 0, 10 | Choosable per shot; no projection choice in world-building mode yet |
-| Automatic regional projection for zoomed-in shots | Not started | 10 | |
-| Grid and scale bar | Done | 0 | |
-| Earth basemap (coastlines, borders) | Not started | 0 | Natural Earth data could not be downloaded in this session |
-| Terrain, imagery, city-level detail (no buildings) | Not started | 8 | |
-
-## Drawing and editing geography
-
-| Requirement | Status | Stage | Notes |
-| --- | --- | --- | --- |
-| Genuine sphere-safe geometry with valid shapes | Done | 0, 2 | Randomised tests across poles and the 180° line |
-| Freehand drawing | Done | 2 | Territory brush with smoothing, irregularity and detail |
-| Precise point-by-point shapes | Done | 2 | |
-| Vertex editing: move, add, remove | Done | 2 | Moves that would cross a border are refused |
-| Snapping to existing borders | Done | 2 | |
-| Polygon splitting and merging | Partial | 2 | Drawing splits and merges territory; no dedicated split or merge tools |
-| Border pen (draw a line that becomes a border) | Not started | 2 | The geometry operation exists; no tool yet |
-| Region picker, administrative boundaries, coastline clipping | Not started | 2 | Needs basemap data |
-| Natural boundary assistance, terrain-aware brush | Not started | 12 | Needs terrain data; will not be claimed until tested on real data |
-| Strategic and military drawing assistance | Not started | 12 | |
-
-## Countries, entities, layers
-
-| Requirement | Status | Stage | Notes |
-| --- | --- | --- | --- |
-| Countries and factions with names, colours, notes | Done | 1 | |
-| Characters, settlements, units as entities | Partial | 1, 4, 7 | They can be created and described; no map presence yet |
-| Custom entity and event types | Not started | 3, 4 | Built-in types only |
-| Relationships (part of, at war with, successor of) | Not started | 4 | |
-| Unlimited custom layers | Partial | 4 | Unlimited territory layers; area, line, point and field layers not started |
-| Layer visibility and choosing the layer to draw on | Done | 4 | |
-| Layer styling | Partial | 4, 10 | Stored per layer; no style editor yet |
-| Geographical features (rivers, mountains, cities) | Not started | 4, 8 | |
-| No arbitrary limits on layers, entities, territories, overlaps | Done | 1 | None imposed; very large projects not yet benchmarked |
+| Several independent worlds with their own maps, layers and territorial history | Tested | `geometry-worlds`, `e2e/workflows` step 6 | |
+| Fictional planet with custom geography, no real data needed | Partial | `geometry-worlds`, `e2e/workflows` | Territories can be drawn on a blank world of any radius. Terrain and planet generation not implemented (Stage 8) |
+| No Earth-specific assumptions | Tested | `geometry-worlds` (areas follow each world's radius) | |
+| Custom projections | Partial | `camera`, `e2e/workflows` step 8 | Four projections for shots. The world-building view has no projection choice; flat (non-spherical) coordinate systems are not implemented |
+| Separate timelines per world | Partial | `geometry-worlds` | Territorial history is per world. Events and entities are shared by the project (DECISIONS D8); the event list shows every world's events (decision pending with the user) |
+| Moon, planets, solar system, exoplanets, nearby stars (50 light-years), Milky Way, galaxies | Not implemented | | Blank spheres with correct radii only (Stages 8, 11) |
 
 ## Time and history
 
-| Requirement | Status | Stage | Notes |
+| Requirement | Status | Evidence | Notes |
 | --- | --- | --- | --- |
-| Time from millennia to milliseconds; infinite range | Done | 3 | Exact over ±24 trillion years |
-| Gregorian calendar with BCE dates and flexible entry | Done | 3 | "14 May 1203", "500 BCE", "c. 3000 BCE", "2241-03-02T04:05" |
-| Fictional calendars | Not started | 13 | |
-| Events with dates, durations, types, descriptions | Done | 3 | |
-| Events genuinely change world state | Done | 3 | |
-| Reconstruction of the world at any date | Done | 3 | |
-| Editing an event updates later history, never earlier or unrelated history | Done | 3 | Randomised tests against a full replay |
-| Same date always gives the same state | Done | 3 | Also after reload |
-| Simultaneous events, ordered by precedence and flagged | Done | 3 | |
-| Overlapping events: later-starting takes over, flagged | Done | 3 | Approved default rule |
-| The app asks what an edit means: new change, correct this period, correct for all time (border shapes) | Done | 3 | "New change" says how long it lasts; record mode skips the question |
-| Broken dependencies flagged with "leave or auto-adapt" | Done | 3 | History Health: keep as stored or re-apply the intention |
-| Dated moves of border points (new change or correct period) | Not started | 3 | Border points correct for all time; dated border changes use the territory brush |
-| Historical timeline, zoomable, with markers and next/previous change | Done | 3 | |
-| Date comparison | Not started | 3 | |
-| Alternative versions of an event for story planning | Done | 4 | |
-| Full alternative timelines with side-by-side comparison | Not started | 13 | |
-| Entity lifespans, renames, successions | Not started | 4 | |
-| Permanent and temporary environmental change kept separate | Not started | 9 | Architecture separates them |
+| Time from milliseconds to millennia, unlimited range | Tested | `core-time`, `scenarios` | Exact over ±24 trillion years |
+| Gregorian dates, BCE, flexible entry | Tested | `core-time` | |
+| Event creation and editing | Tested | `scenarios`, `e2e/*` | |
+| Events genuinely change the world model | Tested | `temporal-engine`, `scenarios` | |
+| Reconstruction at any date, from data only | Tested | `temporal-engine` (equals a naive replay), `scenarios` (same result in any entry order) | No images are stored; caches are rebuilt from the tables |
+| Earlier states unchanged when later events are edited | Tested | `temporal-engine`, `scenarios` | |
+| Editing one event never corrupts unrelated data | Tested | `scenarios` | |
+| Inserting, deleting and moving events | Tested | `scenarios`, `e2e/workflows` step 4 | |
+| Simultaneous events | Tested | `scenarios` | Precedence decides; unresolved clashes are reported until a winner is set |
+| Overlapping events: never silently overwritten | Tested | `scenarios`, `e2e/workflows` | Reported in History Health; the later-starting change takes over (approved default). Fixed in 0.2.0: the report could be out of date |
+| Event durations respected | Tested | `scenarios` | |
+| Changes seconds apart and millennia apart | Tested | `scenarios` | |
+| The edit prompt: new change, correct this period, correct for all time (border shapes) | Tested | `e2e/vertical-slice` | |
+| Dated moves of border points | Not implemented | | Border points correct for all time; dated changes use the territory brush (Stage 3) |
+| Broken dependencies flagged with "leave or auto-adapt" | Tested | `temporal-engine`, `recovery` | |
+| Alternative versions of an event | Tested | `temporal-engine`, `e2e/workflows` step 3 | |
+| Full alternative timelines | Not implemented | | Stage 13 |
+| Custom event types; date comparison; fictional calendars | Not implemented | | Stages 3, 13 |
+| Timeline navigation (zoom, scrub, next/previous change) | Tested | `e2e/vertical-slice` step 8 | |
+| Timeline playback in world-building mode | Not implemented | | Playback exists for shots |
+
+## Layers, entities and relationships
+
+| Requirement | Status | Evidence | Notes |
+| --- | --- | --- | --- |
+| Unlimited custom layers, created, shown and hidden, historically changed | Tested | `scenarios`, `e2e/workflows` step 2 | Territory layers only |
+| Polygon (territory) layers | Tested | as above | |
+| Line, point, route, heatmap and raster/numerical layers | Not implemented | | Stages 4, 7, 9 |
+| Layer styling | Partial | | Opacity and border width per layer, no editor; no hatching or outline styles (a control layer currently looks like a second fill) |
+| Exporting layers independently | Partial | `e2e/workflows` | Passes are separated by kind (fills, borders, labels…) across visible layers; a single layer is exported by hiding the others |
+| Countries and factions | Tested | `e2e/*` | |
+| Characters, cities, units as entities | Partial | | Can be created and described; no place on the map yet (Stages 4, 7) |
+| Relationships (part of, at war with, successor of…) | Not implemented | | Stage 4. Annexation (an intention tied to two countries) exists and is tested |
 
 ## Military, characters and movement
 
-| Requirement | Status | Stage | Notes |
+| Requirement | Status | Evidence | Notes |
 | --- | --- | --- | --- |
-| Military control separate from ownership; occupied and contested areas | Not started | 7 | |
-| Frontlines (derived and manual) | Not started | 7 | |
-| Units, installations, arrows | Not started | 7 | |
-| Character routes and journeys | Not started | 7 | |
-| Migration flows | Not started | 7 | |
+| Occupied territory independent of political borders | Partial | `scenarios`, `e2e/workflows` step 2 | Recorded on a separate territory layer ("Military control"); tested to leave ownership untouched |
+| Frontlines (several, advancing and retreating) | Partial | | The border between controllers on a control layer is a frontline and animates with an advancing front. No dedicated frontline lines, arrows or contested zones (Stage 7) |
+| Contested areas, troop routes, bases, units | Not implemented | | Stage 7 |
+| Character locations, movements, journeys | Not implemented | | Stage 7 |
+| Civilian migration and other custom routes | Not implemented | | Stage 7 |
 
 ## Environment and heatmaps
 
-| Requirement | Status | Stage | Notes |
+| Requirement | Status | Evidence | Notes |
 | --- | --- | --- | --- |
-| Heatmaps and field layers | Not started | 9 | |
-| Disasters, drawn with or without assistance | Not started | 9 | |
-| Very large numbers of events (for example a nuclear war) | Not started | 9 | |
+| Disasters: explosions, destruction zones, radiation, flooding, wildfire | Not implemented | | Stage 9 |
+| Expanding zones, intensity, duration | Not implemented | | Stage 9 (an expanding area can be imitated today with a territory layer and an advancing front, without intensity) |
+| Permanent versus temporary change kept separate | Not implemented | | The architecture separates them (terrain effects vs condition fields); nothing built yet |
+| Heatmaps | Not implemented | | Stage 9 |
 
-## Presentation and animation
+## Animation and presentation
 
-| Requirement | Status | Stage | Notes |
+| Requirement | Status | Evidence | Notes |
 | --- | --- | --- | --- |
-| Separate world-building and presentation modes on one world model | Done | 5 | Shots never change history |
-| Shots covering a historical date range | Done | 5 | |
-| Animation length independent of historical duration | Done | 5 | |
-| Per-event "out of sync with the clock" override (approved) | Not started | 6 | |
-| Camera keyframes | Partial | 5, 10 | Start and end view with easing; no multi-key camera or flights |
-| Text overlays | Partial | 5, 10 | Date and title; no free text boxes or animation |
-| Territorial transitions | Done | 6 | Advancing front and fade; borders and labels follow |
-| Timeline playback | Partial | 5 | Shot playback; no playback in world-building mode |
-| Labels | Partial | 2, 10 | Automatic, collision-avoiding; no label editor |
-| Map styles and presets | Not started | 10 | |
+| World-building and presentation modes on one world model | Tested | `e2e/*` | Shots never change history |
+| Gradual territorial expansion (advancing front) | Tested | `scenarios`, `e2e/vertical-slice` step 11 | Borders and labels follow the front |
+| Rapid occupation (instant change) | Tested | `scenarios` | |
+| Fades | Tested | `scenarios`, `e2e/workflows` step 5 | |
+| Fragmentation and collapse | Needs testing | `scenarios` (history), | The history is tested; their animation uses the same fade and front, without a dedicated test |
+| Encirclement | Not implemented | | Needs front keyframes (Stage 6) |
+| Animation length independent of historical length | Tested | `e2e/workflows` (40 years in one second), `scenarios` (a 20-minute event) | |
+| Per-event "out of sync with the clock" override | Not implemented | | Approved; Stage 6 |
+| Camera movement | Partial | `e2e/workflows` step 7 | Start and end views with easing, checked frame by frame in the export. No multi-key camera or flights |
+| Text overlays | Partial | `e2e/workflows` step 7 | Date and title. No free text boxes or animated text |
+| Shot playback | Needs testing | | Play button works by hand; not driven by an automated test |
+| Spreading phenomena, animated routes, environmental effects, heatmap changes | Not implemented | | Stages 7, 9 |
 
 ## Export
 
-| Requirement | Status | Stage | Notes |
+| Requirement | Status | Evidence | Notes |
 | --- | --- | --- | --- |
-| Rendered from project data, never screenshots of the interface | Done | 5 | Frames are drawn off screen at the exact output size |
-| PNG sequences | Done | 5 | |
-| Transparent backgrounds | Done | 5 | |
-| Separate layer passes for Premiere Pro, with a compositing guide | Done | 5 | Background, fills, borders, labels, overlays, beauty |
-| 1080p, 4K, 8K and custom resolutions and aspect ratios | Done | 5 | 4K and 8K checked; about 6–9 s per 8K frame in development |
-| Custom frame rates including 23.976 | Done | 5 | |
-| Identical output when re-exported | Done | 5 | Checksums compared in the interface test |
-| Historical date ranges | Done | 5 | |
-| Quarter-size preview export | Done | 5 | |
-| TIFF sequences | Not started | 10 | |
-| SVG where suitable | Not started | 10 | |
-| Selected geographical regions | Partial | 5 | By framing the camera; no region-crop tool |
-| Shots pinned to a saved version | Not started | 5 | The manifest records the project's save point |
+| Rendered from project data, never screenshots | Tested | `e2e/*` | Frames are drawn off screen at the exact output size |
+| PNG frames and sequences | Tested | `e2e/*` | |
+| Transparent backgrounds | Tested | `e2e/*` | |
+| Separate layer passes that stack back into the full picture | Tested | `e2e/workflows` step 7 | Fixed in 0.2.0: with several layers the passes did not match. Now max 2.6 of 255 levels apart |
+| 1080p, 4K, 8K, custom sizes | Tested | `e2e/*`; 4K and 8K checked by hand | |
+| Aspect ratios (16:9, 2.39:1, square, any) | Tested | `e2e/workflows` | |
+| Frame rates including 23.976 and 25 | Tested | `e2e/workflows` | |
+| Consistent frame timing | Tested | `e2e/workflows` (evenly spaced to the millisecond) | |
+| Historical date ranges | Tested | `e2e/workflows` (pixels show the right owner at the first and last frames) | |
+| Low-resolution previews | Tested | `e2e/*` | |
+| Repeatable output | Tested | `e2e/vertical-slice` step 13 (identical checksums after reloading) | |
+| Suitable for Premiere Pro | Needs testing | compositing maths checked | Not yet imported into Premiere on the user's PC; `COMPOSITING_GUIDE.txt` explains the steps |
+| TIFF sequences | Not implemented | | Stage 10 |
+| SVG | Not implemented | | Stage 10 |
+| Selected geographical regions | Partial | | By framing the camera; no crop tool |
+| Shots pinned to a saved version | Not implemented | | The manifest records the project's save point |

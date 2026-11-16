@@ -15,7 +15,7 @@ Everything is saved as you work. Projects are kept in `Documents\Map Maker Proje
 in `.mapmaker`, holding the project file, versions, backups and exports. To keep a copy somewhere safe, copy that folder
 while Map Maker is closed. Don't keep projects inside OneDrive or Dropbox while Map Maker is running.
 
-## What it can do now (version 0.1.0)
+## What it can do now (version 0.2.0)
 
 - Create projects and worlds (Earth, the Moon, planets or your own), countries and factions.
 - Draw territory freehand or point by point, and correct borders by dragging their points.
@@ -24,7 +24,7 @@ while Map Maker is closed. Don't keep projects inside OneDrive or Dropbox while 
 - Animate changes (an advancing front or a fade) over the length of an event.
 - Make shots and export PNG image sequences with transparency, in separate layers for Premiere, at HD, 4K, 8K or any
   size and frame rate.
-- Undo and redo, named versions, automatic backups.
+- Undo and redo, named versions, automatic backups, and recovery of a damaged project from its latest healthy backup.
 
 Not there yet: real Earth coastlines and terrain, military fronts, routes, environmental events, space maps and more.
 See `docs/REQUIREMENTS.md`.
