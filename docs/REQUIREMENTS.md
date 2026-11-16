@@ -1,7 +1,7 @@
 # Map Maker: requirements checklist
 
 Every major requirement from the master specification and the user's later answers, with its implementation and test
-status. Last updated: 16 November 2026 (version 0.2.0 plus the Earth basemap, second session of 16 November).
+status. Last updated: 16 November 2026 (after the user's first feedback round; see DEVELOPMENT.md).
 
 **Status** (the user's classification):
 **Tested** = fully implemented and tested ·
@@ -38,16 +38,16 @@ status. Last updated: 16 November 2026 (version 0.2.0 plus the Earth basemap, se
 | --- | --- | --- | --- |
 | Interactive map: pan, zoom, rotate | Tested | `camera`, `e2e/vertical-slice` step 2 | Fixed in 0.2.0: wheel zoom jumped away from the cursor |
 | Coordinate handling, any projection, zoom 0 to city level | Tested | `camera` (round trips to 0.001 px; sub-metre at zoom 16) | |
-| Map styles and geographical detail | Partial | `basemap` | One style. Land, lakes and coastlines on Earth (1:110m and 1:50m). Per-layer opacity and border width are stored but have no editor. No terrain, rivers or cities (Stages 8, 10) |
+| Map styles and geographical detail | Partial | `basemap`, `label-style`, `fills`, `e2e/vertical-slice` | Land, lakes and coastlines on Earth (1:110m, 1:50m, 1:10m close up). Country labels styled for all and per country; countries filled with a colour, a picture (flags of 197 nations included) or a video. Per-layer opacity and border width have no editor yet. No terrain, rivers or cities (Stages 8, 10) |
 | Earth basemap with real data (coastlines, borders) | Tested | `basemap` (decoding, land share, places on land and sea across 180° and the poles, randomised culling), `e2e/vertical-slice` steps 3 and 13 | Natural Earth v5.1.2: land, lakes, coastlines, and present-day borders as a dashed drawing guide (never exported). Per-world switch, undoable. 1:10m (city-scale coasts) not yet included |
-| Existing administrative boundaries | Partial | | Present-day country borders are shown as a guide only. Loading them as parcel edges (region picker) is still to do (Stage 2) |
+| Existing administrative boundaries | Partial | `countries`, `e2e/vertical-slice` step 'Add today's countries' | Today's 242 countries (1:50m) can be added in one step, as the starting map or an event, by search, continent or all. Sub-national boundaries (geoBoundaries/GADM) and a region picker are not built |
 | Coastline clipping (paint loosely over the sea) | Tested | `e2e/vertical-slice` step 16 (grid of points inside two countries: sea shows the ocean, land keeps the colour, labels on land, undo), `basemap` | At drawing time, per layer ("Territory ends at the coast", on by default). Lakes stay water. Areas in the inspector still include the sea; coastlines do not yet change over time (Stage 8) |
 | Custom boundaries that follow no real division | Tested | `scenarios`, `geometry-worlds`, `e2e/*` | |
 | Freehand drawing (territory brush) | Tested | `stroke`, `e2e/*` | Smoothing, irregularity, detail |
 | Precise point-by-point shapes | Tested | `e2e/workflows` step 1 | |
 | Vertex editing: move | Tested | `geo-kernel`, `e2e/vertical-slice` step 5 | Moves that would cross a border are refused |
 | Vertex editing: add and remove | Needs testing | `geo-kernel` | Kernel tested; the interface gestures (double-click a border, Delete) are not driven by an automated test |
-| Splitting and merging regions | Partial | `geometry-worlds`, `scenarios` | Drawing splits and merges territory correctly (borders appear and vanish, history keeps the pieces). No dedicated split or merge tools, no border pen (Stage 2) |
+| Splitting and merging regions | Partial | `geometry-worlds`, `scenarios`, `e2e/workflows` | Drawing splits and merges territory; the border pen draws borders over many sessions (drafts kept with the project). No dedicated split or merge tools |
 | Invalid or complex geometry handled safely | Tested | `geometry-worlds`, `geo-kernel.stress` | Fixed in 0.2.0: an outline enclosing no area or folding back could repaint the whole world |
 | Geometry stored precisely | Tested | `geometry-worlds` (1e-7°, about 1 cm; exact after reopening) | |
 | Shapes across the poles, the 180° line, larger than a hemisphere, metres across | Tested | `geometry-worlds`, `geo-kernel` | |
@@ -137,7 +137,7 @@ status. Last updated: 16 November 2026 (version 0.2.0 plus the Earth basemap, se
 | Animation length independent of historical length | Tested | `e2e/workflows` (40 years in one second), `scenarios` (a 20-minute event) | |
 | Per-event "out of sync with the clock" override | Not implemented | | Approved; Stage 6 |
 | Camera movement | Partial | `e2e/workflows` step 7 | Start and end views with easing, checked frame by frame in the export. No multi-key camera or flights |
-| Text overlays | Partial | `e2e/workflows` step 7 | Date and title. No free text boxes or animated text |
+| Text overlays | Partial | `e2e/workflows`, `events-box` | Date, title, and a fully styleable 'current events' box (with a graphic of the user's own). No free text boxes or animated text |
 | Shot playback | Needs testing | | Play button works by hand; not driven by an automated test |
 | Spreading phenomena, animated routes, environmental effects, heatmap changes | Not implemented | | Stages 7, 9 |
 
@@ -163,3 +163,25 @@ status. Last updated: 16 November 2026 (version 0.2.0 plus the Earth basemap, se
 | Dataset credits travel with exports | Tested | `e2e/vertical-slice` step 13 | `manifest.json` (`dataCredits`) and `COMPOSITING_GUIDE.txt`; all datasets listed with licences under Worlds > Data sources and credits |
 | Land as its own export pass | Tested | `e2e/*` (passes still stack into the full picture) | Empty for worlds without Earth's geography |
 | Shots pinned to a saved version | Not implemented | | The manifest records the project's save point |
+
+## The user's first feedback round (16 November 2026)
+
+| Request | Status | Evidence | Notes |
+| --- | --- | --- | --- |
+| Zooming during a brush stroke must not change the territory | Tested | `e2e/workflows` 'Zooming in the middle of a brush stroke' (fails on the old build) | Points are kept as map positions |
+| More detailed coasts | Tested | `basemap` (1:10m tiles keep the land area) | Natural Earth 1:10m (about 200 m) when zoomed in; loads in the background |
+| Maps, not worlds | Done | interface wording | Flat maps (city plans, solar system, galaxy) await the plane kernel (space-maps stage) |
+| Quickly add today's borders and countries | Tested | `countries`, `e2e/vertical-slice` | 242 countries, by search, continent or all; colours or flags; starting map or event; one undo step |
+| Label looks: for all countries, and per country | Tested | `label-style`, `e2e/vertical-slice` 'Label looks' | Font, weight, italic, capitals, spacing, colours, outline, size, opacity; per-country text, hiding, overrides |
+| A picture instead of a colour; flags of today's nations; own pictures | Tested | `fills`, `e2e/vertical-slice` 'filled with a flag' | 197 flags (flag-icons, MIT) |
+| A video instead of a colour, looping or playing once | Tested | `fills`, `e2e/workflows` 'filled with a video' (green then blue in the export) | Speed and start time too |
+| No refusal of outlines that cross or fold back | Tested | `geometry-worlds` (bow tie, twist) | Every area the line goes around is painted |
+| Draw a border over a long time, let go, come back later | Tested | `stroke`, `e2e/workflows` 'Border pen' (closes and reopens the app mid-draft) | Drafts kept in the project folder |
+| Crash 'reading left_face' when adding to a country | Fixed | `geometry-worlds` regression test | |
+| After drawing, 'correct this period' preselected; Enter applies | Tested | `e2e/workflows` 'Drawing flow' | |
+| Right-click deselects | Tested | `e2e/workflows` 'Drawing flow' | |
+| Several border changes in one event | Tested | `e2e/workflows` 'Drawing flow' | The last event used (or the selected one) is offered |
+| Current events box in presentations, fully customisable, own graphic | Tested | `events-box`, `e2e/workflows` 'Current events box' | |
+| Transitions in presentations: automatic or instant, as customisable as possible | Tested | `sequence`, `e2e/vertical-slice` 'Shot transitions' | As recorded / every change / none; front, fade or wipe; timing, easing, front line |
+| Export settings in categories; choose the folder; 'Export'; 'All' | Tested | `storage`, `e2e/workflows` (exports into a chosen folder) | Folder picker: Electron's in the app, Windows' own in the browser version |
+| Engine redesign (approved) | Tested | `kernel-incremental` (equals a full rebuild after every edit, undo and redo) | Strokes on the 24,500-parcel map 1.75 s -> 0.4 s |

@@ -7,7 +7,19 @@ Companion files: [REQUIREMENTS.md](REQUIREMENTS.md) (checklist against the maste
 The approved architecture is the Claude Doc "Map Maker — Technical Architecture & Development Plan"
 (https://claude.ai/artifact/2JShAV3AWt6iECtNgBTsJN). All twelve of its decisions were approved on 15 November 2026.
 
-## Status at a glance (16 November 2026, version 0.2.0 + Earth basemap)
+## Status at a glance (16 November 2026, after the user's first feedback round)
+
+- **The user's first feedback round is done** (third session, 16 November; every item with its evidence is in
+  REQUIREMENTS.md, "The user's first feedback round"): zoom-proof brush strokes; 1:10m coasts; "maps", not "worlds";
+  today's 242 countries added in one step; label styles for all countries and per country; picture, flag and video
+  fills; outlines that cross themselves painted as drawn; the border pen with drafts kept across sessions; the
+  'left_face' crash fixed; correction preselected and Enter to apply; right-click deselects; several border changes
+  in one event; a current-events box for shots; shot transitions (as recorded, every change, or none; style, timing,
+  easing, front line); the shot panel in groups with a chosen export folder, 'Export' and 'All'.
+- **Engine redesign (approved by the user) done in three steps** (D26): strokes on the 24,500-parcel benchmark map
+  went from 1.75 s to about 0.4 s. Two kernel defects were found along the way and fixed: nearly overlapping borders
+  (real data) could recurse without end, and with firm snapping two separated regions could carry one face label
+  (now guarded; the face assembly itself should still be examined, see Known bugs).
 
 - **Earth basemap done (second session, 16 November).** Natural Earth land, lakes and coastlines are drawn under the
   territories, with present-day borders as an optional drawing guide; a "Data sources and credits" dialog; exports carry
@@ -29,9 +41,8 @@ The approved architecture is the Claude Doc "Map Maker — Technical Architectur
   the chosen groups. First project-file upgrade (format 1 to 2), with a backup before upgrading.
 - **Coastline clipping done.** Territory painted loosely over the sea ends at the coast (per-layer switch), lakes stay
   water, labels stay on land.
-- **Biggest open issues.** (1) The geometry kernel rebuilds the whole map's structure on every edit; this must become incremental
-  before real boundaries are loaded into it as parcel edges. (2) D1 (Canvas renderer instead of deck.gl) still to
-  reverse; D2 and D4 are reversed.
+- **Biggest open issues.** (1) D1 (Canvas renderer instead of deck.gl) still to reverse; D2 and D4 are reversed.
+  (2) Flat maps (city plans, the solar system, the galaxy) need the plane kernel. (3) The face-label issue above.
 
 ## How to run it
 
@@ -49,7 +60,8 @@ For development (Linux or Windows, Node 22.18 or newer):
 | `npm run dist:win` | Builds the Windows installer into `release/` (on Windows; on Linux it needs Wine) |
 | `xvfb-run -a node --disable-warning=ExperimentalWarning e2e/desktop.e2e.ts` | The 5-step desktop app test (build first) |
 | `node --disable-warning=ExperimentalWarning dist/server.mjs --port 4317 --projects <folder> [--open]` | Runs the app |
-| `npm test` | 100 unit, randomised and scenario tests |
+| `sh scripts/check-all.sh` | Every check: type check, unit tests, build, the three interface tests |
+| `npm test` | 127 unit, randomised and scenario tests |
 | `node --disable-warning=ExperimentalWarning test/geo-kernel.stress.ts <seeds> <rings>` | Long randomised kernel run |
 | `node --disable-warning=ExperimentalWarning e2e/vertical-slice.e2e.ts` | The 17-step interface test in Chrome (build first); screenshots in `e2e/output/` |
 | `node --disable-warning=ExperimentalWarning e2e/workflows.e2e.ts` | The 10-step workflow and export-inspection test; screenshots in `e2e/output/workflows/` |
@@ -83,6 +95,11 @@ Terminology: the interface calls them **maps** (DECISIONS D24); the code and old
 | `src/presentation/` | Shots and export | Shot settings (time remap, camera keys, overlays) and the export driver that renders frames off screen at the exact output size. |
 | `src/export/` | Files on disk | PNG encoder, export folders, `manifest.json`, `COMPOSITING_GUIDE.txt`. |
 | `src/ui/` | The interface | React. `store.ts` holds the session state and saves every command; components for the map, timeline, panels, dialogs and presentation mode. |
+| `src/domain/countries.ts` | Today's countries | Decoding `countries-50m.json`; colour groups. The command is `addCountries` in commands.ts. |
+| `src/presentation/events-box.ts` | Current events box | Which events show at a frame (with fades) and how the box is drawn. |
+| `src/render-engine/label-style.ts`, `assets.ts` | Looks | Label styles (general, per country); pictures and videos (loaded once; exports preload pictures and seek videos per frame on their own elements). |
+| `src/server/assets.ts` | Project files | Uploaded pictures and videos in the project's `assets` folder, named by content, served with byte ranges. Border drafts are `drafts.json` in the project folder. |
+| `data/flags/` | Flags | 197 SVG flags (flag-icons, MIT) and `index.json`. |
 | `test/`, `e2e/` | Tests | See "Tests" below. |
 
 How an edit flows: a command changes the in-memory world and returns diffs → the interface redraws at once → the diffs
@@ -106,7 +123,8 @@ The approved roadmap has 14 stages (0–13). Where each stands:
 
 ## Tests
 
-All pass as of 16 November 2026, on Linux and on Windows (100 unit and randomised tests, 17 + 10 + 5 interface steps).
+All pass as of 16 November 2026 (127 unit and randomised tests in 18 files, 21 + 15 + 5 interface steps).
+`sh scripts/check-all.sh` runs everything and prints ALL CHECKS PASSED only when every check passed.
 
 | Suite | Count | What it proves |
 | --- | --- | --- |
@@ -121,7 +139,13 @@ All pass as of 16 November 2026, on Linux and on Windows (100 unit and randomise
 | `test/split-identity.test.ts` | 7 | The split-identity optimisation leaves history identical (6 random histories, with and without) and stops coastline relabelling |
 | `test/stroke.test.ts` | 7 | Freehand outlines: closed, open, figure-eight, tiny, orientation, reproducible irregularity |
 | `test/camera.test.ts` | 7 | Screen/map round trips in every projection, rotation and zoom 0–14; zoom keeps the cursor point fixed; city-level precision; panning across 180° |
-| `test/basemap.test.ts` | 12 | Natural Earth files decode correctly at both scales (land about 29% of the planet, no inside-out polygons, known places on land and at sea across 180° and the poles); dataset record; per-world setting and per-layer clipping setting with undo; culling never drops anything on screen (160 random views) |
+| `test/kernel-incremental.test.ts` | 5 | The kept half-edge structure equals a full rebuild after every kind of edit, undo and redo (4 seeds x 70 steps); nearly overlapping borders |
+| `test/countries.test.ts` | 3 | Today's countries: holes, overseas parts, across 180°, all 242 at once as an event (about 5 s), one undo |
+| `test/label-style.test.ts` | 3 | Label styles: layering, clamping, text, commands with undo |
+| `test/fills.test.ts` | 3 | Video timing; fill commands with undo; the 197 flags and their credit |
+| `test/events-box.test.ts` | 2 | Current events: started and not ended, lingering, alternatives, groups, fades, limits |
+| `test/sequence.test.ts` | 2 | Screen seconds through even and eased pacing; transition settings |
+| `test/basemap.test.ts` | 16 | Natural Earth files decode correctly at both scales (land about 29% of the planet, no inside-out polygons, known places on land and at sea across 180° and the poles); dataset record; per-world setting and per-layer clipping setting with undo; culling never drops anything on screen (160 random views) |
 | `e2e/vertical-slice.e2e.ts` | 17 steps | The vertical slice in Chrome: projects, drawing, Earth's geography and data sources, border points, versions, events, dates, version restore and undo, full restart, animation, export with data credits, identical re-export, 1080p, coastline clipping |
 | `e2e/desktop.e2e.ts` | 5 steps | The Electron app: own window, own data service on this computer only, project written to disk, one copy at a time, close and reopen with contents intact |
 | `test/event-groups.test.ts` | 4 | Event group commands with undo (several groups per event, filter rules, deletion keeps events, alternatives keep groups); a version 1 project file upgraded on opening (backup first, content and undo history intact, old backups restorable without rolling the format back); a file from a newer version refused untouched |
@@ -137,7 +161,9 @@ Random overlapping territories, each with its own dated event; 40 countries.
 | --- | --- | --- | --- | --- | --- | --- |
 | 100 | 263 | 8,223 | 23 ms | 2 ms | 1 ms | 1.9 MB |
 | 300 | 2,160 | 28,322 | 86 ms | 4 ms | 7 ms | 6.7 MB |
-| 1,000 | 24,504 | 130,367 | about 0.6–1.4 s | 11 ms | about 50 ms | 35 MB |
+| 1,000 | 24,504 | 130,367 | about 0.4 s (1.75 s before the engine redesign); the first edit after opening about 1.3 s | 11 ms | about 50 ms | 35 MB |
+
+Adding all 242 of today's countries (98,000 points) takes about 5 s.
 
 Before this stage the same 300-territory project took 135 ms per stroke and 124 ms per save, and its file was 232 MB;
 recompiling the 1,000-territory history took about 800 ms after every edit.
@@ -146,17 +172,16 @@ Rendering the 1,000-territory map in Chrome: about 210 ms per 1080p frame during
 scrubbing); 4K about 330 ms. Opening it: about 4 s. 8K export: about 6–9 s per frame per pass.
 
 Remaining bottlenecks:
-1. **The kernel rebuilds the whole map's structure on every edit** (`topology()`, `rebuildFaces()`), so stroke time grows
-   with the size of the map. Real Earth coastlines (hundreds of thousands of points) would make strokes take seconds.
-   Proposed: incremental updates limited to the area an edit touches. Needs the user's agreement (kernel redesign).
+1. **Face assembly is still global** (components and containment are recomputed on each edit; half-edges and cycle
+   measurements are now kept, D26). It is about 0.1 s per edit on the benchmark map.
 2. **Canvas 2D rendering** of tens of thousands of parcels. The approved WebGL renderer (deck.gl, D1) is the fix.
 
 ## Known bugs and limitations
 
 1. **Not yet run on the user's PC.** The tests run on a Windows machine in GitHub Actions; the installer and the
    launcher have not yet been tried by the user.
-2. **Coastline detail.** The basemap's finest detail is 1:50m (about 1 km); city-scale coastlines (1:10m, OpenStreetMap)
-   are not included yet. Areas in the inspector include parts clipped away at the coast.
+2. **Coastline detail.** The finest basemap detail is 1:10m (about 200 m); street-level coasts (OpenStreetMap) are not
+   included. Areas in the inspector include parts clipped away at the coast.
 3. **Large maps are slow to edit and render** (see Performance).
 4. **Two animations meeting.** Where two simultaneous animated changes touch, their shared border is drawn throughout instead of following each front.
 5. **Animation taking over another animation.** When a change starts while an earlier one is still animating the same area, the earlier one is shown at its starting state.
@@ -165,6 +190,11 @@ Remaining bottlenecks:
 7. **A control or occupation layer looks like a second fill** over the political layer; hatching and outline styles are needed.
 8. **New layers and alternative versions are named in the browser's own small prompt box**, which is plain but works.
 9. **View memory is per browser** and is lost if the app's port changes.
+10. **Face labels under firm snapping.** When an outline drawn zoomed out (snapping up to about 1°) runs along existing
+   borders, the kernel can give two separated regions the same face label. Painting detects it and uses the full
+   check, so results are right, but the face assembly should be examined (D26).
+11. **Uploaded pictures and videos, and border drafts, are not in automatic backups** (which copy the project file
+   only). Copying the whole project folder keeps them.
 
 ## Defects found and fixed in the testing stage (0.2.0)
 
@@ -188,14 +218,15 @@ Remaining bottlenecks:
 | --- | --- | --- |
 | 15–16 Nov 2026 | Stage work from an empty folder: time system and kernel; world model, engine and commands; data service; interface; end-to-end fixes; documentation (0.1.0) | `2a564fc` → `0966b07` |
 | 16 Nov 2026 | Testing and refinement: scenario, geometry, world, recovery, camera and A/B tests; second interface test; benchmark; 11 defects fixed; performance work (0.2.0) | `6a3c64a` → `343d84c` |
-| 16 Nov 2026 (2nd) | Package installs work; Natural Earth basemap (land, lakes, coastlines, present-day borders guide), land export pass, data sources dialog and export credits; coastline clipping with land-aware labels; real React types (D4 reversed); desktop app, Windows installer and Windows test run (D2 reversed); Windows fix; event groups and the first file-format upgrade | `071deac` → latest |
+| 16 Nov 2026 (3rd) | The user's first feedback round (14 items) and the engine redesign; two kernel defects fixed | `aca87e0` → latest |
+| 16 Nov 2026 (2nd) | Package installs work; Natural Earth basemap (land, lakes, coastlines, present-day borders guide), land export pass, data sources dialog and export credits; coastline clipping with land-aware labels; real React types (D4 reversed); desktop app, Windows installer and Windows test run (D2 reversed); Windows fix; event groups and the first file-format upgrade | `071deac` → `9004a90` |
 
 ## Next priorities
 
 1. The user installs the desktop app from the GitHub Actions artifact (or runs `Start Map Maker.bat`) and reports
    what happens.
-2. Reverse D1 (deck.gl renderer).
-3. With the user's agreement: make the geometry kernel's rebuild incremental (needed before real boundaries become parcel edges).
-4. Finish Stage 2: border pen, split and merge tools, region picker, administrative boundaries, coastline clipping.
+2. Examine face assembly under firm snapping (Known bugs 10); then make face assembly incremental too.
+3. Reverse D1 (deck.gl renderer).
+4. Finish Stage 2: split and merge tools, region picker, sub-national boundaries.
 5. Finish Stage 3: custom event types, date comparison, dated border-point moves.
 6. Stage 4: line, point and area layers, layer styles (hatching, outlines), relationships, lifespans.

@@ -59,6 +59,45 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D26. The engine redesign: kept half-edges, local updates, cached cycle measurements (approved by the user)
+
+Half-edges have stable ids (segment x 2 + direction) and the structure is kept between edits: an edit re-sorts only
+the points whose edges changed and re-walks only the cycles through them; cycles are taken in the order of their
+smallest half-edge, exactly as a full rebuild orders them, so faces are assigned as before. Each cycle's area and
+bounding cap are measured once (any change gives a cycle a new id). Painting skips the full area comparison for an
+outline that is one simple loop and separates faces (no face on both sides); otherwise the area check and winding rule
+apply. `insertPaths` inserts many outlines with one rebuild. Proved by `kernel-incremental` (equal to a full rebuild
+after every edit, undo and redo) and a randomised soundness test at the interface's snapping. Still global: grouping
+cycles into faces (components and containment), about 0.1 s per edit on the benchmark map. Found on the way: with firm
+snapping, face assembly can give two separated regions one label (guarded, to be examined); nearly overlapping borders
+made crossing computation unstable and could recurse without end (fixed: a crossing is used only if it lies on both
+arcs, otherwise the arcs share the nearest endpoint; split depth carries through).
+
+### D27. Files a project uses, and border drafts, live in the project folder outside the history
+
+Uploaded pictures and videos are stored in `assets/` named by content (the same file once) and served with byte
+ranges. Border-pen drafts are `drafts.json`. Neither is in the undo history or in automatic backups (which copy the
+project file); copying the project folder keeps them.
+
+### D28. Shot transitions are applied when drawing
+
+A shot can show border changes as recorded, animate every change, or none; restyle recorded animations; and set style
+(front, fade, wipe in eight directions), timing (screen seconds through any pacing, or the event's length), easing and
+the front line. History is never changed. Pictures and videos as fills, label styles and the current-events box are
+likewise drawing-time looks: the preview and exports draw the same frame from the same settings.
+
+### D29. Looks of countries are stored with the country (project file format 3)
+
+`entity.style` (JSON) holds label overrides and fills; the general label style is the meta row `label_style`. Format 3
+adds the column; opening an older file adds missing columns with defaults after a backup, and old backups and old undo
+history read with defaults filled in.
+
+### D30. Today's countries come from Natural Earth 1:50m, added in one step
+
+242 countries (199 nations), with continents, colour groups and flags (`data/natural-earth/countries-50m.json`,
+`data/flags/`). Added as the starting map or as an event, creating or reusing countries by name, one undo step. Finer
+(1:10m) country shapes and sub-national boundaries are not included yet.
+
 ### D24. Maps, not worlds (the user, 16 November 2026)
 
 The top-level category is simply **maps**: a map may be a planet, a city, the solar system or the galaxy. The interface
