@@ -30,14 +30,21 @@ export interface PathStep { seg: number; fwd: boolean }
 
 export class TopologyError extends Error {}
 
+/**
+ * The half-edge structure, kept between edits and updated only around what changed. Half-edge
+ * 2s goes along segment s from a to b, 2s+1 from b to a. Cycle ids are stable while a cycle is
+ * unchanged; cycles are ordered by their smallest half-edge (the order a full rebuild produces).
+ */
 interface Topology {
-  segIds: number[]; // k -> segment id; half-edges 2k (a->b) and 2k+1 (b->a)
-  segIndex: Map<number, number>;
-  next: Int32Array;
-  cycleOf: Int32Array;
-  cycles: number[][];
+  next: Map<number, number>; // half-edge -> next half-edge around its left face
+  cycleOf: Map<number, number>; // half-edge -> cycle id
+  cycles: Map<number, number[]>; // cycle id -> half-edges in order
+  minHE: Map<number, number>; // cycle id -> its smallest half-edge (for a stable order)
+  cycleLabel: Map<number, number>; // cycle id -> face label it is filed under
   outgoing: Map<number, number[]>; // vertex -> outgoing half-edges sorted counter-clockwise
-  facesCycles: Map<number, number[]>; // face label -> cycle indices
+  facesCycles: Map<number, Set<number>>; // face label -> cycle ids
+  /** Bumped whenever cycles change (caches derived from cycles compare against it). */
+  version: number;
 }
 
 const pairKey = (a: number, b: number) => (a < b ? `${a}:${b}` : `${b}:${a}`);
@@ -132,14 +139,20 @@ export class Arrangement {
     if (table === 'vertex') {
       if (before) this.unindexVertex(before.id);
       if (after) this.indexVertex({ ...(after as VertexRow) });
+      this.touchAround((after ?? before)!.id);
     } else if (table === 'segment') {
-      if (before) this.unindexSegment(before.id);
-      if (after) this.indexSegment({ ...(after as SegmentRow) });
+      const b = before as SegmentRow | null, a = after as SegmentRow | null;
+      if (b && a && b.a === a.a && b.b === a.b) {
+        this.segments.set(a.id, { ...a });
+        this.labelsChanged(a.id);
+      } else {
+        if (b) { this.unindexSegment(b.id); this.segmentGone(b); }
+        if (a) { this.indexSegment({ ...a }); this.touch(a.a); this.touch(a.b); }
+      }
     } else {
       if (before) this.faces.delete(before.id);
       if (after) this.faces.set(after.id, { ...(after as FaceRow) });
     }
-    this.topo = null;
     this.revision++;
   }
 
@@ -200,9 +213,35 @@ export class Arrangement {
     if (before) this.vgrid.remove(v.id);
     this.record('vertex', v.id, before ? { ...before } : null, { ...v });
     this.indexVertex({ ...v });
-    this.topo = null;
+    this.touchAround(v.id);
     this.revision++;
   }
+
+  // ---------------------------------------------------------------- what the half-edge structure must update
+
+  private dirtyVertices = new Set<number>();
+  private goneHalfEdges = new Set<number>();
+  private relabelled = new Set<number>();
+
+  /** The order of edges around v may have changed. */
+  private touch(v: number): void { if (this.topo) this.dirtyVertices.add(v); }
+
+  /** v moved: the order changes at v and at every neighbour (their edge towards v turned). */
+  private touchAround(v: number): void {
+    if (!this.topo) return;
+    this.dirtyVertices.add(v);
+    for (const sid of this.incident.get(v) ?? []) { const s = this.segments.get(sid); if (s) { this.dirtyVertices.add(s.a); this.dirtyVertices.add(s.b); } }
+  }
+
+  /** A segment's old geometry left the structure (deleted, or about to come back with new ends). */
+  private segmentGone(old: SegmentRow): void {
+    if (!this.topo) return;
+    this.goneHalfEdges.add(2 * old.id); this.goneHalfEdges.add(2 * old.id + 1);
+    this.dirtyVertices.add(old.a); this.dirtyVertices.add(old.b);
+  }
+
+  /** Only a segment's face labels changed. */
+  private labelsChanged(sid: number): void { if (this.topo) this.relabelled.add(sid); }
 
   private putSegment(s: SegmentRow): void {
     const before = this.segments.get(s.id) ?? null;
@@ -210,14 +249,14 @@ export class Arrangement {
       // Only the face labels change: the geometry, and so the spatial index, stay as they are.
       this.record('segment', s.id, { ...before }, { ...s });
       this.segments.set(s.id, { ...s });
-      this.topo = null;
+      this.labelsChanged(s.id);
       this.revision++;
       return;
     }
-    if (before) this.unindexSegment(s.id);
+    if (before) { this.unindexSegment(s.id); this.segmentGone(before); }
     this.record('segment', s.id, before ? { ...before } : null, { ...s });
     this.indexSegment({ ...s });
-    this.topo = null;
+    this.touch(s.a); this.touch(s.b);
     this.revision++;
   }
 
@@ -226,7 +265,7 @@ export class Arrangement {
     if (!before) return;
     this.record('segment', id, { ...before }, null);
     this.unindexSegment(id);
-    this.topo = null;
+    this.segmentGone(before);
     this.revision++;
   }
 
@@ -415,71 +454,133 @@ export class Arrangement {
 
   // ---------------------------------------------------------------- topology (half-edges and cycles)
 
-  private he(h: number, t: Topology): { seg: SegmentRow; from: number; to: number; label: number } {
-    const s = this.segments.get(t.segIds[h >> 1])!;
+  private he(h: number, _t?: Topology): { seg: SegmentRow; from: number; to: number; label: number } {
+    const s = this.segments.get(h >> 1)!;
     const fwd = (h & 1) === 0;
     return { seg: s, from: fwd ? s.a : s.b, to: fwd ? s.b : s.a, label: fwd ? s.left_face : s.right_face };
   }
 
+  /** The half-edge structure, brought up to date (only around what changed since last time). */
   topology(): Topology {
-    if (this.topo) return this.topo;
-    const segIds = [...this.segments.keys()].sort((a, b) => a - b);
-    const segIndex = new Map<number, number>();
-    segIds.forEach((id, k) => segIndex.set(id, k));
-    const n = segIds.length * 2;
-    const outgoing = new Map<number, number[]>();
-    const angleOf = new Float64Array(n);
-    for (let k = 0; k < segIds.length; k++) {
-      const s = this.segments.get(segIds[k])!;
-      for (const h of [2 * k, 2 * k + 1]) {
-        const from = (h & 1) === 0 ? s.a : s.b;
-        const to = (h & 1) === 0 ? s.b : s.a;
-        const pf = this.v(from), pt = this.v(to);
-        const { east, north } = tangentBasis(pf);
-        const d = arcDirectionAtStart(pf, pt);
-        angleOf[h] = Math.atan2(dot(d, north), dot(d, east));
-        let list = outgoing.get(from);
-        if (!list) outgoing.set(from, (list = []));
-        list.push(h);
-      }
+    if (!this.topo) {
+      // First use (or after loading): build everything, as an update in which every point changed.
+      this.topo = { next: new Map(), cycleOf: new Map(), cycles: new Map(), minHE: new Map(), cycleLabel: new Map(), outgoing: new Map(), facesCycles: new Map(), version: 0 };
+      this.dirtyVertices = new Set(this.incident.keys());
+      this.goneHalfEdges.clear();
+      this.relabelled.clear();
     }
-    const pos = new Int32Array(n);
-    for (const list of outgoing.values()) {
-      list.sort((p, q) => angleOf[p] - angleOf[q] || p - q);
-      list.forEach((h, i) => (pos[h] = i));
-    }
-    const next = new Int32Array(n);
-    for (let h = 0; h < n; h++) {
-      const twin = h ^ 1;
-      const s = this.segments.get(segIds[h >> 1])!;
-      const to = (h & 1) === 0 ? s.b : s.a;
-      const list = outgoing.get(to)!;
-      next[h] = list[(pos[twin] - 1 + list.length) % list.length];
-    }
-    const cycleOf = new Int32Array(n).fill(-1);
-    const cycles: number[][] = [];
-    for (let h = 0; h < n; h++) {
-      if (cycleOf[h] !== -1) continue;
-      const c: number[] = [];
-      let x = h;
-      let guard = 0;
-      while (cycleOf[x] === -1) {
-        cycleOf[x] = cycles.length;
-        c.push(x);
-        x = next[x];
-        if (++guard > n + 1) throw new TopologyError('Corrupt half-edge structure');
-      }
-      cycles.push(c);
-    }
-    const facesCycles = new Map<number, number[]>();
-    cycles.forEach((c, ci) => {
-      const label = this.he(c[0], { segIds } as Topology).label;
-      let list = facesCycles.get(label);
-      if (!list) facesCycles.set(label, (list = []));
-      list.push(ci);
-    });
-    this.topo = { segIds, segIndex, next, cycleOf, cycles, outgoing, facesCycles };
+    if (this.dirtyVertices.size || this.goneHalfEdges.size || this.relabelled.size) this.refreshTopology(this.topo);
     return this.topo;
+  }
+
+  private nextCycleId = 1;
+
+  private refreshTopology(t: Topology): void {
+    const dirty = this.dirtyVertices, gone = this.goneHalfEdges, relabelled = this.relabelled;
+    this.dirtyVertices = new Set(); this.goneHalfEdges = new Set(); this.relabelled = new Set();
+    // 1. New orders around the changed points, and the new 'next' of every edge arriving there.
+    const newNext = new Map<number, number>();
+    for (const v of dirty) {
+      const inc = this.incident.get(v);
+      if (!inc || inc.size === 0 || !this.vec.has(v)) { t.outgoing.delete(v); continue; }
+      const pf = this.v(v);
+      const { east, north } = tangentBasis(pf);
+      const list: Array<{ h: number; a: number }> = [];
+      for (const sid of inc) {
+        const s = this.segments.get(sid);
+        if (!s) continue;
+        const h = s.a === v ? 2 * sid : 2 * sid + 1;
+        const d = arcDirectionAtStart(pf, this.v(s.a === v ? s.b : s.a));
+        list.push({ h, a: Math.atan2(dot(d, north), dot(d, east)) });
+      }
+      list.sort((p, q) => p.a - q.a || p.h - q.h);
+      const out = list.map((x) => x.h);
+      t.outgoing.set(v, out);
+      for (let i = 0; i < out.length; i++) newNext.set(out[i] ^ 1, out[(i - 1 + out.length) % out.length]);
+    }
+    // 2. Every cycle through a changed edge (or a vanished one) is taken apart.
+    const broken = new Set<number>();
+    for (const h of newNext.keys()) { const c = t.cycleOf.get(h); if (c !== undefined) broken.add(c); }
+    for (const h of gone) { const c = t.cycleOf.get(h); if (c !== undefined) broken.add(c); }
+    const loose = new Set<number>();
+    for (const c of broken) {
+      for (const h of t.cycles.get(c)!) { t.cycleOf.delete(h); loose.add(h); }
+      t.cycles.delete(c);
+      t.minHE.delete(c);
+      const l = t.cycleLabel.get(c);
+      if (l !== undefined) { t.facesCycles.get(l)?.delete(c); if (t.facesCycles.get(l)?.size === 0) t.facesCycles.delete(l); }
+      t.cycleLabel.delete(c);
+    }
+    for (const h of gone) if (!this.segments.has(h >> 1) || (newNext.has(h) === false && !this.halfEdgeExists(h))) { t.next.delete(h); loose.delete(h); }
+    for (const [h, n] of newNext) { t.next.set(h, n); loose.add(h); }
+    // 3. The loose edges are walked into new cycles.
+    for (const h0 of [...loose].sort((a, b) => a - b)) {
+      if (t.cycleOf.has(h0) || !this.halfEdgeExists(h0)) continue;
+      const id = this.nextCycleId++;
+      const c: number[] = [];
+      let x = h0, min = h0, guard = 0;
+      while (!t.cycleOf.has(x)) {
+        t.cycleOf.set(x, id);
+        c.push(x);
+        if (x < min) min = x;
+        const nx = t.next.get(x);
+        if (nx === undefined || ++guard > 4 * this.segments.size + 4) throw new TopologyError('Corrupt half-edge structure');
+        x = nx;
+      }
+      if (x !== h0) throw new TopologyError('Corrupt half-edge structure (a walk joined another cycle)');
+      t.cycles.set(id, c);
+      t.minHE.set(id, min);
+      this.fileCycle(t, id);
+    }
+    // 4. Cycles whose edges only changed face label move to their new face.
+    for (const sid of relabelled) for (const h of [2 * sid, 2 * sid + 1]) {
+      const c = t.cycleOf.get(h);
+      if (c === undefined) continue;
+      const label = this.he(t.cycles.get(c)![0]).label;
+      if (t.cycleLabel.get(c) === label) continue;
+      const old = t.cycleLabel.get(c);
+      if (old !== undefined) { t.facesCycles.get(old)?.delete(c); if (t.facesCycles.get(old)?.size === 0) t.facesCycles.delete(old); }
+      this.fileCycle(t, c);
+    }
+    t.version++;
+  }
+
+  private halfEdgeExists(h: number): boolean { return this.segments.has(h >> 1); }
+
+  private fileCycle(t: Topology, id: number): void {
+    const label = this.he(t.cycles.get(id)![0]).label;
+    t.cycleLabel.set(id, label);
+    let set = t.facesCycles.get(label);
+    if (!set) t.facesCycles.set(label, (set = new Set()));
+    set.add(id);
+  }
+
+  /** Cycle ids in a stable order: by smallest half-edge (exactly the order a full rebuild gives). */
+  private orderedCycles(t: Topology, ids?: Iterable<number>): number[] {
+    return [...(ids ?? t.cycles.keys())].sort((a, b) => t.minHE.get(a)! - t.minHE.get(b)!);
+  }
+
+  /** A from-scratch structure, for tests: must equal the maintained one. */
+  checkTopology(): string[] {
+    const t = this.topology();
+    const fresh = new Arrangement(this.spaceId, this.rootFace, this.ids);
+    for (const f of this.faces.values()) fresh.faces.set(f.id, { ...f });
+    for (const v of this.vertices.values()) fresh.indexVertex({ ...v });
+    for (const sg of this.segments.values()) fresh.indexSegment({ ...sg });
+    const f = fresh.topology();
+    const sig = (x: Topology) => [...x.cycles.values()].map((c) => {
+      const m = c.indexOf(Math.min(...c));
+      return [...c.slice(m), ...c.slice(0, m)].join(',');
+    }).sort();
+    const problems: string[] = [];
+    const a = sig(t), b = sig(f);
+    if (a.length !== b.length) problems.push(`${a.length} cycles kept, ${b.length} when rebuilt`);
+    else for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) { problems.push(`cycle differs: ${a[i].slice(0, 60)} vs ${b[i].slice(0, 60)}`); break; }
+    for (const [label, set] of t.facesCycles) {
+      const other = f.facesCycles.get(label);
+      if (!other || other.size !== set.size) { problems.push(`face ${label}: ${set.size} cycles kept, ${other?.size ?? 0} when rebuilt`); break; }
+    }
+    return problems;
   }
 
   /** Signed turning sum of a cycle; area of its left region = 2*pi - sum (Gauss-Bonnet). */
@@ -505,8 +606,12 @@ export class Arrangement {
    */
   private rebuildFaces(): void {
     const t = this.topology();
-    const nC = t.cycles.length;
+    // Cycles in the stable order (by smallest half-edge), numbered 0..nC-1 for this rebuild.
+    const cycIds = this.orderedCycles(t);
+    const nC = cycIds.length;
     if (nC === 0) return;
+    const cyc = cycIds.map((id) => t.cycles.get(id)!);
+    const denseOf = new Map(cycIds.map((id, i) => [id, i]));
 
     // Connected components over vertices.
     const parent = new Map<number, number>();
@@ -530,17 +635,17 @@ export class Arrangement {
       if (!l) compSegs.set(r, (l = []));
       l.push(s.id);
     }
-    const compOfCycle = (ci: number) => find(this.he(t.cycles[ci][0], t).from);
+    const compOfCycle = (ci: number) => find(this.he(cyc[ci][0]).from);
 
     // Per component: the hole cycle (the one whose left side contains PINF).
     const holeOf = new Map<number, number>();
-    for (const [comp, segs] of compSegs) holeOf.set(comp, this.locatePinfInComponent(segs, t));
+    for (const [comp, segs] of compSegs) holeOf.set(comp, denseOf.get(this.locatePinfInComponent(segs, t))!);
 
     const isOuter = new Uint8Array(nC);
     const area = new Float64Array(nC);
     for (let ci = 0; ci < nC; ci++) {
       isOuter[ci] = holeOf.get(compOfCycle(ci)) === ci ? 0 : 1;
-      area[ci] = this.cycleLeftArea(t.cycles[ci], t);
+      area[ci] = this.cycleLeftArea(cyc[ci], t);
     }
 
     // Bounding caps for outer cycles, to skip impossible containment tests.
@@ -548,12 +653,12 @@ export class Arrangement {
     for (let ci = 0; ci < nC; ci++) {
       if (!isOuter[ci] || area[ci] >= 2 * Math.PI) continue;
       let sx = 0, sy = 0, sz = 0;
-      for (const h of t.cycles[ci]) { const p = this.v(this.he(h, t).from); sx += p[0]; sy += p[1]; sz += p[2]; }
+      for (const h of cyc[ci]) { const p = this.v(this.he(h, t).from); sx += p[0]; sy += p[1]; sz += p[2]; }
       const len = Math.hypot(sx, sy, sz);
       if (len < 1e-9) continue;
       const c: Vec3 = [sx / len, sy / len, sz / len];
       let r = 0;
-      for (const h of t.cycles[ci]) r = Math.max(r, angle(c, this.v(this.he(h, t).from)));
+      for (const h of cyc[ci]) r = Math.max(r, angle(c, this.v(this.he(h, t).from)));
       if (r < Math.PI / 2 - 1e-9) caps[ci] = { c, r: r + 1e-9 };
     }
 
@@ -566,7 +671,7 @@ export class Arrangement {
       for (const ci of outerList) {
         if (compOfCycle(ci) === comp) continue;
         if (best !== -1 && area[ci] >= area[best]) continue;
-        const inside = this.pointInOuterCycle(samples, t.cycles[ci], t, caps[ci]);
+        const inside = this.pointInOuterCycle(samples, cyc[ci], t, caps[ci]);
         if (inside) best = ci;
       }
       containerOf.set(comp, best);
@@ -599,7 +704,7 @@ export class Arrangement {
     const resolve = (ri: number, depth = 0): number => {
       if (origin[ri] !== -1) return origin[ri];
       const counts = new Map<number, number>();
-      for (const ci of regions[ri]) for (const h of t.cycles[ci]) {
+      for (const ci of regions[ri]) for (const h of cyc[ci]) {
         const l = this.he(h, t).label;
         if (l > 0) counts.set(l, (counts.get(l) ?? 0) + 1);
       }
@@ -631,7 +736,7 @@ export class Arrangement {
         let keep = list[0], keepN = -1;
         for (const ri of list) {
           let n2 = 0;
-          for (const ci of regions[ri]) for (const h of t.cycles[ci]) if (this.he(h, t).label === o) n2++;
+          for (const ci of regions[ri]) for (const h of cyc[ci]) if (this.he(h, t).label === o) n2++;
           if (n2 > keepN) { keep = ri; keepN = n2; }
         }
         for (const ri of list) {
@@ -655,8 +760,8 @@ export class Arrangement {
     for (let ri = 0; ri < regions.length; ri++) {
       const fid = finalId[ri];
       if (fid === -1) continue;
-      for (const ci of regions[ri]) for (const h of t.cycles[ci]) {
-        const sid = t.segIds[h >> 1];
+      for (const ci of regions[ri]) for (const h of cyc[ci]) {
+        const sid = h >> 1;
         const cur = pending.get(sid) ?? { left: this.segments.get(sid)!.left_face, right: this.segments.get(sid)!.right_face };
         if ((h & 1) === 0) cur.left = fid; else cur.right = fid;
         pending.set(sid, cur);
@@ -667,7 +772,6 @@ export class Arrangement {
       if (s.left_face !== lr.left || s.right_face !== lr.right) this.putSegment({ ...s, left_face: lr.left, right_face: lr.right });
     }
     if (finalId[ROOT] !== -1) this.rootFace = finalId[ROOT];
-    this.topo = null;
   }
 
   private sampleVertices(segs: number[]): number[] {
@@ -688,8 +792,7 @@ export class Arrangement {
       const target = this.segments.get(segs[Math.floor((i * segs.length) / tries)])!;
       const hit = this.firstHit(PINF, target, () => segs);
       if (!hit) continue;
-      const k = t.segIndex.get(hit.seg.id)!;
-      return t.cycleOf[hit.side > 0 ? 2 * k : 2 * k + 1];
+      return t.cycleOf.get(hit.side > 0 ? 2 * hit.seg.id : 2 * hit.seg.id + 1)!;
     }
     throw new TopologyError('Could not classify a boundary (degenerate geometry); try a slightly different shape.');
   }
@@ -742,7 +845,8 @@ export class Arrangement {
     for (const vid of samples) {
       const p = this.v(vid);
       if (cap && angle(cap.c, p) > cap.r) return false;
-      const parity = this.crossingParity(p, cycle.map((h) => t.segIds[h >> 1]));
+      void t;
+      const parity = this.crossingParity(p, cycle.map((h) => h >> 1));
       if (parity !== null) return parity === 1; // PINF is outside an outer cycle
     }
     throw new TopologyError('Could not decide which area contains a shape (degenerate geometry).');
@@ -798,7 +902,8 @@ export class Arrangement {
         if (res !== null) return res;
       }
     }
-    for (const sid of t.segIds) {
+    void t;
+    for (const sid of [...this.segments.keys()].sort((a, b) => a - b)) {
       const res = this.locateVia(p, sid);
       if (res !== null) return res;
     }
@@ -967,8 +1072,7 @@ export class Arrangement {
   /** Boundary cycles of a face as vertex-id lists, each with the face on its left. */
   faceCycles(faceId: number): number[][] {
     const t = this.topology();
-    const list = t.facesCycles.get(faceId) ?? [];
-    return list.map((ci) => t.cycles[ci].map((h) => this.he(h, t).from));
+    return this.orderedCycles(t, t.facesCycles.get(faceId) ?? []).map((ci) => t.cycles.get(ci)!.map((h) => this.he(h).from));
   }
 
   /** Face rings as [lon, lat] degree pairs (face on the left of each ring). Empty for a face with no boundary (whole sphere). */
@@ -979,22 +1083,23 @@ export class Arrangement {
   /** Area of a face in steradians (multiply by radius^2 for physical area). */
   faceArea(faceId: number): number {
     const t = this.topology();
-    const list = t.facesCycles.get(faceId);
-    if (!list || list.length === 0) return faceId === this.rootFace ? 4 * Math.PI : 0;
+    const set = t.facesCycles.get(faceId);
+    if (!set || set.size === 0) return faceId === this.rootFace ? 4 * Math.PI : 0;
+    const list = this.orderedCycles(t, set);
     let outer = -1;
     const holes: number[] = [];
     for (const ci of list) {
       // In a face, at most one cycle is "outer"; holes have left areas close to 4*pi minus the hole.
       if (outer === -1 && !this.cycleContainsPinfCached(ci, t)) outer = ci; else holes.push(ci);
     }
-    let area = outer === -1 ? 4 * Math.PI : this.cycleLeftArea(t.cycles[outer], t);
-    for (const ci of holes) area -= 4 * Math.PI - this.cycleLeftArea(t.cycles[ci], t);
+    let area = outer === -1 ? 4 * Math.PI : this.cycleLeftArea(t.cycles.get(outer)!, t);
+    for (const ci of holes) area -= 4 * Math.PI - this.cycleLeftArea(t.cycles.get(ci)!, t);
     return area;
   }
 
-  private pinfCache: { topo: Topology; holes: Set<number> } | null = null;
+  private pinfCache: { version: number; holes: Set<number> } | null = null;
   private cycleContainsPinfCached(ci: number, t: Topology): boolean {
-    if (!this.pinfCache || this.pinfCache.topo !== t) {
+    if (!this.pinfCache || this.pinfCache.version !== t.version) {
       const holes = new Set<number>();
       const comps = new Map<number, number[]>();
       const seen = new Set<number>();
@@ -1017,7 +1122,7 @@ export class Arrangement {
         comps.set(s.id, segs);
       }
       for (const segs of comps.values()) holes.add(this.locatePinfInComponent(segs, t));
-      this.pinfCache = { topo: t, holes };
+      this.pinfCache = { version: t.version, holes };
     }
     return this.pinfCache.holes.has(ci);
   }
@@ -1156,10 +1261,10 @@ export class Arrangement {
       }
       if (!this.vertices.has(s.a) || !this.vertices.has(s.b)) problems.push(`segment ${s.id} references a missing vertex`);
     }
-    t.cycles.forEach((c, ci) => {
-      const l = this.he(c[0], t).label;
-      for (const h of c) if (this.he(h, t).label !== l) { problems.push(`cycle ${ci} has mixed face labels`); break; }
-    });
+    for (const [ci, c] of t.cycles) {
+      const l = this.he(c[0]).label;
+      for (const h of c) if (this.he(h).label !== l) { problems.push(`cycle ${ci} has mixed face labels`); break; }
+    }
     // No two segments may cross.
     for (const s of this.segments.values()) {
       const pa = this.v(s.a), pb = this.v(s.b);
