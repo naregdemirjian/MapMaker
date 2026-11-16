@@ -873,7 +873,6 @@ export class Arrangement {
     let outer = -1;
     const holes: number[] = [];
     for (const ci of list) {
-      const a = this.cycleLeftArea(t.cycles[ci], t);
       // In a face, at most one cycle is "outer"; holes have left areas close to 4*pi minus the hole.
       if (outer === -1 && !this.cycleContainsPinfCached(ci, t)) outer = ci; else holes.push(ci);
     }

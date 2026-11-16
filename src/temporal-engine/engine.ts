@@ -244,10 +244,19 @@ export class Engine {
   }
 
   /** State of every leaf parcel of a partition layer at time t. */
+  private stateCache = new Map<string, Map<number, FaceState>>();
+
+  /** The state of every parcel of a layer at time t. Recent answers are reused; callers must not modify the result. */
   partitionState(spaceId: string, layerId: string, t: Instant): Map<number, FaceState> {
+    this.ensure();
     const arr = this.world.arrangement(spaceId);
+    const key = `${this.compiledRevision}|${arr.revision}|${spaceId}|${layerId}|${t.day}|${t.ms}`;
+    const hit = this.stateCache.get(key);
+    if (hit) return hit;
     const out = new Map<number, FaceState>();
     for (const f of arr.leafFaces()) out.set(f, this.faceState(spaceId, layerId, f, t));
+    if (this.stateCache.size >= 16) this.stateCache.delete(this.stateCache.keys().next().value!);
+    this.stateCache.set(key, out);
     return out;
   }
 

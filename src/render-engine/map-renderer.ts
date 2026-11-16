@@ -129,7 +129,8 @@ export class MapRenderer {
     const colorOf = (v: string | null) => (v ? entities.get(v)?.color ?? '#888888' : null);
     const labels: LabelInfo[] = [];
 
-    for (const layerId of opts.layerIds) {
+    const drawsLayers = opts.passes.has('fills') || opts.passes.has('borders') || opts.passes.has('labels');
+    for (const layerId of drawsLayers ? opts.layerIds : []) {
       const layer = world.get('layer', layerId);
       if (!layer || layer.space_id !== spaceId || layer.kind !== 'partition') continue;
       const ls = parseJSON<{ fillOpacity?: number; borderWidth?: number }>(layer.style, {});
@@ -140,15 +141,14 @@ export class MapRenderer {
         // The layer is painted fully opaque in a scratch buffer and laid onto the map once at the
         // layer's opacity: neighbouring parcels then never show seams, and fades mix correctly.
         const lc = this.scratch(ctx);
-        const byColor = new Map<string, Path2D>();
+        const byColor = new Map<string, number[]>();
         for (const [face, st] of states) {
           const c = colorOf(tg.of.has(face) ? st.transition!.from : st.value);
           if (!c) continue;
-          let p = byColor.get(c);
-          if (!p) byColor.set(c, (p = new Path2D()));
-          p.addPath(this.facePath(view, arr, face));
+          const l = byColor.get(c);
+          if (l) l.push(face); else byColor.set(c, [face]);
         }
-        for (const [c, p] of byColor) { lc.fillStyle = c; lc.fill(p, 'evenodd'); }
+        for (const [c, faces] of byColor) { lc.fillStyle = c; lc.fill(this.groupPath(view, arr, faces), 'evenodd'); }
         for (const g of tg.groups.values()) this.drawTransition(lc, g, colorOf);
         ctx.save();
         ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -177,6 +177,26 @@ export class MapRenderer {
     if (opts.passes.has('labels')) this.drawLabels(ctx, labels, style, u);
     this.lastLabels = labels;
     ctx.restore();
+  }
+
+  private groupCache = new Map<string, Path2D>();
+
+  /**
+   * One path for a group of parcels drawn in the same colour. Reused while the group is unchanged
+   * (between events, every frame of a scrub or a shot reuses it), rebuilt when parcels change hands.
+   */
+  private groupPath(view: View, arr: Arrangement, faces: number[]): Path2D {
+    let h1 = 0x811c9dc5, h2 = 0x01000193;
+    for (const f of faces) { h1 = Math.imul(h1 ^ f, 16777619) >>> 0; h2 = Math.imul(h2 + f, 2246822519) >>> 0; }
+    const key = `${view.key}|${arr.spaceId}|${arr.revision}|${faces.length}|${h1}|${h2}`;
+    let p = this.groupCache.get(key);
+    if (!p) {
+      p = new Path2D();
+      for (const f of faces) p.addPath(this.facePath(view, arr, f));
+      if (this.groupCache.size > 400) this.groupCache.clear();
+      this.groupCache.set(key, p);
+    }
+    return p;
   }
 
   /** Parcels that are part of an animated change at this moment, grouped by the change they belong to. */

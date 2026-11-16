@@ -34,6 +34,10 @@ import { currentShot } from './components/MapView.tsx';
     const p = lonLatToScreen(makeView(store.camera, r.width, r.height), lon, lat);
     return p ? [p[0] + r.left, p[1] + r.top] : null;
   },
+  /** The current world-building camera framed for an output of the given size (for benchmarks). */
+  viewFor(width: number, height: number) {
+    return makeView(store.camera, width, height);
+  },
   /** Where a map position lands in an exported frame of the current shot (scale 1 = full size). */
   exportPixel(lon: number, lat: number, frame: number, scale: number) {
     const shot = currentShot();
