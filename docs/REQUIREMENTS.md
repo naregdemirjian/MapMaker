@@ -40,7 +40,8 @@ status. Last updated: 16 November 2026 (version 0.2.0 plus the Earth basemap, se
 | Coordinate handling, any projection, zoom 0 to city level | Tested | `camera` (round trips to 0.001 px; sub-metre at zoom 16) | |
 | Map styles and geographical detail | Partial | `basemap` | One style. Land, lakes and coastlines on Earth (1:110m and 1:50m). Per-layer opacity and border width are stored but have no editor. No terrain, rivers or cities (Stages 8, 10) |
 | Earth basemap with real data (coastlines, borders) | Tested | `basemap` (decoding, land share, places on land and sea across 180° and the poles, randomised culling), `e2e/vertical-slice` steps 3 and 13 | Natural Earth v5.1.2: land, lakes, coastlines, and present-day borders as a dashed drawing guide (never exported). Per-world switch, undoable. 1:10m (city-scale coasts) not yet included |
-| Existing administrative boundaries | Partial | | Present-day country borders are shown as a guide only. Loading them as parcel edges (region picker) and coastline clipping are still to do; the data can now be downloaded (Stage 2) |
+| Existing administrative boundaries | Partial | | Present-day country borders are shown as a guide only. Loading them as parcel edges (region picker) is still to do (Stage 2) |
+| Coastline clipping (paint loosely over the sea) | Tested | `e2e/vertical-slice` step 16 (grid of points inside two countries: sea shows the ocean, land keeps the colour, labels on land, undo), `basemap` | At drawing time, per layer ("Territory ends at the coast", on by default). Lakes stay water. Areas in the inspector still include the sea; coastlines do not yet change over time (Stage 8) |
 | Custom boundaries that follow no real division | Tested | `scenarios`, `geometry-worlds`, `e2e/*` | |
 | Freehand drawing (territory brush) | Tested | `stroke`, `e2e/*` | Smoothing, irregularity, detail |
 | Precise point-by-point shapes | Tested | `e2e/workflows` step 1 | |

@@ -69,6 +69,15 @@ The grid is drawn beneath the land so the export passes stack back into the full
 They are dashed, shown only while drawing (a switch under Worlds), never in shots or exports: the film's borders are
 the ones drawn in the project.
 
+### D22. Coastline clipping happens when drawing, not in the parcel map
+
+Territory fills (including animated changes) and borders are clipped to the land minus lakes when drawn. The parcel map
+and history keep the shapes as painted, so switching clipping off for a layer (sea claims, maritime zones) loses
+nothing, and a later dated coastline (sea-level change, Stage 8) will reshape countries automatically, as the approved
+architecture asks. Labels of clipped layers are placed and sized from the land part only, using a 1/8-degree land mask
+and a 10 × 10 grid of sample points per parcel (cached until the map changes). Still to do: areas shown in the
+inspector include the sea.
+
 ### D21. Which worlds show Earth's geography
 
 Stored per world. The first world of a new project (Earth) shows it; worlds created later show it only if "Start with

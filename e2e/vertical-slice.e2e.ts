@@ -538,16 +538,18 @@ try {
       if (!ll || !clearOfCoast(ll) || !(await ownerAt(ll, '2000'))) continue;
       samples.push({ ll, land: onLand(ll) });
     }
-    // Labels are drawn on top of everything; points under them are left out.
-    const labels = await page.evaluate(() => (window as any).__mapmaker.store.renderer.lastLabels as Array<{ text: string; x: number; y: number; size: number }>);
+    // Labels are drawn on top of everything; points under them (before or after clipping) are left out.
+    type Label = { text: string; x: number; y: number; size: number };
+    const readLabels = () => page.evaluate(() => (window as any).__mapmaker.store.renderer.lastLabels as Label[]);
     const canvasBox = await page.getByTestId('map-canvas').boundingBox();
-    const underLabel = async (ll: LL) => {
+    const labelsBefore = await readLabels();
+    const underLabel = async (ll: LL, labels: Label[]) => {
       const [px, py] = await toPage(ll);
       const x = px - canvasBox!.x, y = py - canvasBox!.y;
       return labels.some((l) => Math.abs(x - l.x) < l.text.length * l.size * 0.35 + 6 && Math.abs(y - l.y) < l.size * 0.6 + 6);
     };
-    for (let i = samples.length - 1; i >= 0; i--) if (await underLabel(samples[i].ll)) samples.splice(i, 1);
-    const seaSamples = samples.filter((p) => !p.land), landSamples = samples.filter((p) => p.land);
+    for (let i = samples.length - 1; i >= 0; i--) if (await underLabel(samples[i].ll, labelsBefore)) samples.splice(i, 1);
+    let seaSamples = samples.filter((p) => !p.land), landSamples = samples.filter((p) => p.land);
     assert.ok(seaSamples.length >= 10 && landSamples.length >= 5, `${seaSamples.length} sea and ${landSamples.length} land samples inside the countries`);
     const before = new Map<string, number[]>();
     for (const p of samples) before.set(String(p.ll), await canvasPixel(p.ll));
@@ -556,6 +558,15 @@ try {
 
     await page.getByTestId('clip-to-land').check();
     await page.waitForTimeout(150);
+    // Once clipped, every label stands on land.
+    const labelsAfter = await readLabels();
+    assert.equal(labelsAfter.length, 2);
+    for (const l of labelsAfter) {
+      const ll = await toLL([l.x + canvasBox!.x, l.y + canvasBox!.y]);
+      assert.ok(onLand(ll), `the label "${l.text}" is on land (${ll})`);
+    }
+    for (let i = samples.length - 1; i >= 0; i--) if (await underLabel(samples[i].ll, labelsAfter)) samples.splice(i, 1);
+    seaSamples = samples.filter((p) => !p.land); landSamples = samples.filter((p) => p.land);
     for (const p of seaSamples) assert.ok(colourDiff(await canvasPixel(p.ll), ocean) <= 8, `clipped: the sea at ${p.ll} shows the ocean`);
     for (const p of landSamples) assert.ok(colourDiff(await canvasPixel(p.ll), before.get(String(p.ll))!) <= 8, `clipped: the land at ${p.ll} keeps its territory colour`);
     await screenshot('coastline-clipping');

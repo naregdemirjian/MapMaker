@@ -1,7 +1,7 @@
 // The Earth basemap: land, lakes, coastlines and present-day country borders from Natural Earth,
 // drawn beneath the territories. It is reference geography only: it is not part of the parcel map
 // and never changes history. Files are produced by scripts/fetch-natural-earth.mjs.
-import { geoArea, geoPath } from 'd3-geo';
+import { geoArea, geoPath, geoEquirectangular } from 'd3-geo';
 import { screenToLonLat, lonLatToScreen, type View } from './camera.ts';
 
 export interface BasemapFile {
@@ -234,4 +234,51 @@ export class BasemapPainter {
     ctx.fill(paths.lakes);
     ctx.restore();
   }
+}
+
+/**
+ * Land as a grid of cells (1/8 degree, about 14 km), for fast "is this on land?" questions such as
+ * where to put a label once the coastline has clipped a territory. Lakes count as water.
+ */
+export class LandMask {
+  readonly width: number;
+  readonly height: number;
+  private readonly bits: Uint8Array;
+
+  constructor(width: number, height: number, bits: Uint8Array) {
+    this.width = width; this.height = height; this.bits = bits;
+  }
+
+  /** Rasterised in the browser (needs OffscreenCanvas); null elsewhere. */
+  static build(basemap: Basemap, width = 2880): LandMask | null {
+    if (typeof OffscreenCanvas === 'undefined') return null;
+    const height = width / 2;
+    const b = basemap.scales[basemap.scales.length - 1];
+    const canvas = new OffscreenCanvas(width, height);
+    const ctx = canvas.getContext('2d', { willReadFrequently: true }) as unknown as CanvasRenderingContext2D;
+    const projection = geoEquirectangular().scale(width / (2 * Math.PI)).translate([width / 2, height / 2]).precision(0);
+    const path = geoPath(projection, ctx);
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); path(b.land); ctx.fill('nonzero');
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.beginPath(); path(b.lakes); ctx.fill();
+    const data = ctx.getImageData(0, 0, width, height).data;
+    const bits = new Uint8Array(width * height);
+    for (let i = 0; i < bits.length; i++) bits[i] = data[i * 4 + 3] >= 128 ? 1 : 0;
+    return new LandMask(width, height, bits);
+  }
+
+  onLand(lon: number, lat: number): boolean {
+    const x = Math.floor(((((lon + 180) % 360) + 360) % 360) / 360 * this.width);
+    const y = Math.min(this.height - 1, Math.max(0, Math.floor(((90 - lat) / 180) * this.height)));
+    return this.bits[y * this.width + Math.min(this.width - 1, x)] === 1;
+  }
+}
+
+const masks = new WeakMap<Basemap, LandMask | null>();
+
+/** The land mask of a basemap, built on first use. */
+export function landMaskOf(basemap: Basemap): LandMask | null {
+  if (!masks.has(basemap)) masks.set(basemap, LandMask.build(basemap));
+  return masks.get(basemap) ?? null;
 }

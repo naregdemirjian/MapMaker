@@ -22,9 +22,10 @@ The approved architecture is the Claude Doc "Map Maker — Technical Architectur
   slow: see "Performance" below.
 - **Roadmap position.** Stages 1 and 3 mostly done; 0 and 2 partly done; parts of 4, 5 and 6 built early. Stages 7–13
   (military, terrain, environment, heatmaps, space maps…) not started. `REQUIREMENTS.md` classifies every requirement.
-- **Biggest open issues.** (1) Territories are not yet clipped to the coastlines (they cover the sea where painted
-  loosely). (2) The geometry kernel rebuilds the whole map's structure on every edit; this must become incremental
-  before real boundaries are loaded into it as parcel edges. (3) D1–D4 (Canvas renderer, browser instead of Electron,
+- **Coastline clipping done.** Territory painted loosely over the sea ends at the coast (per-layer switch), lakes stay
+  water, labels stay on land.
+- **Biggest open issues.** (1) The geometry kernel rebuilds the whole map's structure on every edit; this must become incremental
+  before real boundaries are loaded into it as parcel edges. (2) D1–D4 (Canvas renderer, browser instead of Electron,
   loose interface types) still to reverse.
 
 ## How to run it
@@ -38,9 +39,9 @@ For development (Linux or Windows, Node 22.18 or newer):
 | --- | --- |
 | `node scripts/build.mjs` | Builds `dist/server.mjs` (the data service) and `dist/ui/` (the interface) |
 | `node --disable-warning=ExperimentalWarning dist/server.mjs --port 4317 --projects <folder> [--open]` | Runs the app |
-| `npm test` | 95 unit, randomised and scenario tests |
+| `npm test` | 96 unit, randomised and scenario tests |
 | `node --disable-warning=ExperimentalWarning test/geo-kernel.stress.ts <seeds> <rings>` | Long randomised kernel run |
-| `node --disable-warning=ExperimentalWarning e2e/vertical-slice.e2e.ts` | The 16-step interface test in Chrome (build first); screenshots in `e2e/output/` |
+| `node --disable-warning=ExperimentalWarning e2e/vertical-slice.e2e.ts` | The 17-step interface test in Chrome (build first); screenshots in `e2e/output/` |
 | `node --disable-warning=ExperimentalWarning e2e/workflows.e2e.ts` | The 9-step workflow and export-inspection test; screenshots in `e2e/output/workflows/` |
 | `node --disable-warning=ExperimentalWarning test/perf.bench.ts 100 300 1000 [--keep <folder>]` | Performance benchmark (minutes at 1000) |
 | `node node_modules/typescript/bin/tsc -p tsconfig.json` | Type check (must report nothing) |
@@ -92,7 +93,7 @@ The approved roadmap has 14 stages (0–13). Where each stands:
 
 ## Tests
 
-All pass as of 16 November 2026 (95 unit and randomised tests, 16 + 9 interface steps).
+All pass as of 16 November 2026 (96 unit and randomised tests, 17 + 9 interface steps).
 
 | Suite | Count | What it proves |
 | --- | --- | --- |
@@ -107,8 +108,8 @@ All pass as of 16 November 2026 (95 unit and randomised tests, 16 + 9 interface 
 | `test/split-identity.test.ts` | 7 | The split-identity optimisation leaves history identical (6 random histories, with and without) and stops coastline relabelling |
 | `test/stroke.test.ts` | 7 | Freehand outlines: closed, open, figure-eight, tiny, orientation, reproducible irregularity |
 | `test/camera.test.ts` | 7 | Screen/map round trips in every projection, rotation and zoom 0–14; zoom keeps the cursor point fixed; city-level precision; panning across 180° |
-| `test/basemap.test.ts` | 11 | Natural Earth files decode correctly at both scales (land about 29% of the planet, no inside-out polygons, known places on land and at sea across 180° and the poles); dataset record; per-world setting with undo; culling never drops anything on screen (160 random views) |
-| `e2e/vertical-slice.e2e.ts` | 16 steps | The vertical slice in Chrome: projects, drawing, Earth's geography and data sources, border points, versions, events, dates, version restore and undo, full restart, animation, export with data credits, identical re-export, 1080p |
+| `test/basemap.test.ts` | 12 | Natural Earth files decode correctly at both scales (land about 29% of the planet, no inside-out polygons, known places on land and at sea across 180° and the poles); dataset record; per-world setting and per-layer clipping setting with undo; culling never drops anything on screen (160 random views) |
+| `e2e/vertical-slice.e2e.ts` | 17 steps | The vertical slice in Chrome: projects, drawing, Earth's geography and data sources, border points, versions, events, dates, version restore and undo, full restart, animation, export with data credits, identical re-export, 1080p, coastline clipping |
 | `e2e/workflows.e2e.ts` | 9 steps | Precise shapes; occupation layer; hiding layers; alternative versions; annexation; deleting and undoing events; fades; a second world; a camera move at 2.39:1 and 25 fps with frame timing, history in the pixels and pass stacking checked; square size, Natural Earth projection, 23.976 fps, transparency |
 
 Checked by hand: 4K and 8K exports; the unzipped package starts and works; requests from other hosts are refused.
@@ -138,8 +139,8 @@ Remaining bottlenecks:
 ## Known bugs and limitations
 
 1. **Not yet run on Windows.** The launcher, Windows paths and Explorer integration are untested until the user tries them.
-2. **Territories are not clipped to the coastlines.** Painted loosely, a country covers the sea. Coastline clipping is
-   next. The basemap's finest detail is 1:50m (about 1 km); city-scale coastlines (1:10m, OpenStreetMap) are not included yet.
+2. **Coastline detail.** The basemap's finest detail is 1:50m (about 1 km); city-scale coastlines (1:10m, OpenStreetMap)
+   are not included yet. Areas in the inspector include parts clipped away at the coast.
 3. **Large maps are slow to edit and render** (see Performance).
 4. **Two animations meeting.** Where two simultaneous animated changes touch, their shared border is drawn throughout instead of following each front.
 5. **Animation taking over another animation.** When a change starts while an earlier one is still animating the same area, the earlier one is shown at its starting state.
@@ -171,12 +172,12 @@ Remaining bottlenecks:
 | --- | --- | --- |
 | 15–16 Nov 2026 | Stage work from an empty folder: time system and kernel; world model, engine and commands; data service; interface; end-to-end fixes; documentation (0.1.0) | `2a564fc` → `0966b07` |
 | 16 Nov 2026 | Testing and refinement: scenario, geometry, world, recovery, camera and A/B tests; second interface test; benchmark; 11 defects fixed; performance work (0.2.0) | `6a3c64a` → `343d84c` |
-| 16 Nov 2026 (2nd) | Package installs work; Natural Earth basemap (land, lakes, coastlines, present-day borders guide), land export pass, data sources dialog and export credits | `071deac` → latest |
+| 16 Nov 2026 (2nd) | Package installs work; Natural Earth basemap (land, lakes, coastlines, present-day borders guide), land export pass, data sources dialog and export credits; coastline clipping with land-aware labels | `071deac` → latest |
 
 ## Next priorities
 
 1. The user runs `Start Map Maker.bat` on Windows and reports what happens.
-2. Coastline clipping (territories end at the coast), then reverse D4 (real React types), D2 (Electron and installer),
+2. Reverse D4 (real React types), D2 (Electron and installer),
    D1 (deck.gl renderer).
 3. With the user's agreement: make the geometry kernel's rebuild incremental (needed before real coastlines).
 4. Finish Stage 2: border pen, split and merge tools, region picker, administrative boundaries, coastline clipping.
