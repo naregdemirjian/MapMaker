@@ -242,6 +242,28 @@ try {
     await screenshot('zoomed-and-moved');
   });
 
+  await step("Earth's geography: land drawn, present-day borders as a guide, data sources listed", async () => {
+    // Land and sea differ in the picture: a pixel in Africa and one in the Atlantic.
+    const px = (lon: number, lat: number) => page.evaluate(([lon, lat]) => {
+      const p = (window as any).__mapmaker.lonLatToPage(lon, lat);
+      const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement;
+      const r = c.getBoundingClientRect(), k = c.width / r.width;
+      return Array.from(c.getContext('2d')!.getImageData(Math.round((p[0] - r.left) * k), Math.round((p[1] - r.top) * k), 1, 1).data);
+    }, [lon, lat]);
+    await page.waitForFunction(() => (window as any).__mapmaker.store.basemap);
+    const land = await px(20, 5), sea = await px(-30, 10);
+    assert.ok(Math.abs(land[0] - sea[0]) + Math.abs(land[1] - sea[1]) + Math.abs(land[2] - sea[2]) > 40, `land ${land} and sea ${sea} look different`);
+    await page.getByTestId('reference-borders-toggle').check();
+    await screenshot('present-day-borders-guide');
+    await page.getByTestId('reference-borders-toggle').uncheck();
+    await page.getByTestId('data-sources').click();
+    await page.getByTestId('dataset-natural-earth').waitFor();
+    assert.match(await page.getByTestId('dataset-natural-earth').innerText(), /Public domain/);
+    await screenshot('data-sources');
+    await page.locator('.modal button.primary', { hasText: 'Close' }).click();
+    await page.locator('.modal').waitFor({ state: 'detached' });
+  });
+
   await step('Create a country and draw its territory', async () => {
     await page.getByRole('button', { name: '+ New' }).click();
     await page.getByTestId('new-entity-name').fill(A);
@@ -447,6 +469,11 @@ try {
       assert.equal(files.length, 24, `${pass}: 24 frames`);
     }
     assert.ok(existsSync(join(ex.dir, 'COMPOSITING_GUIDE.txt')));
+    // Earth's geography is drawn, and its credit travels with the export.
+    assert.equal(m.dataCredits.length, 1);
+    assert.match(m.dataCredits[0], /^Natural Earth v5\.1\.2 \(Public domain\)/);
+    assert.match(readFileSync(join(ex.dir, 'COMPOSITING_GUIDE.txt'), 'utf8'), /Made with Natural Earth/);
+    assert.equal(new Set(Object.values(m.checksums.land as Record<string, string>)).size, 1, 'the land pass is the same in every frame');
     // The background does not change during the shot; the territory does.
     const bg = Object.values(m.checksums.background as Record<string, string>);
     assert.equal(new Set(bg).size, 1, 'the background pass is the same in every frame');

@@ -7,6 +7,7 @@ import { BASE_EVENT_ID } from '../../world-model/schema.ts';
 import type { TransitionSpec } from '../../temporal-engine/engine.ts';
 import { lonLatToVec } from '../../geo-kernel/vec.ts';
 import { DateField, fmt } from './Panels.tsx';
+import { loadDatasetRecords, type DatasetRecord } from '../../render-engine/basemap.ts';
 
 function Modal({ title, children, onClose, wide }: { title: string; children: any; onClose: () => void; wide?: boolean }) {
   return (
@@ -149,6 +150,34 @@ export function NewWorldDialog() {
       <div className="presets">{WORLD_PRESETS.map((p) => <button key={p.name} className="small" onClick={() => { setName(p.name); setKm(String(p.km)); setEarth(p.name === 'Earth'); }}>{p.name}</button>)}</div>
       <label className="check"><input type="checkbox" checked={earth} onChange={(e: any) => setEarth(e.target.checked)} data-testid="new-world-earth" /> Start with Earth's geography (land, lakes and coastlines)</label>
       <div className="modal-actions"><button onClick={close}>Cancel</button><button className="primary" onClick={create}>Create world</button></div>
+    </Modal>
+  );
+}
+
+export function DataSourcesDialog() {
+  const s = useStore();
+  const [records, setRecords] = useState<DatasetRecord[] | null>(null);
+  const [error, setError] = useState('');
+  useEffect(() => { loadDatasetRecords().then(setRecords, (e: Error) => setError(e.message)); }, []);
+  const close = () => s.set({ dialog: null });
+  return (
+    <Modal title="Data sources" onClose={close} wide>
+      <p className="muted">Real-world data that Map Maker ships with. Each export lists the credit lines for the data it shows in its manifest and compositing guide.</p>
+      {error && <p className="error">{error}</p>}
+      {!records && !error && <p className="muted">Loading…</p>}
+      {records?.map((d) => (
+        <div key={d.id} className="dataset" data-testid={`dataset-${d.id}`}>
+          <h4>{d.name} <span className="muted">{d.version}</span></h4>
+          <table className="kv"><tbody>
+            <tr><th>Used for</th><td>{d.usedFor}</td></tr>
+            <tr><th>Licence</th><td>{d.licence}</td></tr>
+            <tr><th>Credit line</th><td>{d.credit}</td></tr>
+            <tr><th>Source</th><td>{d.source}</td></tr>
+            <tr><th>Retrieved</th><td>{d.retrieved}{d.converted ? ` · ${d.converted}` : ''}</td></tr>
+          </tbody></table>
+        </div>
+      ))}
+      <div className="modal-actions"><button className="primary" onClick={close}>Close</button></div>
     </Modal>
   );
 }

@@ -77,6 +77,20 @@ export function decodeBasemap(file: BasemapFile): BasemapScale {
   };
 }
 
+/** A dataset's record as kept in data/datasets.json (source, version, licence and credit line). */
+export interface DatasetRecord { id: string; name: string; version: string; source: string; licence: string; credit: string; usedFor: string; retrieved: string; converted?: string }
+
+let records: Promise<DatasetRecord[]> | null = null;
+
+/** The records of every dataset the app ships with. */
+export function loadDatasetRecords(url = 'data/datasets.json'): Promise<DatasetRecord[]> {
+  if (!records) {
+    records = fetch(url).then((r) => { if (!r.ok) throw new Error('The dataset records could not be loaded.'); return r.json() as Promise<DatasetRecord[]>; });
+    records.catch(() => { records = null; });
+  }
+  return records;
+}
+
 let loading: Promise<Basemap> | null = null;
 
 /** Load the basemap once (both scales) from the interface's data folder. */

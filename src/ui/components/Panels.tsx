@@ -183,6 +183,7 @@ export function Outliner() {
                 <input type="checkbox" data-testid="reference-borders-toggle" checked={s.referenceBorders} onChange={(e: any) => s.set({ referenceBorders: e.target.checked })} /> Present-day borders (guide)
               </label>
             )}
+            <button className="link" onClick={() => s.set({ dialog: 'data-sources' })} data-testid="data-sources">Data sources and credits</button>
           </div>
         )}
       </Section>

@@ -8,7 +8,7 @@ import { MapRenderer, DEFAULT_STYLE, type PassName } from '../render-engine/map-
 import { makeView } from '../render-engine/camera.ts';
 import { type ShotSettings, timeAt, cameraAt, overlaysAt, drawOverlays } from './sequence.ts';
 import { gregorian } from '../core-time/index.ts';
-import { basemapSourceOf, loadBasemap, type Basemap } from '../render-engine/basemap.ts';
+import { basemapSourceOf, loadBasemap, loadDatasetRecords, type Basemap } from '../render-engine/basemap.ts';
 
 export interface ExportPassDef { name: string; label: string; blend: string; passes: PassName[]; overlays: boolean; background: boolean; note?: string }
 
@@ -61,7 +61,10 @@ export async function runExport(o: {
   const started = performance.now();
   // Loaded before the first frame, so every frame is drawn from the same complete data.
   const basemap = await basemapFor(o.world, o.shot.spaceId);
+  // Credit lines for the data drawn in these frames (written into the manifest and the guide).
+  const credits = basemap ? (await loadDatasetRecords()).filter((d) => d.id === 'natural-earth').map((d) => `${d.name} ${d.version} (${d.licence}): ${d.credit}`) : [];
   const job = await Api.startExport(o.projectId, {
+    credits,
     shotName: o.scale === 1 ? o.shotName : `${o.shotName} (preview)`, width, height, fps: o.shot.fps, frameStart: f0, frameEnd: f1,
     passes: defs.map((d) => ({ name: d.name, label: d.label, blend: d.blend, note: d.note })), transparent: o.shot.transparent,
     historicalRange: [gregorian.format(timeAt(o.shot, f0), 'minute'), gregorian.format(timeAt(o.shot, f1), 'minute')],

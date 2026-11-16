@@ -126,3 +126,14 @@ a { color: var(--accent); cursor: pointer; }
 .picker { height: 100%; display: flex; align-items: center; justify-content: center; background: radial-gradient(circle at 30% 20%, #1a2a3a, #0b1117); }
 .picker-card { width: 540px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 26px 30px; }
 .project-row { padding: 8px; }
+
+/* World options under the worlds list; data sources dialog */
+.world-options { padding: 4px 10px 8px; display: flex; flex-direction: column; gap: 6px; }
+button.link { background: none; border: none; padding: 0; color: var(--accent); text-align: left; cursor: pointer; font-size: 12px; }
+button.link:hover { text-decoration: underline; }
+.dataset { margin: 10px 0 14px; }
+.dataset h4 { margin: 0 0 6px; }
+table.kv { border-collapse: collapse; width: 100%; font-size: 13px; }
+table.kv th { text-align: left; font-weight: 500; color: var(--muted); padding: 3px 12px 3px 0; vertical-align: top; white-space: nowrap; }
+table.kv td { padding: 3px 0; overflow-wrap: anywhere; }
+p.error { color: #ff9aa8; }
