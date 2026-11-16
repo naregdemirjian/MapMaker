@@ -405,17 +405,21 @@ function paintInside(tx: Tx, engine: Engine, p: PaintInput, out: number[] = []):
   for (const r of rings) {
     const path = tx.kernel(p.spaceId, (arr) => arr.insertPath(r, { closed: true, snap: p.snap }));
     const arr = world.arrangement(p.spaceId);
-    const inside = arr.facesLeftOf(path);
-    // Safety check: the parcels about to change must cover exactly the area the outline encloses.
-    // An outline that folds back on itself, crosses itself, or collapses when snapped would otherwise
-    // be able to repaint far more than was drawn. Refusing undoes the geometry too (the command is
-    // one transaction).
+    // A simple outline paints what lies on its left (so shapes larger than a hemisphere work).
+    // Check that against the area the outline encloses, computed independently from its points: if
+    // they differ, the outline crosses, folds back or overlaps itself, and it paints every area it
+    // goes around instead (DECISIONS D23), exactly as drawn.
+    let inside = arr.facesLeftOf(path);
     const enclosed = arr.pathLeftArea(path);
     const full = 4 * Math.PI;
-    if (enclosed < 1e-15 || enclosed > full - 1e-15) throw new Error('This outline encloses no area (it may be too thin at this zoom level). Draw it a little wider.');
     let covered = 0;
     for (const f of leafDescendants(arr, inside)) covered += arr.faceArea(f);
-    if (Math.abs(covered - enclosed) > 1e-9 + 1e-6 * enclosed) throw new Error('This outline crosses or folds back on itself. Draw it as separate shapes.');
+    if (enclosed < 1e-15 || enclosed > full - 1e-15 || Math.abs(covered - enclosed) > 1e-9 + 1e-6 * enclosed) {
+      inside = arr.facesWoundBy(path);
+      let wound = 0;
+      for (const f of leafDescendants(arr, inside)) wound += arr.faceArea(f);
+      if (wound < 1e-15) throw new Error('This outline encloses no area (it may be too thin at this zoom level). Draw it a little wider.');
+    }
     for (const f of inside) insideAll.add(f);
   }
   const arr = world.arrangement(p.spaceId);

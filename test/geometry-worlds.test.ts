@@ -53,12 +53,22 @@ test('degenerate shapes are refused without changing anything', () => {
   assert.equal(s.at(1, 0.001), null);
 });
 
-test('a self-crossing outline never produces invalid geometry', () => {
+test('a self-crossing outline paints exactly the areas it goes around, and never produces invalid geometry', () => {
   const s = setup();
-  // A bow tie: two lobes traversed in opposite directions.
+  // A bow tie: two lobes traversed in opposite directions. Both lobes are painted, nothing else.
   const bow: Array<[number, number]> = [[0, 0], [10, 10], [10, 0], [0, 10]];
-  assert.ok(refusedCleanly(s, () => s.paintRing(ring(bow, 0.5), s.A)), 'a bow tie is refused rather than flooding the world');
+  s.paintRing(ring(bow, 0.5), s.A);
+  assert.equal(s.at(2, 5), s.A, 'left lobe');
+  assert.equal(s.at(8, 5), s.A, 'right lobe');
+  assert.equal(s.at(5, 1), null, 'between the lobes');
+  assert.equal(s.at(5, 9), null, 'between the lobes');
   assert.equal(s.at(100, -40), null, 'far away nothing was painted');
+  // A loop with a twist (a small loop at one corner, drawn the 'wrong' way round): the twist is painted too.
+  const twist: Array<[number, number]> = [[20, 0], [30, 0], [30, 10], [24, 10], [26, 12], [26, 8], [20, 10]];
+  s.paintRing(ring(twist, 0.5), s.B);
+  assert.equal(s.at(25, 5), s.B, 'main loop');
+  assert.equal(s.at(25.3, 10.6), s.B, 'the small twisted loop');
+  assert.equal(s.at(60, 60), null, 'far away nothing was painted');
   // A clockwise outline encloses everything outside it (the drawing tools always orient outlines inward).
   s.paintRing(ring([[40, 40], [40, 45], [45, 45], [45, 40]]), s.B);
   assert.equal(s.at(100, -40), s.B);
@@ -69,7 +79,10 @@ test('a self-crossing outline never produces invalid geometry', () => {
     const cx = r.float(-170, 170), cy = r.float(-70, 70);
     const pts: Array<[number, number]> = [];
     for (let k = 0; k < r.int(4, 12); k++) pts.push([cx + r.float(-8, 8), cy + r.float(-8, 8)]);
-    refusedCleanly(s, () => s.paintRing(ring(pts, 0.5), r.bool() ? s.A : s.B));
+    try { s.paintRing(ring(pts, 0.5), r.bool() ? s.A : s.B); } catch (e) {
+      assert.match((e as Error).message, /encloses no area|too small/, 'scribbles are painted as drawn; only arealess ones are refused');
+    }
+    s.valid();
   }
   s.valid();
 });

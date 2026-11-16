@@ -862,6 +862,57 @@ export class Arrangement {
     return seen;
   }
 
+  /**
+   * The faces a drawn outline goes around, however it crosses or folds over itself: every face
+   * whose winding number is not zero (a figure-eight gives both lobes, a twist its small loop,
+   * an overlap its doubled area). Winding changes by the path's net count across each segment; the
+   * outside is the class of faces with the largest total area (the rest of the planet).
+   */
+  facesWoundBy(path: PathStep[]): Set<number> {
+    const net = new Map<number, number>();
+    for (const st of path) net.set(st.seg, (net.get(st.seg) ?? 0) + (st.fwd ? 1 : -1));
+    // Neighbours across each segment, with the change in winding from the right face to the left.
+    const adj = new Map<number, Array<[number, number]>>();
+    const link = (f: number, g: number, d: number) => { (adj.get(f) ?? adj.set(f, []).get(f)!).push([g, d]); };
+    for (const s of this.segments.values()) {
+      if (s.left_face === s.right_face) continue;
+      const c = net.get(s.id) ?? 0;
+      link(s.right_face, s.left_face, c);
+      link(s.left_face, s.right_face, -c);
+    }
+    const wind = new Map<number, number>();
+    for (const f0 of this.faces.values()) {
+      if (!f0.is_leaf || wind.has(f0.id)) continue;
+      wind.set(f0.id, 0);
+      const queue = [f0.id];
+      while (queue.length) {
+        const f = queue.pop()!;
+        const w = wind.get(f)!;
+        for (const [g, d] of adj.get(f) ?? []) if (!wind.has(g)) { wind.set(g, w + d); queue.push(g); }
+      }
+    }
+    // Total area of each winding value; the most numerous class is measured as the remainder.
+    const byValue = new Map<number, number[]>();
+    for (const [f, w] of wind) (byValue.get(w) ?? byValue.set(w, []).get(w)!).push(f);
+    let biggest = 0, biggestCount = -1;
+    for (const [w, fs] of byValue) if (fs.length > biggestCount) { biggest = w; biggestCount = fs.length; }
+    const area = new Map<number, number>();
+    let rest = 4 * Math.PI;
+    for (const [w, fs] of byValue) {
+      if (w === biggest) continue;
+      let a = 0;
+      for (const f of fs) a += this.faceArea(f);
+      area.set(w, a);
+      rest -= a;
+    }
+    area.set(biggest, rest);
+    let outside = biggest;
+    for (const [w, a] of area) if (a > area.get(outside)!) outside = w;
+    const out = new Set<number>();
+    for (const [f, w] of wind) if (w !== outside) out.add(f);
+    return out;
+  }
+
   leafFaces(): number[] {
     return [...this.faces.values()].filter((f) => f.is_leaf).map((f) => f.id).sort((a, b) => a - b);
   }
