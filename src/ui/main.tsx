@@ -4,7 +4,7 @@ import { store } from './store.ts';
 import { gregorian } from '../core-time/index.ts';
 import { lonLatToVec } from '../geo-kernel/vec.ts';
 import { makeView, screenToLonLat, lonLatToScreen } from '../render-engine/camera.ts';
-import { cameraAt } from '../presentation/sequence.ts';
+import { cameraAt, timeAt } from '../presentation/sequence.ts';
 import { currentShot } from './components/MapView.tsx';
 
 // A small read-only window into the live state, used by the automated interface tests.
@@ -33,6 +33,11 @@ import { currentShot } from './components/MapView.tsx';
     const r = c.getBoundingClientRect();
     const p = lonLatToScreen(makeView(store.camera, r.width, r.height), lon, lat);
     return p ? [p[0] + r.left, p[1] + r.top] : null;
+  },
+  /** The historical instant shown by a frame of the current shot. */
+  shotInstantAt(frame: number) {
+    const shot = currentShot();
+    return shot ? timeAt(shot, frame) : null;
   },
   /** The current world-building camera framed for an output of the given size (for benchmarks). */
   viewFor(width: number, height: number) {

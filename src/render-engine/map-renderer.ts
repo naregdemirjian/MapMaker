@@ -129,50 +129,53 @@ export class MapRenderer {
     const colorOf = (v: string | null) => (v ? entities.get(v)?.color ?? '#888888' : null);
     const labels: LabelInfo[] = [];
 
+    // Draw in the same order whether everything is drawn at once or pass by pass (as exported):
+    // the fills of every layer, then the borders of every layer, then the labels. Stacking the
+    // exported passes in Premiere then reproduces the full picture exactly, with several layers too.
     const drawsLayers = opts.passes.has('fills') || opts.passes.has('borders') || opts.passes.has('labels');
+    const prepared: Array<{ ls: { fillOpacity?: number; borderWidth?: number }; states: Map<number, FaceState>; tg: ReturnType<MapRenderer['transitionGroups']> }> = [];
     for (const layerId of drawsLayers ? opts.layerIds : []) {
       const layer = world.get('layer', layerId);
       if (!layer || layer.space_id !== spaceId || layer.kind !== 'partition') continue;
-      const ls = parseJSON<{ fillOpacity?: number; borderWidth?: number }>(layer.style, {});
       const states = engine.partitionState(spaceId, layerId, t);
-      const tg = this.transitionGroups(view, arr, engine, states, t);
-
-      if (opts.passes.has('fills')) {
-        // The layer is painted fully opaque in a scratch buffer and laid onto the map once at the
-        // layer's opacity: neighbouring parcels then never show seams, and fades mix correctly.
-        const lc = this.scratch(ctx);
-        const byColor = new Map<string, number[]>();
-        for (const [face, st] of states) {
-          const c = colorOf(tg.of.has(face) ? st.transition!.from : st.value);
-          if (!c) continue;
-          const l = byColor.get(c);
-          if (l) l.push(face); else byColor.set(c, [face]);
-        }
-        for (const [c, faces] of byColor) { lc.fillStyle = c; lc.fill(this.groupPath(view, arr, faces), 'evenodd'); }
-        for (const g of tg.groups.values()) this.drawTransition(lc, g, colorOf);
-        ctx.save();
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.globalAlpha = ls.fillOpacity ?? 0.78;
-        ctx.drawImage(lc.canvas as CanvasImageSource, 0, 0);
-        ctx.restore();
-        // The advancing front is highlighted on top, at full strength.
-        for (const g of tg.groups.values()) {
-          if (!g.advance || !g.disc) continue;
-          ctx.save();
-          ctx.clip(g.changing, 'evenodd');
-          ctx.strokeStyle = style.frontGlow;
-          ctx.lineWidth = 2.2 * view.unit;
-          ctx.shadowColor = style.frontGlow;
-          ctx.shadowBlur = 10 * view.unit;
-          ctx.stroke(g.disc);
-          ctx.restore();
-        }
-      }
-
-      if (opts.passes.has('borders')) this.drawBorders(ctx, view, arr, states, tg, style, (ls.borderWidth ?? style.borderWidth) * u);
-
-      if (opts.passes.has('labels')) labels.push(...this.layerLabels(view, arr, states, entities));
+      prepared.push({ ls: parseJSON<{ fillOpacity?: number; borderWidth?: number }>(layer.style, {}), states, tg: this.transitionGroups(view, arr, engine, states, t) });
     }
+
+    if (opts.passes.has('fills')) for (const { ls, states, tg } of prepared) {
+      // Each layer is painted fully opaque in a scratch buffer and laid onto the map once at the
+      // layer's opacity: neighbouring parcels then never show seams, and fades mix correctly.
+      const lc = this.scratch(ctx);
+      const byColor = new Map<string, number[]>();
+      for (const [face, st] of states) {
+        const c = colorOf(tg.of.has(face) ? st.transition!.from : st.value);
+        if (!c) continue;
+        const l = byColor.get(c);
+        if (l) l.push(face); else byColor.set(c, [face]);
+      }
+      for (const [c, faces] of byColor) { lc.fillStyle = c; lc.fill(this.groupPath(view, arr, faces), 'evenodd'); }
+      for (const g of tg.groups.values()) this.drawTransition(lc, g, colorOf);
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalAlpha = ls.fillOpacity ?? 0.78;
+      ctx.drawImage(lc.canvas as CanvasImageSource, 0, 0);
+      ctx.restore();
+      // The advancing front is highlighted on top, at full strength.
+      for (const g of tg.groups.values()) {
+        if (!g.advance || !g.disc) continue;
+        ctx.save();
+        ctx.clip(g.changing, 'evenodd');
+        ctx.strokeStyle = style.frontGlow;
+        ctx.lineWidth = 2.2 * view.unit;
+        ctx.shadowColor = style.frontGlow;
+        ctx.shadowBlur = 10 * view.unit;
+        ctx.stroke(g.disc);
+        ctx.restore();
+      }
+    }
+
+    if (opts.passes.has('borders')) for (const { ls, states, tg } of prepared) this.drawBorders(ctx, view, arr, states, tg, style, (ls.borderWidth ?? style.borderWidth) * u);
+
+    if (opts.passes.has('labels')) for (const { states } of prepared) labels.push(...this.layerLabels(view, arr, states, entities));
 
     if (opts.passes.has('labels')) this.drawLabels(ctx, labels, style, u);
     this.lastLabels = labels;
