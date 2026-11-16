@@ -474,6 +474,28 @@ export class Arrangement {
   }
 
   private nextCycleId = 1;
+  /** Per-cycle geometry (area on its left, bounding cap), valid while the cycle exists unchanged. */
+  private cycleData = new Map<number, { area: number; cap: { c: Vec3; r: number } | null }>();
+
+  private cycleInfo(id: number, c: number[], t: Topology): { area: number; cap: { c: Vec3; r: number } | null } {
+    let d = this.cycleData.get(id);
+    if (!d) {
+      const area = this.cycleLeftArea(c, t);
+      let cap: { c: Vec3; r: number } | null = null;
+      let sx = 0, sy = 0, sz = 0;
+      for (const h of c) { const p = this.v(this.he(h).from); sx += p[0]; sy += p[1]; sz += p[2]; }
+      const len = Math.hypot(sx, sy, sz);
+      if (len >= 1e-9) {
+        const cc: Vec3 = [sx / len, sy / len, sz / len];
+        let r = 0;
+        for (const h of c) r = Math.max(r, angle(cc, this.v(this.he(h).from)));
+        if (r < Math.PI / 2 - 1e-9) cap = { c: cc, r: r + 1e-9 };
+      }
+      d = { area, cap };
+      this.cycleData.set(id, d);
+    }
+    return d;
+  }
 
   private refreshTopology(t: Topology): void {
     const dirty = this.dirtyVertices, gone = this.goneHalfEdges, relabelled = this.relabelled;
@@ -504,6 +526,7 @@ export class Arrangement {
     for (const h of gone) { const c = t.cycleOf.get(h); if (c !== undefined) broken.add(c); }
     const loose = new Set<number>();
     for (const c of broken) {
+      this.cycleData.delete(c);
       for (const h of t.cycles.get(c)!) { t.cycleOf.delete(h); loose.add(h); }
       t.cycles.delete(c);
       t.minHE.delete(c);
@@ -643,23 +666,14 @@ export class Arrangement {
 
     const isOuter = new Uint8Array(nC);
     const area = new Float64Array(nC);
-    for (let ci = 0; ci < nC; ci++) {
-      isOuter[ci] = holeOf.get(compOfCycle(ci)) === ci ? 0 : 1;
-      area[ci] = this.cycleLeftArea(cyc[ci], t);
-    }
-
-    // Bounding caps for outer cycles, to skip impossible containment tests.
+    // Areas and bounding caps come from the per-cycle cache (only new cycles are measured).
     const caps: Array<{ c: Vec3; r: number } | null> = new Array(nC).fill(null);
     for (let ci = 0; ci < nC; ci++) {
-      if (!isOuter[ci] || area[ci] >= 2 * Math.PI) continue;
-      let sx = 0, sy = 0, sz = 0;
-      for (const h of cyc[ci]) { const p = this.v(this.he(h, t).from); sx += p[0]; sy += p[1]; sz += p[2]; }
-      const len = Math.hypot(sx, sy, sz);
-      if (len < 1e-9) continue;
-      const c: Vec3 = [sx / len, sy / len, sz / len];
-      let r = 0;
-      for (const h of cyc[ci]) r = Math.max(r, angle(c, this.v(this.he(h, t).from)));
-      if (r < Math.PI / 2 - 1e-9) caps[ci] = { c, r: r + 1e-9 };
+      isOuter[ci] = holeOf.get(compOfCycle(ci)) === ci ? 0 : 1;
+      const info = this.cycleInfo(cycIds[ci], cyc[ci], t);
+      area[ci] = info.area;
+      // Bounding caps for outer cycles, to skip impossible containment tests.
+      if (isOuter[ci] && area[ci] < 2 * Math.PI) caps[ci] = info.cap;
     }
 
     // Each component's container: the smallest outer cycle of another component that contains it.
@@ -1092,8 +1106,8 @@ export class Arrangement {
       // In a face, at most one cycle is "outer"; holes have left areas close to 4*pi minus the hole.
       if (outer === -1 && !this.cycleContainsPinfCached(ci, t)) outer = ci; else holes.push(ci);
     }
-    let area = outer === -1 ? 4 * Math.PI : this.cycleLeftArea(t.cycles.get(outer)!, t);
-    for (const ci of holes) area -= 4 * Math.PI - this.cycleLeftArea(t.cycles.get(ci)!, t);
+    let area = outer === -1 ? 4 * Math.PI : this.cycleInfo(outer, t.cycles.get(outer)!, t).area;
+    for (const ci of holes) area -= 4 * Math.PI - this.cycleInfo(ci, t.cycles.get(ci)!, t).area;
     return area;
   }
 
