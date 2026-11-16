@@ -291,6 +291,44 @@ try {
     await h.screenshot('zoomed-mid-stroke');
   });
 
+  await h.step('Drawing flow: correction preselected, Enter applies, several border changes in one event, right-click deselects', async () => {
+    await h.setDate('1970');
+    const { cx, cy } = await h.centre();
+    // 1. A correction needs no clicks at all: draw, press Enter.
+    await h.drawLasso(blob(cx - 260, cy + 180, 30, 25));
+    await page.getByTestId('choice-correct').waitFor();
+    assert.match((await page.getByTestId('choice-correct').getAttribute('class')) ?? '', /\bon\b/, 'correct this period is preselected');
+    await page.keyboard.press('Enter');
+    await page.getByTestId('choice-correct').waitFor({ state: 'detached' });
+    await h.saved();
+    assert.equal(await h.ownerAt(await h.toLL([cx - 260, cy + 180]), '1970'), 'Zoomland');
+    // 2. Two border changes go into one event: the second drawing offers the first one's event.
+    const before = await page.evaluate(() => (window as any).__mapmaker.store.world.all('event').length);
+    await h.drawLasso(blob(cx - 180, cy + 180, 30, 25));
+    await page.getByTestId('choice-new').click();
+    await page.getByTestId('event-target').selectOption('new-event');
+    await page.getByTestId('new-event-name').fill('Zoomland expansion');
+    await page.keyboard.press('Enter');
+    await page.getByTestId('choice-new').waitFor({ state: 'detached' });
+    await h.drawLasso(blob(cx - 100, cy + 180, 30, 25));
+    await page.getByTestId('choice-new').click();
+    const ev = await page.evaluate(() => (window as any).__mapmaker.store.world.all('event').find((e: any) => e.name === 'Zoomland expansion').id);
+    assert.equal(await page.getByTestId('event-target').inputValue(), ev, 'the second drawing goes into the same event by default');
+    await page.keyboard.press('Enter');
+    await page.getByTestId('choice-new').waitFor({ state: 'detached' });
+    await h.saved();
+    const after = await page.evaluate((id) => {
+      const w = (window as any).__mapmaker.store.world;
+      return { events: w.all('event').length, effects: w.all('effect').filter((f: any) => f.event_id === id).length };
+    }, ev);
+    assert.equal(after.events, before + 1, 'one event for both border changes');
+    assert.equal(after.effects, 2, 'the event holds both changes');
+    // 3. Right-click deselects.
+    assert.ok(await page.evaluate(() => (window as any).__mapmaker.store.selection !== null));
+    await page.mouse.click(cx + 100, cy - 100, { button: 'right' });
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.selection), null, 'nothing is selected after a right-click');
+  });
+
   let colours: Record<string, string> = {};
   await h.step('A shot with a camera move at 2.39:1 and 25 fps; inspect every exported pass', async () => {
     colours = await page.evaluate((names) => Object.fromEntries(names.map((n) => [n, (window as any).__mapmaker.store.world.all('entity').find((e: any) => e.name === n).color])), [A, B]);

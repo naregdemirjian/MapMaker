@@ -151,3 +151,4 @@ p.error { color: #ff9aa8; }
 .group-new { display: flex; gap: 6px; margin-top: 8px; }
 .group-new input { flex: 1; }
 .group-checks { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
+.key { font-size: 10px; opacity: 0.7; border: 1px solid currentColor; border-radius: 3px; padding: 0 3px; margin-left: 4px; }

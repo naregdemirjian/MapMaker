@@ -245,6 +245,8 @@ export function MapView() {
     const d = drag.current;
     drag.current = { kind: 'none' };
     const p = local(e);
+    // A right-click (without dragging) deselects everything.
+    if (d.kind === 'pan' && d.moved < 4 && !presentation && e.button === 2) { store.set({ selection: null }); return; }
     if (d.kind === 'pan' && d.moved < 4 && !presentation && e.button === 0) {
       const ll = screenToLonLat(view, d.startX, d.startY);
       if (ll) store.set({ selection: { kind: 'point', lon: ll[0], lat: ll[1] } });

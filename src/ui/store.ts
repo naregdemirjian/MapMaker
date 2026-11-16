@@ -59,6 +59,8 @@ class AppStore {
   presentCamera: Camera | null = null;
   playing = false;
   dialog: string | null = null;
+  /** The event the last drawing went into, offered first for the next one (several border changes, one event). */
+  lastPaintEvent: string | null = null;
   /** Event groups the timeline shows (null: every event). Remembered per project. */
   eventFilter: string[] | null = null;
   /** Set when a change could not be saved; editing stops until the project is reloaded from disk. */

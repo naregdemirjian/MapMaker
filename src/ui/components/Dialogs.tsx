@@ -32,8 +32,17 @@ function PaintPrompt({ p }: { p: Extract<PendingEdit, { kind: 'paint' }> }) {
   const s = useStore();
   const w = s.world!, e = s.engine!;
   const who = p.value ? w.get('entity', p.value)?.name ?? 'someone' : 'nobody';
-  const [choice, setChoice] = useState<'new' | 'correct'>('new');
-  const [target, setTarget] = useState<string>('new-event');
+  // A correction is the most common meaning, so it is chosen; Enter applies.
+  const [choice, setChoice] = useState<'new' | 'correct'>('correct');
+  // A new change goes into an existing event when there is an obvious one: the event the last drawing
+  // went into, the selected event, or an event starting at the date being viewed.
+  const [target, setTarget] = useState<string>(() => {
+    const ok = (id: string | null | undefined) => !!id && id !== BASE_EVENT_ID && !!w.get('event', id);
+    if (ok(s.lastPaintEvent)) return s.lastPaintEvent!;
+    if (s.selection?.kind === 'event' && ok(s.selection.id)) return s.selection.id;
+    const now = w.all('event').find((x) => x.id !== BASE_EVENT_ID && compare(fromStore(x.start_day, x.start_ms), s.time) === 0);
+    return now?.id ?? 'new-event';
+  });
   const [evName, setEvName] = useState(p.value ? `${who} gains territory` : 'Territory abandoned');
   const [end, setEnd] = useState<Instant | null>(null);
   const [style, setStyle] = useState<'instant' | 'advance' | 'fade'>('instant');
@@ -61,15 +70,28 @@ function PaintPrompt({ p }: { p: Extract<PendingEdit, { kind: 'paint' }> }) {
     } else if (target === 'new-event') {
       if (end && compare(end, s.time) < 0) { s.toast('The event cannot end before it starts.', 'error'); return; }
       const r = s.execute((wd, en) => cmd.paintWithNewEvent(wd, en, { name: evName, start: s.time, end, type_id: p.value ? 'conquest' : 'general' }, { ...base, transition: end ? transition : null }));
-      if (r) s.set({ selection: { kind: 'event', id: r.eventId } });
+      if (r) s.set({ selection: { kind: 'event', id: r.eventId }, lastPaintEvent: r.eventId });
     } else {
       const ev = w.get('event', target)!;
       const start = fromStore(ev.start_day, ev.start_ms);
       const at = compare(s.time, start) > 0 ? s.time : null;
       s.execute((wd, en) => cmd.paintTerritory(wd, en, { ...base, mode: { kind: 'new', eventId: target, at }, transition: ev.end_day !== null ? transition : null }));
+      s.set({ lastPaintEvent: target });
     }
     close();
   };
+  useEffect(() => {
+    const key = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') { ev.preventDefault(); close(); return; }
+      if (ev.key !== 'Enter' || ev.shiftKey) return;
+      const tag = (ev.target as HTMLElement)?.tagName;
+      if (tag === 'TEXTAREA' || tag === 'SELECT') return;
+      ev.preventDefault();
+      confirm();
+    };
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  });
   return (
     <Modal title={`What does this drawing mean?`} onClose={close}>
       <p className="muted">You drew an area for <b>{who}</b> while looking at <b>{fmt(s.time, 'minute')}</b>.</p>
@@ -105,7 +127,7 @@ function PaintPrompt({ p }: { p: Extract<PendingEdit, { kind: 'paint' }> }) {
         <div className="muted">Fixes how things were during the period you are looking at, inside the change that started it. No new event is created.</div>
       </div>
       <div className="muted small-note">Correcting a border's shape for all time is done by dragging its points with the Border points tool.</div>
-      <div className="modal-actions"><button onClick={close}>Cancel</button><button className="primary" onClick={confirm} data-testid="confirm-edit">Apply</button></div>
+      <div className="modal-actions"><button onClick={close}>Cancel</button><button className="primary" onClick={confirm} data-testid="confirm-edit">Apply <span className="key">Enter</span></button></div>
     </Modal>
   );
 }
