@@ -227,7 +227,7 @@ test('regression: an outline that crosses itself next to an existing country nev
   s.valid();
 });
 
-test('a path judged a simple loop always encloses exactly its left side (randomised)', () => {
+test('a path judged a simple loop that separates faces always encloses exactly its left side (randomised, small and large snapping)', () => {
   const s = setup();
   for (let i = 0; i < 6; i++) s.paintRing(ring(square(-40 + i * 15, 10, 9)), i % 2 ? s.A : s.B);
   const r = rng(7);
@@ -243,9 +243,11 @@ test('a path judged a simple loop always encloses exactly its left side (randomi
     }
     try {
       cmd.run(s.world, 'check', (tx) => {
-        const path = tx.kernel(s.spaceId, (arr) => arr.insertPath(ring(pts, 0.5), { closed: true, snap: 1e-7 }));
+        // Tolerances as the interface uses them: up to 4 pixels, about 1 degree at a whole-world view.
+        const snap = r.pick([1e-7, 1e-4, 4e-3, 1.6e-2]);
+        const path = tx.kernel(s.spaceId, (arr) => arr.insertPath(ring(pts, 0.5), { closed: true, snap }));
         const arr = s.world.arrangement(s.spaceId);
-        if (!arr.isSimpleCycle(path)) { other++; throw new Error('roll back'); }
+        if (!arr.isSimpleCycle(path) || !arr.separatesFaces(path)) { other++; throw new Error('roll back'); }
         simple++;
         const enclosed = arr.pathLeftArea(path);
         let covered = 0;

@@ -978,6 +978,22 @@ export class Arrangement {
     return len === n;
   }
 
+  /**
+   * Whether the faces on the left of a path are all different from those on its right. A simple
+   * loop always separates them; when firm snapping runs an outline along existing borders, the face
+   * structure can label two separated regions alike, and the left side must then not be trusted.
+   */
+  separatesFaces(path: PathStep[]): boolean {
+    const left = new Set<number>(), right = new Set<number>();
+    for (const st of this.netPath(path)) {
+      const s = this.segments.get(st.seg)!;
+      left.add(st.fwd ? s.left_face : s.right_face);
+      right.add(st.fwd ? s.right_face : s.left_face);
+    }
+    for (const f of left) if (right.has(f)) return false;
+    return true;
+  }
+
   /** The steps of a path whose segments are walked a net number of times (out-and-back pieces enclose nothing). */
   netPath(path: PathStep[]): PathStep[] {
     const count = new Map<number, number>();

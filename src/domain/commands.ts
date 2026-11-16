@@ -383,10 +383,13 @@ export interface CountryToAdd {
  * the same name is used) and its land is painted as a correction or as part of an event. All outlines
  * go into the map together, so the map's structure is rebuilt once however many countries there are.
  */
-export function addCountries(world: World, engine: Engine, o: { spaceId: string; layerId: string; countries: CountryToAdd[]; mode: EditMode; snap?: number }): CommandResult<{ entities: string[] }> {
-  checkTarget(world, { spaceId: o.spaceId, layerId: o.layerId, mode: o.mode });
+export function addCountries(world: World, engine: Engine, o: { spaceId: string; layerId: string; countries: CountryToAdd[]; mode: EditMode; snap?: number; newEvent?: EventInput }): CommandResult<{ entities: string[]; eventId: string | null }> {
+  checkTarget(world, { spaceId: o.spaceId, layerId: o.layerId, mode: o.newEvent ? undefined : o.mode });
   if (!o.countries.length) throw new Error('Choose at least one country.');
   return run(world, o.countries.length === 1 ? `Add ${o.countries[0].name}` : `Add ${o.countries.length} countries`, (tx) => {
+    // Optionally the event they belong to is created in the same step (one undo).
+    const eventId = o.newEvent ? insertEventIn(tx, o.newEvent) : null;
+    if (eventId) o = { ...o, mode: { kind: 'new', eventId } };
     const existing = new Map(world.all('entity').filter((e) => e.type_id === 'polity' || e.type_id === 'faction').map((e) => [e.name.toLowerCase(), e.id]));
     const entities: string[] = [];
     // Outlines: each polygon's outer ring and holes, oriented with the area they surround on the left.
@@ -406,7 +409,7 @@ export function addCountries(world: World, engine: Engine, o: { spaceId: string;
     const paths = tx.kernel(o.spaceId, (arr) => arr.insertPaths(rings, { closed: true, snap: o.snap ?? 1e-8 }));
     const arr = world.arrangement(o.spaceId);
     const lefts = arr.facesLeftOfMany(paths);
-    const insideOf = (i: number) => (arr.isSimpleCycle(paths[i]) ? lefts[i] : arr.facesWoundBy(paths[i]));
+    const insideOf = (i: number) => (arr.isSimpleCycle(paths[i]) && arr.separatesFaces(paths[i]) ? lefts[i] : arr.facesWoundBy(paths[i]));
     const corrections: Array<{ leaves: Iterable<number>; value: string | null }> = [];
     o.countries.forEach((c, k) => {
       let id = existing.get(c.name.toLowerCase());
@@ -428,7 +431,7 @@ export function addCountries(world: World, engine: Engine, o: { spaceId: string;
       else corrections.push({ leaves: faces, value: id });
     });
     if (o.mode.kind === 'correct' && corrections.length) correctPeriods(tx, engine, o.spaceId, o.layerId, corrections, o.mode.t);
-    return { entities };
+    return { entities, eventId };
   });
 }
 
@@ -561,7 +564,7 @@ function paintInside(tx: Tx, engine: Engine, p: PaintInput, out: number[] = []):
     const full = 4 * Math.PI;
     // A simple loop encloses exactly its left side; only other outlines need the area comparison
     // (which on a large map costs more than the rest of the edit).
-    const simple = enclosed > 1e-15 && enclosed < full - 1e-15 && arr.isSimpleCycle(path);
+    const simple = enclosed > 1e-15 && enclosed < full - 1e-15 && arr.isSimpleCycle(path) && arr.separatesFaces(path);
     let covered = enclosed;
     if (!simple) { covered = 0; for (const f of leafDescendants(arr, inside)) covered += arr.faceArea(f); }
     if (!simple && (enclosed < 1e-15 || enclosed > full - 1e-15 || Math.abs(covered - enclosed) > 1e-9 + 1e-6 * enclosed)) {
