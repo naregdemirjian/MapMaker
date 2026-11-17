@@ -7,6 +7,7 @@ import { EditPrompt, NewWorldDialog, NewEventDialog, VersionsDialog, HealthDialo
 import { ShotsPanel, ShotEditor, ShotTimeline } from './components/Presentation.tsx';
 import { LabelStyleDialog } from './components/LabelStyles.tsx';
 import { AddCountriesDialog } from './components/AddCountries.tsx';
+import { SettingsDialog } from './components/Settings.tsx';
 import { ContextMenu, deleteEntitiesAsked, deleteEventsAsked } from './components/ContextMenu.tsx';
 
 export function App() {
@@ -50,6 +51,7 @@ export function App() {
       {s.dialog === 'versions' && <VersionsDialog />}
       {s.dialog === 'health' && <HealthDialog />}
       {s.dialog === 'data-sources' && <DataSourcesDialog />}
+      {s.dialog === 'settings' && <SettingsDialog />}
       {s.dialog === 'label-style' && <LabelStyleDialog onClose={() => s.set({ dialog: null })} />}
       {s.dialog === 'add-countries' && <AddCountriesDialog onClose={() => s.set({ dialog: null })} />}
       <OfflineNotice />

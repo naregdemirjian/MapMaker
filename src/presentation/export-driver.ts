@@ -4,7 +4,7 @@
 import { Api } from '../ui/api.ts';
 import type { World } from '../world-model/world.ts';
 import type { Engine } from '../temporal-engine/engine.ts';
-import { MapRenderer, DEFAULT_STYLE, type PassName } from '../render-engine/map-renderer.ts';
+import { MapRenderer, DEFAULT_STYLE, EXPORT_QUALITY, type PassName } from '../render-engine/map-renderer.ts';
 import { makeView } from '../render-engine/camera.ts';
 import { type ShotSettings, type OverlayRect, EVENTS_BOX_ID, timeAt, cameraAt, overlaysAt, drawOverlays, shotTransitions, screenSecondsSince } from './sequence.ts';
 import { gregorian, type Instant } from '../core-time/index.ts';
@@ -57,7 +57,11 @@ export async function estimateExportBytes(world: World, engine: Engine, shot: Sh
   const basemap = await basemapFor(world, shot.spaceId);
   const canvas = new OffscreenCanvas(w, h);
   const ctx = canvas.getContext('2d') as unknown as CanvasRenderingContext2D;
-  const renderer = new MapRenderer();
+  // One renderer for all estimates: what it has prepared (outlines, label places) serves the next estimate too.
+  estimator ??= new MapRenderer();
+  const renderer = estimator;
+  renderer.quality = { ...EXPORT_QUALITY };
+  renderer.caching = 'off';
   const frame = Math.floor(shot.frames / 2);
   let perFrame = 0;
   for (const def of defs) {
@@ -67,6 +71,8 @@ export async function estimateExportBytes(world: World, engine: Engine, shot: Sh
   }
   return (perFrame * (W * H)) / (w * h) * shot.frames;
 }
+
+let estimator: MapRenderer | null = null;
 
 export function visibleLayers(world: World, shot: ShotSettings): string[] {
   return world.all('layer')
@@ -111,6 +117,18 @@ export function renderFrame(ctx: CanvasRenderingContext2D, renderer: MapRenderer
   if (def.overlays) drawShotOverlays(ctx, width, height, world, shot, frame, t);
 }
 
+/** Two 32-bit hashes of a frame's pixels: frames with the same pair are taken to be the same picture. */
+export function pixelHash(rgba: Uint8ClampedArray): [number, number] {
+  const u = new Uint32Array(rgba.buffer, rgba.byteOffset, rgba.byteLength >> 2);
+  let h1 = 0x811c9dc5, h2 = 0x9e3779b9;
+  for (let i = 0; i < u.length; i++) {
+    const v = u[i];
+    h1 = Math.imul(h1 ^ v, 16777619);
+    h2 = (Math.imul(h2 + v, 2246822519) ^ (h2 >>> 15)) | 0;
+  }
+  return [h1 >>> 0, h2 >>> 0];
+}
+
 export interface ExportResult { dir: string; checksums: Record<string, Record<number, string>>; frames: number; seconds: number }
 
 export async function runExport(o: {
@@ -140,22 +158,52 @@ export async function runExport(o: {
     passes: defs.map((d) => ({ name: d.name, label: d.label, blend: d.blend, note: d.note })), transparent: o.shot.transparent,
     historicalRange: [gregorian.format(timeAt(o.shot, f0), 'minute'), gregorian.format(timeAt(o.shot, f1), 'minute')],
   });
-  // A fresh renderer per export: no state shared with the interface, so output never depends on it.
+  // A fresh renderer per export: no state shared with the interface, so output never depends on it
+  // (nor on the working view's performance settings: exports always draw at their own, finest quality).
   const renderer = new MapRenderer();
+  renderer.quality = { ...EXPORT_QUALITY };
+  renderer.caching = 'always';
   const canvas = new OffscreenCanvas(width, height);
   const ctx = canvas.getContext('2d', { willReadFrequently: true }) as unknown as CanvasRenderingContext2D;
   const total = (f1 - f0 + 1) * defs.length;
   let done = 0;
+  // Each frame is drawn, then encoded as a PNG by the browser while the next one is being drawn, and
+  // sent to be written. A frame that is pixel for pixel the picture before it in its pass (a still
+  // camera between events; the land and the background all through) is not encoded again: its file
+  // is copied. A few frames may be on their way at once; each pass's frames are written in order.
+  const last = new Map<string, { a: number; b: number; frame: number }>();
+  const pending = new Set<Promise<unknown>>();
+  const queues = new Map<string, Promise<unknown>>();
+  let failure: unknown = null;
+  const queue = (pass: string, work: () => Promise<unknown>): void => {
+    const p = (queues.get(pass) ?? Promise.resolve()).then(work).then(() => { o.onProgress?.(++done, total); }, (e) => { failure ??= e; });
+    queues.set(pass, p);
+    pending.add(p);
+    void p.finally(() => pending.delete(p));
+  };
   for (let frame = f0; frame <= f1; frame++) {
     for (const def of defs) {
-      if (o.isCancelled?.()) throw new Error('Export cancelled.');
+      if (failure) throw failure;
+      if (o.isCancelled?.()) { await Promise.allSettled(pending); throw new Error('Export cancelled.'); }
       if (videoFills.length) await prepareVideos(videoFills, frame / o.shot.fps);
       renderFrame(ctx, renderer, o.world, o.engine, o.shot, frame, def, width, height, basemap);
-      const data = ctx.getImageData(0, 0, width, height).data;
-      await Api.sendFrame(o.projectId, job.jobId, def.name, frame, width, height, new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
-      o.onProgress?.(++done, total);
+      const [a, b] = pixelHash(ctx.getImageData(0, 0, width, height).data);
+      const before = last.get(def.name);
+      if (before && before.a === a && before.b === b) {
+        const sameAs = before.frame;
+        queue(def.name, () => Api.repeatFrame(o.projectId, job.jobId, def.name, frame, sameAs));
+      } else {
+        last.set(def.name, { a, b, frame });
+        // The canvas is copied now; encoding goes on in the background.
+        const png = canvas.convertToBlob({ type: 'image/png' });
+        queue(def.name, async () => Api.sendPngFrame(o.projectId, job.jobId, def.name, frame, await png));
+      }
+      // Not too many pictures waiting to be encoded and written (each holds a whole frame).
+      while (pending.size >= 4) await Promise.race(pending);
     }
   }
+  await Promise.all(pending);
+  if (failure) throw failure;
   const fin = await Api.finishExport(o.projectId, job.jobId);
   return { dir: fin.dir, checksums: fin.checksums, frames: f1 - f0 + 1, seconds: (performance.now() - started) / 1000 };
 }

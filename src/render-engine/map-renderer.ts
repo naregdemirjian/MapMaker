@@ -1,11 +1,12 @@
 // The map renderer: draws a map space at a moment in time from the world model and the temporal
 // engine. Nothing here is stored history: every pixel is computed from parcels, effects and styles.
 //
-// This is the Canvas 2D backend. The approved architecture uses deck.gl (WebGL) for the final
-// renderer; deck.gl could not be installed in the offline build environment, so this backend sits
-// behind the same inputs (world, engine, view, time, options) and can be replaced without touching
-// the world model, the engine, the interface or the export pipeline.
-import { geoPath, geoGraticule10, geoGraticule, geoCircle, geoCentroid, geoArea, type GeoPermissibleObjects } from 'd3-geo';
+// This is the Canvas 2D backend. Parcels, borders and the Earth basemap are drawn from geometry
+// prepared on a "sheet" of the projection's plane (plane.ts): while the view stays on the sheet,
+// panning and zooming cost no geometry work, only drawing; an edit prepares only the parcels it
+// changed; and what stays the same through a stretch of time (who holds what, which borders show)
+// is worked out once for the stretch (LayerSnap), not once per frame.
+import { geoPath, geoCircle, geoCentroid, geoArea, type GeoPermissibleObjects } from 'd3-geo';
 import type { World } from '../world-model/world.ts';
 import type { Engine, FaceState, Assignment, CompiledTransition } from '../temporal-engine/engine.ts';
 import { parseJSON, slerpLonLat } from '../temporal-engine/engine.ts';
@@ -14,11 +15,13 @@ import { BASE_EVENT_ID } from '../world-model/schema.ts';
 import type { Vec3 } from '../geo-kernel/vec.ts';
 import { screenToLonLat, FLAT_EXTENT_DEG, type View } from './camera.ts';
 import type { Arrangement } from '../geo-kernel/arrangement.ts';
-import { E7 } from '../geo-kernel/vec.ts';
-import { BasemapPainter, landMaskOf, visibleBounds, type Basemap, type LandMask } from './basemap.ts';
+import { BasemapPainter, chooseScale, landMaskOf, visibleBounds, boxIntersects, type Basemap, type LandMask } from './basemap.ts';
 import { planeShape, placeLabel, lineChoices, textWidthEm, blockHeightEm, LINE_HEIGHT, type PlaneShape } from './label-place.ts';
 import { resolveLabelStyle, resolvePointStyle, labelSize, labelFont, labelText, type LabelStyle, type CountryLabel } from './label-style.ts';
-import { imageNow, videoNow, drawImageFit, type MediaChannel } from './assets.ts';
+import { imageNow, videoNow, drawImageFit, assetEpoch, type MediaChannel } from './assets.ts';
+import { Sheet, makeRing, addLine, projectPoint, type Ring } from './plane.ts';
+import { BlockPath, setPaintRegion, type DeviceRect } from './blocks.ts';
+import { parcelGeometry, type ParcelGeometry } from './parcel-geometry.ts';
 
 type LabelEntity = { name: string; style?: string; color?: string; type_id?: string };
 
@@ -43,6 +46,16 @@ export const DEFAULT_STYLE: MapStyle = {
   font: '"Segoe UI", "Inter", "Helvetica Neue", Arial, sans-serif',
 };
 
+/**
+ * How closely prepared geometry follows the true shapes, and how far a sheet reaches beyond the
+ * view. `tolerance` is the largest error simplification may cause, in pixels of the picture drawn.
+ */
+export interface RenderQuality { tolerance: number; margin: number }
+/** The working view: errors of a third of a pixel at most, and room to pan before a new sheet is needed. */
+export const VIEW_QUALITY: RenderQuality = { tolerance: 0.35, margin: 0.6 };
+/** Exports: a tenth of a pixel, whatever the working view is set to. */
+export const EXPORT_QUALITY: RenderQuality = { tolerance: 0.1, margin: 0.3 };
+
 export interface RenderOptions {
   passes: Set<PassName>;
   transparent: boolean;
@@ -65,7 +78,24 @@ export interface RenderOptions {
    * the full picture. Default: as the passes drawn.
    */
   layout?: { labels: boolean; cities: boolean };
+  /**
+   * The view is on the move (the working view, see MapRenderer.carry): parts already drawn may be
+   * shown moved or scaled to the new view instead of being drawn again.
+   * `lastApproximate` then tells whether a fresh drawing would differ.
+   */
+  moving?: boolean;
+  /**
+   * The view is on the move: a country name placed in the part of the country in view stays where it
+   * was on the map for as long as that is in view (instead of being placed again for every movement).
+   */
+  holdNames?: boolean;
 }
+
+/** Where the map's plane lies on the canvas: the transform's linear part, the plane's origin in device pixels and its scale. */
+interface Placing { a: number; b: number; c: number; d: number; x: number; y: number; s: number }
+/** What a kept part of the picture shows: exactly (the same pixels) and loosely (the same things, at whatever detail). */
+interface PartKey { strict: string; loose: string }
+interface Kept { canvas: OffscreenCanvas | null; ctx: CanvasRenderingContext2D | null; key: string; seen: string; strict: string; loose: string; at: Placing | null }
 
 /** A picture or video fill (see domain/commands.ts CountryFill). */
 interface CountryFillLike { kind: 'color' | 'image' | 'video'; asset?: string; off?: boolean; fit?: 'cover' | 'contain' | 'stretch' | 'tile'; tileSize?: number; play?: 'loop' | 'once'; speed?: number; start?: number }
@@ -113,29 +143,82 @@ export interface LabelInfo {
 const LABEL_MARGIN = 0.04;
 
 /** An owner's main piece of territory (for its label). */
-interface OwnerPiece { owner: string; key: string; arcs: Float64Array; centreLon: number; area: number; total: number }
+interface OwnerPiece { owner: string; key: string; arcs: Float64Array; centreLon: number; area: number; total: number; /** Its outline's box: west, south, east, north. */ box: [number, number, number, number] }
 interface PlacedLabel { lon: number; lat: number; font: number; lines: string[] }
 
 interface FaceGeo { geo: GeoPermissibleObjects; area: number; centroid: [number, number] }
 
+/**
+ * A path, and the space it is drawn in: on the sheet (prepared geometry, placed on the view by the
+ * sheet's transform) or on the screen itself (shapes made for one frame).
+ */
+interface Shape { path: Path2D | BlockPath; onSheet: boolean }
+/** A shape as one path (for clipping to it). */
+const solid = (p: Path2D | BlockPath): Path2D => (p instanceof BlockPath ? p.whole() : p);
+
+/** The parcels of one owner (or one change), with a key that says exactly which outlines they are. */
+interface FaceSet { faces: number[]; key: string }
+
+/** One animated change, as far as it stays the same throughout a stretch of time. */
+interface ChangeGroup {
+  id: string;
+  /** Every parcel in the change, and those whose owner actually changes. */
+  region: FaceSet;
+  changing: FaceSet;
+}
+
+/**
+ * What stays the same about a layer throughout a stretch of time (between two changes, and while
+ * the same changes are animating): who holds each parcel, which parcels are changing hands, which
+ * borders show. Worked out once and used for every frame of the stretch.
+ */
+interface LayerSnap {
+  key: string;
+  /** Parcels by the owner they are filled for (during an animated change: the owner before it). */
+  byOwner: Map<string, FaceSet>;
+  groups: Map<string, ChangeGroup>;
+  groupOf: Map<number, ChangeGroup>;
+  /** For labels: each owner's parcels before and after the changes animating now (the same when none is). */
+  before: Map<string, FaceSet>;
+  after: Map<string, FaceSet>;
+  animating: boolean;
+  /** Each owner's parcels including those it is losing or gaining (where its picture is placed). */
+  reach: Map<string, number[]>;
+  /** Label pieces, worked out when labels are first drawn. */
+  pieces: Map<string, { after: Map<string, OwnerPiece>; before: Map<string, OwnerPiece> }>;
+}
+
 interface TransitionGroup {
   a: Assignment;
   faces: number[];
-  states: FaceState[];
+  /** The parcels whose owner actually changes. */
+  changingFaces: number[];
   /** A front moves across the change (advancing circle or straight wipe); otherwise it fades. */
   advance: boolean;
   spec: CompiledTransition;
   /** How far the change has progressed (0 to 1, eased). */
   progress: number;
-  /** For a moving front: the area reached so far (null before anything is reached). */
+  /** For a moving front: the area reached so far (null before anything is reached), in screen space. */
   disc: Path2D | null;
   /** How `disc` is filled: an advancing front from a border is a union of overlapping shapes. */
   discRule: CanvasFillRule;
   /** For a front from a border: the reach builder, to draw the front line as a band. */
   border: BorderFront | null;
-  region: Path2D;
-  /** The parcels whose owner actually changes. */
-  changing: Path2D;
+  /** All the parcels of the change, and those changing owner (null: none of it is on the sheet). */
+  region: Shape | null;
+  changing: Shape | null;
+}
+
+interface BorderPaths { plain: Array<Path2D | BlockPath>; inside: Map<string, Path2D>; outside: Map<string, Path2D> }
+
+/** Paths prepared on one sheet for one parcel map. */
+interface SheetParcels {
+  arr: Arrangement;
+  chains: Map<number, Array<Float32Array[] | undefined>>;
+  sets: Map<string, BlockPath | null>;
+  /** Each owner's share of the borders, by the owner's parcels and which of its chains it draws. */
+  ownerBorders: Map<string, BlockPath | null>;
+  borders: Map<string, BorderPaths>;
 }
 
 /** Everything except the given shape (use with the even-odd rule). */
@@ -146,10 +229,34 @@ function outsideOf(shape: Path2D): Path2D {
   return p;
 }
 
+/** Is any of the view outside the planet's outline (so that the outline must clip what is drawn)? */
+function outlineInView(view: View): boolean {
+  if (view.camera.projection === 'flat') return false;
+  const w = view.width, h = view.height;
+  for (const [x, y] of [[0, 0], [w, 0], [0, h], [w, h], [w / 2, 0], [w / 2, h], [0, h / 2], [w, h / 2]]) if (!screenToLonLat(view, x, y)) return true;
+  return false;
+}
+
+/** The grid of meridians and parallels every 10° (as d3's geoGraticule10), as lines for sheets. */
+let graticuleLines: Ring[] | null = null;
+function graticule10(): Ring[] {
+  if (!graticuleLines) {
+    graticuleLines = [];
+    for (let lat = -80; lat <= 80; lat += 10) {
+      const n = 145;
+      graticuleLines.push(makeRing(Float64Array.from({ length: n }, (_, i) => -180 + i * 2.5), new Float64Array(n).fill(lat), false, false));
+    }
+    for (let lon = -180; lon < 180; lon += 10) {
+      const top = lon % 90 === 0 ? 90 : 80, n = Math.round((2 * top) / 2.5) + 1;
+      graticuleLines.push(makeRing(new Float64Array(n).fill(lon), Float64Array.from({ length: n }, (_, i) => -top + i * 2.5), false, false));
+    }
+  }
+  return graticuleLines;
+}
+
 export class MapRenderer {
-  private geoCache = new WeakMap<Arrangement, { rev: number; faces: Map<number, FaceGeo> }>();
-  private pathCache = new Map<string, Path2D>();
-  private pathCacheView = '';
+  /** How closely prepared geometry follows the true shapes (exports use EXPORT_QUALITY whatever this is). */
+  quality: RenderQuality = { ...VIEW_QUALITY };
   private basemapPainter = new BasemapPainter();
   lastLabels: LabelInfo[] = [];
   /** The characters drawn in the last frame, where (screen) and on the map, for picking and tests. */
@@ -162,41 +269,610 @@ export class MapRenderer {
   lastCities: Array<{ entity: string; name: string; x: number; y: number; lon: number; lat: number; moving: boolean; named: boolean; box?: [number, number, number, number] }> = [];
   /** The animated changes drawn in the last frame (style and eased progress), for checks and tests. */
   lastTransitions: Array<{ style: string; progress: number }> = [];
+  /** For benchmarks and tests: how many sheets have been made, and snapshots of layers worked out. */
+  stats = { sheets: 0, snaps: 0 };
 
-  /** Spherical geometry of a parcel (cached until the parcel map changes). */
+  // ---------------------------------------------------------------- sheets (prepared geometry)
+
+  private sheet: Sheet | null = null;
+  private sheetSpace = '';
+  /** The transform that puts the current sheet on the view being drawn: scale, x, y. */
+  private place: [number, number, number] = [1, 0, 0];
+
+  /** The sheet to draw a view from: the current one while the view stays on it, else a new one. */
+  private sheetFor(view: View, spaceId: string): Sheet {
+    if (!this.sheet || this.sheetSpace !== spaceId || !this.sheet.covers(view, this.quality.tolerance)) {
+      this.sheet = new Sheet(view, this.quality);
+      this.sheetSpace = spaceId;
+      this.stats.sheets++;
+    }
+    this.place = this.sheet.placement(view);
+    return this.sheet;
+  }
+
+  private parcelsOn(sheet: Sheet, arr: Arrangement): SheetParcels {
+    let p = sheet.cache.get('parcels') as SheetParcels | undefined;
+    if (!p || p.arr !== arr) { p = { arr, chains: new Map(), sets: new Map(), ownerBorders: new Map(), borders: new Map() }; sheet.cache.set('parcels', p); }
+    return p;
+  }
+
+  /**
+   * One path for a set of parcels (even-odd), built from the cycles' own paths and kept while the
+   * set and its outlines stay the same. A parcel whose area includes the rest of the planet beyond
+   * its rings (there is at most one such parcel on a map) brings a frame around everything.
+   */
+  private setPath(sp: SheetParcels, sheet: Sheet, arr: Arrangement, set: FaceSet): Shape | null {
+    let p = sp.sets.get(set.key);
+    if (p === undefined) {
+      const geom = parcelGeometry(arr), t = arr.topology();
+      const path = sheet.blocks();
+      let any = false;
+      // Several parcels: their outline taken together (the borders between them are not drawn, nor
+      // worked through when filling). One parcel, or a set that cannot be joined so: ring by ring.
+      const rings = set.faces.length > 1 ? geom.dissolve(set.faces, t) : null;
+      if (rings) for (const r of rings) { if (sheet.ringOf(path, r.parts, r.box)) any = true; }
+      else for (const f of set.faces) {
+        for (const c of t.facesCycles.get(f) ?? []) if (sheet.ring(path, geom.cycle(c))) any = true;
+        if (geom.needsOutline(f)) { path.rect(-(1 << 19), -(1 << 19), 1 << 20, 1 << 20); any = true; }
+      }
+      p = any ? path : null;
+      if (sp.sets.size > 6000) sp.sets.clear();
+      sp.sets.set(set.key, p);
+    }
+    return p ? { path: p, onSheet: true } : null;
+  }
+
+  /** A set of parcels with its key: the parcels and the state of their outlines. */
+  private faceSet(arr: Arrangement, faces: number[]): FaceSet {
+    let h1 = 0x811c9dc5, h2 = 0x01000193;
+    const t = arr.topology();
+    for (const f of faces) {
+      const st = t.faceStamps.get(f) ?? 0;
+      h1 = Math.imul(h1 ^ f, 16777619) >>> 0; h1 = Math.imul(h1 ^ st, 16777619) >>> 0;
+      h2 = (Math.imul(h2 + f, 2246822519) ^ st) >>> 0;
+    }
+    return { faces, key: `${faces.length}|${h1}|${h2}` };
+  }
+
+  private fill(c: CanvasRenderingContext2D, s: Shape, rule: CanvasFillRule = 'evenodd'): void {
+    if (!s.onSheet) { c.fill(solid(s.path), rule); return; }
+    const [k, e, f] = this.place;
+    c.save();
+    c.transform(k, 0, 0, k, e, f);
+    if (s.path instanceof BlockPath) s.path.paint(c, 1, (p) => c.fill(p, rule));
+    else c.fill(s.path, rule);
+    c.restore();
+  }
+
+  private clip(c: CanvasRenderingContext2D, s: Shape, rule: CanvasFillRule = 'evenodd'): void {
+    if (!s.onSheet) { c.clip(solid(s.path), rule); return; }
+    const [k, e, f] = this.place;
+    c.transform(k, 0, 0, k, e, f);
+    c.clip(solid(s.path), rule);
+    c.transform(1 / k, 0, 0, 1 / k, -e / k, -f / k);
+  }
+
+  /** Stroke a sheet path with a line `width` screen pixels wide. */
+  private strokeOnSheet(c: CanvasRenderingContext2D, path: Path2D | BlockPath, width: number): void {
+    const [k, e, f] = this.place;
+    c.save();
+    c.transform(k, 0, 0, k, e, f);
+    c.lineWidth = width / k;
+    if (path instanceof BlockPath) path.paint(c, width / k / 2 + 1, (p) => c.stroke(p));
+    else c.stroke(path);
+    c.restore();
+  }
+
+  /**
+   * Draw with the outline of some parcels (the selected country, say): `draw` is given their path
+   * with the context set so that the path lands on the view; `px` is one screen pixel in the path's
+   * units (for line widths and dashes).
+   */
+  withFaces(ctx: CanvasRenderingContext2D, view: View, arr: Arrangement, faces: number[], draw: (path: Path2D, px: number) => void): void {
+    if (!faces.length) return;
+    const sheet = this.sheetFor(view, arr.spaceId);
+    const shape = this.setPath(this.parcelsOn(sheet, arr), sheet, arr, this.faceSet(arr, faces));
+    if (!shape) return;
+    const [k, e, f] = this.place;
+    ctx.save();
+    if (view.rotation) {
+      ctx.translate(view.width / 2, view.height / 2);
+      ctx.rotate((view.rotation * Math.PI) / 180);
+      ctx.translate(-view.width / 2, -view.height / 2);
+    }
+    ctx.transform(k, 0, 0, k, e, f);
+    draw(solid(shape.path), 1 / k);
+    ctx.restore();
+  }
+
+  // ---------------------------------------------------------------- per-face geometry (labels, animation origins)
+
+  private geoCache = new WeakMap<Arrangement, Map<number, { stamp: number; g: FaceGeo }>>();
+
+  /** Spherical geometry of a parcel (kept until the parcel's outline changes). */
   faceGeo(arr: Arrangement, face: number): FaceGeo {
     let c = this.geoCache.get(arr);
-    if (!c || c.rev !== arr.revision) { c = { rev: arr.revision, faces: new Map() }; this.geoCache.set(arr, c); }
-    let g = c.faces.get(face);
-    if (!g) {
-      const rings = arr.faceRingsLonLat(face);
-      const geo: GeoPermissibleObjects = rings.length === 0
-        ? { type: 'Sphere' }
-        : { type: 'Polygon', coordinates: rings.map((r) => { const rr = [...r].reverse(); rr.push(rr[0]); return rr; }) };
-      const area = arr.faceArea(face);
-      const centroid = rings.length === 0 ? [0, 0] as [number, number] : geoCentroid(geo as GeoJSON.Polygon) as [number, number];
-      g = { geo, area, centroid };
-      c.faces.set(face, g);
-    }
+    if (!c) this.geoCache.set(arr, (c = new Map()));
+    const stamp = arr.faceStamp(face);
+    const hit = c.get(face);
+    if (hit && hit.stamp === stamp) return hit.g;
+    const rings = arr.faceRingsLonLat(face);
+    const geo: GeoPermissibleObjects = rings.length === 0
+      ? { type: 'Sphere' }
+      : { type: 'Polygon', coordinates: rings.map((r) => { const rr = [...r].reverse(); rr.push(rr[0]); return rr; }) };
+    const area = arr.faceArea(face);
+    const centroid = rings.length === 0 ? [0, 0] as [number, number] : geoCentroid(geo as GeoJSON.Polygon) as [number, number];
+    const g = { geo, area, centroid };
+    c.set(face, { stamp, g });
     return g;
   }
 
-  facePath(view: View, arr: Arrangement, face: number): Path2D {
-    const vk = `${view.key}|${arr.spaceId}|${arr.revision}`;
-    if (vk !== this.pathCacheView) { this.pathCache.clear(); this.pathCacheView = vk; }
-    let p = this.pathCache.get(String(face));
-    if (!p) {
-      const d = geoPath(view.projection)(this.faceGeo(arr, face).geo);
-      p = new Path2D(d ?? '');
-      this.pathCache.set(String(face), p);
+  // ---------------------------------------------------------------- what stays the same through a stretch of time
+
+  private snaps = new Map<string, LayerSnap>();
+
+  private snapFor(key: string, arr: Arrangement, states: Map<number, FaceState>, changing: number[]): LayerSnap {
+    const hit = this.snaps.get(key);
+    if (hit) return hit;
+    this.stats.snaps++;
+    const groups = new Map<string, ChangeGroup>(), groupOf = new Map<number, ChangeGroup>();
+    const members = new Map<string, { all: number[]; changing: number[] }>();
+    for (const f of changing) {
+      const st = states.get(f);
+      if (!st?.transition || !st.assignment) continue;
+      const id = st.assignment.effectId;
+      let m = members.get(id);
+      if (!m) members.set(id, (m = { all: [], changing: [] }));
+      m.all.push(f);
+      if ((st.transition.from ?? '') !== (st.value ?? '')) m.changing.push(f);
     }
-    return p;
+    for (const [id, m] of members) {
+      const g: ChangeGroup = { id, region: this.faceSet(arr, m.all), changing: this.faceSet(arr, m.changing) };
+      groups.set(id, g);
+      for (const f of m.all) groupOf.set(f, g);
+    }
+    const owned = new Map<string, number[]>(), reach = new Map<string, number[]>();
+    const before = new Map<string, number[]>(), after = new Map<string, number[]>();
+    let animating = false;
+    const add = (m: Map<string, number[]>, v: string, f: number) => { const l = m.get(v); if (l) l.push(f); else m.set(v, [f]); };
+    for (const [face, st] of states) {
+      const inGroup = groupOf.has(face);
+      const from = inGroup ? st.transition!.from : st.value;
+      if (from) add(owned, from, face);
+      if (st.value) add(reach, st.value, face);
+      if (inGroup && from && from !== st.value) add(reach, from, face);
+      // Labels leave out parcels with no area, and one covering most of the planet.
+      const area = arr.faceArea(face);
+      if (area <= 0 || area > 2 * Math.PI) continue;
+      if (st.value) add(after, st.value, face);
+      const was = st.transition ? st.transition.from : st.value;
+      if (was) add(before, was, face);
+      if (st.transition && st.transition.from !== st.value) animating = true;
+    }
+    const sets = (m: Map<string, number[]>) => { const o = new Map<string, FaceSet>(); for (const [v, faces] of m) o.set(v, this.faceSet(arr, faces)); return o; };
+    const byOwner = sets(owned);
+    const afterSets = sets(after);
+    const snap: LayerSnap = { key, byOwner, groups, groupOf, before: animating ? sets(before) : afterSets, after: afterSets, animating, reach, pieces: new Map() };
+    if (this.snaps.size >= 12) this.snaps.delete(this.snaps.keys().next().value!);
+    this.snaps.set(key, snap);
+    return snap;
   }
+
+  /** Per set of parcels: the border chains around it, as (cycle, chain, parcel across, drawn-from-this-side flag) quadruples. */
+  private boundaryCache = new Map<string, Int32Array>();
+
+  private boundaryOf(arr: Arrangement, set: FaceSet): Int32Array {
+    const key = `${arr.spaceId}|${set.key}`;
+    let b = this.boundaryCache.get(key);
+    if (!b) {
+      const geom = parcelGeometry(arr), t = arr.topology();
+      const inSet = new Set(set.faces);
+      const out: number[] = [];
+      for (const f of set.faces) for (const c of t.facesCycles.get(f) ?? []) {
+        const g = geom.cycle(c, t);
+        for (let i = 0; i < g.heads.length; i++) {
+          const other = arr.halfEdgeFace(g.heads[i] ^ 1);
+          if (!inSet.has(other)) out.push(c, i, other, g.canonical[i]);
+        }
+      }
+      b = Int32Array.from(out);
+      if (this.boundaryCache.size > 4000) this.boundaryCache.clear();
+      this.boundaryCache.set(key, b);
+    }
+    return b;
+  }
+
+  /** The polylines of one border chain on a sheet. */
+  private chainLines(sp: SheetParcels, sheet: Sheet, geom: ParcelGeometry, cycle: number, i: number): Float32Array[] {
+    let list = sp.chains.get(cycle);
+    if (!list) sp.chains.set(cycle, (list = []));
+    let l = list[i];
+    if (!l) {
+      const g = geom.cycle(cycle);
+      const last = i === g.starts.length - 1;
+      l = list[i] = sheet.lines(g, g.starts[i], last ? g.lon.length : g.starts[i + 1] + 1, last);
+    }
+    return l;
+  }
+
+  /**
+   * The borders of a snapshot on a sheet. A border lies between parcels of different owners; each
+   * owner's share of them (every border chain is drawn from one side) is a path kept while the
+   * owner's parcels and neighbours stay as they are, so crossing an event rebuilds only the paths
+   * of the owners it touches. Around parcels in an animated change the borders are sorted by how
+   * they relate to the change: those of the new state ('inside') and of the old ('outside').
+   */
+  private borderPaths(sp: SheetParcels, sheet: Sheet, arr: Arrangement, snap: LayerSnap, states: Map<number, FaceState>): BorderPaths {
+    let bp = sp.borders.get(snap.key);
+    if (bp) return bp;
+    const geom = parcelGeometry(arr), t = arr.topology();
+    const inGroup = snap.groupOf;
+    const plain: Array<Path2D | BlockPath> = [];
+    // (Borders both before and after an animated change, chain by chain: see step 2.)
+    const loose = new Path2D();
+    let anyLoose = false;
+    // 1. Away from any animated change: owner by owner.
+    for (const [owner, set] of snap.byOwner) {
+      const b = this.boundaryOf(arr, set);
+      // Which of its chains this owner draws: one facing unowned land always; one shared with another
+      // owner from the side fixed by the chain itself. Chains touching an animated change are left to step 2.
+      let h1 = 0x811c9dc5, h2 = 0x9e3779b9, n = 0;
+      const take: number[] = [];
+      for (let q = 0; q < b.length; q += 4) {
+        const other = b[q + 2];
+        if (inGroup.size && (inGroup.has(other) || inGroup.has(t.cycleLabel.get(b[q])!))) continue;
+        const across = states.get(other);
+        if (across === undefined) continue;
+        if (across.value !== null && (across.value === owner || !b[q + 3])) continue;
+        take.push(q);
+        h1 = Math.imul(h1 ^ q, 16777619) >>> 0; h2 = (Math.imul(h2 + q, 2246822519) ^ (h2 >>> 13)) >>> 0; n++;
+      }
+      if (!n) continue;
+      const key = `${set.key}|${n}|${h1}|${h2}`;
+      let p = sp.ownerBorders.get(key);
+      if (p === undefined) {
+        const path = sheet.blocks();
+        let any = false;
+        for (const q of take) for (const l of this.chainLines(sp, sheet, geom, b[q], b[q + 1])) { path.addLine(l); any = true; }
+        p = any ? path : null;
+        if (sp.ownerBorders.size > 6000) sp.ownerBorders.clear();
+        sp.ownerBorders.set(key, p);
+      }
+      if (p) plain.push(p);
+    }
+    // 2. Around the parcels of animated changes: chain by chain.
+    const inside = new Map<string, Path2D>(), outside = new Map<string, Path2D>();
+    if (inGroup.size) {
+      const differs = (x: string | null, y: string | null) => (x ?? '') !== (y ?? '');
+      const addTo = (m: Map<string, Path2D>, g: ChangeGroup, lines: Float32Array[]) => { if (!lines.length) return; let p = m.get(g.id); if (!p) m.set(g.id, (p = new Path2D())); for (const l of lines) addLine(p, l); };
+      for (const [face, ga] of inGroup) {
+        const a = states.get(face)!;
+        for (const c of t.facesCycles.get(face) ?? []) {
+          const cg = geom.cycle(c, t);
+          for (let i = 0; i < cg.heads.length; i++) {
+            const other = arr.halfEdgeFace(cg.heads[i] ^ 1);
+            const gb = inGroup.get(other);
+            // Between two parcels in animated changes: taken from one side only.
+            if (gb && !cg.canonical[i]) continue;
+            const b = states.get(other);
+            if (!b) continue;
+            const now = differs(a.value, b.value);
+            const was = differs(a.transition!.from, gb ? b.transition!.from : b.value);
+            if (!now && !was) continue;
+            const lines = this.chainLines(sp, sheet, geom, c, i);
+            // A border both before and after, or where two animations meet: drawn throughout.
+            if ((now && was) || (gb && gb !== ga)) { for (const l of lines) { addLine(loose, l); anyLoose = true; } }
+            else addTo(now ? inside : outside, ga, lines);
+          }
+        }
+      }
+    }
+    if (anyLoose) plain.push(loose);
+    bp = { plain, inside, outside };
+    if (sp.borders.size >= 8) sp.borders.delete(sp.borders.keys().next().value!);
+    sp.borders.set(snap.key, bp);
+    return bp;
+  }
+
+  // ---------------------------------------------------------------- kept pictures of what does not change
+
+  /**
+   * Parts of the picture that stay the same from frame to frame are kept as pictures and copied
+   * instead of drawn again: the base map (ocean, grid, land) while the view stays put, and the
+   * territories and borders while nothing changes hands (scrubbing or playing between events,
+   * redrawing after a click). 'lazy' (the working view): a part is kept from the second time the same
+   * frame is asked for, so panning draws straight to the screen. 'always' (exports): every frame is
+   * drawn through the kept pictures, so a frame's pixels never depend on the frames before it.
+   */
+  caching: 'lazy' | 'always' | 'off' = 'lazy';
+  /**
+   * The working view only (never exports): when the view moves, the parts of the picture already
+   * drawn move with it and only what comes into view is drawn. A move by whole pixels gives exactly
+   * the picture a fresh drawing would; anything else (a zoom, a move by part of a pixel) is allowed
+   * only while `moving` is asked for, and reported in `lastApproximate`.
+   */
+  carry = false;
+  /** Whether the last frame showed parts a fresh drawing would put slightly differently (see carry). */
+  lastApproximate = false;
+  /** For benchmarks and tests: how the parts of the last frame were made ('kept', 'moved', 'scaled' or 'drawn'). */
+  lastParts: Record<string, string> = {};
+  private moving = false;
+  private holdNames = false;
+  /** While only part of a frame is drawn: the device rectangles being drawn (buffers are limited to them). */
+  private region: DeviceRect[] | null = null;
+  private kept = new Map<string, Kept>();
+  /** Kept pictures are used up to this many pixels (a 4K frame); the land mask up to an 8K frame. */
+  private static readonly KEEP_LIMIT = 10_000_000;
+  private static readonly MASK_LIMIT = 40_000_000;
+
+  /** Kept pictures may take this much memory together (the least recently used go first). */
+  private static readonly KEEP_BYTES = 420_000_000;
+
+  private keptBuffer(name: string, target: CanvasRenderingContext2D): Kept & { canvas: OffscreenCanvas; ctx: CanvasRenderingContext2D } {
+    const w = target.canvas.width, h = target.canvas.height;
+    let b = this.kept.get(name);
+    if (!b) b = { canvas: null, ctx: null, key: '', seen: '', strict: '', loose: '', at: null };
+    // Most recently used last.
+    this.kept.delete(name);
+    this.kept.set(name, b);
+    if (!b.canvas || b.canvas.width !== w || b.canvas.height !== h) {
+      // Room for it: pictures not used for longest give theirs up (an export of many passes keeps one or two per pass).
+      let held = 0;
+      for (const [k, o] of this.kept) if (k !== name && o.canvas) held += o.canvas.width * o.canvas.height * 4;
+      for (const [k, o] of this.kept) {
+        if (held + w * h * 4 <= MapRenderer.KEEP_BYTES) break;
+        if (k === name || !o.canvas) continue;
+        held -= o.canvas.width * o.canvas.height * 4;
+        o.canvas = null; o.ctx = null; o.key = '';
+      }
+      b.canvas = new OffscreenCanvas(w, h);
+      const willReadFrequently = !!target.getContextAttributes?.().willReadFrequently;
+      b.ctx = b.canvas.getContext('2d', { willReadFrequently }) as unknown as CanvasRenderingContext2D;
+      b.key = '';
+    }
+    return b as Kept & { canvas: OffscreenCanvas; ctx: CanvasRenderingContext2D };
+  }
+
+  /** What the territory picture last showed: its key, what besides ownership it depends on, who held each parcel, and the map's state. */
+  private patchPrev: { strict: string; stable: string; arr: Arrangement; revision: number; layers: Array<Map<number, FaceState>>; wide: number | null } | null = null;
+
+  /**
+   * After an edit (or a step in time) that changed little: the rectangles of the canvas where the
+   * territory picture changed, so that only they are drawn again (see layered). Null when the whole
+   * picture must be drawn: nothing to compare with, something other than ownership or borders
+   * changed, the changes cover much of the frame, or the view shows the planet more than once.
+   *
+   * The picture changes only (1) where borders were added, removed or moved (the kernel keeps the box
+   * around those), (2) inside parcels that have a new owner, and (3) inside parcels that are new (a
+   * piece cut off by a stroke, or a parcel made whole again by an undo). The parcel that takes in the
+   * rest of the planet has no box: it is passed over when it is a piece of the one before (it then
+   * only lost land, to parcels that are new); otherwise everything is drawn.
+   */
+  private changesSince(view: View, arr: Arrangement, layers: Array<Map<number, FaceState>>, strict: string, stable: string, m: DOMMatrix, width: number, height: number, pad: number): { from: string; rects: DeviceRect[] } | null {
+    const prev = this.patchPrev;
+    if (prev && prev.strict === strict) return null;
+    let wide = prev && prev.arr === arr ? prev.wide : null;
+    let out: { from: string; rects: DeviceRect[] } | null = null;
+    if (prev && prev.arr === arr && prev.stable === stable && prev.layers.length === layers.length && m.b === 0 && m.c === 0 && visibleBounds(view) !== null) {
+      const borders = arr.bordersChangedSince(prev.revision);
+      let ok = borders !== null, changed = 0;
+      // Boxes as x0, y0, x1, y1; joined while joining wastes little, a handful at most.
+      const boxes: number[][] = [];
+      const area = (q: number[]) => (q[2] - q[0]) * (q[3] - q[1]);
+      const add = (sb: Box2) => {
+        const d = this.deviceBox(sb, m, pad, width, height);
+        if (d[2] <= 0 || d[3] <= 0) return;
+        let box = [d[0], d[1], d[0] + d[2], d[1] + d[3]];
+        for (let again = true; again;) {
+          again = false;
+          for (let j = 0; j < boxes.length; j++) {
+            const o = boxes[j];
+            const u = [Math.min(o[0], box[0]), Math.min(o[1], box[1]), Math.max(o[2], box[2]), Math.max(o[3], box[3])];
+            if (area(u) <= 1.3 * (area(o) + area(box)) + 4096 || boxes.length >= 6) { boxes.splice(j, 1); box = u; again = true; break; }
+          }
+        }
+        boxes.push(box);
+      };
+      if (ok && borders) {
+        const acc: Box2 = [Infinity, Infinity, -Infinity, -Infinity];
+        this.boxOnScreen(view, borders, acc);
+        if (acc[2] > acc[0] && acc[3] > acc[1]) add([acc[0], acc[1], acc[2] - acc[0], acc[3] - acc[1]]);
+      }
+      const geom = parcelGeometry(arr);
+      if (ok) outer: for (let i = 0; i < layers.length; i++) {
+        const was = prev.layers[i];
+        for (const [face, st] of layers[i]) {
+          const b = was.get(face);
+          if (b !== undefined && b.value === st.value) continue;
+          if (++changed > 600) { ok = false; break outer; }
+          if (geom.needsOutline(face)) {
+            const piece = b === undefined && wide !== null && arr.ancestors(face).includes(wide);
+            wide = face;
+            if (piece) continue;
+            ok = false; break outer;
+          }
+          const sb = this.screenBox(view, arr, [face]);
+          if (sb[0] === 0 && sb[1] === 0 && sb[2] === view.width && sb[3] === view.height) { ok = false; break outer; }
+          add(sb);
+        }
+      }
+      if (ok) {
+        let total = 0;
+        for (const q of boxes) total += area(q);
+        if (total <= 0.5 * width * height) out = { from: prev.strict, rects: boxes.map((q) => [q[0], q[1], q[2] - q[0], q[3] - q[1]] as DeviceRect) };
+      }
+    }
+    this.patchPrev = { strict, stable, arr, revision: arr.revision, layers, wide };
+    return out;
+  }
+
+  /** Limit a context to some device rectangles (the caller saves and restores around it). */
+  private clipTo(c: CanvasRenderingContext2D, rects: DeviceRect[]): void {
+    const t = c.getTransform();
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.beginPath();
+    for (const [x, y, w, h] of rects) c.rect(x, y, w, h);
+    c.clip();
+    c.setTransform(t);
+  }
+
+  /**
+   * Draw a part of the picture, through its kept picture when it may be kept (`key` says what it
+   * shows; null: never kept; `at`: where the map lies on the canvas in this frame).
+   */
+  private layered(name: string, ctx: CanvasRenderingContext2D, key: PartKey | null, at: Placing, draw: (c: CanvasRenderingContext2D) => void, patch: { from: string; rects: DeviceRect[] } | null = null): void {
+    const mode = this.caching;
+    const w = ctx.canvas.width, h = ctx.canvas.height;
+    const usable = key !== null && mode !== 'off' && w * h <= MapRenderer.KEEP_LIMIT;
+    let rec = this.kept.get(name);
+    if (!rec) this.kept.set(name, (rec = { canvas: null, ctx: null, key: '', seen: '', strict: '', loose: '', at: null }));
+    const exactOf = (strict: string) => `${strict}|${w}x${h}|${at.a},${at.b},${at.c},${at.d},${at.x},${at.y},${at.s}`;
+    const exact = key ? exactOf(key.strict) : '';
+    if (!usable || (mode === 'lazy' && !this.carry && rec.seen !== exact)) {
+      rec.seen = exact;
+      this.lastParts[name] = 'drawn';
+      draw(ctx);
+      return;
+    }
+    const b = this.keptBuffer(name, ctx);
+    const blit = () => {
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.drawImage(b.canvas as CanvasImageSource, 0, 0);
+      ctx.restore();
+    };
+    if (b.key === exact) { this.lastParts[name] = 'kept'; blit(); return; }
+    const t = ctx.getTransform();
+    if (patch && this.carry && b.key === exactOf(patch.from)) {
+      // Patched: the kept picture shows the state before a change that touched only these rectangles; they alone are drawn again.
+      const bc = b.ctx;
+      bc.save();
+      bc.setTransform(1, 0, 0, 1, 0, 0);
+      bc.globalAlpha = 1;
+      bc.globalCompositeOperation = 'source-over';
+      for (const [x, y, rw, rh] of patch.rects) bc.clearRect(x, y, rw, rh);
+      this.clipTo(bc, patch.rects);
+      bc.setTransform(t);
+      this.region = patch.rects; setPaintRegion(patch.rects);
+      try { draw(bc); } finally { this.region = null; setPaintRegion(null); }
+      bc.restore();
+      b.key = exact; b.strict = key!.strict; b.loose = key!.loose;
+      this.lastParts[name] = 'patched';
+      blit();
+      return;
+    }
+    const o = b.at;
+    if (this.carry && b.key && o && b.loose === key!.loose && o.a === at.a && o.b === at.b && o.c === at.c && o.d === at.d) {
+      // The kept picture's pixel p now belongs at r * p + (tx, ty).
+      const r = at.s / o.s, tx = at.x - r * o.x, ty = at.y - r * o.y;
+      if (Math.abs(r - 1) < 1e-9 && b.strict === key!.strict) {
+        const nx = Math.round(tx), ny = Math.round(ty), rx = tx - nx, ry = ty - ny;
+        const whole = Math.abs(rx) < 0.02 && Math.abs(ry) < 0.02;
+        if ((whole || this.moving) && Math.abs(nx) < w * 0.9 && Math.abs(ny) < h * 0.9) {
+          // Moved: the kept picture is shifted by whole pixels and the strips that came into view are drawn into it.
+          const bc = b.ctx;
+          if (nx || ny) {
+            bc.setTransform(1, 0, 0, 1, 0, 0);
+            bc.globalAlpha = 1;
+            bc.globalCompositeOperation = 'copy';
+            bc.drawImage(b.canvas as CanvasImageSource, nx, ny);
+            bc.globalCompositeOperation = 'source-over';
+            const rects: DeviceRect[] = [];
+            if (nx > 0) rects.push([0, 0, nx, h]); else if (nx < 0) rects.push([w + nx, 0, -nx, h]);
+            if (ny > 0) rects.push([0, 0, w, ny]); else if (ny < 0) rects.push([0, h + ny, w, -ny]);
+            bc.save();
+            this.clipTo(bc, rects);
+            // (Drawn where the kept picture now stands: at most half a pixel from the view asked for.)
+            bc.setTransform(t.a, t.b, t.c, t.d, t.e - rx, t.f - ry);
+            this.region = rects; setPaintRegion(rects);
+            try { draw(bc); } finally { this.region = null; setPaintRegion(null); }
+            bc.restore();
+          }
+          b.at = { ...at, x: at.x - rx, y: at.y - ry };
+          b.key = whole ? exact : 'moved';
+          if (!whole) this.lastApproximate = true;
+          this.lastParts[name] = 'moved';
+          blit();
+          return;
+        }
+      } else if (this.moving && Math.abs(r - 1) >= 1e-9 && r >= 0.75 && r <= 1.7) {
+        // Scaled (a zoom under way): the kept picture is shown at the new size, and what lies around it is drawn.
+        const x0 = Math.max(0, Math.ceil(tx)), y0 = Math.max(0, Math.ceil(ty)), x1 = Math.min(w, Math.floor(tx + r * w)), y1 = Math.min(h, Math.floor(ty + r * h));
+        if (x1 > x0 && y1 > y0) {
+          ctx.save();
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.beginPath();
+          ctx.rect(x0, y0, x1 - x0, y1 - y0);
+          ctx.clip();
+          ctx.imageSmoothingEnabled = true;
+          ctx.setTransform(r, 0, 0, r, tx, ty);
+          ctx.drawImage(b.canvas as CanvasImageSource, 0, 0);
+          ctx.restore();
+          const rects = ([[0, 0, w, y0], [0, y1, w, h - y1], [0, y0, x0, y1 - y0], [x1, y0, w - x1, y1 - y0]] as DeviceRect[]).filter((q) => q[2] > 0 && q[3] > 0);
+          if (rects.length) {
+            ctx.save();
+            this.clipTo(ctx, rects);
+            this.region = rects; setPaintRegion(rects);
+            try { draw(ctx); } finally { this.region = null; setPaintRegion(null); }
+            ctx.restore();
+          }
+          this.lastApproximate = true;
+          this.lastParts[name] = 'scaled';
+          return;
+        }
+      }
+    }
+    b.ctx.setTransform(1, 0, 0, 1, 0, 0);
+    b.ctx.globalAlpha = 1;
+    b.ctx.globalCompositeOperation = 'source-over';
+    b.ctx.clearRect(0, 0, b.canvas.width, b.canvas.height);
+    b.ctx.setTransform(t);
+    b.ctx.save();
+    draw(b.ctx);
+    b.ctx.restore();
+    b.key = exact;
+    b.strict = key!.strict; b.loose = key!.loose; b.at = at;
+    this.lastParts[name] = 'drawn';
+    blit();
+  }
+
+  /**
+   * Keep only what lies on land in a buffer (coastline clipping). The land is painted once per view
+   * into a mask that every layer's fills and borders then use, instead of each tracing the coast.
+   */
+  private maskLand(lc: CanvasRenderingContext2D, view: View, sheet: Sheet, basemap: Basemap, frameKey: string, lakes: boolean): void {
+    // (Only part of the frame is being drawn: the buffer is limited to that part, and so is the trimming.)
+    if (this.region || this.caching === 'off' || lc.canvas.width * lc.canvas.height > MapRenderer.MASK_LIMIT) { this.basemapPainter.maskToLand(lc, view, sheet, basemap, lakes); return; }
+    const b = this.keptBuffer('mask', lc);
+    const key = `${frameKey}|${sheet.id}|${basemap.scales.length}`;
+    if (b.key !== key) {
+      b.ctx.setTransform(1, 0, 0, 1, 0, 0);
+      b.ctx.clearRect(0, 0, b.canvas.width, b.canvas.height);
+      b.ctx.setTransform(lc.getTransform());
+      this.basemapPainter.fillLand(b.ctx, view, sheet, basemap);
+      b.key = key;
+    }
+    lc.save();
+    lc.setTransform(1, 0, 0, 1, 0, 0);
+    lc.globalAlpha = 1;
+    lc.globalCompositeOperation = 'destination-in';
+    lc.drawImage(b.canvas as CanvasImageSource, 0, 0);
+    lc.restore();
+    if (lakes) this.basemapPainter.eraseLakes(lc, view, sheet, basemap);
+  }
+
+  // ---------------------------------------------------------------- a frame
 
   render(ctx: CanvasRenderingContext2D, view: View, world: World, engine: Engine, spaceId: string, t: Instant, opts: RenderOptions): void {
     const style = opts.style ?? DEFAULT_STYLE;
     const arr = world.arrangement(spaceId);
     const u = view.unit;
+    const sheet = this.sheetFor(view, spaceId);
+    const sp = this.parcelsOn(sheet, arr);
+    this.moving = !!opts.moving;
+    this.holdNames = !!opts.holdNames;
+    this.lastApproximate = false;
+    this.lastParts = {};
     ctx.save();
     ctx.clearRect(0, 0, view.width, view.height);
     if (view.rotation) {
@@ -204,27 +880,62 @@ export class MapRenderer {
       ctx.rotate((view.rotation * Math.PI) / 180);
       ctx.translate(-view.width / 2, -view.height / 2);
     }
+    // What this frame is drawn on: the view, the size of the canvas and where the frame sits on it.
+    const m = ctx.getTransform();
+    const frameKey = `${view.key}|${ctx.canvas.width}x${ctx.canvas.height}|${m.a},${m.b},${m.c},${m.d},${m.e},${m.f}|${spaceId}`;
+    // Where the map's plane lies on the canvas, and what a part of the picture depends on besides its
+    // own content: the frame's size and the kind of map (loosely), and the detail it is drawn at (strictly).
+    const [pk, pe, pf] = this.place, px = pe - pk * sheet.S * sheet.ox, py = pf - pk * sheet.S * sheet.oy;
+    const at: Placing = { a: m.a, b: m.b, c: m.c, d: m.d, x: m.a * px + m.c * py + m.e, y: m.b * px + m.d * py + m.f, s: pk * sheet.S };
+    const looseBase = `${spaceId}|${sheet.kind}|${sheet.lonRef}|${view.width}x${view.height}|${u}`;
+    const detail = `${sheet.S}|${sheet.tolerance}|${opts.basemap ? chooseScale(opts.basemap, view).scale : ''}`;
+    const partKey = (content: string, more = ''): PartKey => ({ loose: `${looseBase}|${content}`, strict: `${looseBase}|${content}|${detail}|${more}` });
     const sphere = new Path2D(geoPath(view.projection)({ type: 'Sphere' }) ?? '');
-    if (opts.passes.has('background') && !opts.transparent) {
-      ctx.fillStyle = style.ocean;
-      ctx.fill(sphere);
-    }
-    if (opts.passes.has('graticule')) {
-      ctx.strokeStyle = style.graticule;
-      ctx.lineWidth = 0.8 * u;
-      const space = world.get('map_space', spaceId);
-      if (view.camera.projection === 'flat' && space?.radius_m) {
-        // A flat map: a grid in round kilometres or metres, about eight lines across the view.
-        const kmPerRad = space.radius_m / 1000, viewKm = (view.width / view.projection.scale()) * kmPerRad;
-        const raw = viewKm / 8, mag = Math.pow(10, Math.floor(Math.log10(raw)));
-        const stepKm = [1, 2, 5, 10].map((k) => k * mag).find((k) => k >= raw) ?? 10 * mag;
-        const stepDeg = (stepKm / kmPerRad) * (180 / Math.PI), ext = FLAT_EXTENT_DEG * 1.6;
-        ctx.stroke(new Path2D(geoPath(view.projection)(geoGraticule().extent([[-ext, -ext], [ext, ext]]).step([stepDeg, stepDeg]).precision(stepDeg)()) ?? ''));
-      } else ctx.stroke(new Path2D(geoPath(view.projection)(geoGraticule10()) ?? ''));
-    }
-    if (opts.passes.has('land') && opts.basemap) {
-      const oceanBelow = opts.passes.has('background') && !opts.transparent;
-      this.basemapPainter.draw(ctx, view, opts.basemap, { referenceBorders: !!opts.referenceBorders, oceanColor: oceanBelow ? style.ocean : undefined });
+    // Prepared geometry runs on past the planet's outline (a ring is drawn again a turn east or
+    // west where that copy shows): where the outline is in view, it clips everything on the map.
+    const clipSphere = outlineInView(view);
+
+    // ---- The base map: ocean, grid and land. The same picture for as long as the view stays put.
+    const wantsBackground = opts.passes.has('background') && !opts.transparent;
+    const wantsLand = opts.passes.has('land') && !!opts.basemap;
+    const space = world.get('map_space', spaceId);
+    if (wantsBackground || opts.passes.has('graticule') || wantsLand) {
+      // (A flat map's grid changes its spacing with the zoom.)
+      const gridStep = opts.passes.has('graticule') && view.camera.projection === 'flat' && space?.radius_m ? Math.floor(Math.log10(view.width / view.projection.scale()) * 3) : 0;
+      const baseKey = partKey(`${wantsBackground ? style.ocean : ''}|${opts.passes.has('graticule') ? style.graticule : ''}|${wantsLand ? `${opts.basemap!.scales.length}${opts.referenceBorders ? 'r' : ''}` : ''}|${space?.radius_m ?? 0}`, `${gridStep}`);
+      // (One kept picture per combination of parts: an export draws several passes of each frame.)
+      this.layered(`base:${wantsBackground ? 'o' : ''}${opts.passes.has('graticule') ? 'g' : ''}${wantsLand ? 'l' : ''}`, ctx, baseKey, at, (c) => {
+        if (wantsBackground) {
+          c.fillStyle = style.ocean;
+          c.fill(sphere);
+        }
+        c.save();
+        if (clipSphere) c.clip(sphere);
+        if (opts.passes.has('graticule')) {
+          c.strokeStyle = style.graticule;
+          let key = 'graticule', lines: Ring[] | null = null;
+          if (view.camera.projection === 'flat' && space?.radius_m) {
+            // A flat map: a grid in round kilometres or metres, about eight lines across the view.
+            const kmPerRad = space.radius_m / 1000, viewKm = (view.width / view.projection.scale()) * kmPerRad;
+            const raw = viewKm / 8, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+            const stepKm = [1, 2, 5, 10].map((k) => k * mag).find((k) => k >= raw) ?? 10 * mag;
+            const stepDeg = (stepKm / kmPerRad) * (180 / Math.PI), ext = FLAT_EXTENT_DEG * 1.6;
+            key = `graticule:${stepDeg}`;
+            if (!sheet.cache.has(key)) {
+              lines = [];
+              const n = Math.floor(ext / stepDeg);
+              for (let i = -n; i <= n; i++) {
+                lines.push(makeRing(Float64Array.of(i * stepDeg, i * stepDeg), Float64Array.of(-ext, ext), false, true));
+                lines.push(makeRing(Float64Array.of(-ext, ext), Float64Array.of(i * stepDeg, i * stepDeg), false, false));
+              }
+            }
+          } else if (!sheet.cache.has(key)) lines = graticule10();
+          if (lines) { const p = new Path2D(); for (const l of lines) sheet.line(p, l); sheet.cache.set(key, p); }
+          this.strokeOnSheet(c, sheet.cache.get(key) as Path2D, 0.8 * u);
+        }
+        if (wantsLand) this.basemapPainter.draw(c, view, sheet, opts.basemap!, { referenceBorders: !!opts.referenceBorders, oceanColor: wantsBackground ? style.ocean : undefined });
+        c.restore();
+      });
     }
 
     // Each name as it is at this moment (names can change over time).
@@ -233,6 +944,7 @@ export class MapRenderer {
     this.mediaChannel = opts.mediaChannel ?? 'live';
     // Pictures and videos filling territory, by owner.
     const fills = new Map<string, CountryFillLike | null>();
+    let anyMedia = false;
     const fillOf = (v: string): CountryFillLike | null => {
       if (fills.has(v)) return fills.get(v)!;
       const f = parseJSON<{ fill?: CountryFillLike }>(entities.get(v)?.style ?? '{}', {})?.fill ?? null;
@@ -261,105 +973,146 @@ export class MapRenderer {
     const placesText = opts.passes.has('labels') || opts.passes.has('cities');
     const drawsLayers = opts.passes.has('fills') || opts.passes.has('borders') || (placesText && layout.labels);
     type LayerStyle = { fillOpacity?: number; borderWidth?: number; clipToLand?: boolean };
-    const prepared: Array<{ ls: LayerStyle; states: Map<number, FaceState>; tg: ReturnType<MapRenderer['transitionGroups']>; clip: boolean }> = [];
+    const prepared: Array<{ ls: LayerStyle; states: Map<number, FaceState>; snap: LayerSnap; tg: { groups: Map<string, TransitionGroup>; of: Map<number, TransitionGroup> }; clip: boolean }> = [];
+    let landKey = '', layerSig = '', animated = false;
     for (const layerId of drawsLayers ? opts.layerIds : []) {
       const layer = world.get('layer', layerId);
       if (!layer || layer.space_id !== spaceId || layer.kind !== 'partition') continue;
-      const states = opts.transitions ? this.shotStates(engine, spaceId, layerId, t, engine.partitionState(spaceId, layerId, t), opts.transitions) : engine.partitionState(spaceId, layerId, t);
+      let states = engine.partitionState(spaceId, layerId, t);
+      let changing = engine.partitionChanging(spaceId, layerId, t);
+      let sig = '';
+      if (opts.transitions) ({ states, changing, sig } = this.shotStates(engine, spaceId, layerId, t, states, changing, opts.transitions));
+      const snap = this.snapFor(`${engine.revision}|${arr.revision}|${spaceId}|${layerId}|${engine.stretchOf(t)}|${sig}`, arr, states, changing);
       const ls = parseJSON<LayerStyle>(layer.style, {});
       // Coastline clipping: territory ends at the coast unless the layer is set to cover the sea.
-      const clip = !!opts.basemap && ls.clipToLand !== false;
-      prepared.push({ ls, states, tg: this.transitionGroups(view, arr, engine, states, t), clip });
+      // Away from any coast there is nothing to trim (all land), or nothing to see (all sea).
+      let clip = !!opts.basemap && ls.clipToLand !== false;
+      if (clip) {
+        const coast = this.basemapPainter.pathsFor(view, sheet, opts.basemap!).coast;
+        if (coast === 'land') clip = false;
+        else if (coast === 'sea') continue;
+      }
+      const tg = this.transitionGroups(view, sheet, sp, arr, snap, states);
+      prepared.push({ ls, states, snap, tg, clip });
+      landKey += `|${snap.key}|${layer.style}|${clip ? 1 : 0}`;
+      layerSig += `|${layerId}|${layer.style}|${clip ? 1 : 0}`;
+      if (tg.groups.size) animated = true;
+      for (const owner of snap.byOwner.keys()) if (fillOf(owner)) anyMedia = true;
     }
 
     this.lastTransitions = prepared.flatMap((p) => [...p.tg.groups.values()].map((g) => ({ style: g.spec.style, progress: g.progress })));
-    const land = (): Path2D => this.basemapPainter.pathsFor(view, opts.basemap!).land;
-    if (opts.passes.has('fills')) for (const { ls, states, tg, clip } of prepared) {
-      // Each layer is painted fully opaque in a scratch buffer and laid onto the map once at the
-      // layer's opacity: neighbouring parcels then never show seams, and fades mix correctly.
-      const lc = this.scratch(ctx);
-      // Owners filled with a picture or video are drawn on their own; the rest are grouped by colour.
-      const byColor = new Map<string, number[]>(), byMedia = new Map<string, number[]>();
-      for (const [face, st] of states) {
-        const v = tg.of.has(face) ? st.transition!.from : st.value;
-        if (!v) continue;
-        if (fillOf(v)) { const l = byMedia.get(v); if (l) l.push(face); else byMedia.set(v, [face]); continue; }
-        const c = colorOf(v);
-        if (!c) continue;
-        const l = byColor.get(c);
-        if (l) l.push(face); else byColor.set(c, [face]);
-      }
-      for (const [c, faces] of byColor) { lc.fillStyle = c; lc.fill(this.groupPath(view, arr, faces), 'evenodd'); }
-      // Pictures are placed by the bounding box of the owner's whole territory (so a flag does not
-      // jump between the owner's pieces); an owner whose picture is not loaded yet shows its colour.
-      const ownerBox = new Map<string, Box2>();
-      const boxOf = (v: string) => {
-        let b = ownerBox.get(v);
-        if (!b) {
-          const faces: number[] = [];
-          for (const [f, st] of states) if (st.value === v || (tg.of.has(f) && st.transition!.from === v)) faces.push(f);
-          b = this.screenBox(view, arr, faces);
-          ownerBox.set(v, b);
-        }
-        return b;
-      };
-      const paint = (c: CanvasRenderingContext2D, v: string | null, shape: Path2D) => {
-        const media = v ? fillOf(v) : null;
-        if (v && media && this.paintMedia(c, media, shape, boxOf(v), view.unit)) return;
-        const col = colorOf(v);
-        if (col) { c.fillStyle = col; c.fill(shape, 'evenodd'); }
-        else { c.save(); c.globalCompositeOperation = 'destination-out'; c.fillStyle = '#000'; c.fill(shape, 'evenodd'); c.restore(); }
-      };
-      for (const [v, faces] of byMedia) paint(lc, v, this.groupPath(view, arr, faces));
-      for (const g of tg.groups.values()) this.drawTransition(lc, g, paint);
-      if (clip) this.basemapPainter.maskToLand(lc, view, opts.basemap!);
-      ctx.save();
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.globalAlpha = ls.fillOpacity ?? 0.78;
-      ctx.drawImage(lc.canvas as CanvasImageSource, 0, 0);
-      ctx.restore();
-      // The advancing front is highlighted on top, at full strength.
-      const front = opts.transitions?.front ?? { show: true, color: style.frontGlow, width: 2.2, glow: 10 };
-      if (front.show) for (const g of tg.groups.values()) {
-        if (!g.advance || !g.disc) continue;
-        ctx.save();
-        if (clip) ctx.clip(land());
-        ctx.clip(g.changing, 'evenodd');
-        if (g.border) {
-          // The edge of the reached area: the area minus the area reached a line-width earlier.
-          const r = g.progress * g.border.maxDist, w = Math.max(0.5, front.width * view.unit);
-          const band = this.scratch(ctx);
-          band.fillStyle = front.color;
-          band.fill(g.disc, 'nonzero');
-          band.globalCompositeOperation = 'destination-out';
-          band.fill(g.border.reach(r - w), 'nonzero');
-          band.globalCompositeOperation = 'source-over';
-          ctx.setTransform(1, 0, 0, 1, 0, 0);
-          ctx.shadowColor = front.color;
-          ctx.shadowBlur = front.glow * view.unit;
-          ctx.drawImage(band.canvas as CanvasImageSource, 0, 0);
-        } else {
-          ctx.strokeStyle = front.color;
-          ctx.lineWidth = front.width * view.unit;
-          ctx.shadowColor = front.color;
-          ctx.shadowBlur = front.glow * view.unit;
-          ctx.stroke(g.disc);
-        }
-        ctx.restore();
-      }
-    }
+    const land = (): Shape => ({ path: this.basemapPainter.pathsFor(view, sheet, opts.basemap!).land, onSheet: true });
+    const wantsFills = opts.passes.has('fills'), wantsBorders = opts.passes.has('borders');
 
-    if (opts.passes.has('borders')) for (const { ls, states, tg, clip } of prepared) {
-      ctx.save();
-      if (clip) ctx.clip(land());
-      this.drawBorders(ctx, view, arr, states, tg, style, (ls.borderWidth ?? style.borderWidth) * u);
-      ctx.restore();
+    // ---- Territories and borders. The same picture while nothing changes hands (and nothing animates).
+    if ((wantsFills || wantsBorders) && prepared.length) {
+      const front = opts.transitions?.front ?? { show: true, color: style.frontGlow, width: 2.2, glow: 10 };
+      // A change under way looks different at every instant (and in a shot, at every frame, which is
+      // drawn afresh); so do videos. Pictures are kept until one loads.
+      const key = animated && opts.transitions ? null : partKey(`${animated ? `${t.day}:${t.ms}|` : ''}${wantsFills ? 'f' : ''}${wantsBorders ? 'b' : ''}|${world.revision}|${style.border}|${style.borderWidth}|${opts.basemap ? opts.basemap.scales.length : ''}${landKey}${anyMedia ? `|${assetEpoch()}|${this.mediaSeconds}|${this.mediaChannel}` : ''}`);
+      // The working view, after an edit or a step in time that changed few parcels: only where they lie is drawn again.
+      let patch: { from: string; rects: DeviceRect[] } | null = null;
+      if (key && this.carry && !animated && !anyMedia) {
+        // (How every country looks, whoever holds land now: a changed colour means the whole picture.)
+        let colours = 0;
+        for (const e of entities.values()) {
+          const look = `${e.id}|${e.color}|${e.style}`;
+          let hsh = 0x811c9dc5;
+          for (let i = 0; i < look.length; i++) hsh = Math.imul(hsh ^ look.charCodeAt(i), 16777619);
+          colours = (colours + (hsh >>> 0)) % 4294967291;
+        }
+        const stable = `${key.loose.slice(0, looseBase.length)}|${detail}|${wantsFills ? 'f' : ''}${wantsBorders ? 'b' : ''}|${style.border}|${style.borderWidth}|${opts.basemap ? opts.basemap.scales.length : ''}${layerSig}|${colours}`;
+        const widest = Math.max(...prepared.map((p) => p.ls.borderWidth ?? style.borderWidth));
+        patch = this.changesSince(view, arr, prepared.map((p) => p.states), key.strict, stable, m, ctx.canvas.width, ctx.canvas.height, widest * u + 3);
+      } else this.patchPrev = null;
+      this.layered(`territory:${wantsFills ? 'f' : ''}${wantsBorders ? 'b' : ''}`, ctx, key, at, (c) => {
+        c.save();
+        if (clipSphere) c.clip(sphere);
+        if (wantsFills) for (const { ls, snap, tg, clip } of prepared) {
+          // Each layer is painted fully opaque in a scratch buffer and laid onto the map once at the
+          // layer's opacity: neighbouring parcels then never show seams, and fades mix correctly.
+          const lc = this.scratch(c);
+          // Pictures are placed by the bounding box of the owner's whole territory (so a flag does not
+          // jump between the owner's pieces); an owner whose picture is not loaded yet shows its colour.
+          const ownerBox = new Map<string, Box2>();
+          const boxOf = (v: string) => {
+            let b = ownerBox.get(v);
+            if (!b) ownerBox.set(v, (b = this.screenBox(view, arr, snap.reach.get(v) ?? [])));
+            return b;
+          };
+          const paint = (pc: CanvasRenderingContext2D, v: string | null, shape: Shape) => {
+            const media = v ? fillOf(v) : null;
+            if (v && media && this.paintMedia(pc, media, shape, boxOf(v), view.unit)) return;
+            const col = colorOf(v);
+            if (col) { pc.fillStyle = col; this.fill(pc, shape); }
+            else { pc.save(); pc.globalCompositeOperation = 'destination-out'; pc.fillStyle = '#000'; this.fill(pc, shape); pc.restore(); }
+          };
+          // Every owner's parcels as one shape (those not on this sheet are skipped altogether).
+          for (const [owner, set] of snap.byOwner) {
+            const shape = this.setPath(sp, sheet, arr, set);
+            if (!shape) continue;
+            if (fillOf(owner)) { paint(lc, owner, shape); continue; }
+            const col = colorOf(owner);
+            if (col) { lc.fillStyle = col; this.fill(lc, shape); }
+          }
+          for (const g of tg.groups.values()) this.drawTransition(lc, g, paint);
+          if (clip) this.maskLand(lc, view, sheet, opts.basemap!, frameKey, true);
+          c.save();
+          c.setTransform(1, 0, 0, 1, 0, 0);
+          c.globalAlpha = ls.fillOpacity ?? 0.78;
+          c.drawImage(lc.canvas as CanvasImageSource, 0, 0);
+          c.restore();
+          // The advancing front is highlighted on top, at full strength.
+          if (front.show) for (const g of tg.groups.values()) {
+            if (!g.advance || !g.disc || !g.changing) continue;
+            c.save();
+            if (clip) this.clip(c, land());
+            this.clip(c, g.changing);
+            if (g.border) {
+              // The edge of the reached area: the area minus the area reached a line-width earlier.
+              const r = g.progress * g.border.maxDist, w = Math.max(0.5, front.width * view.unit);
+              const band = this.scratch(c);
+              band.fillStyle = front.color;
+              band.fill(g.disc, 'nonzero');
+              band.globalCompositeOperation = 'destination-out';
+              band.fill(g.border.reach(r - w), 'nonzero');
+              band.globalCompositeOperation = 'source-over';
+              c.setTransform(1, 0, 0, 1, 0, 0);
+              c.shadowColor = front.color;
+              c.shadowBlur = front.glow * view.unit;
+              // Only the part of the buffer around the change (blurring the glow over the whole frame is slow).
+              const [bx, by, bw, bh] = this.deviceBox(this.screenBox(view, arr, g.changingFaces), m, 3 * front.glow * view.unit + w + 4, c.canvas.width, c.canvas.height);
+              if (bw > 0 && bh > 0) c.drawImage(band.canvas as CanvasImageSource, bx, by, bw, bh, bx, by, bw, bh);
+            } else {
+              c.strokeStyle = front.color;
+              c.lineWidth = front.width * view.unit;
+              c.shadowColor = front.color;
+              c.shadowBlur = front.glow * view.unit;
+              c.stroke(g.disc);
+            }
+            c.restore();
+          }
+        }
+        if (wantsBorders) for (const { ls, states, snap, tg, clip } of prepared) {
+          const width = (ls.borderWidth ?? style.borderWidth) * u;
+          if (!clip) { this.drawBorders(c, sheet, sp, arr, snap, states, tg, style, width); continue; }
+          // Ending at the coast: drawn in the scratch buffer, masked by the land, then laid on.
+          const lc = this.scratch(c);
+          this.drawBorders(lc, sheet, sp, arr, snap, states, tg, style, width);
+          this.maskLand(lc, view, sheet, opts.basemap!, frameKey, false);
+          c.save();
+          c.setTransform(1, 0, 0, 1, 0, 0);
+          c.drawImage(lc.canvas as CanvasImageSource, 0, 0);
+          c.restore();
+        }
+        c.restore();
+      }, patch);
     }
 
     // One label per country: a country on several layers (its land, and its military control, say) is
     // labelled from the lowest layer it is on.
-    if (placesText && layout.labels) for (const { states, clip } of prepared) {
-      for (const l of this.layerLabels(view, arr, states, entities, clip ? landMaskOf(opts.basemap!) : null)) if (!labels.some((x) => x.entityId === l.entityId)) labels.push(l);
+    if (placesText && layout.labels) for (const { states, snap, clip } of prepared) {
+      for (const l of this.layerLabels(view, arr, snap, states, entities, clip ? landMaskOf(opts.basemap!) : null)) if (!labels.some((x) => x.entityId === l.entityId)) labels.push(l);
     }
     // Country labels and city names are placed together: they move apart where they would overlap,
     // and where they cannot the one with less priority is hidden (larger countries, then smaller
@@ -376,81 +1129,84 @@ export class MapRenderer {
     ctx.restore();
   }
 
-  private groupCache = new Map<string, Path2D>();
-
-  /**
-   * One path for a group of parcels drawn in the same colour. Reused while the group is unchanged
-   * (between events, every frame of a scrub or a shot reuses it), rebuilt when parcels change hands.
-   */
-  private groupPath(view: View, arr: Arrangement, faces: number[]): Path2D {
-    let h1 = 0x811c9dc5, h2 = 0x01000193;
-    for (const f of faces) { h1 = Math.imul(h1 ^ f, 16777619) >>> 0; h2 = Math.imul(h2 + f, 2246822519) >>> 0; }
-    const key = `${view.key}|${arr.spaceId}|${arr.revision}|${faces.length}|${h1}|${h2}`;
-    let p = this.groupCache.get(key);
-    if (!p) {
-      p = new Path2D();
-      for (const f of faces) p.addPath(this.facePath(view, arr, f));
-      if (this.groupCache.size > 400) this.groupCache.clear();
-      this.groupCache.set(key, p);
-    }
-    return p;
-  }
+  /** Per stretch of time: the parcels of each change that a shot may animate (not recorded as animated), with what they were before. */
+  private shotIndex = new Map<string, Map<string, { a: Assignment; faces: number[]; from: Array<{ value: string | null; prior: Assignment | null }> }>>();
 
   /**
    * A shot's way of animating changes, applied to the recorded states: no animation at all, every
    * change animated, or recorded animations restyled. History is never changed, only what is drawn.
+   * Only the parcels in a change being animated get states of their own; `sig` says which changes
+   * those are (so that what stays the same between frames can be kept).
    */
-  private shotStates(engine: Engine, spaceId: string, layerId: string, t: Instant, states: Map<number, FaceState>, o: ShotTransitionOptions): Map<number, FaceState> {
-    if (o.mode === 'recorded' && !o.restyleRecorded) return states;
+  private shotStates(engine: Engine, spaceId: string, layerId: string, t: Instant, states: Map<number, FaceState>, changing: number[], o: ShotTransitionOptions): { states: Map<number, FaceState>; changing: number[]; sig: string } {
+    if (o.mode === 'recorded' && !o.restyleRecorded) return { states, changing, sig: '' };
     const spec: CompiledTransition = { style: o.style, origin: null, maxDist: 0, easing: o.easing, angle: o.angle, shot: true };
     const progressOf = (a: Assignment): number => {
       if (o.timing === 'event' && compare(a.end, a.t) > 0) return diffMs(a.t, t) / Math.max(1, diffMs(a.t, a.end));
       return o.secondsSince(a.t) / Math.max(1e-3, o.seconds);
     };
-    const out = new Map<number, FaceState>();
-    for (const [f, st] of states) {
-      const a = st.assignment;
-      if (o.mode === 'instant') { out.set(f, st.transition ? { value: st.value, assignment: a } : st); continue; }
-      if (st.transition) {
-        if (!o.restyleRecorded) { out.set(f, st); continue; }
-        const p = progressOf(a!);
-        out.set(f, p >= 1 || !(p >= 0) ? { value: st.value, assignment: a } : { ...st, transition: { ...st.transition, progress: p, spec } });
-        continue;
-      }
-      // The starting map is never animated; changes made without an event are, like any other change.
-      if (o.mode !== 'all' || !a || (a.eventId === BASE_EVENT_ID && a.t.day === -Infinity)) { out.set(f, st); continue; }
-      const p = progressOf(a);
-      if (!(p >= 0 && p < 1)) { out.set(f, st); continue; }
-      const prior = engine.latest(spaceId, layerId, f, t, a);
-      const from = prior ? prior.value : null;
-      if ((from ?? '') === (st.value ?? '')) { out.set(f, st); continue; }
-      out.set(f, { value: st.value, assignment: a, transition: { from, progress: p, spec, prior } });
+    let out: Map<number, FaceState> | null = null;
+    const put = (f: number, st: FaceState) => { (out ??= new Map(states)).set(f, st); };
+    const now: number[] = [];
+    const active = new Set<string>();
+    // Changes recorded as animated.
+    for (const f of changing) {
+      const st = states.get(f)!, a = st.assignment;
+      if (o.mode === 'instant') { put(f, { value: st.value, assignment: a }); continue; }
+      if (!o.restyleRecorded) { now.push(f); active.add(a!.effectId); continue; }
+      const p = progressOf(a!);
+      if (p >= 1 || !(p >= 0)) put(f, { value: st.value, assignment: a });
+      else { put(f, { ...st, transition: { ...st.transition!, progress: p, spec } }); now.push(f); active.add(a!.effectId); }
     }
-    return out;
+    // Every other change, animated by the shot ('all'): only those under way at this frame.
+    if (o.mode === 'all') {
+      const key = `${engine.revision}|${engine.stretchOf(t)}|${spaceId}|${layerId}|${states.size}`;
+      let index = this.shotIndex.get(key);
+      if (!index) {
+        index = new Map();
+        for (const [f, st] of states) {
+          const a = st.assignment;
+          // The starting map is never animated; changes made without an event are, like any other change.
+          if (st.transition || !a || (a.eventId === BASE_EVENT_ID && a.t.day === -Infinity)) continue;
+          let e = index.get(a.effectId);
+          if (!e) index.set(a.effectId, (e = { a, faces: [], from: [] }));
+          e.faces.push(f);
+        }
+        if (this.shotIndex.size >= 6) this.shotIndex.delete(this.shotIndex.keys().next().value!);
+        this.shotIndex.set(key, index);
+      }
+      for (const [id, e] of index) {
+        const p = progressOf(e.a);
+        if (!(p >= 0 && p < 1)) continue;
+        for (let i = 0; i < e.faces.length; i++) {
+          const f = e.faces[i], st = states.get(f)!;
+          let was = e.from[i];
+          if (!was) { const prior = engine.latest(spaceId, layerId, f, t, st.assignment!); was = e.from[i] = { value: prior ? prior.value : null, prior }; }
+          if ((was.value ?? '') === (st.value ?? '')) continue;
+          put(f, { value: st.value, assignment: st.assignment, transition: { from: was.value, progress: p, spec, prior: was.prior } });
+          now.push(f);
+          active.add(id);
+        }
+      }
+    }
+    return { states: out ?? states, changing: now, sig: `${o.mode}|${o.restyleRecorded ? 1 : 0}|${now.length}|${[...active].sort().join(',')}` };
   }
 
-  /** Parcels that are part of an animated change at this moment, grouped by the change they belong to. */
-  private transitionGroups(view: View, arr: Arrangement, engine: Engine, states: Map<number, FaceState>, t: Instant): { groups: Map<string, TransitionGroup>; of: Map<number, TransitionGroup> } {
-    void engine; void t;
+  /** The animated changes at this moment: the parcels of each (from the snapshot) and how far each has come. */
+  private transitionGroups(view: View, sheet: Sheet, sp: SheetParcels, arr: Arrangement, snap: LayerSnap, states: Map<number, FaceState>): { groups: Map<string, TransitionGroup>; of: Map<number, TransitionGroup> } {
     const groups = new Map<string, TransitionGroup>(), of = new Map<number, TransitionGroup>();
-    for (const [face, st] of states) {
-      if (!st.transition || !st.assignment) continue;
-      const spec = st.transition.spec;
-      const key = st.assignment.effectId;
-      let g = groups.get(key);
-      if (!g) {
-        const advance = spec.style === 'advance' || spec.style === 'wipe' || spec.style === 'border';
-        // Shot-made animations use the shot's easing; recorded fronts their own; recorded fades stay even.
-        const progress = spec.shot || spec.style === 'advance' || spec.style === 'border' ? ease(spec.easing, st.transition.progress) : st.transition.progress;
-        g = { a: st.assignment, faces: [], states: [], advance, spec, progress, disc: null, discRule: 'evenodd', border: null, region: new Path2D(), changing: new Path2D() };
-        groups.set(key, g);
-      }
-      g.faces.push(face);
-      g.states.push(st);
-      of.set(face, g);
-      const path = this.facePath(view, arr, face);
-      g.region.addPath(path);
-      if ((st.transition.from ?? '') !== (st.value ?? '')) g.changing.addPath(path);
+    for (const cg of snap.groups.values()) {
+      const st = states.get(cg.region.faces[0])!;
+      const spec = st.transition!.spec;
+      const advance = spec.style === 'advance' || spec.style === 'wipe' || spec.style === 'border';
+      // Shot-made animations use the shot's easing; recorded fronts their own; recorded fades stay even.
+      const progress = spec.shot || spec.style === 'advance' || spec.style === 'border' ? ease(spec.easing, st.transition!.progress) : st.transition!.progress;
+      const g: TransitionGroup = {
+        a: st.assignment!, faces: cg.region.faces, changingFaces: cg.changing.faces, advance, spec, progress, disc: null, discRule: 'evenodd', border: null,
+        region: this.setPath(sp, sheet, arr, cg.region), changing: cg.changing.faces.length ? this.setPath(sp, sheet, arr, cg.changing) : null,
+      };
+      groups.set(cg.id, g);
+      for (const f of cg.region.faces) of.set(f, g);
     }
     // The area each moving front has reached: grown from the border with the new owner's land, a
     // circle from its origin, or a straight wipe (older shots).
@@ -477,8 +1233,13 @@ export class MapRenderer {
     return { groups, of };
   }
 
+  private reachCache = new Map<string, { origin: Vec3; maxDist: number }>();
+
   /** Where a front starts when the change has no recorded origin: the middle of the change, and how far it must go. */
   private reachOf(arr: Arrangement, faces: number[]): { origin: Vec3; maxDist: number } {
+    const key = `${arr.spaceId}|${this.faceSet(arr, faces).key}`;
+    const hit = this.reachCache.get(key);
+    if (hit) return hit;
     let sx = 0, sy = 0, sz = 0;
     for (const f of faces) {
       const g = this.faceGeo(arr, f);
@@ -493,7 +1254,10 @@ export class MapRenderer {
       const d = Math.acos(Math.max(-1, Math.min(1, origin[0] * Math.cos(la) * Math.cos(lo) + origin[1] * Math.cos(la) * Math.sin(lo) + origin[2] * Math.sin(la))));
       if (d > maxDist) maxDist = d;
     }
-    return { origin, maxDist };
+    const res = { origin, maxDist };
+    if (this.reachCache.size > 64) this.reachCache.clear();
+    this.reachCache.set(key, res);
+    return res;
   }
 
   /** A straight front sweeping across the change in the shot's direction (in longitude/latitude). */
@@ -535,19 +1299,18 @@ export class MapRenderer {
    * buffer: an advancing front fills the reached area with the new owner; a fade mixes the new
    * owner in. Territory that becomes nobody's is erased from the layer, never from the map below.
    */
-  private drawTransition(lc: CanvasRenderingContext2D, g: TransitionGroup, paint: (c: CanvasRenderingContext2D, v: string | null, shape: Path2D) => void): void {
-    const shape = g.advance ? g.disc : g.changing;
-    if (!shape) return; // the front has not reached anything yet
+  private drawTransition(lc: CanvasRenderingContext2D, g: TransitionGroup, paint: (c: CanvasRenderingContext2D, v: string | null, shape: Shape) => void): void {
+    if (!g.changing) return; // nothing changes owner, or none of it is in view
+    if (g.advance && !g.disc) return; // the front has not reached anything yet
     lc.save();
-    if (g.advance && g.discRule === 'nonzero') {
-      // The reached area is a union of shapes: clip to it and paint the changing parcels.
-      lc.clip(g.changing, 'evenodd');
-      lc.clip(shape, 'nonzero');
-      paint(lc, g.a.value, g.changing);
+    if (g.advance) {
+      // The area the front has reached (a union of shapes for a front from a border), within the changing parcels.
+      this.clip(lc, g.changing);
+      if (g.discRule === 'nonzero') { lc.clip(g.disc!, 'nonzero'); paint(lc, g.a.value, g.changing); }
+      else paint(lc, g.a.value, { path: g.disc!, onSheet: false });
     } else {
-      if (g.advance) lc.clip(g.changing, 'evenodd');
-      else lc.globalAlpha = Math.min(1, Math.max(0, g.progress));
-      paint(lc, g.a.value, shape);
+      lc.globalAlpha = Math.min(1, Math.max(0, g.progress));
+      paint(lc, g.a.value, g.changing);
     }
     lc.restore();
   }
@@ -565,8 +1328,7 @@ export class MapRenderer {
   private borderFront(view: View, arr: Arrangement, g: TransitionGroup, states: Map<number, FaceState>): BorderFront | null {
     const owner = g.a.value;
     if (!owner) return null;
-    const changing: number[] = [];
-    g.faces.forEach((f, i) => { if ((g.states[i].transition?.from ?? '') !== (g.states[i].value ?? '')) changing.push(f); });
+    const changing = g.changingFaces;
     if (!changing.length) return null;
     const key = `${arr.spaceId}|${arr.revision}|${g.a.effectId}|${owner}|${changing.length}|${changing[0]}|${changing[changing.length - 1]}`;
     // 1. The source, in longitude/latitude (independent of the view): the shared border, or failing that
@@ -689,25 +1451,59 @@ export class MapRenderer {
     return bf;
   }
 
-  /** The screen rectangle of a set of parcels (the whole view for a parcel covering the planet). */
+
+  /**
+   * The screen rectangle of a set of parcels (the whole view for a parcel covering the rest of the
+   * planet): from the boxes of their outlines, each taken at the turn nearest the camera.
+   */
   private screenBox(view: View, arr: Arrangement, faces: number[]): Box2 {
-    const polys: number[][][][] = [];
+    const whole: Box2 = [0, 0, view.width, view.height];
+    if (!faces.length) return whole;
+    const geom = parcelGeometry(arr), t = arr.topology();
+    const acc: Box2 = [Infinity, Infinity, -Infinity, -Infinity];
     for (const f of faces) {
-      const g = this.faceGeo(arr, f);
-      if ((g.geo as { type: string }).type !== 'Polygon') return [0, 0, view.width, view.height];
-      polys.push((g.geo as GeoJSON.Polygon).coordinates);
+      if (geom.needsOutline(f)) return whole;
+      for (const c of t.facesCycles.get(f) ?? []) this.boxOnScreen(view, geom.cycle(c, t).box, acc);
     }
-    if (!polys.length) return [0, 0, view.width, view.height];
-    const [[x0, y0], [x1, y1]] = geoPath(view.projection).bounds({ type: 'MultiPolygon', coordinates: polys });
-    return Number.isFinite(x0) && x1 > x0 && y1 > y0 ? [x0, y0, x1 - x0, y1 - y0] : [0, 0, view.width, view.height];
+    const [x0, y0, x1, y1] = acc;
+    return Number.isFinite(x0) && x1 > x0 && y1 > y0 ? [x0, y0, x1 - x0, y1 - y0] : whole;
+  }
+
+  /** Grow `acc` (x0, y0, x1, y1 on screen) to hold a box given in degrees (west, south, east, north; longitudes may be unwrapped). */
+  private boxOnScreen(view: View, box: readonly [number, number, number, number], acc: Box2): void {
+    const kind = view.camera.projection, flat = kind === 'flat', ref = flat ? 0 : view.camera.lon;
+    const s = view.projection.scale(), [tx, ty] = view.projection.translate();
+    const [w, so, e, n] = box;
+    const turn = flat ? 0 : 360 * Math.round((ref - (w + e) / 2) / 360);
+    const lo = Math.max(-180, w + turn - ref), hi = Math.min(180, e + turn - ref);
+    // The corners, and the latitude nearest the equator (where the map is widest).
+    const mid = so > 0 ? so : n < 0 ? n : 0;
+    for (const lat of [so, n, mid]) for (const lon of [lo, hi]) {
+      const [px, py] = projectPoint(kind, lon, lat);
+      const x = tx + s * px, y = ty + s * py;
+      if (x < acc[0]) acc[0] = x; if (y < acc[1]) acc[1] = y; if (x > acc[2]) acc[2] = x; if (y > acc[3]) acc[3] = y;
+    }
+  }
+
+  /** A box of the view in the canvas's own pixels (under the frame's transform), grown by `pad` and kept inside the canvas. */
+  private deviceBox(box: Box2, m: DOMMatrix, pad: number, width: number, height: number): Box2 {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const [x, y] of [[box[0], box[1]], [box[0] + box[2], box[1]], [box[0], box[1] + box[3]], [box[0] + box[2], box[1] + box[3]]]) {
+      const dx = m.a * x + m.c * y + m.e, dy = m.b * x + m.d * y + m.f;
+      if (dx < x0) x0 = dx; if (dx > x1) x1 = dx; if (dy < y0) y0 = dy; if (dy > y1) y1 = dy;
+    }
+    const k = Math.hypot(m.a, m.b) || 1;
+    x0 = Math.max(0, Math.floor(x0 - pad * k)); y0 = Math.max(0, Math.floor(y0 - pad * k));
+    x1 = Math.min(width, Math.ceil(x1 + pad * k)); y1 = Math.min(height, Math.ceil(y1 + pad * k));
+    return [x0, y0, x1 - x0, y1 - y0];
   }
 
   /** Fill a shape with a picture or video frame; false if it cannot be drawn yet. */
-  private paintMedia(c: CanvasRenderingContext2D, fill: CountryFillLike, shape: Path2D, box: Box2, unit: number): boolean {
+  private paintMedia(c: CanvasRenderingContext2D, fill: CountryFillLike, shape: Shape, box: Box2, unit: number): boolean {
     const src = fill.kind === 'video' ? videoNow(fill.asset, this.mediaSeconds, fill, this.mediaChannel) : imageNow(fill.asset);
     if (!src) return false;
     c.save();
-    c.clip(shape, 'evenodd');
+    this.clip(c, shape);
     if (fill.fit === 'tile') {
       const w = (src as HTMLVideoElement).videoWidth || src.width, h = (src as HTMLVideoElement).videoHeight || src.height;
       const pattern = c.createPattern(src, 'repeat');
@@ -715,7 +1511,8 @@ export class MapRenderer {
         const size = (fill.tileSize ?? 120) * unit;
         pattern.setTransform(new DOMMatrix().translate(box[0], box[1]).scale(size / w));
         c.fillStyle = pattern;
-        c.fill(shape, 'evenodd');
+        // The shape clips; the pattern is laid over everything in screen space.
+        c.fillRect(-1e5, -1e5, 2e5, 2e5);
       }
     } else drawImageFit(c, src, box[0], box[1], box[2], box[3], fill.fit ?? 'cover');
     c.restore();
@@ -728,22 +1525,32 @@ export class MapRenderer {
 
   private scratchCanvas: OffscreenCanvas | null = null;
   private scratchCtx: CanvasRenderingContext2D | null = null;
+  /** The scratch buffer is limited to the part of the frame being drawn (see region), and where it was last drawn on (null: anywhere). */
+  private scratchLimited = false;
+  private scratchUsed: DeviceRect[] | null = null;
 
   /** A cleared buffer the size of the target, with the target's current transform. */
   private scratch(ctx: CanvasRenderingContext2D): CanvasRenderingContext2D {
     const w = ctx.canvas.width, h = ctx.canvas.height;
     if (!this.scratchCanvas || this.scratchCanvas.width !== w || this.scratchCanvas.height !== h) {
       this.scratchCanvas = new OffscreenCanvas(w, h);
+      this.scratchLimited = false;
+      this.scratchUsed = null;
       // Match the target's memory placement so copying between them stays cheap.
       const willReadFrequently = !!ctx.getContextAttributes?.().willReadFrequently;
       this.scratchCtx = this.scratchCanvas.getContext('2d', { willReadFrequently }) as unknown as CanvasRenderingContext2D;
     }
     const sc = this.scratchCtx!;
+    if (this.scratchLimited) { sc.restore(); this.scratchLimited = false; }
     sc.setTransform(1, 0, 0, 1, 0, 0);
     sc.globalAlpha = 1;
     sc.globalCompositeOperation = 'source-over';
-    sc.clearRect(0, 0, w, h);
+    // Only what was drawn on last needs clearing.
+    if (this.scratchUsed) for (const [x, y, rw, rh] of this.scratchUsed) sc.clearRect(x, y, rw, rh);
+    else sc.clearRect(0, 0, w, h);
+    this.scratchUsed = this.region;
     sc.setTransform(ctx.getTransform());
+    if (this.region) { sc.save(); this.clipTo(sc, this.region); this.scratchLimited = true; }
     return sc;
   }
 
@@ -751,62 +1558,50 @@ export class MapRenderer {
    * Borders are drawn where neighbouring parcels have different owners. During an animated change
    * they follow the animation: inside the advancing front the new owners decide, outside it the
    * previous owners do, and the front itself is the moving border. Fades cross-fade the two sets.
+   * Which borders those are is kept per stretch of time, and their paths per sheet.
    */
   private drawBorders(
-    ctx: CanvasRenderingContext2D, view: View, arr: Arrangement, states: Map<number, FaceState>,
+    ctx: CanvasRenderingContext2D, sheet: Sheet, sp: SheetParcels, arr: Arrangement, snap: LayerSnap, states: Map<number, FaceState>,
     tg: { groups: Map<string, TransitionGroup>; of: Map<number, TransitionGroup> }, style: MapStyle, width: number,
   ): void {
-    const differs = (x: string | null, y: string | null) => (x ?? '') !== (y ?? '');
-    const plain: number[][][] = [];
-    const inside = new Map<TransitionGroup, number[][][]>(), outside = new Map<TransitionGroup, number[][][]>();
-    const add = (m: Map<TransitionGroup, number[][][]>, g: TransitionGroup, line: number[][]) => { let l = m.get(g); if (!l) m.set(g, (l = [])); l.push(line); };
-    for (const s of arr.segments.values()) {
-      const a = states.get(s.left_face), b = states.get(s.right_face);
-      if (!a || !b) continue;
-      const ga = tg.of.get(s.left_face), gb = tg.of.get(s.right_face);
-      const now = differs(a.value, b.value);
-      const before = ga || gb ? differs(ga ? a.transition!.from : a.value, gb ? b.transition!.from : b.value) : now;
-      if (!now && !before) continue;
-      const va = arr.vertices.get(s.a)!, vb = arr.vertices.get(s.b)!;
-      const line = [[va.lon / E7, va.lat / E7], [vb.lon / E7, vb.lat / E7]];
-      // Unaffected by any animation, a border both before and after, or where two animations meet.
-      if ((!ga && !gb) || (now && before) || (ga && gb && ga !== gb)) { plain.push(line); continue; }
-      add(now ? inside : outside, (ga ?? gb)!, line);
-    }
-    const path = (lines: number[][][]) => new Path2D(geoPath(view.projection)({ type: 'MultiLineString', coordinates: lines }) ?? '');
+    const bp = this.borderPaths(sp, sheet, arr, snap, states);
+    const stroke = (p: Path2D | BlockPath | null | undefined) => { if (p) this.strokeOnSheet(ctx, p, width); };
     ctx.save();
     ctx.strokeStyle = style.border;
     ctx.lineWidth = width;
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
-    if (plain.length) ctx.stroke(path(plain));
-    for (const g of tg.groups.values()) {
-      const ins = inside.get(g), outs = outside.get(g);
+    // (Owner by owner: each owner's lines are skipped where none of them shows.)
+    for (const p of bp.plain) stroke(p);
+    for (const [id, g] of tg.groups) {
+      const ins = bp.inside.get(id), outs = bp.outside.get(id);
       if (g.advance) {
-        if (!g.disc) { if (outs) ctx.stroke(path(outs)); continue; }
-        if (ins) { ctx.save(); ctx.clip(g.disc, 'evenodd'); ctx.stroke(path(ins)); ctx.restore(); }
-        if (outs) { ctx.save(); ctx.clip(outsideOf(g.disc), 'evenodd'); ctx.stroke(path(outs)); ctx.restore(); }
-        ctx.save(); ctx.clip(g.changing, 'evenodd'); ctx.stroke(g.disc); ctx.restore();
+        if (!g.disc) { stroke(outs); continue; }
+        if (ins) { ctx.save(); ctx.clip(g.disc, 'evenodd'); stroke(ins); ctx.restore(); }
+        if (outs) { ctx.save(); ctx.clip(outsideOf(g.disc), 'evenodd'); stroke(outs); ctx.restore(); }
+        if (g.changing) { ctx.save(); this.clip(ctx, g.changing); ctx.stroke(g.disc); ctx.restore(); }
       } else {
-        if (ins) { ctx.globalAlpha = g.progress; ctx.stroke(path(ins)); }
-        if (outs) { ctx.globalAlpha = 1 - g.progress; ctx.stroke(path(outs)); }
+        if (ins) { ctx.globalAlpha = g.progress; stroke(ins); }
+        if (outs) { ctx.globalAlpha = 1 - g.progress; stroke(outs); }
         ctx.globalAlpha = 1;
       }
     }
     ctx.restore();
   }
 
-  private landCache = new WeakMap<Arrangement, { rev: number; mask: LandMask; faces: Map<number, LandSample> }>();
+  private landCache = new WeakMap<Arrangement, { mask: LandMask; faces: Map<number, { stamp: number; s: LandSample }> }>();
 
   /**
    * The part of a parcel that is on land, as a grid of sample points (each standing for an equal share
-   * of the parcel's area). Cached until the parcel map changes.
+   * of the parcel's area). Kept until the parcel's outline changes.
    */
   private landSample(arr: Arrangement, face: number, mask: LandMask): LandSample {
     let c = this.landCache.get(arr);
-    if (!c || c.rev !== arr.revision || c.mask !== mask) { c = { rev: arr.revision, mask, faces: new Map() }; this.landCache.set(arr, c); }
-    let s = c.faces.get(face);
-    if (s) return s;
+    if (!c || c.mask !== mask) { c = { mask, faces: new Map() }; this.landCache.set(arr, c); }
+    const stamp = arr.faceStamp(face);
+    const hit = c.faces.get(face);
+    if (hit && hit.stamp === stamp) return hit.s;
+    let s: LandSample;
     const g = this.faceGeo(arr, face);
     const rings = (g.geo as GeoJSON.Polygon).coordinates ?? [];
     let w = Infinity, so = Infinity, e = -Infinity, n = -Infinity;
@@ -832,7 +1627,7 @@ export class MapRenderer {
       sum[0] += vec[k]; sum[1] += vec[k + 1]; sum[2] += vec[k + 2];
     }
     s = { pts, vec, sum, weight: g.area / inside, land: (g.area * (pts.length / 2)) / inside };
-    c.faces.set(face, s);
+    c.faces.set(face, { stamp, s });
     return s;
   }
 
@@ -844,84 +1639,93 @@ export class MapRenderer {
   // keep their labels where labels would collide. During an animated change the label glides from
   // where it was before the change to where it will be after it.
 
-  private pieceCache = new Map<string, Map<string, OwnerPiece>>();
+  private pieceCache = new Map<string, OwnerPiece | null>();
   private shapeCache = new Map<string, PlaneShape>();
   private spotCache = new Map<string, PlacedLabel[]>();
   private viewSpotCache = new Map<string, PlacedLabel[]>();
   private viewSpotKey = '';
 
-  /** Each owner's main piece and its outline, for one assignment of parcels to owners. */
-  private ownerPieces(arr: Arrangement, owners: Map<number, string>, mask: LandMask | null): Map<string, OwnerPiece> {
-    let h1 = 0x811c9dc5, h2 = 0x01000193;
-    for (const [f, o] of owners) {
-      h1 = Math.imul(h1 ^ f, 16777619);
-      for (let i = 0; i < o.length; i++) { const c = o.charCodeAt(i); h1 = Math.imul(h1 ^ c, 16777619); h2 = Math.imul(h2 + c + f, 2246822519); }
+  /**
+   * Each owner's main piece and its outline. Worked out owner by owner and kept while the owner's
+   * parcels stay the same: crossing an event, or an edit, works out again only the owners it touches.
+   */
+  private ownerPieces(arr: Arrangement, sets: Map<string, FaceSet>, mask: LandMask | null): Map<string, OwnerPiece> {
+    const out = new Map<string, OwnerPiece>();
+    for (const [owner, set] of sets) {
+      const key = `${arr.spaceId}|${set.key}|${mask ? 'land' : 'all'}`;
+      let p = this.pieceCache.get(key);
+      if (p === undefined) {
+        p = this.ownerPiece(arr, owner, set, mask);
+        if (this.pieceCache.size > 4000) this.pieceCache.clear();
+        this.pieceCache.set(key, p);
+      }
+      // (The same parcels may have passed to another owner.)
+      if (p) out.set(owner, p.owner === owner ? p : { ...p, owner });
     }
-    const key = `${arr.spaceId}|${arr.revision}|${mask ? 'land' : 'all'}|${owners.size}|${h1 >>> 0}|${h2 >>> 0}`;
-    const hit = this.pieceCache.get(key);
-    if (hit) return hit;
-    // Connected pieces: parcels of the same owner that share a border.
+    return out;
+  }
+
+  private ownerPiece(arr: Arrangement, owner: string, set: FaceSet, mask: LandMask | null): OwnerPiece | null {
+    const geom = parcelGeometry(arr), t = arr.topology();
+    const inSet = new Set(set.faces);
+    // Connected pieces: parcels of the owner that share a border.
     const parent = new Map<number, number>();
     const find = (f: number): number => { let r = f; while (parent.get(r) !== r) r = parent.get(r)!; let x = f; while (x !== r) { const n = parent.get(x)!; parent.set(x, r); x = n; } return r; };
-    for (const f of owners.keys()) parent.set(f, f);
-    for (const s of arr.segments.values()) {
-      const lo = owners.get(s.left_face);
-      if (lo !== undefined && lo === owners.get(s.right_face)) { const a = find(s.left_face), b = find(s.right_face); if (a !== b) parent.set(a, b); }
+    for (const f of set.faces) parent.set(f, f);
+    for (const f of set.faces) for (const c of t.facesCycles.get(f) ?? []) {
+      const g = geom.cycle(c, t);
+      for (let i = 0; i < g.heads.length; i++) {
+        const other = arr.halfEdgeFace(g.heads[i] ^ 1);
+        if (other !== f && inSet.has(other)) { const a = find(f), b = find(other); if (a !== b) parent.set(a, b); }
+      }
     }
-    type Comp = { owner: string; faces: number[]; area: number; sx: number; sy: number; sz: number };
+    type Comp = { faces: number[]; area: number; sx: number; sy: number; sz: number };
     const comps = new Map<number, Comp>();
-    const total = new Map<string, number>();
-    for (const [f, o] of owners) {
+    let total = 0;
+    for (const f of set.faces) {
       const g = this.faceGeo(arr, f);
       const area = mask ? this.landSample(arr, f, mask).land : g.area;
       const r = find(f);
       let c = comps.get(r);
-      if (!c) comps.set(r, (c = { owner: o, faces: [], area: 0, sx: 0, sy: 0, sz: 0 }));
+      if (!c) comps.set(r, (c = { faces: [], area: 0, sx: 0, sy: 0, sz: 0 }));
       c.faces.push(f);
       c.area += area;
       const lon = g.centroid[0] * Math.PI / 180, lat = g.centroid[1] * Math.PI / 180;
       c.sx += g.area * Math.cos(lat) * Math.cos(lon); c.sy += g.area * Math.cos(lat) * Math.sin(lon); c.sz += g.area * Math.sin(lat);
-      total.set(o, (total.get(o) ?? 0) + area);
+      total += area;
     }
-    const main = new Map<string, Comp & { root: number }>();
-    for (const [root, c] of comps) {
-      if (c.area <= 0) continue;
-      const m = main.get(c.owner);
-      if (!m || c.area > m.area) main.set(c.owner, { ...c, root });
-    }
-    const mainOf = new Map<number, string>(); // face -> owner, for faces in an owner's main piece
-    for (const [o, c] of main) for (const f of c.faces) mainOf.set(f, o);
-    const arcs = new Map<string, number[]>();
-    for (const s of arr.segments.values()) {
-      const lo = mainOf.get(s.left_face), ro = mainOf.get(s.right_face);
-      if (lo === ro) continue;
-      const a = arr.vertices.get(s.a)!, b = arr.vertices.get(s.b)!;
-      for (const o of [lo, ro]) {
-        if (o === undefined) continue;
-        let l = arcs.get(o);
-        if (!l) arcs.set(o, (l = []));
-        l.push(a.lon / 1e7, a.lat / 1e7, b.lon / 1e7, b.lat / 1e7);
+    let main: Comp | null = null;
+    for (const c of comps.values()) if (c.area > 0 && (!main || c.area > main.area)) main = c;
+    if (!main) return null;
+    // The outline of the main piece: the border chains with the piece on one side only.
+    const inMain = new Set(main.faces);
+    const arcs: number[] = [];
+    for (const f of main.faces) for (const c of t.facesCycles.get(f) ?? []) {
+      const g = geom.cycle(c, t), n = g.lon.length;
+      for (let i = 0; i < g.heads.length; i++) {
+        if (inMain.has(arr.halfEdgeFace(g.heads[i] ^ 1))) continue;
+        const from = g.starts[i], to = i === g.starts.length - 1 ? n : g.starts[i + 1];
+        for (let j = from; j < to; j++) {
+          const k = j + 1 < n ? j + 1 : 0;
+          arcs.push(g.lon[j], g.lat[j], k === 0 ? g.lon[0] + 360 * g.wind : g.lon[k], g.lat[k]);
+        }
       }
     }
-    const out = new Map<string, OwnerPiece>();
-    for (const [o, c] of main) {
-      const lon = Math.atan2(c.sy, c.sx) * 180 / Math.PI;
-      const a = Float64Array.from(arcs.get(o) ?? []);
-      // Keyed by the outline itself, so an edit elsewhere keeps this label's place.
-      let k1 = 0x811c9dc5, k2 = 0x9e3779b9;
-      for (let i = 0; i < a.length; i++) { const v = Math.round(a[i] * 1e7) | 0; k1 = Math.imul(k1 ^ v, 16777619); k2 = Math.imul(k2 + v, 2246822519) ^ (k2 >>> 13); }
-      out.set(o, {
-        owner: o, key: `${a.length}|${k1 >>> 0}|${k2 >>> 0}${mask ? '|land' : ''}`,
-        arcs: a, centreLon: Number.isFinite(lon) ? lon : 0, area: c.area, total: total.get(o) ?? c.area,
-      });
-    }
-    if (this.pieceCache.size > 8) this.pieceCache.clear();
-    this.pieceCache.set(key, out);
-    return out;
+    const lon = Math.atan2(main.sy, main.sx) * 180 / Math.PI;
+    const a = Float64Array.from(arcs);
+    // Keyed by the outline itself, so an edit elsewhere keeps this label's place.
+    let k1 = 0x811c9dc5, k2 = 0x9e3779b9;
+    for (let i = 0; i < a.length; i++) { const v = Math.round(a[i] * 1e7) | 0; k1 = Math.imul(k1 ^ v, 16777619); k2 = Math.imul(k2 + v, 2246822519) ^ (k2 >>> 13); }
+    const box: [number, number, number, number] = [Infinity, Infinity, -Infinity, -Infinity];
+    for (let i = 0; i < a.length; i += 2) { if (a[i] < box[0]) box[0] = a[i]; if (a[i] > box[2]) box[2] = a[i]; if (a[i + 1] < box[1]) box[1] = a[i + 1]; if (a[i + 1] > box[3]) box[3] = a[i + 1]; }
+    return {
+      owner, key: `${a.length}|${k1 >>> 0}|${k2 >>> 0}${mask ? '|land' : ''}`,
+      arcs: a, centreLon: Number.isFinite(lon) ? lon : 0, area: main.area, total, box,
+    };
   }
 
   /** Where a piece's label can go, for each way of breaking its text into lines (projection units). */
-  private placePiece(piece: OwnerPiece, view: View, text: string, st: LabelStyle, accept: ((lon: number, lat: number) => boolean) | null, cacheKey: string, cache: Map<string, PlacedLabel[]>, onScreenOnly = false): PlacedLabel[] {
+  private placePiece(piece: OwnerPiece, view: View, text: string, st: LabelStyle, accept: ((lon: number, lat: number) => boolean) | null, cacheKey: string, cache: Map<string, PlacedLabel[]>, onScreenOnly = false, wantedFont = Infinity): PlacedLabel[] {
     const hit = cache.get(cacheKey);
     if (hit) return hit;
     const proj = view.camera.projection;
@@ -952,7 +1756,10 @@ export class MapRenderer {
     for (const lines of lineChoices(text)) {
       const wEm = Math.max(...lines.map((l) => textWidthEm(l, false, st.letterSpacing)));
       const hEm = blockHeightEm(lines.length);
-      const spot = placeLabel(shape, wEm / hEm, accept ?? undefined, within);
+      // In the part on screen, room for more than the size wanted is worth nothing: the label then
+      // stands as near the middle of that part as it can at full size (and the search is short).
+      const cap = wantedFont < Infinity ? (wantedFont * hEm * 1.1) / (Math.SQRT2 * 1.15) : Infinity;
+      const spot = placeLabel(shape, wEm / hEm, accept ?? undefined, within, cap);
       // A box with the label's proportions fits inside the ellipse found when its height is sqrt(2)
       // times the ellipse's half-height. Labels may spill a little past narrow places.
       if (spot) res.push({ lon: spot.lon, lat: spot.lat, font: (Math.SQRT2 * spot.room * 1.15) / hEm, lines });
@@ -976,33 +1783,38 @@ export class MapRenderer {
     return best;
   }
 
-  private layerLabels(view: View, arr: Arrangement, states: Map<number, FaceState>, entities: Map<string, LabelEntity>, mask: LandMask | null = null): LabelInfo[] {
-    // Who holds each parcel before and after the changes animating now (the same when none is).
-    const before = new Map<number, string>(), after = new Map<number, string>();
+  private layerLabels(view: View, arr: Arrangement, snap: LayerSnap, states: Map<number, FaceState>, entities: Map<string, LabelEntity>, mask: LandMask | null = null): LabelInfo[] {
+    // How far each owner's changes have come (by area), for labels gliding with an animated change.
     const progress = new Map<string, { w: number; p: number }>();
-    let animating = false;
-    for (const [face, st] of states) {
-      const g = this.faceGeo(arr, face);
-      if (g.area <= 0 || g.area > 2 * Math.PI) continue;
-      if (st.value) after.set(face, st.value);
-      const from = st.transition ? st.transition.from : st.value;
-      if (from) before.set(face, from);
-      if (st.transition && st.transition.from !== st.value) {
-        animating = true;
-        const p = Math.min(1, Math.max(0, st.transition.progress));
-        for (const o of [st.transition.from, st.value]) {
-          if (!o) continue;
-          const e = progress.get(o) ?? { w: 0, p: 0 };
-          e.w += g.area; e.p += g.area * p;
-          progress.set(o, e);
-        }
+    if (snap.animating) for (const g of snap.groups.values()) for (const face of g.changing.faces) {
+      const st = states.get(face);
+      if (!st?.transition) continue;
+      const area = arr.faceArea(face);
+      if (area <= 0 || area > 2 * Math.PI) continue;
+      const p = Math.min(1, Math.max(0, st.transition.progress));
+      for (const o of [st.transition.from, st.value]) {
+        if (!o) continue;
+        const e = progress.get(o) ?? { w: 0, p: 0 };
+        e.w += area; e.p += area * p;
+        progress.set(o, e);
       }
     }
-    const piecesAfter = this.ownerPieces(arr, after, mask);
-    const piecesBefore = animating ? this.ownerPieces(arr, before, mask) : piecesAfter;
+    // Each owner's main piece before and after the changes animating now (the same when none is):
+    // worked out once for the stretch of time.
+    const pk = mask ? 'land' : 'all';
+    let pieces = snap.pieces.get(pk);
+    if (!pieces) {
+      const after = this.ownerPieces(arr, snap.after, mask);
+      pieces = { after, before: snap.animating ? this.ownerPieces(arr, snap.before, mask) : after };
+      snap.pieces.set(pk, pieces);
+    }
+    const piecesAfter = pieces.after, piecesBefore = pieces.before;
     const scale = view.projection.scale();
     const vis = visibleBounds(view);
-    if (view.key !== this.viewSpotKey) { this.viewSpotCache.clear(); this.viewSpotKey = view.key; }
+    // Places found in the part of a country in view hold for that view; while the view is moving they
+    // are kept for as long as they stay in view (the names then travel with the map instead of sliding over it).
+    const held = this.holdNames ? this.viewSpotCache : null;
+    if (view.key !== this.viewSpotKey) { if (held) this.viewSpotCache = new Map(); else this.viewSpotCache.clear(); this.viewSpotKey = view.key; }
     const margin = LABEL_MARGIN;
     const onScreen = (p: [number, number] | null) => !!p && p[0] >= view.width * margin && p[0] <= view.width * (1 - margin) && p[1] >= view.height * margin && p[1] <= view.height * (1 - margin);
     const landOk = mask ? (lon: number, lat: number) => mask.onLand(lon, lat) : null;
@@ -1015,9 +1827,12 @@ export class MapRenderer {
       let p = pl ? view.projection([pl.lon, pl.lat]) as [number, number] | null : null;
       // The best place is off screen while part of the territory is in view (zoomed in on a large
       // country): place the label in the part that is in view.
-      if ((!pl || !onScreen(p)) && vis !== null) {
+      if ((!pl || !onScreen(p)) && vis !== null && boxIntersects(piece.box, vis)) {
         const inView = (lon: number, lat: number) => onScreen(view.projection([lon, lat]) as [number, number] | null) && (!landOk || landOk(lon, lat));
-        const alt = this.chooseLines(this.placePiece(piece, view, text, st, inView, `${ck}|view`, this.viewSpotCache, true), wanted, scale, view.unit);
+        const before = held?.get(`${ck}|view`);
+        const kept = before ? this.chooseLines(before, wanted, scale, view.unit) : null;
+        if (before && kept && onScreen(view.projection([kept.lon, kept.lat]) as [number, number] | null)) { this.viewSpotCache.set(`${ck}|view`, before); this.lastApproximate = true; }
+        const alt = this.chooseLines(this.placePiece(piece, view, text, st, inView, `${ck}|view`, this.viewSpotCache, true, (wanted * view.unit) / scale), wanted, scale, view.unit);
         if (alt && (alt.font * scale) / view.unit >= 6) { pl = alt; p = view.projection([alt.lon, alt.lat]) as [number, number] | null; }
       }
       if (!pl || !p) return null;
@@ -1032,6 +1847,8 @@ export class MapRenderer {
       const look = this.labelLook(id, name);
       if (!look) continue;
       const pa = piecesAfter.get(id), pb = piecesBefore.get(id);
+      // A country nowhere near the view has no label to place (most countries, close in).
+      if (vis !== null && !(pa && boxIntersects(pa.box, vis)) && !(pb && boxIntersects(pb.box, vis))) continue;
       const a = pa ? place(pa, look.text, look.style) : null;
       const b = pb === pa ? a : pb ? place(pb, look.text, look.style) : null;
       if (!a && !b) continue;
@@ -1059,6 +1876,9 @@ export class MapRenderer {
       // The size the territory's area suggests, but never more than fits where the label stands.
       const natural = (Math.sqrt(total) * scale * 0.18) / view.unit;
       const size = labelSize(look.style, Math.min(natural, fontPx / view.unit)) * view.unit;
+      // Off the frame altogether (with room to spare for the text and for moving aside): not placed.
+      const hw = 0.8 * size * Math.max(...lines.map((l) => textWidthEm(l, false, look.style.letterSpacing))) + size, hh = size * (1.5 + 2 * lines.length);
+      if (p[0] + hw < 0 || p[0] - hw > view.width || p[1] + hh < 0 || p[1] - hh > view.height) continue;
       out.push({ text: look.text, lines, x: p[0], y: p[1], size, style: look.style, entityId: id, priority: area });
     }
     return out;
@@ -1112,6 +1932,25 @@ export class MapRenderer {
     ctx.restore();
   }
 
+  private widths = new Map<string, number>();
+
+  /** The width of a text as it will be drawn (measured once per text, font, size and spacing). */
+  private textWidth(ctx: CanvasRenderingContext2D, font: string, spacingPx: number, text: string): number {
+    const spacing = `${spacingPx.toFixed(2)}px`;
+    const key = `${font}|${spacing}|${text}`;
+    let w = this.widths.get(key);
+    if (w === undefined) {
+      ctx.save();
+      ctx.font = font;
+      (ctx as CanvasRenderingContext2D & { letterSpacing?: string }).letterSpacing = spacing;
+      w = ctx.measureText(text).width;
+      ctx.restore();
+      if (this.widths.size > 8000) this.widths.clear();
+      this.widths.set(key, w);
+    }
+    return w;
+  }
+
   /**
    * Place country labels and city names so that none overlap. In order of priority (larger countries,
    * smaller countries, cities), each takes the first free place among a few near its own: a country
@@ -1128,11 +1967,8 @@ export class MapRenderer {
     for (const l of sorted) {
       l.drawn = false;
       const st = l.style;
-      ctx.font = labelFont(st, l.size);
-      const spacing = st.letterSpacing * l.size;
-      (ctx as CanvasRenderingContext2D & { letterSpacing?: string }).letterSpacing = `${spacing.toFixed(2)}px`;
       const lines = l.lines.length ? l.lines : [l.text];
-      const w = Math.max(...lines.map((t) => ctx.measureText(t).width));
+      const w = Math.max(...lines.map((t) => this.textWidth(ctx, labelFont(st, l.size), st.letterSpacing * l.size, t)));
       const h = l.size + (lines.length - 1) * l.size * LINE_HEIGHT;
       const at = (dx: number, dy: number): Box => [l.x + dx - w / 2, l.y + dy - h / 2, l.x + dx + w / 2, l.y + dy + h / 2];
       const tries: Array<[number, number]> = [[0, 0], [0, -0.75 * h], [0, 0.75 * h], [-0.3 * w, 0], [0.3 * w, 0], [0, -1.4 * h], [0, 1.4 * h]];
@@ -1151,8 +1987,7 @@ export class MapRenderer {
     (ctx as CanvasRenderingContext2D & { letterSpacing?: string }).letterSpacing = '0px';
     for (const c of cities) {
       if (!c.size) { c.drawn = false; continue; }
-      ctx.font = cityFont(c.size);
-      const w = ctx.measureText(c.name).width, h = c.size, gap = c.r + 4 * (c.size / 17);
+      const w = this.textWidth(ctx, cityFont(c.size), 0, c.name), h = c.size, gap = c.r + 4 * (c.size / 17);
       const others = dots.filter((d) => !(d[0] === c.x - c.r && d[1] === c.y - c.r));
       const options: Array<{ tx: number; ty: number; align: CanvasTextAlign; box: Box }> = [
         { tx: c.x + gap, ty: c.y, align: 'left', box: [c.x + gap, c.y - h / 2, c.x + gap + w, c.y + h / 2] },

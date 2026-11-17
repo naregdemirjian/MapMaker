@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useStore, store, type Tool } from '../store.ts';
+import { useStore, useLive, store, type Tool } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
 import { type Instant, gregorian, fromStore, formatYear, compare, NEG_INF } from '../../core-time/index.ts';
 import { BASE_EVENT_ID, type EffectRow } from '../../world-model/schema.ts';
@@ -52,6 +52,12 @@ export function NumberField({ value, onCommit, min, max, step, testId, title }: 
   return <input type="number" value={text} min={min} max={max} step={step} title={title} onChange={(e) => setText(e.target.value)} onBlur={commit} onKeyDown={(e) => e.key === 'Enter' && commit()} data-testid={testId} />;
 }
 
+/** The date being viewed (follows the timeline as it is scrubbed). */
+function CurrentDate() {
+  const s = useLive();
+  return <DateField value={s.time} onChange={(t) => t && s.setTime(t)} testId="current-date" />;
+}
+
 export function TopBar() {
   const s = useStore();
   const w = s.world!;
@@ -76,7 +82,7 @@ export function TopBar() {
       {s.mode === 'world' && (
         <div className="datebar">
           <button onClick={() => stepChange(-1)} title="Previous change">◀</button>
-          <DateField value={s.time} onChange={(t) => t && s.setTime(t)} testId="current-date" />
+          <CurrentDate />
           <button onClick={() => stepChange(1)} title="Next change">▶</button>
         </div>
       )}
@@ -87,6 +93,7 @@ export function TopBar() {
       <button className={conflicts.length ? 'warn' : ''} onClick={() => s.set({ dialog: 'health' })} data-testid="health">
         History Health{conflicts.length ? ` (${conflicts.length})` : ' ✓'}
       </button>
+      <button onClick={() => s.set({ dialog: 'settings' })} title="Settings: how fast and how sharp the map is drawn while you work (never changes an export)" data-testid="settings">Settings</button>
       <button onClick={() => s.closeProject()} title="Back to the project list">Projects</button>
     </header>
   );
@@ -197,6 +204,22 @@ function Section({ title, onAdd, addLabel, children }: { title: string; onAdd?: 
   );
 }
 
+/** Which country each city stands in at the date viewed: worked out once per state of the project and date. */
+let cityMemo: { key: string; map: Map<string, string> } | null = null;
+function citiesInCountries(s: ReturnType<typeof useStore>): Map<string, string> {
+  const w = s.world!;
+  const key = `${w.revision}|${s.spaceId}|${s.layerId}|${s.time.day}:${s.time.ms}`;
+  if (cityMemo?.key === key) return cityMemo.map;
+  const map = new Map<string, string>();
+  if (s.layerId) for (const c of s.engine!.charactersAt(s.spaceId, s.time)) {
+    if (w.get('entity', c.entity)?.type_id !== 'settlement') continue;
+    const owner = s.engine!.valueAtPoint(s.spaceId, s.layerId, lonLatToVec(c.lon, c.lat), s.time);
+    if (owner) map.set(c.entity, owner);
+  }
+  cityMemo = { key, map };
+  return map;
+}
+
 export function Outliner() {
   const s = useStore();
   const w = s.world!;
@@ -233,12 +256,7 @@ export function Outliner() {
   // viewed), Ctrl/Shift + click to choose several, right-click for quick actions.
   type Ent = (typeof political)[number];
   const groups = w.all('entity_group').sort((a, b) => a.sort_order - b.sort_order || a.created_seq - b.created_seq);
-  const cityIn = new Map<string, string>(); // city -> the country holding the place it stands on
-  if (s.layerId) for (const c of s.engine!.charactersAt(s.spaceId, s.time)) {
-    if (w.get('entity', c.entity)?.type_id !== 'settlement') continue;
-    const owner = s.engine!.valueAtPoint(s.spaceId, s.layerId, lonLatToVec(c.lon, c.lat), s.time);
-    if (owner) cityIn.set(c.entity, owner);
-  }
+  const cityIn = citiesInCountries(s); // city -> the country holding the place it stands on
   const citiesOf = new Map<string, Ent[]>();
   for (const e of w.all('entity')) {
     const owner = e.type_id === 'settlement' ? cityIn.get(e.id) : undefined;

@@ -32,13 +32,15 @@ export interface PathStep { seg: number; fwd: boolean }
 export const SNAP_REFUSAL = 'At this zoom level the outline could not be joined to the borders around it without borders crossing. Zoom in a little and draw it again.';
 
 export class TopologyError extends Error {}
+/** Raised inside the local face rebuild when it meets something it does not handle (the full rebuild takes over). */
+class NeedFullRebuild extends Error {}
 
 /**
  * The half-edge structure, kept between edits and updated only around what changed. Half-edge
  * 2s goes along segment s from a to b, 2s+1 from b to a. Cycle ids are stable while a cycle is
  * unchanged; cycles are ordered by their smallest half-edge (the order a full rebuild produces).
  */
-interface Topology {
+export interface Topology {
   next: Map<number, number>; // half-edge -> next half-edge around its left face
   cycleOf: Map<number, number>; // half-edge -> cycle id
   cycles: Map<number, number[]>; // cycle id -> half-edges in order
@@ -46,6 +48,8 @@ interface Topology {
   cycleLabel: Map<number, number>; // cycle id -> face label it is filed under
   outgoing: Map<number, number[]>; // vertex -> outgoing half-edges sorted counter-clockwise
   facesCycles: Map<number, Set<number>>; // face label -> cycle ids
+  /** Per face label: a number that changes whenever the set of cycles filed under it does (see faceStamp). */
+  faceStamps: Map<number, number>;
   /** Bumped whenever cycles change (caches derived from cycles compare against it). */
   version: number;
 }
@@ -69,6 +73,27 @@ export class Arrangement {
   private topo: Topology | null = null;
   /** Bumped on every geometric change; renderers use it to invalidate caches. */
   revision = 0;
+  /**
+   * How faces are rebuilt after an insertion. 'auto': only around what changed, unless most of the
+   * map changed (a large import), when everything is rebuilt. The other two are for tests, which
+   * check that both ways always give exactly the same faces.
+   */
+  static faceRebuild: 'auto' | 'full' | 'incremental' = 'auto';
+  /** How often each way ran (for tests and benchmarks): `fallback` counts local rebuilds that gave up. */
+  static rebuildStats = { around: 0, full: 0, fallback: 0 };
+  /** Cycles made since the operation in progress began: their face labels are not settled yet. */
+  private fresh = new Set<number>();
+  /** Face labels of the cycles taken apart since the operation in progress began. */
+  private brokenLabels = new Set<number>();
+  /**
+   * Per cycle: is the reference point PINF on its left? Exactly one cycle of each connected piece
+   * of borders is (the piece's outside); it depends on the cycle alone, so it is kept while the
+   * cycle exists. `holes` lists the cycles for which it is true.
+   */
+  private holeFlag = new Map<number, boolean>();
+  private holes = new Set<number>();
+  /** Set when the operation in progress moved or removed a border point (not only added borders). */
+  private reshaped = false;
   /**
    * Set by the world before an edit: does any recorded history refer to this face? When it is not
    * set, every face is treated as referenced (the original, always-correct behaviour).
@@ -97,7 +122,54 @@ export class Arrangement {
     for (const f of faces) arr.faces.set(f.id, { ...f });
     for (const v of vertices) arr.indexVertex({ ...v });
     for (const s of segments) arr.indexSegment({ ...s });
+    // (Loading is not a change to what was there.)
+    arr.changed = [];
+    arr.changedFrom = arr.revision;
     return arr;
+  }
+
+  // ---------------------------------------------------------------- where the borders changed
+
+  /**
+   * Where border segments were added, removed or moved, revision by revision: a box in degrees (west,
+   * south, east, north) or null when no box can be given (across the 180° meridian). Kept for the
+   * last few hundred revisions, so that a picture of the map can be brought up to date by drawing
+   * only where something changed.
+   */
+  private changed: Array<{ rev: number; box: [number, number, number, number] | null }> = [];
+  private changedFrom = 0;
+
+  private noteChanged(a: VertexRow | undefined, b: VertexRow | undefined): void {
+    let e = this.changed[this.changed.length - 1];
+    if (!e || e.rev !== this.revision) {
+      if (this.changed.length >= 400) { this.changedFrom = this.changed[200].rev; this.changed.splice(0, 200); }
+      this.changed.push((e = { rev: this.revision, box: [Infinity, Infinity, -Infinity, -Infinity] }));
+    }
+    if (!a || !b) { e.box = null; return; }
+    const lo0 = a.lon / 1e7, la0 = a.lat / 1e7, lo1 = b.lon / 1e7, la1 = b.lat / 1e7;
+    if (Math.abs(lo0 - lo1) > 180) { e.box = null; return; }
+    const box = e.box;
+    if (!box) return;
+    // (A border is the shortest path between its ends: it bulges past their box by less than half its span.)
+    const pad = 0.5 * Math.max(Math.abs(lo0 - lo1), Math.abs(la0 - la1)) + 1e-6;
+    box[0] = Math.min(box[0], lo0 - pad, lo1 - pad); box[1] = Math.min(box[1], la0 - pad, la1 - pad);
+    box[2] = Math.max(box[2], lo0 + pad, lo1 + pad); box[3] = Math.max(box[3], la0 + pad, la1 + pad);
+  }
+
+  /**
+   * The box around every border added, removed or moved since the map was at `revision`: undefined
+   * when none was, null when it is not known (too long ago, or across the 180° meridian).
+   */
+  bordersChangedSince(revision: number): [number, number, number, number] | null | undefined {
+    if (revision < this.changedFrom) return null;
+    let out: [number, number, number, number] | undefined;
+    for (let i = this.changed.length - 1; i >= 0 && this.changed[i].rev >= revision; i--) {
+      const b = this.changed[i].box;
+      if (!b) return null;
+      if (b[0] > b[2]) continue;
+      out = out ? [Math.min(out[0], b[0]), Math.min(out[1], b[1]), Math.max(out[2], b[2]), Math.max(out[3], b[3])] : [b[0], b[1], b[2], b[3]];
+    }
+    return out;
   }
 
   // ---------------------------------------------------------------- change log
@@ -106,6 +178,12 @@ export class Arrangement {
     if (this.log) throw new TopologyError('Nested kernel operation');
     this.log = new Map();
     this.rootBefore = this.rootFace;
+    // Face labels are consistent at this point: the cycles that change from here on are the ones
+    // whose faces must be worked out again (see rebuildFaces).
+    this.topology();
+    this.fresh.clear();
+    this.brokenLabels.clear();
+    this.reshaped = false;
   }
 
   commit(): KernelDiff {
@@ -174,11 +252,14 @@ export class Arrangement {
       if (s && this.vec.has(s.a) && this.vec.has(s.b)) {
         const [slo, shi] = arcBox(this.v(s.a), this.v(s.b), 0);
         this.sgrid.insert(sid, slo, shi);
+        this.noteChanged(this.vertices.get(s.a), this.vertices.get(s.b));
       }
     }
   }
 
   private unindexVertex(id: number): void {
+    // (Where its borders were, should it be coming back somewhere else.)
+    for (const sid of this.incident.get(id) ?? []) { const s = this.segments.get(sid); if (s) this.noteChanged(this.vertices.get(s.a), this.vertices.get(s.b)); }
     this.vertices.delete(id);
     this.vec.delete(id);
     this.vgrid.remove(id);
@@ -193,11 +274,13 @@ export class Arrangement {
     this.incidentOf(s.b).add(s.id);
     const [lo, hi] = arcBox(this.v(s.a), this.v(s.b), 0);
     this.sgrid.insert(s.id, lo, hi);
+    this.noteChanged(this.vertices.get(s.a), this.vertices.get(s.b));
   }
 
   private unindexSegment(id: number): void {
     const s = this.segments.get(id);
     if (!s) return;
+    this.noteChanged(this.vertices.get(s.a), this.vertices.get(s.b));
     this.segments.delete(id);
     if (this.pairIndex.get(pairKey(s.a, s.b)) === id) this.pairIndex.delete(pairKey(s.a, s.b));
     this.incident.get(s.a)?.delete(id);
@@ -560,10 +643,11 @@ export class Arrangement {
   topology(): Topology {
     if (!this.topo) {
       // First use (or after loading): build everything, as an update in which every point changed.
-      this.topo = { next: new Map(), cycleOf: new Map(), cycles: new Map(), minHE: new Map(), cycleLabel: new Map(), outgoing: new Map(), facesCycles: new Map(), version: 0 };
+      this.topo = { next: new Map(), cycleOf: new Map(), cycles: new Map(), minHE: new Map(), cycleLabel: new Map(), outgoing: new Map(), facesCycles: new Map(), faceStamps: new Map(), version: 0 };
       this.dirtyVertices = new Set(this.incident.keys());
       this.goneHalfEdges.clear();
       this.relabelled.clear();
+      this.refreshTopology(this.topo, true);
     }
     if (this.dirtyVertices.size || this.goneHalfEdges.size || this.relabelled.size) this.refreshTopology(this.topo);
     return this.topo;
@@ -593,7 +677,7 @@ export class Arrangement {
     return d;
   }
 
-  private refreshTopology(t: Topology): void {
+  private refreshTopology(t: Topology, initial = false): void {
     const dirty = this.dirtyVertices, gone = this.goneHalfEdges, relabelled = this.relabelled;
     this.dirtyVertices = new Set(); this.goneHalfEdges = new Set(); this.relabelled = new Set();
     // 1. New orders around the changed points, and the new 'next' of every edge arriving there.
@@ -623,11 +707,16 @@ export class Arrangement {
     const loose = new Set<number>();
     for (const c of broken) {
       this.cycleData.delete(c);
+      this.holeFlag.delete(c);
+      this.holes.delete(c);
+      this.fresh.delete(c);
+      const was = t.cycleLabel.get(c);
+      if (was !== undefined) this.brokenLabels.add(was);
       for (const h of t.cycles.get(c)!) { t.cycleOf.delete(h); loose.add(h); }
       t.cycles.delete(c);
       t.minHE.delete(c);
       const l = t.cycleLabel.get(c);
-      if (l !== undefined) { t.facesCycles.get(l)?.delete(c); if (t.facesCycles.get(l)?.size === 0) t.facesCycles.delete(l); }
+      if (l !== undefined) { t.facesCycles.get(l)?.delete(c); if (t.facesCycles.get(l)?.size === 0) t.facesCycles.delete(l); t.faceStamps.set(l, ++this.stampSeq); }
       t.cycleLabel.delete(c);
     }
     for (const h of gone) if (!this.segments.has(h >> 1) || (newNext.has(h) === false && !this.halfEdgeExists(h))) { t.next.delete(h); loose.delete(h); }
@@ -650,6 +739,8 @@ export class Arrangement {
       t.cycles.set(id, c);
       t.minHE.set(id, min);
       this.fileCycle(t, id);
+      // The first build reads a consistent map (its labels stand); later cycles are new.
+      if (!initial) this.fresh.add(id);
     }
     // 4. Cycles whose edges only changed face label move to their new face.
     for (const sid of relabelled) for (const h of [2 * sid, 2 * sid + 1]) {
@@ -658,7 +749,7 @@ export class Arrangement {
       const label = this.he(t.cycles.get(c)![0]).label;
       if (t.cycleLabel.get(c) === label) continue;
       const old = t.cycleLabel.get(c);
-      if (old !== undefined) { t.facesCycles.get(old)?.delete(c); if (t.facesCycles.get(old)?.size === 0) t.facesCycles.delete(old); }
+      if (old !== undefined) { t.facesCycles.get(old)?.delete(c); if (t.facesCycles.get(old)?.size === 0) t.facesCycles.delete(old); t.faceStamps.set(old, ++this.stampSeq); }
       this.fileCycle(t, c);
     }
     t.version++;
@@ -672,6 +763,35 @@ export class Arrangement {
     let set = t.facesCycles.get(label);
     if (!set) t.facesCycles.set(label, (set = new Set()));
     set.add(id);
+    t.faceStamps.set(label, ++this.stampSeq);
+  }
+
+  private stampSeq = 0;
+
+  /**
+   * A number that changes whenever a face's outline does (its cycles are remade when any of their
+   * points or segments change): caches of a face's geometry stay valid while it is the same.
+   */
+  faceStamp(faceId: number): number {
+    return this.topology().faceStamps.get(faceId) ?? 0;
+  }
+
+  /** The cycles (ids) bounding a face, in a stable order. */
+  faceCycleIds(faceId: number): number[] {
+    const t = this.topology();
+    return this.orderedCycles(t, t.facesCycles.get(faceId) ?? []);
+  }
+
+  /** The vertex a half-edge starts at (half-edge 2s runs along segment s from a to b, 2s+1 back). */
+  halfEdgeFrom(h: number): number {
+    const s = this.segments.get(h >> 1)!;
+    return (h & 1) === 0 ? s.a : s.b;
+  }
+
+  /** The face on the left of a half-edge. */
+  halfEdgeFace(h: number): number {
+    const s = this.segments.get(h >> 1)!;
+    return (h & 1) === 0 ? s.left_face : s.right_face;
   }
 
   /** Cycle ids in a stable order: by smallest half-edge (exactly the order a full rebuild gives). */
@@ -725,14 +845,28 @@ export class Arrangement {
    */
   private rebuildFaces(): void {
     const t = this.topology();
-    // Cycles in the stable order (by smallest half-edge), numbered 0..nC-1 for this rebuild.
-    const cycIds = this.orderedCycles(t);
-    const nC = cycIds.length;
-    if (nC === 0) return;
-    const cyc = cycIds.map((id) => t.cycles.get(id)!);
-    const denseOf = new Map(cycIds.map((id, i) => [id, i]));
+    if (t.cycles.size === 0) return;
+    const mode = Arrangement.faceRebuild;
+    // Around what changed, unless most of the map did (a large import): then everything at once is quicker.
+    let around = mode === 'incremental' || (mode === 'auto' && this.fresh.size <= Math.max(48, t.cycles.size >> 2));
+    if (around) {
+      try {
+        this.rebuildFacesAround(t);
+        Arrangement.rebuildStats.around++;
+      } catch (e) {
+        // Something the local method does not expect: nothing has been changed yet; rebuild everything.
+        if (!(e instanceof NeedFullRebuild)) throw e;
+        Arrangement.rebuildStats.fallback++;
+        around = false;
+      }
+    }
+    if (!around) { this.rebuildFacesFull(t); Arrangement.rebuildStats.full++; }
+    this.fresh.clear();
+    this.brokenLabels.clear();
+  }
 
-    // Connected components over vertices.
+  /** The connected pieces of the border network: a finder of each vertex's piece, and each piece's segments. */
+  private components(): { find: (x: number) => number; compSegs: Map<number, number[]> } {
     const parent = new Map<number, number>();
     const find = (x: number): number => {
       let r = x;
@@ -754,7 +888,378 @@ export class Arrangement {
       if (!l) compSegs.set(r, (l = []));
       l.push(s.id);
     }
-    const compOfCycle = (ci: number) => find(this.he(cyc[ci][0]).from);
+    return { find, compSegs };
+  }
+
+  private setHole(id: number, hole: boolean): void {
+    this.holeFlag.set(id, hole);
+    if (hole) this.holes.add(id); else this.holes.delete(id);
+  }
+
+  /** Is the reference point PINF on the left of this cycle (is it the outside of its connected piece)? */
+  private isHoleCycle(id: number, t: Topology): boolean {
+    let f = this.holeFlag.get(id);
+    if (f === undefined) { this.settleHoleFlags(t); f = this.holeFlag.get(id)!; }
+    return f;
+  }
+
+  /** Work out, for every cycle not yet known, whether PINF is on its left. */
+  private settleHoleFlags(t: Topology): void {
+    const unknown: number[] = [];
+    for (const id of t.cycles.keys()) if (!this.holeFlag.has(id)) unknown.push(id);
+    if (!unknown.length) return;
+    // A few new cycles: each on its own, by a walk from PINF to it (the work is near that walk only).
+    if (unknown.length <= Math.max(16, this.segments.size / 300)) {
+      const found: Array<[number, boolean]> = [];
+      for (const id of unknown) {
+        // A cycle that fits in a cap smaller than a hemisphere, with PINF outside the cap: everything
+        // outside the cap is on one side of it, the side with more than half the sphere.
+        const d = this.cycleInfo(id, t.cycles.get(id)!, t);
+        let f: boolean | null;
+        if (d.cap && angle(d.cap.c, PINF) > d.cap.r + 1e-9 && Math.abs(d.area - 2 * Math.PI) > 1e-3) f = d.area > 2 * Math.PI;
+        else f = this.pinfLeftOfCycle(id, t);
+        if (f === null) break;
+        found.push([id, f]);
+      }
+      if (found.length === unknown.length) { for (const [id, f] of found) this.setHole(id, f); return; }
+    }
+    // Many at once (a map just opened, a large import): piece by piece.
+    const { find, compSegs } = this.components();
+    const holeOf = new Map<number, number>();
+    for (const [comp, segs] of compSegs) holeOf.set(comp, this.locatePinfInComponent(segs, t));
+    for (const [id, c] of t.cycles) this.setHole(id, holeOf.get(find(this.he(c[0]).from)) === id);
+  }
+
+  /** The path from a point to PINF: one great-circle arc, or two when they are nearly opposite. */
+  private legsToPinf(p: Vec3): Array<[Vec3, Vec3]> {
+    if (dot(p, PINF) > -0.9) return [[p, PINF]];
+    let m = cross(p, PINF);
+    if (Math.hypot(m[0], m[1], m[2]) < 1e-6) m = cross(p, [1, 0, 0]);
+    const mid = normalize(m);
+    return [[p, mid], [mid, PINF]];
+  }
+
+  /** Every segment that could meet a path (a superset: those whose index boxes the path passes through). */
+  private segmentsNear(legs: Array<[Vec3, Vec3]>): Set<number> {
+    const out = new Set<number>();
+    const step = this.sgrid.cell * 2;
+    for (const [x, y] of legs) {
+      const ang = angle(x, y);
+      const n = Math.max(1, Math.ceil(ang / step));
+      const sn = Math.sin(ang);
+      let prev = x;
+      for (let i = 1; i <= n; i++) {
+        let q = y;
+        if (i < n && sn > 1e-12) {
+          const w0 = Math.sin(((n - i) / n) * ang) / sn, w1 = Math.sin((i / n) * ang) / sn;
+          q = normalize([w0 * x[0] + w1 * y[0], w0 * x[1] + w1 * y[1], w0 * x[2] + w1 * y[2]]);
+        }
+        const [lo, hi] = arcBox(prev, q, 1e-9);
+        this.sgrid.queryInto(out, lo, hi);
+        prev = q;
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Is PINF in the area on the left of a cycle? Decided by walking from PINF to the middle of one of
+   * the cycle's segments: the side the walk arrives on, and how many times it crossed the cycle on
+   * the way. Null in exactly degenerate situations (the caller falls back to the piece-wide method).
+   */
+  private pinfLeftOfCycle(id: number, t: Topology): boolean | null {
+    const c = t.cycles.get(id)!;
+    // Targets spread along the cycle; a segment walked both ways (a spike) has the area on both sides.
+    const targets: number[] = [];
+    const n = Math.min(c.length, 12);
+    for (let k = 0; k < n; k++) { const h = c[Math.floor((k * c.length) / n)]; if (t.cycleOf.get(h ^ 1) !== id) targets.push(h); }
+    if (!targets.length) {
+      const h = c.find((x) => t.cycleOf.get(x ^ 1) !== id);
+      if (h === undefined) return true; // nothing but spikes: the area on its left is everything else
+      targets.push(h);
+    }
+    for (const h0 of targets) {
+      const s0 = this.segments.get(h0 >> 1)!;
+      const ua = this.v(s0.a), ub = this.v(s0.b);
+      const tp = normalize([ua[0] + ub[0], ua[1] + ub[1], ua[2] + ub[2]]);
+      let legs: Array<[Vec3, Vec3]>;
+      if (dot(tp, PINF) > -0.9) legs = [[PINF, tp]];
+      else {
+        let m = cross(PINF, tp);
+        if (Math.hypot(m[0], m[1], m[2]) < 1e-6) m = cross(PINF, [1, 0, 0]);
+        if (Math.hypot(m[0], m[1], m[2]) < 1e-6) m = cross(PINF, [0, 1, 0]);
+        const mid = normalize(m);
+        legs = [[PINF, mid], [mid, tp]];
+      }
+      const last = legs.length - 1;
+      const side0 = orient(ua, ub, legs[last][0]);
+      if (side0 === 0) continue;
+      const arrivesOnLeft = (h0 & 1) === 0 ? side0 > 0 : side0 < 0;
+      let count = 0, degenerate = false;
+      scan: for (const sid of this.segmentsNear(legs)) {
+        const inA = t.cycleOf.get(2 * sid) === id, inB = t.cycleOf.get(2 * sid + 1) === id;
+        if (inA === inB) continue; // not of this cycle, or a spike (crossing it changes nothing)
+        const s = this.segments.get(sid)!;
+        const pa = this.v(s.a), pb = this.v(s.b);
+        for (let li = 0; li <= last; li++) {
+          if (sid === s0.id && li === last) continue; // the walk ends on the target
+          const r = arcsCross(legs[li][0], legs[li][1], pa, pb);
+          if (r === 'degenerate') { degenerate = true; break scan; }
+          if (r === 'cross') count++;
+        }
+      }
+      if (degenerate) continue;
+      return arrivesOnLeft !== ((count & 1) === 1);
+    }
+    return null;
+  }
+
+  /**
+   * Rebuild the faces around what changed. The face labels on the segments were consistent when the
+   * operation began, so only the cycles made since then (`fresh`) and the faces they touch need
+   * work: which fresh cycles are outsides of pieces, which face each piece now lies in, and new ids
+   * for the faces that were divided. The result is exactly what rebuildFacesFull gives (the tests
+   * run both); nothing is changed before every decision is made.
+   */
+  private rebuildFacesAround(t: Topology): void {
+    this.settleHoleFlags(t);
+    const fresh = this.fresh, holeFlag = this.holeFlag;
+    const ROOT = -1;
+    const freshOuter: number[] = [], freshHole: number[] = [];
+    for (const c of fresh) (holeFlag.get(c) ? freshHole : freshOuter).push(c);
+    const labelOf = (h: number): number => { const s = this.segments.get(h >> 1)!; return (h & 1) === 0 ? s.left_face : s.right_face; };
+    const info = (c: number) => this.cycleInfo(c, t.cycles.get(c)!, t);
+
+    // Faces that may be affected: those whose labels appear on fresh cycles or on cycles taken apart.
+    const dirty = new Set<number>(this.brokenLabels);
+    for (const c of fresh) for (const h of t.cycles.get(c)!) { const l = labelOf(h); if (l > 0) dirty.add(l); }
+
+    // The outer cycle of a face that still stands as it was, by the face's label.
+    const outerOf = new Map<number, number | null>();
+    const standingOuter = (label: number): number | null => {
+      let o = outerOf.get(label);
+      if (o === undefined) {
+        o = null;
+        for (const c of t.facesCycles.get(label) ?? []) {
+          if (fresh.has(c) || holeFlag.get(c)) continue;
+          if (o !== null) throw new NeedFullRebuild();
+          o = c;
+        }
+        outerOf.set(label, o);
+      }
+      return o;
+    };
+    const samplesOf = (c: number): number[] => {
+      const out: number[] = [];
+      for (const h of t.cycles.get(c)!) { const v = this.he(h).from; if (!out.includes(v)) { out.push(v); if (out.length >= 6) break; } }
+      return out;
+    };
+    const near = new Map<number, Set<number>>();
+    // The smallest of some outer cycles whose area holds a piece (given by sample points of its outside).
+    const smallestHolding = (samples: number[], candidates: Iterable<number>, limit: number): number | null => {
+      let best: number | null = null, bestArea = limit;
+      for (const y of candidates) {
+        const d = info(y);
+        if (d.area >= bestArea) continue;
+        if (this.pointInOuterCycle(samples, y, t, d.area < 2 * Math.PI ? d.cap : null, near)) { best = y; bestArea = d.area; }
+      }
+      return best;
+    };
+    const allOuters = function* (): Generator<number> { for (const c of t.cycles.keys()) if (!holeFlag.get(c)) yield c; };
+
+    // Where each piece lies whose place may have changed: hole cycle -> the outer cycle around it, or ROOT.
+    //
+    // Insertion only ever adds borders, so the face a piece lies in now is part of the face it lay in
+    // before (the label L on its outside): its container is a fresh outer cycle carved out of L (one
+    // carrying L, or made only of new borders), or else L's own outer cycle if that still stands.
+    // After any other kind of change in the same operation nothing is assumed: every outer cycle is tried.
+    const assume = !this.reshaped;
+    const freshByLabel = new Map<number, number[]>();
+    const freshUnlabelled: number[] = [];
+    if (assume) for (const y of freshOuter) {
+      const seen = new Set<number>();
+      for (const h of t.cycles.get(y)!) { const l = labelOf(h); if (l > 0 && !seen.has(l)) { seen.add(l); let list = freshByLabel.get(l); if (!list) freshByLabel.set(l, (list = [])); list.push(y); } }
+      if (!seen.size) freshUnlabelled.push(y);
+    }
+    const freshFor = (label: number): number[] => {
+      if (!assume) return freshOuter;
+      const a = freshByLabel.get(label);
+      return a ? (freshUnlabelled.length ? [...a, ...freshUnlabelled] : a) : freshUnlabelled;
+    };
+    const container = new Map<number, number>();
+    for (const h of freshHole) {
+      let label = 0;
+      if (assume) for (const x of t.cycles.get(h)!) { const l = labelOf(x); if (l > 0) { label = l; break; } }
+      const samples = samplesOf(h);
+      let k: number | null = null;
+      if (label > 0) {
+        const cur = label === this.rootFace ? ROOT : standingOuter(label);
+        const cands = freshFor(label);
+        k = cands.length ? smallestHolding(samples, cands, cur !== null && cur !== ROOT ? info(cur).area : Infinity) : null;
+        if (k === null) k = cur;
+      }
+      // A piece with no earlier borders on its outside (a new island, say), or whose face is gone.
+      if (k === null) k = smallestHolding(samples, allOuters(), Infinity) ?? ROOT;
+      container.set(h, k);
+    }
+    if (freshOuter.length || this.brokenLabels.size) {
+      for (const h of this.holes) {
+        if (fresh.has(h)) continue;
+        const label = t.cycleLabel.get(h)!;
+        const cur = label === this.rootFace ? ROOT : standingOuter(label);
+        const cands = freshFor(label);
+        if (!cands.length && cur !== null) continue; // nothing new was carved out of its face
+        const samples = samplesOf(h);
+        // Inside one of the new areas now?
+        let next = cands.length ? smallestHolding(samples, cands, cur !== null && cur !== ROOT ? info(cur).area : Infinity) : null;
+        if (next === null) {
+          if (cur !== null) continue; // it stays where it was
+          next = smallestHolding(samples, allOuters(), Infinity) ?? ROOT; // the face it lay in is gone
+        }
+        container.set(h, next);
+        dirty.add(label);
+      }
+    }
+
+    // The affected regions: an outer cycle (or ROOT) with the pieces lying directly inside it.
+    interface Region { key: number; cycles: number[]; order: number }
+    const regions = new Map<number, Region>();
+    const region = (key: number): Region => {
+      let r = regions.get(key);
+      if (!r) {
+        r = { key, cycles: key === ROOT ? [] : [key], order: key === ROOT ? Infinity : t.minHE.get(key)! };
+        regions.set(key, r);
+        if (key === ROOT || !fresh.has(key)) {
+          // A face that stands: the pieces that lay in it and have not moved.
+          const label = key === ROOT ? this.rootFace : t.cycleLabel.get(key)!;
+          for (const c of t.facesCycles.get(label) ?? []) if (c !== key && !fresh.has(c) && holeFlag.get(c) && !container.has(c)) r.cycles.push(c);
+        }
+      }
+      return r;
+    };
+    for (const y of freshOuter) region(y);
+    for (const label of dirty) { const o = label === this.rootFace ? ROOT : standingOuter(label); if (o !== null) region(o); }
+    for (const [h, k] of container) region(k).cycles.push(h);
+
+    // Origin of each region: the old face most of its labels point to, else the origin of the region
+    // its connected piece lies in.
+    const holeOfPiece = (outer: number): number => {
+      const start = this.he(t.cycles.get(outer)![0]).from;
+      const seen = new Set<number>([start]);
+      const stack = [start];
+      while (stack.length) {
+        const v = stack.pop()!;
+        for (const h of t.outgoing.get(v) ?? []) {
+          for (const x of [h, h ^ 1]) { const c = t.cycleOf.get(x); if (c !== undefined && holeFlag.get(c)) return c; }
+          const w = this.he(h).to;
+          if (!seen.has(w)) { seen.add(w); stack.push(w); }
+        }
+      }
+      throw new NeedFullRebuild();
+    };
+    const regionOfHole = (h: number): number => {
+      const k = container.get(h);
+      if (k !== undefined) return k;
+      const label = t.cycleLabel.get(h)!;
+      if (label === this.rootFace) return ROOT;
+      const o = standingOuter(label);
+      if (o === null) throw new NeedFullRebuild();
+      return o;
+    };
+    const origin = new Map<number, number>();
+    const resolve = (key: number, depth = 0): number => {
+      const known = origin.get(key);
+      if (known !== undefined) return known;
+      const counts = new Map<number, number>();
+      for (const c of region(key).cycles) {
+        const hs = t.cycles.get(c)!;
+        if (!fresh.has(c)) { const l = t.cycleLabel.get(c)!; if (l > 0) counts.set(l, (counts.get(l) ?? 0) + hs.length); continue; }
+        for (const h of hs) { const l = labelOf(h); if (l > 0) counts.set(l, (counts.get(l) ?? 0) + 1); }
+      }
+      let o = -1, bestN = -1;
+      for (const [l, n2] of counts) if (n2 > bestN || (n2 === bestN && l < o)) { o = l; bestN = n2; }
+      if (o === -1) o = key === ROOT || depth > 10000 ? this.rootFace : resolve(regionOfHole(holeOfPiece(key)), depth + 1);
+      origin.set(key, o);
+      return o;
+    };
+    for (const key of [...regions.keys()]) resolve(key);
+
+    const byOrigin = new Map<number, Region[]>();
+    for (const r of regions.values()) {
+      if (r.cycles.length === 0) continue;
+      const o = origin.get(r.key)!;
+      let l = byOrigin.get(o);
+      if (!l) byOrigin.set(o, (l = []));
+      l.push(r);
+    }
+
+    // ---- from here on the map is changed: new ids, then labels.
+    const finalId = new Map<number, number>();
+    for (const [o, list] of [...byOrigin.entries()].sort((a, b) => a[0] - b[0])) {
+      list.sort((a, b) => a.order - b.order);
+      const face = this.faces.get(o);
+      if (list.length === 1 && face && face.is_leaf) { finalId.set(list[0].key, o); continue; }
+      if (face && face.is_leaf && this.isReferenced && !this.isReferenced(o)) {
+        let keep = list[0], keepN = -1;
+        for (const r of list) {
+          let n2 = 0;
+          for (const c of r.cycles) {
+            const hs = t.cycles.get(c)!;
+            if (!fresh.has(c)) { if (t.cycleLabel.get(c) === o) n2 += hs.length; continue; }
+            for (const h of hs) if (labelOf(h) === o) n2++;
+          }
+          if (n2 > keepN) { keep = r; keepN = n2; }
+        }
+        for (const r of list) {
+          if (r === keep) { finalId.set(r.key, o); continue; }
+          const id = this.ids.next('face');
+          this.putFace({ id, space_id: this.spaceId, parent_id: face.parent_id, is_leaf: 1 });
+          finalId.set(r.key, id);
+        }
+        continue;
+      }
+      if (face && face.is_leaf) this.putFace({ ...face, is_leaf: 0 });
+      for (const r of list) {
+        const id = this.ids.next('face');
+        this.putFace({ id, space_id: this.spaceId, parent_id: o, is_leaf: 1 });
+        finalId.set(r.key, id);
+      }
+    }
+    const pending = new Map<number, { left: number; right: number }>();
+    for (const r of regions.values()) {
+      const fid = finalId.get(r.key);
+      if (fid === undefined) continue;
+      for (const c of r.cycles) {
+        if (!fresh.has(c) && t.cycleLabel.get(c) === fid) continue; // already labelled so
+        for (const h of t.cycles.get(c)!) {
+          const sid = h >> 1;
+          let cur = pending.get(sid);
+          if (!cur) { const s = this.segments.get(sid)!; pending.set(sid, (cur = { left: s.left_face, right: s.right_face })); }
+          if ((h & 1) === 0) cur.left = fid; else cur.right = fid;
+        }
+      }
+    }
+    for (const [sid, lr] of pending) {
+      const s = this.segments.get(sid)!;
+      if (s.left_face !== lr.left || s.right_face !== lr.right) this.putSegment({ ...s, left_face: lr.left, right_face: lr.right });
+    }
+    const root = finalId.get(ROOT);
+    if (root !== undefined) this.rootFace = root;
+  }
+
+  /** The faces of the whole map from scratch (the reference method; used for large imports). */
+  private rebuildFacesFull(t: Topology): void {
+    // Cycles in the stable order (by smallest half-edge), numbered 0..nC-1 for this rebuild.
+    const cycIds = this.orderedCycles(t);
+    const nC = cycIds.length;
+    if (nC === 0) return;
+    const cyc = cycIds.map((id) => t.cycles.get(id)!);
+    const denseOf = new Map(cycIds.map((id, i) => [id, i]));
+
+    // Connected components over vertices.
+    const { find, compSegs } = this.components();
+    const compIds = cyc.map((c) => find(this.he(c[0]).from));
+    const compOfCycle = (ci: number) => compIds[ci];
 
     // Per component: the hole cycle (the one whose left side contains PINF).
     const holeOf = new Map<number, number>();
@@ -766,6 +1271,7 @@ export class Arrangement {
     const caps: Array<{ c: Vec3; r: number } | null> = new Array(nC).fill(null);
     for (let ci = 0; ci < nC; ci++) {
       isOuter[ci] = holeOf.get(compOfCycle(ci)) === ci ? 0 : 1;
+      this.setHole(cycIds[ci], !isOuter[ci]);
       const info = this.cycleInfo(cycIds[ci], cyc[ci], t);
       area[ci] = info.area;
       // Bounding caps for outer cycles, to skip impossible containment tests.
@@ -775,13 +1281,14 @@ export class Arrangement {
     // Each component's container: the smallest outer cycle of another component that contains it.
     const containerOf = new Map<number, number>(); // component -> outer cycle index, or -1 for root
     const outerList = [...Array(nC).keys()].filter((ci) => isOuter[ci]);
+    const near = new Map<number, Set<number>>();
     for (const [comp, segs] of compSegs) {
       let best = -1;
       const samples = this.sampleVertices(segs);
       for (const ci of outerList) {
         if (compOfCycle(ci) === comp) continue;
         if (best !== -1 && area[ci] >= area[best]) continue;
-        const inside = this.pointInOuterCycle(samples, cyc[ci], t, caps[ci]);
+        const inside = this.pointInOuterCycle(samples, cycIds[ci], t, caps[ci], near);
         if (inside) best = ci;
       }
       containerOf.set(comp, best);
@@ -950,28 +1457,35 @@ export class Arrangement {
     return { seg: best.seg, side: best.side };
   }
 
-  /** Is the component (represented by sample vertices) inside the left region of an outer cycle? */
-  private pointInOuterCycle(samples: number[], cycle: number[], t: Topology, cap: { c: Vec3; r: number } | null): boolean {
+  /**
+   * Is a connected piece (represented by sample vertices of it) inside the left region of an outer
+   * cycle? A piece that shares a point with the cycle is part of the same piece, never inside it.
+   * `near` keeps, per sample point, the segments near its path to PINF (shared between cycles).
+   */
+  private pointInOuterCycle(samples: number[], cycleId: number, t: Topology, cap: { c: Vec3; r: number } | null, near: Map<number, Set<number>>): boolean {
+    const cycle = t.cycles.get(cycleId)!;
     for (const vid of samples) {
       const p = this.v(vid);
       if (cap && angle(cap.c, p) > cap.r) return false;
-      void t;
-      const parity = this.crossingParity(p, cycle.map((h) => h >> 1));
+      for (const h of t.outgoing.get(vid) ?? []) if (t.cycleOf.get(h) === cycleId || t.cycleOf.get(h ^ 1) === cycleId) return false;
+      const legs = this.legsToPinf(p);
+      let parity: number | null;
+      if (cycle.length <= 160) parity = this.crossingParity(legs, cycle.map((h) => h >> 1));
+      else {
+        // A long cycle: only its segments near the path can cross it.
+        let cands = near.get(vid);
+        if (!cands) near.set(vid, (cands = this.segmentsNear(legs)));
+        const mine: number[] = [];
+        for (const sid of cands) if ((t.cycleOf.get(2 * sid) === cycleId) !== (t.cycleOf.get(2 * sid + 1) === cycleId)) mine.push(sid);
+        parity = this.crossingParity(legs, mine);
+      }
       if (parity !== null) return parity === 1; // PINF is outside an outer cycle
     }
     throw new TopologyError('Could not decide which area contains a shape (degenerate geometry).');
   }
 
-  /** Parity of crossings of a path from p to PINF with the given segments (null if degenerate). */
-  private crossingParity(p: Vec3, segIds: number[]): number | null {
-    const legs: Array<[Vec3, Vec3]> = [];
-    if (dot(p, PINF) > -0.9) legs.push([p, PINF]);
-    else {
-      let m = cross(p, PINF);
-      if (Math.hypot(m[0], m[1], m[2]) < 1e-6) m = cross(p, [1, 0, 0]);
-      const mid = normalize(m);
-      legs.push([p, mid], [mid, PINF]);
-    }
+  /** Parity of crossings of a path to PINF with the given segments (null if degenerate). */
+  private crossingParity(legs: Array<[Vec3, Vec3]>, segIds: number[]): number | null {
     let count = 0;
     for (const sid of segIds) {
       const s = this.segments.get(sid)!;
@@ -1126,22 +1640,24 @@ export class Arrangement {
 
   facesLeftOf(path: PathStep[]): Set<number> {
     const barrier = new Set(path.map((s) => s.seg));
-    const start = new Set<number>();
+    const seen = new Set<number>();
     for (const st of this.netPath(path)) {
       const s = this.segments.get(st.seg)!;
-      start.add(st.fwd ? s.left_face : s.right_face);
+      seen.add(st.fwd ? s.left_face : s.right_face);
     }
-    const adj = new Map<number, number[]>();
-    for (const s of this.segments.values()) {
-      if (barrier.has(s.id) || s.left_face === s.right_face) continue;
-      (adj.get(s.left_face) ?? adj.set(s.left_face, []).get(s.left_face)!).push(s.right_face);
-      (adj.get(s.right_face) ?? adj.set(s.right_face, []).get(s.right_face)!).push(s.left_face);
-    }
-    const seen = new Set(start);
-    const queue = [...start];
+    // Outwards from those faces across every border that is not part of the path (only the faces
+    // reached are looked at, not the whole map).
+    const t = this.topology();
+    const queue = [...seen];
     while (queue.length) {
       const f = queue.pop()!;
-      for (const g of adj.get(f) ?? []) if (!seen.has(g)) { seen.add(g); queue.push(g); }
+      for (const c of t.facesCycles.get(f) ?? []) for (const h of t.cycles.get(c)!) {
+        const sid = h >> 1;
+        if (barrier.has(sid)) continue;
+        const s = this.segments.get(sid)!;
+        const g = (h & 1) === 0 ? s.right_face : s.left_face;
+        if (g !== f && !seen.has(g)) { seen.add(g); queue.push(g); }
+      }
     }
     return seen;
   }
@@ -1254,41 +1770,11 @@ export class Arrangement {
     const holes: number[] = [];
     for (const ci of list) {
       // In a face, at most one cycle is "outer"; holes have left areas close to 4*pi minus the hole.
-      if (outer === -1 && !this.cycleContainsPinfCached(ci, t)) outer = ci; else holes.push(ci);
+      if (outer === -1 && !this.isHoleCycle(ci, t)) outer = ci; else holes.push(ci);
     }
     let area = outer === -1 ? 4 * Math.PI : this.cycleInfo(outer, t.cycles.get(outer)!, t).area;
     for (const ci of holes) area -= 4 * Math.PI - this.cycleInfo(ci, t.cycles.get(ci)!, t).area;
     return area;
-  }
-
-  private pinfCache: { version: number; holes: Set<number> } | null = null;
-  private cycleContainsPinfCached(ci: number, t: Topology): boolean {
-    if (!this.pinfCache || this.pinfCache.version !== t.version) {
-      const holes = new Set<number>();
-      const comps = new Map<number, number[]>();
-      const seen = new Set<number>();
-      for (const s of this.segments.values()) {
-        if (seen.has(s.id)) continue;
-        // flood the component
-        const stack = [s.a];
-        const verts = new Set<number>([s.a]);
-        const segs: number[] = [];
-        while (stack.length) {
-          const v = stack.pop()!;
-          for (const sid of this.incident.get(v) ?? []) {
-            if (seen.has(sid)) continue;
-            seen.add(sid);
-            segs.push(sid);
-            const o = this.segments.get(sid)!;
-            for (const w of [o.a, o.b]) if (!verts.has(w)) { verts.add(w); stack.push(w); }
-          }
-        }
-        comps.set(s.id, segs);
-      }
-      for (const segs of comps.values()) holes.add(this.locatePinfInComponent(segs, t));
-      this.pinfCache = { version: t.version, holes };
-    }
-    return this.pinfCache.holes.has(ci);
   }
 
   // ---------------------------------------------------------------- topology-preserving vertex edits
@@ -1346,6 +1832,7 @@ export class Arrangement {
     if (!check.ok) throw new TopologyError(check.reason);
     const [lon, lat] = vecToE7(p);
     const row = this.vertices.get(vid)!;
+    this.reshaped = true;
     this.putVertex({ ...row, lon, lat }); // also refreshes the incident segments' index boxes
   }
 
@@ -1402,6 +1889,7 @@ export class Arrangement {
         if (arcsCross(pu, pw, this.v(s.a), this.v(s.b)) !== 'none') throw new TopologyError('Removing this point would cross another border.');
       }
     }
+    this.reshaped = true;
     this.deleteSegment(s1.id);
     this.deleteSegment(s2.id);
     const id = this.ids.next('segment');

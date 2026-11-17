@@ -111,3 +111,41 @@ test('labels: zoomed in on part of a large country, the label goes in the part o
   assert.ok(spot.lon >= 30 && spot.lon <= 50 && spot.lat >= 45 && spot.lat <= 65, `in the part on screen: ${spot.lon}, ${spot.lat}`);
   assert.ok(geoContains(polygon(russia), [spot.lon, spot.lat]), 'and inside Russia');
 });
+
+test('the gridded distance to an outline equals the edge-by-edge one, inside and outside, at any stretch', async () => {
+  const { signedDistance } = await import('../src/render-engine/label-place.ts');
+  const { rng } = await import('./helpers.ts');
+  const r = rng(77);
+  // A ragged outline of 3,000 edges with a hole in it, and a small one of 12.
+  const outline = (cx: number, cy: number, rad: number, n: number, rough: number): number[] => {
+    const pts: Array<[number, number]> = [];
+    for (let i = 0; i < n; i++) { const a = (i / n) * Math.PI * 2, k = rad * (1 + rough * Math.sin(9 * a) + r.float(-rough, rough) / 3); pts.push([cx + k * Math.cos(a) * 1.7, cy + k * Math.sin(a)]); }
+    const out: number[] = [];
+    for (let i = 0; i < n; i++) out.push(...pts[i], ...pts[(i + 1) % n]);
+    return out;
+  };
+  for (const edgesList of [[...outline(0.3, -0.2, 0.5, 2800, 0.2), ...outline(0.35, -0.15, 0.12, 200, 0.1)], outline(2, 1, 0.01, 12, 0.3)]) {
+    const edges = Float64Array.from(edgesList);
+    const bbox: [number, number, number, number] = [Infinity, Infinity, -Infinity, -Infinity];
+    for (let i = 0; i < edges.length; i += 2) { bbox[0] = Math.min(bbox[0], edges[i]); bbox[1] = Math.min(bbox[1], edges[i + 1]); bbox[2] = Math.max(bbox[2], edges[i]); bbox[3] = Math.max(bbox[3], edges[i + 1]); }
+    const shape = { edges, bbox, projection: null as never };
+    const brute = (x: number, y: number, stretch: number) => {
+      let inside = false, best = Infinity;
+      const k = 1 / stretch;
+      for (let i = 0; i < edges.length; i += 4) {
+        const ax = edges[i], ay = edges[i + 1], bx = edges[i + 2], by = edges[i + 3];
+        if ((ax > x) !== (bx > x) && ay + ((x - ax) * (by - ay)) / (bx - ax) < y) inside = !inside;
+        const px = (x - ax) * k, py = y - ay, dx = (bx - ax) * k, dy = by - ay, len2 = dx * dx + dy * dy;
+        let t = len2 > 0 ? (px * dx + py * dy) / len2 : 0;
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
+        best = Math.min(best, (px - t * dx) ** 2 + (py - t * dy) ** 2);
+      }
+      return inside ? Math.sqrt(best) : -Math.sqrt(best);
+    };
+    const w = bbox[2] - bbox[0], h = bbox[3] - bbox[1];
+    for (let i = 0; i < 1500; i++) {
+      const x = bbox[0] + r.float(-0.4, 1.4) * w, y = bbox[1] + r.float(-0.4, 1.4) * h, stretch = r.pick([0.2, 1, 2.5, 7]);
+      assert.equal(signedDistance(shape, x, y, stretch), brute(x, y, stretch), `at ${x}, ${y}, stretch ${stretch}`);
+    }
+  }
+});

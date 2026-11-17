@@ -8,8 +8,9 @@ import { Engine } from '../temporal-engine/engine.ts';
 import type { CommandResult } from '../domain/commands.ts';
 import { type Instant, gregorian, toJSONValue, fromJSONValue } from '../core-time/index.ts';
 import { type Camera, defaultCamera, flatCamera, PROJECTIONS } from '../render-engine/camera.ts';
-import { MapRenderer } from '../render-engine/map-renderer.ts';
-import { loadBasemap, type Basemap } from '../render-engine/basemap.ts';
+import { MapRenderer, VIEW_QUALITY } from '../render-engine/map-renderer.ts';
+import { loadViewSettings, saveViewSettings, DETAIL_TOLERANCE, type ViewSettings } from './view-settings.ts';
+import { loadBasemap, loadBasemapDetail, type Basemap } from '../render-engine/basemap.ts';
 import { DEFAULT_PERIOD, type PeriodSpec } from '../domain/history-view.ts';
 import { setAssetBase } from '../render-engine/assets.ts';
 import type { Vec3 } from '../geo-kernel/vec.ts';
@@ -120,6 +121,20 @@ class AppStore {
   /** Set when a change could not be saved; editing stops until the project is reloaded from disk. */
   offline: string | null = null;
   readonly renderer = new MapRenderer();
+  /** How the working view is drawn on this computer (never part of a project or an export). */
+  viewSettings: ViewSettings = loadViewSettings();
+  setViewSettings(v: ViewSettings) {
+    this.viewSettings = v;
+    saveViewSettings(v);
+    this.applyViewSettings();
+    this.notify();
+  }
+  private applyViewSettings() {
+    this.renderer.carry = this.viewSettings.whileMoving === 'carry';
+    this.renderer.quality = { ...VIEW_QUALITY, tolerance: DETAIL_TOLERANCE[this.viewSettings.detail] };
+    return true;
+  }
+  private readonly viewSettingsApplied = this.applyViewSettings();
   /** Earth's geography (Natural Earth), loaded once in the background. */
   basemap: Basemap | null = null;
   /** Show present-day country borders over the land while drawing (never exported). */
@@ -130,7 +145,44 @@ class AppStore {
   private viewTimer: ReturnType<typeof setTimeout> | undefined;
 
   subscribe = (cb: () => void) => { this.listeners.add(cb); return () => { this.listeners.delete(cb); }; };
-  notify() { this.version++; for (const l of this.listeners) l(); this.saveViewSoon(); }
+  /** Everything follows a change: the map at once and every panel. */
+  notify() {
+    clearTimeout(this.catchUp);
+    this.catchUp = undefined;
+    this.version++;
+    this.liveVersion++;
+    for (const l of this.listeners) l();
+    for (const l of this.liveListeners) l();
+    this.saveViewSoon();
+  }
+
+  /**
+   * Goes up with every change at once; `version` (which the panels follow) goes up with it, except
+   * when only the view moved (see notifyLive): then it follows when the movement pauses.
+   */
+  liveVersion = 0;
+  private liveListeners = new Set<() => void>();
+  private catchUp: ReturnType<typeof setTimeout> | undefined;
+  subscribeLive = (cb: () => void) => { this.liveListeners.add(cb); return () => { this.liveListeners.delete(cb); }; };
+
+  /**
+   * The view moved (the map dragged or zoomed, the date scrubbed along the timeline, a shot playing):
+   * the map and the few readouts that follow the view are redrawn at once; the panels (lists of
+   * hundreds of countries and events, the inspector) catch up when the movement pauses, instead of
+   * being worked out again for every step of it.
+   */
+  notifyLive() {
+    this.liveVersion++;
+    for (const l of this.liveListeners) l();
+    clearTimeout(this.catchUp);
+    this.catchUp = setTimeout(() => { this.catchUp = undefined; this.notify(); }, 140);
+  }
+
+  /** Change view state (camera in a shot, shot frame, an overlay being dragged) as the view moves: see notifyLive. */
+  setLive(patch: Partial<AppStore>) {
+    Object.assign(this, patch);
+    this.notifyLive();
+  }
 
   /** Remember where the user was looking (per project, in this browser), so reopening returns there. */
   private saveViewSoon() {
@@ -187,10 +239,15 @@ class AppStore {
     if (!c) { c = flat ? flatCamera() : defaultCamera(); this.cameras.set(this.spaceId, c); }
     return c;
   }
-  setCamera(c: Camera) { this.cameras.set(this.spaceId, c); this.notify(); }
+  setCamera(c: Camera) { this.cameras.set(this.spaceId, c); this.notifyLive(); }
 
   async loadApp() {
-    loadBasemap().then((b) => this.set({ basemap: b }), (e: Error) => this.toast(e.message, 'error'));
+    loadBasemap().then((b) => {
+      this.set({ basemap: b });
+      // The detailed coastlines follow in the background (unless the working view does without them),
+      // so that the first close look at a coast does not have to wait for them.
+      if (this.viewSettings.coast === 'full') setTimeout(() => { loadBasemapDetail(b).then(() => this.notify(), () => undefined); }, 1500);
+    }, (e: Error) => this.toast(e.message, 'error'));
     const info = await Api.app();
     this.appVersion = info.version;
     this.projectsDir = info.projectsDir;
@@ -356,6 +413,8 @@ class AppStore {
   execute<T>(fn: (w: World, e: Engine) => CommandResult<T>): T | undefined {
     if (!this.world || !this.engine || !this.projectId) return undefined;
     if (this.halted) { this.toast('Changes cannot be saved right now, so editing is paused.', 'error'); return undefined; }
+    // An undo or redo on its way changes the map when it arrives: a change made meanwhile would be built on what is about to go.
+    if (this.stepping) { this.toast('One moment: the undo is still being applied.'); return undefined; }
     let r: CommandResult<T>;
     try {
       r = fn(this.world, this.engine);
@@ -412,11 +471,15 @@ class AppStore {
   undo() { this.historyStep('undo'); }
   redo() { this.historyStep('redo'); }
 
+  /** Undo and redo steps asked for and not yet applied. */
+  private stepping = 0;
+
   private historyStep(which: 'undo' | 'redo') {
     if (!this.projectId || this.halted) return;
     const id = this.projectId;
+    this.stepping++;
     this.queue = this.queue.then(async () => {
-      if (this.halted) return;
+      if (this.halted) { this.stepping--; return; }
       try {
         const res = which === 'undo' ? await Api.undo(id) : await Api.redo(id);
         if (res.diffs.length && this.world) this.world.applyDiffs(res.diffs);
@@ -427,6 +490,7 @@ class AppStore {
         this.offline = `${which === 'undo' ? 'Undo' : 'Redo'} failed: ${(e as Error).message}`;
         if (e instanceof ApiError) await this.reloadFromDisk();
       }
+      this.stepping--;
       this.validateSelection();
       this.notify();
     });
@@ -442,7 +506,8 @@ class AppStore {
     if (this.shotId && !this.world.get('sequence', this.shotId)) this.shotId = null;
   }
 
-  setTime(t: Instant) { this.time = t; this.notify(); }
+  /** Go to a date; `live`: while scrubbing (the panels catch up when the scrubbing pauses). */
+  setTime(t: Instant, live = false) { this.time = t; if (live) this.notifyLive(); else this.notify(); }
 
   fitTimeline() {
     if (!this.world) return;
@@ -463,5 +528,11 @@ export type Store = AppStore;
 
 export function useStore(): AppStore {
   useSyncExternalStore(store.subscribe, () => store.version);
+  return store;
+}
+
+/** As useStore, for the few components that follow the view as it moves (the map, the timeline's cursor, the date and frame readouts). */
+export function useLive(): AppStore {
+  useSyncExternalStore(store.subscribeLive, () => store.liveVersion);
   return store;
 }

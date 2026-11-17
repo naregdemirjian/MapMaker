@@ -170,7 +170,7 @@ export class Engine {
   get revision(): number { this.ensure(); return this.compiledRevision; }
 
   ensure(): void {
-    if (this.compiledRevision !== this.world.revision) this.compile();
+    if (this.compiledRevision !== this.world.historyRevision) this.compile();
   }
 
   isActiveEvent(ev: EventRow): boolean {
@@ -262,7 +262,7 @@ export class Engine {
       for (let i = tr.length - 2; i >= 0; i--) if (compare(tr[i].t, tr[i + 1].t) === 0) tr.splice(i, 1);
     }
     this.changeTimes = [...times.values()].sort(compare);
-    this.compiledRevision = w.revision;
+    this.compiledRevision = w.historyRevision;
     this.detectConflicts(effects, events);
   }
 
@@ -320,8 +320,10 @@ export class Engine {
     return d * a.transition.maxDist;
   }
 
-  /** State of every leaf parcel of a partition layer at time t. */
+  /** States at recent instants (while changes are animating, each instant has its own). */
   private stateCache = new Map<string, Map<number, FaceState>>();
+  /** Per stretch of time between two changes: every parcel's state, and the parcels changing hands in it. */
+  private stretchCache = new Map<string, { base: Map<number, FaceState>; changing: number[] }>();
 
   /** The state of every parcel of a layer at time t. Recent answers are reused; callers must not modify the result. */
   /** The name something goes by at instant t, if it was renamed by then (null: its own name). */
@@ -367,17 +369,61 @@ export class Engine {
     return out;
   }
 
+  /**
+   * Which stretch of time an instant falls in: the number of change instants at or before it.
+   * Between two change instants nothing changes hands; only animations in progress move on.
+   */
+  stretchOf(t: Instant): number {
+    this.ensure();
+    const ts = this.changeTimes;
+    let lo = 0, hi = ts.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (compare(ts[mid], t) <= 0) lo = mid + 1; else hi = mid; }
+    return lo;
+  }
+
+  /**
+   * The state of every parcel of a layer at time t; callers must not modify the result. Worked out
+   * once per stretch of time between changes: every instant of a stretch shares it, and while
+   * changes are animating only the parcels changing hands are worked out again for each instant.
+   */
   partitionState(spaceId: string, layerId: string, t: Instant): Map<number, FaceState> {
     this.ensure();
     const arr = this.world.arrangement(spaceId);
-    const key = `${this.compiledRevision}|${arr.revision}|${spaceId}|${layerId}|${t.day}|${t.ms}`;
+    const sk = `${this.compiledRevision}|${arr.revision}|${spaceId}|${layerId}|${this.stretchOf(t)}`;
+    let st = this.stretchCache.get(sk);
+    if (!st) {
+      const base = new Map<number, FaceState>();
+      const changing: number[] = [];
+      for (const f of arr.leafFaces()) {
+        const s = this.faceState(spaceId, layerId, f, t);
+        base.set(f, s);
+        if (s.transition) changing.push(f);
+      }
+      st = { base, changing };
+      if (this.stretchCache.size >= 24) this.stretchCache.delete(this.stretchCache.keys().next().value!);
+      this.stretchCache.set(sk, st);
+      // The states just worked out are those of this instant.
+      if (changing.length) this.stateCache.set(`${sk}|${t.day}|${t.ms}`, base);
+    }
+    if (!st.changing.length) return st.base;
+    const key = `${sk}|${t.day}|${t.ms}`;
     const hit = this.stateCache.get(key);
     if (hit) return hit;
-    const out = new Map<number, FaceState>();
-    for (const f of arr.leafFaces()) out.set(f, this.faceState(spaceId, layerId, f, t));
+    const out = new Map(st.base);
+    for (const f of st.changing) out.set(f, this.faceState(spaceId, layerId, f, t));
     if (this.stateCache.size >= 16) this.stateCache.delete(this.stateCache.keys().next().value!);
     this.stateCache.set(key, out);
     return out;
+  }
+
+  /**
+   * The parcels changing hands (in an animated change) at instant t: the same throughout a stretch
+   * of time. Empty in most stretches.
+   */
+  partitionChanging(spaceId: string, layerId: string, t: Instant): number[] {
+    this.partitionState(spaceId, layerId, t);
+    const arr = this.world.arrangement(spaceId);
+    return this.stretchCache.get(`${this.compiledRevision}|${arr.revision}|${spaceId}|${layerId}|${this.stretchOf(t)}`)?.changing ?? [];
   }
 
   /** Fraction (0..1) of a transition's duration after which point p changes hands. */

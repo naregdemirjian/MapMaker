@@ -3,6 +3,8 @@
 // and never changes history. Files are produced by scripts/fetch-natural-earth.mjs.
 import { geoArea, geoPath, geoEquirectangular } from 'd3-geo';
 import { screenToLonLat, lonLatToScreen, type View } from './camera.ts';
+import { makeRing, rankRing, addLine, type Ring, type Sheet } from './plane.ts';
+import type { BlockPath } from './blocks.ts';
 
 export interface BasemapFile {
   format: string; dataset: string; version: string; scale: string; quantum: number;
@@ -31,8 +33,13 @@ function boxOf(points: Iterable<number[]>): Box {
 /** Every scale loaded so far, coarsest first (1:10m joins later, see loadBasemapDetail). */
 export interface Basemap { version: string; scales: BasemapScale[] }
 
-/** Above this many pixels per degree the finest scale (1:10m, about 200 m) is used. */
-export const DETAIL_PIXELS_PER_DEGREE = 24;
+/**
+ * Above this many pixels per degree the finest scale (1:10m, about 200 m) is used, and above
+ * MEDIUM_PIXELS_PER_DEGREE the 1:50m one. Each is drawn at the detail the view can show (see
+ * plane.ts), so the finer data can come in early without slowing wide views down.
+ */
+export const DETAIL_PIXELS_PER_DEGREE = 14;
+export const MEDIUM_PIXELS_PER_DEGREE = 2.5;
 
 export { basemapSourceOf, type BasemapSource } from '../world-model/world-settings.ts';
 
@@ -53,24 +60,30 @@ function closeRing(r: number[][]): number[][] {
   return r;
 }
 
-export function decodeBasemap(file: BasemapFile): BasemapScale {
+/** Decoding, a few shapes at a time (each step is a pause point for decodeGently). */
+function* decodeSteps(file: BasemapFile): Generator<void, BasemapScale> {
   if (file.format !== 'mapmaker-basemap-1') throw new Error(`Unknown basemap format "${file.format}".`);
   const q = file.quantum;
-  const polygons = (name: string): GeoJSON.MultiPolygon => {
+  function* polygons(name: string): Generator<void, GeoJSON.MultiPolygon> {
     const items = (file.layers[name]?.items ?? []) as number[][][];
-    const coordinates = items.map((rings) => {
+    const coordinates: GeoJSON.Position[][][] = [];
+    for (const rings of items) {
       const poly = rings.map((r) => closeRing(decodeLine(r, q)));
       // d3-geo reads winding strictly (a ring the wrong way round encloses the rest of the planet):
       // any polygon that comes out larger than a hemisphere is turned round.
       if (geoArea({ type: 'Polygon', coordinates: poly }) > 2 * Math.PI) for (const r of poly) r.reverse();
-      return poly;
-    });
+      coordinates.push(poly);
+      yield;
+    }
     return { type: 'MultiPolygon', coordinates };
-  };
-  const lines = (name: string): GeoJSON.MultiLineString => ({
-    type: 'MultiLineString', coordinates: ((file.layers[name]?.items ?? []) as number[][]).map((l) => decodeLine(l, q)),
-  });
-  const land = polygons('land'), lakes = polygons('lakes'), coastline = lines('coastline'), borders = lines('borders');
+  }
+  function* lines(name: string): Generator<void, GeoJSON.MultiLineString> {
+    const coordinates: GeoJSON.Position[][] = [];
+    for (const l of (file.layers[name]?.items ?? []) as number[][]) { coordinates.push(decodeLine(l, q)); yield; }
+    return { type: 'MultiLineString', coordinates };
+  }
+  const land = yield* polygons('land'), lakes = yield* polygons('lakes'), coastline = yield* lines('coastline'), borders = yield* lines('borders');
+  yield;
   return {
     scale: file.scale, land, lakes, coastline, borders,
     boxes: {
@@ -78,6 +91,33 @@ export function decodeBasemap(file: BasemapFile): BasemapScale {
       coastline: coastline.coordinates.map(boxOf), borders: borders.coordinates.map(boxOf),
     },
   };
+}
+
+export function decodeBasemap(file: BasemapFile): BasemapScale {
+  const steps = decodeSteps(file);
+  let r = steps.next();
+  while (!r.done) r = steps.next();
+  return r.value;
+}
+
+/** Let the page draw and answer the pointer before carrying on. */
+const breathe = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+
+/** Run steps a few milliseconds at a time, so that the page stays responsive meanwhile. */
+async function gently<T>(steps: Generator<void, T>, slice = 5): Promise<T> {
+  let r = steps.next(), t = performance.now();
+  while (!r.done) {
+    if (performance.now() - t > slice) { await breathe(); t = performance.now(); }
+    r = steps.next();
+  }
+  return r.value;
+}
+
+/** A scale's shapes made ready for drawing (rings, and the order their points are left out in), a few at a time. */
+function* readySteps(b: BasemapScale): Generator<void, void> {
+  const r = ringsOf(b);
+  yield;
+  for (const list of [r.land, r.lakes, r.coastline, r.borders]) for (const ring of list) { rankRing(ring); yield; }
 }
 
 /** A dataset's record as kept in data/datasets.json (source, version, licence and credit line). */
@@ -117,7 +157,10 @@ export function loadBasemapDetail(base: Basemap, baseUrl = 'data/natural-earth/'
   if (!loadingDetail) {
     loadingDetail = fetch(`${baseUrl}ne-10m.json`).then(async (res) => {
       if (!res.ok) throw new Error('The detailed coastlines could not be loaded.');
-      return decodeBasemap(await res.json() as BasemapFile);
+      // Decoded and made ready a little at a time: the page stays responsive while 9 MB of coast arrive.
+      const scale = await gently(decodeSteps(await res.json() as BasemapFile));
+      await gently(readySteps(scale));
+      return scale;
     });
     loadingDetail.catch(() => { loadingDetail = null; });
   }
@@ -133,15 +176,37 @@ export function pixelsPerDegree(view: View): number {
 }
 
 /**
- * The detail to draw: 1:110m for whole-world views, 1:50m once a degree is more than 6 pixels
- * wide, 1:10m (when loaded) above DETAIL_PIXELS_PER_DEGREE.
+ * The data to draw from: 1:110m for very small views of the whole world, 1:50m from there on,
+ * 1:10m (when loaded) above DETAIL_PIXELS_PER_DEGREE. Measured in design pixels (as if the view
+ * were 1920 wide), so a preview and a large export choose alike.
  */
 export function chooseScale(basemap: Basemap, view: View): BasemapScale {
   const by = (name: string) => basemap.scales.find((s) => s.scale === name);
-  const ppd = pixelsPerDegree(view);
+  const ppd = pixelsPerDegree(view) / view.unit;
   if (ppd > DETAIL_PIXELS_PER_DEGREE) { const d = by('10m'); if (d) return d; }
-  if (ppd > 6) { const m = by('50m'); if (m) return m; }
+  if (ppd > MEDIUM_PIXELS_PER_DEGREE) { const m = by('50m'); if (m) return m; }
   return by('110m') ?? basemap.scales[0];
+}
+
+/** A scale's shapes as rings and lines ready for drawing (made on first use). */
+interface ScaleRings { land: Ring[]; lakes: Ring[]; coastline: Ring[]; borders: Ring[] }
+const ringsOfScale = new WeakMap<BasemapScale, ScaleRings>();
+
+function ringsOf(b: BasemapScale): ScaleRings {
+  let r = ringsOfScale.get(b);
+  if (!r) {
+    const closed = (mp: GeoJSON.MultiPolygon): Ring[] => mp.coordinates.flatMap((poly) => poly.map((ring) => {
+      // GeoJSON repeats a ring's first point at its end; rings here close by themselves.
+      const n = ring.length - 1;
+      const lon = new Float64Array(n), lat = new Float64Array(n);
+      for (let i = 0; i < n; i++) { lon[i] = ring[i][0]; lat[i] = ring[i][1]; }
+      return makeRing(lon, lat, true, false);
+    }));
+    const open = (ml: GeoJSON.MultiLineString): Ring[] => ml.coordinates.map((line) => makeRing(Float64Array.from(line, (q) => q[0]), Float64Array.from(line, (q) => q[1]), false, false));
+    r = { land: closed(b.land), lakes: closed(b.lakes), coastline: open(b.coastline), borders: open(b.borders) };
+    ringsOfScale.set(b, r);
+  }
+  return r;
 }
 
 /**
@@ -185,80 +250,128 @@ export const DEFAULT_BASEMAP_STYLE: BasemapStyle = {
   land: '#38443a', coast: 'rgba(176, 204, 214, 0.55)', lake: '#14324a', reference: 'rgba(235, 240, 245, 0.42)',
 };
 
-interface Paths { land: Path2D; lakes: Path2D; coastline: Path2D; borders: Path2D | null }
+interface Paths {
+  land: BlockPath; lakes: BlockPath; coastline: BlockPath; borders: BlockPath | null;
+  /**
+   * What the sheet's window holds: 'mixed' (a coast or a lake shore passes through it), or nothing
+   * but 'land' or nothing but 'sea' (territory then needs no trimming at the coast, or is not seen at all).
+   */
+  coast: 'land' | 'sea' | 'mixed';
+}
 
-/** Draws the basemap; keeps the projected paths while the view is unchanged (scrubbing time reuses them). */
-export class BasemapPainter {
-  private key = '';
-  private paths: Paths | null = null;
-  private vis: ReturnType<typeof visibleBounds> = null;
-  private scaleUsed: BasemapScale | null = null;
-
-  /** The projected paths for this view (land, lakes, coastline; the reference borders on request). */
-  pathsFor(view: View, basemap: Basemap, referenceBorders = false): Paths {
-    const b = chooseScale(basemap, view);
-    const key = `${view.key}|${b.scale}`;
-    if (key !== this.key || !this.paths) {
-      // Only the items that can be on screen are projected (a regional view touches a few percent
-      // of the data); d3 writes straight into each Path2D.
-      this.vis = visibleBounds(view);
-      this.scaleUsed = b;
-      this.paths = { land: this.project(view, b, 'land'), lakes: this.project(view, b, 'lakes'), coastline: this.project(view, b, 'coastline'), borders: null };
-      this.key = key;
+/** Is a point inside rings drawn with straight edges in longitude/latitude (even-odd)? */
+function insideRings(rings: Ring[], lon: number, lat: number): boolean {
+  let inside = false;
+  for (const r of rings) {
+    if (lat < r.box[1] || lat > r.box[3]) continue;
+    // The ring as it lies, or a turn east or west of it.
+    for (const turn of [-360, 0, 360]) {
+      const x = lon - turn;
+      if (x < r.box[0] || x > r.box[2]) continue;
+      const n = r.lon.length;
+      for (let i = 0, j = n - 1; i < n; j = i++) {
+        const yi = r.lat[i], yj = r.lat[j];
+        if ((yi > lat) !== (yj > lat) && x < ((r.lon[j] - r.lon[i]) * (lat - yi)) / (yj - yi) + r.lon[i]) inside = !inside;
+      }
     }
-    if (referenceBorders && !this.paths.borders) this.paths.borders = this.project(view, this.scaleUsed!, 'borders');
-    return this.paths;
+  }
+  return inside;
+}
+
+/**
+ * Draws the basemap from paths prepared on the current sheet (see plane.ts): only what the sheet
+ * shows, at the detail its scale can show; kept while the view stays on the sheet.
+ */
+export class BasemapPainter {
+  /** The paths for this sheet (land, lakes, coastline; the reference borders on request). */
+  pathsFor(view: View, sheet: Sheet, basemap: Basemap, referenceBorders = false): Paths {
+    const b = chooseScale(basemap, view);
+    const key = `basemap:${b.scale}`;
+    let paths = sheet.cache.get(key) as Paths | undefined;
+    const rings = ringsOf(b);
+    if (!paths) {
+      const fill = (list: Ring[]) => { const p = sheet.blocks(); for (const r of list) { if (sheet.copies(r.box).length) { rankRing(r); sheet.ring(p, r); } } return p; };
+      sheet.touched = false;
+      const land = fill(rings.land), lakes = fill(rings.lakes);
+      // No shore anywhere on the sheet: it is all land or all sea, as its middle is.
+      const coast = sheet.touched ? 'mixed' : insideRings(rings.land, sheet.centre[0], sheet.centre[1]) && !insideRings(rings.lakes, sheet.centre[0], sheet.centre[1]) ? 'land' : 'sea';
+      paths = { land, lakes, coastline: this.lines(sheet, rings.coastline), borders: null, coast };
+      sheet.cache.set(key, paths);
+    }
+    if (referenceBorders && !paths.borders) paths.borders = this.lines(sheet, rings.borders);
+    return paths;
   }
 
-  private project(view: View, b: BasemapScale, k: 'land' | 'lakes' | 'coastline' | 'borders'): Path2D {
-    const vis = this.vis;
-    const items = (b[k].coordinates as unknown[]).filter((_, i) => !vis || boxIntersects(b.boxes[k][i], vis));
-    const geo = (k === 'land' || k === 'lakes'
-      ? { type: 'MultiPolygon', coordinates: items }
-      : { type: 'MultiLineString', coordinates: items }) as GeoJSON.GeometryObject;
-    const p2 = new Path2D();
-    geoPath(view.projection, p2 as unknown as CanvasRenderingContext2D)(geo);
-    return p2;
+  private lines(sheet: Sheet, list: Ring[]): BlockPath {
+    const p = sheet.blocks();
+    for (const r of list) { if (!sheet.copies(r.box).length) continue; rankRing(r); for (const l of sheet.lines(r)) p.addLine(l); }
+    return p;
   }
 
-  draw(ctx: CanvasRenderingContext2D, view: View, basemap: Basemap, o: { referenceBorders: boolean; style?: BasemapStyle; oceanColor?: string }): void {
-    const paths = this.pathsFor(view, basemap, o.referenceBorders);
+  draw(ctx: CanvasRenderingContext2D, view: View, sheet: Sheet, basemap: Basemap, o: { referenceBorders: boolean; style?: BasemapStyle; oceanColor?: string }): void {
+    const paths = this.pathsFor(view, sheet, basemap, o.referenceBorders);
     const st = o.style ?? DEFAULT_BASEMAP_STYLE;
-    const u = view.unit;
+    const [k, e, f] = sheet.placement(view);
+    const px = view.unit / k; // a design pixel, in sheet units
     ctx.save();
+    ctx.transform(k, 0, 0, k, e, f);
+    const fill = (p: Path2D) => ctx.fill(p, 'evenodd'), stroke = (p: Path2D) => ctx.stroke(p);
     ctx.fillStyle = st.land;
-    ctx.fill(paths.land, 'nonzero');
+    paths.land.paint(ctx, 1, fill);
     // Lakes are cut out of the land, so they show whatever lies beneath (the ocean, or nothing).
     ctx.globalCompositeOperation = 'destination-out';
-    ctx.fill(paths.lakes);
+    paths.lakes.paint(ctx, 1, fill);
     ctx.globalCompositeOperation = 'source-over';
-    if (o.oceanColor) { ctx.fillStyle = o.oceanColor; ctx.fill(paths.lakes); }
+    if (o.oceanColor) { ctx.fillStyle = o.oceanColor; paths.lakes.paint(ctx, 1, fill); }
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
     ctx.strokeStyle = st.coast;
-    ctx.lineWidth = 0.8 * u;
-    ctx.stroke(paths.coastline);
+    ctx.lineWidth = 0.8 * px;
+    paths.coastline.paint(ctx, 0.4 * px + 1, stroke);
     if (o.referenceBorders && paths.borders) {
       ctx.strokeStyle = st.reference;
-      ctx.lineWidth = 0.9 * u;
-      ctx.setLineDash([4 * u, 3 * u]);
-      ctx.stroke(paths.borders);
+      ctx.lineWidth = 0.9 * px;
+      ctx.setLineDash([4 * px, 3 * px]);
+      paths.borders.paint(ctx, 0.45 * px + 1, stroke);
     }
     ctx.restore();
   }
 
   /**
-   * Keep only what lies on land in a buffer: everything over the sea or over lakes is erased.
-   * Used to end territory at the coast (coastline clipping).
+   * Keep only what lies on land in a buffer: everything over the sea (and, with `lakes`, over lakes)
+   * is erased. Used to end territory at the coast (coastline clipping).
    */
-  maskToLand(ctx: CanvasRenderingContext2D, view: View, basemap: Basemap): void {
-    const paths = this.pathsFor(view, basemap);
+  maskToLand(ctx: CanvasRenderingContext2D, view: View, sheet: Sheet, basemap: Basemap, lakes = true): void {
+    const paths = this.pathsFor(view, sheet, basemap);
+    const [k, e, f] = sheet.placement(view);
     ctx.save();
+    ctx.transform(k, 0, 0, k, e, f);
     ctx.fillStyle = '#000';
-    ctx.globalCompositeOperation = 'destination-in';
-    ctx.fill(paths.land, 'nonzero');
+    paths.land.keepInside(ctx);
+    if (lakes) { ctx.globalCompositeOperation = 'destination-out'; paths.lakes.paint(ctx, 1, (p) => ctx.fill(p, 'evenodd')); }
+    ctx.restore();
+  }
+
+  /** Paint the land solid (for a mask of the land, see MapRenderer). */
+  fillLand(ctx: CanvasRenderingContext2D, view: View, sheet: Sheet, basemap: Basemap): void {
+    const paths = this.pathsFor(view, sheet, basemap);
+    const [k, e, f] = sheet.placement(view);
+    ctx.save();
+    ctx.transform(k, 0, 0, k, e, f);
+    ctx.fillStyle = '#000';
+    paths.land.paint(ctx, 1, (p) => ctx.fill(p, 'evenodd'));
+    ctx.restore();
+  }
+
+  /** Erase what lies over lakes from a buffer. */
+  eraseLakes(ctx: CanvasRenderingContext2D, view: View, sheet: Sheet, basemap: Basemap): void {
+    const paths = this.pathsFor(view, sheet, basemap);
+    const [k, e, f] = sheet.placement(view);
+    ctx.save();
+    ctx.transform(k, 0, 0, k, e, f);
+    ctx.fillStyle = '#000';
     ctx.globalCompositeOperation = 'destination-out';
-    ctx.fill(paths.lakes);
+    paths.lakes.paint(ctx, 1, (p) => ctx.fill(p, 'evenodd'));
     ctx.restore();
   }
 }

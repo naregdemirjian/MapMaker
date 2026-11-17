@@ -59,6 +59,75 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D54. After an edit, only what changed is drawn again (the working view)
+
+The kept picture of the territories is brought up to date instead of being drawn again: the kernel records, revision
+by revision, the box around every border segment added, removed or moved (`Arrangement.bordersChangedSince`), and
+the renderer adds the boxes of parcels with a new owner and of parcels that are new (`MapRenderer.changesSince`).
+Only those rectangles are cleared and drawn (blocks keep that cheap, D50). The whole picture is drawn when anything
+else changed (a colour, a layer, the view), when the changes cover half the frame, when the view shows the planet
+more than once, or when the parcel that takes in the rest of the planet gained land (it has no box). Steps in time
+that change little are patched the same way. `e2e/render-compare` checks patched pictures against fresh ones after
+strokes and an undo. Found while testing: a change made in the instant an undo was still on its way was built on a
+map about to be replaced; such a change is now held back with a short notice.
+
+### D53. Settings for the working view only (the user, 17 November 2026)
+
+A **Settings** button at the top opens the options for how the map is drawn while working: presets (Best looking,
+Balanced, Fastest) and the single choices behind them (what happens while the map moves, country names while it moves,
+sharpness, how closely outlines are followed, coastline detail close up, a drawing-time readout). They are kept in the
+browser's storage for this computer (`mapmaker.viewSettings`), never in the project, and never reach an export: the
+export driver makes its own renderer with `EXPORT_QUALITY`, loads the finest coasts itself and never carries pictures
+from frame to frame. None of them removes a feature; they trade sharpness on screen for speed (`ui/view-settings.ts`).
+
+### D52. Exports: frames encoded by the browser, unchanged frames copied
+
+A frame is turned into a PNG by the browser's own encoder off the main thread (`OffscreenCanvas.convertToBlob`, about
+70 ms at 4K against 700 ms for the encoder in JavaScript) while the next frame is drawn; up to four are in flight. A
+frame whose pixels equal the frame before (found by hashing the pixels) is copied by the data service instead of being
+encoded and sent again. The service adds the sRGB tag; checksums in the manifest are of the files as written. Videos:
+a frame is drawn only once the browser has handed the sought frame over for display (`requestVideoFrameCallback`); the
+"seeked" event alone came a moment too early once frames were written faster.
+
+### D51. A picture that moves with the view (the working view)
+
+When the view moves and nothing else changes, the base map and the territories already drawn are **carried**: a move by
+whole pixels shifts the kept picture and draws only the strips that came into view (the result is the picture a fresh
+drawing gives, checked in `e2e/render-compare`); a zoom, or a move by part of a pixel, shows the kept picture at its new
+place or size and is allowed only while the view is moving; 110 ms after the last movement everything is drawn afresh.
+Country names placed in the part of a country in view stay where they are on the map meanwhile. Exports never carry.
+`MapRenderer.carry`, `RenderOptions.moving`, `lastApproximate`.
+
+### D50. Shapes cut into blocks
+
+Drawing a sliver of a large outline used to cost as much as drawing all of it (the browser walks every point). Land,
+lakes, coastlines, each owner's territory and each owner's borders are now held in a tree of square blocks
+(`render-engine/blocks.ts`), each with only the points that matter inside it: all points in the block and a margin, and
+of every stretch outside it just the first and last point when the stretch stays on one side (inside the block neither
+fills nor lines change; proved by `test/blocks.test.ts`). Blocks are made the first time they are drawn and drawn
+clipped to their own square on whole pixels, so neighbours meet exactly. Turned views and shapes with few points are
+drawn whole. This is what makes carried strips cheap, and full frames and exports faster (nothing outside the frame is
+walked).
+
+### D49. Prepared geometry ("sheets") instead of projecting every frame
+
+The renderer no longer hands GeoJSON to d3-geo for every frame. Shapes are projected once onto a **sheet**: a window
+around the view at a fixed scale, in the projection's own plane, with detail chosen by ranked point importance (borders
+shared by two countries are simplified identically, so neighbours never part). A sheet serves every view inside its
+window between half and 1.42 times its scale, by one transform. Per stretch of time between changes the renderer keeps
+who owns what, each owner's outline (parcels dissolved into one shape), border lines and label places; the base map
+and the territories are kept as pictures while they do not change. The old renderer is kept, frozen, in
+`e2e/reference/` and `e2e/render-compare.e2e.ts` compares the two over 35 scenes. Also: the map is drawn before the
+browser paints (not a frame later); panels follow a moving view only when it pauses (`store.notifyLive`).
+
+### D48. Faces rebuilt only around an edit; history states shared between changes
+
+The kernel rebuilt every face of the map after each stroke. It now rebuilds only the faces whose boundary cycles
+changed (`rebuildFacesAround`; the full rebuild stays as the reference and the two are compared on random maps in
+`test/kernel-faces.test.ts`). The temporal engine recompiles only when history changed (`world.historyRevision`), and
+shares one state per stretch between change instants. A stroke on the map of today's 242 countries went from 1.75 s
+to about 15 ms.
+
 ### D47. Names over time
 
 A country, city or character is renamed from a date on with a dated change of kind `rename` (without an event, in the

@@ -227,3 +227,19 @@ status. Last updated: 17 November 2026 (after the user's second feedback round; 
 | City and character labels the same size whatever the zoom | Fixed | `e2e/workflows` 'A city' (no name at world zoom, named close up) | D46; sizes in the Label style dialog |
 | Next step: names over time | Tested | `names`, `e2e/workflows` 'A city' (renamed in 1620) | D47 |
 
+## The user's optimisation request (17 November 2026)
+
+"Completely and absolutely optimise everything for performance", before more detail is added to the maps. Measured in
+Chrome with software drawing (no graphics card) on the map of today's 242 countries with 1:10m coasts, 1360 x 843;
+see DEVELOPMENT.md, "Performance", for the tables and the other benchmark projects.
+
+| Request | Status | Evidence | Notes |
+| --- | --- | --- | --- |
+| Coast detail must not cost frame rate zoomed out, and stay detailed zoomed in | Done | `bench/render.bench.ts` (panWorld 325 ms to 20 ms a frame), `plane` tests | D49: detail chosen per zoom from ranked points; D50: blocks |
+| Frame rate fell when zoomed in very far | Fixed | `bench` panDeep 522 ms to 31 ms, panVeryDeep 3.1 s to 32 ms | D49: only what the view shows is prepared |
+| Projects with every country were very slow | Done | `bench`: unchanged frame 249 ms to 17 ms, scrubbing 224 ms to 7 ms, a brush stroke 693 ms to 40 ms | D48, D49, D54 |
+| Exports heavily optimised | Done | `bench`: 1080p 730 ms to 92 ms a frame, 4K 2.3 s to 203 ms, eight layers of each frame 3.9 s to 192 ms | D52; identical pixels on re-export still checked in `e2e/vertical-slice` |
+| Weaker computers | Done | Settings presets; `e2e/workflows` 'Settings' | D53 |
+| A Settings button with performance options that never touch the final render or limit what can be made | Done | `e2e/workflows` 'Settings'; `blocks` test (stored settings) | D53 |
+| Editing stays rapid on a massive project | Done | `bench` on "Bench Heavy" (128,000 border segments, 11,000 parcels, 500 events) | D48–D51, D54; stepping through time across many events is the slowest thing left (DEVELOPMENT.md) |
+

@@ -6,11 +6,17 @@ import { lonLatToVec } from '../geo-kernel/vec.ts';
 import { makeView, screenToLonLat, lonLatToScreen } from '../render-engine/camera.ts';
 import { cameraAt, timeAt } from '../presentation/sequence.ts';
 import { currentShot, frameRect, shotOverlayRects } from './components/MapView.tsx';
+import * as commands from '../domain/commands.ts';
+import { runExport } from '../presentation/export-driver.ts';
+import { decodeCountries, COUNTRY_GROUP_COLORS } from '../domain/countries.ts';
+import { MapRenderer } from '../render-engine/map-renderer.ts';
 
 // A small read-only window into the live state, used by the automated interface tests.
 // It changes nothing; everything the tests do to the project goes through the interface itself.
 (window as unknown as { __mapmaker: unknown }).__mapmaker = {
   store,
+  /** For the performance benchmarks (bench/): the commands, dates and the export, to drive large projects directly. */
+  bench: { commands, gregorian, lonLatToVec, runExport, decodeCountries, COUNTRY_GROUP_COLORS, MapRenderer, makeView },
   /** A view of the map for a camera and size (for off-screen comparisons in tests). */
   viewOf(camera: Parameters<typeof makeView>[0], width: number, height: number) { return makeView(camera, width, height); },
   /** Who owns the place at (lon, lat) on the date written in `date`, on the layer being drawn on. */

@@ -1,9 +1,9 @@
 // Export jobs on the data-service side: frames rendered by the map engine arrive as raw RGBA pixels,
 // are encoded here and written as numbered image sequences with a manifest and a compositing guide.
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, copyFileSync } from 'node:fs';
 import { join, isAbsolute, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
-import { encodePNG } from './png.ts';
+import { encodePNG, tagSRGB } from './png.ts';
 
 export interface PassInfo { name: string; label: string; blend: string; note?: string }
 
@@ -74,6 +74,42 @@ export function writeFrame(job: ExportJob, pass: string, frame: number, width: n
   const file = join(job.dir, safe(pass), frameFileName(job, pass, frame));
   writeFileSync(file, png);
   (job.checksums[pass] ??= {})[frame] = sha256;
+  return { file, sha256 };
+}
+
+function checkFrame(job: ExportJob, pass: string, frame: number): void {
+  const st = job.settings;
+  if (!st.passes.some((p) => p.name === pass)) throw new Error(`Unknown pass ${pass}`);
+  if (!Number.isInteger(frame) || frame < st.frameStart || frame > st.frameEnd) throw new Error(`Frame ${frame} is outside ${st.frameStart}-${st.frameEnd}`);
+}
+
+/**
+ * Write one frame of one pass that arrives already encoded as a PNG (by the browser's own encoder,
+ * which works while the next frame is being drawn). The file is tagged as sRGB; its checksum is
+ * that of the file written (the same pixels always give the same file).
+ */
+export function writeEncodedFrame(job: ExportJob, pass: string, frame: number, png: Uint8Array): { file: string; sha256: string } {
+  checkFrame(job, pass, frame);
+  const st = job.settings;
+  // The header says what size it is.
+  const dv = new DataView(png.buffer, png.byteOffset, png.byteLength);
+  if (png.length < 33 || dv.getUint32(16) !== st.width || dv.getUint32(20) !== st.height) throw new Error(`Frame is not ${st.width}x${st.height}`);
+  const bytes = tagSRGB(png);
+  const sha256 = createHash('sha256').update(bytes).digest('hex');
+  const file = join(job.dir, safe(pass), frameFileName(job, pass, frame));
+  writeFileSync(file, bytes);
+  (job.checksums[pass] ??= {})[frame] = sha256;
+  return { file, sha256 };
+}
+
+/** Write a frame that is pixel for pixel the same as an earlier frame of the same pass: the file is copied. */
+export function repeatFrame(job: ExportJob, pass: string, frame: number, sameAs: number): { file: string; sha256: string } {
+  checkFrame(job, pass, frame);
+  const sha256 = job.checksums[pass]?.[sameAs];
+  if (!sha256) throw new Error(`Frame ${sameAs} of ${pass} has not been written`);
+  const file = join(job.dir, safe(pass), frameFileName(job, pass, frame));
+  copyFileSync(join(job.dir, safe(pass), frameFileName(job, pass, sameAs)), file);
+  job.checksums[pass][frame] = sha256;
   return { file, sha256 };
 }
 

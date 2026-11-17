@@ -428,6 +428,9 @@ try {
     // Drag the marker with Select in 1600: that placement moves (no new one).
     await h.setDate('1600');
     await page.getByTestId('tool-select').click();
+    // Leaving the Characters tool takes its hint line away and the map grows: wait for that before
+    // measuring where things are (the map now redraws faster than the page settles).
+    await page.waitForTimeout(150);
     const from = await h.toPage(C2), to = await h.toPage(C3);
     await page.mouse.move(from[0], from[1]); await page.mouse.down();
     await page.mouse.move(to[0], to[1], { steps: 8 }); await page.mouse.up();
@@ -903,6 +906,57 @@ try {
     await h.screenshot('flat-map');
     await page.locator('header select').first().selectOption({ label: 'Earth' });
     assert.notEqual(await page.evaluate(() => (window as any).__mapmaker.store.camera.projection), 'flat', 'Earth is round again');
+  });
+
+  await h.step('Settings: how fast and how sharp the working view is drawn, kept on this computer', async () => {
+    await page.getByTestId('mode-world').click();
+    await page.getByTestId('tool-select').click();
+    const state = () => page.evaluate(() => {
+      const s = (window as any).__mapmaker.store, c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement;
+      return { v: s.viewSettings, carry: s.renderer.carry as boolean, tolerance: s.renderer.quality.tolerance as number, width: c.width, shown: Math.round(c.getBoundingClientRect().width), parts: Object.values(s.renderer.lastParts) as string[], labels: s.renderer.lastLabels.length as number, stored: localStorage.getItem('mapmaker.viewSettings') };
+    });
+    const before = await state();
+    assert.ok(before.carry && before.v.resolution === 1 && before.width === before.shown, `balanced to begin with (${JSON.stringify(before.v)})`);
+    await page.getByTestId('settings').click();
+    await page.getByTestId('settings-dialog').waitFor();
+    assert.match(await page.getByTestId('preset-current').innerText(), /Balanced/);
+    await page.getByTestId('preset-fastest').click();
+    assert.match(await page.getByTestId('preset-current').innerText(), /Fastest/);
+    await page.getByTestId('setting-speed').check();
+    await h.screenshot('settings');
+    await page.getByTestId('settings-close').click();
+    await page.getByTestId('draw-speed').waitFor();
+    await page.waitForFunction(() => /\d+ ms/.test(document.querySelector('[data-testid=draw-speed]')?.textContent ?? ''));
+    const fast = await state();
+    assert.equal(fast.width, Math.round(before.shown * 0.75), 'three quarters of the pixels, shown at the same size');
+    assert.equal(fast.shown, before.shown);
+    assert.ok(fast.tolerance > before.tolerance, 'simpler outlines');
+    assert.match(fast.stored ?? '', /"names":"hide"/, 'kept in this browser, not in the project');
+    // While the map moves its picture is moved along and the names are hidden; at rest it is drawn afresh, names and all.
+    const box = (await page.getByTestId('map-canvas').boundingBox())!;
+    const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
+    await page.waitForTimeout(250);
+    const still = await state();
+    await page.mouse.move(cx, cy);
+    await page.mouse.down();
+    await page.mouse.move(cx + 24, cy + 8);
+    await page.mouse.move(cx + 48, cy + 16);
+    const moving = await state();
+    await page.mouse.up();
+    assert.ok(moving.parts.length > 0 && moving.parts.every((p) => p === 'moved'), `the picture moves along with the map (${moving.parts.join(', ')})`);
+    assert.equal(moving.labels, 0, 'names are hidden while the map moves');
+    await page.waitForFunction((n) => (window as any).__mapmaker.store.renderer.lastLabels.length === n, still.labels, { timeout: 3000 });
+    // One setting changed by hand; then back to how it was.
+    await page.getByTestId('settings').click();
+    await page.getByTestId('setting-names').selectOption('hold');
+    assert.match(await page.getByTestId('preset-current').innerText(), /your own choices/);
+    await page.getByTestId('preset-balanced').click();
+    await page.getByTestId('setting-speed').uncheck();
+    await page.getByTestId('settings-close').click();
+    const after = await state();
+    assert.deepEqual(after.v, before.v);
+    assert.equal(after.width, before.width);
+    assert.equal(await page.getByTestId('draw-speed').count(), 0);
   });
 
   await h.step('History Health lists the overlap, nothing else; no browser errors', async () => {

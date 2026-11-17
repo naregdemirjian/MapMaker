@@ -4,6 +4,9 @@
 
 let base = '';
 let onLoaded: () => void = () => {};
+/** Goes up whenever a picture or a video frame becomes available (kept pictures of the map are redrawn). */
+let epoch = 0;
+export const assetEpoch = () => epoch;
 
 /** Where the open project's assets are served from, and what to do when an image arrives. */
 export function setAssetBase(url: string, loaded: () => void = () => {}): void {
@@ -26,7 +29,7 @@ function entry(file: string) {
     img.decoding = 'async';
     const rec = { img, ready: false, failed: false, promise: Promise.resolve() };
     rec.promise = new Promise<void>((resolve) => {
-      img.onload = () => { rec.ready = true; resolve(); onLoaded(); };
+      img.onload = () => { rec.ready = true; epoch++; resolve(); onLoaded(); };
       img.onerror = () => { rec.failed = true; resolve(); };
     });
     img.src = url;
@@ -97,8 +100,8 @@ function videoEntry(file: string, channel: MediaChannel) {
         setTimeout(resolve, 5000);
       }, { once: true });
     });
-    v.addEventListener('seeked', () => onLoaded());
-    v.addEventListener('loadeddata', () => onLoaded());
+    v.addEventListener('seeked', () => { epoch++; onLoaded(); });
+    v.addEventListener('loadeddata', () => { epoch++; onLoaded(); });
     v.src = url;
     e = { v, meta };
     videos.set(key, e);
@@ -125,6 +128,9 @@ export function videoNow(file: string | null | undefined, seconds: number, p: Vi
   return v;
 }
 
+/** The time of the frame each export video is known to have ready for drawing. */
+const shown = new WeakMap<HTMLVideoElement, number>();
+
 /** Seek every video to its frame for this moment and wait until all are ready (exports). */
 export async function prepareVideos(items: Array<{ file: string; play: VideoPlay }>, seconds: number): Promise<void> {
   await Promise.all(items.map(async ({ file, play }) => {
@@ -133,12 +139,23 @@ export async function prepareVideos(items: Array<{ file: string; play: VideoPlay
     const v = e.v;
     if (v.readyState < 1) return;
     const target = videoTime(v.duration, seconds, play);
-    if (Math.abs(v.currentTime - target) <= 1e-3 && !v.seeking && v.readyState >= 2) return;
+    // Already showing this frame (as far as drawing goes: see below)?
+    if (shown.get(v) !== undefined && Math.abs(shown.get(v)! - target) <= 1e-3 && Math.abs(v.currentTime - target) <= 1e-3 && !v.seeking && v.readyState >= 2) return;
+    shown.delete(v);
     await new Promise<void>((resolve) => {
       const done = () => { v.removeEventListener('seeked', done); resolve(); };
       v.addEventListener('seeked', done);
       v.currentTime = target;
       setTimeout(done, 5000); // never hang an export on a broken file
     });
+    // The browser reports the seek as done a moment before the frame can be drawn: wait until the
+    // frame has been handed over for display (drawing any earlier gives the frame before, or nothing).
+    await new Promise<void>((resolve) => {
+      const rvfc = (v as HTMLVideoElement & { requestVideoFrameCallback?: (cb: () => void) => number }).requestVideoFrameCallback;
+      if (!rvfc) { setTimeout(resolve, 50); return; }
+      rvfc.call(v, () => resolve());
+      setTimeout(resolve, 400);
+    });
+    shown.set(v, target);
   }));
 }

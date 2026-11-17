@@ -608,7 +608,13 @@ try {
     const samples: Array<{ ll: LL; land: boolean }> = [];
     for (let x = cx - 360; x <= cx + 360; x += 24) for (let y = cy - 200; y <= cy + 200; y += 24) {
       const ll = await hook<LL | null>('pageToLonLat', x, y);
-      if (!ll || !clearOfCoast(ll) || !(await ownerAt(ll, '2000'))) continue;
+      if (!ll || !clearOfCoast(ll)) continue;
+      const owner = await ownerAt(ll, '2000');
+      if (!owner) continue;
+      // Away from any border too (a border line is drawn over the colour beneath it).
+      let nearBorder = false;
+      for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) if ((await ownerAt([ll[0] + dx, ll[1] + dy], '2000')) !== owner) nearBorder = true;
+      if (nearBorder) continue;
       samples.push({ ll, land: onLand(ll) });
     }
     // Labels are drawn on top of everything; points under them (before or after clipping) are left out.
@@ -627,7 +633,7 @@ try {
     const before = new Map<string, number[]>();
     for (const p of samples) before.set(String(p.ll), await canvasPixel(p.ll));
     const ocean = await canvasPixel([-30, 40]); // open sea, no territory
-    for (const p of seaSamples) assert.ok(colourDiff(before.get(String(p.ll))!, ocean) > 20, 'unclipped: territory is drawn over the sea');
+    for (const p of seaSamples) assert.ok(colourDiff(before.get(String(p.ll))!, ocean) > 20, `unclipped: territory is drawn over the sea (at ${p.ll}: ${before.get(String(p.ll))}; open sea: ${ocean})`);
 
     await page.getByTestId('clip-to-land').check();
     await page.waitForTimeout(150);

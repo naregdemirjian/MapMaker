@@ -22,7 +22,7 @@ export class ApiError extends Error {
   constructor(status: number, message: string, code?: string) { super(message); this.status = status; this.code = code; }
 }
 
-async function call<T>(method: string, path: string, body?: unknown, raw?: Uint8Array): Promise<T> {
+async function call<T>(method: string, path: string, body?: unknown, raw?: Uint8Array | Blob): Promise<T> {
   const res = await fetch(path, {
     method,
     headers: raw ? { 'content-type': 'application/octet-stream' } : body !== undefined ? { 'content-type': 'application/json' } : {},
@@ -66,5 +66,11 @@ export const Api = {
   startExport: (id: string, settings: unknown) => call<{ jobId: string; dir: string }>('POST', `${p(id)}/exports`, settings),
   sendFrame: (id: string, job: string, pass: string, frame: number, w: number, h: number, rgba: Uint8Array) =>
     call<{ file: string; sha256: string }>('POST', `${p(id)}/exports/${encodeURIComponent(job)}/frames?pass=${encodeURIComponent(pass)}&frame=${frame}&w=${w}&h=${h}`, undefined, rgba),
+  /** A frame already encoded as a PNG. */
+  sendPngFrame: (id: string, job: string, pass: string, frame: number, png: Blob) =>
+    call<{ file: string; sha256: string }>('POST', `${p(id)}/exports/${encodeURIComponent(job)}/frames?pass=${encodeURIComponent(pass)}&frame=${frame}&format=png`, undefined, png),
+  /** A frame that is the same picture as an earlier frame of the pass. */
+  repeatFrame: (id: string, job: string, pass: string, frame: number, sameAs: number) =>
+    call<{ file: string; sha256: string }>('POST', `${p(id)}/exports/${encodeURIComponent(job)}/frames?pass=${encodeURIComponent(pass)}&frame=${frame}&same=${sameAs}`),
   finishExport: (id: string, job: string) => call<{ dir: string; manifest: string; guide: string; checksums: Record<string, Record<number, string>> }>('POST', `${p(id)}/exports/${encodeURIComponent(job)}/finish`),
 };

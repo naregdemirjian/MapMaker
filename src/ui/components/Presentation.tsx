@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useStore, store } from '../store.ts';
+import { useStore, useLive, store } from '../store.ts';
 import { Api } from '../api.ts';
 import * as cmd from '../../domain/commands.ts';
 import { type Instant, add, fromJSONValue, toJSONValue, fromStore, compare, gregorian, type Precision } from '../../core-time/index.ts';
@@ -336,7 +336,7 @@ function Group({ title, children, open = true }: { title: string; children: Reac
 }
 
 export function ShotTimeline() {
-  const s = useStore();
+  const s = useLive();
   const shot = currentShot();
   const raf = useRef(0);
   useEffect(() => {
@@ -346,7 +346,7 @@ export function ShotTimeline() {
     const tick = () => {
       const f = startFrame + Math.floor(((performance.now() - startWall) / 1000) * shot.fps);
       if (f >= shot.frames - 1) { store.set({ shotFrame: shot.frames - 1, playing: false, presentCamera: null }); return; }
-      store.set({ shotFrame: f, presentCamera: null });
+      store.setLive({ shotFrame: f, presentCamera: null });
       raf.current = requestAnimationFrame(tick);
     };
     raf.current = requestAnimationFrame(tick);
@@ -359,7 +359,7 @@ export function ShotTimeline() {
       <div className="shot-controls">
         <button onClick={() => s.set({ playing: !s.playing })} data-testid="play">{s.playing ? 'Pause' : 'Play'}</button>
         <button onClick={() => s.set({ shotFrame: 0, presentCamera: null, playing: false })}>⏮</button>
-        <input type="range" min={0} max={shot.frames - 1} value={s.shotFrame} onChange={(e) => s.set({ shotFrame: Number(e.target.value), presentCamera: null, playing: false })} className="frame-slider" data-testid="frame-slider" />
+        <input type="range" min={0} max={shot.frames - 1} value={s.shotFrame} onChange={(e) => s.setLive({ shotFrame: Number(e.target.value), presentCamera: null, playing: false })} className="frame-slider" data-testid="frame-slider" />
         <button onClick={() => s.set({ shotFrame: shot.frames - 1, presentCamera: null, playing: false })}>⏭</button>
         <span className="frame-info" data-testid="frame-info">Frame {s.shotFrame + 1} / {shot.frames} · {(s.shotFrame / shot.fps).toFixed(2)} s · <b>{gregorian.format(t, 'minute')}</b></span>
       </div>

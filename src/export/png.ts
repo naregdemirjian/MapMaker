@@ -56,3 +56,20 @@ export function encodePNG(width: number, height: number, rgba: Uint8Array, opts:
   for (const p of parts) { out.set(p, off); off += p.length; }
   return out;
 }
+
+/**
+ * Tag a PNG file as sRGB if it carries no colour information (the files the browser encodes do
+ * not): the sRGB chunk is put in straight after the header. Returns the file unchanged otherwise.
+ */
+export function tagSRGB(png: Uint8Array): Uint8Array {
+  // Signature (8 bytes), then IHDR: length (4), type (4), 13 bytes, checksum (4).
+  if (png.length < 33 + 12 || png[0] !== 137 || png[1] !== 80 || png[2] !== 78 || png[3] !== 71) throw new Error('Not a PNG file');
+  const next = String.fromCharCode(png[37], png[38], png[39], png[40]);
+  if (next === 'sRGB' || next === 'iCCP' || next === 'gAMA' || next === 'cHRM') return png;
+  const tag = chunk('sRGB', new Uint8Array([0]));
+  const out = new Uint8Array(png.length + tag.length);
+  out.set(png.subarray(0, 33), 0);
+  out.set(tag, 33);
+  out.set(png.subarray(33), 33 + tag.length);
+  return out;
+}

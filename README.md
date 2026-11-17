@@ -42,6 +42,9 @@ while Map Maker is closed. Don't keep projects inside OneDrive or Dropbox while 
 - Earth's real geography (Natural Earth land, lakes and coastlines); countries can be painted loosely over the sea and
   end at the coast; today's borders can be shown as a drawing guide.
 - Undo and redo, named versions, automatic backups, and recovery of a damaged project from its latest healthy backup.
+- Built to stay fast on large projects: moving the map, scrubbing time, drawing and exporting all keep their speed with
+  hundreds of countries and detailed coasts. **Settings** (top right) trades sharpness for speed on slower computers;
+  it only affects the screen while you work, never an export.
 
 Not there yet: terrain, rivers, military fronts, environmental events, space maps and more.
 See `docs/REQUIREMENTS.md`.

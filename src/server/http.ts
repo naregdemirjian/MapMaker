@@ -6,7 +6,7 @@ import { readFileSync, existsSync, mkdirSync, writeFileSync, renameSync } from '
 import { join, extname } from 'node:path';
 import { spawn } from 'node:child_process';
 import { ProjectRegistry } from './projects.ts';
-import { startJob, writeFrame, finishJob, type ExportJob, type ExportSettings } from '../export/writer.ts';
+import { startJob, writeFrame, writeEncodedFrame, repeatFrame, finishJob, type ExportJob, type ExportSettings } from '../export/writer.ts';
 import { saveAsset, serveAsset } from './assets.ts';
 import type { RowDiff } from '../world-model/schema.ts';
 
@@ -181,6 +181,14 @@ export function createAppServer(opts: ServerOptions): { server: Server; registry
       if (parts[5] === 'frames' && method === 'POST') {
         const pass = url.searchParams.get('pass') ?? '';
         const frame = Number(url.searchParams.get('frame'));
+        // The same picture as an earlier frame: its file is copied.
+        const same = url.searchParams.get('same');
+        if (same !== null) { await readBody(req); return send(res, 200, repeatFrame(job, pass, frame, Number(same))); }
+        // Already encoded (by the browser), or raw pixels to encode here.
+        if (url.searchParams.get('format') === 'png') {
+          const png = await readBody(req);
+          return send(res, 200, writeEncodedFrame(job, pass, frame, new Uint8Array(png.buffer, png.byteOffset, png.byteLength)));
+        }
         const w = Number(url.searchParams.get('w')), h = Number(url.searchParams.get('h'));
         const body = await readBody(req);
         const out = writeFrame(job, pass, frame, w, h, new Uint8Array(body.buffer, body.byteOffset, body.byteLength));

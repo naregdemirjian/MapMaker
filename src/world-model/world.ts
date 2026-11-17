@@ -23,6 +23,12 @@ export class World {
   readonly ids: IdSource = { next: (t) => ++this.counters[t] };
   /** Bumped after every applied change; caches compare against it. */
   revision = 0;
+  /**
+   * Bumped only by changes that can alter history as the temporal engine compiles it: events and
+   * dated changes, the coming and going of layers, maps, countries and parcels, moved border points.
+   * Restyling, renaming, shots and settings leave it alone, so they never cost a recompile.
+   */
+  historyRevision = 0;
 
   constructor() {
     for (const t of TABLE_NAMES) if (!TABLES[t].kernel) this.tables.set(t, new Map());
@@ -74,10 +80,12 @@ export class World {
         this.arrangements.set(row.space_id, arr);
       }
       arr.applyRowChange(d.table as KernelTable, d.before as KernelRow | null, d.after as KernelRow | null);
+      if (d.table !== 'segment') this.historyRevision++;
       if (d.after) this.counters[d.table as KernelTable] = Math.max(this.counters[d.table as KernelTable], (d.after as KernelRow).id);
       return;
     }
     const map = this.tables.get(d.table)!;
+    if (d.table === 'event' || d.table === 'effect' || ((d.table === 'layer' || d.table === 'map_space' || d.table === 'entity') && (!d.before || !d.after))) this.historyRevision++;
     if (d.before) map.delete(rowKey(d.table, d.before));
     if (d.after) map.set(rowKey(d.table, d.after), { ...withDefaults(d.table, d.after) });
     if (d.table === 'map_space') {
@@ -101,17 +109,27 @@ export class World {
   /** Which parcels of a map any change (active or not, in any layer) refers to directly. */
   referencedFaces(spaceId: string): (faceId: number) => boolean {
     const set = new Set<number>();
-    for (const ef of this.all('effect')) {
+    for (const ef of this.tables.get('effect')!.values() as Iterable<Rows['effect']>) {
       if (ef.space_id !== spaceId) continue;
-      let res: { set?: Array<[number[], unknown]> };
-      try { res = JSON.parse(ef.resolution); } catch { return () => true; } // unreadable: assume everything is referenced
-      for (const entry of res.set ?? []) {
-        if (!Array.isArray(entry) || !Array.isArray(entry[0])) return () => true;
-        for (const f of entry[0]) set.add(f);
+      // Each change's parcels are read once (a changed row is a new object).
+      let faces = this.effectFaces.get(ef);
+      if (faces === undefined) {
+        faces = [];
+        try {
+          const res = JSON.parse(ef.resolution) as { set?: Array<[number[], unknown]> };
+          for (const entry of res.set ?? []) {
+            if (!Array.isArray(entry) || !Array.isArray(entry[0])) { faces = null; break; }
+            for (const f of entry[0]) faces.push(f);
+          }
+        } catch { faces = null; }
+        this.effectFaces.set(ef, faces);
       }
+      if (faces === null) return () => true; // unreadable: assume everything is referenced
+      for (const f of faces) set.add(f);
     }
     return (f) => set.has(f);
   }
+  private effectFaces = new WeakMap<object, number[] | null>();
 
   snapshot(): Snapshot {
     const s: Snapshot = {};
@@ -195,7 +213,10 @@ export class Tx {
       arr.isReferenced = null;
     }
     const kd = arr.commit();
-    for (const c of kd.changes) this.diffs.push({ table: c.table, before: c.before as AnyRow | null, after: c.after as AnyRow | null });
+    for (const c of kd.changes) {
+      this.diffs.push({ table: c.table, before: c.before as AnyRow | null, after: c.after as AnyRow | null });
+      if (c.table !== 'segment') this.world.historyRevision++;
+    }
     if (kd.rootFace) {
       const sp = this.world.get('map_space', spaceId)!;
       this.push({ table: 'map_space', before: { ...sp }, after: { ...sp, root_face: kd.rootFace.after } });

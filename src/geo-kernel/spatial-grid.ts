@@ -65,7 +65,12 @@ export class SpatialGrid {
   }
 
   query(min: Vec3, max: Vec3): Set<number> {
-    const out = new Set<number>(this.big);
+    return this.queryInto(new Set<number>(), min, max);
+  }
+
+  /** As query, adding to a set the caller keeps (many small queries along a path share one set). */
+  queryInto(out: Set<number>, min: Vec3, max: Vec3): Set<number> {
+    for (const id of this.big) out.add(id);
     const r = this.range(min, max);
     if (r.count > this.cells.size) {
       for (const [k, s] of this.cells) {

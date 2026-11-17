@@ -7,7 +7,19 @@ Companion files: [REQUIREMENTS.md](REQUIREMENTS.md) (checklist against the maste
 The approved architecture is the Claude Doc "Map Maker — Technical Architecture & Development Plan"
 (https://claude.ai/artifact/2JShAV3AWt6iECtNgBTsJN). All twelve of its decisions were approved on 15 November 2026.
 
-## Status at a glance (17 November 2026, after the user's fourth feedback round)
+## Status at a glance (17 November 2026, after the optimisation stage)
+
+- **Optimisation stage done** (the user's request to optimise everything before adding more detail; D48–D54, and the
+  table in REQUIREMENTS.md, "The user's optimisation request"). On the map of today's 242 countries with detailed
+  coasts: a frame that changes nothing went from 249 ms to 11 ms, moving the map from 325–3,100 ms to about 20 ms,
+  scrubbing time from 224 ms to 8 ms, a brush stroke from 0.7 s to about 40 ms, an exported 1080p frame from 730 ms
+  to about 90 ms. How: faces rebuilt only around an edit; history states shared between changes; shapes projected once onto
+  "sheets" and drawn by one transform; shapes cut into blocks so only the part being drawn is walked; the picture
+  carried along while the view moves; after an edit only the changed area drawn again; panels that follow the view
+  only when it pauses; frames encoded by the browser and unchanged frames copied. A **Settings** button (top right) holds the working view's speed options; exports
+  never depend on them (D48–D54). Four defects found on the way are fixed: a quick drag of a city or border point could be
+  ignored (it counted mouse movements, not distance); a video fill could miss its first exported frame; the map was
+  drawn a frame late; a change made in the instant an undo was arriving could spoil the map in memory.
 
 - **Fourth round done** (D45–D47): the events box shows an event again at each of its dated changes; Ctrl+Z/Ctrl+Y with
   the border pen touch the draft only; city and character markers and names scale with the zoom (sizes adjustable);
@@ -84,8 +96,13 @@ For development (Linux or Windows, Node 22.18 or newer):
 | `npm run dist:win` | Builds the Windows installer into `release/` (on Windows; on Linux it needs Wine) |
 | `xvfb-run -a node --disable-warning=ExperimentalWarning e2e/desktop.e2e.ts` | The 5-step desktop app test (build first) |
 | `node --disable-warning=ExperimentalWarning dist/server.mjs --port 4317 --projects <folder> [--open]` | Runs the app |
-| `sh scripts/check-all.sh` | Every check: type check, unit tests, build, the three interface tests |
-| `npm test` | 161 unit, randomised and scenario tests |
+| `sh scripts/check-all.sh` | Every check: type check, unit tests, build, the four interface tests |
+| `npm test` | 189 unit, randomised and scenario tests |
+| `node --disable-warning=ExperimentalWarning e2e/render-compare.e2e.ts` | The renderer against the old one kept in `e2e/reference/` (35 scenes), and carried pictures against fresh ones (build first; `VERBOSE=1` lists every case) |
+| `node --disable-warning=ExperimentalWarning bench/make-fixtures.ts <folder>` | Makes the benchmark projects: "Bench Earth 242", "Bench Heavy", "Bench Random 1000" (minutes) |
+| `node --disable-warning=ExperimentalWarning bench/render.bench.ts <folder> ["<project>"...] [--only a,b] [--label x] [--out file]` | Frame times in Chrome for each scenario (idle, pans at five zooms, zoom, scrub, stroke, play, exports); build first |
+| `node --disable-warning=ExperimentalWarning bench/edit.bench.ts <folder>` | Kernel and engine times for edits, without a browser |
+| `node --disable-warning=ExperimentalWarning bench/profile.ts <folder> "<project>" <scenario> out.cpuprofile`, then `node bench/top.mjs out.cpuprofile` | Where the time goes in one scenario |
 | `node --disable-warning=ExperimentalWarning test/geo-kernel.stress.ts <seeds> <rings>` | Long randomised kernel run |
 | `node --disable-warning=ExperimentalWarning e2e/vertical-slice.e2e.ts` | The 17-step interface test in Chrome (build first); screenshots in `e2e/output/` |
 | `node --disable-warning=ExperimentalWarning e2e/workflows.e2e.ts` | The 10-step workflow and export-inspection test; screenshots in `e2e/output/workflows/` |
@@ -114,7 +131,12 @@ Terminology: the interface calls them **maps** (DECISIONS D24); the code and old
 | `src/domain/commands.ts` | Every user action | Each command returns its row diffs, which become one undo step. |
 | `src/desktop/` | Desktop app | Electron main process: hosts the data service in-process and opens the interface in its own window. |
 | `src/server/` | Local data service | SQLite project file (WAL, full sync, integrity check on open), journal for undo and redo, versions, rolling backups, export writer, HTTP bound to this computer only. |
-| `src/render-engine/` | Drawing the map | Camera and projections (d3-geo), the map renderer (fills, borders, labels, transitions), the Earth basemap (`basemap.ts`: decoding, choice of detail, culling to the view), stroke processing for the freehand brush. |
+| `src/render-engine/` | Drawing the map | Camera and projections (d3-geo), the map renderer (fills, borders, labels, transitions), the Earth basemap (`basemap.ts`: decoding, choice of detail), stroke processing for the freehand brush. |
+| `src/render-engine/plane.ts` | Sheets (D49) | The projections' own formulas; rings with ranked points; a `Sheet` holds shapes projected once for a window around the view and places them on any view inside it by one transform. |
+| `src/render-engine/parcel-geometry.ts` | Parcel outlines | Each boundary cycle as longitude/latitude with point importance shared between neighbours; `dissolve` joins an owner's parcels into one outline. |
+| `src/render-engine/blocks.ts` | Blocks (D50) | `BlockPath`: shapes held in a tree of square blocks, so drawing part of the view only walks the points there. |
+| `src/ui/view-settings.ts`, `components/Settings.tsx` | Working-view settings (D53) | Presets and single options, kept in the browser, applied by `store.setViewSettings` and `MapView`; never read by exports. |
+| `bench/` | Measuring | Benchmark projects, frame-time and edit benchmarks, profiling helpers (see the commands above). |
 | `data/` | Shipped map data | Natural Earth basemap files and `datasets.json` (source, version, licence, credit of every dataset); copied to `dist/ui/data/` by the build. |
 | `src/presentation/` | Shots and export | Shot settings (time remap, camera keys, overlays) and the export driver that renders frames off screen at the exact output size. |
 | `src/export/` | Files on disk | PNG encoder, export folders, `manifest.json`, `COMPOSITING_GUIDE.txt`. |
@@ -150,7 +172,7 @@ The approved roadmap has 14 stages (0–13). Where each stands:
 
 ## Tests
 
-All pass as of 17 November 2026 (161 unit and randomised tests in 24 files, 23 + 20 + 5 interface steps).
+All pass as of 17 November 2026 (189 unit and randomised tests in 28 files, 23 + 21 + 4 + 5 interface steps).
 `sh scripts/check-all.sh` runs everything and prints ALL CHECKS PASSED only when every check passed.
 
 | Suite | Count | What it proves |
@@ -179,12 +201,59 @@ All pass as of 17 November 2026 (161 unit and randomised tests in 24 files, 23 +
 | `test/characters.test.ts` | 5 | Characters: travelling between places along the shortest path, appearing, leaving the map, moving a placement, in events and from the start, undo, reload, deleted characters reported, across 180°; cities founded, moved at once, abandoned, from the beginning |
 | `test/history-view.test.ts` | 2 | Periods (day, month, year, several years, before year 1), stepping; a country's gains and losses in a period and the changes that made them; lost and won back within a period |
 | `test/basemap.test.ts` | 16 | Natural Earth files decode correctly at both scales (land about 29% of the planet, no inside-out polygons, known places on land and at sea across 180° and the poles); dataset record; per-world setting and per-layer clipping setting with undo; culling never drops anything on screen (160 random views) |
+| `test/kernel-faces.test.ts` | 2 | Faces rebuilt only around an edit equal a full rebuild after every step, on twin random maps (painting, erasing, moving points, undo); `test/kernel-faces.stress.ts` runs it for longer |
+| `test/engine-stretch.test.ts` | 2 | States shared between change instants equal states worked out afresh; edits to history are seen at once; edits that do not touch history do not recompile |
+| `test/plane.test.ts` | 8 | The projection formulas against d3-geo; a sheet covers exactly what the kernel says each parcel covers, across 180°, at the poles and on flat maps; neighbours simplified alike; dissolved outlines |
+| `test/blocks.test.ts` | 3 | A block keeps what matters inside it: the same fill (winding) and the same lines as the whole shape, on random shapes; stored working-view settings are made valid, presets recognised |
+| `e2e/render-compare.e2e.ts` | 4 steps | 35 scenes drawn by the renderer and by the old one (`e2e/reference/`) are the same picture (fills strictly, borders by position); a picture carried along as the view moves equals one drawn afresh; after brush strokes and an undo, the patched picture equals one drawn afresh |
 | `e2e/vertical-slice.e2e.ts` | 17 steps | The vertical slice in Chrome: projects, drawing, Earth's geography and data sources, border points, versions, events, dates, version restore and undo, full restart, animation, export with data credits, identical re-export, 1080p, coastline clipping |
 | `e2e/desktop.e2e.ts` | 5 steps | The Electron app: own window, own data service on this computer only, project written to disk, one copy at a time, close and reopen with contents intact |
 | `test/event-groups.test.ts` | 4 | Event group commands with undo (several groups per event, filter rules, deletion keeps events, alternatives keep groups); a version 1 project file upgraded on opening (backup first, content and undo history intact, old backups restorable without rolling the format back); a file from a newer version refused untouched |
 | `e2e/workflows.e2e.ts` | 10 steps | Precise shapes; occupation layer; hiding layers; alternative versions; annexation; deleting and undoing events; fades; a second world; a camera move at 2.39:1 and 25 fps with frame timing, history in the pixels and pass stacking checked; square size, Natural Earth projection, 23.976 fps, transparency |
 
 Checked by hand: 4K and 8K exports; the unzipped package starts and works; requests from other hosts are refused.
+
+## Performance after the optimisation stage (measured 17 November 2026, `bench/render.bench.ts`)
+
+Chrome in the development container, **drawing in software (no graphics card)**, map area 1360 x 843. Times are
+milliseconds per frame, the whole cost of a step until the page is idle again (median of 40 steps). A real computer
+with a graphics card should be faster, a screen with more pixels slower; Settings shows the time on the user's machine.
+
+Benchmark projects (`bench/make-fixtures.ts`): **Earth 242**: today's 242 countries with 1:10m coasts, 30 events;
+**Heavy**: 128,000 border segments, 11,000 parcels, 500 events, about 12 events crossed per scrub step;
+**Random 1000**: 1,000 overlapping random territories, 24,500 parcels, 1,000 events.
+
+| Step | Earth 242 before | Earth 242 now | Heavy now | Random 1000 now |
+| --- | --- | --- | --- | --- |
+| A click that changes nothing on the map | 249 | 17 (the map itself 3) | 18 | 18 |
+| Moving the map, whole world | 325 | 20 | 22 | 22 |
+| Moving the map, a region (zoom 3.5) | 517 | 20 | 36 | 24 |
+| Moving the map, close in (zoom 13) | 522 | 31 | 16 | 14 |
+| Moving the map, very close in (zoom 19) | 3,107 | 32 | 14 | 15 |
+| Zooming (each wheel step) | not measured | 35 | 53 | 31 |
+| Scrubbing through time | 224 | 7 | 166 | 218 |
+| Scrubbing between events (nothing changes hands) | not measured | 8 | 9 | 38 |
+| A brush stroke (the kernel, history and the redraw) | 693 | 40 | 71 | 151 |
+| Playing a shot, still camera | 212 | 7 | 78 | 97 |
+| Playing a shot, moving camera | 1,120 | 52 | 127 | 103 |
+| Export, 1080p, per frame | 730 | 92 | 248 | 216 |
+| Export, 4K, per frame | 2,288 | 203 | 493 | 438 |
+| Export, 1080p, eight layers of each frame | 3,935 | 192 | 426 | 409 |
+| Opening the project | 3.2 s | 3.1 s | 5.0 s | 6.3 s |
+
+What still takes time, in order of what it would give:
+
+1. **Stepping through time on maps with thousands of parcels** (Heavy and Random 1000: 170–220 ms a step when many
+   events are crossed). Each new moment works out who owns every parcel and each owner's outline afresh; states and
+   outlines should be updated from the moment before (only the parcels of the events crossed).
+2. **After a stroke on those maps**, history is recompiled for the whole map (about 50 ms at 24,500 parcels); it
+   should recompile only the parcels touched.
+3. **Opening** large projects (reading every row; the first frame prepares every outline in view).
+4. **The first zoom far in** waits for the 1:10m coasts if they are still being prepared in the background (they
+   start loading a moment after a project opens).
+5. Exports with a moving camera draw every frame afresh by design (nothing is carried from frame to frame).
+
+The earlier figures below are from before this stage (16 November, `test/perf.bench.ts`: kernel, saving, file size).
 
 ## Performance (measured 16 November 2026, development container, `test/perf.bench.ts`)
 
@@ -201,13 +270,7 @@ Adding all 242 of today's countries (98,000 points) takes about 5 s.
 Before this stage the same 300-territory project took 135 ms per stroke and 124 ms per save, and its file was 232 MB;
 recompiling the 1,000-territory history took about 800 ms after every edit.
 
-Rendering the 1,000-territory map in Chrome: about 210 ms per 1080p frame during a shot (about 5 frames a second when
-scrubbing); 4K about 330 ms. Opening it: about 4 s. 8K export: about 6–9 s per frame per pass.
-
-Remaining bottlenecks:
-1. **Face assembly is still global** (components and containment are recomputed on each edit; half-edges and cycle
-   measurements are now kept, D26). It is about 0.1 s per edit on the benchmark map.
-2. **Canvas 2D rendering** of tens of thousands of parcels. The approved WebGL renderer (deck.gl, D1) is the fix.
+(Since then: face assembly works only around an edit, D48, and rendering is covered by the table above.)
 
 ## Known bugs and limitations
 
@@ -215,7 +278,7 @@ Remaining bottlenecks:
    launcher have not yet been tried by the user.
 2. **Coastline detail.** The finest basemap detail is 1:10m (about 200 m); street-level coasts (OpenStreetMap) are not
    included. Areas in the inspector include parts clipped away at the coast.
-3. **Large maps are slow to edit and render** (see Performance).
+3. **Large maps** (done in the optimisation stage, see Performance): what still takes time is listed there.
 4. **Two animations meeting.** Where two simultaneous animated changes touch, their shared border is drawn throughout instead of following each front.
 5. **Animation taking over another animation.** When a change starts while an earlier one is still animating the same area, the earlier one is shown at its starting state.
 6. **Event groups are made by hand** (D8). Automatic groups, such as "every event that changes this world", are not
@@ -259,6 +322,7 @@ Remaining bottlenecks:
 | 16 Nov 2026 | Testing and refinement: scenario, geometry, world, recovery, camera and A/B tests; second interface test; benchmark; 11 defects fixed; performance work (0.2.0) | `6a3c64a` → `343d84c` |
 | 16 Nov 2026 (3rd) | The user's first feedback round (14 items) and the engine redesign; two kernel defects fixed | `aca87e0` → `db6423b` |
 | 17 Nov 2026 | The user's second feedback round (12 items): labels, add into a country, characters, corrections from the date drawn, changes over time, still camera, advancing front, draggable texts, graphic as the box, export choices and size | `6525557` → `83c103a` |
+| 17 Nov 2026 (3rd) | Optimisation stage: kernel faces rebuilt around an edit, engine states per stretch, the renderer rewritten on sheets and blocks, carried pictures, live and full interface updates, browser-encoded exports, patched redraws after edits, the Settings button; benchmark projects and tools; four defects fixed (D48–D54) | after `c9bdc89` |
 | 17 Nov 2026 (2nd) | Firm-snapping kernel defects (D39), cities (D40), trails; the third feedback round: grey borders and "+ Layer" fixed, choosing several, right-click menus, groups, bulk delete, cities under countries, labels apart, border eraser, flat maps (D41–D44) | `ed163e3` → latest |
 | 16 Nov 2026 (2nd) | Package installs work; Natural Earth basemap (land, lakes, coastlines, present-day borders guide), land export pass, data sources dialog and export credits; coastline clipping with land-aware labels; real React types (D4 reversed); desktop app, Windows installer and Windows test run (D2 reversed); Windows fix; event groups and the first file-format upgrade | `071deac` → `9004a90` |
 

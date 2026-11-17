@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useStore, store } from '../store.ts';
+import { useStore, useLive, store } from '../store.ts';
 import {
   type Instant, toApproxYear, fromApproxYear, gregorian, formatYear, floorTo, instant, add, compare, fromStore, MS_PER_DAY,
 } from '../../core-time/index.ts';
@@ -73,7 +73,7 @@ function ticks(start: number, end: number, u: Unit): Array<{ t: number; label: s
 }
 
 export function Timeline() {
-  const s = useStore();
+  const s = useLive();
   const ref = useRef<HTMLCanvasElement | null>(null);
   const wrap = useRef<HTMLDivElement | null>(null);
   const [w, setW] = useState(800);
@@ -193,7 +193,7 @@ export function Timeline() {
     const d = drag.current;
     if (!d) return;
     const x = localX(e);
-    if (d.kind === 'scrub') store.setTime(timeAtX(x));
+    if (d.kind === 'scrub') store.setTime(timeAtX(x), true);
     else {
       const dy = ((x - d.x) / w) * (d.end - d.start);
       store.set({ timeline: { start: d.start - dy, end: d.end - dy } });

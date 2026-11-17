@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { useStore, store } from '../store.ts';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useLive, store } from '../store.ts';
 import {
   makeView, screenToLonLat, lonLatToScreen, panCamera, zoomCameraAt, radiansPerPixel, type View, type Camera,
 } from '../../render-engine/camera.ts';
@@ -14,7 +14,7 @@ import { transitionOptions, drawShotOverlays } from '../../presentation/export-d
 import { parseJSON, slerpLonLat } from '../../temporal-engine/engine.ts';
 import { compare, fromStore } from '../../core-time/index.ts';
 import { basemapSourceOf } from '../../world-model/world-settings.ts';
-import { loadBasemapDetail, pixelsPerDegree, DETAIL_PIXELS_PER_DEGREE } from '../../render-engine/basemap.ts';
+import { loadBasemapDetail, pixelsPerDegree, DETAIL_PIXELS_PER_DEGREE, type Basemap } from '../../render-engine/basemap.ts';
 import * as cmd from '../../domain/commands.ts';
 
 type Drag =
@@ -29,7 +29,7 @@ type Drag =
   // A text or the current-events box dragged on the shot preview.
   | { kind: 'overlay'; id: string; x: number; y: number; from: { x: number; y: number } }
   // A character's marker dragged to a new place (from the date being viewed).
-  | { kind: 'character'; entity: string; moved: number }
+  | { kind: 'character'; entity: string; from: Pt; moved: number }
   // The border eraser's stroke (map positions).
   | { kind: 'erase'; points: Pt[] };
 
@@ -130,8 +130,24 @@ function commitShotCamera(): void {
   store.set({ presentCamera: null });
 }
 
+/** How long after the last movement of the view the picture is drawn afresh, sharp (milliseconds). */
+const SETTLE_MS = 110;
+
+/** The basemap without its most detailed coastlines (the working view's "medium coasts" setting). */
+const mediumCoasts = new WeakMap<Basemap, { n: number; basemap: Basemap }>();
+function withoutDetail(b: Basemap): Basemap {
+  let m = mediumCoasts.get(b);
+  if (!m || m.n !== b.scales.length) mediumCoasts.set(b, (m = { n: b.scales.length, basemap: { ...b, scales: b.scales.filter((sc) => sc.scale !== '10m') } }));
+  return m.basemap;
+}
+
 export function MapView() {
-  const s = useStore();
+  const s = useLive();
+  /** The view last drawn and when it last changed; the timer that sharpens the picture once it rests. */
+  const motion = useRef({ sig: '', at: 0, timer: 0 });
+  const speedRef = useRef<HTMLDivElement | null>(null);
+  const frameTimes = useRef<number[]>([]);
+  useEffect(() => () => window.clearTimeout(motion.current.timer), []);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [size, setSize] = useState({ w: 800, h: 600 });
@@ -160,10 +176,14 @@ export function MapView() {
   const view: View = makeView(camera, frame.w, frame.h);
   const time = shot ? timeAt(shot, s.shotFrame) : s.time;
 
-  useEffect(() => {
+  // Drawn before the browser paints (a passive effect would show each movement a frame late).
+  useLayoutEffect(() => {
     const c = canvasRef.current;
     if (!c || !s.world || !s.engine || !s.spaceId) return;
-    const dpr = window.devicePixelRatio || 1;
+    const vs = s.viewSettings;
+    const started = performance.now();
+    // (The working view's sharpness setting: fewer pixels to draw, shown at the same size.)
+    const dpr = (window.devicePixelRatio || 1) * vs.resolution;
     if (c.width !== Math.round(size.w * dpr) || c.height !== Math.round(size.h * dpr)) {
       c.width = Math.round(size.w * dpr);
       c.height = Math.round(size.h * dpr);
@@ -174,19 +194,35 @@ export function MapView() {
     ctx.setTransform(dpr, 0, 0, dpr, frame.x * dpr, frame.y * dpr);
     const layers = s.world.all('layer').filter((l) => l.space_id === s.spaceId && l.kind === 'partition' && (shot ? (shot.layers.length ? shot.layers.includes(l.id) : l.visible) : l.visible)).sort((a, b) => a.sort_order - b.sort_order).map((l) => l.id);
     const passes = new Set<PassName>(['background', 'land', 'fills', 'borders']);
-    const basemap = basemapSourceOf(s.world.get('map_space', s.spaceId)) === 'natural-earth' ? s.basemap : null;
+    const full = basemapSourceOf(s.world.get('map_space', s.spaceId)) === 'natural-earth' ? s.basemap : null;
+    const basemap = full && vs.coast === 'medium' ? withoutDetail(full) : full;
     // Close up, load the detailed coastlines (once) and redraw when they arrive.
-    if (basemap && pixelsPerDegree(view) > DETAIL_PIXELS_PER_DEGREE && !basemap.scales.some((sc) => sc.scale === '10m')) {
+    if (basemap && vs.coast === 'full' && pixelsPerDegree(view) > DETAIL_PIXELS_PER_DEGREE && !basemap.scales.some((sc) => sc.scale === '10m')) {
       loadBasemapDetail(basemap).then(() => store.notify(), (e: Error) => store.toast(e.message, 'error'));
     }
     if (!shot || shot.graticule) passes.add('graticule');
-    if (!shot || shot.labels) passes.add('labels');
+    // The view counts as moving from when it changes until it has rested for a moment: meanwhile the
+    // picture may be carried along (see MapRenderer.carry), and it is drawn afresh once it rests.
+    const mo = motion.current;
+    const sig = `${view.key}|${frame.x},${frame.y}|${c.width}x${c.height}`;
+    if (sig !== mo.sig) { mo.at = mo.sig ? started : -Infinity; mo.sig = sig; }
+    const moving = started - mo.at < SETTLE_MS;
+    const namesHidden = moving && vs.names === 'hide';
+    if ((!shot || shot.labels) && !namesHidden) passes.add('labels');
     if (!shot || shot.characters !== false) passes.add('characters');
     if (!shot || shot.cities !== false) passes.add('cities');
     try {
-      s.renderer.render(ctx, view, s.world, s.engine, s.spaceId, time, { passes, transparent: !!shot?.transparent, layerIds: layers, basemap, referenceBorders: !shot && s.referenceBorders, transitions: shot ? transitionOptions(shot, s.shotFrame) : undefined, mediaSeconds: shot ? s.shotFrame / shot.fps : 0, trails: !!shot?.trails, layout: { labels: !shot || shot.labels, cities: !shot || shot.cities !== false } });
+      s.renderer.render(ctx, view, s.world, s.engine, s.spaceId, time, { passes, transparent: !!shot?.transparent, layerIds: layers, basemap, referenceBorders: !shot && s.referenceBorders, transitions: shot ? transitionOptions(shot, s.shotFrame) : undefined, mediaSeconds: shot ? s.shotFrame / shot.fps : 0, trails: !!shot?.trails, layout: { labels: (!shot || shot.labels) && !namesHidden, cities: !shot || shot.cities !== false }, moving: moving && vs.whileMoving === 'carry', holdNames: moving && vs.names === 'hold' });
     } catch (e) {
       console.error(e);
+    }
+    window.clearTimeout(mo.timer);
+    if (moving && (s.renderer.lastApproximate || namesHidden)) mo.timer = window.setTimeout(() => force((n) => n + 1), Math.max(0, SETTLE_MS - (performance.now() - mo.at)) + 4);
+    if (speedRef.current) {
+      const times = frameTimes.current;
+      times.push(performance.now() - started);
+      if (times.length > 20) times.shift();
+      speedRef.current.textContent = `${times[times.length - 1].toFixed(0)} ms (last ${times.length}: ${(times.reduce((a, b) => a + b, 0) / times.length).toFixed(0)} ms)`;
     }
     if (shot) {
       const o = s.presentOverlay;
@@ -206,27 +242,26 @@ export function MapView() {
     const selEnt = s.selection?.kind === 'entity' ? w.get('entity', s.selection.id) : null;
     if (s.historyView.on && selEnt && (selEnt.type_id === 'polity' || selEnt.type_id === 'faction') && s.layerId) {
       const pc = periodChangesNow(w, s.engine!, s.spaceId, s.layerId, selEnt.id);
-      const path = (faces: number[]) => { const p = new Path2D(); for (const f of faces) p.addPath(s.renderer.facePath(v, arr, f)); return p; };
       ctx.save();
-      const held = path(pc.held);
-      ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.fill(held, 'evenodd');
-      ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = 1.2; ctx.setLineDash([4, 4]); ctx.stroke(held);
-      ctx.setLineDash([]);
+      s.renderer.withFaces(ctx, v, arr, pc.held, (held, px) => {
+        ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.fill(held, 'evenodd');
+        ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = 1.2 * px; ctx.setLineDash([4 * px, 4 * px]); ctx.stroke(held);
+      });
       for (const [faces, color] of [[pc.gained, GAINED_COLOR], [pc.lost, LOST_COLOR]] as const) {
-        if (!faces.length) continue;
-        const p = path(faces);
-        ctx.globalAlpha = 0.5; ctx.fillStyle = color; ctx.fill(p, 'evenodd');
-        ctx.globalAlpha = 1; ctx.strokeStyle = color; ctx.lineWidth = 2.5; ctx.stroke(p);
+        s.renderer.withFaces(ctx, v, arr, faces, (p, px) => {
+          ctx.globalAlpha = 0.5; ctx.fillStyle = color; ctx.fill(p, 'evenodd');
+          ctx.globalAlpha = 1; ctx.strokeStyle = color; ctx.lineWidth = 2.5 * px; ctx.stroke(p);
+        });
       }
       ctx.restore();
     } else
     // Selected owner: outline its territory at the current date.
     if (s.selection?.kind === 'entity' && s.layerId) {
       const states = s.engine!.partitionState(s.spaceId, s.layerId, s.time);
-      const p = new Path2D();
-      let any = false;
-      for (const [f, st] of states) if (st.value === s.selection.id) { p.addPath(s.renderer.facePath(v, arr, f)); any = true; }
-      if (any) { ctx.save(); ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 2.5; ctx.setLineDash([6, 4]); ctx.stroke(p); ctx.restore(); }
+      const id = s.selection.id;
+      const faces: number[] = [];
+      for (const [f, st] of states) if (st.value === id) faces.push(f);
+      s.renderer.withFaces(ctx, v, arr, faces, (p, px) => { ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 2.5 * px; ctx.setLineDash([6 * px, 4 * px]); ctx.stroke(p); });
     }
     // Selected character: its route through its places (dashed), each place a small ring.
     if (s.selection?.kind === 'entity' && w.get('entity', s.selection.id)?.type_id === 'character') {
@@ -401,7 +436,7 @@ export function MapView() {
     // Select tool: a character's marker is picked up (dragged to move it, clicked to select it).
     if (!presentation && e.button === 0 && s.tool === 'select') {
       const hit = [...s.renderer.lastCharacters, ...s.renderer.lastCities].find((c) => { const q = lonLatToScreen(view, c.lon, c.lat); return !!q && Math.hypot(q[0] - p[0], q[1] - p[1]) <= 11; });
-      if (hit) { drag.current = { kind: 'character', entity: hit.entity, moved: 0 }; setCursor(p); return; }
+      if (hit) { drag.current = { kind: 'character', entity: hit.entity, from: p, moved: 0 }; setCursor(p); return; }
     }
     const wantsPan = e.button === 1 || e.button === 2 || presentation || s.tool === 'select' || (e as unknown as KeyboardEvent).shiftKey;
     if (!presentation && e.button === 0 && s.tool === 'vertex') {
@@ -443,10 +478,11 @@ export function MapView() {
     const p = local(e);
     const d = drag.current;
     if (d.kind === 'overlay') {
-      store.set({ presentOverlay: { id: d.id, dx: (p[0] - d.x) / frame.w, dy: (p[1] - d.y) / frame.h, from: d.from } });
+      store.setLive({ presentOverlay: { id: d.id, dx: (p[0] - d.x) / frame.w, dy: (p[1] - d.y) / frame.h, from: d.from } });
       return;
     }
-    if (d.kind === 'character') { d.moved += 1; setCursor(p); return; }
+    // (Moved once the pointer is a few pixels from where it went down, however few movements were reported.)
+    if (d.kind === 'character') { d.moved = Math.max(d.moved, Math.hypot(p[0] - d.from[0], p[1] - d.from[1])); setCursor(p); return; }
     if (d.kind === 'erase') {
       const ll = screenToLonLat(view, p[0], p[1]);
       const last = d.points[d.points.length - 1];
@@ -462,7 +498,7 @@ export function MapView() {
       const dx = e.clientX - d.x, dy = e.clientY - d.y;
       d.x = e.clientX; d.y = e.clientY; d.moved += Math.abs(dx) + Math.abs(dy);
       const next = panCamera(camera, view, dx, dy);
-      if (shot) store.set({ presentCamera: next }); else store.setCamera(next);
+      if (shot) store.setLive({ presentCamera: next }); else store.setCamera(next);
       return;
     }
     if (d.kind === 'lasso') {
@@ -472,7 +508,7 @@ export function MapView() {
       if (ll && (!lastScreen || Math.hypot(p[0] - lastScreen[0], p[1] - lastScreen[1]) > 2)) { d.points.push(ll); force((n) => n + 1); }
       return;
     }
-    if (d.kind === 'vertex') { d.moved += 1; setCursor(p); return; }
+    if (d.kind === 'vertex') { d.moved = Math.max(d.moved, Math.hypot(p[0] - d.x, p[1] - d.y)); setCursor(p); return; }
     if (d.kind === 'pen') {
       const pts = store.draft?.points ?? [];
       const last = pts[pts.length - 1];
@@ -500,7 +536,7 @@ export function MapView() {
     // A character dropped: it is there from the date being viewed (a click just selects it).
     if (d.kind === 'character') {
       setCursor(null);
-      const ll = d.moved > 2 ? screenToLonLat(view, p[0], p[1]) : null;
+      const ll = Math.max(d.moved, Math.hypot(p[0] - d.from[0], p[1] - d.from[1])) > 4 ? screenToLonLat(view, p[0], p[1]) : null;
       if (ll) store.execute((wd) => cmd.placeCharacter(wd, { spaceId: store.spaceId, entity: d.entity, lon: ll[0], lat: ll[1], mode: placementMode() }));
       store.set({ selection: { kind: 'entity', id: d.entity } });
       return;
@@ -531,7 +567,7 @@ export function MapView() {
     }
     if (d.kind === 'vertex') {
       setCursor(null);
-      if (d.moved < 2) { setHoverVertex(d.vid); return; }
+      if (Math.max(d.moved, Math.hypot(p[0] - d.x, p[1] - d.y)) < 3) { setHoverVertex(d.vid); return; }
       const ll = screenToLonLat(view, p[0], p[1]);
       if (!ll) { store.toast('That is outside the map.', 'error'); return; }
       const to = lonLatToVec(ll[0], ll[1]);
@@ -571,7 +607,7 @@ export function MapView() {
     if (e.altKey && !presentation) { store.setCamera({ ...camera, rotation: (camera.rotation + (e.deltaY > 0 ? 3 : -3)) % 360 }); return; }
     const next = zoomCameraAt(camera, frame.w, frame.h, p[0], p[1], -e.deltaY / 400);
     if (shot) {
-      store.set({ presentCamera: next });
+      store.setLive({ presentCamera: next });
       // Stored once the wheel has been still for a moment (one undo step per zoom gesture).
       clearTimeout(wheelTimer.current);
       wheelTimer.current = window.setTimeout(commitShotCamera, 350);
@@ -634,12 +670,13 @@ export function MapView() {
         data-testid="map-canvas"
       />
       {!presentation && <MapHud view={view} />}
+      {s.viewSettings.showSpeed && <div className="draw-speed" ref={speedRef} title="How long the map took to draw (the working view only)" data-testid="draw-speed" />}
     </div>
   );
 }
 
 function MapHud({ view }: { view: View }) {
-  const s = useStore();
+  const s = useLive();
   const radius = s.world?.get('map_space', s.spaceId)?.radius_m ?? 6371000;
   const kmPerPx = (radius / 1000) * radiansPerPixel(view);
   const target = kmPerPx * 120;
