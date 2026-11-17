@@ -37,3 +37,40 @@ test('transition styles: the advancing front from the border is the default; old
   assert.equal(shotTransitions({ ...shot, transitions: { ...DEFAULT_TRANSITIONS, style: 'wipe', angle: 90 } }).style, 'border', 'a shot saved with the old wipe');
   assert.equal(shotTransitions({ ...shot, transitions: { ...DEFAULT_TRANSITIONS, style: 'advance' } }).style, 'advance', 'the expansion stays');
 });
+
+test('still camera: framing sets one view for the whole shot; reset gives the whole map', async () => {
+  const { withStillCamera, cameraMoves, resetCamera } = await import('../src/presentation/sequence.ts');
+  const shot = defaultShot('space', cam, Y(1900), Y(2000), 25, 4);
+  const moving = { ...shot, camera: [shot.camera[0], { ...shot.camera[shot.camera.length - 1], camera: { ...cam, zoom: 3, lon: 40 } }] };
+  assert.ok(cameraMoves(moving), 'an older shot could move');
+  const still = withStillCamera(moving, { ...cam, lon: 10, lat: 20, zoom: 2, projection: 'mercator' });
+  assert.ok(!cameraMoves(still));
+  assert.ok(still.camera.every((k) => k.camera.lon === 10 && k.camera.zoom === 2 && k.camera.projection === 'mercator'));
+  assert.deepEqual(resetCamera(still), { lon: 0, lat: 0, zoom: 0, rotation: 0, projection: 'mercator' }, 'reset keeps the projection');
+});
+
+test('overlays move by fractions of the frame; the events box becomes freely placed', async () => {
+  const { moveOverlay, EVENTS_BOX_ID } = await import('../src/presentation/sequence.ts');
+  const shot = defaultShot('space', cam, Y(1900), Y(2000), 25, 4);
+  const date = shot.overlays.find((o) => o.kind === 'date')!;
+  const moved = moveOverlay(shot, date.id, 0.1, -0.05);
+  const d2 = moved.overlays.find((o) => o.id === date.id)!;
+  assert.ok(Math.abs(d2.x - (date.x + 0.1)) < 1e-9 && Math.abs(d2.y - Math.max(0, date.y - 0.05)) < 1e-9);
+  assert.equal(moveOverlay(shot, date.id, 5, 5).overlays.find((o) => o.id === date.id)!.x, 1, 'kept inside the frame');
+  const boxed = moveOverlay({ ...shot, eventsBox: { show: true, corner: 'bottom-right' } }, EVENTS_BOX_ID, -0.2, -0.1, { x: 0.7, y: 0.75 });
+  assert.equal(boxed.eventsBox!.corner, 'custom');
+  assert.ok(Math.abs(boxed.eventsBox!.x! - 0.5) < 1e-9 && Math.abs(boxed.eventsBox!.y! - 0.65) < 1e-9);
+  assert.equal(boxed.eventsBox!.show, true, 'other settings kept');
+});
+
+test('export choices: "All" alone unless chosen otherwise; sizes written for people', async () => {
+  const { exportPassesOf, formatBytes, PASS_DEFS } = await import('../src/presentation/export-driver.ts');
+  const shot = defaultShot('space', cam, Y(1900), Y(2000), 25, 4);
+  assert.deepEqual(exportPassesOf(shot), ['all']);
+  assert.deepEqual(exportPassesOf({ ...shot, exportPasses: ['fills', 'nonsense', 'all'] }), ['fills', 'all']);
+  assert.equal(PASS_DEFS[0].name, 'all', '"All" comes first');
+  assert.equal(formatBytes(0), '0 KB');
+  assert.equal(formatBytes(1536), '1.5 KB');
+  assert.equal(formatBytes(850 * 1024 * 1024), '850 MB');
+  assert.equal(formatBytes(2.4 * 1024 ** 3), '2.4 GB');
+});

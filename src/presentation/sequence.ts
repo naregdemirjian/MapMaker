@@ -28,6 +28,8 @@ export interface ShotSettings {
   transparent: boolean;
   /** Folder to export into; empty or absent: the project's exports folder. */
   exportDir?: string | null;
+  /** What to export (pass names, see export-driver.ts); absent: everything combined ('all') only. */
+  exportPasses?: string[];
   /** How border changes animate in this shot (absent: as recorded). */
   transitions?: ShotTransitions;
   /** The 'current events' box (absent: not shown). See events-box.ts. */
@@ -132,6 +134,22 @@ export function timeAt(shot: ShotSettings, frame: number): Instant {
   return lerp(fromJSONValue(a.at), fromJSONValue(b.at), f);
 }
 
+/** The shot with one camera for its whole length (the view never moves during the shot). */
+export function withStillCamera(shot: ShotSettings, camera: Camera): ShotSettings {
+  return { ...shot, camera: shot.camera.map((k) => ({ ...k, camera: { ...camera } })) };
+}
+
+/** Whether the shot's camera moves (shots made before the camera became still could). */
+export function cameraMoves(shot: ShotSettings): boolean {
+  const a = shot.camera[0].camera;
+  return shot.camera.some((k) => k.camera.lon !== a.lon || k.camera.lat !== a.lat || k.camera.zoom !== a.zoom || k.camera.rotation !== a.rotation);
+}
+
+/** The camera a reset gives: the whole map, straight, in the shot's projection. */
+export function resetCamera(shot: ShotSettings): Camera {
+  return { lon: 0, lat: 0, zoom: 0, rotation: 0, projection: shot.camera[0].camera.projection };
+}
+
 export function cameraAt(shot: ShotSettings, frame: number): Camera {
   const { a, b, f } = segment(shot.camera, frame);
   return interpolateCamera(a.camera, b.camera, f);
@@ -151,8 +169,29 @@ export function overlaysAt(shot: ShotSettings, frame: number, t: Instant): Overl
   return out;
 }
 
-/** Draw overlays onto a frame. Sizes are design pixels, scaled by `unit` (output width / 1920). */
-export function drawOverlays(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, width: number, height: number, items: OverlayDraw[], unit: number, font: string): void {
+/** Where something was drawn on a frame (pixels of that frame). */
+export interface OverlayRect { id: string; x: number; y: number; w: number; h: number }
+
+/** The id of the current-events box among a shot's overlay rectangles. */
+export const EVENTS_BOX_ID = 'events-box';
+
+/**
+ * The shot with one overlay moved by (dx, dy), as fractions of the frame. The current-events box is
+ * placed where it was dragged (from its drawn top-left corner `from`, fractions of the frame).
+ */
+export function moveOverlay(shot: ShotSettings, id: string, dx: number, dy: number, from?: { x: number; y: number }): ShotSettings {
+  const clamp = (v: number) => Math.min(1, Math.max(0, v));
+  if (id === EVENTS_BOX_ID) {
+    const box = shot.eventsBox ?? {};
+    const x0 = from?.x ?? box.x ?? 0, y0 = from?.y ?? box.y ?? 0;
+    return { ...shot, eventsBox: { ...box, corner: 'custom', x: clamp(x0 + dx), y: clamp(y0 + dy) } };
+  }
+  return { ...shot, overlays: shot.overlays.map((o) => (o.id === id ? { ...o, x: clamp(o.x + dx), y: clamp(o.y + dy) } : o)) };
+}
+
+/** Draw overlays onto a frame. Sizes are design pixels, scaled by `unit` (output width / 1920). Returns where each went. */
+export function drawOverlays(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, width: number, height: number, items: OverlayDraw[], unit: number, font: string): OverlayRect[] {
+  const rects: OverlayRect[] = [];
   for (const it of items) {
     const o = it.overlay;
     const size = o.size * unit;
@@ -174,5 +213,8 @@ export function drawOverlays(ctx: CanvasRenderingContext2D | OffscreenCanvasRend
     ctx.fillStyle = o.color;
     ctx.fillText(it.text, x, y);
     ctx.restore();
+    const left = o.align === 'left' ? x : o.align === 'center' ? x - w / 2 : x - w;
+    rects.push({ id: o.id, x: left - size * 0.35, y: y - size * 0.75, w: w + size * 0.7, h: size * 1.5 });
   }
+  return rects;
 }

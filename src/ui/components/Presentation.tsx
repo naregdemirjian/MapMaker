@@ -3,8 +3,8 @@ import { useStore, store } from '../store.ts';
 import { Api } from '../api.ts';
 import * as cmd from '../../domain/commands.ts';
 import { type Instant, add, fromJSONValue, toJSONValue, fromStore, compare, gregorian, type Precision } from '../../core-time/index.ts';
-import { defaultShot, timeAt, cameraAt, RESOLUTIONS, FRAME_RATES, shotTransitions, type ShotSettings, type Ease, type ShotTransitions } from '../../presentation/sequence.ts';
-import { PASS_DEFS, runExport } from '../../presentation/export-driver.ts';
+import { defaultShot, timeAt, cameraAt, RESOLUTIONS, FRAME_RATES, shotTransitions, withStillCamera, cameraMoves, resetCamera, type ShotSettings, type Ease, type ShotTransitions } from '../../presentation/sequence.ts';
+import { PASS_DEFS, runExport, exportPassesOf, estimateExportBytes, formatBytes } from '../../presentation/export-driver.ts';
 import { eventsBoxOf, type EventsBox } from '../../presentation/events-box.ts';
 import { LABEL_FONTS } from '../../render-engine/label-style.ts';
 import { PROJECTIONS, type ProjectionName } from '../../render-engine/camera.ts';
@@ -54,13 +54,15 @@ export function ShotEditor() {
   const shot = currentShot();
   const row = s.shotId ? w.get('sequence', s.shotId) : null;
   const [name, setName] = useState(row?.name ?? '');
-  const [passes, setPasses] = useState<string[]>(['background', 'land', 'fills', 'borders', 'labels', 'overlays', 'all']);
+  const [estimate, setEstimate] = useState<{ key: string; bytes: number } | null>(null);
   const [progress, setProgress] = useState<null | { done: number; total: number; label: string }>(null);
   const [result, setResult] = useState<null | { dir: string; frames: number; seconds: number }>(null);
   const cancel = useRef(false);
   useEffect(() => setName(row?.name ?? ''), [s.shotId]);
-  if (!shot || !row) return <aside className="right"><div className="panel"><h3>Presentation</h3><p className="muted">Create or pick a shot on the left. Its preview appears in the middle; drag and scroll there to frame the view, then store it as the start or end view.</p></div></aside>;
+  if (!shot || !row) return <aside className="right"><div className="panel"><h3>Presentation</h3><p className="muted">Create or pick a shot on the left. Its preview appears in the middle; drag and scroll there to frame the view.</p></div></aside>;
   const seconds = shot.frames / shot.fps;
+  const passes = exportPassesOf(shot);
+  const setPasses = (next: string[]) => update({ exportPasses: PASS_DEFS.map((d) => d.name).filter((n) => next.includes(n)) });
   const startT = fromJSONValue(shot.time[0].at), endT = fromJSONValue(shot.time[shot.time.length - 1].at);
   const update = (patch: Partial<ShotSettings>) => saveShot(row.id, { ...shot, ...patch });
   const setFrames = (fps: number, secs: number) => {
@@ -70,13 +72,8 @@ export function ShotEditor() {
     s.set({ shotFrame: Math.min(s.shotFrame, frames - 1) });
   };
   const liveCamera = s.presentCamera ?? cameraAt(shot, s.shotFrame);
-  const setCameraKey = (which: 'start' | 'end') => {
-    const keys = [...shot.camera];
-    const idx = which === 'start' ? 0 : keys.length - 1;
-    keys[idx] = { ...keys[idx], camera: { ...liveCamera } };
-    update({ camera: keys });
-    s.set({ presentCamera: null, shotFrame: which === 'start' ? 0 : shot.frames - 1 });
-  };
+  // The camera stays still for the whole shot: framing the preview sets it, a reset clears it.
+  const setCamera = (cam: typeof liveCamera) => { saveShot(row.id, withStillCamera(shot, cam)); s.set({ presentCamera: null }); };
   const setTimeKey = (which: 'start' | 'end', t: Instant | null) => {
     if (!t) return;
     const keys = [...shot.time];
@@ -108,8 +105,11 @@ export function ShotEditor() {
   const setBox = (patch: Partial<EventsBox>) => update({ eventsBox: { ...box, ...patch } });
   const uploadBoxImage = async (file: File | undefined) => {
     if (!file) return;
-    try { const a = await Api.uploadAsset(s.projectId!, file); setBox({ image: a.file }); } catch (e) { s.toast((e as Error).message, 'error'); }
+    // A new graphic becomes the box itself (its shape and proportions), the simplest start.
+    try { const a = await Api.uploadAsset(s.projectId!, file); setBox({ image: a.file, imageFit: 'wrap' }); } catch (e) { s.toast((e as Error).message, 'error'); }
   };
+  // Re-estimated when anything that changes the files changes (after a pause, in the background).
+  const estimateKey = JSON.stringify([row.settings, passes, s.world?.revision]);
   const tr = shotTransitions(shot);
   const setTr = (patch: Partial<ShotTransitions>) => update({ transitions: { ...tr, ...patch } });
   const chooseFolder = async () => {
@@ -122,6 +122,7 @@ export function ShotEditor() {
   };
   return (
     <aside className="right" data-testid="shot-editor">
+      <SizeEstimate shot={shot} passes={passes} estimateKey={estimateKey} onEstimate={setEstimate} />
       <div className="panel shot-panel">
         <Group title="Shot">
           <label>Name<input value={name} onChange={(e) => setName(e.target.value)} onBlur={() => name.trim() && name !== row.name && s.execute((wd) => cmd.updateSequence(wd, row.id, { name: name.trim() }))} /></label>
@@ -147,15 +148,15 @@ export function ShotEditor() {
           <label>Screen time (seconds)<NumberField min={0.1} max={3600} step={0.5} value={Number(seconds.toFixed(3))} onCommit={(n) => setFrames(shot.fps, n)} testId="shot-seconds" /></label>
         </Group>
         <Group title="Camera">
-          <p className="muted">Drag and scroll the preview to frame a view, then store it.</p>
+          <p className="muted">Drag and scroll the preview to frame the shot. The view stays still for the whole shot.</p>
+          {cameraMoves(shot) && <p className="muted" data-testid="camera-moves">This shot's camera moves (it was made that way before). Framing the preview or resetting makes it still.</p>}
           <div className="buttons">
-            <button onClick={() => setCameraKey('start')} data-testid="set-start-view">Use this view at the start</button>
-            <button onClick={() => setCameraKey('end')} data-testid="set-end-view">Use this view at the end</button>
+            <button onClick={() => setCamera(resetCamera(shot))} data-testid="reset-camera" title="The whole map, straight and centred">Reset camera</button>
           </div>
           <label>Projection<select value={shot.camera[0].camera.projection} onChange={(e) => update({ camera: shot.camera.map((k) => ({ ...k, camera: { ...k.camera, projection: e.target.value as ProjectionName } })) })}>
             {PROJECTIONS.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select></label>
-          <label>Rotation (degrees)<input type="number" value={Math.round(liveCamera.rotation)} onChange={(e) => s.set({ presentCamera: { ...liveCamera, rotation: Number(e.target.value) } })} /></label>
+          <label>Rotation (degrees)<NumberField min={-360} max={360} step={1} value={Math.round(liveCamera.rotation)} onCommit={(n) => setCamera({ ...liveCamera, rotation: n })} testId="camera-rotation" /></label>
         </Group>
         <Group title="Transitions">
           <label>Border changes<select value={tr.mode} onChange={(e) => setTr({ mode: e.target.value as ShotTransitions['mode'] })} data-testid="transition-mode">
@@ -244,11 +245,14 @@ export function ShotEditor() {
               {box.image && <button className="small" onClick={() => setBox({ image: null })}>Remove</button>}
             </div>
             {box.image && <>
-              <label>Fit<select value={box.imageFit} onChange={(e) => setBox({ imageFit: e.target.value as EventsBox['imageFit'] })}>
+              <label>Fit<select value={box.imageFit} onChange={(e) => setBox({ imageFit: e.target.value as EventsBox['imageFit'] })} data-testid="events-box-fit">
+                <option value="wrap">Wrap the box around the graphic (the graphic is the box)</option>
                 <option value="cover">Cover the box</option><option value="contain">Fit inside the box</option><option value="stretch">Stretch to the box</option>
               </select></label>
               <label>Picture opacity (%)<NumberField min={0} max={100} step={5} value={Math.round(box.imageOpacity * 100)} onCommit={(n) => setBox({ imageOpacity: n / 100 })} /></label>
-              <p className="muted">Tip: set the background opacity to 0 to show only your graphic.</p>
+              <p className="muted">{box.imageFit === 'wrap'
+                ? 'The box takes your graphic\'s shape; "Width" sets its size. Use "Inner spacing" to keep the text inside its frame.'
+                : 'Tip: set the background opacity to 0 to show only your graphic.'}</p>
             </>}
           </>}
         </Group>
@@ -257,6 +261,7 @@ export function ShotEditor() {
           <label className="check"><input type="checkbox" checked={shot.labels} onChange={(e) => update({ labels: e.target.checked })} /> Country labels</label>
         </Group>
         <Group title="Text">
+          <p className="muted">Drag the date, the title or the events box on the preview to place them anywhere.</p>
           <label className="check"><input type="checkbox" checked={!!dateOverlay} onChange={(e) => update({ overlays: e.target.checked ? [...shot.overlays, defaultShot(shot.spaceId, liveCamera, startT, endT, shot.fps, seconds).overlays[0]] : shot.overlays.filter((o) => o.kind !== 'date') })} /> Show the date</label>
           {dateOverlay && <label>Date detail<select value={dateOverlay.datePrecision} onChange={(e) => update({ overlays: shot.overlays.map((o) => (o.kind === 'date' ? { ...o, datePrecision: e.target.value as Precision } : o)) })}>
             <option value="year">Year</option><option value="month">Month</option><option value="day">Day</option><option value="minute">Hour and minute</option><option value="second">Seconds</option>
@@ -269,16 +274,23 @@ export function ShotEditor() {
         </Group>
         <Group title="Export">
           <h4>What to export</h4>
-          {PASS_DEFS.map((d) => (
-            <label key={d.name} className="check" title={d.note ?? ''}><input type="checkbox" checked={passes.includes(d.name)} onChange={(e) => setPasses(e.target.checked ? [...passes, d.name] : passes.filter((p) => p !== d.name))} data-testid={`pass-${d.name}`} /> {d.label}</label>
+          {PASS_DEFS.filter((d) => d.name === 'all').map((d) => (
+            <label key={d.name} className="check" title={d.note ?? ''}><input type="checkbox" checked={passes.includes(d.name)} onChange={(e) => setPasses(e.target.checked ? [...passes, d.name] : passes.filter((p) => p !== d.name))} data-testid={`pass-${d.name}`} /> <b>{d.label}</b> <span className="muted">(everything in one image sequence)</span></label>
           ))}
+          <div className="pass-box" data-testid="separate-passes">
+            <p className="muted" data-testid="separate-passes-note">Each of these is exported separately, as its own image sequence, to stack and adjust in Premiere.</p>
+            {PASS_DEFS.filter((d) => d.name !== 'all').map((d) => (
+              <label key={d.name} className="check" title={d.note ?? ''}><input type="checkbox" checked={passes.includes(d.name)} onChange={(e) => setPasses(e.target.checked ? [...passes, d.name] : passes.filter((p) => p !== d.name))} data-testid={`pass-${d.name}`} /> {d.label}</label>
+            ))}
+          </div>
           <h4>Where</h4>
           <div className="folder-field">
             <input value={shot.exportDir ?? ''} placeholder="The project's exports folder" onChange={(e) => update({ exportDir: e.target.value || null })} data-testid="export-dir" title="A full folder path. Each export makes its own folder inside it." />
             <button className="small" onClick={chooseFolder} data-testid="choose-export-dir">Choose…</button>
             {shot.exportDir && <button className="small" onClick={() => update({ exportDir: null })} title="Back to the project's exports folder">Reset</button>}
           </div>
-          <p className="muted">{shot.frames} frames × {passes.length} layers at {shot.width} x {shot.height}.</p>
+          <p className="muted" data-testid="export-summary">{shot.frames} frames × {passes.length} {passes.length === 1 ? 'image sequence' : 'image sequences'} at {shot.width} x {shot.height}.
+            {' '}{estimate?.key === estimateKey ? <>Estimated size: <b data-testid="export-size">about {formatBytes(estimate.bytes)}</b> (a preview, ¼ size, about {formatBytes(estimate.bytes / 16)}).</> : passes.length ? 'Estimating the size…' : ''}</p>
           {progress ? (
             <div className="progress"><div className="bar"><div style={{ width: `${(100 * progress.done) / progress.total}%` }} /></div>
               <span>{progress.label}: {progress.done} / {progress.total}</span><button onClick={() => (cancel.current = true)}>Cancel</button></div>
@@ -294,6 +306,20 @@ export function ShotEditor() {
       </div>
     </aside>
   );
+}
+
+/** Works out the export size estimate shortly after the settings stop changing. */
+function SizeEstimate({ shot, passes, estimateKey, onEstimate }: { shot: ShotSettings; passes: string[]; estimateKey: string; onEstimate: (e: { key: string; bytes: number }) => void }) {
+  const s = useStore();
+  useEffect(() => {
+    let stale = false;
+    const timer = window.setTimeout(() => {
+      if (!passes.length || !s.world || !s.engine) return;
+      estimateExportBytes(s.world, s.engine, shot, passes).then((bytes) => { if (!stale) onEstimate({ key: estimateKey, bytes }); }, () => undefined);
+    }, 700);
+    return () => { stale = true; clearTimeout(timer); };
+  }, [estimateKey]);
+  return null;
 }
 
 /** A collapsible group of settings. */

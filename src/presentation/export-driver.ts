@@ -6,7 +6,7 @@ import type { World } from '../world-model/world.ts';
 import type { Engine } from '../temporal-engine/engine.ts';
 import { MapRenderer, DEFAULT_STYLE, type PassName } from '../render-engine/map-renderer.ts';
 import { makeView } from '../render-engine/camera.ts';
-import { type ShotSettings, timeAt, cameraAt, overlaysAt, drawOverlays, shotTransitions, screenSecondsSince } from './sequence.ts';
+import { type ShotSettings, type OverlayRect, EVENTS_BOX_ID, timeAt, cameraAt, overlaysAt, drawOverlays, shotTransitions, screenSecondsSince } from './sequence.ts';
 import { gregorian, type Instant } from '../core-time/index.ts';
 import { eventsBoxOf, currentEvents, drawEventsBox } from './events-box.ts';
 import { eventShown, entityStyle } from '../domain/commands.ts';
@@ -16,14 +16,55 @@ import { basemapSourceOf, loadBasemap, loadBasemapDetail, loadDatasetRecords, ty
 export interface ExportPassDef { name: string; label: string; blend: string; passes: PassName[]; overlays: boolean; background: boolean; note?: string }
 
 export const PASS_DEFS: ExportPassDef[] = [
+  { name: 'all', label: 'All', blend: 'Normal', passes: ['background', 'graticule', 'land', 'fills', 'borders', 'labels'], overlays: true, background: true, note: 'everything combined in one image sequence' },
   { name: 'background', label: 'Background', blend: 'Normal', passes: ['background', 'graticule'], overlays: false, background: true, note: 'ocean and grid' },
   { name: 'land', label: 'Land (Natural Earth)', blend: 'Normal', passes: ['land'], overlays: false, background: false, note: 'land, lakes and coastlines; empty for worlds without the Earth basemap' },
   { name: 'fills', label: 'Territory fills', blend: 'Normal', passes: ['fills'], overlays: false, background: false, note: 'lower the opacity in Premiere to taste' },
   { name: 'borders', label: 'Borders', blend: 'Normal', passes: ['borders'], overlays: false, background: false },
   { name: 'labels', label: 'Labels', blend: 'Normal', passes: ['labels'], overlays: false, background: false },
   { name: 'overlays', label: 'Text overlays', blend: 'Normal', passes: [], overlays: true, background: false, note: 'dates and titles' },
-  { name: 'all', label: 'All', blend: 'Normal', passes: ['background', 'graticule', 'land', 'fills', 'borders', 'labels'], overlays: true, background: true, note: 'everything combined: compare your composite with this' },
 ];
+
+/** What a shot exports: its own choice, or everything combined ('all') when it has none. */
+export function exportPassesOf(shot: ShotSettings): string[] {
+  const known = new Set(PASS_DEFS.map((d) => d.name));
+  const chosen = (shot.exportPasses ?? ['all']).filter((p) => known.has(p));
+  return chosen;
+}
+
+/** A size in bytes for people: "850 MB", "2.4 GB", "120 KB". */
+export function formatBytes(n: number): string {
+  if (!(n > 0)) return '0 KB';
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let v = n / 1024, i = 0;
+  while (v >= 1000 && i < units.length - 1) { v /= 1024; i++; }
+  return `${v >= 100 ? Math.round(v) : v >= 10 ? v.toFixed(0) : v.toFixed(1)} ${units[i]}`;
+}
+
+/**
+ * About how many bytes an export will write: one frame from the middle of the shot is drawn for each
+ * chosen pass (at most 1920 pixels wide, scaled up by area) and compressed as PNG, then multiplied
+ * by the number of frames. Real frames vary, so this is an estimate.
+ */
+export async function estimateExportBytes(world: World, engine: Engine, shot: ShotSettings, passNames: string[], scale = 1): Promise<number> {
+  const defs = PASS_DEFS.filter((d) => passNames.includes(d.name));
+  if (!defs.length) return 0;
+  const W = Math.max(16, Math.round(shot.width * scale)), H = Math.max(16, Math.round(shot.height * scale));
+  const k = Math.min(1, 1920 / W);
+  const w = Math.max(16, Math.round(W * k)), h = Math.max(16, Math.round(H * k));
+  const basemap = await basemapFor(world, shot.spaceId);
+  const canvas = new OffscreenCanvas(w, h);
+  const ctx = canvas.getContext('2d') as unknown as CanvasRenderingContext2D;
+  const renderer = new MapRenderer();
+  const frame = Math.floor(shot.frames / 2);
+  let perFrame = 0;
+  for (const def of defs) {
+    renderFrame(ctx, renderer, world, engine, shot, frame, def, w, h, basemap);
+    const blob = await canvas.convertToBlob({ type: 'image/png' });
+    perFrame += blob.size;
+  }
+  return (perFrame * (W * H)) / (w * h) * shot.frames;
+}
 
 export function visibleLayers(world: World, shot: ShotSettings): string[] {
   return world.all('layer')
@@ -33,13 +74,15 @@ export function visibleLayers(world: World, shot: ShotSettings): string[] {
 }
 
 /** Text overlays and the current-events box of a shot frame (the same in the preview and exports). */
-export function drawShotOverlays(ctx: CanvasRenderingContext2D, width: number, height: number, world: World, shot: ShotSettings, frame: number, t: Instant): void {
-  drawOverlays(ctx, width, height, overlaysAt(shot, frame, t), width / 1920, DEFAULT_STYLE.font);
+export function drawShotOverlays(ctx: CanvasRenderingContext2D, width: number, height: number, world: World, shot: ShotSettings, frame: number, t: Instant): OverlayRect[] {
+  const rects = drawOverlays(ctx, width, height, overlaysAt(shot, frame, t), width / 1920, DEFAULT_STYLE.font);
   const box = eventsBoxOf(shot.eventsBox);
-  if (!box.show) return;
+  if (!box.show) return rects;
   const groups = box.groups ? new Set(box.groups) : null;
   const events = currentEvents(world, box, t, (t0) => screenSecondsSince(shot, frame, t0), (id) => eventShown(world, id, groups));
-  drawEventsBox(ctx, width, height, width / 1920, box, t, events);
+  const r = drawEventsBox(ctx, width, height, width / 1920, box, t, events);
+  if (r) rects.push({ id: EVENTS_BOX_ID, ...r });
+  return rects;
 }
 
 /** The shot's transition settings for one frame, as the renderer takes them. */
@@ -74,8 +117,10 @@ export async function runExport(o: {
 }): Promise<ExportResult> {
   const width = Math.max(16, Math.round(o.shot.width * o.scale));
   const height = Math.max(16, Math.round(o.shot.height * o.scale));
-  const defs = PASS_DEFS.filter((d) => o.passNames.includes(d.name));
-  if (!defs.length) throw new Error('Choose at least one pass to export.');
+  // Written in stacking order, bottom first (the compositing guide lists them so), the combined
+  // picture last.
+  const defs = [...PASS_DEFS.filter((d) => d.name !== 'all'), ...PASS_DEFS.filter((d) => d.name === 'all')].filter((d) => o.passNames.includes(d.name));
+  if (!defs.length) throw new Error('Choose at least one thing to export.');
   const [f0, f1] = o.frameRange ?? [0, o.shot.frames - 1];
   const started = performance.now();
   // Loaded before the first frame, so every frame is drawn from the same complete data.

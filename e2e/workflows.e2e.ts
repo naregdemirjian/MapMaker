@@ -1,7 +1,7 @@
 // Second interface test: the workflows the first test does not cover, and a close inspection of
 // exported files. Run after building: node --disable-warning=ExperimentalWarning e2e/workflows.e2e.ts
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync, existsSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync, rmSync, writeFileSync, statSync } from 'node:fs';
 import { encodePNG } from '../src/export/png.ts';
 import { join } from 'node:path';
 import { Harness, ROOT, blob, readPNG, pixel, hexRGB, near, compositeOver, type LL } from './harness.ts';
@@ -381,7 +381,7 @@ try {
   });
 
   let colours: Record<string, string> = {};
-  await h.step('A shot with a camera move at 2.39:1 and 25 fps; inspect every exported pass', async () => {
+  await h.step('A shot framed in the preview (still camera, reset) at 2.39:1 and 25 fps; inspect every exported pass', async () => {
     colours = await page.evaluate((names) => Object.fromEntries(names.map((n) => [n, (window as any).__mapmaker.store.world.all('entity').find((e: any) => e.name === n).color])), [A, B]);
     await page.locator('.left .row', { hasText: 'Union' }).click();
     await page.getByTestId('mode-present').click();
@@ -395,16 +395,49 @@ try {
     await page.locator('label', { hasText: 'Frame rate' }).locator('select').selectOption('25');
     await page.getByTestId('shot-seconds').fill('1'); await page.getByTestId('shot-seconds').press('Enter');
     await page.waitForFunction(() => (window as any).__mapmaker.store.world.all('sequence')[0]?.settings.includes('"frames":25'));
-    // Camera: start as framed, end zoomed in and moved.
-    await page.getByTestId('set-start-view').click();
+    // Camera: still for the whole shot. Zooming and dragging the preview frames it; a reset gives
+    // the whole map; there are no start and end views any more.
+    assert.equal(await page.getByTestId('set-start-view').count(), 0, 'no "use this view at the start"');
+    const shotCameras = () => page.evaluate(() => JSON.parse((window as any).__mapmaker.store.world.all('sequence')[0].settings).camera.map((k: any) => k.camera));
     const { cx, cy } = await h.centre();
     await page.mouse.move(cx, cy);
     await page.mouse.wheel(0, -300);
     await page.mouse.down(); await page.mouse.move(cx - 80, cy + 30, { steps: 6 }); await page.mouse.up();
-    await page.getByTestId('set-end-view').click();
+    await page.waitForTimeout(500);
+    await h.saved();
+    let cams = await shotCameras();
+    assert.ok(cams[0].zoom > 0.5, `zooming the preview framed the shot closer (zoom ${cams[0].zoom})`);
+    assert.ok(cams.every((c: any) => JSON.stringify(c) === JSON.stringify(cams[0])), 'one view for the whole shot');
+    await page.getByTestId('reset-camera').click();
+    await h.saved();
+    cams = await shotCameras();
+    assert.ok(cams.every((c: any) => c.zoom === 0 && c.lon === 0 && c.lat === 0 && c.rotation === 0), 'reset: the whole map, straight');
+    // Frame it again for the export.
+    await page.mouse.move(cx, cy);
+    await page.mouse.wheel(0, -300);
+    await page.mouse.down(); await page.mouse.move(cx - 80, cy + 30, { steps: 6 }); await page.mouse.up();
+    await page.waitForTimeout(500);
     await h.saved();
     await page.getByTestId('frame-slider').fill('12');
-    await h.screenshot('presentation-camera-move');
+    await h.screenshot('presentation-still-camera');
+
+    // What to export: only "All" at first, explained; then every separate layer too.
+    const separate = ['background', 'land', 'fills', 'borders', 'labels', 'overlays'];
+    assert.ok(await page.getByTestId('pass-all').isChecked(), '"All" is chosen by default');
+    for (const p of separate) assert.ok(!(await page.getByTestId(`pass-${p}`).isChecked()), `${p} is not chosen by default`);
+    assert.match((await page.getByTestId('separate-passes-note').textContent()) ?? '', /exported separately/);
+    const passOrder = await page.locator('[data-testid^=pass-]').evaluateAll((els) => els.map((e) => e.getAttribute('data-testid')));
+    assert.equal(passOrder[0], 'pass-all', '"All" is at the top');
+    // The estimated size appears, and grows when more is chosen.
+    const sizeText = async () => { await page.getByTestId('export-size').waitFor({ timeout: 20000 }); return (await page.getByTestId('export-size').textContent()) ?? ''; };
+    const toBytes = (t: string) => { const m = /([\d.]+) (KB|MB|GB)/.exec(t)!; return Number(m[1]) * { KB: 1, MB: 1024, GB: 1024 * 1024 }[m[2] as 'KB']; };
+    const onlyAll = toBytes(await sizeText());
+    for (const p of separate) await page.getByTestId(`pass-${p}`).check();
+    await page.waitForFunction(() => /fills/.test(JSON.stringify(JSON.parse((window as any).__mapmaker.store.world.all('sequence')[0].settings).exportPasses)));
+    await page.waitForTimeout(900);
+    const everything = toBytes(await sizeText());
+    assert.ok(everything > onlyAll * 1.3, `the estimate grows with the separate layers (${onlyAll} KB, then ${everything} KB)`);
+    await h.screenshot('export-choices');
 
     const ex = await exportShot('export-preview');
     const m = ex.manifest;
@@ -412,6 +445,11 @@ try {
     assert.equal(m.fps, 25);
     assert.deepEqual(m.frames, [0, 24]);
     for (const pass of ['background', 'land', 'fills', 'borders', 'labels', 'overlays', 'all']) assert.equal(ex.frames(pass).length, 25, pass);
+    // The estimate is of the right size: the preview (¼ size) is about a sixteenth of it.
+    let written = 0;
+    for (const pass of ['background', 'land', 'fills', 'borders', 'labels', 'overlays', 'all']) for (const f of ex.frames(pass)) written += statSync(f).size;
+    const ratio = written / 1024 / (everything / 16);
+    assert.ok(ratio > 0.25 && ratio < 4, `the estimated size is close (written ${(written / 1024).toFixed(0)} KB at ¼ size, estimated ${(everything / 16).toFixed(0)} KB)`);
     assert.match(readFileSync(join(ex.dir, 'COMPOSITING_GUIDE.txt'), 'utf8'), /25 fps/);
 
     // Frame timing: evenly spaced through the chosen range, first and last exactly on the ends.
@@ -424,9 +462,9 @@ try {
     assert.equal(instants[0].day, days(1880));
     assert.equal(instants[24].day, days(1920));
 
-    // The camera moves: background frames all differ; with a static camera they were identical.
+    // The camera is still: every background frame is identical.
     const bg = Object.values(m.checksums.background as Record<string, string>);
-    assert.equal(new Set(bg).size, 25, 'every frame of the camera move is different');
+    assert.equal(new Set(bg).size, 1, 'the view never moves during the shot');
 
     // Correct history in the pixels: before 1900 B's land is B's colour, after it A's (annexation).
     const at0 = await page.evaluate(([lon, lat]) => (window as any).__mapmaker.exportPixel(lon, lat, 0, 0.25), P.b);
@@ -470,11 +508,46 @@ try {
     await h.screenshot('events-box');
     const ex = await exportShot('export-preview');
     const img = readPNG(ex.frames('overlays')[24]);
-    // Bottom-right corner, inside the box (margin 48 and rounding 12 at a quarter of 1920).
-    const c = pixel(img, img.width - 12 - 6, img.height - 12 - 6);
-    assert.ok(c[0] > 200 && c[1] < 60 && c[2] > 200 && c[3] > 200, `the box shows the user's graphic (${c})`);
+    // The new graphic is the box: wrapped around it, with the graphic's 2:1 shape. At a quarter of
+    // 1920: 520 wide is 130 pixels, so 65 high; margin 48 is 12.
+    assert.equal(await page.getByTestId('events-box-fit').inputValue(), 'wrap', 'a new graphic is wrapped by default');
+    const magenta = (c: number[]) => c[0] > 200 && c[1] < 60 && c[2] > 200 && c[3] > 200;
+    const c = pixel(img, img.width - 12 - 3, img.height - 12 - 3);
+    assert.ok(magenta(c), `the box shows the user's graphic to its very corner (${c})`);
+    const top = img.height - 12 - 65;
+    assert.ok(magenta(pixel(img, img.width - 12 - 65, top + 3)), 'up to its top edge');
+    assert.equal(pixel(img, img.width - 12 - 65, top - 4)[3], 0, 'and no further: the box has the graphic\'s shape');
+    assert.equal(pixel(img, img.width - 12 - 130 - 4, img.height - 12 - 30)[3], 0, 'nor wider');
     assert.equal(pixel(img, Math.round(img.width / 2), Math.round(img.height / 2))[3], 0, 'the rest of the overlay layer stays transparent');
     assert.ok(readdirSync(join(h.projects, 'Workflows Test.mapmaker', 'assets')).some((f) => f.endsWith('.png')), 'the graphic is kept in the project');
+    // Drag the events box and the date to new places on the preview; each drop is one undo step.
+    type R = { id: string; x: number; y: number; w: number; h: number };
+    const rects = () => page.evaluate(() => (window as any).__mapmaker.previewOverlays()) as Promise<R[]>;
+    const settings = () => page.evaluate(() => JSON.parse((window as any).__mapmaker.store.world.all('sequence')[0].settings));
+    const dragBy = async (r: R, dx: number, dy: number) => {
+      await page.mouse.move(r.x + r.w / 2, r.y + r.h / 2);
+      await page.mouse.down();
+      await page.mouse.move(r.x + r.w / 2 + dx, r.y + r.h / 2 + dy, { steps: 6 });
+      await page.mouse.up();
+      await h.saved();
+    };
+    let box = (await rects()).find((r) => r.id === 'events-box')!;
+    assert.ok(box, 'the events box is drawn on the preview');
+    const cam0 = JSON.stringify((await settings()).camera);
+    await dragBy(box, -300, -120);
+    const moved = (await rects()).find((r) => r.id === 'events-box')!;
+    assert.ok(Math.abs(moved.x - (box.x - 300)) < 3 && Math.abs(moved.y - (box.y - 120)) < 3, `the box follows the pointer (${box.x},${box.y} -> ${moved.x},${moved.y})`);
+    assert.equal((await settings()).eventsBox.corner, 'custom', 'it is now placed freely');
+    assert.equal(JSON.stringify((await settings()).camera), cam0, 'dragging the box does not move the camera');
+    const date = (await rects()).find((r) => r.id !== 'events-box')!;
+    const before = (await settings()).overlays.find((o: any) => o.id === date.id);
+    await dragBy(date, 150, 60);
+    const after = (await settings()).overlays.find((o: any) => o.id === date.id);
+    const fr = await page.evaluate(() => { const c = document.querySelector('[data-testid=map-canvas]')!.getBoundingClientRect(); return { w: c.width, h: c.height }; });
+    assert.ok(after.x > before.x && after.y > before.y, `the date moved right and down (${before.x},${before.y} -> ${after.x},${after.y}; preview ${fr.w}x${fr.h})`);
+    await h.screenshot('overlays-dragged');
+    await page.getByTestId('undo').click();
+    await page.waitForFunction((x) => JSON.parse((window as any).__mapmaker.store.world.all('sequence')[0].settings).overlays.find((o: any) => o.kind === 'date').x === x, before.x);
     // Hide the box again for the following steps.
     await page.getByTestId('events-box-show').uncheck();
     await h.saved();

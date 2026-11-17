@@ -58,6 +58,8 @@ class AppStore {
   shotFrame = 0;
   /** Unsaved camera adjustment in presentation mode (cleared when the frame changes). */
   presentCamera: Camera | null = null;
+  /** A text or the current-events box being dragged on the shot preview (fractions of the frame). */
+  presentOverlay: { id: string; dx: number; dy: number; from?: { x: number; y: number } } | null = null;
   playing = false;
   dialog: string | null = null;
   /** The event the last drawing went into, offered first for the next one (several border changes, one event). */

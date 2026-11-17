@@ -29,8 +29,12 @@ export interface EventsBox {
   titleColor: string; dateColor: string; textColor: string; accentColor: string;
   background: string; backgroundOpacity: number;
   borderColor: string; borderWidth: number; radius: number;
-  /** A picture of the user's own behind the text (an asset name), and how it fills the box. */
-  image: string | null; imageFit: 'stretch' | 'cover' | 'contain'; imageOpacity: number;
+  /**
+   * A picture of the user's own behind the text (an asset name), and how it fills the box. 'wrap':
+   * the graphic is the box: the box takes the graphic's shape (its width is `width`), with the text
+   * laid on it, and no panel of its own.
+   */
+  image: string | null; imageFit: 'wrap' | 'stretch' | 'cover' | 'contain'; imageOpacity: number;
   /** Fixed height (design pixels); 0 grows with the content. Useful with a custom graphic. */
   height: number;
 }
@@ -124,24 +128,38 @@ export function drawEventsBox(ctx: CanvasRenderingContext2D | OffscreenCanvasRen
   }
   const lineH = (r: { size: number; kind: string }) => r.size * (r.kind === 'title' ? 1.5 : 1.3);
   const contentH = rows.reduce((h, r) => h + lineH(r), 0);
-  const h = box.height > 0 ? box.height * u : contentH + 2 * pad;
+  const img = imageNow(box.image);
+  // Wrapped around the graphic: the box has the graphic's proportions (until the picture has loaded,
+  // it fits the text).
+  const iw = img ? img.naturalWidth || img.width : 0, ih = img ? img.naturalHeight || img.height : 0;
+  const wrapped = box.imageFit === 'wrap' && !!box.image && iw > 0 && ih > 0;
+  const h = wrapped ? (w * ih) / iw : box.height > 0 ? box.height * u : contentH + 2 * pad;
   const m = box.margin * u;
   const x = box.corner === 'custom' ? box.x * width : box.corner.endsWith('left') ? m : width - m - w;
   const y = box.corner === 'custom' ? box.y * height : box.corner.startsWith('top') ? m : height - m - h;
   // Background: the user's graphic, and/or a coloured panel.
-  const r = Math.min(box.radius * u, w / 2, h / 2);
-  ctx.beginPath();
-  ctx.roundRect(x, y, w, h, r);
-  if (box.backgroundOpacity > 0) { ctx.fillStyle = withAlpha(box.background, box.backgroundOpacity); ctx.fill(); }
-  const img = imageNow(box.image);
-  if (img) {
+  if (wrapped) {
+    // The graphic is the box: drawn whole, in its own shape; no panel, corners or frame of ours.
     ctx.save();
-    ctx.clip();
     ctx.globalAlpha = box.imageOpacity;
-    drawImageFit(ctx, img, x, y, w, h, box.imageFit);
+    ctx.drawImage(img!, x, y, w, h);
     ctx.restore();
+  } else {
+    const r = Math.min(box.radius * u, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, r);
+    if (box.backgroundOpacity > 0) { ctx.fillStyle = withAlpha(box.background, box.backgroundOpacity); ctx.fill(); }
+    if (img) {
+      ctx.save();
+      ctx.clip();
+      ctx.globalAlpha = box.imageOpacity;
+      drawImageFit(ctx, img, x, y, w, h, box.imageFit === 'wrap' ? 'stretch' : box.imageFit);
+      ctx.restore();
+    }
+    if (box.borderWidth > 0) { ctx.lineWidth = box.borderWidth * u; ctx.strokeStyle = box.borderColor; ctx.stroke(); }
   }
-  if (box.borderWidth > 0) { ctx.lineWidth = box.borderWidth * u; ctx.strokeStyle = box.borderColor; ctx.stroke(); }
+  // Text that does not fit in a graphic's own shape is cut at its edge.
+  if (wrapped) { ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip(); }
   // Text.
   ctx.textBaseline = 'middle';
   ctx.textAlign = 'left';

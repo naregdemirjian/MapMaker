@@ -471,6 +471,11 @@ try {
     await page.waitForFunction(() => (window as any).__mapmaker.store.world.all('sequence')[0]?.settings.includes('"frames":24'));
     await page.getByTestId('frame-slider').fill('12');
     await screenshot('presentation-mode');
+    // Only "All" is chosen at first; the separate layers are explained and chosen here.
+    assert.ok(await page.getByTestId('pass-all').isChecked());
+    assert.ok(!(await page.getByTestId('pass-fills').isChecked()));
+    for (const p of ['background', 'land', 'fills', 'borders', 'labels', 'overlays']) await page.getByTestId(`pass-${p}`).check();
+    await page.waitForFunction(() => JSON.parse((window as any).__mapmaker.store.world.all('sequence')[0].settings).exportPasses?.length === 7);
     const ex = await runExport('export-preview');
     first = ex;
     const m = ex.manifest;

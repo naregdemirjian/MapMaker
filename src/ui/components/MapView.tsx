@@ -7,7 +7,7 @@ import { DEFAULT_STYLE, type PassName } from '../../render-engine/map-renderer.t
 import { processLasso, densify, orientInteriorLeft, signedArea, splitLoops, type Pt, dedupe, ringFromMapPoints } from '../../render-engine/stroke.ts';
 import { geoCentroid } from 'd3-geo';
 import { lonLatToVec, E7 } from '../../geo-kernel/vec.ts';
-import { cameraAt, timeAt, overlaysAt, drawOverlays, type ShotSettings } from '../../presentation/sequence.ts';
+import { cameraAt, timeAt, overlaysAt, drawOverlays, withStillCamera, moveOverlay, type ShotSettings, type OverlayRect } from '../../presentation/sequence.ts';
 import { transitionOptions, drawShotOverlays } from '../../presentation/export-driver.ts';
 import { parseJSON } from '../../temporal-engine/engine.ts';
 import { compare, fromStore } from '../../core-time/index.ts';
@@ -23,7 +23,14 @@ type Drag =
   | { kind: 'lasso'; points: Pt[] }
   | { kind: 'vertex'; vid: number; x: number; y: number; moved: number }
   // The border pen: points go straight into the current draft (map positions).
-  | { kind: 'pen' };
+  | { kind: 'pen' }
+  // A text or the current-events box dragged on the shot preview.
+  | { kind: 'overlay'; id: string; x: number; y: number; from: { x: number; y: number } };
+
+/** Where the shot preview last drew its texts and the events box (frame pixels), to pick them up. */
+let overlayRects: OverlayRect[] = [];
+/** The same, for the tests. */
+export function shotOverlayRects(): OverlayRect[] { return overlayRects; }
 
 export function currentShot(): ShotSettings | null {
   const w = store.world;
@@ -40,17 +47,27 @@ export function frameRect(shot: ShotSettings, w: number, h: number) {
   return { x: (w - fw) / 2, y: (h - fh) / 2, w: Math.max(1, fw), h: Math.max(1, fh) };
 }
 
+/** Store the preview's view as the current shot's camera (still for the whole shot). */
+function commitShotCamera(): void {
+  const sh = currentShot(), cam = store.presentCamera, id = store.shotId;
+  if (!sh || !cam || !id) return;
+  store.execute((w) => cmd.updateSequence(w, id, { settings: withStillCamera(sh, cam) }));
+  store.set({ presentCamera: null });
+}
+
 export function MapView() {
   const s = useStore();
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [size, setSize] = useState({ w: 800, h: 600 });
   const drag = useRef<Drag>({ kind: 'none' });
+  const wheelTimer = useRef(0);
   /** Points of the precise shape being placed, as map positions (longitude, latitude). */
   const [polygon, setPolygon] = useState<Pt[]>([]);
   const [cursor, setCursor] = useState<Pt | null>(null);
   const [hoverVertex, setHoverVertex] = useState<number | null>(null);
   const [, force] = useState(0);
+  const [overOverlay, setOverOverlay] = useState(false);
   const presentation = s.mode === 'present';
   const shot = presentation ? currentShot() : null;
 
@@ -95,7 +112,8 @@ export function MapView() {
       console.error(e);
     }
     if (shot) {
-      drawShotOverlays(ctx, frame.w, frame.h, s.world, shot, s.shotFrame, time);
+      const o = s.presentOverlay;
+      overlayRects = drawShotOverlays(ctx, frame.w, frame.h, s.world, o ? moveOverlay(shot, o.id, o.dx, o.dy, o.from) : shot, s.shotFrame, time);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.strokeStyle = 'rgba(255,255,255,0.35)';
       ctx.lineWidth = 1;
@@ -222,6 +240,11 @@ export function MapView() {
     if (!s.world) return;
     e.currentTarget.setPointerCapture(e.pointerId);
     const p = local(e);
+    // In the shot preview, a text or the events box under the pointer is picked up and moved.
+    if (presentation && e.button === 0) {
+      const hit = overlayAt(p);
+      if (hit) { drag.current = { kind: 'overlay', id: hit.id, x: p[0], y: p[1], from: { x: hit.x / frame.w, y: hit.y / frame.h } }; return; }
+    }
     const wantsPan = e.button === 1 || e.button === 2 || presentation || s.tool === 'select' || (e as unknown as KeyboardEvent).shiftKey;
     if (!presentation && e.button === 0 && s.tool === 'vertex') {
       const ll = screenToLonLat(view, p[0], p[1]);
@@ -249,9 +272,26 @@ export function MapView() {
     if (wantsPan) drag.current = { kind: 'pan', x: e.clientX, y: e.clientY, moved: 0, startX: p[0], startY: p[1] };
   }
 
+  /** The text or events box drawn under a point of the frame (the topmost), if any. */
+  function overlayAt(p: Pt): OverlayRect | null {
+    for (let i = overlayRects.length - 1; i >= 0; i--) {
+      const r = overlayRects[i];
+      if (p[0] >= r.x && p[0] <= r.x + r.w && p[1] >= r.y && p[1] <= r.y + r.h) return r;
+    }
+    return null;
+  }
+
   function onPointerMove(e: React.PointerEvent<HTMLCanvasElement>) {
     const p = local(e);
     const d = drag.current;
+    if (d.kind === 'overlay') {
+      store.set({ presentOverlay: { id: d.id, dx: (p[0] - d.x) / frame.w, dy: (p[1] - d.y) / frame.h, from: d.from } });
+      return;
+    }
+    if (presentation && d.kind === 'none') {
+      const over = !!overlayAt(p);
+      if (over !== overOverlay) setOverOverlay(over);
+    }
     if (d.kind === 'pan') {
       const dx = e.clientX - d.x, dy = e.clientY - d.y;
       d.x = e.clientX; d.y = e.clientY; d.moved += Math.abs(dx) + Math.abs(dy);
@@ -288,6 +328,15 @@ export function MapView() {
     const d = drag.current;
     drag.current = { kind: 'none' };
     const p = local(e);
+    // Framing the shot: the view dragged to becomes the shot's camera (still for the whole shot).
+    if (presentation && d.kind === 'pan') { if (d.moved >= 1) commitShotCamera(); return; }
+    // A text or the events box dropped where it was dragged (one undo step).
+    if (d.kind === 'overlay') {
+      const o = store.presentOverlay, sh = currentShot(), id = store.shotId;
+      store.set({ presentOverlay: null });
+      if (o && sh && id && (Math.abs(o.dx) > 1e-4 || Math.abs(o.dy) > 1e-4)) store.execute((w) => cmd.updateSequence(w, id, { settings: moveOverlay(sh, o.id, o.dx, o.dy, o.from) }));
+      return;
+    }
     // A right-click (without dragging) deselects everything.
     if (d.kind === 'pan' && d.moved < 4 && !presentation && e.button === 2) { store.set({ selection: null }); return; }
     if (d.kind === 'pan' && d.moved < 4 && !presentation && e.button === 0) {
@@ -346,7 +395,12 @@ export function MapView() {
     const p = local(e);
     if (e.altKey && !presentation) { store.setCamera({ ...camera, rotation: (camera.rotation + (e.deltaY > 0 ? 3 : -3)) % 360 }); return; }
     const next = zoomCameraAt(camera, frame.w, frame.h, p[0], p[1], -e.deltaY / 400);
-    if (shot) store.set({ presentCamera: next }); else store.setCamera(next);
+    if (shot) {
+      store.set({ presentCamera: next });
+      // Stored once the wheel has been still for a moment (one undo step per zoom gesture).
+      clearTimeout(wheelTimer.current);
+      wheelTimer.current = window.setTimeout(commitShotCamera, 350);
+    } else store.setCamera(next);
   }
 
   useEffect(() => {
@@ -390,7 +444,7 @@ export function MapView() {
     }
   }
 
-  const cursorStyle = presentation ? 'grab' : s.tool === 'select' ? 'grab' : s.tool === 'vertex' ? (hoverVertex !== null ? 'move' : 'default') : 'crosshair';
+  const cursorStyle = presentation ? (drag.current.kind === 'overlay' || overOverlay ? 'move' : 'grab') : s.tool === 'select' ? 'grab' : s.tool === 'vertex' ? (hoverVertex !== null ? 'move' : 'default') : 'crosshair';
   return (
     <div className="map-wrap" ref={wrapRef}>
       <canvas

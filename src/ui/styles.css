@@ -198,3 +198,7 @@ label.file-button.small { padding: 3px 8px; font-size: 12px; }
 .country-row { gap: 8px; padding: 2px 0; }
 .country-row img, .country-row .noflag { width: 20px; height: 15px; object-fit: cover; border: 1px solid var(--line); flex: none; }
 .country-row .muted { margin-left: auto; font-size: 11px; }
+
+/* Export: the separately exported layers, set apart under "All". */
+.pass-box { margin: 4px 0 8px 6px; padding: 4px 0 4px 10px; border-left: 2px solid rgba(255, 255, 255, 0.14); }
+.pass-box p { margin: 0 0 4px; }
