@@ -243,3 +243,20 @@ see DEVELOPMENT.md, "Performance", for the tables and the other benchmark projec
 | A Settings button with performance options that never touch the final render or limit what can be made | Done | `e2e/workflows` 'Settings'; `blocks` test (stored settings) | D53 |
 | Editing stays rapid on a massive project | Done | `bench` on "Bench Heavy" (128,000 border segments, 11,000 parcels, 500 events) | D48–D51, D54; stepping through time across many events is the slowest thing left (DEVELOPMENT.md) |
 
+## The user's second optimisation request (17 November 2026)
+
+"Continue optimising the whole workflow … try stress testing it a lot … I'm going to be using this software rapidly
+all while having massive projects up, and also while using a slower computer." Measured like the first request, on
+the same three benchmark projects, against the build before this stage (DEVELOPMENT.md, "Performance after the
+second optimisation stage", has every figure).
+
+| Request | Status | Evidence | Notes |
+| --- | --- | --- | --- |
+| Moving and zooming the map on massive projects | Done | `bench/render.bench.ts`: moving 16–39 ms a frame to 5–10 ms, zooming 39–56 ms to 18–28 ms; `e2e/render-compare` (carried pictures equal fresh ones, 170 small moves, the planet's ends in view) | D58, D61–D64 |
+| Rapid editing: strokes, undo, choosing, lists | Done | `bench`: a stroke 65–75 ms to 33 ms (193 to 123 ms with 24,500 parcels), choosing a country 30 to 19 ms; `engine-follow` (random edits followed one by one equal a full recomputation); `e2e/render-compare` (the patched picture equals a fresh one) | D55, D56, D58 |
+| Dragging and stepping the timeline | Done, with a known rest | `bench`: a year a frame 29 to 10 ms on the heavy project; a month a frame close in 37 to 16 ms with a thousand territories | D58, D60, D65. A dozen events crossed in one frame still costs 100–180 ms on the largest projects |
+| Playing and exporting | Done | `bench`: export 1080p a fifth to a quarter faster, 4K up to a quarter; a moving camera on Earth 59 to 30 ms | D61, D64; identical re-export still checked |
+| Opening a project | Done | `bench/open.ts`: 3.2–5.6 s to 2.0–3.7 s | D66 |
+| A slower computer | Done | `bench/stress.ts --throttle 4` on the heavy project: moving the map 146 to 71 ms a frame, a stroke 227 to 155 ms, the median frame 110 to 79 ms | D65: the sharp redraw waits for the frame, so a slow computer no longer draws twice |
+| Long sessions on massive projects | Done | `bench/stress.ts`: memory level after the first hundred steps on all three projects; `kept` test | D59 |
+| Stress testing | Done | `bench/stress.ts`: 250–300 random steps on each project, twice the pixel density, four times slower, both presets, every tenth frame compared with a fresh drawing; the verify mode checks history, snapshots and borders against a full recomputation | D57. Six defects found and fixed (DEVELOPMENT.md, status) |
