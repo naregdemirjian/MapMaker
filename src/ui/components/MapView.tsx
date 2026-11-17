@@ -4,12 +4,14 @@ import {
   makeView, screenToLonLat, lonLatToScreen, panCamera, zoomCameraAt, radiansPerPixel, type View, type Camera,
 } from '../../render-engine/camera.ts';
 import { DEFAULT_STYLE, type PassName } from '../../render-engine/map-renderer.ts';
+import { placementMode } from './Characters.tsx';
+import { periodChangesNow, GAINED_COLOR, LOST_COLOR } from './CountryHistory.tsx';
 import { processLasso, densify, orientInteriorLeft, signedArea, splitLoops, type Pt, dedupe, ringFromMapPoints } from '../../render-engine/stroke.ts';
 import { geoCentroid } from 'd3-geo';
 import { lonLatToVec, E7 } from '../../geo-kernel/vec.ts';
 import { cameraAt, timeAt, overlaysAt, drawOverlays, withStillCamera, moveOverlay, type ShotSettings, type OverlayRect } from '../../presentation/sequence.ts';
 import { transitionOptions, drawShotOverlays } from '../../presentation/export-driver.ts';
-import { parseJSON } from '../../temporal-engine/engine.ts';
+import { parseJSON, slerpLonLat } from '../../temporal-engine/engine.ts';
 import { compare, fromStore } from '../../core-time/index.ts';
 import { basemapSourceOf } from '../../world-model/world-settings.ts';
 import { loadBasemapDetail, pixelsPerDegree, DETAIL_PIXELS_PER_DEGREE } from '../../render-engine/basemap.ts';
@@ -25,7 +27,9 @@ type Drag =
   // The border pen: points go straight into the current draft (map positions).
   | { kind: 'pen' }
   // A text or the current-events box dragged on the shot preview.
-  | { kind: 'overlay'; id: string; x: number; y: number; from: { x: number; y: number } };
+  | { kind: 'overlay'; id: string; x: number; y: number; from: { x: number; y: number } }
+  // A character's marker dragged to a new place (from the date being viewed).
+  | { kind: 'character'; entity: string; moved: number };
 
 /** Where the shot preview last drew its texts and the events box (frame pixels), to pick them up. */
 let overlayRects: OverlayRect[] = [];
@@ -106,6 +110,7 @@ export function MapView() {
     }
     if (!shot || shot.graticule) passes.add('graticule');
     if (!shot || shot.labels) passes.add('labels');
+    if (!shot || shot.characters !== false) passes.add('characters');
     try {
       s.renderer.render(ctx, view, s.world, s.engine, s.spaceId, time, { passes, transparent: !!shot?.transparent, layerIds: layers, basemap, referenceBorders: !shot && s.referenceBorders, transitions: shot ? transitionOptions(shot, s.shotFrame) : undefined, mediaSeconds: shot ? s.shotFrame / shot.fps : 0 });
     } catch (e) {
@@ -125,6 +130,24 @@ export function MapView() {
 
   function drawEditingOverlay(ctx: CanvasRenderingContext2D, v: View) {
     const w = s.world!, arr = w.arrangement(s.spaceId);
+    // "Changes over time": the country lightly, what it gained (green) and lost (red) in the period strongly.
+    const selEnt = s.selection?.kind === 'entity' ? w.get('entity', s.selection.id) : null;
+    if (s.historyView.on && selEnt && (selEnt.type_id === 'polity' || selEnt.type_id === 'faction') && s.layerId) {
+      const pc = periodChangesNow(w, s.engine!, s.spaceId, s.layerId, selEnt.id);
+      const path = (faces: number[]) => { const p = new Path2D(); for (const f of faces) p.addPath(s.renderer.facePath(v, arr, f)); return p; };
+      ctx.save();
+      const held = path(pc.held);
+      ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.fill(held, 'evenodd');
+      ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = 1.2; ctx.setLineDash([4, 4]); ctx.stroke(held);
+      ctx.setLineDash([]);
+      for (const [faces, color] of [[pc.gained, GAINED_COLOR], [pc.lost, LOST_COLOR]] as const) {
+        if (!faces.length) continue;
+        const p = path(faces);
+        ctx.globalAlpha = 0.5; ctx.fillStyle = color; ctx.fill(p, 'evenodd');
+        ctx.globalAlpha = 1; ctx.strokeStyle = color; ctx.lineWidth = 2.5; ctx.stroke(p);
+      }
+      ctx.restore();
+    } else
     // Selected owner: outline its territory at the current date.
     if (s.selection?.kind === 'entity' && s.layerId) {
       const states = s.engine!.partitionState(s.spaceId, s.layerId, s.time);
@@ -132,6 +155,40 @@ export function MapView() {
       let any = false;
       for (const [f, st] of states) if (st.value === s.selection.id) { p.addPath(s.renderer.facePath(v, arr, f)); any = true; }
       if (any) { ctx.save(); ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 2.5; ctx.setLineDash([6, 4]); ctx.stroke(p); ctx.restore(); }
+    }
+    // Selected character: its route through its places (dashed), each place a small ring.
+    if (s.selection?.kind === 'entity' && w.get('entity', s.selection.id)?.type_id === 'character') {
+      const track = s.engine!.characterTrack(s.spaceId, s.selection.id);
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255, 209, 102, 0.9)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 5]);
+      for (let i = 1; i < track.length; i++) {
+        const a = track[i - 1], b = track[i];
+        if (a.off || b.off || b.arrive !== 'travel') continue;
+        ctx.beginPath();
+        for (let k = 0; k <= 32; k++) {
+          const [lon, lat] = slerpLonLat(a.lon, a.lat, b.lon, b.lat, k / 32);
+          const q = lonLatToScreen(v, lon, lat);
+          if (!q) continue;
+          if (k === 0) ctx.moveTo(q[0], q[1]); else ctx.lineTo(q[0], q[1]);
+        }
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      for (const wp of track) {
+        if (wp.off) continue;
+        const q = lonLatToScreen(v, wp.lon, wp.lat);
+        if (q) { ctx.beginPath(); ctx.arc(q[0], q[1], 4, 0, Math.PI * 2); ctx.stroke(); }
+      }
+      ctx.restore();
+    }
+    // A character being dragged: where it will go.
+    if (drag.current.kind === 'character' && cursor) {
+      ctx.save();
+      ctx.beginPath(); ctx.arc(cursor[0], cursor[1], 8, 0, Math.PI * 2);
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.setLineDash([3, 3]); ctx.stroke();
+      ctx.restore();
     }
     if (s.selection?.kind === 'point') {
       const p = lonLatToScreen(v, s.selection.lon, s.selection.lat);
@@ -245,6 +302,21 @@ export function MapView() {
       const hit = overlayAt(p);
       if (hit) { drag.current = { kind: 'overlay', id: hit.id, x: p[0], y: p[1], from: { x: hit.x / frame.w, y: hit.y / frame.h } }; return; }
     }
+    // Characters tool: a click puts the chosen character here, from the date being viewed.
+    if (!presentation && e.button === 0 && s.tool === 'place') {
+      const ll = screenToLonLat(view, p[0], p[1]);
+      if (!ll) return;
+      if (!s.placeValue) { store.toast('Choose the character to place first.', 'error'); return; }
+      const who = s.placeValue;
+      store.execute((wd) => cmd.placeCharacter(wd, { spaceId: s.spaceId, entity: who, lon: ll[0], lat: ll[1], mode: placementMode() }));
+      store.set({ selection: { kind: 'entity', id: who } });
+      return;
+    }
+    // Select tool: a character's marker is picked up (dragged to move it, clicked to select it).
+    if (!presentation && e.button === 0 && s.tool === 'select') {
+      const hit = s.renderer.lastCharacters.find((c) => { const q = lonLatToScreen(view, c.lon, c.lat); return !!q && Math.hypot(q[0] - p[0], q[1] - p[1]) <= 11; });
+      if (hit) { drag.current = { kind: 'character', entity: hit.entity, moved: 0 }; setCursor(p); return; }
+    }
     const wantsPan = e.button === 1 || e.button === 2 || presentation || s.tool === 'select' || (e as unknown as KeyboardEvent).shiftKey;
     if (!presentation && e.button === 0 && s.tool === 'vertex') {
       const ll = screenToLonLat(view, p[0], p[1]);
@@ -288,6 +360,7 @@ export function MapView() {
       store.set({ presentOverlay: { id: d.id, dx: (p[0] - d.x) / frame.w, dy: (p[1] - d.y) / frame.h, from: d.from } });
       return;
     }
+    if (d.kind === 'character') { d.moved += 1; setCursor(p); return; }
     if (presentation && d.kind === 'none') {
       const over = !!overlayAt(p);
       if (over !== overOverlay) setOverOverlay(over);
@@ -330,6 +403,14 @@ export function MapView() {
     const p = local(e);
     // Framing the shot: the view dragged to becomes the shot's camera (still for the whole shot).
     if (presentation && d.kind === 'pan') { if (d.moved >= 1) commitShotCamera(); return; }
+    // A character dropped: it is there from the date being viewed (a click just selects it).
+    if (d.kind === 'character') {
+      setCursor(null);
+      const ll = d.moved > 2 ? screenToLonLat(view, p[0], p[1]) : null;
+      if (ll) store.execute((wd) => cmd.placeCharacter(wd, { spaceId: store.spaceId, entity: d.entity, lon: ll[0], lat: ll[1], mode: placementMode() }));
+      store.set({ selection: { kind: 'entity', id: d.entity } });
+      return;
+    }
     // A text or the events box dropped where it was dragged (one undo step).
     if (d.kind === 'overlay') {
       const o = store.presentOverlay, sh = currentShot(), id = store.shotId;

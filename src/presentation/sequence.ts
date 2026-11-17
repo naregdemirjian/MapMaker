@@ -25,6 +25,8 @@ export interface ShotSettings {
   layers: string[]; // partition layers shown; empty = all visible layers of the world
   graticule: boolean;
   labels: boolean;
+  /** Characters' markers and names (absent: shown). */
+  characters?: boolean;
   transparent: boolean;
   /** Folder to export into; empty or absent: the project's exports folder. */
   exportDir?: string | null;

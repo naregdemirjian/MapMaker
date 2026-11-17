@@ -381,6 +381,101 @@ try {
   });
 
   let colours: Record<string, string> = {};
+  await h.step('A character: a point that travels between places over time, moved by dragging, leaves the map; never territory', async () => {
+    await page.getByTestId('mode-world').click();
+    await page.getByTestId('tool-select').click();
+    await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: -30, lat: 45, zoom: 1.6, rotation: 0, projection: 'equirectangular' }));
+    await h.setDate('1500');
+    const C1: LL = [-45, 55], C2: LL = [-20, 62], C3: LL = [-28, 50];
+    const ownersBefore = [await h.ownerAt(C1, '1550'), await h.ownerAt(C2, '1650')];
+    const eventCount = () => page.evaluate(() => (window as any).__mapmaker.store.world.all('event').length) as Promise<number>;
+    const eventsBefore = await eventCount();
+    // A new character: made under Characters, ready to place.
+    await page.getByRole('button', { name: '+ Character' }).click();
+    await page.getByTestId('new-character-name').fill('Ilse the Wanderer');
+    await page.getByTestId('new-character-create').click();
+    await page.getByTestId('character-panel').waitFor();
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.tool), 'place', 'ready to place');
+    let q = await h.toPage(C1); await page.mouse.click(q[0], q[1]);
+    await h.setDate('1600');
+    q = await h.toPage(C2); await page.mouse.click(q[0], q[1]);
+    await h.saved();
+    const drawn = () => page.evaluate(() => (window as any).__mapmaker.store.renderer.lastCharacters) as Promise<Array<{ name: string; lon: number; lat: number; moving: boolean }>>;
+    let c = (await drawn()).find((x) => x.name === 'Ilse the Wanderer')!;
+    assert.ok(c && Math.abs(c.lon - C2[0]) < 0.6 && Math.abs(c.lat - C2[1]) < 0.6, `in 1600 at the second place (${c?.lon}, ${c?.lat})`);
+    // Half-way through, travelling between the two places.
+    await h.setDate('1550');
+    c = (await drawn()).find((x) => x.name === 'Ilse the Wanderer')!;
+    assert.ok(c.moving && c.lon > C1[0] + 3 && c.lon < C2[0] - 3, `travelling in 1550 (${c.lon}, ${c.lat})`);
+    assert.match((await page.getByTestId('character-where').textContent()) ?? '', /travelling/);
+    await h.screenshot('character-travelling');
+    // Not before its first place; and never territory.
+    await h.setDate('1499');
+    assert.ok(!(await drawn()).some((x) => x.name === 'Ilse the Wanderer'), 'not on the map before 1500');
+    assert.deepEqual([await h.ownerAt(C1, '1550'), await h.ownerAt(C2, '1650')], ownersBefore, 'the places it stands on belong to whoever held them');
+    // Drag the marker with Select in 1600: that placement moves (no new one).
+    await h.setDate('1600');
+    await page.getByTestId('tool-select').click();
+    const from = await h.toPage(C2), to = await h.toPage(C3);
+    await page.mouse.move(from[0], from[1]); await page.mouse.down();
+    await page.mouse.move(to[0], to[1], { steps: 8 }); await page.mouse.up();
+    await h.saved();
+    assert.equal(await page.getByTestId('character-place').count(), 2, 'still two places');
+    c = (await drawn()).find((x) => x.name === 'Ilse the Wanderer')!;
+    assert.ok(Math.abs(c.lon - C3[0]) < 0.6 && Math.abs(c.lat - C3[1]) < 0.6, `dragged to the third place (${c.lon}, ${c.lat})`);
+    // Appears instead of travelling: waits at the first place until 1600.
+    await page.getByTestId('character-arrive').selectOption('jump');
+    await h.setDate('1550');
+    c = (await drawn()).find((x) => x.name === 'Ilse the Wanderer')!;
+    assert.ok(!c.moving && Math.abs(c.lon - C1[0]) < 0.6, 'waits at the first place');
+    await page.getByTestId('character-arrive').selectOption('travel');
+    // Leaves the map in 1700 (and undo brings it back).
+    await h.setDate('1700');
+    await page.getByTestId('character-leaves').click();
+    await h.setDate('1750');
+    assert.ok(!(await drawn()).some((x) => x.name === 'Ilse the Wanderer'), 'gone after leaving');
+    await page.getByTestId('undo').click();
+    await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastCharacters.some((x: any) => x.name === 'Ilse the Wanderer'));
+    assert.equal(await eventCount(), eventsBefore, 'placing and moving a character makes no event');
+    await h.screenshot('character-panel');
+  });
+
+  await h.step("Changes over time: a country shown lightly, the land it gained in a year, a decade, a century", async () => {
+    await page.getByTestId('tool-select').click();
+    await page.locator('.left .row', { hasText: A }).first().click();
+    await page.getByTestId('entity-panel').waitFor();
+    await page.getByTestId('history-mode').check();
+    await page.getByTestId('history-unit').selectOption('year');
+    await page.evaluate(([lon, lat]) => (window as any).__mapmaker.store.setCamera({ lon, lat, zoom: 1, rotation: 0, projection: 'equirectangular' }), P.b);
+    await h.setDate('1 June 1900');
+    assert.equal(await page.getByTestId('history-period').textContent(), '1900');
+    // In 1900 A annexed B: it gained land, lost none, and the Union is listed.
+    const summary = (await page.getByTestId('history-summary').textContent()) ?? '';
+    const km = (re: RegExp) => Number((re.exec(summary)?.[1] ?? '0').replace(/,/g, ''));
+    assert.ok(km(/Gained ([\d,]+) km²/) > 100000 && km(/lost ([\d,]+) km²/) === 0, `gained, not lost: ${summary}`);
+    assert.ok((await page.getByTestId('history-change').allTextContents()).some((t) => /Union/.test(t) && /from Duchy of Proba/.test(t)), 'the Union is listed, with whom from');
+    // On the map, B's former land is marked as gained (green), A's own land only lightly.
+    const px = async (ll: LL) => { const q = await h.toPage(ll); return page.evaluate(([x, y]) => { const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement; const r = c.getBoundingClientRect(), k = c.width / r.width; return Array.from(c.getContext('2d')!.getImageData(Math.round((x - r.left) * k), Math.round((y - r.top) * k), 1, 1).data).slice(0, 3); }, q); };
+    const gained = await px(P.b);
+    await page.getByTestId('history-mode').uncheck();
+    const plain = await px(P.b);
+    await page.getByTestId('history-mode').check();
+    const greener = (gained[1] - gained[0]) - (plain[1] - plain[0]);
+    assert.ok(greener > 40, `B's former land is marked green (${plain} -> ${gained})`);
+    await h.screenshot('changes-over-time-1900');
+    // The year before: nothing changed. A century: the same gain (and 1800's treaty, if it touched A).
+    await page.getByTestId('history-prev').click();
+    assert.equal(await page.getByTestId('history-period').textContent(), '1899');
+    assert.equal(await page.getByTestId('history-change').count(), 0);
+    await page.getByTestId('history-unit').selectOption('years');
+    await page.getByTestId('history-years').fill('100');
+    assert.equal(await page.getByTestId('history-period').textContent(), '1800–1899');
+    await page.getByTestId('history-next').click();
+    assert.equal(await page.getByTestId('history-period').textContent(), '1900–1999');
+    assert.ok((await page.getByTestId('history-change').count()) >= 1);
+    await page.getByTestId('history-mode').uncheck();
+  });
+
   await h.step('A shot framed in the preview (still camera, reset) at 2.39:1 and 25 fps; inspect every exported pass', async () => {
     colours = await page.evaluate((names) => Object.fromEntries(names.map((n) => [n, (window as any).__mapmaker.store.world.all('entity').find((e: any) => e.name === n).color])), [A, B]);
     await page.locator('.left .row', { hasText: 'Union' }).click();
@@ -422,7 +517,7 @@ try {
     await h.screenshot('presentation-still-camera');
 
     // What to export: only "All" at first, explained; then every separate layer too.
-    const separate = ['background', 'land', 'fills', 'borders', 'labels', 'overlays'];
+    const separate = ['background', 'land', 'fills', 'borders', 'labels', 'characters', 'overlays'];
     assert.ok(await page.getByTestId('pass-all').isChecked(), '"All" is chosen by default');
     for (const p of separate) assert.ok(!(await page.getByTestId(`pass-${p}`).isChecked()), `${p} is not chosen by default`);
     assert.match((await page.getByTestId('separate-passes-note').textContent()) ?? '', /exported separately/);
@@ -444,10 +539,10 @@ try {
     assert.deepEqual(m.resolution, [480, 201], '2.39:1 at a quarter size');
     assert.equal(m.fps, 25);
     assert.deepEqual(m.frames, [0, 24]);
-    for (const pass of ['background', 'land', 'fills', 'borders', 'labels', 'overlays', 'all']) assert.equal(ex.frames(pass).length, 25, pass);
+    for (const pass of [...separate, 'all']) assert.equal(ex.frames(pass).length, 25, pass);
     // The estimate is of the right size: the preview (¼ size) is about a sixteenth of it.
     let written = 0;
-    for (const pass of ['background', 'land', 'fills', 'borders', 'labels', 'overlays', 'all']) for (const f of ex.frames(pass)) written += statSync(f).size;
+    for (const pass of [...separate, 'all']) for (const f of ex.frames(pass)) written += statSync(f).size;
     const ratio = written / 1024 / (everything / 16);
     assert.ok(ratio > 0.25 && ratio < 4, `the estimated size is close (written ${(written / 1024).toFixed(0)} KB at ¼ size, estimated ${(everything / 16).toFixed(0)} KB)`);
     assert.match(readFileSync(join(ex.dir, 'COMPOSITING_GUIDE.txt'), 'utf8'), /25 fps/);
@@ -475,7 +570,7 @@ try {
 
     // The separate passes stacked with Premiere's Normal blend reproduce the full picture.
     for (const f of [0, 12, 24]) {
-      const layers = ['background', 'land', 'fills', 'borders', 'labels', 'overlays'].map((p) => readPNG(ex.frames(p)[f]));
+      const layers = separate.map((p) => readPNG(ex.frames(p)[f]));
       const beauty = readPNG(ex.frames('all')[f]);
       const n = beauty.width * beauty.height;
       const comp = compositeOver(layers, n);

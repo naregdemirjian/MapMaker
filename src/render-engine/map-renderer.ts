@@ -20,11 +20,11 @@ import { planeShape, placeLabel, lineChoices, textWidthEm, blockHeightEm, LINE_H
 import { resolveLabelStyle, labelSize, labelFont, labelText, type LabelStyle, type CountryLabel } from './label-style.ts';
 import { imageNow, videoNow, drawImageFit, type MediaChannel } from './assets.ts';
 
-type LabelEntity = { name: string; style?: string };
+type LabelEntity = { name: string; style?: string; color?: string };
 
-export type PassName = 'background' | 'graticule' | 'land' | 'fills' | 'borders' | 'labels';
+export type PassName = 'background' | 'graticule' | 'land' | 'fills' | 'borders' | 'labels' | 'characters';
 /** Drawing order. The grid lies under the land, so stacked export passes match the full picture. */
-export const ALL_PASSES: PassName[] = ['background', 'graticule', 'land', 'fills', 'borders', 'labels'];
+export const ALL_PASSES: PassName[] = ['background', 'graticule', 'land', 'fills', 'borders', 'labels', 'characters'];
 
 export interface MapStyle {
   ocean: string;
@@ -145,6 +145,8 @@ export class MapRenderer {
   private pathCacheView = '';
   private basemapPainter = new BasemapPainter();
   lastLabels: LabelInfo[] = [];
+  /** The characters drawn in the last frame, where (screen) and on the map, for picking and tests. */
+  lastCharacters: Array<{ entity: string; name: string; x: number; y: number; lon: number; lat: number; moving: boolean }> = [];
   /** The animated changes drawn in the last frame (style and eased progress), for checks and tests. */
   lastTransitions: Array<{ style: string; progress: number }> = [];
 
@@ -327,10 +329,16 @@ export class MapRenderer {
       ctx.restore();
     }
 
-    if (opts.passes.has('labels')) for (const { states, clip } of prepared) labels.push(...this.layerLabels(view, arr, states, entities, clip ? landMaskOf(opts.basemap!) : null));
+    // One label per country: a country on several layers (its land, and its military control, say) is
+    // labelled from the lowest layer it is on.
+    if (opts.passes.has('labels')) for (const { states, clip } of prepared) {
+      for (const l of this.layerLabels(view, arr, states, entities, clip ? landMaskOf(opts.basemap!) : null)) if (!labels.some((x) => x.entityId === l.entityId)) labels.push(l);
+    }
 
     if (opts.passes.has('labels')) this.drawLabels(ctx, labels, style, u);
     this.lastLabels = labels;
+    this.lastCharacters = [];
+    if (opts.passes.has('characters')) this.drawCharacters(ctx, view, engine, spaceId, t, entities);
     ctx.restore();
   }
 
@@ -1024,6 +1032,42 @@ export class MapRenderer {
 
   /** The look of one country's label (null: hidden); set for each frame by render(). */
   private labelLook: (id: string, name: string) => { style: LabelStyle; text: string } | null = (_id, name) => ({ style: resolveLabelStyle(), text: name });
+
+  /** Characters: a marker in the character's colour and its name beside it. Points, never territory. */
+  private drawCharacters(ctx: CanvasRenderingContext2D, view: View, engine: Engine, spaceId: string, t: Instant, entities: Map<string, LabelEntity>): void {
+    const u = view.unit;
+    const list = engine.charactersAt(spaceId, t);
+    if (!list.length) return;
+    ctx.save();
+    ctx.lineJoin = 'round';
+    for (const c of list) {
+      const e = entities.get(c.entity);
+      if (!e) continue;
+      const p = view.projection([c.lon, c.lat]);
+      if (!p || p[0] < -50 || p[1] < -50 || p[0] > view.width + 50 || p[1] > view.height + 50) continue;
+      const r = 8 * u;
+      ctx.shadowColor = 'rgba(0,0,0,0.55)';
+      ctx.shadowBlur = 6 * u;
+      ctx.beginPath();
+      ctx.arc(p[0], p[1], r, 0, Math.PI * 2);
+      ctx.fillStyle = e.color ?? '#ffd166';
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.lineWidth = 2.2 * u;
+      ctx.strokeStyle = '#ffffff';
+      ctx.stroke();
+      ctx.font = `600 ${(20 * u).toFixed(1)}px "Segoe UI", Arial, sans-serif`;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.lineWidth = 4 * u;
+      ctx.strokeStyle = 'rgba(10,16,24,0.85)';
+      ctx.strokeText(e.name, p[0] + r + 5 * u, p[1]);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(e.name, p[0] + r + 5 * u, p[1]);
+      this.lastCharacters.push({ entity: c.entity, name: e.name, x: p[0], y: p[1], lon: c.lon, lat: c.lat, moving: c.moving });
+    }
+    ctx.restore();
+  }
 
   private drawLabels(ctx: CanvasRenderingContext2D, labels: LabelInfo[], _style: MapStyle, _u: number): void {
     const placed: Array<[number, number, number, number]> = [];

@@ -10,12 +10,13 @@ import { type Instant, gregorian, toJSONValue, fromJSONValue } from '../core-tim
 import { type Camera, defaultCamera, PROJECTIONS } from '../render-engine/camera.ts';
 import { MapRenderer } from '../render-engine/map-renderer.ts';
 import { loadBasemap, type Basemap } from '../render-engine/basemap.ts';
+import { DEFAULT_PERIOD, type PeriodSpec } from '../domain/history-view.ts';
 import { setAssetBase } from '../render-engine/assets.ts';
 import type { Vec3 } from '../geo-kernel/vec.ts';
 import type { StrokeSettings } from '../render-engine/stroke.ts';
 
 export type Mode = 'world' | 'present';
-export type Tool = 'select' | 'lasso' | 'polygon' | 'pen' | 'vertex';
+export type Tool = 'select' | 'lasso' | 'polygon' | 'pen' | 'vertex' | 'place';
 export type Selection =
   | { kind: 'entity'; id: string }
   | { kind: 'event'; id: string }
@@ -47,6 +48,13 @@ class AppStore {
   tool: Tool = 'select';
   selection: Selection = null;
   paintValue: string | null = null;
+  /** The character the Characters tool places. */
+  placeValue: string | null = null;
+  /**
+   * "Changes over time": the selected country is shown lightly, and the land it gained and lost in
+   * the period around the date being viewed strongly. See domain/history-view.ts.
+   */
+  historyView: { on: boolean; period: PeriodSpec } = { on: false, period: DEFAULT_PERIOD };
   recordEventId: string | null = null;
   cameras = new Map<string, Camera>();
   stroke: StrokeSettings = { smoothness: 1, irregularity: 0, precision: 1.2, seed: 1 };

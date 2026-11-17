@@ -2,7 +2,7 @@
 // in-memory world and returns the exact row diffs to save (and to undo). Commands never draw anything.
 import { World, Tx, newId } from '../world-model/world.ts';
 import {
-  Engine, canonicalFaces, leafDescendants, hashFaces, parseJSON, type Resolution, type TransitionSpec, type AnnexIntent,
+  Engine, canonicalFaces, leafDescendants, hashFaces, parseJSON, type Resolution, type TransitionSpec, type AnnexIntent, type PlaceIntent,
 } from '../temporal-engine/engine.ts';
 import { type Instant, toStore, NEG_INF, compare } from '../core-time/index.ts';
 import {
@@ -669,6 +669,63 @@ export function reapplyIntent(world: World, engine: Engine, effectId: string): C
     const basis = engine.basisFor(ef, intent.from);
     tx.patch('effect', effectId, { resolution: JSON.stringify({ set: [[basis, intent.to]] }), basis_hash: hashFaces(basis) });
   });
+}
+
+// ---------------------------------------------------------------- characters (points, never territory)
+
+/**
+ * Place a character on a map from a date on: a point, with no borders. Without an event (mode
+ * 'change') or as part of an event (mode 'new'). Placing a character again at the same moment moves
+ * that placement instead of adding another. `arrive`: travels here from its previous place
+ * (moving steadily between the two dates), or appears here at the date.
+ */
+export function placeCharacter(world: World, o: { spaceId: string; entity: string; lon: number; lat: number; mode: EditMode; arrive?: 'travel' | 'jump' }): CommandResult<string> {
+  const e = world.get('entity', o.entity);
+  if (!e) throw new Error('That character no longer exists.');
+  if (!world.get('map_space', o.spaceId)) throw new Error('That map no longer exists.');
+  if (!Number.isFinite(o.lon) || !Number.isFinite(o.lat) || Math.abs(o.lat) > 90) throw new Error('That place is not on the map.');
+  const lon = ((((o.lon + 180) % 360) + 360) % 360) - 180;
+  return run(world, `Place ${e.name}`, (tx) => writePlacement(tx, o.spaceId, o.entity, o.mode, { lon, lat: o.lat, arrive: o.arrive }));
+}
+
+/** A character leaves the map from a date on (until placed again). */
+export function characterLeaves(world: World, o: { spaceId: string; entity: string; mode: EditMode }): CommandResult<string> {
+  const e = world.get('entity', o.entity);
+  if (!e) throw new Error('That character no longer exists.');
+  return run(world, `${e.name} leaves the map`, (tx) => writePlacement(tx, o.spaceId, o.entity, o.mode, { off: true }));
+}
+
+/** Whether a character travels to a placement from the previous one, or appears there. */
+export function setPlacementArrival(world: World, effectId: string, arrive: 'travel' | 'jump'): CommandResult {
+  const ef = world.get('effect', effectId);
+  if (!ef || ef.kind !== 'place') throw new Error('That placement no longer exists.');
+  const it = parseJSON<PlaceIntent>(ef.intent, { op: 'place', entity: '' });
+  return run(world, arrive === 'travel' ? 'Travels there' : 'Appears there', (tx) => tx.patch('effect', effectId, { intent: JSON.stringify({ ...it, arrive }) }));
+}
+
+function writePlacement(tx: Tx, spaceId: string, entity: string, mode: EditMode, what: { lon?: number; lat?: number; off?: boolean; arrive?: 'travel' | 'jump' }): string {
+  const world = tx.world;
+  const eventId = mode.kind === 'new' ? mode.eventId : BASE_EVENT_ID;
+  if (mode.kind === 'new' && !world.get('event', eventId)) throw new Error('That event no longer exists.');
+  const t: Instant | null = mode.kind === 'new' ? mode.at ?? null : mode.t;
+  const at = t && t.day !== -Infinity ? toStore(t) : null;
+  // The same character, map, event and moment: move that placement.
+  const same = world.all('effect').find((f) => {
+    if (f.kind !== 'place' || f.space_id !== spaceId || f.event_id !== eventId || f.at_day !== (at ? at[0] : null) || f.at_ms !== (at ? at[1] : null)) return false;
+    return parseJSON<PlaceIntent | null>(f.intent, null)?.entity === entity;
+  });
+  const prev = same ? parseJSON<PlaceIntent | null>(same.intent, null) : null;
+  const intent: PlaceIntent = what.off
+    ? { op: 'place', entity, off: true }
+    : { op: 'place', entity, lon: what.lon, lat: what.lat, arrive: what.arrive ?? prev?.arrive ?? 'travel' };
+  if (same) { tx.patch('effect', same.id, { intent: JSON.stringify(intent) }); return same.id; }
+  const id = newId('eff');
+  tx.insert('effect', {
+    id, event_id: eventId, ordinal: nextOrdinal(world, eventId), kind: 'place', space_id: spaceId, layer_id: null,
+    // No parcels: an empty resolution, in the same shape as every other change's.
+    at_day: at ? at[0] : null, at_ms: at ? at[1] : null, transition: '', intent: JSON.stringify(intent), resolution: JSON.stringify({ set: [] }), basis_hash: '',
+  });
+  return id;
 }
 
 export function deleteEffect(world: World, effectId: string): CommandResult {

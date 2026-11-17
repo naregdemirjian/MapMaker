@@ -59,6 +59,74 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D38. No maps of cities (the user, 17 November 2026)
+
+The user dropped maps of cities ("forget about creating maps for cities and stuff"). Every map stays a sphere with its
+own radius, so the plane version of the kernel is no longer planned for city plans. Whether the solar system and the
+galaxy are still wanted is to be confirmed with the user; until then they stay in the long-term roadmap (space maps).
+
+### D37. Export: "All" alone by default; an estimated size
+
+"All" (everything in one image sequence) is first and the only thing chosen at first; the separate layers are listed
+under it, explained as exported separately. The choice is kept with each shot (`exportPasses` in its settings; absent
+means "All"). Files are still written in stacking order, bottom first, with "All" last, as the compositing guide lists
+them. The estimated size draws one frame from the middle of the shot for each chosen layer (at most 1920 pixels wide,
+scaled up by area), compresses it as PNG and multiplies by the number of frames; the interface test compares it with a
+real export (it must be within a factor of four; it is usually much closer).
+
+### D36. "Changes over time": comparing a country at the start and the end of a period
+
+A selection mode for a country (in its panel): the whole country is outlined lightly; the land it gained and lost in the
+period around the date being viewed is filled green and red. Periods are a day, a month, a year or several years
+(aligned: decades start in years ending in 0); ◀ ▶ step through them. Gained and lost land compare the country just
+before the period and at its end, so land lost and won back within the period is neither, while every change in the
+period that touched its land is listed (with from and to whom). Read-only (`src/domain/history-view.ts`).
+
+### D35. Characters are dated placements: points, never territory
+
+A character's places are changes of kind `place` (the character, a longitude and latitude, or "leaves the map"),
+dated like any other change: without an event (from the date being viewed) or in the event being recorded. No project
+file change: effects already allow any kind; place changes have no layer and an empty parcel list. Between two places a
+character travels steadily along the shortest path between the two dates, unless set to appear at the second date. The
+Characters tool places the chosen character with a click; with Select its marker is dragged (placing it again at the
+same moment moves that placement). Characters are drawn above labels, as their own export layer ("Characters"), and can
+be hidden per shot.
+
+### D34. Shots have a still camera (the user, 17 November 2026)
+
+The user never moves the camera during a video. Dragging and zooming the preview sets the shot's one view (one undo step
+per gesture); "Reset camera" gives the whole map, straight. The start and end views are gone. Shots made earlier whose
+camera moves still play as made, with a note, until they are framed again. Texts and the current events box are dragged
+on the preview to place them anywhere; a graphic of the user's own can be the events box itself ("wrap the box around
+the graphic", chosen for new graphics: the box takes the graphic's shape at the chosen width).
+
+### D33. Advancing front from the border; expansion; no wipe (the user, 17 November 2026)
+
+"Advancing front" now grows a change out of the border it shares with the new owner's land as it was before the change:
+the area reached is every point within a distance of that border, the distance growing with the change (drawn as the
+border widened by that distance, clipped to the change). A piece that does not touch the owner's land grows from its
+side facing the owner's nearest land, as a straight front. An owner with no land before grows from the middle. The circle
+from where the drawing started is now called "Expansion". The straight wipe is gone; shots saved with it show the
+advancing front. It is the default for shots.
+
+### D32. "Correct this period" applies from the date drawn, without an event (the user, 17 November 2026)
+
+Replaces the retroactive correction in the drawing prompt (D10 remains for the starting map). Drawing with "Correct this
+period" changes the map from the date being viewed on, until something later changes that land, and makes no event.
+Stored as a dated change with the starting map, which no list shows as an event; it wins over an event at the same
+moment (it was drawn while looking at that moment). Listed with its date in the country's changes and in the starting
+map's panel, where it can be removed. Adding today's countries offers it too ("from this date on, without an event").
+
+### D31. Country labels: one per country, in its main piece, where it has the most room
+
+Each country is labelled once (across layers too), in its main piece of territory: the largest connected part (on a
+layer that ends at the coast, the part with the most land). The place is where the widest ellipse with the label's own
+proportions fits inside the outline (a pole-of-inaccessibility search stretched to the text), measured in the
+projection's plane and drawn mildly towards the middle; the size fits there (never more than the area suggests, nor
+than the style allows). Long names may take two or three lines. Larger countries are placed first where labels collide.
+Zoomed in on part of a large country, the label is placed in the part on screen. Places are cached per outline, so an
+edit elsewhere keeps them; placing all 242 of today's countries takes about 0.3 s once.
+
 ### D26. The engine redesign: kept half-edges, local updates, cached cycle measurements (approved by the user)
 
 Half-edges have stable ids (segment x 2 + direction) and the structure is kept between edits: an edit re-sorts only
@@ -103,7 +171,8 @@ history read with defaults filled in.
 The top-level category is simply **maps**: a map may be a planet, a city, the solar system or the galaxy. The interface
 says "Maps", "+ Map", "New map" and "Starting map" (the state before any event). Inside the code a map is still a
 `map_space` (and older notes say "world"); nothing in project files changed. Flat maps (city plans, the solar system,
-the galaxy) need the plane version of the kernel, due with the space-maps stage.
+the galaxy) need the plane version of the kernel, due with the space-maps stage. **Update 17 November 2026:** maps of
+cities are dropped (D38).
 
 ### D23. Outlines are painted exactly as drawn, even when they cross themselves (the user, 16 November 2026)
 

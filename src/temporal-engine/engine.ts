@@ -40,6 +40,19 @@ export interface FaceState {
   transition?: { from: string | null; progress: number; spec: CompiledTransition; prior: Assignment | null };
 }
 
+/**
+ * Where a character is placed from a date on (an effect of kind 'place'): a point, never territory.
+ * `off`: the character leaves the map from this date. `arrive`: whether the character travels here
+ * from its previous place (moving steadily between the two dates) or appears here at the date.
+ */
+export interface PlaceIntent { op: 'place'; entity: string; lon?: number; lat?: number; off?: boolean; arrive?: 'travel' | 'jump' }
+
+/** One compiled waypoint of a character's track. */
+export interface Waypoint { t: Instant; lon: number; lat: number; off: boolean; arrive: 'travel' | 'jump'; effectId: string; eventId: string; precedence: number; eventSeq: number; ordinal: number }
+
+/** A character on the map at a moment. */
+export interface CharacterAt { entity: string; lon: number; lat: number; moving: boolean }
+
 export type ConflictKind = 'simultaneous' | 'overlap' | 'stale' | 'broken';
 export interface Conflict { kind: ConflictKind; effectId: string; eventId: string; otherEventId?: string; message: string }
 
@@ -135,6 +148,8 @@ export function hashFaces(faces: number[]): string {
 export class Engine {
   private compiledRevision = -1;
   private timelines = new Map<string, Map<number, Assignment[]>>();
+  /** Characters' tracks: map -> character -> waypoints in time order. */
+  private tracks = new Map<string, Map<string, Waypoint[]>>();
   private effectAssignments = new Map<string, Assignment[]>();
   private changeTimes: Instant[] = [];
   private conflictList: Conflict[] = [];
@@ -160,6 +175,7 @@ export class Engine {
   compile(): void {
     const w = this.world;
     this.timelines.clear();
+    this.tracks.clear();
     this.effectAssignments.clear();
     this.conflictList = [];
     const events = new Map(w.all('event').map((e) => [e.id, e]));
@@ -169,6 +185,22 @@ export class Engine {
       const ev = events.get(ef.event_id);
       if (!ev) { this.conflictList.push({ kind: 'broken', effectId: ef.id, eventId: ef.event_id, message: 'This change belongs to an event that no longer exists.' }); continue; }
       if (!this.isActiveEvent(ev)) continue;
+      if (ef.kind === 'place') {
+        const it = parseJSON<PlaceIntent | null>(ef.intent, null);
+        if (!it || !ef.space_id || !w.get('map_space', ef.space_id)) { this.conflictList.push({ kind: 'broken', effectId: ef.id, eventId: ev.id, message: 'This character placement refers to a map that no longer exists.' }); continue; }
+        if (!w.get('entity', it.entity)) { this.conflictList.push({ kind: 'broken', effectId: ef.id, eventId: ev.id, message: 'This placement is of a character who no longer exists.' }); continue; }
+        const t = effectTime(ef, ev);
+        let bySpace = this.tracks.get(ef.space_id);
+        if (!bySpace) this.tracks.set(ef.space_id, (bySpace = new Map()));
+        let track = bySpace.get(it.entity);
+        if (!track) bySpace.set(it.entity, (track = []));
+        track.push({
+          t, lon: it.lon ?? 0, lat: it.lat ?? 0, off: !!it.off, arrive: it.arrive ?? 'travel', effectId: ef.id, eventId: ev.id,
+          precedence: isUntracked(ef) ? UNTRACKED_PRECEDENCE : ev.precedence, eventSeq: ev.created_seq, ordinal: ef.ordinal,
+        });
+        if (t.day !== -Infinity) times.set(`${t.day}:${t.ms}`, t);
+        continue;
+      }
       if (ef.kind !== 'assign' && ef.kind !== 'annex') continue;
       const layer = ef.layer_id ? w.get('layer', ef.layer_id) : undefined;
       const arr = ef.space_id ? w.arrangements.get(ef.space_id) : undefined;
@@ -204,6 +236,11 @@ export class Engine {
       if (compiled && end) times.set(`${end.day}:${end.ms}`, end);
     }
     for (const lm of this.timelines.values()) for (const tl of lm.values()) tl.sort(orderCmp);
+    for (const bySpace of this.tracks.values()) for (const tr of bySpace.values()) {
+      tr.sort((a, b) => compare(a.t, b.t) || a.precedence - b.precedence || a.eventSeq - b.eventSeq || a.ordinal - b.ordinal);
+      // Several placements at one moment: the last in order stands.
+      for (let i = tr.length - 2; i >= 0; i--) if (compare(tr[i].t, tr[i + 1].t) === 0) tr.splice(i, 1);
+    }
     this.changeTimes = [...times.values()].sort(compare);
     this.compiledRevision = w.revision;
     this.detectConflicts(effects, events);
@@ -267,6 +304,33 @@ export class Engine {
   private stateCache = new Map<string, Map<number, FaceState>>();
 
   /** The state of every parcel of a layer at time t. Recent answers are reused; callers must not modify the result. */
+  /** A character's waypoints on a map, in time order. */
+  characterTrack(spaceId: string, entity: string): Waypoint[] {
+    this.ensure();
+    return this.tracks.get(spaceId)?.get(entity) ?? [];
+  }
+
+  /** The characters on a map with a track (placed at least once). */
+  trackedCharacters(spaceId: string): string[] {
+    this.ensure();
+    return [...(this.tracks.get(spaceId)?.keys() ?? [])];
+  }
+
+  /**
+   * Where each character is at instant t: at its last place, or on the way to the next one when it
+   * travels there (moving steadily along the shortest path between the two dates). Characters not
+   * yet placed, or who have left the map, are not listed.
+   */
+  charactersAt(spaceId: string, t: Instant): CharacterAt[] {
+    this.ensure();
+    const out: CharacterAt[] = [];
+    for (const [entity, tr] of this.tracks.get(spaceId) ?? []) {
+      const at = positionOnTrack(tr, t);
+      if (at) out.push({ entity, ...at });
+    }
+    return out;
+  }
+
   partitionState(spaceId: string, layerId: string, t: Instant): Map<number, FaceState> {
     this.ensure();
     const arr = this.world.arrangement(spaceId);
@@ -441,3 +505,29 @@ function invSmooth(y: number): number {
   return 0.5 - Math.sin(Math.asin(1 - 2 * y) / 3);
 }
 
+
+/** Where a track puts its character at instant t (null: not on the map). */
+export function positionOnTrack(tr: Waypoint[], t: Instant): { lon: number; lat: number; moving: boolean } | null {
+  // The last waypoint at or before t.
+  let lo = 0, hi = tr.length - 1, k = -1;
+  while (lo <= hi) { const m = (lo + hi) >> 1; if (compare(tr[m].t, t) <= 0) { k = m; lo = m + 1; } else hi = m - 1; }
+  if (k < 0 || tr[k].off) return null;
+  const a = tr[k], b = tr[k + 1];
+  if (!b || b.off || b.arrive !== 'travel' || a.t.day === -Infinity) return { lon: a.lon, lat: a.lat, moving: false };
+  const total = diffMs(a.t, b.t), done = diffMs(a.t, t);
+  const f = total > 0 ? Math.min(1, Math.max(0, done / total)) : 1;
+  if (f <= 0) return { lon: a.lon, lat: a.lat, moving: false };
+  if (f >= 1) return { lon: b.lon, lat: b.lat, moving: false };
+  const [lon, lat] = slerpLonLat(a.lon, a.lat, b.lon, b.lat, f);
+  return { lon, lat, moving: f > 0 && f < 1 };
+}
+
+/** The point a fraction f of the way along the shortest path between two places. */
+export function slerpLonLat(lon0: number, lat0: number, lon1: number, lat1: number, f: number): [number, number] {
+  const p = lonLatToVec(lon0, lat0), q = lonLatToVec(lon1, lat1);
+  const ang = angle(p, q);
+  if (ang < 1e-12) return [lon0, lat0];
+  const s = Math.sin(ang), w0 = Math.sin((1 - f) * ang) / s, w1 = Math.sin(f * ang) / s;
+  const x = w0 * p[0] + w1 * q[0], y = w0 * p[1] + w1 * q[1], z = w0 * p[2] + w1 * q[2];
+  return [Math.atan2(y, x) * 180 / Math.PI, Math.asin(Math.max(-1, Math.min(1, z / Math.hypot(x, y, z)))) * 180 / Math.PI];
+}

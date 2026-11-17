@@ -16,12 +16,13 @@ import { basemapSourceOf, loadBasemap, loadBasemapDetail, loadDatasetRecords, ty
 export interface ExportPassDef { name: string; label: string; blend: string; passes: PassName[]; overlays: boolean; background: boolean; note?: string }
 
 export const PASS_DEFS: ExportPassDef[] = [
-  { name: 'all', label: 'All', blend: 'Normal', passes: ['background', 'graticule', 'land', 'fills', 'borders', 'labels'], overlays: true, background: true, note: 'everything combined in one image sequence' },
+  { name: 'all', label: 'All', blend: 'Normal', passes: ['background', 'graticule', 'land', 'fills', 'borders', 'labels', 'characters'], overlays: true, background: true, note: 'everything combined in one image sequence' },
   { name: 'background', label: 'Background', blend: 'Normal', passes: ['background', 'graticule'], overlays: false, background: true, note: 'ocean and grid' },
   { name: 'land', label: 'Land (Natural Earth)', blend: 'Normal', passes: ['land'], overlays: false, background: false, note: 'land, lakes and coastlines; empty for worlds without the Earth basemap' },
   { name: 'fills', label: 'Territory fills', blend: 'Normal', passes: ['fills'], overlays: false, background: false, note: 'lower the opacity in Premiere to taste' },
   { name: 'borders', label: 'Borders', blend: 'Normal', passes: ['borders'], overlays: false, background: false },
   { name: 'labels', label: 'Labels', blend: 'Normal', passes: ['labels'], overlays: false, background: false },
+  { name: 'characters', label: 'Characters', blend: 'Normal', passes: ['characters'], overlays: false, background: false, note: 'character markers and names' },
   { name: 'overlays', label: 'Text overlays', blend: 'Normal', passes: [], overlays: true, background: false, note: 'dates and titles' },
 ];
 
@@ -100,7 +101,7 @@ export async function basemapFor(world: World, spaceId: string): Promise<Basemap
 export function renderFrame(ctx: CanvasRenderingContext2D, renderer: MapRenderer, world: World, engine: Engine, shot: ShotSettings, frame: number, def: ExportPassDef, width: number, height: number, basemap: Basemap | null = null): void {
   const t = timeAt(shot, frame);
   const view = makeView(cameraAt(shot, frame), width, height);
-  const passes = new Set<PassName>(def.passes.filter((p) => (p !== 'graticule' || shot.graticule) && (p !== 'labels' || shot.labels)));
+  const passes = new Set<PassName>(def.passes.filter((p) => (p !== 'graticule' || shot.graticule) && (p !== 'labels' || shot.labels) && (p !== 'characters' || shot.characters !== false)));
   ctx.clearRect(0, 0, width, height);
   if (passes.size) {
     const transparent = def.name === 'all' ? shot.transparent : !def.background;

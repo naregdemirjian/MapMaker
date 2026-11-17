@@ -202,3 +202,8 @@ label.file-button.small { padding: 3px 8px; font-size: 12px; }
 /* Export: the separately exported layers, set apart under "All". */
 .pass-box { margin: 4px 0 8px 6px; padding: 4px 0 4px 10px; border-left: 2px solid rgba(255, 255, 255, 0.14); }
 .pass-box p { margin: 0 0 4px; }
+
+/* Changes over time */
+.period-nav { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+.history-section .gain { color: #5fe08a; }
+.history-section .loss { color: #ff6b6b; }

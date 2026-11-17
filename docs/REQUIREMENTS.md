@@ -1,7 +1,7 @@
 # Map Maker: requirements checklist
 
 Every major requirement from the master specification and the user's later answers, with its implementation and test
-status. Last updated: 16 November 2026 (after the user's first feedback round; see DEVELOPMENT.md).
+status. Last updated: 17 November 2026 (after the user's second feedback round; see DEVELOPMENT.md).
 
 **Status** (the user's classification):
 **Tested** = fully implemented and tested ·
@@ -170,7 +170,7 @@ status. Last updated: 16 November 2026 (after the user's first feedback round; s
 | --- | --- | --- | --- |
 | Zooming during a brush stroke must not change the territory | Tested | `e2e/workflows` 'Zooming in the middle of a brush stroke' (fails on the old build) | Points are kept as map positions |
 | More detailed coasts | Tested | `basemap` (1:10m tiles keep the land area) | Natural Earth 1:10m (about 200 m) when zoomed in; loads in the background |
-| Maps, not worlds | Done | interface wording | Flat maps (city plans, solar system, galaxy) await the plane kernel (space-maps stage) |
+| Maps, not worlds | Done | interface wording | Maps of cities dropped by the user (17 November, D38) |
 | Quickly add today's borders and countries | Tested | `countries`, `e2e/vertical-slice` | 242 countries, by search, continent or all; colours or flags; starting map or event; one undo step |
 | Label looks: for all countries, and per country | Tested | `label-style`, `e2e/vertical-slice` 'Label looks' | Font, weight, italic, capitals, spacing, colours, outline, size, opacity; per-country text, hiding, overrides |
 | A picture instead of a colour; flags of today's nations; own pictures | Tested | `fills`, `e2e/vertical-slice` 'filled with a flag' | 197 flags (flag-icons, MIT) |
@@ -182,6 +182,24 @@ status. Last updated: 16 November 2026 (after the user's first feedback round; s
 | Right-click deselects | Tested | `e2e/workflows` 'Drawing flow' | |
 | Several border changes in one event | Tested | `e2e/workflows` 'Drawing flow' | The last event used (or the selected one) is offered |
 | Current events box in presentations, fully customisable, own graphic | Tested | `events-box`, `e2e/workflows` 'Current events box' | |
-| Transitions in presentations: automatic or instant, as customisable as possible | Tested | `sequence`, `e2e/vertical-slice` 'Shot transitions' | As recorded / every change / none; front, fade or wipe; timing, easing, front line |
+| Transitions in presentations: automatic or instant, as customisable as possible | Tested | `sequence`, `e2e/vertical-slice` 'Shot transitions' | As recorded / every change / none; advancing front, expansion or fade; timing, easing, front line (the wipe was removed in the second round) |
 | Export settings in categories; choose the folder; 'Export'; 'All' | Tested | `storage`, `e2e/workflows` (exports into a chosen folder) | Folder picker: Electron's in the app, Windows' own in the browser version |
 | Engine redesign (approved) | Tested | `kernel-incremental` (equals a full rebuild after every edit, undo and redo) | Strokes on the 24,500-parcel map 1.75 s -> 0.4 s |
+
+## The user's second feedback round (17 November 2026)
+
+| Request | Status | Evidence | Notes |
+| --- | --- | --- | --- |
+| Labels of all countries placed correctly; every large country labelled, in its centre | Tested | `label-place` (every large country of today's 242, in four projections, inside it; 24 countries near their middle; across 180° and the pole; part on screen), `e2e/vertical-slice` (11 European countries drawn and inside) | D31. Long names on two or three lines; one label per country across layers |
+| Add a present-day country's land to a country of your own | Tested | `countries` (Greece and North Macedonia into the user's country), `e2e/vertical-slice` | "Who gets the land" in the dialog; also as an event |
+| Characters: points, not countries with borders | Tested | `characters`, `e2e/workflows` 'A character' | D35. Travel between places or appear; leave the map; drag to move; own export layer |
+| "Correct this period" starts from the date drawn, without an event | Tested | `temporal-engine` (from its date, earlier untouched, wins at the same moment, reload), `e2e/vertical-slice` (nothing before the date) | D32 |
+| View a country's borders by how they changed over time, by day, month, year or several years | Tested | `history-view`, `e2e/workflows` 'Changes over time' (green on the map, the Union listed) | D36. A selection mode in the country's panel |
+| Presentation camera: reset for a clear shot; no start and end views | Tested | `sequence`, `e2e/workflows` (reset; still camera: identical backgrounds) | D34 |
+| Transitions: no wipe; "Advancing front" from the existing border; the old one renamed "Expansion" | Tested | `sequence`, `e2e/vertical-slice` (the side facing the conqueror changes first, in the pixels) | D33 |
+| Events box: wrap the box around the graphic | Tested | `e2e/workflows` (the exported box has the graphic's shape) | Chosen for new graphics |
+| Drag the date, title and events box freely | Tested | `sequence`, `e2e/workflows` (follows the pointer; undo) | |
+| Export: only "All" chosen at first, at the top, the others explained as separate | Tested | `sequence`, `e2e/workflows`, `e2e/vertical-slice` | D37. The choice is kept with the shot |
+| Estimated total export size | Tested | `e2e/workflows` (compared with a real export) | D37 |
+| No maps of cities | Done | | D38 |
+
