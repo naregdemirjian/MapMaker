@@ -167,13 +167,10 @@ export function ShotEditor() {
             <label className="check"><input type="checkbox" checked={tr.restyleRecorded} onChange={(e) => setTr({ restyleRecorded: e.target.checked })} data-testid="transition-restyle" /> {tr.mode === 'all' ? 'Changes recorded with their own animation use these settings too' : 'Use the settings below for recorded animations too'}</label>
             {(tr.mode === 'all' || tr.restyleRecorded) && <>
               <label>Style<select value={tr.style} onChange={(e) => setTr({ style: e.target.value as ShotTransitions['style'] })} data-testid="transition-style-shot">
-                <option value="advance">Advancing front (from where the drawing started, or the middle)</option>
+                <option value="border">Advancing front (grows out of the country's existing border)</option>
+                <option value="advance">Expansion (a circle from where the drawing started, or the middle)</option>
                 <option value="fade">Fade</option>
-                <option value="wipe">Wipe in one direction</option>
               </select></label>
-              {tr.style === 'wipe' && <label>Direction<select value={tr.angle} onChange={(e) => setTr({ angle: Number(e.target.value) })}>
-                {[[0, 'Eastward →'], [45, 'North-east ↗'], [90, 'Northward ↑'], [135, 'North-west ↖'], [180, 'Westward ←'], [225, 'South-west ↙'], [270, 'Southward ↓'], [315, 'South-east ↘']].map(([v, n]) => <option key={v} value={v}>{n}</option>)}
-              </select></label>}
               <label>Length<select value={tr.timing} onChange={(e) => setTr({ timing: e.target.value as ShotTransitions['timing'] })}>
                 <option value="seconds">Fixed screen time</option>
                 <option value="event">The event's length (events without an end use screen time)</option>

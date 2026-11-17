@@ -30,3 +30,10 @@ test('shot transitions: defaults fill in, saved settings win', () => {
   assert.equal(shotTransitions(shot).front.color, '#ff0000');
   assert.equal(shotTransitions(shot).front.width, DEFAULT_TRANSITIONS.front.width);
 });
+
+test('transition styles: the advancing front from the border is the default; old wipes show as it', () => {
+  const shot = defaultShot('space', { lon: 0, lat: 0, zoom: 0, rotation: 0, projection: 'equirectangular' }, gregorian.fromCivil({ year: 1900 }), gregorian.fromCivil({ year: 1901 }));
+  assert.equal(shotTransitions(shot).style, 'border');
+  assert.equal(shotTransitions({ ...shot, transitions: { ...DEFAULT_TRANSITIONS, style: 'wipe', angle: 90 } }).style, 'border', 'a shot saved with the old wipe');
+  assert.equal(shotTransitions({ ...shot, transitions: { ...DEFAULT_TRANSITIONS, style: 'advance' } }).style, 'advance', 'the expansion stays');
+});

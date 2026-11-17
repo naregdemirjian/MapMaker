@@ -6,7 +6,7 @@ import * as cmd from '../src/domain/commands.ts';
 import { gregorian, NEG_INF, type Instant, compare, instant } from '../src/core-time/index.ts';
 import { lonLatToVec } from '../src/geo-kernel/vec.ts';
 import { rng, ring, square } from './helpers.ts';
-import { BASE_EVENT_ID } from '../src/world-model/schema.ts';
+import { BASE_EVENT_ID, invertDiffs } from '../src/world-model/schema.ts';
 
 const Y = (y: number, m = 1, d = 1) => gregorian.fromCivil({ year: y, month: m, day: d });
 
@@ -304,4 +304,57 @@ test('painting several rings at once (a lasso that crossed itself) covers exactl
   for (const [x, y] of [[-8, 0], [0, 0], [8, 0], [-4, 4], [4, -4]]) assert.equal(s.at(x, y, Y(1900)), B, `${x},${y}`);
   for (const [x, y] of [[-15, 0], [15, 0], [0, 8], [0, -8]]) assert.equal(s.at(x, y, Y(1900)), A, `${x},${y}`);
   assert.deepEqual(s.world.arrangement(s.spaceId).validate(), []);
+});
+
+test('a change without an event ("correct this period" in the drawing prompt): from its date on, earlier dates untouched', () => {
+  const s = setup();
+  const A = s.ent('Kingdom A'), B = s.ent('Kingdom B'), C = s.ent('Kingdom C');
+  s.correct(square(10, 45, 10), A, NEG_INF); // the starting map
+  const war = s.event('War', Y(1500));
+  s.paint(square(14, 49, 3), B, war);
+  const change = (pts: Array<[number, number]>, value: string | null, t: Instant) =>
+    cmd.paintTerritory(s.world, s.engine, { spaceId: s.spaceId, layerId: s.layerId, ring: ring(pts), value, snap: 1e-7, mode: { kind: 'change', t } });
+  const events = s.world.all('event').length;
+  const r = change(square(6, 42, 2), C, Y(1300));
+  assert.equal(s.world.all('event').length, events, 'no event was made');
+  assert.equal(s.at(6, 42, Y(1299)), A, 'before the date: as it was');
+  assert.equal(s.at(6, 42, Y(1300)), C, 'from the date on');
+  assert.equal(s.at(6, 42, Y(1800)), C, 'until something later changes it');
+  assert.equal(s.at(14, 49, Y(1600)), B, 'the war is untouched');
+  // Undo removes it; redo brings it back.
+  s.world.applyDiffs(invertDiffs(r.diffs));
+  assert.equal(s.at(6, 42, Y(1350)), A);
+  s.world.applyDiffs(r.diffs);
+  assert.equal(s.at(6, 42, Y(1350)), C);
+  // It lasts until a later change of the same place.
+  s.paint(square(6, 42, 1), B, war);
+  assert.equal(s.at(6, 42, Y(1400)), C);
+  assert.equal(s.at(6, 42, Y(1600)), B, 'the war takes it in 1500');
+  // Drawn while looking at the war's own date, it wins over the war at that moment.
+  change(square(14, 49, 1), C, Y(1500));
+  assert.equal(s.at(14, 49, Y(1500)), C);
+  assert.equal(s.at(14, 49, Y(1499)), A);
+  // Stored with the starting map, dated; no history problems reported.
+  const ef = s.world.get('effect', (r.diffs.find((d) => d.table === 'effect' && d.after)!.after as { id: string }).id)!;
+  assert.equal(ef.event_id, BASE_EVENT_ID);
+  assert.ok(ef.at_day !== null);
+  assert.deepEqual(s.engine.conflicts, []);
+  // The retroactive correction of the starting map still corrects the starting map (not a dated change).
+  s.correct(square(30, 10, 2), C, NEG_INF);
+  assert.equal(s.at(30, 10, Y(-5000)), C);
+  assert.equal(s.world.all('effect').filter((f) => f.event_id === BASE_EVENT_ID && f.at_day === null).length, 1, 'one undated starting-map change');
+});
+
+test('a change without an event survives saving and reloading, and shows in the order of changes', () => {
+  const s = setup();
+  const A = s.ent('A'), B = s.ent('B');
+  cmd.paintTerritory(s.world, s.engine, { spaceId: s.spaceId, layerId: s.layerId, ring: ring(square(0, 0, 5)), value: A, snap: 1e-7, mode: { kind: 'change', t: Y(1000) } });
+  cmd.paintTerritory(s.world, s.engine, { spaceId: s.spaceId, layerId: s.layerId, ring: ring(square(0, 0, 2)), value: B, snap: 1e-7, mode: { kind: 'change', t: Y(1200) } });
+  const copy = World.fromSnapshot(JSON.parse(JSON.stringify(s.world.snapshot())));
+  const e2 = new Engine(copy);
+  const at = (t: Instant) => e2.valueAtPoint(s.spaceId, s.layerId, lonLatToVec(0, 0), t);
+  assert.equal(at(Y(999)), null);
+  assert.equal(at(Y(1100)), A);
+  assert.equal(at(Y(1300)), B);
+  assert.equal(e2.valueAtPoint(s.spaceId, s.layerId, lonLatToVec(4, 4), Y(1300)), A);
 });

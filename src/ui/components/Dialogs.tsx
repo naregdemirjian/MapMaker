@@ -45,15 +45,13 @@ function PaintPrompt({ p }: { p: Extract<PendingEdit, { kind: 'paint' }> }) {
   });
   const [evName, setEvName] = useState(p.value ? `${who} gains territory` : 'Territory abandoned');
   const [end, setEnd] = useState<Instant | null>(null);
-  const [style, setStyle] = useState<'instant' | 'advance' | 'fade'>('instant');
+  const [style, setStyle] = useState<'instant' | 'border' | 'advance' | 'fade'>('instant');
   const events = w.all('event').filter((x) => x.id !== BASE_EVENT_ID).sort((a, b) => a.start_day - b.start_day || a.start_ms - b.start_ms);
 
-  let periodFrom = 'the beginning', periodTo = 'the end of time';
+  let periodTo = 'the end of time';
   let lasts = 'Nothing later changes this area yet, so the change lasts until you record a later one.';
   if (p.sample) {
     const face = w.arrangement(p.spaceId).locate(lonLatToVec(p.sample[0], p.sample[1]));
-    const a = e.latest(p.spaceId, p.layerId, face, s.time);
-    if (a) periodFrom = a.eventId === BASE_EVENT_ID ? 'the starting map' : fmt(a.t);
     const next = e.nextChange(p.spaceId, p.layerId, [face], s.time);
     if (next) {
       periodTo = fmt(next);
@@ -63,10 +61,13 @@ function PaintPrompt({ p }: { p: Extract<PendingEdit, { kind: 'paint' }> }) {
   }
   const close = () => s.set({ pending: null });
   const confirm = () => {
-    const transition: TransitionSpec | null = style === 'instant' ? null : style === 'advance' ? { style: 'advance', origin: p.origin, easing: 'smooth' } : { style: 'fade' };
+    const transition: TransitionSpec | null = style === 'instant' ? null
+      : style === 'border' ? { style: 'border', easing: 'smooth' }
+      : style === 'advance' ? { style: 'advance', origin: p.origin, easing: 'smooth' } : { style: 'fade' };
     const base = { spaceId: p.spaceId, layerId: p.layerId, rings: p.rings, value: p.value, snap: p.snap };
     if (choice === 'correct') {
-      s.execute((wd, en) => cmd.paintTerritory(wd, en, { ...base, mode: { kind: 'correct', t: s.time } }));
+      // From the date being viewed on, without an event (earlier dates stay as they are).
+      s.execute((wd, en) => cmd.paintTerritory(wd, en, { ...base, mode: { kind: 'change', t: s.time } }));
     } else if (target === 'new-event') {
       if (end && compare(end, s.time) < 0) { s.toast('The event cannot end before it starts.', 'error'); return; }
       const r = s.execute((wd, en) => cmd.paintWithNewEvent(wd, en, { name: evName, start: s.time, end, type_id: p.value ? 'conquest' : 'general' }, { ...base, transition: end ? transition : null }));
@@ -116,7 +117,8 @@ function PaintPrompt({ p }: { p: Extract<PendingEdit, { kind: 'paint' }> }) {
               <label>How it spreads
                 <select value={style} onChange={(ev) => setStyle(ev.target.value as typeof style)} data-testid="spread-style">
                   <option value="instant">At once</option>
-                  <option value="advance">Advancing front, from where you started drawing</option>
+                  <option value="border">Advancing front, out of the country's existing border</option>
+                  <option value="advance">Expansion, a circle from where you started drawing</option>
                   <option value="fade">Fade over the event's duration</option>
                 </select>
               </label>
@@ -125,8 +127,8 @@ function PaintPrompt({ p }: { p: Extract<PendingEdit, { kind: 'paint' }> }) {
         )}
       </div>
       <div className={`choice ${choice === 'correct' ? 'on' : ''}`} onClick={() => setChoice('correct')} data-testid="choice-correct">
-        <b>Correct this period ({periodFrom} – {periodTo})</b>
-        <div className="muted">Fixes how things were during the period you are looking at, inside the change that started it. No new event is created.</div>
+        <b>Correct this period ({fmt(s.time)} – {periodTo})</b>
+        <div className="muted" data-testid="correct-explained">Changes the map from {fmt(s.time)} on, without making an event; earlier dates stay as they are. {lasts}</div>
       </div>
       <div className="muted small-note">Correcting a border's shape for all time is done by dragging its points with the Border points tool.</div>
       <div className="modal-actions"><button onClick={close}>Cancel</button><button className="primary" onClick={confirm} data-testid="confirm-edit">Apply <span className="key">Enter</span></button></div>

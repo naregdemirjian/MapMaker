@@ -12,10 +12,11 @@ import { parseJSON } from '../temporal-engine/engine.ts';
 import { type Instant, compare, diffMs } from '../core-time/index.ts';
 import { BASE_EVENT_ID } from '../world-model/schema.ts';
 import type { Vec3 } from '../geo-kernel/vec.ts';
-import type { View } from './camera.ts';
+import { screenToLonLat, type View } from './camera.ts';
 import type { Arrangement } from '../geo-kernel/arrangement.ts';
 import { E7 } from '../geo-kernel/vec.ts';
-import { BasemapPainter, landMaskOf, type Basemap, type LandMask } from './basemap.ts';
+import { BasemapPainter, landMaskOf, visibleBounds, type Basemap, type LandMask } from './basemap.ts';
+import { planeShape, placeLabel, lineChoices, textWidthEm, blockHeightEm, LINE_HEIGHT, type PlaneShape } from './label-place.ts';
 import { resolveLabelStyle, labelSize, labelFont, labelText, type LabelStyle, type CountryLabel } from './label-style.ts';
 import { imageNow, videoNow, drawImageFit, type MediaChannel } from './assets.ts';
 
@@ -70,7 +71,7 @@ export type TransitionEase = 'linear' | 'smooth' | 'in' | 'out';
 /** Shot transition settings as the renderer needs them (see presentation/sequence.ts ShotTransitions). */
 export interface ShotTransitionOptions {
   mode: 'recorded' | 'all' | 'instant';
-  style: 'advance' | 'fade' | 'wipe';
+  style: 'border' | 'advance' | 'fade' | 'wipe';
   angle: number;
   timing: 'seconds' | 'event';
   seconds: number;
@@ -89,7 +90,24 @@ function ease(kind: string | undefined, p: number): number {
   return x;
 }
 
-export interface LabelInfo { text: string; x: number; y: number; size: number; style: LabelStyle; entityId: string }
+export interface LabelInfo {
+  text: string;
+  /** The text as drawn, broken into lines (long names may take two or three). */
+  lines: string[];
+  x: number; y: number; size: number; style: LabelStyle; entityId: string;
+  /** Larger territories are placed first where labels would collide. */
+  priority: number;
+  /** Set when drawn: whether the label was drawn (not hidden by a larger one) and its box. */
+  drawn?: boolean;
+  box?: [number, number, number, number];
+}
+
+/** Labels keep this share of the frame's width and height clear of its edges. */
+const LABEL_MARGIN = 0.04;
+
+/** An owner's main piece of territory (for its label). */
+interface OwnerPiece { owner: string; key: string; arcs: Float64Array; centreLon: number; area: number; total: number }
+interface PlacedLabel { lon: number; lat: number; font: number; lines: string[] }
 
 interface FaceGeo { geo: GeoPermissibleObjects; area: number; centroid: [number, number] }
 
@@ -104,6 +122,10 @@ interface TransitionGroup {
   progress: number;
   /** For a moving front: the area reached so far (null before anything is reached). */
   disc: Path2D | null;
+  /** How `disc` is filled: an advancing front from a border is a union of overlapping shapes. */
+  discRule: CanvasFillRule;
+  /** For a front from a border: the reach builder, to draw the front line as a band. */
+  border: BorderFront | null;
   region: Path2D;
   /** The parcels whose owner actually changes. */
   changing: Path2D;
@@ -274,11 +296,26 @@ export class MapRenderer {
         ctx.save();
         if (clip) ctx.clip(land());
         ctx.clip(g.changing, 'evenodd');
-        ctx.strokeStyle = front.color;
-        ctx.lineWidth = front.width * view.unit;
-        ctx.shadowColor = front.color;
-        ctx.shadowBlur = front.glow * view.unit;
-        ctx.stroke(g.disc);
+        if (g.border) {
+          // The edge of the reached area: the area minus the area reached a line-width earlier.
+          const r = g.progress * g.border.maxDist, w = Math.max(0.5, front.width * view.unit);
+          const band = this.scratch(ctx);
+          band.fillStyle = front.color;
+          band.fill(g.disc, 'nonzero');
+          band.globalCompositeOperation = 'destination-out';
+          band.fill(g.border.reach(r - w), 'nonzero');
+          band.globalCompositeOperation = 'source-over';
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.shadowColor = front.color;
+          ctx.shadowBlur = front.glow * view.unit;
+          ctx.drawImage(band.canvas as CanvasImageSource, 0, 0);
+        } else {
+          ctx.strokeStyle = front.color;
+          ctx.lineWidth = front.width * view.unit;
+          ctx.shadowColor = front.color;
+          ctx.shadowBlur = front.glow * view.unit;
+          ctx.stroke(g.disc);
+        }
         ctx.restore();
       }
     }
@@ -338,7 +375,8 @@ export class MapRenderer {
         out.set(f, p >= 1 || !(p >= 0) ? { value: st.value, assignment: a } : { ...st, transition: { ...st.transition, progress: p, spec } });
         continue;
       }
-      if (o.mode !== 'all' || !a || a.eventId === BASE_EVENT_ID) { out.set(f, st); continue; }
+      // The starting map is never animated; changes made without an event are, like any other change.
+      if (o.mode !== 'all' || !a || (a.eventId === BASE_EVENT_ID && a.t.day === -Infinity)) { out.set(f, st); continue; }
       const p = progressOf(a);
       if (!(p >= 0 && p < 1)) { out.set(f, st); continue; }
       const prior = engine.latest(spaceId, layerId, f, t, a);
@@ -359,10 +397,10 @@ export class MapRenderer {
       const key = st.assignment.effectId;
       let g = groups.get(key);
       if (!g) {
-        const advance = spec.style === 'advance' || spec.style === 'wipe';
+        const advance = spec.style === 'advance' || spec.style === 'wipe' || spec.style === 'border';
         // Shot-made animations use the shot's easing; recorded fronts their own; recorded fades stay even.
-        const progress = spec.shot || spec.style === 'advance' ? ease(spec.easing, st.transition.progress) : st.transition.progress;
-        g = { a: st.assignment, faces: [], states: [], advance, spec, progress, disc: null, region: new Path2D(), changing: new Path2D() };
+        const progress = spec.shot || spec.style === 'advance' || spec.style === 'border' ? ease(spec.easing, st.transition.progress) : st.transition.progress;
+        g = { a: st.assignment, faces: [], states: [], advance, spec, progress, disc: null, discRule: 'evenodd', border: null, region: new Path2D(), changing: new Path2D() };
         groups.set(key, g);
       }
       g.faces.push(face);
@@ -372,10 +410,21 @@ export class MapRenderer {
       g.region.addPath(path);
       if ((st.transition.from ?? '') !== (st.value ?? '')) g.changing.addPath(path);
     }
-    // The area each moving front has reached: a circle from its origin, or a straight wipe.
+    // The area each moving front has reached: grown from the border with the new owner's land, a
+    // circle from its origin, or a straight wipe (older shots).
     for (const g of groups.values()) {
       if (!g.advance || g.progress <= 0) continue;
       if (g.spec.style === 'wipe') { g.disc = this.wipeShape(view, arr, g); continue; }
+      if (g.spec.style === 'border') {
+        const bf = this.borderFront(view, arr, g, states);
+        if (bf) {
+          g.border = bf;
+          g.disc = bf.reach(g.progress * bf.maxDist);
+          g.discRule = 'nonzero';
+          continue;
+        }
+        // The new owner held no land before: it grows from the middle, like an expansion.
+      }
       let origin = g.spec.origin, maxDist = g.spec.maxDist;
       if (!origin || !maxDist) ({ origin, maxDist } = this.reachOf(arr, g.faces));
       const r = (g.progress * maxDist * 180) / Math.PI;
@@ -448,10 +497,154 @@ export class MapRenderer {
     const shape = g.advance ? g.disc : g.changing;
     if (!shape) return; // the front has not reached anything yet
     lc.save();
-    if (g.advance) lc.clip(g.changing, 'evenodd');
-    else lc.globalAlpha = Math.min(1, Math.max(0, g.progress));
-    paint(lc, g.a.value, shape);
+    if (g.advance && g.discRule === 'nonzero') {
+      // The reached area is a union of shapes: clip to it and paint the changing parcels.
+      lc.clip(g.changing, 'evenodd');
+      lc.clip(shape, 'nonzero');
+      paint(lc, g.a.value, g.changing);
+    } else {
+      if (g.advance) lc.clip(g.changing, 'evenodd');
+      else lc.globalAlpha = Math.min(1, Math.max(0, g.progress));
+      paint(lc, g.a.value, shape);
+    }
     lc.restore();
+  }
+
+  private borderCache = new Map<string, { lonlat: Float64Array; line: boolean } | null>();
+  private borderViewCache = new Map<string, BorderFront | null>();
+  private borderViewKey = '';
+
+  /**
+   * An advancing front from a border: the changing parcels are reached outward from the border they
+   * share with the new owner's land (as it was before the change). A piece that does not touch that
+   * land grows from its side facing the owner's nearest land, as a straight front. Null when the new
+   * owner held no land before the change.
+   */
+  private borderFront(view: View, arr: Arrangement, g: TransitionGroup, states: Map<number, FaceState>): BorderFront | null {
+    const owner = g.a.value;
+    if (!owner) return null;
+    const changing: number[] = [];
+    g.faces.forEach((f, i) => { if ((g.states[i].transition?.from ?? '') !== (g.states[i].value ?? '')) changing.push(f); });
+    if (!changing.length) return null;
+    const key = `${arr.spaceId}|${arr.revision}|${g.a.effectId}|${owner}|${changing.length}|${changing[0]}|${changing[changing.length - 1]}`;
+    // 1. The source, in longitude/latitude (independent of the view): the shared border, or failing that
+    //    the point of the change nearest to the owner's land and the direction it lies in.
+    let src = this.borderCache.get(key);
+    if (src === undefined) {
+      const inChange = new Set(changing);
+      const held = new Set<number>();
+      for (const [f, st] of states) if ((st.transition ? st.transition.from : st.value) === owner && !inChange.has(f)) held.add(f);
+      const pts: number[] = [];
+      for (const sg of arr.segments.values()) {
+        const l = sg.left_face, r = sg.right_face;
+        if ((inChange.has(l) && held.has(r)) || (inChange.has(r) && held.has(l))) {
+          const a = arr.vertices.get(sg.a)!, b = arr.vertices.get(sg.b)!;
+          pts.push(a.lon / 1e7, a.lat / 1e7, b.lon / 1e7, b.lat / 1e7);
+        }
+      }
+      if (pts.length) src = { lonlat: Float64Array.from(pts), line: false };
+      else if (held.size) {
+        // Not touching: the nearest pair of points between the change and the owner's land.
+        const sample = (faces: Iterable<number>, max: number) => {
+          const all: Array<[number, number]> = [];
+          for (const f of faces) for (const ring of arr.faceRingsLonLat(f)) for (const p of ring) all.push(p);
+          const step = Math.max(1, Math.floor(all.length / max));
+          return all.filter((_, i) => i % step === 0);
+        };
+        const cs = sample(changing, 300), hs = sample(held, 3000);
+        let best = Infinity, pc: [number, number] = cs[0], ph: [number, number] = hs[0];
+        for (const c of cs) { const vc = vec3(c); for (const h of hs) { const vh = vec3(h); const d = -(vc[0] * vh[0] + vc[1] * vh[1] + vc[2] * vh[2]); if (d < best) { best = d; pc = c; ph = h; } } }
+        src = { lonlat: Float64Array.from([pc[0], pc[1], ph[0], ph[1]]), line: true };
+      } else src = null;
+      if (this.borderCache.size > 200) this.borderCache.clear();
+      this.borderCache.set(key, src);
+    }
+    if (!src) return null;
+    // 2. On screen: the source segments, and how far the front must travel to cover the change.
+    if (view.key !== this.borderViewKey) { this.borderViewCache.clear(); this.borderViewKey = view.key; }
+    const vk = key;
+    let bf = this.borderViewCache.get(vk);
+    if (bf !== undefined) return bf;
+    const P = (lon: number, lat: number) => view.projection([lon, lat]);
+    const changePts: Array<[number, number]> = [];
+    for (const f of changing) for (const ring of arr.faceRingsLonLat(f)) for (const [lon, lat] of ring) { const q = P(lon, lat); if (q) changePts.push(q as [number, number]); }
+    if (!changePts.length) { this.borderViewCache.set(vk, null); return null; }
+    let segs: number[] = [];
+    if (!src.line) {
+      for (let i = 0; i < src.lonlat.length; i += 4) {
+        const a = P(src.lonlat[i], src.lonlat[i + 1]), b = P(src.lonlat[i + 2], src.lonlat[i + 3]);
+        if (a && b) segs.push(a[0], a[1], b[0], b[1]);
+      }
+    } else {
+      // A straight front across the change, at its point nearest the owner's land, facing that land.
+      const c = P(src.lonlat[0], src.lonlat[1]), h = P(src.lonlat[2], src.lonlat[3]);
+      if (c && h) {
+        let dx = h[0] - c[0], dy = h[1] - c[1];
+        const len = Math.hypot(dx, dy) || 1; dx /= len; dy /= len;
+        let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+        for (const [x, y] of changePts) { if (x < x0) x0 = x; if (y < y0) y0 = y; if (x > x1) x1 = x; if (y > y1) y1 = y; }
+        const half = Math.hypot(x1 - x0, y1 - y0) + 10;
+        segs = [c[0] - dy * half, c[1] + dx * half, c[0] + dy * half, c[1] - dx * half];
+      }
+    }
+    if (!segs.length) { this.borderViewCache.set(vk, null); return null; }
+    // Fewer, longer pieces for drawing (a pixel apart at most).
+    const simplified: number[] = [];
+    for (let i = 0; i < segs.length; i += 4) {
+      const n = simplified.length;
+      if (n && Math.hypot(simplified[n - 2] - segs[i], simplified[n - 1] - segs[i + 1]) < 1e-9 && Math.hypot(segs[i + 2] - segs[i], segs[i + 3] - segs[i + 1]) < 1.5) {
+        simplified[n - 2] = segs[i + 2]; simplified[n - 1] = segs[i + 3];
+        continue;
+      }
+      simplified.push(segs[i], segs[i + 1], segs[i + 2], segs[i + 3]);
+    }
+    const S = Float64Array.from(simplified);
+    // The farthest point of the change from the source (sampled), plus a margin.
+    const step = Math.max(1, Math.floor(changePts.length / 500));
+    const sstep = Math.max(1, Math.floor(S.length / 4 / 500)) * 4;
+    let maxDist = 1;
+    for (let i = 0; i < changePts.length; i += step) {
+      const [x, y] = changePts[i];
+      let m = Infinity;
+      for (let k = 0; k < S.length; k += sstep) m = Math.min(m, segDist(x, y, S[k], S[k + 1], S[k + 2], S[k + 3]));
+      if (m > maxDist) maxDist = m;
+    }
+    maxDist *= 1.04;
+    bf = {
+      maxDist,
+      reach: (r: number) => {
+        const p = new Path2D();
+        if (r <= 0) return p;
+        // Every piece of the source widened by r: a rectangle along it and a circle at each end, all
+        // wound the same way so that filled with the nonzero rule they make one area.
+        let lx = NaN, ly = NaN;
+        const minLen = Math.max(0.5, r / 6);
+        for (let i = 0; i < S.length; i += 4) {
+          const ax = S[i], ay = S[i + 1], bx = S[i + 2], by = S[i + 3];
+          const L = Math.hypot(bx - ax, by - ay);
+          if (L > 1e-9) {
+            const nx = (-(by - ay) / L) * r, ny = ((bx - ax) / L) * r;
+            const quad: Array<[number, number]> = [[ax + nx, ay + ny], [bx + nx, by + ny], [bx - nx, by - ny], [ax - nx, ay - ny]];
+            let area = 0;
+            for (let k = 0; k < 4; k++) { const u = quad[k], v = quad[(k + 1) % 4]; area += u[0] * v[1] - v[0] * u[1]; }
+            if (area < 0) quad.reverse();
+            p.moveTo(quad[0][0], quad[0][1]);
+            for (let k = 1; k < 4; k++) p.lineTo(quad[k][0], quad[k][1]);
+            p.closePath();
+          }
+          for (const [x, y] of [[ax, ay], [bx, by]]) {
+            if (Math.hypot(x - lx, y - ly) < minLen) continue;
+            p.moveTo(x + r, y);
+            p.arc(x, y, r, 0, Math.PI * 2, false);
+            p.closePath();
+            lx = x; ly = y;
+          }
+        }
+        return p;
+      },
+    };
+    this.borderViewCache.set(vk, bf);
+    return bf;
   }
 
   /** The screen rectangle of a set of parcels (the whole view for a parcel covering the planet). */
@@ -601,49 +794,230 @@ export class MapRenderer {
     return s;
   }
 
+  // ---------------------------------------------------------------- labels
+  //
+  // Each country is labelled once, in its main piece of territory (the largest connected part; on a
+  // layer that ends at the coast, the piece with the most land), at the place with the most room for
+  // the label (label-place.ts), and sized to fit there. Larger countries are placed first, so they
+  // keep their labels where labels would collide. During an animated change the label glides from
+  // where it was before the change to where it will be after it.
+
+  private pieceCache = new Map<string, Map<string, OwnerPiece>>();
+  private shapeCache = new Map<string, PlaneShape>();
+  private spotCache = new Map<string, PlacedLabel[]>();
+  private viewSpotCache = new Map<string, PlacedLabel[]>();
+  private viewSpotKey = '';
+
+  /** Each owner's main piece and its outline, for one assignment of parcels to owners. */
+  private ownerPieces(arr: Arrangement, owners: Map<number, string>, mask: LandMask | null): Map<string, OwnerPiece> {
+    let h1 = 0x811c9dc5, h2 = 0x01000193;
+    for (const [f, o] of owners) {
+      h1 = Math.imul(h1 ^ f, 16777619);
+      for (let i = 0; i < o.length; i++) { const c = o.charCodeAt(i); h1 = Math.imul(h1 ^ c, 16777619); h2 = Math.imul(h2 + c + f, 2246822519); }
+    }
+    const key = `${arr.spaceId}|${arr.revision}|${mask ? 'land' : 'all'}|${owners.size}|${h1 >>> 0}|${h2 >>> 0}`;
+    const hit = this.pieceCache.get(key);
+    if (hit) return hit;
+    // Connected pieces: parcels of the same owner that share a border.
+    const parent = new Map<number, number>();
+    const find = (f: number): number => { let r = f; while (parent.get(r) !== r) r = parent.get(r)!; let x = f; while (x !== r) { const n = parent.get(x)!; parent.set(x, r); x = n; } return r; };
+    for (const f of owners.keys()) parent.set(f, f);
+    for (const s of arr.segments.values()) {
+      const lo = owners.get(s.left_face);
+      if (lo !== undefined && lo === owners.get(s.right_face)) { const a = find(s.left_face), b = find(s.right_face); if (a !== b) parent.set(a, b); }
+    }
+    type Comp = { owner: string; faces: number[]; area: number; sx: number; sy: number; sz: number };
+    const comps = new Map<number, Comp>();
+    const total = new Map<string, number>();
+    for (const [f, o] of owners) {
+      const g = this.faceGeo(arr, f);
+      const area = mask ? this.landSample(arr, f, mask).land : g.area;
+      const r = find(f);
+      let c = comps.get(r);
+      if (!c) comps.set(r, (c = { owner: o, faces: [], area: 0, sx: 0, sy: 0, sz: 0 }));
+      c.faces.push(f);
+      c.area += area;
+      const lon = g.centroid[0] * Math.PI / 180, lat = g.centroid[1] * Math.PI / 180;
+      c.sx += g.area * Math.cos(lat) * Math.cos(lon); c.sy += g.area * Math.cos(lat) * Math.sin(lon); c.sz += g.area * Math.sin(lat);
+      total.set(o, (total.get(o) ?? 0) + area);
+    }
+    const main = new Map<string, Comp & { root: number }>();
+    for (const [root, c] of comps) {
+      if (c.area <= 0) continue;
+      const m = main.get(c.owner);
+      if (!m || c.area > m.area) main.set(c.owner, { ...c, root });
+    }
+    const mainOf = new Map<number, string>(); // face -> owner, for faces in an owner's main piece
+    for (const [o, c] of main) for (const f of c.faces) mainOf.set(f, o);
+    const arcs = new Map<string, number[]>();
+    for (const s of arr.segments.values()) {
+      const lo = mainOf.get(s.left_face), ro = mainOf.get(s.right_face);
+      if (lo === ro) continue;
+      const a = arr.vertices.get(s.a)!, b = arr.vertices.get(s.b)!;
+      for (const o of [lo, ro]) {
+        if (o === undefined) continue;
+        let l = arcs.get(o);
+        if (!l) arcs.set(o, (l = []));
+        l.push(a.lon / 1e7, a.lat / 1e7, b.lon / 1e7, b.lat / 1e7);
+      }
+    }
+    const out = new Map<string, OwnerPiece>();
+    for (const [o, c] of main) {
+      const lon = Math.atan2(c.sy, c.sx) * 180 / Math.PI;
+      const a = Float64Array.from(arcs.get(o) ?? []);
+      // Keyed by the outline itself, so an edit elsewhere keeps this label's place.
+      let k1 = 0x811c9dc5, k2 = 0x9e3779b9;
+      for (let i = 0; i < a.length; i++) { const v = Math.round(a[i] * 1e7) | 0; k1 = Math.imul(k1 ^ v, 16777619); k2 = Math.imul(k2 + v, 2246822519) ^ (k2 >>> 13); }
+      out.set(o, {
+        owner: o, key: `${a.length}|${k1 >>> 0}|${k2 >>> 0}${mask ? '|land' : ''}`,
+        arcs: a, centreLon: Number.isFinite(lon) ? lon : 0, area: c.area, total: total.get(o) ?? c.area,
+      });
+    }
+    if (this.pieceCache.size > 8) this.pieceCache.clear();
+    this.pieceCache.set(key, out);
+    return out;
+  }
+
+  /** Where a piece's label can go, for each way of breaking its text into lines (projection units). */
+  private placePiece(piece: OwnerPiece, view: View, text: string, st: LabelStyle, accept: ((lon: number, lat: number) => boolean) | null, cacheKey: string, cache: Map<string, PlacedLabel[]>, onScreenOnly = false): PlacedLabel[] {
+    const hit = cache.get(cacheKey);
+    if (hit) return hit;
+    const proj = view.camera.projection;
+    const sk = `${piece.key}|${proj}`;
+    let shape = this.shapeCache.get(sk);
+    if (!shape) {
+      shape = planeShape(piece.arcs, proj, piece.centreLon);
+      if (this.shapeCache.size > 1500) this.shapeCache.clear();
+      this.shapeCache.set(sk, shape);
+    }
+    // The part of the plane on screen (from points along the screen's edges), to search only there.
+    let within: [number, number, number, number] | undefined;
+    if (onScreenOnly) {
+      within = [Infinity, Infinity, -Infinity, -Infinity];
+      const m = LABEL_MARGIN, N = 16;
+      for (let i = 0; i <= N; i++) {
+        const f = m + (i / N) * (1 - 2 * m);
+        for (const [x, y] of [[f, m], [f, 1 - m], [m, f], [1 - m, f]]) {
+          const ll = screenToLonLat(view, x * view.width, y * view.height);
+          const q = ll ? shape.projection(ll) : null;
+          if (!q) continue;
+          within[0] = Math.min(within[0], q[0]); within[1] = Math.min(within[1], q[1]);
+          within[2] = Math.max(within[2], q[0]); within[3] = Math.max(within[3], q[1]);
+        }
+      }
+    }
+    const res: PlacedLabel[] = [];
+    for (const lines of lineChoices(text)) {
+      const wEm = Math.max(...lines.map((l) => textWidthEm(l, false, st.letterSpacing)));
+      const hEm = blockHeightEm(lines.length);
+      const spot = placeLabel(shape, wEm / hEm, accept ?? undefined, within);
+      // A box with the label's proportions fits inside the ellipse found when its height is sqrt(2)
+      // times the ellipse's half-height. Labels may spill a little past narrow places.
+      if (spot) res.push({ lon: spot.lon, lat: spot.lat, font: (Math.SQRT2 * spot.room * 1.15) / hEm, lines });
+    }
+    if (cache.size > 3000) cache.clear();
+    cache.set(cacheKey, res);
+    return res;
+  }
+
+  /**
+   * Of the ways to place a label, the one with the fewest lines that reaches the size wanted (design
+   * pixels); when none does, the largest, with one line preferred over more.
+   */
+  private chooseLines(choices: PlacedLabel[], wanted: number, scale: number, unit: number): PlacedLabel | null {
+    for (const c of choices) if ((c.font * scale) / unit >= wanted * 0.92) return c;
+    let best: PlacedLabel | null = null, bestScore = -Infinity;
+    for (const c of choices) {
+      const score = c.font * (c.lines.length === 1 ? 1.3 : c.lines.length === 2 ? 1 : 0.85);
+      if (score > bestScore) { bestScore = score; best = c; }
+    }
+    return best;
+  }
+
   private layerLabels(view: View, arr: Arrangement, states: Map<number, FaceState>, entities: Map<string, LabelEntity>, mask: LandMask | null = null): LabelInfo[] {
-    if (mask) return this.landLabels(view, arr, states, entities, mask);
-    const byOwner = new Map<string, { area: number; sx: number; sy: number; sz: number; best: FaceGeo | null }>();
-    const bestArea = new Map<string, number>();
-    // During an animated change a parcel counts partly for its previous owner and partly for its new
-    // one, in proportion to how far the change has progressed, so labels glide instead of jumping.
-    const add = (v: string | null, g: FaceGeo, weight: number) => {
-      if (!v || weight <= 0) return;
-      const area = g.area * weight;
-      let o = byOwner.get(v);
-      if (!o) byOwner.set(v, (o = { area: 0, sx: 0, sy: 0, sz: 0, best: null }));
-      const [lon, lat] = g.centroid.map((d) => (d * Math.PI) / 180);
-      o.sx += area * Math.cos(lat) * Math.cos(lon); o.sy += area * Math.cos(lat) * Math.sin(lon); o.sz += area * Math.sin(lat);
-      o.area += area;
-      if (!o.best || area > (bestArea.get(v) ?? 0)) { o.best = g; bestArea.set(v, area); }
-    };
+    // Who holds each parcel before and after the changes animating now (the same when none is).
+    const before = new Map<number, string>(), after = new Map<number, string>();
+    const progress = new Map<string, { w: number; p: number }>();
+    let animating = false;
     for (const [face, st] of states) {
       const g = this.faceGeo(arr, face);
       if (g.area <= 0 || g.area > 2 * Math.PI) continue;
-      if (st.transition) {
+      if (st.value) after.set(face, st.value);
+      const from = st.transition ? st.transition.from : st.value;
+      if (from) before.set(face, from);
+      if (st.transition && st.transition.from !== st.value) {
+        animating = true;
         const p = Math.min(1, Math.max(0, st.transition.progress));
-        add(st.transition.from, g, 1 - p);
-        add(st.value, g, p);
-      } else add(st.value, g, 1);
-    }
-    const out: LabelInfo[] = [];
-    const scale = view.projection.scale();
-    for (const [id, o] of byOwner) {
-      const name = entities.get(id)?.name;
-      if (!name || !o.best) continue;
-      const len = Math.hypot(o.sx, o.sy, o.sz);
-      let pos: [number, number] = o.best.centroid;
-      if (len > 1e-12) {
-        const c: [number, number] = [Math.atan2(o.sy, o.sx) * 180 / Math.PI, Math.asin(o.sz / len) * 180 / Math.PI];
-        // use the weighted centre only when it lies inside the owner's largest piece of territory
-        if (insideGeo(o.best.geo, c)) pos = c;
+        for (const o of [st.transition.from, st.value]) {
+          if (!o) continue;
+          const e = progress.get(o) ?? { w: 0, p: 0 };
+          e.w += g.area; e.p += g.area * p;
+          progress.set(o, e);
+        }
       }
-      const p = view.projection(pos);
-      if (!p) continue;
+    }
+    const piecesAfter = this.ownerPieces(arr, after, mask);
+    const piecesBefore = animating ? this.ownerPieces(arr, before, mask) : piecesAfter;
+    const scale = view.projection.scale();
+    const vis = visibleBounds(view);
+    if (view.key !== this.viewSpotKey) { this.viewSpotCache.clear(); this.viewSpotKey = view.key; }
+    const margin = LABEL_MARGIN;
+    const onScreen = (p: [number, number] | null) => !!p && p[0] >= view.width * margin && p[0] <= view.width * (1 - margin) && p[1] >= view.height * margin && p[1] <= view.height * (1 - margin);
+    const landOk = mask ? (lon: number, lat: number) => mask.onLand(lon, lat) : null;
+
+    const place = (piece: OwnerPiece, text: string, st: LabelStyle): { pos: [number, number]; fontPx: number; lines: string[] } | null => {
+      const ck = `${piece.key}|${view.camera.projection}|${text}|${st.letterSpacing}|${mask ? 1 : 0}`;
+      // The size the territory's area suggests (design pixels): the label is never larger.
+      const wanted = Math.min(st.maxSize, (Math.sqrt(piece.total) * scale * 0.18 * st.sizeScale) / view.unit);
+      let pl = this.chooseLines(this.placePiece(piece, view, text, st, landOk, ck, this.spotCache), wanted, scale, view.unit);
+      let p = pl ? view.projection([pl.lon, pl.lat]) as [number, number] | null : null;
+      // The best place is off screen while part of the territory is in view (zoomed in on a large
+      // country): place the label in the part that is in view.
+      if ((!pl || !onScreen(p)) && vis !== null) {
+        const inView = (lon: number, lat: number) => onScreen(view.projection([lon, lat]) as [number, number] | null) && (!landOk || landOk(lon, lat));
+        const alt = this.chooseLines(this.placePiece(piece, view, text, st, inView, `${ck}|view`, this.viewSpotCache, true), wanted, scale, view.unit);
+        if (alt && (alt.font * scale) / view.unit >= 6) { pl = alt; p = view.projection([alt.lon, alt.lat]) as [number, number] | null; }
+      }
+      if (!pl || !p) return null;
+      return { pos: [pl.lon, pl.lat], fontPx: pl.font * scale, lines: pl.lines };
+    };
+
+    const out: LabelInfo[] = [];
+    const owners = new Set([...piecesAfter.keys(), ...piecesBefore.keys()]);
+    for (const id of owners) {
+      const name = entities.get(id)?.name;
+      if (!name) continue;
       const look = this.labelLook(id, name);
       if (!look) continue;
-      const size = labelSize(look.style, (Math.sqrt(o.area) * scale * 0.18) / view.unit) * view.unit;
-      out.push({ text: look.text, x: p[0], y: p[1], size, style: look.style, entityId: id });
+      const pa = piecesAfter.get(id), pb = piecesBefore.get(id);
+      const a = pa ? place(pa, look.text, look.style) : null;
+      const b = pb === pa ? a : pb ? place(pb, look.text, look.style) : null;
+      if (!a && !b) continue;
+      const pr = progress.get(id);
+      const f = pr && pr.w > 0 ? pr.p / pr.w : 1;
+      let pos: [number, number], fontPx: number, lines: string[], total: number, area: number;
+      if (a && b && a !== b) {
+        // Glide between the places before and after the change.
+        const va = vec3(a.pos), vb = vec3(b.pos);
+        pos = toLonLat([vb[0] + (va[0] - vb[0]) * f, vb[1] + (va[1] - vb[1]) * f, vb[2] + (va[2] - vb[2]) * f]);
+        fontPx = b.fontPx + (a.fontPx - b.fontPx) * f;
+        lines = f >= 0.5 ? a.lines : b.lines;
+        total = pb!.total + (pa!.total - pb!.total) * f;
+        area = pb!.area + (pa!.area - pb!.area) * f;
+      } else if (a) {
+        // Appearing: grows with the change.
+        ({ pos, fontPx, lines } = a); total = pa!.total * f; area = pa!.area * f;
+      } else {
+        // Disappearing: shrinks with the change.
+        ({ pos, fontPx, lines } = b!); total = pb!.total * (1 - f); area = pb!.area * (1 - f);
+      }
+      if (total <= 0) continue;
+      const p = view.projection(pos);
+      if (!p) continue;
+      // The size the territory's area suggests, but never more than fits where the label stands.
+      const natural = (Math.sqrt(total) * scale * 0.18) / view.unit;
+      const size = labelSize(look.style, Math.min(natural, fontPx / view.unit)) * view.unit;
+      out.push({ text: look.text, lines, x: p[0], y: p[1], size, style: look.style, entityId: id, priority: area });
     }
     return out;
   }
@@ -651,98 +1025,68 @@ export class MapRenderer {
   /** The look of one country's label (null: hidden); set for each frame by render(). */
   private labelLook: (id: string, name: string) => { style: LabelStyle; text: string } | null = (_id, name) => ({ style: resolveLabelStyle(), text: name });
 
-  /**
-   * Labels for a layer clipped at the coast: placed and sized from the land part of each territory
-   * only, so they never sit over the sea. A territory entirely at sea has no label.
-   */
-  private landLabels(view: View, arr: Arrangement, states: Map<number, FaceState>, entities: Map<string, LabelEntity>, mask: LandMask): LabelInfo[] {
-    type Acc = { area: number; sx: number; sy: number; sz: number; samples: LandSample[]; best: FaceGeo | null; bestLand: number };
-    const byOwner = new Map<string, Acc>();
-    const add = (v: string | null, face: number, weight: number) => {
-      if (!v || weight <= 0) return;
-      const s = this.landSample(arr, face, mask);
-      if (!s.pts.length) return;
-      let o = byOwner.get(v);
-      if (!o) byOwner.set(v, (o = { area: 0, sx: 0, sy: 0, sz: 0, samples: [], best: null, bestLand: 0 }));
-      const wt = s.weight * weight;
-      o.sx += wt * s.sum[0]; o.sy += wt * s.sum[1]; o.sz += wt * s.sum[2];
-      o.area += s.land * weight;
-      o.samples.push(s);
-      if (s.land * weight > o.bestLand) { o.bestLand = s.land * weight; o.best = this.faceGeo(arr, face); }
-    };
-    for (const [face, st] of states) {
-      const g = this.faceGeo(arr, face);
-      if (g.area <= 0 || g.area > 2 * Math.PI) continue;
-      if (st.transition) {
-        const p = Math.min(1, Math.max(0, st.transition.progress));
-        add(st.transition.from, face, 1 - p);
-        add(st.value, face, p);
-      } else add(st.value, face, 1);
-    }
-    const out: LabelInfo[] = [];
-    const scale = view.projection.scale();
-    for (const [id, o] of byOwner) {
-      const name = entities.get(id)?.name;
-      const len = Math.hypot(o.sx, o.sy, o.sz);
-      if (!name || !o.best || len < 1e-12) continue;
-      const ux = o.sx / len, uy = o.sy / len, uz = o.sz / len;
-      let pos: [number, number] = [Math.atan2(uy, ux) * 180 / Math.PI, Math.asin(uz) * 180 / Math.PI];
-      // The weighted centre, when it is on land inside the largest land piece (labels glide during
-      // animations); otherwise the land sample nearest to it.
-      if (!(mask.onLand(pos[0], pos[1]) && insideGeo(o.best.geo, pos))) {
-        let bestDot = -2;
-        for (const s of o.samples) for (let i = 0, k = 0; i < s.pts.length; i += 2, k += 3) {
-          const d = ux * s.vec[k] + uy * s.vec[k + 1] + uz * s.vec[k + 2];
-          if (d > bestDot) { bestDot = d; pos = [s.pts[i], s.pts[i + 1]]; }
-        }
-      }
-      const p = view.projection(pos);
-      if (!p) continue;
-      const look = this.labelLook(id, name);
-      if (!look) continue;
-      const size = labelSize(look.style, (Math.sqrt(o.area) * scale * 0.18) / view.unit) * view.unit;
-      out.push({ text: look.text, x: p[0], y: p[1], size, style: look.style, entityId: id });
-    }
-    return out;
-  }
-
   private drawLabels(ctx: CanvasRenderingContext2D, labels: LabelInfo[], _style: MapStyle, _u: number): void {
     const placed: Array<[number, number, number, number]> = [];
-    const sorted = [...labels].sort((a, b) => b.size - a.size || a.text.localeCompare(b.text));
+    // Larger territories first: where labels would overlap, theirs are kept.
+    const sorted = [...labels].sort((a, b) => b.priority - a.priority || b.size - a.size || a.text.localeCompare(b.text));
     ctx.save();
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.lineJoin = 'round';
     for (const l of sorted) {
+      l.drawn = false;
       const st = l.style;
       ctx.font = labelFont(st, l.size);
       const spacing = st.letterSpacing * l.size;
       (ctx as CanvasRenderingContext2D & { letterSpacing?: string }).letterSpacing = `${spacing.toFixed(2)}px`;
-      const w = ctx.measureText(l.text).width;
-      // Larger labels win where labels would overlap.
-      const box: [number, number, number, number] = [l.x - w / 2, l.y - l.size / 2, l.x + w / 2, l.y + l.size / 2];
+      const lines = l.lines.length ? l.lines : [l.text];
+      const w = Math.max(...lines.map((t) => ctx.measureText(t).width));
+      const lh = l.size * LINE_HEIGHT;
+      const h = l.size + (lines.length - 1) * lh;
+      const box: [number, number, number, number] = [l.x - w / 2, l.y - h / 2, l.x + w / 2, l.y + h / 2];
       if (placed.some((b) => !(box[2] < b[0] || box[0] > b[2] || box[3] < b[1] || box[1] > b[3]))) continue;
       placed.push(box);
+      l.drawn = true;
+      l.box = box;
       // With letter spacing the text grows to the right; shift it back so it stays centred.
       const x = l.x + spacing / 2;
       ctx.globalAlpha = st.opacity;
-      if (st.haloWidth > 0) {
-        ctx.lineWidth = Math.max(1, l.size * st.haloWidth);
-        ctx.strokeStyle = st.haloColor;
-        ctx.strokeText(l.text, x, l.y);
-      }
-      ctx.fillStyle = st.color;
-      ctx.fillText(l.text, x, l.y);
+      lines.forEach((t, i) => {
+        const y = l.y - ((lines.length - 1) * lh) / 2 + i * lh;
+        if (st.haloWidth > 0) {
+          ctx.lineWidth = Math.max(1, l.size * st.haloWidth);
+          ctx.strokeStyle = st.haloColor;
+          ctx.strokeText(t, x, y);
+        }
+        ctx.fillStyle = st.color;
+        ctx.fillText(t, x, y);
+      });
     }
     ctx.restore();
   }
 
 }
 
+/** An advancing front from a border: how far it must travel, and the area reached at a distance. */
+interface BorderFront { maxDist: number; reach: (r: number) => Path2D }
+
+function segDist(x: number, y: number, ax: number, ay: number, bx: number, by: number): number {
+  const dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy;
+  let t = L2 > 0 ? ((x - ax) * dx + (y - ay) * dy) / L2 : 0;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  return Math.hypot(x - ax - t * dx, y - ay - t * dy);
+}
+
 interface LandSample { pts: number[]; vec: Float64Array; sum: [number, number, number]; weight: number; land: number }
 
+function vec3(p: [number, number]): [number, number, number] {
+  const lon = (p[0] * Math.PI) / 180, lat = (p[1] * Math.PI) / 180;
+  return [Math.cos(lat) * Math.cos(lon), Math.cos(lat) * Math.sin(lon), Math.sin(lat)];
+}
+
 function toLonLat(v: [number, number, number]): [number, number] {
-  return [Math.atan2(v[1], v[0]) * 180 / Math.PI, Math.asin(Math.max(-1, Math.min(1, v[2]))) * 180 / Math.PI];
+  const len = Math.hypot(v[0], v[1], v[2]) || 1;
+  return [Math.atan2(v[1], v[0]) * 180 / Math.PI, Math.asin(Math.max(-1, Math.min(1, v[2] / len))) * 180 / Math.PI];
 }
 
 function insideGeo(geo: GeoPermissibleObjects, p: [number, number]): boolean {

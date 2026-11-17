@@ -40,9 +40,14 @@ export type TransitionEasing = 'linear' | 'smooth' | 'in' | 'out';
 export interface ShotTransitions {
   /** recorded: each change as recorded (animated or not); all: every change animates; instant: none do. */
   mode: 'recorded' | 'all' | 'instant';
-  /** Style for changes the shot animates: an advancing front, a fade, or a straight wipe. */
-  style: 'advance' | 'fade' | 'wipe';
-  /** Wipe direction in degrees: 0 moves eastward, 90 northward, 180 westward, 270 southward. */
+  /**
+   * Style for changes the shot animates. border ("Advancing front"): the new territory grows out of
+   * the border it shares with the country's land, or from the side facing the country's nearest land;
+   * advance ("Expansion"): a circle growing from where the drawing started (or the middle); fade.
+   * 'wipe' is no longer offered; shots saved with it show the advancing front.
+   */
+  style: 'border' | 'advance' | 'fade' | 'wipe';
+  /** No longer used (the direction of the old wipe); kept so older shots load unchanged. */
   angle: number;
   /** seconds: each change takes `seconds` of screen time; event: the event's own length (instant events use seconds). */
   timing: 'seconds' | 'event';
@@ -50,18 +55,20 @@ export interface ShotTransitions {
   easing: TransitionEasing;
   /** Also give changes recorded with their own animation this style and timing. */
   restyleRecorded: boolean;
-  /** The moving front line of advancing and wiping changes. */
+  /** The moving front line of advancing fronts and expansions. */
   front: { show: boolean; color: string; width: number; glow: number };
 }
 
 export const DEFAULT_TRANSITIONS: ShotTransitions = {
-  mode: 'recorded', style: 'advance', angle: 0, timing: 'seconds', seconds: 1.5, easing: 'smooth', restyleRecorded: false,
+  mode: 'recorded', style: 'border', angle: 0, timing: 'seconds', seconds: 1.5, easing: 'smooth', restyleRecorded: false,
   front: { show: true, color: '#ffe9a6', width: 2.2, glow: 10 },
 };
 
 export function shotTransitions(shot: ShotSettings): ShotTransitions {
   const t = shot.transitions;
-  return { ...DEFAULT_TRANSITIONS, ...(t ?? {}), front: { ...DEFAULT_TRANSITIONS.front, ...(t?.front ?? {}) } };
+  const out = { ...DEFAULT_TRANSITIONS, ...(t ?? {}), front: { ...DEFAULT_TRANSITIONS.front, ...(t?.front ?? {}) } };
+  if (out.style === 'wipe') out.style = 'border';
+  return out;
 }
 
 /**

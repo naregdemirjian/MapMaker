@@ -5,7 +5,7 @@ import { gregorian } from '../core-time/index.ts';
 import { lonLatToVec } from '../geo-kernel/vec.ts';
 import { makeView, screenToLonLat, lonLatToScreen } from '../render-engine/camera.ts';
 import { cameraAt, timeAt } from '../presentation/sequence.ts';
-import { currentShot } from './components/MapView.tsx';
+import { currentShot, frameRect } from './components/MapView.tsx';
 
 // A small read-only window into the live state, used by the automated interface tests.
 // It changes nothing; everything the tests do to the project goes through the interface itself.
@@ -44,6 +44,16 @@ import { currentShot } from './components/MapView.tsx';
   /** The current world-building camera framed for an output of the given size (for benchmarks). */
   viewFor(width: number, height: number) {
     return makeView(store.camera, width, height);
+  },
+  /** The point of the page where a map position is drawn in the shot preview (presentation mode). */
+  previewToPage(lon: number, lat: number) {
+    const shot = currentShot();
+    const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement | null;
+    if (!shot || !c) return null;
+    const r = c.getBoundingClientRect();
+    const fr = frameRect(shot, r.width, r.height);
+    const p = lonLatToScreen(makeView(store.presentCamera ?? cameraAt(shot, store.shotFrame), fr.w, fr.h), lon, lat);
+    return p ? [p[0] + fr.x + r.left, p[1] + fr.y + r.top] : null;
   },
   /** Where a map position lands in an exported frame of the current shot (scale 1 = full size). */
   exportPixel(lon: number, lat: number, frame: number, scale: number) {

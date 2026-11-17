@@ -31,6 +31,8 @@ try {
     // These countries are drawn over the Atlantic: keep their territory over the sea
     // (coastline clipping is checked in the vertical-slice test).
     await page.getByTestId('clip-to-land').uncheck();
+    // "Correct this period" applies from the date being viewed: the countries exist from 1400 on.
+    await h.setDate('1400');
     await h.newCountry(A);
     await page.getByTestId('tool-polygon').click();
     const { cx, cy } = await h.centre();
@@ -43,6 +45,7 @@ try {
     P.aEdge = await h.toLL([cx - 30, cy - 20]);
     P.out = await h.toLL([cx + 300, cy - 200]);
     await h.waitOwner(P.a, '1500', A);
+    assert.equal(await h.ownerAt(P.a, '1399'), null, 'nothing before the date drawn');
     assert.equal(await h.ownerAt(P.out, '1500'), null);
     await h.screenshot('precise-shape');
   });
@@ -169,6 +172,7 @@ try {
     await page.waitForFunction(() => (window as any).__mapmaker.store.world.get('map_space', (window as any).__mapmaker.store.spaceId)?.name === 'Aster');
     assert.equal(await h.ownerAt(P.a, '1500'), null, 'Aster starts blank at the same coordinates');
     await h.newCountry(C);
+    await h.setDate('1400');
     await page.getByTestId('tool-lasso').click();
     const ap = await h.toPage(P.a);
     await h.drawLasso(blob(ap[0], ap[1], 60, 50));

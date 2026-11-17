@@ -4,7 +4,8 @@ import * as cmd from '../../domain/commands.ts';
 import { type Instant, gregorian, fromStore, formatYear, compare, NEG_INF } from '../../core-time/index.ts';
 import { BASE_EVENT_ID, type EffectRow } from '../../world-model/schema.ts';
 import { basemapSourceOf } from '../../world-model/world-settings.ts';
-import { parseJSON, leafDescendants, type Resolution, type TransitionSpec } from '../../temporal-engine/engine.ts';
+import { parseJSON, leafDescendants, isUntracked, type Resolution, type TransitionSpec } from '../../temporal-engine/engine.ts';
+import type { World } from '../../world-model/world.ts';
 import { lonLatToVec } from '../../geo-kernel/vec.ts';
 import { stepChange } from './Timeline.tsx';
 import { GroupChecks, eventVisible } from './EventGroups.tsx';
@@ -319,9 +320,9 @@ function EntityPanel({ id }: { id: string }) {
       <div className="stat">On {fmt(s.time)}: {parcels ? `${Math.round(areaSr * (radius / 1000) ** 2).toLocaleString()} km²` : 'no territory'} </div>
       {(e.type_id === 'polity' || e.type_id === 'faction') && <button onClick={() => s.set({ paintValue: id, tool: 'lasso' })}>Draw territory for {e.name}</button>}
       <h4>Territorial changes</h4>
-      {[...new Set(changes.map((f) => f.event_id))].map((eid) => w.get('event', eid)).filter((ev) => !!ev).sort((a, b) => a!.start_day - b!.start_day || a!.start_ms - b!.start_ms).map((ev) => (
-        <div key={ev!.id} className="row" onClick={() => s.set({ selection: { kind: 'event', id: ev!.id }, time: ev!.id === BASE_EVENT_ID ? s.time : fromStore(ev!.start_day, ev!.start_ms) })}>
-          {ev!.id === BASE_EVENT_ID ? 'Starting map (from the beginning)' : <><span className="date">{fmt(fromStore(ev!.start_day, ev!.start_ms))}</span> {ev!.name}</>}
+      {changeRows(w, changes).map((r) => (
+        <div key={r.key} className="row" onClick={() => s.set({ selection: { kind: 'event', id: r.eventId }, time: r.time ?? s.time })}>
+          {r.time ? <><span className="date">{fmt(r.time)}</span> {r.label}</> : r.label}
         </div>
       ))}
       {!changes.length && <div className="muted">None yet.</div>}
@@ -329,6 +330,26 @@ function EntityPanel({ id }: { id: string }) {
       <button className="danger" onClick={() => { if (confirm(`Delete ${e.name}? Events that refer to it will be flagged in History Health.`)) { s.execute((wd) => cmd.deleteEntity(wd, id)); s.set({ selection: null }); } }}>Delete</button>
     </div>
   );
+}
+
+/**
+ * A country's territorial changes in date order: the starting map, each event once, and each change
+ * made without an event on its own date.
+ */
+function changeRows(w: World, changes: EffectRow[]): Array<{ key: string; eventId: string; time: Instant | null; label: string }> {
+  const rows: Array<{ key: string; eventId: string; time: Instant | null; label: string }> = [];
+  const seen = new Set<string>();
+  for (const f of changes) {
+    if (isUntracked(f)) { rows.push({ key: f.id, eventId: BASE_EVENT_ID, time: fromStore(f.at_day!, f.at_ms ?? 0), label: 'Change without an event' }); continue; }
+    if (seen.has(f.event_id)) continue;
+    seen.add(f.event_id);
+    const ev = w.get('event', f.event_id);
+    if (!ev) continue;
+    rows.push(ev.id === BASE_EVENT_ID
+      ? { key: ev.id, eventId: ev.id, time: null, label: 'Starting map (from the beginning)' }
+      : { key: ev.id, eventId: ev.id, time: fromStore(ev.start_day, ev.start_ms), label: ev.name });
+  }
+  return rows.sort((a, b) => (a.time ? (b.time ? compare(a.time, b.time) : 1) : b.time ? -1 : 0));
 }
 
 function describeEffect(s: ReturnType<typeof useStore>, f: EffectRow): string {
@@ -369,12 +390,13 @@ function EventPanel({ id }: { id: string }) {
     if (style === 'advance') {
       const old = parseJSON<TransitionSpec | null>(f.transition, null);
       spec = { style: 'advance', origin: old?.origin ?? regionCentre(s, f), easing: 'smooth' };
-    } else if (style === 'fade') spec = { style: 'fade' };
+    } else if (style === 'border') spec = { style: 'border', easing: 'smooth' };
+    else if (style === 'fade') spec = { style: 'fade' };
     s.execute((wd) => cmd.setEffectTransition(wd, f.id, spec));
   };
   return (
     <div className="panel" data-testid="event-panel">
-      <h3>{base ? 'Starting map' : e.name}</h3>
+      <h3>{base ? 'Starting map and changes without an event' : e.name}</h3>
       {!base && <>
         <label>Name<input value={name} onChange={(ev) => setName(ev.target.value)} onBlur={() => name.trim() && name !== e.name && s.execute((wd) => cmd.updateEvent(wd, id, { name: name.trim() }))} /></label>
         <label>Type<select value={e.type_id} onChange={(ev) => s.execute((wd) => cmd.updateEvent(wd, id, { type_id: ev.target.value }))}>{w.all('event_type').filter((t) => t.id !== 'base').map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
@@ -395,13 +417,15 @@ function EventPanel({ id }: { id: string }) {
       <h4>Changes</h4>
       {effects.map((f) => (
         <div key={f.id} className="effect">
-          <div>{describeEffect(s, f)}</div>
+          <div>{isUntracked(f) && <span className="date">{fmt(fromStore(f.at_day!, f.at_ms ?? 0))} · </span>}{describeEffect(s, f)}</div>
+          {base && isUntracked(f) && <div className="effect-tools"><button className="small" onClick={() => s.setTime(fromStore(f.at_day!, f.at_ms ?? 0))}>Go to</button><button className="small danger" onClick={() => s.execute((wd) => cmd.deleteEffect(wd, f.id))}>Remove</button></div>}
           {!base && f.layer_id && (
             <div className="effect-tools">
               <label className="inline">Animation
                 <select value={parseJSON<TransitionSpec | null>(f.transition, null)?.style ?? 'instant'} onChange={(ev) => setTransition(f, ev.target.value)} disabled={!end} title={end ? '' : 'Give the event an end date to animate its changes'} data-testid="transition-style">
                   <option value="instant">Instant</option>
-                  <option value="advance">Advancing front</option>
+                  <option value="border">Advancing front (from the border)</option>
+                  <option value="advance">Expansion (a circle)</option>
                   <option value="fade">Fade</option>
                 </select>
               </label>
@@ -465,7 +489,9 @@ function PointPanel({ lon, lat }: { lon: number; lat: number }) {
       <div className="stat" data-testid="point-owner">
         On {fmt(s.time, 'minute')}: {owner ? <><span className="swatch" style={{ background: owner.color }} /> <b>{owner.name}</b></> : <b>nobody</b>}
       </div>
-      {ev && <div>Since {ev.id === BASE_EVENT_ID ? 'the starting map' : <>{fmt(a!.t, 'day')} (<a onClick={() => s.set({ selection: { kind: 'event', id: ev.id } })}>{ev.name}</a>)</>}</div>}
+      {ev && <div>Since {ev.id === BASE_EVENT_ID
+        ? (a!.t.day === -Infinity ? 'the starting map' : <>{fmt(a!.t, 'day')} (<a onClick={() => s.set({ selection: { kind: 'event', id: ev.id } })}>a change without an event</a>)</>)
+        : <>{fmt(a!.t, 'day')} (<a onClick={() => s.set({ selection: { kind: 'event', id: ev.id } })}>{ev.name}</a>)</>}</div>}
       <div>{next ? <>Until {fmt(next, 'day')}</> : 'No later change recorded'}</div>
       {owner && <button onClick={() => s.set({ selection: { kind: 'entity', id: owner.id } })}>Open {owner.name}</button>}
     </div>

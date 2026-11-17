@@ -382,11 +382,17 @@ export interface CountryToAdd {
  * Add countries and their territory in one step: each country is created (or an existing one with
  * the same name is used) and its land is painted as a correction or as part of an event. All outlines
  * go into the map together, so the map's structure is rebuilt once however many countries there are.
+ * With `into`, their land is given to that existing country instead (Greece's borders added to a
+ * country of the user's own, say), and no countries are created.
  */
-export function addCountries(world: World, engine: Engine, o: { spaceId: string; layerId: string; countries: CountryToAdd[]; mode: EditMode; snap?: number; newEvent?: EventInput }): CommandResult<{ entities: string[]; eventId: string | null }> {
-  checkTarget(world, { spaceId: o.spaceId, layerId: o.layerId, mode: o.newEvent ? undefined : o.mode });
+export function addCountries(world: World, engine: Engine, o: { spaceId: string; layerId: string; countries: CountryToAdd[]; mode: EditMode; snap?: number; newEvent?: EventInput; into?: string }): CommandResult<{ entities: string[]; eventId: string | null }> {
+  checkTarget(world, { spaceId: o.spaceId, layerId: o.layerId, mode: o.newEvent ? undefined : o.mode, value: o.into });
   if (!o.countries.length) throw new Error('Choose at least one country.');
-  return run(world, o.countries.length === 1 ? `Add ${o.countries[0].name}` : `Add ${o.countries.length} countries`, (tx) => {
+  const intoName = o.into ? world.get('entity', o.into)!.name : '';
+  const label = o.into
+    ? `Add ${o.countries.length === 1 ? o.countries[0].name : `${o.countries.length} countries`} to ${intoName}`
+    : o.countries.length === 1 ? `Add ${o.countries[0].name}` : `Add ${o.countries.length} countries`;
+  return run(world, label, (tx) => {
     // Optionally the event they belong to is created in the same step (one undo).
     const eventId = o.newEvent ? insertEventIn(tx, o.newEvent) : null;
     if (eventId) o = { ...o, mode: { kind: 'new', eventId } };
@@ -410,16 +416,17 @@ export function addCountries(world: World, engine: Engine, o: { spaceId: string;
     const arr = world.arrangement(o.spaceId);
     const lefts = arr.facesLeftOfMany(paths);
     const insideOf = (i: number) => (arr.isSimpleCycle(paths[i]) && arr.separatesFaces(paths[i]) ? lefts[i] : arr.facesWoundBy(paths[i]));
-    const corrections: Array<{ leaves: Iterable<number>; value: string | null }> = [];
+    const items: Array<{ leaves: Iterable<number>; value: string | null }> = [];
     o.countries.forEach((c, k) => {
-      let id = existing.get(c.name.toLowerCase());
+      // Into an existing country: its territory grows; no country of this name is created.
+      let id = o.into ?? existing.get(c.name.toLowerCase());
       if (!id) {
         id = newId('ent');
         const style = c.fill?.asset ? JSON.stringify({ fill: c.fill }) : '{}';
         tx.insert('entity', { id, type_id: 'polity', branch_id: MAIN_BRANCH, name: c.name, color: c.color ?? suggestColor(world), notes: '', created_seq: world.nextSeq('entity'), style });
         existing.set(c.name.toLowerCase(), id);
       }
-      entities.push(id);
+      if (!entities.includes(id)) entities.push(id);
       const faces = new Set<number>();
       for (const p of parts[k]) {
         const holes = new Set<number>();
@@ -428,9 +435,9 @@ export function addCountries(world: World, engine: Engine, o: { spaceId: string;
       }
       if (!faces.size) return;
       if (o.mode.kind === 'new') insertAssignEffect(tx, { eventId: o.mode.eventId, spaceId: o.spaceId, layerId: o.layerId, faces: canonicalFaces(arr, [...faces]), value: id, at: o.mode.at ?? null, intent: { op: 'paint', value: id } });
-      else corrections.push({ leaves: faces, value: id });
+      else items.push({ leaves: faces, value: id });
     });
-    if (o.mode.kind === 'correct' && corrections.length) correctPeriods(tx, engine, o.spaceId, o.layerId, corrections, o.mode.t);
+    if (o.mode.kind !== 'new' && items.length) writeAssignments(tx, engine, o.spaceId, o.layerId, o.mode, items);
     return { entities, eventId };
   });
 }
@@ -439,7 +446,26 @@ export function addCountries(world: World, engine: Engine, o: { spaceId: string;
 
 export type EditMode =
   | { kind: 'new'; eventId: string; at?: Instant | null }
-  | { kind: 'correct'; t: Instant };
+  /** Retroactive: fixes the period being viewed inside the change that started it (the starting map at NEG_INF). */
+  | { kind: 'correct'; t: Instant }
+  /** "Correct this period": a change from `t` on, until something later changes the area; no event. */
+  | { kind: 'change'; t: Instant };
+
+/** Write territory changes as the edit mode says (one change for all the items). */
+function writeAssignments(tx: Tx, engine: Engine, spaceId: string, layerId: string, mode: EditMode, items: Array<{ leaves: Iterable<number>; value: string | null }>, extra: { transition?: TransitionSpec | null; intent?: unknown } = {}): void {
+  const arr = tx.world.arrangement(spaceId);
+  if (mode.kind === 'correct' || (mode.kind === 'change' && mode.t.day === -Infinity)) {
+    correctPeriods(tx, engine, spaceId, layerId, items, mode.t);
+    return;
+  }
+  const sets: Array<[number[], string | null]> = items.map((x) => [canonicalFaces(arr, x.leaves), x.value]);
+  const nonEmpty = sets.filter(([f]) => f.length);
+  if (!nonEmpty.length) return;
+  const id = mode.kind === 'new'
+    ? insertAssignEffect(tx, { eventId: mode.eventId, spaceId, layerId, faces: nonEmpty[0][0], value: nonEmpty[0][1], at: mode.at ?? null, transition: extra.transition ?? null, intent: extra.intent })
+    : insertAssignEffect(tx, { eventId: BASE_EVENT_ID, spaceId, layerId, faces: nonEmpty[0][0], value: nonEmpty[0][1], at: mode.t, intent: extra.intent });
+  if (nonEmpty.length > 1) tx.patch('effect', id, { resolution: JSON.stringify({ set: nonEmpty } satisfies Resolution) });
+}
 
 function nextOrdinal(world: World, eventId: string): number {
   return world.all('effect').filter((f) => f.event_id === eventId).reduce((m, f) => Math.max(m, f.ordinal), 0) + 1;
@@ -495,8 +521,9 @@ function correctPeriods(tx: Tx, engine: Engine, spaceId: string, layerId: string
       tx.patch('effect', effectId, { resolution: JSON.stringify(res) });
       continue;
     }
-    // Nothing set it yet: correct the base world.
-    const base = world.all('effect').find((f) => f.event_id === BASE_EVENT_ID && f.layer_id === layerId && f.kind === 'assign');
+    // Nothing set it yet: correct the base world (its undated change; dated ones are changes made
+    // without an event).
+    const base = world.all('effect').find((f) => f.event_id === BASE_EVENT_ID && f.layer_id === layerId && f.kind === 'assign' && f.at_day === null);
     if (base) {
       const res = parseJSON<Resolution>(base.resolution, { set: [] });
       res.set.push(...sets);
@@ -524,7 +551,7 @@ export interface PaintInput {
 /** Give an area to an owner (or clear it). The area's outline permanently cuts the parcel map. */
 export function paintTerritory(world: World, engine: Engine, p: PaintInput): CommandResult<{ faces: number[] }> {
   const who = p.value ? world.get('entity', p.value)?.name ?? 'someone' : 'nobody';
-  return run(world, p.mode.kind === 'new' ? `Give territory to ${who}` : `Correct territory to ${who}`, (tx) => {
+  return run(world, p.mode.kind === 'new' ? `Give territory to ${who}` : p.mode.kind === 'change' ? `Change territory to ${who}` : `Correct territory to ${who}`, (tx) => {
     const faces: number[] = [];
     paintInside(tx, engine, p, faces);
     return { faces };
@@ -577,11 +604,7 @@ function paintInside(tx: Tx, engine: Engine, p: PaintInput, out: number[] = []):
   }
   const arr = world.arrangement(p.spaceId);
   const inside = [...leafDescendants(arr, insideAll)];
-  if (p.mode.kind === 'new') {
-    insertAssignEffect(tx, { eventId: p.mode.eventId, spaceId: p.spaceId, layerId: p.layerId, faces: canonicalFaces(arr, inside), value: p.value, at: p.mode.at ?? null, transition: p.transition ?? null, intent: { op: 'paint', value: p.value } });
-  } else {
-    correctPeriod(tx, engine, p.spaceId, p.layerId, inside, p.value, p.mode.t);
-  }
+  writeAssignments(tx, engine, p.spaceId, p.layerId, p.mode, [{ leaves: inside, value: p.value }], { transition: p.mode.kind === 'new' ? p.transition ?? null : null, intent: { op: 'paint', value: p.value } });
   out.push(...inside);
   return 'paint';
 }
@@ -603,9 +626,7 @@ export function assignFaces(world: World, engine: Engine, o: { spaceId: string; 
   const who = o.value ? world.get('entity', o.value)?.name ?? 'someone' : 'nobody';
   return run(world, `Give territory to ${who}`, (tx) => {
     checkTarget(world, o);
-    const arr = world.arrangement(o.spaceId);
-    if (o.mode.kind === 'new') insertAssignEffect(tx, { eventId: o.mode.eventId, spaceId: o.spaceId, layerId: o.layerId, faces: canonicalFaces(arr, o.leaves), value: o.value, at: o.mode.at ?? null, transition: o.transition ?? null });
-    else correctPeriod(tx, engine, o.spaceId, o.layerId, o.leaves, o.value, o.mode.t);
+    writeAssignments(tx, engine, o.spaceId, o.layerId, o.mode, [{ leaves: o.leaves, value: o.value }], { transition: o.transition ?? null });
   });
 }
 

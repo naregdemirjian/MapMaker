@@ -280,10 +280,13 @@ try {
     await page.getByTestId('entity-panel').waitFor();
     await page.getByTestId('tool-lasso').click();
     assert.equal(await page.getByTestId('paint-owner').inputValue(), await entityId(A), 'the new country is chosen in "Give to"');
+    // The countries exist from the year 900 on: "correct this period" applies from the date being viewed.
+    await setDate('900');
     const { cx, cy } = await centre();
     await drawLasso(blob(cx - 120, cy, 110, 80));
     await page.getByTestId('choice-new').waitFor();
     assert.match((await page.getByTestId('new-change-lasts').textContent()) ?? '', /Nothing later changes this area yet/);
+    assert.match((await page.getByTestId('correct-explained').textContent()) ?? '', /from 1 January 900 on, without making an event; earlier dates stay as they are/);
     await screenshot('what-does-this-drawing-mean');
     await page.getByTestId('choice-correct').click();
     await page.getByTestId('confirm-edit').click();
@@ -292,7 +295,9 @@ try {
     P.conqEdge = await toLL([cx - 105, cy]);
     P.north = await toLL([cx - 120, cy - 150]);
     await waitOwner(P.westA, '2000', A);
-    assert.equal(await ownerAt(P.westA, '1000'), A, 'a correction with no history before it is part of the base world');
+    assert.equal(await ownerAt(P.westA, '1000'), A, 'from the date drawn on');
+    assert.equal(await ownerAt(P.westA, '899'), null, 'and not before it');
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('event').length), 1, 'no event was made (only the starting map)');
     assert.equal(await ownerAt(P.north, '2000'), null);
     assert.match(await inspect(P.westA), new RegExp(A));
     await screenshot('country-a');
@@ -523,7 +528,7 @@ try {
     for (const pass of ['fills', 'borders']) copyFileSync(join(full.dir, pass, readdirSync(join(full.dir, pass)).sort()[12]), join(OUT, `exported-${pass}-frame-13.png`));
   });
 
-  await step('Shot transitions: as recorded, none at all, or every change restyled (a wipe)', async () => {
+  await step('Shot transitions: as recorded, none at all, or every change restyled (an advancing front from the border)', async () => {
     const drawn = () => page.evaluate(() => (window as any).__mapmaker.store.renderer.lastTransitions as Array<{ style: string; progress: number }>);
     await page.getByTestId('mode-present').click();
     await page.getByTestId('shot-editor').waitFor();
@@ -537,12 +542,34 @@ try {
     await screenshot('shot-no-animation');
     await page.getByTestId('transition-mode').selectOption('all');
     await page.getByTestId('transition-restyle').check();
-    await page.getByTestId('transition-style-shot').selectOption('wipe');
+    assert.deepEqual(await page.getByTestId('transition-style-shot').locator('option').allInnerTexts(), [
+      "Advancing front (grows out of the country's existing border)", 'Expansion (a circle from where the drawing started, or the middle)', 'Fade',
+    ], 'no wipe; the advancing front and the expansion');
+    await page.getByTestId('transition-style-shot').selectOption('border');
     await page.locator('label', { hasText: 'Length' }).locator('select').selectOption('event');
     await page.waitForTimeout(100);
+    // Find a frame about half-way through the change.
+    const frames = Number(await page.getByTestId('frame-slider').getAttribute('max'));
+    for (let f = 0; f <= frames; f++) {
+      await page.getByTestId('frame-slider').fill(String(f));
+      tr = await drawn();
+      if (tr.length === 1 && tr[0].progress >= 0.4) break;
+    }
     tr = await drawn();
-    assert.ok(tr.length === 1 && tr[0].style === 'wipe' && tr[0].progress > 0 && tr[0].progress < 1, `restyled as a wipe over the event's length (${JSON.stringify(tr)})`);
-    await screenshot('shot-wipe');
+    assert.ok(tr.length === 1 && tr[0].style === 'border' && tr[0].progress > 0.3 && tr[0].progress < 0.75, `restyled as an advancing front over the event's length (${JSON.stringify(tr)})`);
+    // B's land lies east of the conquered area: the side facing B has changed, the far side not yet.
+    const previewPixel = (ll: LL) => page.evaluate(([lon, lat]) => {
+      const p = (window as any).__mapmaker.previewToPage(lon, lat);
+      const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement;
+      const r = c.getBoundingClientRect(), k = c.width / r.width;
+      return Array.from(c.getContext('2d')!.getImageData(Math.round((p[0] - r.left) * k), Math.round((p[1] - r.top) * k), 1, 1).data).slice(0, 3);
+    }, ll);
+    const nearB: LL = [2 * P.conq[0] - P.conqEdge[0], 2 * P.conq[1] - P.conqEdge[1]];
+    const colB = await previewPixel(P.eastB), colA = await previewPixel(P.westA);
+    assert.ok(colourDiff(colA, colB) > 30, 'the two countries look different');
+    assert.ok(colourDiff(await previewPixel(nearB), colB) < 12, `the side facing B has become B's (${await previewPixel(nearB)} vs ${colB})`);
+    assert.ok(colourDiff(await previewPixel(P.conqEdge), colA) < 12, `the far side is still A's (${await previewPixel(P.conqEdge)} vs ${colA})`);
+    await screenshot('shot-advancing-front');
     // Back to the recorded animation, so later steps see the shot as it was.
     await page.getByTestId('transition-mode').selectOption('recorded');
     await page.getByTestId('transition-restyle').uncheck();
@@ -682,11 +709,39 @@ try {
     await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 12, lat: 50, zoom: 2.3, rotation: 0, projection: 'mercator' }));
     await page.waitForTimeout(600);
     await screenshot('europe-today');
+    // Every large country has its label drawn (none hidden by smaller ones), standing inside it.
+    type Lbl = { text: string; x: number; y: number; drawn: boolean };
+    const shown = await page.evaluate(() => (window as any).__mapmaker.store.renderer.lastLabels.map((l: any) => ({ text: l.text, x: l.x, y: l.y, drawn: l.drawn }))) as Lbl[];
+    const box = (await page.getByTestId('map-canvas').boundingBox())!;
+    for (const name of ['France', 'Spain', 'Germany', 'Poland', 'Ukraine', 'Italy', 'Sweden', 'Norway', 'Finland', 'Romania', 'Russia']) {
+      const l = shown.find((x) => x.text.toLowerCase() === name.toLowerCase()); // an earlier step made labels capitals
+      assert.ok(l && l.drawn, `${name} has a label on screen (${JSON.stringify(l)})`);
+      const ll = await toLL([box.x + l.x, box.y + l.y]);
+      assert.equal(await ownerAt(ll, '1461'), name, `the label "${name}" stands inside ${name}`);
+    }
     // One undo takes it all back.
     await page.getByTestId('undo').click();
     await page.waitForFunction(() => !(window as any).__mapmaker.store.world.all('event').some((e: any) => e.name === 'Present-day borders'));
     assert.equal(await ownerAt([2.35, 48.86], '1461'), null);
     await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 0, lat: 0, zoom: 0, rotation: 0, projection: 'equirectangular' }));
+  });
+
+  await step("Add today's countries into one of your own: Greece's land joins a country of the project", async () => {
+    await page.getByTestId('open-add-countries').click();
+    await page.getByTestId('add-countries').waitFor();
+    await page.getByTestId('country-search').fill('Greece');
+    await page.getByTestId('country-Greece').check();
+    await page.getByTestId('countries-into').check();
+    await page.getByTestId('countries-into-target').selectOption({ label: A });
+    assert.equal(await page.getByTestId('add-countries-go').innerText(), `Add to ${A}`);
+    await screenshot('add-countries-into');
+    const entitiesBefore = await page.evaluate(() => (window as any).__mapmaker.store.world.all('entity').length);
+    await page.getByTestId('add-countries-go').click();
+    await page.getByTestId('add-countries').waitFor({ state: 'detached', timeout: 60000 });
+    assert.equal(await ownerAt([23.73, 37.98], '1300'), A, 'Athens belongs to the chosen country, from the start');
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('entity').length), entitiesBefore, 'no country called Greece was made');
+    await page.getByTestId('undo').click();
+    await page.waitForFunction(() => (window as any).__mapmaker.ownerAt(23.73, 37.98, '1300') === null);
   });
 
   await step('History Health reports no problems', async () => {

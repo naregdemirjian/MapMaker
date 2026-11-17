@@ -7,7 +7,11 @@ import { BASE_EVENT_ID, type EffectRow, type EventRow } from '../world-model/sch
 import { type Vec3, angle, e7ToVec, lonLatToVec } from '../geo-kernel/vec.ts';
 import type { Arrangement } from '../geo-kernel/arrangement.ts';
 
-export type TransitionStyle = 'instant' | 'advance' | 'fade' | 'wipe';
+/**
+ * How a change animates. border ("Advancing front"): from the border with the new owner's existing
+ * land; advance ("Expansion"): a circle from an origin; fade; wipe: a straight sweep (old shots only).
+ */
+export type TransitionStyle = 'instant' | 'border' | 'advance' | 'fade' | 'wipe';
 export interface TransitionSpec { style: TransitionStyle; origin?: [number, number]; easing?: 'linear' | 'smooth' }
 export interface Resolution { set: Array<[number[], string | null]> }
 export interface AnnexIntent { op: 'annex'; from: string; to: string }
@@ -51,9 +55,25 @@ export function eventEnd(e: EventRow): Instant | null {
   return e.end_day === null || e.end_ms === null ? null : fromStore(e.end_day, e.end_ms);
 }
 export function effectTime(ef: EffectRow, ev: EventRow): Instant {
-  if (ev.id === BASE_EVENT_ID) return NEG_INF;
+  // The starting map's changes are from the beginning, except changes made without an event, which
+  // carry their own date (see isUntracked).
+  if (ev.id === BASE_EVENT_ID) return ef.at_day !== null && ef.at_ms !== null ? fromStore(ef.at_day, ef.at_ms) : NEG_INF;
   return ef.at_day !== null && ef.at_ms !== null ? fromStore(ef.at_day, ef.at_ms) : eventStart(ev);
 }
+
+/**
+ * A change made without an event ("correct this period"): kept with the starting map, which no list
+ * shows as an event, but dated. It applies from its date until something later changes the area.
+ */
+export function isUntracked(ef: Pick<EffectRow, 'event_id' | 'at_day'>): boolean {
+  return ef.event_id === BASE_EVENT_ID && ef.at_day !== null;
+}
+
+/**
+ * Where a change without an event and an event's change happen at the same moment, the change
+ * without an event wins: it was drawn while looking at that moment, on top of what was there.
+ */
+export const UNTRACKED_PRECEDENCE = 1e9;
 
 export function parseJSON<T>(text: string, fallback: T): T {
   if (!text) return fallback;
@@ -167,7 +187,7 @@ export class Engine {
         for (const face of faces) {
           if (!arr.faces.has(face)) { this.conflictList.push({ kind: 'broken', effectId: ef.id, eventId: ev.id, message: `Parcel ${face} no longer exists.` }); continue; }
           const a: Assignment = {
-            t, end: compiled ? end! : t, value, effectId: ef.id, eventId: ev.id, precedence: ev.precedence,
+            t, end: compiled ? end! : t, value, effectId: ef.id, eventId: ev.id, precedence: isUntracked(ef) ? UNTRACKED_PRECEDENCE : ev.precedence,
             eventSeq: ev.created_seq, ordinal: ef.ordinal, entry, face, transition: compiled,
           };
           let lm = this.timelines.get(layer.id);
@@ -323,7 +343,7 @@ export class Engine {
     if (!ev || !ef.space_id || !ef.layer_id) return [];
     const arr = w.arrangement(ef.space_id);
     const probe: Assignment = {
-      t: effectTime(ef, ev), end: effectTime(ef, ev), value: null, effectId: ef.id, eventId: ev.id, precedence: ev.precedence,
+      t: effectTime(ef, ev), end: effectTime(ef, ev), value: null, effectId: ef.id, eventId: ev.id, precedence: isUntracked(ef) ? UNTRACKED_PRECEDENCE : ev.precedence,
       eventSeq: ev.created_seq, ordinal: ef.ordinal, entry: -1, face: 0, transition: null,
     };
     const out: number[] = [];

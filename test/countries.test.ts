@@ -75,3 +75,27 @@ test('adding all 242 countries at once, as an event: a valid map, right owners b
   assert.deepEqual(s.world.arrangement(s.space).validate(), []);
   assert.equal(s.world.all('entity').filter((e) => e.type_id === 'polity').length, 242);
 });
+
+test("adding a country's land to one of the user's own countries: no new country, correction or event, one undo", () => {
+  const s = setup();
+  const mine = cmd.createEntity(s.world, { type_id: 'polity', name: 'Hellenic League' }).result;
+  cmd.addCountries(s.world, s.engine, { spaceId: s.space, layerId: s.layer, countries: pick('Bulgaria'), mode: { kind: 'correct', t: NEG_INF } });
+  const before = s.world.all('entity').length;
+  // Greece and North Macedonia, given to the user's country as part of the starting map.
+  const r = cmd.addCountries(s.world, s.engine, { spaceId: s.space, layerId: s.layer, countries: pick('Greece', 'North Macedonia'), mode: { kind: 'correct', t: NEG_INF }, into: mine });
+  assert.deepEqual(r.result.entities, [mine]);
+  assert.equal(s.world.all('entity').length, before, 'no country was created');
+  assert.ok(!s.world.all('entity').some((e) => e.name === 'Greece'));
+  assert.equal(s.owner(23.73, 37.98), 'Hellenic League', 'Athens');
+  assert.equal(s.owner(21.43, 42.0), 'Hellenic League', 'Skopje');
+  assert.equal(s.owner(23.32, 42.7), 'Bulgaria', 'Sofia stays Bulgarian');
+  s.world.applyDiffs(invertDiffs(r.diffs));
+  assert.equal(s.owner(23.73, 37.98), null, 'undone in one step');
+  // As an event: the land joins the country on the event's date.
+  const ev = cmd.createEvent(s.world, { name: 'Union', start: gregorian.fromCivil({ year: 1900 }) }).result;
+  cmd.addCountries(s.world, s.engine, { spaceId: s.space, layerId: s.layer, countries: pick('Greece'), mode: { kind: 'new', eventId: ev }, into: mine });
+  assert.equal(s.owner(23.73, 37.98, gregorian.fromCivil({ year: 1899 })), null);
+  assert.equal(s.owner(23.73, 37.98, gregorian.fromCivil({ year: 1901 })), 'Hellenic League');
+  // A country that no longer exists is refused before anything changes.
+  assert.throws(() => cmd.addCountries(s.world, s.engine, { spaceId: s.space, layerId: s.layer, countries: pick('Albania'), mode: { kind: 'correct', t: NEG_INF }, into: 'ent_gone' }), /no longer exists/);
+});
