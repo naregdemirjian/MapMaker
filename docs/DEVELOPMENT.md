@@ -396,8 +396,10 @@ recompiling the 1,000-territory history took about 800 ms after every edit.
 12. **Characters have one look** (a dot in their colour and their name); no pictures or icons yet, and shots show where
    they are, not the trail they took. Placements made inside an event are removed from the character's panel.
 13. **"Changes over time" reads one layer** (the one being drawn on) and compares the start and the end of the period.
-14. **The export size is an estimate** from one frame of each chosen layer (checked to be within a factor of four of a
-   real export; usually much closer).
+14. **The export size is an estimate** from one frame of each chosen layer, drawn small and worked up (D69; checked
+   to be within a factor of 2.5 of a real export; usually much closer).
+15. **A shot in Equal Earth or Natural Earth, while its camera is framed by hand**, keeps the middle meridian it had
+   and straightens a little when the pointer rests or lets go (D67): what is shown at rest is what is exported.
 
 ## Defects found and fixed in the testing stage (0.2.0)
 
