@@ -9,6 +9,7 @@ import { BASE_EVENT_ID } from '../../world-model/schema.ts';
 import { featureStyle, featureColor, isFeatureKind, DEFAULT_FEATURE_STYLE, type FeatureKind, type FeatureStyle } from '../../render-engine/feature-style.ts';
 import { parseJSON } from '../../temporal-engine/engine.ts';
 import { DateField, fmt } from './Panels.tsx';
+import { PicturesSection } from './Pictures.tsx';
 
 const KIND_NAME: Record<FeatureKind, { one: string; many: string; example: string }> = {
   area: { one: 'area', many: 'Areas', example: 'claims, influence zones, occupied zones' },
@@ -309,6 +310,7 @@ export function FeaturePanel({ id }: { id: string }) {
         {now && <button onClick={() => s.execute((wd, en) => cmd.endFeature(wd, en, { feature: id, mode: { kind: 'change', t: s.time } }))} data-testid="feature-end" title="It no longer exists from the date viewed (until given a new shape)">Ends on {fmt(s.time)}</button>}
       </div>
       <label>Notes<textarea rows={4} value={notes} onChange={(ev) => setNotes(ev.target.value)} onBlur={() => notes !== f.notes && s.execute((wd) => cmd.updateFeature(wd, id, { notes }))} /></label>
+      <PicturesSection holder={{ kind: 'feature', id }} />
       <button className="danger" onClick={() => { if (confirm(`Delete "${f.name}" and all its shapes?`)) { s.execute((wd) => cmd.deleteFeatures(wd, [id])); s.set({ selection: null }); } }} data-testid="feature-delete">Delete</button>
     </div>
   );

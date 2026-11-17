@@ -247,3 +247,19 @@ label.file-button.small { padding: 3px 8px; font-size: 12px; }
 .relation-words { color: #c9d2dc; }
 .badge { margin-left: 6px; padding: 0 6px; border-radius: 8px; font-size: 11px; background: #ffd166; color: #10161d; }
 .relation-form { padding: 6px 8px; border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; margin: 6px 0; }
+
+/* Search (Search.tsx) */
+.search { position: relative; margin-right: 8px; }
+.search input { width: 220px; }
+.search-results { position: absolute; top: 100%; right: 0; width: 360px; max-height: 60vh; overflow: auto; z-index: 50; background: #17202b; border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); padding: 4px 0; }
+.search-result { padding: 6px 10px; cursor: pointer; }
+.search-result.on { background: rgba(255,209,102,0.12); }
+label.indent { margin-left: 24px; }
+
+/* Pictures with notes (Pictures.tsx) */
+.pictures { margin: 4px 0 10px; }
+.picture-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 6px; }
+.picture { position: relative; }
+.picture img { width: 100%; height: 64px; object-fit: cover; border-radius: 4px; cursor: zoom-in; display: block; }
+.picture button { position: absolute; top: 2px; right: 2px; padding: 0 5px; }
+.picture-large { max-width: 90vw; max-height: 90vh; margin: auto; display: block; border-radius: 6px; box-shadow: 0 10px 40px rgba(0,0,0,0.6); }

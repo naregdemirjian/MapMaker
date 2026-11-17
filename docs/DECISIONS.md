@@ -60,6 +60,38 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D73. Search, data export (GeoJSON and CSV) and pictures with notes: the rest of Stage 4
+
+**Search** (`src/domain/search.ts`, the box in the top bar, Ctrl+F): countries, factions, characters, cities, areas,
+lines and points, events, relationships and layers, by name, by every name something went by (Byzantium is found as
+"Constantinople"), and by the words of notes and descriptions; accents and case are ignored. Best first: a name that
+starts with the words, then one that holds them, then a former name, then notes (with the piece of text shown).
+Going to a result chooses it and brings the date and the view to it: a city or character to where it is (or first
+was), a feature to where it is (the date moved to its first shape if it is not there now), an event to its start.
+
+**Data export** (`src/domain/data-export.ts`; "Export data (GeoJSON, CSV)…" under Maps; a new route of the data
+service writes the files into a new folder of the project's exports). The map at a chosen date as **GeoJSON**:
+territories joined owner by owner (the parcels' outline, D56) with holes and separate pieces, areas, lines and
+points, cities and characters where they are; each with its layer, name, owner and colour. Rings follow RFC 7946
+(outer rings anticlockwise, holes clockwise; d3 reads the opposite way and must reverse them); longitudes stay
+continuous along a ring, so a shape across 180° may run past ±180° (QGIS and most tools accept this). The record
+as **CSV**: events (type, dates, groups, alternatives, description), countries and others (with every other name and
+the date it began), relationships (one row per period) and features (one row per dated shape or ending). Dates are
+written so a spreadsheet sorts them (1850-03-01; astronomical years, -0043 for 44 BCE); cells that hold commas,
+quotes or line breaks are quoted, and text that a spreadsheet would take for a formula is defused. The project
+file stays the authoritative copy: nothing is read back from these files.
+
+**Pictures with notes** (the architecture's "rich notes and images"): every country, faction, character and city,
+every area, line and point, and every event can keep pictures with its notes or description (thumbnails, opened
+large with a click). They are stored in the project's pictures folder like picture fills, named by their content, and
+listed in the item's look (`style.pictures`, events in `fields.pictures`), so they are undone like any edit. (Like
+other pictures they are not in automatic backups: Known limits 11.)
+
+Tests: `test/search-export.test.ts` (search ranking, former names, notes, accents; the GeoJSON of a map with an
+enclave and two pieces, whose polygon areas, measured from the file alone, equal the owners' land within 1%;
+nesting and winding; every CSV with quoting, dates and formula text) and `e2e/workflows` 'Search, pictures with
+notes, and data export'.
+
 ### D72. Relationships between entities: a relation table, and their periods as changes (Stage 4)
 
 The architecture's relationships ("typed links between entities, with start and end dates set by events, just like

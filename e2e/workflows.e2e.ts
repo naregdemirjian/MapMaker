@@ -774,6 +774,55 @@ try {
     assert.deepEqual(holds, [true, false, true, false]);
   });
 
+  await h.step('Search, pictures with notes, and data export (GeoJSON of the map at a date, CSV of the record)', async () => {
+    await page.getByTestId('tool-select').click();
+    // (Going to a search result moves the view; the steps after this one expect it where it was.)
+    const viewBefore = await page.evaluate(() => ({ ...(window as any).__mapmaker.store.camera }));
+    // Search by a piece of a name: the country is chosen.
+    await page.getByTestId('search').fill('proba');
+    await page.getByTestId('search-results').waitFor();
+    assert.match((await page.getByTestId('search-result').first().textContent()) ?? '', new RegExp(`${B}.*Country`));
+    await page.getByTestId('search').press('Enter');
+    await page.getByTestId('entity-panel').locator('h3', { hasText: B }).waitFor();
+    // An event: chosen, and the date goes to its start.
+    await page.getByTestId('search').fill('union');
+    await page.getByTestId('search-result').filter({ hasText: 'Event' }).first().click();
+    await page.getByTestId('event-panel').waitFor();
+    assert.equal(await page.getByTestId('current-date').inputValue(), '1 January 1900');
+    // An area, line or point: chosen.
+    await page.getByTestId('search').fill('ford');
+    await page.getByTestId('search-result').filter({ hasText: 'Point on Battles' }).click();
+    await page.getByTestId('feature-panel').waitFor();
+    // A picture kept with a country's notes.
+    await page.getByTestId('search').fill(B);
+    await page.getByTestId('search').press('Enter');
+    await page.getByTestId('entity-panel').locator('h3', { hasText: B }).waitFor();
+    const px = new Uint8Array(40 * 30 * 4).map((_, i) => (i % 4 === 3 ? 255 : (i * 7) % 256));
+    await page.getByTestId('entity-panel').getByTestId('picture-upload').setInputFiles({ name: 'portrait.png', mimeType: 'image/png', buffer: Buffer.from(encodePNG(40, 30, px)) });
+    await page.getByTestId('picture-thumb').first().waitFor();
+    const pics = await page.evaluate((n) => { const s = (window as any).__mapmaker.store; return JSON.parse(s.world.all('entity').find((e: any) => e.name === n).style).pictures; }, B);
+    assert.equal(pics.length, 1, 'kept with the country');
+    assert.ok(await page.getByTestId('picture-thumb').first().evaluate((img) => (img as HTMLImageElement).complete && (img as HTMLImageElement).naturalWidth === 40), 'and shown');
+    // Data export: the map in 1890 as GeoJSON, and the record as CSV.
+    await page.getByTestId('open-data-export').click();
+    await page.getByTestId('data-export-dialog').waitFor();
+    await page.getByTestId('data-date').fill('1890');
+    await page.getByTestId('data-date').press('Enter');
+    await page.getByTestId('data-export-run').click();
+    await page.getByTestId('data-export-result').waitFor();
+    const dir = ((await page.getByTestId('data-export-result').locator('.path').textContent()) ?? '').trim();
+    const files = readdirSync(dir).sort();
+    assert.deepEqual(files, ['Earth_1890-01-01.geojson', 'areas_lines_points.csv', 'countries_and_others.csv', 'events.csv', 'relationships.csv']);
+    const gj = JSON.parse(readFileSync(join(dir, 'Earth_1890-01-01.geojson'), 'utf8'));
+    const names = gj.features.map((f: any) => `${f.properties.kind}:${f.properties.name}`);
+    for (const n of [`territory:${A}`, `territory:${B}`, 'line:Northern front', 'point:Battle of the Ford', 'area:Probian claim']) assert.ok(names.includes(n), `${n} is in the GeoJSON (${names.join(', ')})`);
+    assert.equal(gj.properties.date, '1890-01-01');
+    assert.match(readFileSync(join(dir, 'events.csv'), 'utf8'), /,Union,/);
+    assert.match(readFileSync(join(dir, 'relationships.csv'), 'utf8'), /is at war with.*1850-01-01,1860-01-01/);
+    await page.getByTestId('data-export-dialog').getByText('Close', { exact: true }).click();
+    await page.evaluate((c) => (window as any).__mapmaker.store.setCamera(c), viewBefore);
+  });
+
   await h.step('A shot framed in the preview (still camera, reset) at 2.39:1 and 25 fps; inspect every exported pass', async () => {
     colours = await page.evaluate((names) => Object.fromEntries(names.map((n) => [n, (window as any).__mapmaker.store.world.all('entity').find((e: any) => e.name === n).color])), [A, B]);
     await page.locator('.left .row', { hasText: 'Union' }).click();

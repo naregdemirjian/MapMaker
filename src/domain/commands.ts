@@ -162,7 +162,7 @@ export interface CountryFill {
 }
 
 /** What is stored in entity.style (JSON). */
-export interface EntityStyle { label?: CountryLabel; fill?: CountryFill }
+export interface EntityStyle { label?: CountryLabel; fill?: CountryFill; pictures?: string[] }
 
 export function entityStyle(e: { style?: string } | null | undefined): EntityStyle {
   return parseJSON<EntityStyle>(e?.style ?? '{}', {}) ?? {};
@@ -211,6 +211,43 @@ export function setEntityStyle(world: World, id: string, patch: { label?: Countr
     next.fill = patch.fill;
   }
   return run(world, `Change the look of "${e.name}"`, (tx) => { tx.patch('entity', id, { style: JSON.stringify(next) }); });
+}
+
+/** Where pictures for notes are kept: a country (or other entity), an area, line or point, or an event. */
+export type PictureHolder = { kind: 'entity' | 'feature' | 'event'; id: string };
+
+/** The pictures kept with the notes of something (project asset file names, in order). */
+export function picturesOf(world: World, h: PictureHolder): string[] {
+  const row = h.kind === 'entity' ? world.get('entity', h.id) : h.kind === 'feature' ? world.get('feature', h.id) : world.get('event', h.id);
+  if (!row) return [];
+  const text = h.kind === 'event' ? (row as EventRow).fields : (row as { style: string }).style;
+  const list = parseJSON<{ pictures?: unknown } | null>(text, null)?.pictures;
+  return Array.isArray(list) ? list.filter((x): x is string => typeof x === 'string' && !!x) : [];
+}
+
+/** Set the pictures kept with the notes of something (one undo step). */
+export function setPictures(world: World, h: PictureHolder, pictures: string[]): CommandResult {
+  const list = pictures.filter((x) => typeof x === 'string' && /^[\w\-.]+$/.test(x));
+  const label = list.length > picturesOf(world, h).length ? 'Add picture' : 'Remove picture';
+  if (h.kind === 'entity') {
+    const e = world.get('entity', h.id);
+    if (!e) throw new Error('That no longer exists.');
+    const next: EntityStyle = { ...entityStyle(e), pictures: list };
+    if (!list.length) delete next.pictures;
+    return run(world, label, (tx) => { tx.patch('entity', h.id, { style: JSON.stringify(next) }); });
+  }
+  if (h.kind === 'feature') {
+    const f = world.get('feature', h.id);
+    if (!f) throw new Error('That no longer exists.');
+    const next: Record<string, unknown> = { ...parseJSON<Record<string, unknown>>(f.style, {}), pictures: list };
+    if (!list.length) delete next.pictures;
+    return run(world, label, (tx) => { tx.patch('feature', h.id, { style: JSON.stringify(next) }); });
+  }
+  const ev = world.get('event', h.id);
+  if (!ev) throw new Error('That event no longer exists.');
+  const next: Record<string, unknown> = { ...parseJSON<Record<string, unknown>>(ev.fields, {}), pictures: list };
+  if (!list.length) delete next.pictures;
+  return run(world, label, (tx) => { tx.patch('event', h.id, { fields: JSON.stringify(next) }); });
 }
 
 // ---------------------------------------------------------------- entities

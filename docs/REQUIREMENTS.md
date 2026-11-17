@@ -1,7 +1,7 @@
 # Map Maker: requirements checklist
 
 Every major requirement from the master specification and the user's later answers, with its implementation and test
-status. Last updated: 17 November 2026 (after the user's second feedback round; see DEVELOPMENT.md).
+status. Last updated: 18 November 2026 (Stage 4; see DEVELOPMENT.md).
 
 **Status** (the user's classification):
 **Tested** = fully implemented and tested ·
@@ -104,6 +104,8 @@ status. Last updated: 17 November 2026 (after the user's second feedback round; 
 | Countries and factions | Tested | `e2e/*` | |
 | Characters, cities, units as entities | Partial | `characters`, `e2e/workflows` 'A character', 'A city' | Characters travel between dated places; cities are founded (at a date or from the beginning), moved at once and abandoned; both have their own export layers. Units have no place on the map yet (Stage 7); city renames over time not yet |
 | Relationships (part of, at war with, successor of…) | Tested | `relations`, `e2e/workflows` 'Relationships' | At war, allied, part of, vassal of, member of, leads, successor of, travels with; each holds over periods begun and ended at dates or by events, read from either side (D72). Annexation (an intention tied to two countries) is separate and tested. Their use on the map (front lines from wars) is Stage 7 |
+| Lore: notes with pictures | Tested | `e2e/workflows` 'Search, pictures…' | Notes on every country, faction, character, city, area, line and point, descriptions on events; pictures kept with any of them (thumbnails, opened large) in the project's pictures folder (D73) |
+| Search | Tested | `search-export`, `e2e/workflows` 'Search, pictures…' | Names, every name something went by, notes and descriptions; accents and case ignored; going to a result chooses it and brings the date and the view to it; Ctrl+F (D73) |
 
 ## Military, characters and movement
 
@@ -159,6 +161,7 @@ status. Last updated: 17 November 2026 (after the user's second feedback round; 
 | Suitable for Premiere Pro | Needs testing | compositing maths checked | Not yet imported into Premiere on the user's PC; `COMPOSITING_GUIDE.txt` explains the steps |
 | TIFF sequences | Not implemented | | Stage 10 |
 | SVG | Not implemented | | Stage 10 |
+| GeoJSON and CSV export of the data | Tested | `search-export` (polygon areas equal the map's land), `e2e/workflows` | The map at a date as GeoJSON (territories joined owner by owner with holes, areas, lines and points, cities and characters, RFC 7946 winding); events, entities with their other names, relationships by period and features over time as CSV (D73) |
 | Selected geographical regions | Partial | | By framing the camera; no crop tool |
 | Dataset credits travel with exports | Tested | `e2e/vertical-slice` step 13 | `manifest.json` (`dataCredits`) and `COMPOSITING_GUIDE.txt`; all datasets listed with licences under Worlds > Data sources and credits |
 | Land as its own export pass | Tested | `e2e/*` (passes still stack into the full picture) | Empty for worlds without Earth's geography |

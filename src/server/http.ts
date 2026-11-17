@@ -174,6 +174,21 @@ export function createAppServer(opts: ServerOptions): { server: Server; registry
       openInFileBrowser(folder);
       return send(res, 200, { ok: true });
     }
+    // Data export (GeoJSON, CSV): text files written into a new folder of the project's exports.
+    if (action === 'data-export' && method === 'POST') {
+      const body = await json<{ name?: string; files?: Array<{ name: string; text: string }> }>(req);
+      const files = Array.isArray(body.files) ? body.files : [];
+      if (!files.length) throw new HttpError(400, 'Nothing to export.');
+      for (const f of files) if (typeof f.name !== 'string' || !/^[\w\- .]+\.(geojson|csv|json|txt)$/i.test(f.name) || f.name.startsWith('.') || typeof f.text !== 'string') throw new HttpError(400, `Not a file name Map Maker writes: ${String(f.name).slice(0, 60)}`);
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const base = `${(body.name ?? 'data').replace(/[^\w\-]+/g, '_').replace(/^_+|_+$/g, '') || 'data'}_${stamp}`;
+      const root = join(db.dir, 'exports');
+      let dir = join(root, base);
+      for (let n = 2; existsSync(dir); n++) dir = join(root, `${base}_${n}`);
+      mkdirSync(dir, { recursive: true });
+      for (const f of files) writeFileSync(join(dir, f.name), f.text, 'utf8');
+      return send(res, 201, { dir, files: files.map((f) => f.name) });
+    }
     if (action === 'exports') {
       if (parts.length === 4 && method === 'POST') {
         const settings = await json<ExportSettings>(req);

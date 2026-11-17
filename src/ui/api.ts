@@ -62,6 +62,8 @@ export const Api = {
   },
   drafts: (id: string) => call<BorderDraft[]>('GET', `${p(id)}/drafts`),
   saveDrafts: (id: string, drafts: BorderDraft[]) => call<{ ok: boolean }>('PUT', `${p(id)}/drafts`, drafts),
+  /** Write data files (GeoJSON, CSV) into a new folder of the project's exports. */
+  exportData: (id: string, name: string, files: Array<{ name: string; text: string }>) => call<{ dir: string; files: string[] }>('POST', `${p(id)}/data-export`, { name, files }),
   chooseFolder: (start?: string) => call<{ path: string | null }>('POST', '/api/choose-folder', { start }),
   startExport: (id: string, settings: unknown) => call<{ jobId: string; dir: string }>('POST', `${p(id)}/exports`, settings),
   sendFrame: (id: string, job: string, pass: string, frame: number, w: number, h: number, rgba: Uint8Array) =>

@@ -17,6 +17,8 @@ import { CountryHistorySection } from './CountryHistory.tsx';
 import { NamesSection } from './Names.tsx';
 import { FeatureToolOptions, FeaturePanel, FeatureRows, featureLayers } from './Features.tsx';
 import { RelationsSection } from './Relations.tsx';
+import { SearchBox } from './Search.tsx';
+import { PicturesSection } from './Pictures.tsx';
 import { isFeatureKind } from '../../render-engine/feature-style.ts';
 
 export const fmt = (t: Instant, precision: 'year' | 'day' | 'minute' = 'day') => gregorian.format(t, precision);
@@ -89,6 +91,7 @@ export function TopBar() {
         </div>
       )}
       <div className="spacer" />
+      <SearchBox />
       <button disabled={!s.journal.canUndo} title={s.journal.undoLabel ? `Undo: ${s.journal.undoLabel} (Ctrl+Z)` : 'Nothing to undo'} onClick={() => s.undo()} data-testid="undo">Undo</button>
       <button disabled={!s.journal.canRedo} title={s.journal.redoLabel ? `Redo: ${s.journal.redoLabel} (Ctrl+Y)` : 'Nothing to redo'} onClick={() => s.redo()}>Redo</button>
       <button onClick={() => s.set({ dialog: 'versions' })} title="Save a named version, restore versions and backups">Versions</button>
@@ -420,6 +423,7 @@ export function Outliner() {
             <button className="link" onClick={() => s.set({ dialog: 'data-sources' })} data-testid="data-sources">Data sources and credits</button>
           </div>
         )}
+        <button className="link pad-link" onClick={() => s.set({ dialog: 'data-export' })} data-testid="open-data-export" title="The map at a date as GeoJSON; events, countries, relationships and features as CSV">Export data (GeoJSON, CSV)…</button>
       </Section>
       <Section title="Layers" onAdd={() => s.set({ dialog: 'new-layer' })} addLabel="Layer">
         {layers.map((l) => {
@@ -528,6 +532,7 @@ function EntityPanel({ id }: { id: string }) {
       <label>Colour<input type="color" value={e.color} onChange={(ev) => s.execute((wd) => cmd.updateEntity(wd, id, { color: ev.target.value }))} /></label>
       <label>Type<select value={e.type_id} onChange={(ev) => s.execute((wd) => cmd.updateEntity(wd, id, { type_id: ev.target.value }))}>{w.all('entity_type').map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
       <label>Notes<textarea rows={5} value={notes} onChange={(ev) => setNotes(ev.target.value)} onBlur={() => notes !== e.notes && s.execute((wd) => cmd.updateEntity(wd, id, { notes }))} /></label>
+      <PicturesSection holder={{ kind: 'entity', id }} />
       {e.type_id !== 'character' && e.type_id !== 'settlement' && <div className="stat">On {fmt(s.time)}: {parcels ? `${Math.round(areaSr * (radius / 1000) ** 2).toLocaleString()} km²` : 'no territory'} </div>}
       {(e.type_id === 'polity' || e.type_id === 'faction') && <button onClick={() => s.set({ paintValue: id, tool: 'lasso' })}>Draw territory for {e.name}</button>}
       {e.type_id !== 'character' && e.type_id !== 'settlement' && <h4>Territorial changes</h4>}
@@ -639,6 +644,7 @@ function EventPanel({ id }: { id: string }) {
         <label>Ends<DateField value={end} allowEmpty placeholder="(instantaneous)" onChange={(t) => s.execute((wd) => cmd.updateEvent(wd, id, { end: t }))} testId="event-panel-end" /></label>
         <label title="When two events change the same place at the same instant, the higher precedence wins">Precedence<NumberField value={e.precedence} step={1} onCommit={(n) => s.execute((wd) => cmd.updateEvent(wd, id, { precedence: Math.round(n) }))} /></label>
         <label>Description<textarea rows={4} value={desc} onChange={(ev) => setDesc(ev.target.value)} onBlur={() => desc !== e.description && s.execute((wd) => cmd.updateEvent(wd, id, { description: desc }))} /></label>
+        <PicturesSection holder={{ kind: 'event', id }} />
         <h4>Groups</h4>
         <GroupChecks eventId={id} />
         <div className="buttons">
