@@ -21,7 +21,7 @@ import { resolveLabelStyle, resolvePointStyle, labelSize, labelFont, labelText, 
 import { imageNow, videoNow, drawImageFit, assetEpoch, type MediaChannel } from './assets.ts';
 import { Sheet, makeRing, addLine, projectPoint, type Ring } from './plane.ts';
 import { BlockPath, setPaintRegion, type DeviceRect } from './blocks.ts';
-import { parcelGeometry, type ParcelGeometry } from './parcel-geometry.ts';
+import { parcelGeometry, type ParcelGeometry, type CycleGeom } from './parcel-geometry.ts';
 
 type LabelEntity = { name: string; style?: string; color?: string; type_id?: string };
 
@@ -145,6 +145,11 @@ const LABEL_MARGIN = 0.04;
 /** An owner's main piece of territory (for its label). */
 interface OwnerPiece { owner: string; key: string; arcs: Float64Array; centreLon: number; area: number; total: number; /** Its outline's box: west, south, east, north. */ box: [number, number, number, number] }
 interface PlacedLabel { lon: number; lat: number; font: number; lines: string[] }
+/**
+ * The ways of writing a label (on one line, two, three), each placed when it is first asked for:
+ * most names fit on one line, and then the others are never searched for.
+ */
+interface Placings { count: number; at: (i: number) => PlacedLabel | null }
 
 interface FaceGeo { geo: GeoPermissibleObjects; area: number; centroid: [number, number] }
 
@@ -186,7 +191,17 @@ interface LayerSnap {
   reach: Map<string, number[]>;
   /** Label pieces, worked out when labels are first drawn. */
   pieces: Map<string, { after: Map<string, OwnerPiece>; before: Map<string, OwnerPiece> }>;
+  /** The parcel map and the states this was made from. */
+  arr: Arrangement;
+  states: Map<number, FaceState>;
+  /** Which border chains each owner draws (see ownerBorder), worked out when borders are first drawn. */
+  borders: Map<string, OwnerBorder> | null;
+  /** When this was made from the snapshot before it: that snapshot, the owners whose parcels changed and the parcels worked out again. */
+  from: { prev: LayerSnap; owners: Set<string>; changed: number[] } | null;
 }
+
+/** The border chains an owner draws: `take` are positions in `b` (see boundaryOf); `key` says which lines those are. */
+interface OwnerBorder { key: string; b: Int32Array; take: number[] }
 
 interface TransitionGroup {
   a: Assignment;
@@ -270,7 +285,7 @@ export class MapRenderer {
   /** The animated changes drawn in the last frame (style and eased progress), for checks and tests. */
   lastTransitions: Array<{ style: string; progress: number }> = [];
   /** For benchmarks and tests: how many sheets have been made, and snapshots of layers worked out. */
-  stats = { sheets: 0, snaps: 0 };
+  stats = { sheets: 0, snaps: 0, snapsFollowed: 0 };
 
   // ---------------------------------------------------------------- sheets (prepared geometry)
 
@@ -309,7 +324,7 @@ export class MapRenderer {
       let any = false;
       // Several parcels: their outline taken together (the borders between them are not drawn, nor
       // worked through when filling). One parcel, or a set that cannot be joined so: ring by ring.
-      const rings = set.faces.length > 1 ? geom.dissolve(set.faces, t) : null;
+      const rings = set.faces.length > 1 ? geom.dissolve(set.faces, t, set.key) : null;
       if (rings) for (const r of rings) { if (sheet.ringOf(path, r.parts, r.box)) any = true; }
       else for (const f of set.faces) {
         for (const c of t.facesCycles.get(f) ?? []) if (sheet.ring(path, geom.cycle(c))) any = true;
@@ -411,13 +426,36 @@ export class MapRenderer {
 
   private snaps = new Map<string, LayerSnap>();
 
-  private snapFor(key: string, arr: Arrangement, states: Map<number, FaceState>, changing: number[]): LayerSnap {
+  /** The snapshot made from each state (for making the next one from it). */
+  private snapOf = new WeakMap<Map<number, FaceState>, LayerSnap>();
+  /** For tests: every snapshot made from the one before is compared with one made from scratch. */
+  verify = false;
+
+  private snapFor(key: string, arr: Arrangement, states: Map<number, FaceState>, changing: number[], engine: Engine): LayerSnap {
     const hit = this.snaps.get(key);
     if (hit) return hit;
     this.stats.snaps++;
+    let snap = this.snapFromBefore(key, arr, states, changing, engine);
+    if (snap) {
+      this.stats.snapsFollowed++;
+      if (this.verify) this.sameSnap(snap, this.snapWhole(key, arr, states, changing), states);
+    } else snap = this.snapWhole(key, arr, states, changing);
+    this.snapOf.set(states, snap);
+    if (this.snaps.size >= 12) this.snaps.delete(this.snaps.keys().next().value!);
+    this.snaps.set(key, snap);
+    return snap;
+  }
+
+  /** Owners in a fixed order (by their ids), each with its parcels in order: the same however the states were worked out. */
+  private ordered<T>(m: Map<string, T>): Map<string, T> {
+    return new Map([...m.entries()].sort((x, y) => (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0)));
+  }
+
+  /** A snapshot worked out from the states of every parcel. */
+  private snapWhole(key: string, arr: Arrangement, states: Map<number, FaceState>, changing: number[]): LayerSnap {
     const groups = new Map<string, ChangeGroup>(), groupOf = new Map<number, ChangeGroup>();
     const members = new Map<string, { all: number[]; changing: number[] }>();
-    for (const f of changing) {
+    for (const f of [...changing].sort((x, y) => x - y)) {
       const st = states.get(f);
       if (!st?.transition || !st.assignment) continue;
       const id = st.assignment.effectId;
@@ -449,32 +487,88 @@ export class MapRenderer {
       if (was) add(before, was, face);
       if (st.transition && st.transition.from !== st.value) animating = true;
     }
-    const sets = (m: Map<string, number[]>) => { const o = new Map<string, FaceSet>(); for (const [v, faces] of m) o.set(v, this.faceSet(arr, faces)); return o; };
-    const byOwner = sets(owned);
+    const num = (x: number, y: number) => x - y;
+    const sets = (m: Map<string, number[]>) => { const o = new Map<string, FaceSet>(); for (const [v, faces] of this.ordered(m)) o.set(v, this.faceSet(arr, faces.sort(num))); return o; };
+    for (const l of reach.values()) l.sort(num);
     const afterSets = sets(after);
-    const snap: LayerSnap = { key, byOwner, groups, groupOf, before: animating ? sets(before) : afterSets, after: afterSets, animating, reach, pieces: new Map() };
-    if (this.snaps.size >= 12) this.snaps.delete(this.snaps.keys().next().value!);
-    this.snaps.set(key, snap);
-    return snap;
+    return { key, byOwner: sets(owned), groups, groupOf, before: animating ? sets(before) : afterSets, after: afterSets, animating, reach: this.ordered(reach), pieces: new Map(), arr, states, borders: null, from: null };
   }
 
-  /** Per set of parcels: the border chains around it, as (cycle, chain, parcel across, drawn-from-this-side flag) quadruples. */
+  /**
+   * A snapshot made from the one before it, when the states were worked out from the states that
+   * one was made from (Engine.stateDelta) and nothing is animating in either: only the owners of
+   * the parcels worked out again get new sets of parcels; every other owner keeps its own (and with
+   * them its outline, its borders and its label). Null when it has to be made from every parcel.
+   */
+  private snapFromBefore(key: string, arr: Arrangement, states: Map<number, FaceState>, changing: number[], engine: Engine): LayerSnap | null {
+    if (changing.length) return null;
+    const delta = engine.stateDelta(states);
+    const prev = delta ? this.snapOf.get(delta.from) : undefined;
+    if (!delta || !prev || prev.arr !== arr || prev.animating || prev.groups.size) return null;
+    const moved = new Set<number>(delta.changed);
+    for (const f of delta.removed) moved.add(f);
+    if (moved.size > states.size / 4 + 16) return null;
+    // The owners of those parcels, before and now; and the parcels each owner gains.
+    const owners = new Set<string>();
+    const gains = new Map<string, number[]>(), gainsLabelled = new Map<string, number[]>();
+    for (const f of moved) { const was = delta.from.get(f)?.value; if (was) owners.add(was); }
+    for (const f of delta.changed) {
+      const now = states.get(f)?.value;
+      if (!now) continue;
+      owners.add(now);
+      const l = gains.get(now);
+      if (l) l.push(f); else gains.set(now, [f]);
+      const area = arr.faceArea(f);
+      if (area <= 0 || area > 2 * Math.PI) continue;
+      const g = gainsLabelled.get(now);
+      if (g) g.push(f); else gainsLabelled.set(now, [f]);
+    }
+    const byOwner = new Map(prev.byOwner), reach = new Map(prev.reach), after = new Map(prev.after);
+    const num = (x: number, y: number) => x - y;
+    const rest = (l: number[] | undefined, more: number[] | undefined) => { const o = (l ?? []).filter((f) => !moved.has(f)); if (more) o.push(...more); return o.sort(num); };
+    let cameOrWent = false;
+    for (const owner of owners) {
+      const o = rest(prev.byOwner.get(owner)?.faces, gains.get(owner));
+      if (byOwner.has(owner) !== o.length > 0 ) cameOrWent = true;
+      if (o.length) { byOwner.set(owner, this.faceSet(arr, o)); reach.set(owner, o); } else { byOwner.delete(owner); reach.delete(owner); }
+      const a = rest(prev.after.get(owner)?.faces, gainsLabelled.get(owner));
+      if (after.has(owner) !== a.length > 0) cameOrWent = true;
+      if (a.length) after.set(owner, this.faceSet(arr, a)); else after.delete(owner);
+    }
+    // (An owner new to the map takes its place in the order.)
+    const inOrder = <T>(m: Map<string, T>) => (cameOrWent ? this.ordered(m) : m);
+    const afterSets = inOrder(after);
+    // The snapshot before keeps no hold on the one before it.
+    prev.from = null;
+    return { key, byOwner: inOrder(byOwner), groups: new Map(), groupOf: new Map(), before: afterSets, after: afterSets, animating: false, reach: inOrder(reach), pieces: new Map(), arr, states, borders: null, from: { prev, owners, changed: delta.changed } };
+  }
+
+  /** For tests: a snapshot made from the one before must be the snapshot made from every parcel. */
+  private sameSnap(got: LayerSnap, want: LayerSnap, states: Map<number, FaceState>): void {
+    const show = (m: Map<string, FaceSet>) => [...m.entries()].map(([o, s]) => `${o}=${s.key}:${s.faces.join(',')}`).join(' ');
+    const showLists = (m: Map<string, number[]>) => [...m.entries()].map(([o, l]) => `${o}=${l.join(',')}`).join(' ');
+    for (const [name, a, b] of [['owners', show(got.byOwner), show(want.byOwner)], ['labels', show(got.after), show(want.after)], ['before', show(got.before), show(want.before)], ['reach', showLists(got.reach), showLists(want.reach)]]) {
+      if (a !== b) throw new Error(`A snapshot made from the one before differs from one made afresh (${name}):\n  made from before: ${a.slice(0, 600)}\n  made afresh:      ${b.slice(0, 600)}`);
+    }
+    const borders = (snap: LayerSnap) => [...this.bordersOf(snap.arr, snap, states).entries()].map(([o, e]) => `${o}=${e.key}`).join(' ');
+    const a = borders(got), b = borders(want);
+    if (a !== b) throw new Error(`Borders worked out from the snapshot before differ from those worked out afresh:\n  from before: ${a.slice(0, 600)}\n  afresh:      ${b.slice(0, 600)}`);
+  }
+
+  /**
+   * Per set of parcels: the border chains around it, as (cycle, chain, drawn-from-this-side flag)
+   * triples. The parcel across a chain is not kept: it gets a new number when it is split, without
+   * anything about this set changing; it is looked up when the chain is used.
+   */
   private boundaryCache = new Map<string, Int32Array>();
 
   private boundaryOf(arr: Arrangement, set: FaceSet): Int32Array {
     const key = `${arr.spaceId}|${set.key}`;
     let b = this.boundaryCache.get(key);
     if (!b) {
-      const geom = parcelGeometry(arr), t = arr.topology();
-      const inSet = new Set(set.faces);
+      const gr = parcelGeometry(arr).graph(set.faces, arr.topology(), set.key);
       const out: number[] = [];
-      for (const f of set.faces) for (const c of t.facesCycles.get(f) ?? []) {
-        const g = geom.cycle(c, t);
-        for (let i = 0; i < g.heads.length; i++) {
-          const other = arr.halfEdgeFace(g.heads[i] ^ 1);
-          if (!inSet.has(other)) out.push(c, i, other, g.canonical[i]);
-        }
-      }
+      for (let q = 0; q < gr.n; q++) if (gr.across[q] < 0) out.push(gr.cycle[q].id, gr.index[q], gr.cycle[q].canonical[gr.index[q]]);
       b = Int32Array.from(out);
       if (this.boundaryCache.size > 4000) this.boundaryCache.clear();
       this.boundaryCache.set(key, b);
@@ -496,6 +590,54 @@ export class MapRenderer {
   }
 
   /**
+   * Which of its boundary chains an owner draws: one facing unowned land always; one shared with
+   * another owner from the side fixed by the chain itself. Chains touching an animated change are
+   * left out (they are drawn chain by chain, see borderPaths). Null when it draws none.
+   */
+  private ownerBorder(arr: Arrangement, owner: string, set: FaceSet, states: Map<number, FaceState>, inGroup: Map<number, ChangeGroup>): OwnerBorder | null {
+    const geom = parcelGeometry(arr), t = arr.topology();
+    const b = this.boundaryOf(arr, set);
+    let h1 = 0x811c9dc5, h2 = 0x9e3779b9, n = 0;
+    const take: number[] = [];
+    for (let q = 0; q < b.length; q += 3) {
+      const other = arr.halfEdgeFace(geom.cycle(b[q], t).heads[b[q + 1]] ^ 1);
+      if (inGroup.size && (inGroup.has(other) || inGroup.has(t.cycleLabel.get(b[q])!))) continue;
+      const across = states.get(other);
+      if (across === undefined) continue;
+      if (across.value !== null && (across.value === owner || !b[q + 2])) continue;
+      take.push(q);
+      h1 = Math.imul(h1 ^ q, 16777619) >>> 0; h2 = (Math.imul(h2 + q, 2246822519) ^ (h2 >>> 13)) >>> 0; n++;
+    }
+    return n ? { key: `${set.key}|${n}|${h1}|${h2}`, b, take } : null;
+  }
+
+  /**
+   * The border chains each owner draws in a snapshot (the same on every sheet). In a snapshot made
+   * from the one before, only the owners whose parcels changed and the owners next to a parcel that
+   * was worked out again are gone through; the others draw what they drew.
+   */
+  private bordersOf(arr: Arrangement, snap: LayerSnap, states: Map<number, FaceState>): Map<string, OwnerBorder> {
+    if (snap.borders) return snap.borders;
+    const out = new Map<string, OwnerBorder>();
+    const before = snap.from?.prev.borders ?? null;
+    let again: Set<string> | null = null;
+    if (snap.from && before) {
+      const geom = parcelGeometry(arr), t = arr.topology();
+      again = new Set(snap.from.owners);
+      for (const f of snap.from.changed) for (const c of t.facesCycles.get(f) ?? []) {
+        for (const h of geom.cycle(c, t).heads) { const o = states.get(arr.halfEdgeFace(h ^ 1))?.value; if (o) again.add(o); }
+      }
+    }
+    for (const [owner, set] of snap.byOwner) {
+      const e = again && !again.has(owner) ? before!.get(owner) ?? null : this.ownerBorder(arr, owner, set, states, snap.groupOf);
+      if (e) out.set(owner, e);
+    }
+    snap.borders = out;
+    snap.from = null;
+    return out;
+  }
+
+  /**
    * The borders of a snapshot on a sheet. A border lies between parcels of different owners; each
    * owner's share of them (every border chain is drawn from one side) is a path kept while the
    * owner's parcels and neighbours stay as they are, so crossing an event rebuilds only the paths
@@ -512,31 +654,15 @@ export class MapRenderer {
     const loose = new Path2D();
     let anyLoose = false;
     // 1. Away from any animated change: owner by owner.
-    for (const [owner, set] of snap.byOwner) {
-      const b = this.boundaryOf(arr, set);
-      // Which of its chains this owner draws: one facing unowned land always; one shared with another
-      // owner from the side fixed by the chain itself. Chains touching an animated change are left to step 2.
-      let h1 = 0x811c9dc5, h2 = 0x9e3779b9, n = 0;
-      const take: number[] = [];
-      for (let q = 0; q < b.length; q += 4) {
-        const other = b[q + 2];
-        if (inGroup.size && (inGroup.has(other) || inGroup.has(t.cycleLabel.get(b[q])!))) continue;
-        const across = states.get(other);
-        if (across === undefined) continue;
-        if (across.value !== null && (across.value === owner || !b[q + 3])) continue;
-        take.push(q);
-        h1 = Math.imul(h1 ^ q, 16777619) >>> 0; h2 = (Math.imul(h2 + q, 2246822519) ^ (h2 >>> 13)) >>> 0; n++;
-      }
-      if (!n) continue;
-      const key = `${set.key}|${n}|${h1}|${h2}`;
-      let p = sp.ownerBorders.get(key);
+    for (const e of this.bordersOf(arr, snap, states).values()) {
+      let p = sp.ownerBorders.get(e.key);
       if (p === undefined) {
         const path = sheet.blocks();
         let any = false;
-        for (const q of take) for (const l of this.chainLines(sp, sheet, geom, b[q], b[q + 1])) { path.addLine(l); any = true; }
+        for (const q of e.take) for (const l of this.chainLines(sp, sheet, geom, e.b[q], e.b[q + 1])) { path.addLine(l); any = true; }
         p = any ? path : null;
         if (sp.ownerBorders.size > 6000) sp.ownerBorders.clear();
-        sp.ownerBorders.set(key, p);
+        sp.ownerBorders.set(e.key, p);
       }
       if (p) plain.push(p);
     }
@@ -634,7 +760,7 @@ export class MapRenderer {
   }
 
   /** What the territory picture last showed: its key, what besides ownership it depends on, who held each parcel, and the map's state. */
-  private patchPrev: { strict: string; stable: string; arr: Arrangement; revision: number; layers: Array<Map<number, FaceState>>; wide: number | null } | null = null;
+  private patchPrev: { strict: string; stable: string; arr: Arrangement; revision: number; layers: Array<Map<number, FaceState>> } | null = null;
 
   /**
    * After an edit (or a step in time) that changed little: the rectangles of the canvas where the
@@ -643,15 +769,14 @@ export class MapRenderer {
    * changed, the changes cover much of the frame, or the view shows the planet more than once.
    *
    * The picture changes only (1) where borders were added, removed or moved (the kernel keeps the box
-   * around those), (2) inside parcels that have a new owner, and (3) inside parcels that are new (a
-   * piece cut off by a stroke, or a parcel made whole again by an undo). The parcel that takes in the
-   * rest of the planet has no box: it is passed over when it is a piece of the one before (it then
-   * only lost land, to parcels that are new); otherwise everything is drawn.
+   * around those), (2) inside parcels that have a new owner, and (3) inside parcels that are new and
+   * are not a piece of a parcel that had the same owner (a piece keeps its fill, and its new borders
+   * lie along the borders added). A parcel that takes in the rest of the planet has no box: when one
+   * is among those, everything is drawn.
    */
-  private changesSince(view: View, arr: Arrangement, layers: Array<Map<number, FaceState>>, strict: string, stable: string, m: DOMMatrix, width: number, height: number, pad: number): { from: string; rects: DeviceRect[] } | null {
+  private changesSince(view: View, arr: Arrangement, engine: Engine, layers: Array<Map<number, FaceState>>, strict: string, stable: string, m: DOMMatrix, width: number, height: number, pad: number): { from: string; rects: DeviceRect[] } | null {
     const prev = this.patchPrev;
     if (prev && prev.strict === strict) return null;
-    let wide = prev && prev.arr === arr ? prev.wide : null;
     let out: { from: string; rects: DeviceRect[] } | null = null;
     if (prev && prev.arr === arr && prev.stable === stable && prev.layers.length === layers.length && m.b === 0 && m.c === 0 && visibleBounds(view) !== null) {
       const borders = arr.bordersChangedSince(prev.revision);
@@ -680,17 +805,26 @@ export class MapRenderer {
       }
       const geom = parcelGeometry(arr);
       if (ok) outer: for (let i = 0; i < layers.length; i++) {
-        const was = prev.layers[i];
-        for (const [face, st] of layers[i]) {
+        const was = prev.layers[i], now = layers[i];
+        // Where the states were worked out from those of before, only the parcels worked out again can differ.
+        const delta = engine.stateDelta(now);
+        const faces: Iterable<number> = delta && delta.from === was ? delta.changed : now.keys();
+        for (const face of faces) {
+          const st = now.get(face);
+          if (!st) continue;
           const b = was.get(face);
           if (b !== undefined && b.value === st.value) continue;
-          if (++changed > 600) { ok = false; break outer; }
-          if (geom.needsOutline(face)) {
-            const piece = b === undefined && wide !== null && arr.ancestors(face).includes(wide);
-            wide = face;
+          if (b === undefined) {
+            // A piece of a parcel that had this owner: nothing in it changed.
+            let piece = false;
+            for (let up = arr.faces.get(face)?.parent_id; up !== null && up !== undefined; up = arr.faces.get(up)?.parent_id) {
+              const p = was.get(up);
+              if (p) { piece = p.value === st.value; break; }
+            }
             if (piece) continue;
-            ok = false; break outer;
           }
+          if (++changed > 600) { ok = false; break outer; }
+          if (geom.needsOutline(face)) { ok = false; break outer; }
           const sb = this.screenBox(view, arr, [face]);
           if (sb[0] === 0 && sb[1] === 0 && sb[2] === view.width && sb[3] === view.height) { ok = false; break outer; }
           add(sb);
@@ -702,7 +836,7 @@ export class MapRenderer {
         if (total <= 0.5 * width * height) out = { from: prev.strict, rects: boxes.map((q) => [q[0], q[1], q[2] - q[0], q[3] - q[1]] as DeviceRect) };
       }
     }
-    this.patchPrev = { strict, stable, arr, revision: arr.revision, layers, wide };
+    this.patchPrev = { strict, stable, arr, revision: arr.revision, layers };
     return out;
   }
 
@@ -982,7 +1116,7 @@ export class MapRenderer {
       let changing = engine.partitionChanging(spaceId, layerId, t);
       let sig = '';
       if (opts.transitions) ({ states, changing, sig } = this.shotStates(engine, spaceId, layerId, t, states, changing, opts.transitions));
-      const snap = this.snapFor(`${engine.revision}|${arr.revision}|${spaceId}|${layerId}|${engine.stretchOf(t)}|${sig}`, arr, states, changing);
+      const snap = this.snapFor(`${engine.revision}|${arr.revision}|${spaceId}|${layerId}|${engine.stretchOf(t)}|${sig}`, arr, states, changing, engine);
       const ls = parseJSON<LayerStyle>(layer.style, {});
       // Coastline clipping: territory ends at the coast unless the layer is set to cover the sea.
       // Away from any coast there is nothing to trim (all land), or nothing to see (all sea).
@@ -1023,7 +1157,7 @@ export class MapRenderer {
         }
         const stable = `${key.loose.slice(0, looseBase.length)}|${detail}|${wantsFills ? 'f' : ''}${wantsBorders ? 'b' : ''}|${style.border}|${style.borderWidth}|${opts.basemap ? opts.basemap.scales.length : ''}${layerSig}|${colours}`;
         const widest = Math.max(...prepared.map((p) => p.ls.borderWidth ?? style.borderWidth));
-        patch = this.changesSince(view, arr, prepared.map((p) => p.states), key.strict, stable, m, ctx.canvas.width, ctx.canvas.height, widest * u + 3);
+        patch = this.changesSince(view, arr, engine, prepared.map((p) => p.states), key.strict, stable, m, ctx.canvas.width, ctx.canvas.height, widest * u + 3);
       } else this.patchPrev = null;
       this.layered(`territory:${wantsFills ? 'f' : ''}${wantsBorders ? 'b' : ''}`, ctx, key, at, (c) => {
         c.save();
@@ -1589,46 +1723,64 @@ export class MapRenderer {
     ctx.restore();
   }
 
-  private landCache = new WeakMap<Arrangement, { mask: LandMask; faces: Map<number, { stamp: number; s: LandSample }> }>();
+  private infoCache = new WeakMap<Arrangement, { mask: LandMask | null; faces: Map<number, FaceInfo> }>();
 
   /**
-   * The part of a parcel that is on land, as a grid of sample points (each standing for an equal share
-   * of the parcel's area). Kept until the parcel's outline changes.
+   * What labels need to know of a parcel: its area, how much of that is on land (all of it without
+   * a land mask), and a point in its middle (as a unit vector). Kept until the parcel's outline
+   * changes. The share on land is counted on a grid of 10 by 10 points over the parcel's box, row by
+   * row: where a row crosses the outline is worked out once for the whole row.
    */
-  private landSample(arr: Arrangement, face: number, mask: LandMask): LandSample {
-    let c = this.landCache.get(arr);
-    if (!c || c.mask !== mask) { c = { mask, faces: new Map() }; this.landCache.set(arr, c); }
-    const stamp = arr.faceStamp(face);
+  private faceInfo(arr: Arrangement, face: number, mask: LandMask | null): FaceInfo {
+    let c = this.infoCache.get(arr);
+    if (!c || c.mask !== mask) { c = { mask, faces: new Map() }; this.infoCache.set(arr, c); }
+    const t = arr.topology();
+    const stamp = t.faceStamps.get(face) ?? 0;
     const hit = c.faces.get(face);
-    if (hit && hit.stamp === stamp) return hit.s;
-    let s: LandSample;
-    const g = this.faceGeo(arr, face);
-    const rings = (g.geo as GeoJSON.Polygon).coordinates ?? [];
-    let w = Infinity, so = Infinity, e = -Infinity, n = -Infinity;
-    for (const r of rings) for (const [x, y] of r) { if (x < w) w = x; if (x > e) e = x; if (y < so) so = y; if (y > n) n = y; }
-    const N = 10, pts: number[] = [];
-    let inside = 0;
-    for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
-      const p: [number, number] = [w + ((i + 0.5) / N) * (e - w), so + ((j + 0.5) / N) * (n - so)];
-      if (!insideGeo(g.geo, p)) continue;
-      inside++;
-      if (mask.onLand(p[0], p[1])) pts.push(p[0], p[1]);
+    if (hit && hit.stamp === stamp) return hit;
+    const geom = parcelGeometry(arr);
+    const cycles: CycleGeom[] = [];
+    let w = Infinity, so = Infinity, e = -Infinity, no = -Infinity, round = false;
+    for (const id of t.facesCycles.get(face) ?? []) {
+      const g = geom.cycle(id, t);
+      cycles.push(g);
+      if (g.wind !== 0) round = true;
+      if (g.box[0] < w) w = g.box[0]; if (g.box[1] < so) so = g.box[1]; if (g.box[2] > e) e = g.box[2]; if (g.box[3] > no) no = g.box[3];
     }
-    if (inside === 0) { // a thin sliver the grid missed: judge it by its centre
-      inside = 1;
-      if (mask.onLand(g.centroid[0], g.centroid[1])) pts.push(g.centroid[0], g.centroid[1]);
+    const area = arr.faceArea(face);
+    const lon = ((w + e) / 2) * Math.PI / 180, lat = ((so + no) / 2) * Math.PI / 180;
+    const middle = cycles.length ? [Math.cos(lat) * Math.cos(lon), Math.cos(lat) * Math.sin(lon), Math.sin(lat)] : [1, 0, 0];
+    let land = area;
+    if (mask && cycles.length && !round) {
+      const N = 10, xs: number[] = [];
+      let inside = 0, onLand = 0;
+      for (let j = 0; j < N; j++) {
+        const y = so + ((j + 0.5) / N) * (no - so);
+        xs.length = 0;
+        for (const g of cycles) {
+          const lo = g.lon, la = g.lat, n = lo.length;
+          for (let i = 0, k = n - 1; i < n; k = i++) {
+            const yi = la[i], yk = la[k];
+            if ((yi > y) !== (yk > y)) xs.push(lo[i] + ((y - yi) * (lo[k] - lo[i])) / (yk - yi));
+          }
+        }
+        xs.sort((p, q) => p - q);
+        let q = 0;
+        for (let i = 0; i < N; i++) {
+          const x = w + ((i + 0.5) / N) * (e - w);
+          while (q < xs.length && xs[q] < x) q++;
+          if (!(q & 1)) continue;
+          inside++;
+          if (mask.onLand(x, y)) onLand++;
+        }
+      }
+      // (A thin sliver the grid missed is judged by its middle.)
+      land = inside ? (area * onLand) / inside : mask.onLand((w + e) / 2, (so + no) / 2) ? area : 0;
     }
-    // Unit vectors of the samples and their sum, so labels need no trigonometry per frame.
-    const vec = new Float64Array((pts.length / 2) * 3);
-    const sum: [number, number, number] = [0, 0, 0];
-    for (let i = 0, k = 0; i < pts.length; i += 2, k += 3) {
-      const lon = (pts[i] * Math.PI) / 180, lat = (pts[i + 1] * Math.PI) / 180;
-      vec[k] = Math.cos(lat) * Math.cos(lon); vec[k + 1] = Math.cos(lat) * Math.sin(lon); vec[k + 2] = Math.sin(lat);
-      sum[0] += vec[k]; sum[1] += vec[k + 1]; sum[2] += vec[k + 2];
-    }
-    s = { pts, vec, sum, weight: g.area / inside, land: (g.area * (pts.length / 2)) / inside };
-    c.faces.set(face, { stamp, s });
-    return s;
+    const info: FaceInfo = { stamp, area, land, x: middle[0], y: middle[1], z: middle[2] };
+    if (c.faces.size > 4 * t.facesCycles.size + 4096) c.faces.clear();
+    c.faces.set(face, info);
+    return info;
   }
 
   // ---------------------------------------------------------------- labels
@@ -1641,8 +1793,8 @@ export class MapRenderer {
 
   private pieceCache = new Map<string, OwnerPiece | null>();
   private shapeCache = new Map<string, PlaneShape>();
-  private spotCache = new Map<string, PlacedLabel[]>();
-  private viewSpotCache = new Map<string, PlacedLabel[]>();
+  private spotCache = new Map<string, Placings>();
+  private viewSpotCache = new Map<string, Placings>();
   private viewSpotKey = '';
 
   /**
@@ -1666,53 +1818,65 @@ export class MapRenderer {
   }
 
   private ownerPiece(arr: Arrangement, owner: string, set: FaceSet, mask: LandMask | null): OwnerPiece | null {
-    const geom = parcelGeometry(arr), t = arr.topology();
-    const inSet = new Set(set.faces);
+    const gr = parcelGeometry(arr).graph(set.faces, arr.topology(), set.key);
+    const faces = set.faces, count = faces.length;
     // Connected pieces: parcels of the owner that share a border.
-    const parent = new Map<number, number>();
-    const find = (f: number): number => { let r = f; while (parent.get(r) !== r) r = parent.get(r)!; let x = f; while (x !== r) { const n = parent.get(x)!; parent.set(x, r); x = n; } return r; };
-    for (const f of set.faces) parent.set(f, f);
-    for (const f of set.faces) for (const c of t.facesCycles.get(f) ?? []) {
-      const g = geom.cycle(c, t);
-      for (let i = 0; i < g.heads.length; i++) {
-        const other = arr.halfEdgeFace(g.heads[i] ^ 1);
-        if (other !== f && inSet.has(other)) { const a = find(f), b = find(other); if (a !== b) parent.set(a, b); }
-      }
+    const parent = new Int32Array(count);
+    for (let i = 0; i < count; i++) parent[i] = i;
+    const find = (i: number): number => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+    for (let q = 0; q < gr.n; q++) {
+      const o = gr.across[q];
+      if (o < 0 || o === gr.of[q]) continue;
+      const a = find(gr.of[q]), b = find(o);
+      if (a !== b) parent[a] = b;
     }
-    type Comp = { faces: number[]; area: number; sx: number; sy: number; sz: number };
+    type Comp = { root: number; area: number; sx: number; sy: number; sz: number };
     const comps = new Map<number, Comp>();
     let total = 0;
-    for (const f of set.faces) {
-      const g = this.faceGeo(arr, f);
-      const area = mask ? this.landSample(arr, f, mask).land : g.area;
-      const r = find(f);
+    for (let i = 0; i < count; i++) {
+      const f = faces[i];
+      const g = this.faceInfo(arr, f, mask);
+      const area = g.land;
+      const r = find(i);
       let c = comps.get(r);
-      if (!c) comps.set(r, (c = { faces: [], area: 0, sx: 0, sy: 0, sz: 0 }));
-      c.faces.push(f);
+      if (!c) comps.set(r, (c = { root: r, area: 0, sx: 0, sy: 0, sz: 0 }));
       c.area += area;
-      const lon = g.centroid[0] * Math.PI / 180, lat = g.centroid[1] * Math.PI / 180;
-      c.sx += g.area * Math.cos(lat) * Math.cos(lon); c.sy += g.area * Math.cos(lat) * Math.sin(lon); c.sz += g.area * Math.sin(lat);
+      c.sx += g.area * g.x; c.sy += g.area * g.y; c.sz += g.area * g.z;
       total += area;
     }
     let main: Comp | null = null;
     for (const c of comps.values()) if (c.area > 0 && (!main || c.area > main.area)) main = c;
     if (!main) return null;
     // The outline of the main piece: the border chains with the piece on one side only.
-    const inMain = new Set(main.faces);
-    const arcs: number[] = [];
-    for (const f of main.faces) for (const c of t.facesCycles.get(f) ?? []) {
-      const g = geom.cycle(c, t), n = g.lon.length;
-      for (let i = 0; i < g.heads.length; i++) {
-        if (inMain.has(arr.halfEdgeFace(g.heads[i] ^ 1))) continue;
-        const from = g.starts[i], to = i === g.starts.length - 1 ? n : g.starts[i + 1];
-        for (let j = from; j < to; j++) {
-          const k = j + 1 < n ? j + 1 : 0;
-          arcs.push(g.lon[j], g.lat[j], k === 0 ? g.lon[0] + 360 * g.wind : g.lon[k], g.lat[k]);
-        }
+    const root = main.root;
+    const edge = (q: number) => find(gr.of[q]) === root && (gr.across[q] < 0 || find(gr.across[q]) !== root);
+    // The outline is taken at a detail that suits its size (points that matter less than a
+    // five-hundredth of its extent are left out): finding room for a name needs no more, and takes
+    // far less time on a detailed coast.
+    let w = Infinity, so = Infinity, e = -Infinity, no = -Infinity;
+    for (let q = 0; q < gr.n; q++) {
+      if (!edge(q)) continue;
+      const bx = gr.cycle[q].box;
+      if (bx[0] < w) w = bx[0]; if (bx[1] < so) so = bx[1]; if (bx[2] > e) e = bx[2]; if (bx[3] > no) no = bx[3];
+    }
+    const eps = Math.max(e - w, no - so) / 500;
+    const out: number[] = [];
+    for (let q = 0; q < gr.n; q++) {
+      if (!edge(q)) continue;
+      const g = gr.cycle[q], i = gr.index[q], n = g.lon.length, imp = g.imp;
+      const from = g.starts[i], to = i === g.starts.length - 1 ? n : g.starts[i + 1];
+      let last = from;
+      for (let j = from + 1; j <= to; j++) {
+        // (The chain's last piece ends on the first point of the next chain: of the cycle, after its last chain.)
+        const k = j < n ? j : 0;
+        if (j < to && imp && imp[j] < eps) continue;
+        out.push(g.lon[last], g.lat[last], k === 0 ? g.lon[0] + 360 * g.wind : g.lon[k], g.lat[k]);
+        last = j;
       }
     }
+    const arcs = Float64Array.from(out);
     const lon = Math.atan2(main.sy, main.sx) * 180 / Math.PI;
-    const a = Float64Array.from(arcs);
+    const a = arcs;
     // Keyed by the outline itself, so an edit elsewhere keeps this label's place.
     let k1 = 0x811c9dc5, k2 = 0x9e3779b9;
     for (let i = 0; i < a.length; i++) { const v = Math.round(a[i] * 1e7) | 0; k1 = Math.imul(k1 ^ v, 16777619); k2 = Math.imul(k2 + v, 2246822519) ^ (k2 >>> 13); }
@@ -1725,7 +1889,7 @@ export class MapRenderer {
   }
 
   /** Where a piece's label can go, for each way of breaking its text into lines (projection units). */
-  private placePiece(piece: OwnerPiece, view: View, text: string, st: LabelStyle, accept: ((lon: number, lat: number) => boolean) | null, cacheKey: string, cache: Map<string, PlacedLabel[]>, onScreenOnly = false, wantedFont = Infinity): PlacedLabel[] {
+  private placePiece(piece: OwnerPiece, view: View, text: string, st: LabelStyle, accept: ((lon: number, lat: number) => boolean) | null, cacheKey: string, cache: Map<string, Placings>, onScreenOnly = false, wantedFont = Infinity): Placings {
     const hit = cache.get(cacheKey);
     if (hit) return hit;
     const proj = view.camera.projection;
@@ -1752,18 +1916,25 @@ export class MapRenderer {
         }
       }
     }
-    const res: PlacedLabel[] = [];
-    for (const lines of lineChoices(text)) {
-      const wEm = Math.max(...lines.map((l) => textWidthEm(l, false, st.letterSpacing)));
-      const hEm = blockHeightEm(lines.length);
-      // In the part on screen, room for more than the size wanted is worth nothing: the label then
-      // stands as near the middle of that part as it can at full size (and the search is short).
-      const cap = wantedFont < Infinity ? (wantedFont * hEm * 1.1) / (Math.SQRT2 * 1.15) : Infinity;
-      const spot = placeLabel(shape, wEm / hEm, accept ?? undefined, within, cap);
-      // A box with the label's proportions fits inside the ellipse found when its height is sqrt(2)
-      // times the ellipse's half-height. Labels may spill a little past narrow places.
-      if (spot) res.push({ lon: spot.lon, lat: spot.lat, font: (Math.SQRT2 * spot.room * 1.15) / hEm, lines });
-    }
+    const choices = lineChoices(text);
+    const found: Array<PlacedLabel | null | undefined> = choices.map(() => undefined);
+    const outline = shape;
+    const res: Placings = {
+      count: choices.length,
+      at: (i) => {
+        if (found[i] !== undefined) return found[i]!;
+        const lines = choices[i];
+        const wEm = Math.max(...lines.map((l) => textWidthEm(l, false, st.letterSpacing)));
+        const hEm = blockHeightEm(lines.length);
+        // Room for more than the size given is worth nothing: the label then stands as near the
+        // middle as it can at that size (and the search is short).
+        const cap = wantedFont < Infinity ? (wantedFont * hEm * 1.1) / (Math.SQRT2 * 1.15) : Infinity;
+        const spot = placeLabel(outline, wEm / hEm, accept ?? undefined, within, cap);
+        // A box with the label's proportions fits inside the ellipse found when its height is sqrt(2)
+        // times the ellipse's half-height. Labels may spill a little past narrow places.
+        return (found[i] = spot ? { lon: spot.lon, lat: spot.lat, font: (Math.SQRT2 * spot.room * 1.15) / hEm, lines } : null);
+      },
+    };
     if (cache.size > 3000) cache.clear();
     cache.set(cacheKey, res);
     return res;
@@ -1773,10 +1944,12 @@ export class MapRenderer {
    * Of the ways to place a label, the one with the fewest lines that reaches the size wanted (design
    * pixels); when none does, the largest, with one line preferred over more.
    */
-  private chooseLines(choices: PlacedLabel[], wanted: number, scale: number, unit: number): PlacedLabel | null {
-    for (const c of choices) if ((c.font * scale) / unit >= wanted * 0.92) return c;
+  private chooseLines(choices: Placings, wanted: number, scale: number, unit: number): PlacedLabel | null {
+    for (let i = 0; i < choices.count; i++) { const c = choices.at(i); if (c && (c.font * scale) / unit >= wanted * 0.92) return c; }
     let best: PlacedLabel | null = null, bestScore = -Infinity;
-    for (const c of choices) {
+    for (let i = 0; i < choices.count; i++) {
+      const c = choices.at(i);
+      if (!c) continue;
       const score = c.font * (c.lines.length === 1 ? 1.3 : c.lines.length === 2 ? 1 : 0.85);
       if (score > bestScore) { bestScore = score; best = c; }
     }
@@ -1820,10 +1993,13 @@ export class MapRenderer {
     const landOk = mask ? (lon: number, lat: number) => mask.onLand(lon, lat) : null;
 
     const place = (piece: OwnerPiece, text: string, st: LabelStyle): { pos: [number, number]; fontPx: number; lines: string[] } | null => {
-      const ck = `${piece.key}|${view.camera.projection}|${text}|${st.letterSpacing}|${mask ? 1 : 0}`;
+      const ck = `${piece.key}|${view.camera.projection}|${text}|${st.letterSpacing}|${st.sizeScale}|${mask ? 1 : 0}`;
       // The size the territory's area suggests (design pixels): the label is never larger.
       const wanted = Math.min(st.maxSize, (Math.sqrt(piece.total) * scale * 0.18 * st.sizeScale) / view.unit);
-      let pl = this.chooseLines(this.placePiece(piece, view, text, st, landOk, ck, this.spotCache), wanted, scale, view.unit);
+      // The label is never larger than the territory's area suggests: where there is room for more
+      // than twice that, more room is worth nothing (and looking for it takes long in a large country).
+      const natural = Math.sqrt(piece.total) * 0.18 * st.sizeScale;
+      let pl = this.chooseLines(this.placePiece(piece, view, text, st, landOk, ck, this.spotCache, false, 2 * natural), wanted, scale, view.unit);
       let p = pl ? view.projection([pl.lon, pl.lat]) as [number, number] | null : null;
       // The best place is off screen while part of the territory is in view (zoomed in on a large
       // country): place the label in the part that is in view.
@@ -2137,7 +2313,7 @@ function segDist(x: number, y: number, ax: number, ay: number, bx: number, by: n
   return Math.hypot(x - ax - t * dx, y - ay - t * dy);
 }
 
-interface LandSample { pts: number[]; vec: Float64Array; sum: [number, number, number]; weight: number; land: number }
+interface FaceInfo { stamp: number; area: number; land: number; x: number; y: number; z: number }
 
 function vec3(p: [number, number]): [number, number, number] {
   const lon = (p[0] * Math.PI) / 180, lat = (p[1] * Math.PI) / 180;
@@ -2147,21 +2323,5 @@ function vec3(p: [number, number]): [number, number, number] {
 function toLonLat(v: [number, number, number]): [number, number] {
   const len = Math.hypot(v[0], v[1], v[2]) || 1;
   return [Math.atan2(v[1], v[0]) * 180 / Math.PI, Math.asin(Math.max(-1, Math.min(1, v[2] / len))) * 180 / Math.PI];
-}
-
-function insideGeo(geo: GeoPermissibleObjects, p: [number, number]): boolean {
-  if ((geo as { type: string }).type === 'Sphere') return true;
-  // Signed spherical area of the polygon with p's antipode excluded: cheap test via d3's area of a tiny cap
-  // is overkill; use winding of the projected ring around p instead (good enough for label placement).
-  const poly = geo as GeoJSON.Polygon;
-  let inside = false;
-  for (const ring of poly.coordinates) {
-    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-      const [xi, yi] = ring[i], [xj, yj] = ring[j];
-      if (Math.abs(xi - xj) > 180) continue;
-      if ((yi > p[1]) !== (yj > p[1]) && p[0] < ((xj - xi) * (p[1] - yi)) / (yj - yi) + xi) inside = !inside;
-    }
-  }
-  return inside;
 }
 

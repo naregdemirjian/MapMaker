@@ -2,7 +2,7 @@
 // "what is the world like at time t". Events are the authoritative record; everything here is a
 // disposable cache rebuilt from them whenever the world's revision changes.
 import { type Instant, compare, NEG_INF, fromStore, lerp, diffMs } from '../core-time/index.ts';
-import type { World } from '../world-model/world.ts';
+import type { World, HistoryStep } from '../world-model/world.ts';
 import { BASE_EVENT_ID, type EffectRow, type EventRow } from '../world-model/schema.ts';
 import { type Vec3, angle, e7ToVec, lonLatToVec } from '../geo-kernel/vec.ts';
 import type { Arrangement } from '../geo-kernel/arrangement.ts';
@@ -96,21 +96,10 @@ export function parseJSON<T>(text: string, fallback: T): T {
   try { return JSON.parse(text) as T; } catch { return fallback; }
 }
 
-const kidsCache = new WeakMap<Arrangement, { revision: number; map: Map<number, number[]> }>();
 
-/** Children of every face (lineage tree). Cached per map revision; callers must not modify it. */
+/** Children of every face (lineage tree), kept by the parcel map itself; callers must not modify it. */
 export function childrenMap(arr: Arrangement): Map<number, number[]> {
-  const cached = kidsCache.get(arr);
-  if (cached && cached.revision === arr.revision) return cached.map;
-  const m = new Map<number, number[]>();
-  for (const f of arr.faces.values()) {
-    if (f.parent_id === null) continue;
-    let l = m.get(f.parent_id);
-    if (!l) m.set(f.parent_id, (l = []));
-    l.push(f.id);
-  }
-  kidsCache.set(arr, { revision: arr.revision, map: m });
-  return m;
+  return arr.childrenMap();
 }
 
 export function leafDescendants(arr: Arrangement, faces: Iterable<number>, kids = childrenMap(arr)): Set<number> {
@@ -148,6 +137,17 @@ export function hashFaces(faces: number[]): string {
   return (h >>> 0).toString(16).padStart(8, '0') + ':' + faces.length;
 }
 
+/** What a state of all parcels differs by from the state it was worked out from (see Engine.stateDelta). */
+export interface StateDelta { from: Map<number, FaceState>; changed: number[]; removed: number[] }
+
+/** The parts of an event that decide when and in what order its changes take place. */
+function sameStanding(a: EventRow, b: EventRow): boolean {
+  return a.start_day === b.start_day && a.start_ms === b.start_ms && a.end_day === b.end_day && a.end_ms === b.end_ms
+    && a.precedence === b.precedence && a.created_seq === b.created_seq && a.variant_group === b.variant_group && a.variant_active === b.variant_active;
+}
+
+const timeKey = (t: Instant) => `${t.day}:${t.ms}`;
+
 export class Engine {
   private compiledRevision = -1;
   private timelines = new Map<string, Map<number, Assignment[]>>();
@@ -156,10 +156,36 @@ export class Engine {
   /** Characters' tracks: map -> character -> waypoints in time order. */
   private tracks = new Map<string, Map<string, Waypoint[]>>();
   private effectAssignments = new Map<string, Assignment[]>();
+  /** For each territory change: the layer it writes to, and the instants it takes place and ends at. */
+  private effectLayer = new Map<string, string>();
+  private effectTimes = new Map<string, Instant[]>();
+  /** Territory changes with an animation that spreads from a point (its reach depends on the land's outline). */
+  private originEffects = new Set<string>();
+  /** How many changes take place or end at each instant; the instants in order; those of names and placements. */
+  private timeCount = new Map<string, { t: Instant; n: number }>();
   private changeTimes: Instant[] = [];
-  private conflictList: Conflict[] = [];
-  /** Problems found in the history, always current with the tables. */
-  get conflicts(): Conflict[] { this.ensure(); return this.conflictList; }
+  private pointTimes: Instant[] = [];
+  /** Territory changes by the instants they take place and end at, in order (for finding what happens between two moments). */
+  private timeIndex: Array<{ t: Instant; id: string }> = [];
+  /** Problems found while compiling, by change; and the whole list with those found by comparing changes (null: to be worked out). */
+  private broken = new Map<string, Conflict[]>();
+  private conflictList: Conflict[] | null = null;
+  /**
+   * Problems found in the history, always current with the tables. Comparing every change with
+   * every other takes a while on a long history, so it is done when the list is asked for.
+   */
+  get conflicts(): Conflict[] {
+    this.ensure();
+    if (!this.conflictList) {
+      const w = this.world;
+      const order = (id: string) => w.get('effect', id)?.ordinal ?? 0;
+      const list: Conflict[] = [];
+      for (const [, l] of [...this.broken.entries()].sort((x, y) => order(x[0]) - order(y[0]) || (x[0] < y[0] ? -1 : 1))) list.push(...l);
+      this.conflictList = list;
+      this.detectConflicts(w.all('effect').sort((x, y) => x.ordinal - y.ordinal || (x.id < y.id ? -1 : 1)), new Map(w.all('event').map((e) => [e.id, e])));
+    }
+    return this.conflictList;
+  }
 
   private readonly world: World;
 
@@ -169,101 +195,318 @@ export class Engine {
 
   get revision(): number { this.ensure(); return this.compiledRevision; }
 
+  /** How compiled history was brought up to date (for tests and benchmarks): all at once, or by following changes. */
+  stats = { compiled: 0, followed: 0, statesWhole: 0, statesDerived: 0 };
+  /** For tests: never follow changes or derive states, always work everything out afresh. */
+  static incremental = true;
+  /**
+   * For tests: whenever changes were followed or a state was worked out from the one before, work
+   * the same out afresh as well and stop with an error if the two differ.
+   */
+  static verify = false;
+
   ensure(): void {
-    if (this.compiledRevision !== this.world.historyRevision) this.compile();
+    if (this.compiledRevision === this.world.historyRevision) return;
+    const steps = Engine.incremental && this.compiledRevision >= 0 ? this.world.historySince(this.compiledRevision) : null;
+    if (steps && steps.length <= 5000 && this.follow(steps)) {
+      this.stats.followed++;
+      if (Engine.verify) this.checkAgainstFresh();
+      return;
+    }
+    this.compile();
+  }
+
+  /** For tests (see verify): history as followed must be history as compiled afresh. */
+  private checkAgainstFresh(): void {
+    const fresh = new Engine(this.world);
+    fresh.compile();
+    const brief = (a: Assignment) => `${a.entry}@${a.face}:${a.t.day}.${a.t.ms}-${a.end.day}.${a.end.ms}=${a.value}/${a.precedence}/${a.eventSeq}/${a.ordinal}/${a.transition ? `${a.transition.style}~${a.transition.maxDist}` : ''}`;
+    const show = (e: Engine) => [
+      e.changeTimes.map(timeKey).join(' '),
+      [...e.effectAssignments.entries()].sort((x, y) => (x[0] < y[0] ? -1 : 1)).map(([id, l]) => `${id}[${l.map(brief).join(' ')}]`).join('\n'),
+      [...e.timelines.entries()].sort((x, y) => (x[0] < y[0] ? -1 : 1)).map(([layer, lm]) => `${layer}{${[...lm.entries()].sort((x, y) => x[0] - y[0]).map(([f, tl]) => `${f}:${tl.map((a) => `${a.effectId}#${a.entry}`).join(',')}`).join(' ')}}`).join('\n'),
+      e.timeIndex.map((x) => `${timeKey(x.t)}`).join(' '),
+      JSON.stringify([...e.names.entries()].sort()), JSON.stringify([...e.tracks.entries()].map(([sp, m]) => [sp, [...m.entries()].sort()])),
+      JSON.stringify(e.conflicts),
+    ];
+    const a = show(this), b = show(fresh);
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) {
+      let at = 0;
+      while (at < a[i].length && a[i][at] === b[i][at]) at++;
+      throw new Error(`History followed change by change differs from history compiled afresh (part ${i}, from character ${at}):
+  followed: ${a[i].slice(Math.max(0, at - 80), at + 200)}
+  afresh:   ${b[i].slice(Math.max(0, at - 80), at + 200)}`);
+    }
   }
 
   isActiveEvent(ev: EventRow): boolean {
     return !ev.variant_group || ev.variant_active === 1;
   }
 
+  /** Compile all of history from the tables. */
   compile(): void {
     const w = this.world;
+    this.stats.compiled++;
     this.timelines.clear();
+    this.effectAssignments.clear();
+    this.effectLayer.clear();
+    this.effectTimes.clear();
+    this.originEffects.clear();
+    this.timeCount.clear();
+    this.pointTimes = [];
+    this.timeIndex = [];
+    this.broken.clear();
+    this.conflictList = null;
+    const events = new Map(w.all('event').map((e) => [e.id, e]));
+    const effects = w.all('effect').sort((a, b) => a.ordinal - b.ordinal || (a.id < b.id ? -1 : 1));
+    for (const ef of effects) if (ef.kind === 'assign' || ef.kind === 'annex') this.addAssign(ef, events.get(ef.event_id), false);
+    for (const lm of this.timelines.values()) for (const tl of lm.values()) tl.sort(orderCmp);
+    this.timeIndex.sort((a, b) => compare(a.t, b.t));
+    this.compilePoints(effects, events);
+    this.changeTimes = [...this.timeCount.values()].map((x) => x.t).sort(compare);
+    this.compiledRevision = w.historyRevision;
+    // Nothing worked out before this can be carried over.
+    this.stateLog = [];
+    this.stateLogFrom = this.compiledRevision;
+    // (Without bringing the parcel maps' outlines up to date: maps not being looked at are left alone.)
+    this.kernelMarks = new Map([...w.arrangements.values()].map((arr) => [arr, arr.touchMark(false)]));
+  }
+
+  /** Count an instant at which something changes (or stop counting it), keeping the list of instants in order. */
+  private countTime(t: Instant, by: 1 | -1, ordered: boolean): void {
+    if (t.day === -Infinity) return;
+    const k = timeKey(t);
+    const e = this.timeCount.get(k);
+    if (by > 0) {
+      if (e) { e.n++; return; }
+      this.timeCount.set(k, { t, n: 1 });
+      if (ordered) this.changeTimes.splice(this.firstAfter(this.changeTimes, t), 0, t);
+    } else if (e && --e.n <= 0) {
+      this.timeCount.delete(k);
+      if (ordered) { const i = this.firstAfter(this.changeTimes, t) - 1; if (i >= 0 && compare(this.changeTimes[i], t) === 0) this.changeTimes.splice(i, 1); }
+    }
+  }
+
+  /** The index of the first instant after t in a list in order. */
+  private firstAfter(ts: Instant[], t: Instant): number {
+    let lo = 0, hi = ts.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (compare(ts[mid], t) <= 0) lo = mid + 1; else hi = mid; }
+    return lo;
+  }
+
+  /**
+   * Compile one territory change into the timelines. `ordered`: the timelines and lists of instants
+   * are in order and must stay so (a change being followed); otherwise they are put in order afterwards.
+   */
+  private addAssign(ef: EffectRow, ev: EventRow | undefined, ordered: boolean): void {
+    const w = this.world;
+    const problems: Conflict[] = [];
+    const done = () => { if (problems.length) this.broken.set(ef.id, problems); };
+    if (!ev) { problems.push({ kind: 'broken', effectId: ef.id, eventId: ef.event_id, message: 'This change belongs to an event that no longer exists.' }); return done(); }
+    if (!this.isActiveEvent(ev)) return;
+    const layer = ef.layer_id ? w.get('layer', ef.layer_id) : undefined;
+    const arr = ef.space_id ? w.arrangements.get(ef.space_id) : undefined;
+    if (!layer || !arr) { problems.push({ kind: 'broken', effectId: ef.id, eventId: ev.id, message: 'This change refers to a layer or map that no longer exists.' }); return done(); }
+    const t = effectTime(ef, ev);
+    const spec = parseJSON<TransitionSpec | null>(ef.transition, null);
+    const end = eventEnd(ev);
+    const hasTransition = spec && spec.style !== 'instant' && end && compare(end, t) > 0;
+    const compiled: CompiledTransition | null = hasTransition
+      ? { style: spec.style, origin: spec.origin ? lonLatToVec(spec.origin[0], spec.origin[1]) : null, maxDist: 0, easing: spec.easing ?? 'smooth' }
+      : null;
+    const res = parseJSON<Resolution>(ef.resolution, { set: [] });
+    const list: Assignment[] = [];
+    let lm = this.timelines.get(layer.id);
+    if (!lm) this.timelines.set(layer.id, (lm = new Map()));
+    res.set.forEach(([faces, given], entry) => {
+      let value = given;
+      // Land given to a country that no longer exists is nobody's (and reported): it is never drawn
+      // as a nameless grey owner.
+      if (value && !w.get('entity', value)) { problems.push({ kind: 'broken', effectId: ef.id, eventId: ev.id, message: 'This change gives territory to someone who no longer exists.' }); value = null; }
+      for (const face of faces) {
+        if (!arr.faces.has(face)) { problems.push({ kind: 'broken', effectId: ef.id, eventId: ev.id, message: `Parcel ${face} no longer exists.` }); continue; }
+        const a: Assignment = {
+          t, end: compiled ? end! : t, value, effectId: ef.id, eventId: ev.id, precedence: isUntracked(ef) ? UNTRACKED_PRECEDENCE : ev.precedence,
+          eventSeq: ev.created_seq, ordinal: ef.ordinal, entry, face, transition: compiled,
+        };
+        let tl = lm!.get(face);
+        if (!tl) lm!.set(face, (tl = []));
+        if (ordered) {
+          let lo = 0, hi = tl.length;
+          while (lo < hi) { const mid = (lo + hi) >> 1; if (orderCmp(tl[mid], a) <= 0) lo = mid + 1; else hi = mid; }
+          tl.splice(lo, 0, a);
+          this.stateLog.push({ rev: w.historyRevision, layer: layer.id, face });
+        } else tl.push(a);
+        list.push(a);
+      }
+    });
+    this.effectAssignments.set(ef.id, list);
+    this.effectLayer.set(ef.id, layer.id);
+    if (compiled && compiled.origin) { compiled.maxDist = this.regionMaxDistance(arr, list.map((a) => a.face), compiled.origin); this.originEffects.add(ef.id); }
+    const times = compiled && end ? [t, end] : [t];
+    this.effectTimes.set(ef.id, times);
+    for (const x of times) {
+      this.countTime(x, 1, ordered);
+      if (ordered) this.timeIndex.splice(this.firstIndexAfter(x), 0, { t: x, id: ef.id });
+      else this.timeIndex.push({ t: x, id: ef.id });
+    }
+    done();
+  }
+
+  /** The index of the first entry of the time index after t. */
+  private firstIndexAfter(t: Instant): number {
+    const ix = this.timeIndex;
+    let lo = 0, hi = ix.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (compare(ix[mid].t, t) <= 0) lo = mid + 1; else hi = mid; }
+    return lo;
+  }
+
+  /** Take one territory change out of the timelines (it was changed or deleted). */
+  private removeAssign(id: string): void {
+    this.broken.delete(id);
+    const list = this.effectAssignments.get(id);
+    if (!list) return;
+    const layerId = this.effectLayer.get(id)!;
+    const lm = this.timelines.get(layerId);
+    for (const a of list) {
+      const tl = lm?.get(a.face);
+      if (tl) { const i = tl.indexOf(a); if (i >= 0) tl.splice(i, 1); if (!tl.length) lm!.delete(a.face); }
+      this.stateLog.push({ rev: this.world.historyRevision, layer: layerId, face: a.face });
+    }
+    for (const x of this.effectTimes.get(id) ?? []) {
+      this.countTime(x, -1, true);
+      for (let i = this.firstIndexAfter(x) - 1; i >= 0 && compare(this.timeIndex[i].t, x) === 0; i--) if (this.timeIndex[i].id === id) { this.timeIndex.splice(i, 1); break; }
+    }
+    this.effectAssignments.delete(id);
+    this.effectLayer.delete(id);
+    this.effectTimes.delete(id);
+    this.originEffects.delete(id);
+  }
+
+  /** Compile names over time and characters' and cities' places (all of them: there are few, and they depend on each other's order). */
+  private compilePoints(effects: EffectRow[], events: Map<string, EventRow>): void {
+    const w = this.world;
+    for (const t of this.pointTimes) this.countTime(t, -1, false);
+    this.pointTimes = [];
     this.tracks.clear();
     this.names.clear();
-    this.effectAssignments.clear();
-    this.conflictList = [];
-    const events = new Map(w.all('event').map((e) => [e.id, e]));
-    const times = new Map<string, Instant>();
-    const effects = w.all('effect').sort((a, b) => a.ordinal - b.ordinal || (a.id < b.id ? -1 : 1));
+    const count = (t: Instant) => { if (t.day !== -Infinity) { this.pointTimes.push(t); this.countTime(t, 1, false); } };
     for (const ef of effects) {
+      if (ef.kind !== 'rename' && ef.kind !== 'place') continue;
+      this.broken.delete(ef.id);
       const ev = events.get(ef.event_id);
-      if (!ev) { this.conflictList.push({ kind: 'broken', effectId: ef.id, eventId: ef.event_id, message: 'This change belongs to an event that no longer exists.' }); continue; }
+      const problem = (message: string) => this.broken.set(ef.id, [{ kind: 'broken', effectId: ef.id, eventId: ev ? ev.id : ef.event_id, message }]);
+      if (!ev) { problem('This change belongs to an event that no longer exists.'); continue; }
       if (!this.isActiveEvent(ev)) continue;
       if (ef.kind === 'rename') {
         const it = parseJSON<RenameIntent | null>(ef.intent, null);
-        if (!it || !w.get('entity', it.entity)) { this.conflictList.push({ kind: 'broken', effectId: ef.id, eventId: ev.id, message: 'This change of name is of something that no longer exists.' }); continue; }
+        if (!it || !w.get('entity', it.entity)) { problem('This change of name is of something that no longer exists.'); continue; }
         const l = this.names.get(it.entity) ?? [];
         l.push({ t: effectTime(ef, ev), name: it.name, order: [isUntracked(ef) ? UNTRACKED_PRECEDENCE : ev.precedence, ev.created_seq, ef.ordinal] });
         this.names.set(it.entity, l);
-        const tt = effectTime(ef, ev);
-        if (tt.day !== -Infinity) times.set(`${tt.day}:${tt.ms}`, tt);
+        count(effectTime(ef, ev));
         continue;
       }
-      if (ef.kind === 'place') {
-        const it = parseJSON<PlaceIntent | null>(ef.intent, null);
-        if (!it || !ef.space_id || !w.get('map_space', ef.space_id)) { this.conflictList.push({ kind: 'broken', effectId: ef.id, eventId: ev.id, message: 'This character placement refers to a map that no longer exists.' }); continue; }
-        if (!w.get('entity', it.entity)) { this.conflictList.push({ kind: 'broken', effectId: ef.id, eventId: ev.id, message: 'This placement is of a character who no longer exists.' }); continue; }
-        const t = effectTime(ef, ev);
-        let bySpace = this.tracks.get(ef.space_id);
-        if (!bySpace) this.tracks.set(ef.space_id, (bySpace = new Map()));
-        let track = bySpace.get(it.entity);
-        if (!track) bySpace.set(it.entity, (track = []));
-        track.push({
-          t, lon: it.lon ?? 0, lat: it.lat ?? 0, off: !!it.off, arrive: it.arrive ?? 'travel', effectId: ef.id, eventId: ev.id,
-          precedence: isUntracked(ef) ? UNTRACKED_PRECEDENCE : ev.precedence, eventSeq: ev.created_seq, ordinal: ef.ordinal,
-        });
-        if (t.day !== -Infinity) times.set(`${t.day}:${t.ms}`, t);
-        continue;
-      }
-      if (ef.kind !== 'assign' && ef.kind !== 'annex') continue;
-      const layer = ef.layer_id ? w.get('layer', ef.layer_id) : undefined;
-      const arr = ef.space_id ? w.arrangements.get(ef.space_id) : undefined;
-      if (!layer || !arr) { this.conflictList.push({ kind: 'broken', effectId: ef.id, eventId: ev.id, message: 'This change refers to a layer or map that no longer exists.' }); continue; }
+      const it = parseJSON<PlaceIntent | null>(ef.intent, null);
+      if (!it || !ef.space_id || !w.get('map_space', ef.space_id)) { problem('This character placement refers to a map that no longer exists.'); continue; }
+      if (!w.get('entity', it.entity)) { problem('This placement is of a character who no longer exists.'); continue; }
       const t = effectTime(ef, ev);
-      const spec = parseJSON<TransitionSpec | null>(ef.transition, null);
-      const end = eventEnd(ev);
-      const hasTransition = spec && spec.style !== 'instant' && end && compare(end, t) > 0;
-      const compiled: CompiledTransition | null = hasTransition
-        ? { style: spec.style, origin: spec.origin ? lonLatToVec(spec.origin[0], spec.origin[1]) : null, maxDist: 0, easing: spec.easing ?? 'smooth' }
-        : null;
-      const res = parseJSON<Resolution>(ef.resolution, { set: [] });
-      const list: Assignment[] = [];
-      res.set.forEach(([faces, given], entry) => {
-        let value = given;
-        // Land given to a country that no longer exists is nobody's (and reported): it is never drawn
-        // as a nameless grey owner.
-        if (value && !w.get('entity', value)) { this.conflictList.push({ kind: 'broken', effectId: ef.id, eventId: ev.id, message: 'This change gives territory to someone who no longer exists.' }); value = null; }
-        for (const face of faces) {
-          if (!arr.faces.has(face)) { this.conflictList.push({ kind: 'broken', effectId: ef.id, eventId: ev.id, message: `Parcel ${face} no longer exists.` }); continue; }
-          const a: Assignment = {
-            t, end: compiled ? end! : t, value, effectId: ef.id, eventId: ev.id, precedence: isUntracked(ef) ? UNTRACKED_PRECEDENCE : ev.precedence,
-            eventSeq: ev.created_seq, ordinal: ef.ordinal, entry, face, transition: compiled,
-          };
-          let lm = this.timelines.get(layer.id);
-          if (!lm) this.timelines.set(layer.id, (lm = new Map()));
-          let tl = lm.get(face);
-          if (!tl) lm.set(face, (tl = []));
-          tl.push(a);
-          list.push(a);
-        }
+      let bySpace = this.tracks.get(ef.space_id);
+      if (!bySpace) this.tracks.set(ef.space_id, (bySpace = new Map()));
+      let track = bySpace.get(it.entity);
+      if (!track) bySpace.set(it.entity, (track = []));
+      track.push({
+        t, lon: it.lon ?? 0, lat: it.lat ?? 0, off: !!it.off, arrive: it.arrive ?? 'travel', effectId: ef.id, eventId: ev.id,
+        precedence: isUntracked(ef) ? UNTRACKED_PRECEDENCE : ev.precedence, eventSeq: ev.created_seq, ordinal: ef.ordinal,
       });
-      this.effectAssignments.set(ef.id, list);
-      if (compiled && compiled.origin) compiled.maxDist = this.regionMaxDistance(arr, list.map((a) => a.face), compiled.origin);
-      if (t.day !== -Infinity) times.set(`${t.day}:${t.ms}`, t);
-      if (compiled && end) times.set(`${end.day}:${end.ms}`, end);
+      count(t);
     }
-    for (const lm of this.timelines.values()) for (const tl of lm.values()) tl.sort(orderCmp);
     for (const l of this.names.values()) l.sort((a, b) => compare(a.t, b.t) || a.order[0] - b.order[0] || a.order[1] - b.order[1] || a.order[2] - b.order[2]);
     for (const bySpace of this.tracks.values()) for (const tr of bySpace.values()) {
       tr.sort((a, b) => compare(a.t, b.t) || a.precedence - b.precedence || a.eventSeq - b.eventSeq || a.ordinal - b.ordinal);
       // Several placements at one moment: the last in order stands.
       for (let i = tr.length - 2; i >= 0; i--) if (compare(tr[i].t, tr[i + 1].t) === 0) tr.splice(i, 1);
     }
-    this.changeTimes = [...times.values()].sort(compare);
+  }
+
+  /** The state of the parcel maps as of the last compile, to find what was touched since (see follow). */
+  private kernelMarks = new Map<Arrangement, number>();
+  /** Parcels whose timeline changed, by the revision that changed it (for carrying states over, see derive). */
+  private stateLog: Array<{ rev: number; layer: string; face: number }> = [];
+  private stateLogFrom = 0;
+
+  /**
+   * Bring compiled history up to date by following the changes made since the last compile, when
+   * they are of kinds that touch little: territory changes and events added, changed or deleted,
+   * names and placements, parcels split or made whole again. False when everything must be compiled
+   * (a layer, map or country came or went, or the changes cannot all be told).
+   */
+  private follow(steps: HistoryStep[]): boolean {
+    const w = this.world;
+    const effects = new Set<string>();
+    const events = new Map<string, EventRow | null>();
+    const spaces = new Set<string>();
+    let points = false;
+    for (const s of steps) {
+      if (s.table === 'vertex' || s.table === 'face') { spaces.add(((s.after ?? s.before) as { space_id: string }).space_id); continue; }
+      if (s.table === 'effect') {
+        effects.add(((s.after ?? s.before) as EffectRow).id);
+        for (const r of [s.before, s.after] as Array<EffectRow | null>) if (r && (r.kind === 'rename' || r.kind === 'place')) points = true;
+        continue;
+      }
+      if (s.table === 'event') {
+        const id = ((s.after ?? s.before) as EventRow).id;
+        if (!events.has(id)) events.set(id, s.before as EventRow | null);
+        continue;
+      }
+      return false;
+    }
+    // An event that came, went, or moved in time or standing takes all its changes with it.
+    const moved = new Set<string>();
+    for (const [id, before] of events) {
+      const now = w.get('event', id);
+      if (!(before && now && sameStanding(before, now))) moved.add(id);
+    }
+    const all = moved.size || points ? w.all('effect') : null;
+    if (moved.size) for (const ef of all!) if (moved.has(ef.event_id)) { effects.add(ef.id); if (ef.kind === 'rename' || ef.kind === 'place') points = true; }
+    // Parcels: one that is gone may not be referred to; land whose outline changed may change how far an animation reaches.
+    const again = new Set<string>();
+    const gone: number[] = [];
+    for (const spaceId of spaces) {
+      const arr = w.arrangements.get(spaceId);
+      if (!arr) return false;
+      const mark = this.kernelMarks.get(arr);
+      const touched = mark === undefined ? null : arr.touchedSince(mark);
+      if (!touched) return false;
+      for (const f of touched) {
+        if (!arr.faces.has(f)) { gone.push(f); continue; }
+        if (!this.originEffects.size) continue;
+        for (let g: number | null | undefined = f; g !== null && g !== undefined; g = arr.faces.get(g)?.parent_id) {
+          for (const lm of this.timelines.values()) for (const a of lm.get(g) ?? []) if (a.transition?.origin) again.add(a.effectId);
+        }
+      }
+    }
+    const eventOf = (ef: EffectRow) => w.get('event', ef.event_id);
+    for (const id of effects) {
+      this.removeAssign(id);
+      const ef = w.get('effect', id);
+      if (ef && (ef.kind === 'assign' || ef.kind === 'annex')) this.addAssign(ef, eventOf(ef), true);
+    }
+    // A parcel that is gone and still referred to: reported by compiling everything.
+    for (const f of gone) for (const lm of this.timelines.values()) if (lm.has(f)) return false;
+    if (points) this.compilePoints(all ?? w.all('effect'), new Map(w.all('event').map((e) => [e.id, e])));
+    if (points) this.changeTimes = [...this.timeCount.values()].map((x) => x.t).sort(compare);
+    for (const id of again) {
+      const list = this.effectAssignments.get(id), ef = w.get('effect', id);
+      const arr = ef?.space_id ? w.arrangements.get(ef.space_id) : undefined;
+      const spec = list?.[0]?.transition;
+      if (list && arr && spec?.origin) spec.maxDist = this.regionMaxDistance(arr, list.map((a) => a.face), spec.origin);
+    }
+    for (const spaceId of spaces) { const arr = w.arrangements.get(spaceId)!; this.kernelMarks.set(arr, arr.touchMark()); }
+    if (this.stateLog.length > 60_000) { this.stateLogFrom = this.stateLog[30_000].rev; this.stateLog.splice(0, 30_001); }
+    this.conflictList = null;
     this.compiledRevision = w.historyRevision;
-    this.detectConflicts(effects, events);
+    return true;
   }
 
   private regionMaxDistance(arr: Arrangement, faces: number[], origin: Vec3): number {
@@ -323,7 +566,10 @@ export class Engine {
   /** States at recent instants (while changes are animating, each instant has its own). */
   private stateCache = new Map<string, Map<number, FaceState>>();
   /** Per stretch of time between two changes: every parcel's state, and the parcels changing hands in it. */
-  private stretchCache = new Map<string, { base: Map<number, FaceState>; changing: number[] }>();
+  private stretchCache = new Map<string, { base: Map<number, FaceState>; changing: number[]; t: Instant }>();
+  /** The state last given for each layer, with what was current when it was worked out: the next is worked out from it (see derive). */
+  private lastState = new Map<string, { arr: Arrangement; base: Map<number, FaceState>; changing: number[]; t: Instant; rev: number; mark: number }>();
+  private deltas = new WeakMap<Map<number, FaceState>, { from: WeakRef<Map<number, FaceState>>; changed: number[]; removed: number[] }>();
 
   /** The state of every parcel of a layer at time t. Recent answers are reused; callers must not modify the result. */
   /** The name something goes by at instant t, if it was renamed by then (null: its own name). */
@@ -375,16 +621,14 @@ export class Engine {
    */
   stretchOf(t: Instant): number {
     this.ensure();
-    const ts = this.changeTimes;
-    let lo = 0, hi = ts.length;
-    while (lo < hi) { const mid = (lo + hi) >> 1; if (compare(ts[mid], t) <= 0) lo = mid + 1; else hi = mid; }
-    return lo;
+    return this.firstAfter(this.changeTimes, t);
   }
 
   /**
    * The state of every parcel of a layer at time t; callers must not modify the result. Worked out
    * once per stretch of time between changes: every instant of a stretch shares it, and while
    * changes are animating only the parcels changing hands are worked out again for each instant.
+   * A new state is worked out from the one given last wherever that is possible (see derive).
    */
   partitionState(spaceId: string, layerId: string, t: Instant): Map<number, FaceState> {
     this.ensure();
@@ -392,28 +636,100 @@ export class Engine {
     const sk = `${this.compiledRevision}|${arr.revision}|${spaceId}|${layerId}|${this.stretchOf(t)}`;
     let st = this.stretchCache.get(sk);
     if (!st) {
-      const base = new Map<number, FaceState>();
-      const changing: number[] = [];
-      for (const f of arr.leafFaces()) {
-        const s = this.faceState(spaceId, layerId, f, t);
-        base.set(f, s);
-        if (s.transition) changing.push(f);
+      const derived = Engine.incremental ? this.derive(spaceId, layerId, t, arr) : null;
+      if (derived) {
+        st = { ...derived, t };
+        this.stats.statesDerived++;
+        if (Engine.verify) {
+          const show = (s: FaceState) => `${s.value}|${s.assignment ? `${s.assignment.effectId}#${s.assignment.entry}` : ''}|${s.transition ? `${s.transition.from}~${s.transition.progress}~${s.transition.prior ? s.transition.prior.effectId : ''}` : ''}`;
+          const leaves = arr.leafFaces();
+          if (leaves.length !== derived.base.size) throw new Error(`A state worked out from the one before has ${derived.base.size} parcels; the map has ${leaves.length}.`);
+          for (const f of leaves) {
+            const got = derived.base.get(f), want = this.faceState(spaceId, layerId, f, t);
+            if (!got || show(got) !== show(want)) throw new Error(`A state worked out from the one before differs from one worked out afresh at parcel ${f}: ${got ? show(got) : 'missing'} against ${show(want)}.`);
+          }
+        }
       }
-      st = { base, changing };
+      else {
+        const base = new Map<number, FaceState>();
+        const changing: number[] = [];
+        for (const f of arr.leafFaces()) {
+          const s = this.faceState(spaceId, layerId, f, t);
+          base.set(f, s);
+          if (s.transition) changing.push(f);
+        }
+        st = { base, changing, t };
+        this.stats.statesWhole++;
+      }
       if (this.stretchCache.size >= 24) this.stretchCache.delete(this.stretchCache.keys().next().value!);
       this.stretchCache.set(sk, st);
       // The states just worked out are those of this instant.
-      if (changing.length) this.stateCache.set(`${sk}|${t.day}|${t.ms}`, base);
+      if (st.changing.length) this.stateCache.set(`${sk}|${t.day}|${t.ms}`, st.base);
     }
+    this.lastState.set(`${spaceId}|${layerId}`, { arr, base: st.base, changing: st.changing, t: st.t, rev: this.compiledRevision, mark: arr.touchMark() });
     if (!st.changing.length) return st.base;
     const key = `${sk}|${t.day}|${t.ms}`;
     const hit = this.stateCache.get(key);
     if (hit) return hit;
     const out = new Map(st.base);
     for (const f of st.changing) out.set(f, this.faceState(spaceId, layerId, f, t));
+    this.deltas.set(out, { from: new WeakRef(st.base), changed: st.changing, removed: [] });
     if (this.stateCache.size >= 16) this.stateCache.delete(this.stateCache.keys().next().value!);
     this.stateCache.set(key, out);
     return out;
+  }
+
+  /**
+   * The state of every parcel at t, worked out from the state given last: only the parcels that can
+   * differ are worked out again. Those are the parcels (1) whose timeline was changed by an edit since,
+   * (2) that are new, or have been split or made whole again since, (3) under a change that takes
+   * place or ends between the two moments, and (4) that were changing hands at the earlier moment.
+   * Every other parcel has the same latest change at both moments and is in no animation at either.
+   * Null when that cannot be told (history was compiled anew, or too much happened in between).
+   */
+  private derive(spaceId: string, layerId: string, t: Instant, arr: Arrangement): { base: Map<number, FaceState>; changing: number[] } | null {
+    const src = this.lastState.get(`${spaceId}|${layerId}`);
+    if (!src || src.arr !== arr || src.rev < this.stateLogFrom) return null;
+    const touched = arr.touchedSince(src.mark);
+    if (!touched) return null;
+    const roots: number[] = [];
+    for (let i = this.stateLog.length - 1; i >= 0 && this.stateLog[i].rev > src.rev; i--) if (this.stateLog[i].layer === layerId) roots.push(this.stateLog[i].face);
+    // Changes taking place or ending after the earlier of the two moments, up to the later.
+    const [lo, hi] = compare(src.t, t) <= 0 ? [src.t, t] : [t, src.t];
+    const from = this.firstIndexAfter(lo), to = this.firstIndexAfter(hi);
+    if (to - from > 4000) return null;
+    for (let i = from; i < to; i++) {
+      const id = this.timeIndex[i].id;
+      if (this.effectLayer.get(id) === layerId) for (const a of this.effectAssignments.get(id)!) roots.push(a.face);
+    }
+    const again = new Set<number>(src.changing);
+    for (const leaf of leafDescendants(arr, roots)) again.add(leaf);
+    if (again.size + touched.length > src.base.size / 2 + 64) return null;
+    const base = new Map(src.base);
+    const removed: number[] = [];
+    for (const f of touched) { if (arr.faces.get(f)?.is_leaf) again.add(f); else if (base.delete(f)) removed.push(f); }
+    const changed: number[] = [], changing: number[] = [];
+    for (const f of again) {
+      if (!arr.faces.get(f)?.is_leaf) continue;
+      const s = this.faceState(spaceId, layerId, f, t);
+      base.set(f, s);
+      changed.push(f);
+      if (s.transition) changing.push(f);
+    }
+    changing.sort((x, y) => x - y);
+    this.deltas.set(base, { from: new WeakRef(src.base), changed, removed });
+    return { base, changing };
+  }
+
+  /**
+   * How a state given by partitionState differs from the state it was worked out from, when it was
+   * worked out so and that state is still around: the parcels worked out again (most of them the
+   * same as before) and those no longer there. For keeping what is made from a state up to date.
+   */
+  stateDelta(states: Map<number, FaceState>): StateDelta | null {
+    const d = this.deltas.get(states);
+    const from = d?.from.deref();
+    return d && from ? { from, changed: d.changed, removed: d.removed } : null;
   }
 
   /**
@@ -540,7 +856,7 @@ export class Engine {
         if (reported.has(key) || !overlapping(A.id, B.id)) continue;
         reported.add(key);
         const nb = events.get(B.event_id)?.name ?? 'another event';
-        this.conflictList.push({ kind: 'simultaneous', effectId: A.id, eventId: A.event_id, otherEventId: B.event_id, message: `Changes the same area at the same moment as "${nb}". The one later in the precedence order wins.` });
+        this.conflictList!.push({ kind: 'simultaneous', effectId: A.id, eventId: A.event_id, otherEventId: B.event_id, message: `Changes the same area at the same moment as "${nb}". The one later in the precedence order wins.` });
       }
     }
     // Overlapping transitions: only pairs that share land are compared (found through a land index).
@@ -564,7 +880,7 @@ export class Engine {
       if (!overlapping(x.id, y.id)) continue;
       const [first, second] = orderCmp(x.a, y.a) <= 0 ? [x, y] : [y, x];
       const n1 = events.get(first.a.eventId)?.name ?? 'an earlier event';
-      this.conflictList.push({ kind: 'overlap', effectId: second.id, eventId: second.a.eventId, otherEventId: first.a.eventId, message: `Overlaps "${n1}" in the same area. From its start, this later change takes over the shared area.` });
+      this.conflictList!.push({ kind: 'overlap', effectId: second.id, eventId: second.a.eventId, otherEventId: first.a.eventId, message: `Overlaps "${n1}" in the same area. From its start, this later change takes over the shared area.` });
     }
     // Intentions worked out from an older version of history.
     for (const ef of effects) {
@@ -576,7 +892,7 @@ export class Engine {
       const basis = this.basisFor(ef, intent.from);
       if (hashFaces(basis) !== ef.basis_hash) {
         const who = w.get('entity', intent.from)?.name ?? 'the original owner';
-        this.conflictList.push({ kind: 'stale', effectId: ef.id, eventId: ev.id, message: `This was worked out when ${who} held different territory. Keep it as stored, or re-apply the intention.` });
+        this.conflictList!.push({ kind: 'stale', effectId: ef.id, eventId: ev.id, message: `This was worked out when ${who} held different territory. Keep it as stored, or re-apply the intention.` });
       }
     }
   }

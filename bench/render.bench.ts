@@ -6,6 +6,7 @@ import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { appendFileSync } from 'node:fs';
+import { workCopy } from './tools/workcopy.ts';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const args = process.argv.slice(2);
@@ -15,7 +16,8 @@ const folder = args[0];
 const names = args.slice(1).length ? args.slice(1) : ['Bench Earth 242', 'Bench Heavy', 'Bench Random 1000'];
 const port = 4455;
 
-const server = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', join(ROOT, 'dist', 'server.mjs'), '--port', String(port), '--projects', folder], { stdio: ['ignore', 'pipe', 'pipe'] });
+const work = workCopy(folder, names);
+const server = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', join(ROOT, 'dist', 'server.mjs'), '--port', String(port), '--projects', work.folder], { stdio: ['ignore', 'pipe', 'pipe'] });
 const baseUrl = await new Promise<string>((res, rej) => {
   let text = '';
   const timer = setTimeout(() => rej(new Error(`The service did not start:\n${text}`)), 20000);
@@ -122,5 +124,6 @@ try {
 } finally {
   await browser.close();
   server.kill('SIGTERM');
+  work.done();
 }
 if (out) appendFileSync(out, results.map((r) => JSON.stringify(r)).join('\n') + '\n');

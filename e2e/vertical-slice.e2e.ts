@@ -229,6 +229,9 @@ try {
 
   await step('Open Map Maker and create a project', async () => {
     await page.goto(baseUrl);
+    // Everything worked out from what was there before is also worked out afresh, and must be the same (see main.tsx).
+    await page.waitForFunction(() => !!(window as any).__mapmaker);
+    await page.evaluate(() => (window as any).__mapmaker.verify());
     await page.getByTestId('project-name').fill('Vertical Slice Test');
     await screenshot('project-picker');
     await page.getByTestId('project-create').click();
@@ -441,6 +444,9 @@ try {
     await startServer();
     page = watch(await context.newPage());
     await page.goto(baseUrl);
+    // Everything worked out from what was there before is also worked out afresh, and must be the same (see main.tsx).
+    await page.waitForFunction(() => !!(window as any).__mapmaker);
+    await page.evaluate(() => (window as any).__mapmaker.verify());
     await page.getByText('Vertical Slice Test').click();
     await page.getByTestId('map-canvas').waitFor();
     const after = await worldSummary();

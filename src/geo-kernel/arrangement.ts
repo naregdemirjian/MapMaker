@@ -119,13 +119,80 @@ export class Arrangement {
 
   static fromRows(spaceId: string, rootFace: number, vertices: Iterable<VertexRow>, segments: Iterable<SegmentRow>, faces: Iterable<FaceRow>, ids: IdSource): Arrangement {
     const arr = new Arrangement(spaceId, rootFace, ids);
-    for (const f of faces) arr.faces.set(f.id, { ...f });
+    for (const f of faces) arr.setFace(f.id, { ...f });
     for (const v of vertices) arr.indexVertex({ ...v });
     for (const s of segments) arr.indexSegment({ ...s });
     // (Loading is not a change to what was there.)
     arr.changed = [];
     arr.changedFrom = arr.revision;
+    arr.touched = [];
+    arr.touchedBase = 0;
     return arr;
+  }
+
+  // ---------------------------------------------------------------- parcels: rows, lineage, what was touched
+
+  /** Children of every parcel that was split (the lineage tree), kept as rows come and go. */
+  private readonly kids = new Map<number, number[]>();
+  /** The parcels that are leaves (not split further), and the same as a sorted list (made on demand). */
+  private readonly leaves = new Set<number>();
+  private leafList: number[] | null = null;
+
+  /** Write or (with null) delete a parcel's row, keeping the lineage tree and the leaf set in step. */
+  private setFace(id: number, row: FaceRow | null): void {
+    const old = this.faces.get(id);
+    if (old && (!row || row.parent_id !== old.parent_id) && old.parent_id !== null) {
+      const l = this.kids.get(old.parent_id);
+      if (l) { const i = l.indexOf(id); if (i >= 0) l.splice(i, 1); if (!l.length) this.kids.delete(old.parent_id); }
+    }
+    if (row) {
+      this.faces.set(id, row);
+      if (row.parent_id !== null && (!old || old.parent_id !== row.parent_id)) {
+        const l = this.kids.get(row.parent_id);
+        if (l) l.push(id); else this.kids.set(row.parent_id, [id]);
+      }
+      if (row.is_leaf) { if (!this.leaves.has(id)) { this.leaves.add(id); this.leafList = null; } }
+      else if (this.leaves.delete(id)) this.leafList = null;
+    } else {
+      this.faces.delete(id);
+      if (this.leaves.delete(id)) this.leafList = null;
+    }
+    this.touch1(id);
+  }
+
+  /** Children of every parcel that has any (do not modify). */
+  childrenMap(): Map<number, number[]> { return this.kids; }
+
+  /**
+   * Every parcel whose row or outline changed, in the order it happened: created, deleted, split
+   * (no longer a leaf), made whole again, or given a new outline. Whoever keeps something per parcel
+   * (who owns it, how it is drawn) remembers a mark and later asks what was touched since.
+   */
+  private touched: number[] = [];
+  private touchedBase = 0;
+
+  private touch1(face: number): void {
+    if (this.touched.length >= 200_000) { this.touchedBase += 100_000; this.touched.splice(0, 100_000); }
+    this.touched.push(face);
+  }
+
+  /**
+   * A mark for touchedSince: everything touched so far lies before it. Outlines are brought up to
+   * date first (new outlines are noted when that happens), unless `refresh` is false: then parcels
+   * whose outline is still to be worked out count as touched after the mark.
+   */
+  touchMark(refresh = true): number {
+    if (refresh) this.topology();
+    return this.touchedBase + this.touched.length;
+  }
+
+  /** The parcels touched since a mark (each once), or null when that is too long ago to tell. */
+  touchedSince(mark: number): number[] | null {
+    this.topology();
+    if (mark < this.touchedBase) return null;
+    const from = mark - this.touchedBase;
+    if (from >= this.touched.length) return [];
+    return [...new Set(this.touched.slice(from))];
   }
 
   // ---------------------------------------------------------------- where the borders changed
@@ -231,8 +298,8 @@ export class Arrangement {
         if (a) { this.indexSegment({ ...a }); this.touch(a.a); this.touch(a.b); }
       }
     } else {
-      if (before) this.faces.delete(before.id);
-      if (after) this.faces.set(after.id, { ...(after as FaceRow) });
+      if (before && (!after || after.id !== before.id)) this.setFace(before.id, null);
+      if (after) this.setFace(after.id, { ...(after as FaceRow) });
     }
     this.revision++;
   }
@@ -358,7 +425,7 @@ export class Arrangement {
   private putFace(f: FaceRow): void {
     const before = this.faces.get(f.id) ?? null;
     this.record('face', f.id, before ? { ...before } : null, { ...f });
-    this.faces.set(f.id, { ...f });
+    this.setFace(f.id, { ...f });
     this.revision++;
   }
 
@@ -716,7 +783,7 @@ export class Arrangement {
       t.cycles.delete(c);
       t.minHE.delete(c);
       const l = t.cycleLabel.get(c);
-      if (l !== undefined) { t.facesCycles.get(l)?.delete(c); if (t.facesCycles.get(l)?.size === 0) t.facesCycles.delete(l); t.faceStamps.set(l, ++this.stampSeq); }
+      if (l !== undefined) { t.facesCycles.get(l)?.delete(c); if (t.facesCycles.get(l)?.size === 0) t.facesCycles.delete(l); t.faceStamps.set(l, ++this.stampSeq); this.touch1(l); }
       t.cycleLabel.delete(c);
     }
     for (const h of gone) if (!this.segments.has(h >> 1) || (newNext.has(h) === false && !this.halfEdgeExists(h))) { t.next.delete(h); loose.delete(h); }
@@ -749,7 +816,7 @@ export class Arrangement {
       const label = this.he(t.cycles.get(c)![0]).label;
       if (t.cycleLabel.get(c) === label) continue;
       const old = t.cycleLabel.get(c);
-      if (old !== undefined) { t.facesCycles.get(old)?.delete(c); if (t.facesCycles.get(old)?.size === 0) t.facesCycles.delete(old); t.faceStamps.set(old, ++this.stampSeq); }
+      if (old !== undefined) { t.facesCycles.get(old)?.delete(c); if (t.facesCycles.get(old)?.size === 0) t.facesCycles.delete(old); t.faceStamps.set(old, ++this.stampSeq); this.touch1(old); }
       this.fileCycle(t, c);
     }
     t.version++;
@@ -764,6 +831,7 @@ export class Arrangement {
     if (!set) t.facesCycles.set(label, (set = new Set()));
     set.add(id);
     t.faceStamps.set(label, ++this.stampSeq);
+    this.touch1(label);
   }
 
   private stampSeq = 0;
@@ -803,7 +871,7 @@ export class Arrangement {
   checkTopology(): string[] {
     const t = this.topology();
     const fresh = new Arrangement(this.spaceId, this.rootFace, this.ids);
-    for (const f of this.faces.values()) fresh.faces.set(f.id, { ...f });
+    for (const f of this.faces.values()) fresh.setFace(f.id, { ...f });
     for (const v of this.vertices.values()) fresh.indexVertex({ ...v });
     for (const sg of this.segments.values()) fresh.indexSegment({ ...sg });
     const f = fresh.topology();
@@ -1737,8 +1805,9 @@ export class Arrangement {
     return out;
   }
 
+  /** The parcels that are not split further, in order of their numbers (do not modify the list). */
   leafFaces(): number[] {
-    return [...this.faces.values()].filter((f) => f.is_leaf).map((f) => f.id).sort((a, b) => a - b);
+    return (this.leafList ??= [...this.leaves].sort((a, b) => a - b));
   }
 
   /** Ancestors of a face, nearest first (excluding itself). */
@@ -1765,6 +1834,19 @@ export class Arrangement {
     const t = this.topology();
     const set = t.facesCycles.get(faceId);
     if (!set || set.size === 0) return faceId === this.rootFace ? 4 * Math.PI : 0;
+    // (Kept until the face's outline changes: asked for every parcel, again and again, when drawing.)
+    const stamp = t.faceStamps.get(faceId) ?? 0;
+    const kept = this.areas.get(faceId);
+    if (kept && kept.stamp === stamp && kept.topo === t) return kept.area;
+    const area = this.faceAreaNow(t, set);
+    if (this.areas.size > 4 * t.facesCycles.size + 4096) this.areas.clear();
+    this.areas.set(faceId, { stamp, topo: t, area });
+    return area;
+  }
+
+  private readonly areas = new Map<number, { stamp: number; topo: Topology; area: number }>();
+
+  private faceAreaNow(t: Topology, set: Set<number>): number {
     const list = this.orderedCycles(t, set);
     let outer = -1;
     const holes: number[] = [];

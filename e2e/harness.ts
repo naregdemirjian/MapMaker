@@ -58,6 +58,9 @@ export class Harness {
     this.context = await this.browser.newContext({ viewport: { width: 1600, height: 950 }, deviceScaleFactor: 1 });
     this.page = this.watch(await this.context.newPage());
     await this.page.goto(this.baseUrl);
+    // Everything worked out from what was there before is also worked out afresh, and must be the same (see main.tsx).
+    await this.page.waitForFunction(() => !!(window as any).__mapmaker);
+    await this.page.evaluate(() => (window as any).__mapmaker.verify());
   }
 
   watch(p: Page): Page {

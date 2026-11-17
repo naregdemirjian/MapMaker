@@ -16,6 +16,9 @@ export function newId(prefix: string): string {
   return `${prefix}_${s.slice(0, 12)}`;
 }
 
+/** One change that can alter history as the temporal engine compiles it (see World.historySince). */
+export interface HistoryStep { rev: number; table: TableName; before: AnyRow | null; after: AnyRow | null }
+
 export class World {
   private readonly tables = new Map<TableName, Map<string | number, AnyRow>>();
   readonly arrangements = new Map<string, Arrangement>();
@@ -29,6 +32,30 @@ export class World {
    * Restyling, renaming, shots and settings leave it alone, so they never cost a recompile.
    */
   historyRevision = 0;
+
+  /**
+   * What lay behind each step of historyRevision (the last few thousand), so that the temporal
+   * engine can follow changes one by one instead of compiling all of history again.
+   */
+  private historyLog: HistoryStep[] = [];
+  private historyLogFrom = 0;
+
+  /** Count a change that can alter history, and remember what it was. */
+  noteHistory(table: TableName, before: AnyRow | null, after: AnyRow | null): void {
+    this.historyRevision++;
+    if (this.historyLog.length >= 40_000) { this.historyLog.splice(0, 20_000); this.historyLogFrom = this.historyLog[0].rev - 1; }
+    this.historyLog.push({ rev: this.historyRevision, table, before, after });
+  }
+
+  /** The changes that took history from `revision` to where it is now, in order; null when they are no longer all known. */
+  historySince(revision: number): HistoryStep[] | null {
+    if (revision < this.historyLogFrom) return null;
+    const log = this.historyLog;
+    // (Steps are in order of their revision: find the first one after `revision`.)
+    let lo = 0, hi = log.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (log[mid].rev <= revision) lo = mid + 1; else hi = mid; }
+    return log.slice(lo);
+  }
 
   constructor() {
     for (const t of TABLE_NAMES) if (!TABLES[t].kernel) this.tables.set(t, new Map());
@@ -80,14 +107,14 @@ export class World {
         this.arrangements.set(row.space_id, arr);
       }
       arr.applyRowChange(d.table as KernelTable, d.before as KernelRow | null, d.after as KernelRow | null);
-      if (d.table !== 'segment') this.historyRevision++;
+      if (d.table !== 'segment') this.noteHistory(d.table, d.before, d.after);
       if (d.after) this.counters[d.table as KernelTable] = Math.max(this.counters[d.table as KernelTable], (d.after as KernelRow).id);
       return;
     }
     const map = this.tables.get(d.table)!;
-    if (d.table === 'event' || d.table === 'effect' || ((d.table === 'layer' || d.table === 'map_space' || d.table === 'entity') && (!d.before || !d.after))) this.historyRevision++;
     if (d.before) map.delete(rowKey(d.table, d.before));
     if (d.after) map.set(rowKey(d.table, d.after), { ...withDefaults(d.table, d.after) });
+    if (d.table === 'event' || d.table === 'effect' || ((d.table === 'layer' || d.table === 'map_space' || d.table === 'entity') && (!d.before || !d.after))) this.noteHistory(d.table, d.before, d.after);
     if (d.table === 'map_space') {
       const sp = (d.after ?? d.before) as MapSpaceRow;
       if (!d.after) this.arrangements.delete(sp.id);
@@ -215,7 +242,7 @@ export class Tx {
     const kd = arr.commit();
     for (const c of kd.changes) {
       this.diffs.push({ table: c.table, before: c.before as AnyRow | null, after: c.after as AnyRow | null });
-      if (c.table !== 'segment') this.world.historyRevision++;
+      if (c.table !== 'segment') this.world.noteHistory(c.table, c.before as AnyRow | null, c.after as AnyRow | null);
     }
     if (kd.rootFace) {
       const sp = this.world.get('map_space', spaceId)!;

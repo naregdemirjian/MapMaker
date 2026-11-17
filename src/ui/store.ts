@@ -471,6 +471,29 @@ class AppStore {
   undo() { this.historyStep('undo'); }
   redo() { this.historyStep('redo'); }
 
+  /**
+   * How many problems History Health has found, as last counted. Counting compares every change
+   * with every other, which takes a while on a long history: so the count follows edits a moment
+   * later instead of holding each one up (the dialog itself always shows the current list).
+   */
+  private problems: { engine: Engine | null; revision: number; count: number; timer: ReturnType<typeof setTimeout> | undefined } = { engine: null, revision: -1, count: 0, timer: undefined };
+  problemCount(): number {
+    const engine = this.engine, p = this.problems;
+    if (!engine) return 0;
+    const revision = engine.revision;
+    if (p.engine !== engine) { clearTimeout(p.timer); this.problems = { engine, revision, count: engine.conflicts.length, timer: undefined }; return this.problems.count; }
+    if (p.revision !== revision) {
+      clearTimeout(p.timer);
+      p.timer = setTimeout(() => {
+        if (this.engine !== engine) return;
+        const count = engine.conflicts.length, changed = count !== p.count;
+        p.revision = engine.revision; p.count = count;
+        if (changed) this.notify();
+      }, 300);
+    }
+    return p.count;
+  }
+
   /** Undo and redo steps asked for and not yet applied. */
   private stepping = 0;
 

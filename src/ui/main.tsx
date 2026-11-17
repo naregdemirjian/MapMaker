@@ -10,13 +10,20 @@ import * as commands from '../domain/commands.ts';
 import { runExport } from '../presentation/export-driver.ts';
 import { decodeCountries, COUNTRY_GROUP_COLORS } from '../domain/countries.ts';
 import { MapRenderer } from '../render-engine/map-renderer.ts';
+import { Engine } from '../temporal-engine/engine.ts';
 
 // A small read-only window into the live state, used by the automated interface tests.
 // It changes nothing; everything the tests do to the project goes through the interface itself.
 (window as unknown as { __mapmaker: unknown }).__mapmaker = {
   store,
   /** For the performance benchmarks (bench/): the commands, dates and the export, to drive large projects directly. */
-  bench: { commands, gregorian, lonLatToVec, runExport, decodeCountries, COUNTRY_GROUP_COLORS, MapRenderer, makeView },
+  /**
+   * For the interface tests: everything worked out from what was there before (history followed
+   * change by change, states and snapshots made from the ones before) is also worked out afresh,
+   * and any difference stops the drawing with an error. Slow; never on in normal use.
+   */
+  verify(on = true) { Engine.verify = on; store.renderer.verify = on; },
+  bench: { commands, gregorian, lonLatToVec, runExport, decodeCountries, COUNTRY_GROUP_COLORS, MapRenderer, makeView, Engine },
   /** A view of the map for a camera and size (for off-screen comparisons in tests). */
   viewOf(camera: Parameters<typeof makeView>[0], width: number, height: number) { return makeView(camera, width, height); },
   /** Who owns the place at (lon, lat) on the date written in `date`, on the layer being drawn on. */

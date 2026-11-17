@@ -5,10 +5,12 @@ import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
+import { workCopy } from './workcopy.ts';
 
 const ROOT = resolve(import.meta.dirname, '..', '..');
 const [folder, name, snippet, shot] = process.argv.slice(2);
-const server = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', join(ROOT, 'dist', 'server.mjs'), '--port', '4457', '--projects', folder], { stdio: ['ignore', 'pipe', 'pipe'] });
+const work = workCopy(folder, [name]);
+const server = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', join(ROOT, 'dist', 'server.mjs'), '--port', '4457', '--projects', work.folder], { stdio: ['ignore', 'pipe', 'pipe'] });
 const baseUrl = await new Promise<string>((res) => { let t = ''; server.stdout!.on('data', (d) => { t += d; const m = /running at (http:\/\/\S+)/.exec(t); if (m) res(m[1]); }); });
 const browser = await chromium.launch({ channel: 'chrome', headless: true });
 try {
@@ -30,4 +32,5 @@ try {
 } finally {
   await browser.close();
   server.kill('SIGTERM');
+  work.done();
 }

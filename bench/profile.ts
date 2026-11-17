@@ -1,15 +1,17 @@
 // CPU profile of one benchmark scenario in Chrome, written as a .cpuprofile (open in Chrome DevTools,
 // or summarise with bench/top.mjs).
 // Usage: node --disable-warning=ExperimentalWarning bench/profile.ts <fixtures folder> "<project>" <scenario> <out.cpuprofile>
-// Scenarios: idle, panWorld, panRegion, panDeep, scrub, play, playMoving
+// Scenarios: idle, select, panWorld, panRegion, panDeep, scrub, scrubSmall, stroke, play, playMoving
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { writeFileSync } from 'node:fs';
+import { workCopy } from './tools/workcopy.ts';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const [folder, name, scenario, outFile] = process.argv.slice(2);
-const server = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', join(ROOT, 'dist', 'server.mjs'), '--port', '4456', '--projects', folder], { stdio: ['ignore', 'pipe', 'pipe'] });
+const work = workCopy(folder, [name]);
+const server = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', join(ROOT, 'dist', 'server.mjs'), '--port', '4456', '--projects', work.folder], { stdio: ['ignore', 'pipe', 'pipe'] });
 const baseUrl = await new Promise<string>((res) => { let t = ''; server.stdout!.on('data', (d) => { t += d; const m = /running at (http:\/\/\S+)/.exec(t); if (m) res(m[1]); }); });
 const browser = await chromium.launch({ channel: 'chrome', headless: true });
 try {
@@ -48,6 +50,17 @@ try {
       else if (sc === 'panRegion') s.setCamera({ ...base, zoom: 3.5, lon: 5 + i * 0.25 });
       else if (sc === 'panDeep') s.setCamera({ ...base, zoom: 13, lon: 10 + i * 0.0003 });
       else if (sc === 'scrub') s.setTime(Y(1000 + i * 25), true);
+      else if (sc === 'scrubSmall') s.setTime(B.gregorian.fromCivil({ year: 1950, month: 1, day: 1 + (i % 27) }), true);
+      else if (sc === 'select') { const ids = s.world.all('entity').filter((e: any) => e.type_id === 'polity').map((e: any) => e.id); s.set({ selection: { kind: 'entity', id: ids[i % ids.length] } }); }
+      else if (sc === 'stroke') {
+        const owners = s.world.all('entity').filter((e: any) => e.type_id === 'polity').map((e: any) => e.id);
+        const ring = (cx: number, cy: number, r: number) => Array.from({ length: 60 }, (_, k) => { const a = (k / 60) * Math.PI * 2; return B.lonLatToVec(cx + r * 1.4 * Math.cos(a), cy + r * Math.sin(a)); });
+        s.execute((w: any, e: any) => {
+          const ev = B.commands.createEvent(w, { name: `Profile stroke ${i}`, start: Y(1960 + i) });
+          const p = B.commands.paintTerritory(w, e, { spaceId: s.spaceId, layerId: s.layerId, ring: ring(8 + i * 1.2, 47 + (i % 3), 1.2), value: owners[i % owners.length], snap: 1e-7, mode: { kind: 'new', eventId: ev.result } });
+          return { label: p.label, diffs: [...ev.diffs, ...p.diffs], result: null };
+        });
+      }
       else if (sc === 'play' || sc === 'playMoving') s.setLive({ shotFrame: i * 4, presentCamera: null });
       await hop(); await hop();
     }
@@ -58,4 +71,5 @@ try {
 } finally {
   await browser.close();
   server.kill('SIGTERM');
+  work.done();
 }

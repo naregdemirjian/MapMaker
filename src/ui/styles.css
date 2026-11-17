@@ -62,6 +62,9 @@ a { color: var(--accent); cursor: pointer; }
 .swatch.big { width: 18px; height: 18px; }
 .new-entity { display: grid; gap: 6px; padding: 6px 8px; }
 .toolbar { display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.tool-options-anchor { position: relative; height: 0; z-index: 6; }
+.tool-options { position: absolute; left: 0; right: 0; top: 0; }
+.tool-options .toolbar.sub { background: rgba(21, 29, 37, 0.94); }
 .record-banner { display: flex; align-items: center; gap: 10px; padding: 4px 10px; background: #3a1d24; border-bottom: 1px solid #6b2b37; color: #ffb3bd; }
 .record-banner .rec-text { font-weight: 600; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .record-banner .muted-red { color: #d99aa5; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

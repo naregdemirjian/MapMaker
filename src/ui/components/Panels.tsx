@@ -61,8 +61,7 @@ function CurrentDate() {
 export function TopBar() {
   const s = useStore();
   const w = s.world!;
-  s.engine!.ensure();
-  const conflicts = s.engine!.conflicts;
+  const problems = s.problemCount();
   const spaces = w.all('map_space').sort((a, b) => a.sort_order - b.sort_order);
   const switchSpace = (id: string) => {
     const layer = w.all('layer').find((l) => l.space_id === id && l.kind === 'partition');
@@ -90,8 +89,8 @@ export function TopBar() {
       <button disabled={!s.journal.canUndo} title={s.journal.undoLabel ? `Undo: ${s.journal.undoLabel} (Ctrl+Z)` : 'Nothing to undo'} onClick={() => s.undo()} data-testid="undo">Undo</button>
       <button disabled={!s.journal.canRedo} title={s.journal.redoLabel ? `Redo: ${s.journal.redoLabel} (Ctrl+Y)` : 'Nothing to redo'} onClick={() => s.redo()}>Redo</button>
       <button onClick={() => s.set({ dialog: 'versions' })} title="Save a named version, restore versions and backups">Versions</button>
-      <button className={conflicts.length ? 'warn' : ''} onClick={() => s.set({ dialog: 'health' })} data-testid="health">
-        History Health{conflicts.length ? ` (${conflicts.length})` : ' ✓'}
+      <button className={problems ? 'warn' : ''} onClick={() => s.set({ dialog: 'health' })} data-testid="health">
+        History Health{problems ? ` (${problems})` : ' ✓'}
       </button>
       <button onClick={() => s.set({ dialog: 'settings' })} title="Settings: how fast and how sharp the map is drawn while you work (never changes an export)" data-testid="settings">Settings</button>
       <button onClick={() => s.closeProject()} title="Back to the project list">Projects</button>
@@ -147,8 +146,12 @@ export function ToolBar() {
       {TOOLS.map((t) => (
         <button key={t.id} className={s.tool === t.id ? 'on' : ''} title={t.hint} onClick={() => s.set({ tool: t.id })} data-testid={`tool-${t.id}`}>{t.name}</button>
       ))}
+    </div>
+    {/* What a tool needs besides its button lies over the top edge of the map, so that the map
+        keeps its size and place whichever tool is chosen (a map that changes size is drawn again in full). */}
+    <div className="tool-options-anchor"><div className="tool-options">
       {(s.tool === 'lasso' || s.tool === 'polygon' || s.tool === 'pen') && (
-        <>
+        <div className="toolbar sub">
           <label className="inline">Give to
             <select value={s.paintValue ?? ''} onChange={(e) => { s.set({ paintValue: e.target.value || null }); if (s.tool === 'pen' && s.draft) s.setDraftOwner(s.draft.id, e.target.value || null); }} data-testid="paint-owner">
               <option value="">Nobody (clear territory)</option>
@@ -166,9 +169,8 @@ export function ToolBar() {
               </div>
             </details>
           )}
-        </>
+        </div>
       )}
-    </div>
     {s.tool === 'place' && (
       <div className="toolbar sub">
         <label className="inline">Place
@@ -191,6 +193,7 @@ export function ToolBar() {
         <button onClick={() => s.set({ recordEventId: null })}>Stop</button>
       </div>
     )}
+    </div></div>
     </>
   );
 }

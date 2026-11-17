@@ -36,6 +36,24 @@ export interface DissolvedRing {
 
 const wrap = (d: number) => d - 360 * Math.round(d / 360);
 
+/**
+ * The border chains of a set of parcels, gone through once: for each chain its cycle, its number
+ * in the cycle, the parcel it belongs to and, when the parcel across it is in the set too, that
+ * parcel (both as positions in `faces`; -1 for a chain on the edge of the set). Outlines, borders
+ * and label pieces of an owner are all made from this. Parcel numbers across the edge are not kept:
+ * a parcel across gets a new number when it is split, without anything about this set changing.
+ */
+export interface SetGraph {
+  faces: number[];
+  n: number;
+  cycle: CycleGeom[];
+  index: Int32Array;
+  of: Int32Array;
+  across: Int32Array;
+  /** A parcel takes in the rest of the planet, or a border goes round the planet: the set cannot be joined into rings. */
+  open: boolean;
+}
+
 export class ParcelGeometry {
   private readonly cycles = new Map<number, CycleGeom>();
   private readonly outline = new Map<number, { stamp: number; needs: boolean }>();
@@ -78,6 +96,49 @@ export class ParcelGeometry {
     return o.needs;
   }
 
+  private readonly graphs = new Map<string, SetGraph>();
+  private graphChains = 0;
+
+  /**
+   * The border chains of a set of parcels (see SetGraph). With a `key` that says exactly which
+   * parcels and outlines these are, the result is kept and given again for the same key.
+   */
+  graph(faces: number[], t: Topology = this.arr.topology(), key?: string): SetGraph {
+    const kept = key === undefined ? undefined : this.graphs.get(key);
+    if (kept) return kept;
+    const arr = this.arr;
+    const at = new Map<number, number>();
+    for (let i = 0; i < faces.length; i++) at.set(faces[i], i);
+    const cycle: CycleGeom[] = [], index: number[] = [], of: number[] = [], across: number[] = [];
+    let open = false;
+    for (let fi = 0; fi < faces.length; fi++) {
+      const f = faces[fi];
+      if (this.needsOutline(f)) open = true;
+      for (const c of t.facesCycles.get(f) ?? []) {
+        const g = this.cycle(c, t);
+        if (g.wind !== 0) open = true;
+        const heads = g.heads;
+        for (let i = 0; i < heads.length; i++) {
+          cycle.push(g); index.push(i); of.push(fi);
+          across.push(at.get(arr.halfEdgeFace(heads[i] ^ 1)) ?? -1);
+        }
+      }
+    }
+    const gr: SetGraph = { faces, n: index.length, cycle, index: Int32Array.from(index), of: Int32Array.from(of), across: Int32Array.from(across), open };
+    if (key !== undefined) {
+      // (Kept within a budget of chains; the oldest go first.)
+      this.graphChains += gr.n;
+      this.graphs.set(key, gr);
+      for (const [k, g] of this.graphs) {
+        if (this.graphChains <= 2_000_000 && this.graphs.size <= 600) break;
+        if (k === key) continue;
+        this.graphs.delete(k);
+        this.graphChains -= g.n;
+      }
+    }
+    return gr;
+  }
+
   /**
    * The outline of a set of parcels taken together: the border chains with a parcel of the set on
    * one side only, joined end to end into closed rings. Parcels of one owner then draw as the
@@ -85,26 +146,19 @@ export class ParcelGeometry {
    * (cycle, chain) pairs in order. Null when the set cannot be drawn so: a parcel whose area takes in
    * the rest of the planet, or an outline that goes round the planet (those are drawn parcel by parcel).
    */
-  dissolve(faces: number[], t: Topology = this.arr.topology()): DissolvedRing[] | null {
-    const arr = this.arr;
-    const inSet = new Set(faces);
+  dissolve(faces: number[], t: Topology = this.arr.topology(), key?: string): DissolvedRing[] | null {
+    const gr = this.graph(faces, t, key);
+    if (gr.open) return null;
     interface Link { cycle: CycleGeom; i: number; from: number; to: number; used: boolean }
     const links: Link[] = [];
     const byStart = new Map<number, Link[]>();
-    for (const f of faces) {
-      if (this.needsOutline(f)) return null;
-      for (const c of t.facesCycles.get(f) ?? []) {
-        const g = this.cycle(c, t);
-        if (g.wind !== 0) return null;
-        const n = g.heads.length;
-        for (let i = 0; i < n; i++) {
-          if (inSet.has(arr.halfEdgeFace(g.heads[i] ^ 1))) continue; // a border inside the set
-          const link: Link = { cycle: g, i, from: g.nodes[i], to: g.nodes[(i + 1) % n], used: false };
-          links.push(link);
-          const l = byStart.get(link.from);
-          if (l) l.push(link); else byStart.set(link.from, [link]);
-        }
-      }
+    for (let q = 0; q < gr.n; q++) {
+      if (gr.across[q] >= 0) continue; // a border inside the set
+      const g = gr.cycle[q], i = gr.index[q];
+      const link: Link = { cycle: g, i, from: g.nodes[i], to: g.nodes[(i + 1) % g.heads.length], used: false };
+      links.push(link);
+      const l = byStart.get(link.from);
+      if (l) l.push(link); else byStart.set(link.from, [link]);
     }
     // Every chain has the set on its left, so at each meeting point as many arrive as leave: following
     // any unused chain out of the point a chain ends at always closes a ring (even-odd filling does

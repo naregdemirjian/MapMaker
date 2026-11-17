@@ -261,9 +261,12 @@ try {
       for (const c of [{ name: 'a region with coasts', zoom: 3.2, lon: 12, lat: 46, basemap: true }, { name: 'a region without the Earth', zoom: 2.6, lon: 20, lat: 48, basemap: false }]) {
         const working = new B.MapRenderer(), fresh = new B.MapRenderer();
         working.carry = true;
+        working.verify = true;
         fresh.caching = 'off';
         const opts = { passes: new Set(['background', 'graticule', 'land', 'fills', 'borders']), transparent: false, layerIds: layers, basemap: c.basemap ? s.basemap : null };
         const view = B.makeView({ lon: c.lon, lat: c.lat, zoom: c.zoom, rotation: 0, projection: 'equirectangular' }, W, H);
+        // Another view of the same place: everything is drawn again there, from what the renderer keeps about each country.
+        const other = B.makeView({ lon: c.lon + 1.5, lat: c.lat - 0.8, zoom: c.zoom + 0.55, rotation: 0, projection: 'equirectangular' }, W, H);
         working.render(a, view, s.world, s.engine, s.spaceId, t, opts);
         fresh.render(b, view, s.world, s.engine, s.spaceId, t, opts);
         const before = compare();
@@ -275,7 +278,36 @@ try {
           // (Compared with how far the two ways of drawing were apart before the stroke: a patch must add nothing.)
           const now = compare();
           out.push({ name: `${c.name}, stroke ${i + 1}`, part: working.lastParts['territory:fb'], differing: Math.max(0, now.differing - before.differing), worst: now.worst });
+          // The whole picture drawn again elsewhere: borders of the neighbours of a country that was drawn in must still be there.
+          working.render(a, other, s.world, s.engine, s.spaceId, t, opts);
+          fresh.render(b, other, s.world, s.engine, s.spaceId, t, opts);
+          out.push({ name: `${c.name}, stroke ${i + 1}, seen from elsewhere`, part: working.lastParts['territory:fb'] === 'drawn' ? 'patched' : `${working.lastParts['territory:fb']} (expected drawn)`, ...compare() });
+          working.render(a, view, s.world, s.engine, s.spaceId, t, opts);
         }
+        // Strokes in the middle of countries, touching no border: the country is cut in two parcels with
+        // new numbers, and nothing about its neighbours changes; their borders with it must stay.
+        const arr = s.world.arrangement(s.spaceId);
+        const held = s.engine.partitionState(s.spaceId, layers[0], t);
+        const inside: Array<{ face: number; lon: number; lat: number; owner: string }> = [];
+        for (const [face, st] of held) {
+          if (!st.value || inside.length >= 5) continue;
+          const g = working.faceGeo(arr, face);
+          if (g.area < 0.0008 || g.area > 0.05 || Math.abs(g.centroid[0] - c.lon) > 9 || Math.abs(g.centroid[1] - c.lat) > 5) continue;
+          if (arr.locate(B.lonLatToVec(g.centroid[0], g.centroid[1])) !== face) continue;
+          inside.push({ face, lon: g.centroid[0], lat: g.centroid[1], owner: st.value });
+        }
+        for (const [i, spot] of inside.entries()) {
+          s.execute((w: any, e: any) => B.commands.paintTerritory(w, e, { spaceId: s.spaceId, layerId: layers[0], ring: ring(spot.lon, spot.lat, 0.1), value: owners.find((o: string) => o !== spot.owner), snap: 1e-7, mode: { kind: 'correct', t: B.gregorian.fromCivil({ year: 1900 }) } }));
+          working.render(a, view, s.world, s.engine, s.spaceId, t, opts);
+          fresh.render(b, view, s.world, s.engine, s.spaceId, t, opts);
+          const now = compare();
+          out.push({ name: `${c.name}, a stroke inside country ${i + 1}`, part: working.lastParts['territory:fb'], differing: Math.max(0, now.differing - before.differing), worst: now.worst });
+          working.render(a, other, s.world, s.engine, s.spaceId, t, opts);
+          fresh.render(b, other, s.world, s.engine, s.spaceId, t, opts);
+          out.push({ name: `${c.name}, a stroke inside country ${i + 1}, seen from elsewhere`, part: working.lastParts['territory:fb'] === 'drawn' ? 'patched' : `${working.lastParts['territory:fb']} (expected drawn)`, ...compare() });
+          working.render(a, view, s.world, s.engine, s.spaceId, t, opts);
+        }
+        out.push({ name: `${c.name}: ${inside.length} strokes inside countries`, part: inside.length >= 3 ? 'patched' : 'too few countries in view', differing: 0, worst: 0 });
         await s.flush();
         s.undo();
         await s.flush();
@@ -291,7 +323,7 @@ try {
     let failed = 0;
     for (const r of results) {
       // (An undo may need the whole picture: land going back to no one has no box of its own.)
-      const ok = (r.part === 'patched' || (/undone/.test(r.name) && r.part === 'drawn')) && r.differing <= (/before any stroke/.test(r.name) ? 0.0005 : 0.00005);
+      const ok = (r.part === 'patched' || (/undone/.test(r.name) && r.part === 'drawn')) && r.differing <= (/before any stroke|from elsewhere/.test(r.name) ? 0.0005 : 0.00005);
       if (!ok) failed++;
       if (!ok || process.env.VERBOSE) console.log(`    ${ok ? 'same' : 'DIFFERENT'}  ${r.name}: territory ${r.part}; ${(r.differing * 100).toFixed(4)}% of pixels differ (largest difference ${r.worst})`);
     }

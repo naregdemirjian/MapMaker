@@ -73,11 +73,10 @@ for (const seed of [1, 2, 3]) {
 
 test('restyling, renaming and shots do not recompile history; real changes do', () => {
   const s = build(4);
-  let compiles = 0;
-  const original = s.engine.compile.bind(s.engine);
-  s.engine.compile = () => { compiles++; original(); };
+  // (History is brought up to date either by compiling everything or by following the changes.)
+  const updates = () => s.engine.stats.compiled + s.engine.stats.followed;
   s.engine.ensure();
-  const before = compiles;
+  const before = updates();
   cmd.updateEntity(s.world, s.owners[0], { color: '#123456', name: 'Renamed' });
   cmd.setEntityStyle(s.world, s.owners[1], { label: { color: '#ff0000' } });
   cmd.setGeneralLabelStyle(s.world, { sizeScale: 1.2 });
@@ -85,18 +84,18 @@ test('restyling, renaming and shots do not recompile history; real changes do', 
   cmd.updateSequence(s.world, shot, { name: 'Shot 2' });
   cmd.updateLayer(s.world, s.layer, { name: 'Politics' });
   s.engine.ensure();
-  assert.equal(compiles, before, 'no recompile');
+  assert.equal(updates(), before, 'no recompile');
   // The states are still right (and still shared).
   assert.equal(s.engine.partitionState(s.space, s.layer, D(1200)), s.engine.partitionState(s.space, s.layer, D(1201)));
   cmd.createEvent(s.world, { name: 'New', start: D(1700) });
   s.engine.ensure();
-  assert.equal(compiles, before + 1, 'a new event recompiles');
+  assert.equal(updates(), before + 1, 'a new event recompiles');
   const ev = s.world.all('event').find((e) => e.name === 'E3')!;
   cmd.updateEvent(s.world, ev.id, { start: D(1444) });
   s.engine.ensure();
-  assert.equal(compiles, before + 2);
+  assert.equal(updates(), before + 2);
   cmd.deleteEntities(s.world, [s.owners[3]]);
   s.engine.ensure();
-  assert.equal(compiles, before + 3, 'deleting a country recompiles');
+  assert.equal(updates(), before + 3, 'deleting a country recompiles');
   assert.deepEqual(s.engine.conflicts.filter((c) => c.kind === 'broken'), []);
 });
