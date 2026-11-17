@@ -227,7 +227,7 @@ test('regression: an outline that crosses itself next to an existing country nev
   s.valid();
 });
 
-test('a path judged a simple loop that separates faces always encloses exactly its left side (randomised, small and large snapping)', () => {
+test('a path judged a simple loop always separates faces and encloses exactly its left side (randomised, small and large snapping)', () => {
   const s = setup();
   for (let i = 0; i < 6; i++) s.paintRing(ring(square(-40 + i * 15, 10, 9)), i % 2 ? s.A : s.B);
   const r = rng(7);
@@ -247,8 +247,12 @@ test('a path judged a simple loop that separates faces always encloses exactly i
         const snap = r.pick([1e-7, 1e-4, 4e-3, 1.6e-2]);
         const path = tx.kernel(s.spaceId, (arr) => arr.insertPath(ring(pts, 0.5), { closed: true, snap }));
         const arr = s.world.arrangement(s.spaceId);
-        if (!arr.isSimpleCycle(path) || !arr.separatesFaces(path)) { other++; throw new Error('roll back'); }
+        if (!arr.isSimpleCycle(path)) { other++; throw new Error('roll back'); }
         simple++;
+        // A simple loop always has different faces on its two sides (this used to fail when the
+        // outline went back and forth along a border before closing over it: netPath kept the
+        // cancelled steps).
+        assert.ok(arr.separatesFaces(path), `simple loop ${n} separates faces`);
         const enclosed = arr.pathLeftArea(path);
         let covered = 0;
         for (const f of leafDescendants(arr, arr.facesLeftOf(path))) covered += arr.faceArea(f);
@@ -256,9 +260,22 @@ test('a path judged a simple loop that separates faces always encloses exactly i
         throw new Error('roll back'); // leave the map as it was
       });
     } catch (e) {
-      if ((e as Error).message !== 'roll back' && !(e instanceof Error && /too small|encloses/.test(e.message))) throw e;
+      if ((e as Error).message !== 'roll back' && !(e instanceof Error && /too small|encloses|without borders crossing/.test(e.message))) throw e;
     }
   }
   assert.ok(simple > 100 && other > 30, `both kinds were tried (${simple} simple, ${other} not)`);
   s.valid();
+});
+
+test('netPath keeps exactly the net steps: back-and-forth steps cancel even when a segment is walked an odd number of times', () => {
+  const s = setup();
+  const arr = s.world.arrangement(s.spaceId);
+  const back = (n: number) => Array.from({ length: n }, (_, i) => ({ seg: 9, fwd: i % 2 === 0 }));
+  // 12 times forward and back along segment 9, then round a loop of 1, 2, 3 that closes back over 9.
+  const path = [...back(24), { seg: 1, fwd: true }, { seg: 2, fwd: true }, { seg: 3, fwd: true }, { seg: 9, fwd: false }];
+  const bySeg = (p: Array<{ seg: number; fwd: boolean }>) => [...p].sort((a, b) => a.seg - b.seg);
+  assert.deepEqual(bySeg(arr.netPath(path)), [{ seg: 1, fwd: true }, { seg: 2, fwd: true }, { seg: 3, fwd: true }, { seg: 9, fwd: false }], 'order aside');
+  // Walked twice the same way: kept twice.
+  assert.deepEqual(arr.netPath([{ seg: 4, fwd: true }, { seg: 4, fwd: false }, { seg: 4, fwd: true }, { seg: 4, fwd: true }]), [{ seg: 4, fwd: true }, { seg: 4, fwd: true }]);
+  assert.deepEqual(arr.netPath(back(10)), []);
 });

@@ -28,6 +28,9 @@ export interface KernelDiff { changes: RowChange[]; rootFace: { before: number; 
 export interface IdSource { next(table: KernelTable): number }
 export interface PathStep { seg: number; fwd: boolean }
 
+/** Why an outline is refused when firm snapping cannot join it to the borders around it cleanly. */
+export const SNAP_REFUSAL = 'At this zoom level the outline could not be joined to the borders around it without borders crossing. Zoom in a little and draw it again.';
+
 export class TopologyError extends Error {}
 
 /**
@@ -346,7 +349,8 @@ export class Arrangement {
     const s = this.segments.get(segId)!;
     this.deleteSegment(segId);
     // The depth carries on through splits, so chains of splits (nearly overlapping borders) always end.
-    const steps = [...this.insertPiece(s.a, x, tol, s.left_face, s.right_face, depth + 1), ...this.insertPiece(x, s.b, tol, s.left_face, s.right_face, depth + 1)];
+    const steps = this.insertPiece(s.a, x, tol, s.left_face, s.right_face, depth + 1);
+    for (const st of this.insertPiece(x, s.b, tol, s.left_face, s.right_face, depth + 1)) steps.push(st);
     this.splitLog?.set(segId, steps);
   }
 
@@ -358,10 +362,23 @@ export class Arrangement {
   private splitLog: Map<number, PathStep[]> | null = null;
 
   private resolveStep(step: PathStep): PathStep[] {
-    const rep = this.splitLog?.get(step.seg);
-    if (!rep) return [step];
-    const parts = rep.flatMap((r) => this.resolveStep(r));
-    return step.fwd ? parts : parts.reverse().map((r) => ({ seg: r.seg, fwd: !r.fwd }));
+    const parts = this.resolvedForward(step.seg);
+    if (!parts) return [step];
+    return step.fwd ? parts : [...parts].reverse().map((r) => ({ seg: r.seg, fwd: !r.fwd }));
+  }
+
+  /** What a split segment became, walked forward (each segment worked out once per insertion). */
+  private resolvedCache: Map<number, PathStep[]> | null = null;
+  private resolvedForward(seg: number): PathStep[] | null {
+    const rep = this.splitLog?.get(seg);
+    if (!rep) return null;
+    let out = this.resolvedCache?.get(seg);
+    if (out) return out;
+    out = [];
+    for (const r of rep) for (const st of this.resolveStep(r)) out.push(st);
+    if (this.created && (this.insertBudget -= out.length) < 0) throw new TopologyError(SNAP_REFUSAL);
+    this.resolvedCache?.set(seg, out);
+    return out;
   }
 
   // ---------------------------------------------------------------- insertion with noding
@@ -381,10 +398,33 @@ export class Arrangement {
    * map). Returns each inserted path, expressed in the segments that exist at the end.
    */
   insertPaths(lines: Vec3[][], opts: { closed: boolean; snap: number }): PathStep[][] {
-    const tol = Math.max(opts.snap, MIN_SNAP);
+    // Firm snapping (zoomed far out) can re-route new borders through points far enough away that
+    // they cross other borders. Such an attempt is wound back and tried again with a quarter of the
+    // snapping, down to the finest; only an outline that cannot be joined cleanly at all is refused.
+    let tol = Math.max(opts.snap, MIN_SNAP);
+    for (;;) {
+      const sp = this.savepoint();
+      try {
+        const paths = this.insertPathsOnce(lines, opts.closed, tol);
+        this.rebuildFaces();
+        return paths;
+      } catch (e) {
+        if (!(e instanceof TopologyError) || e.message !== SNAP_REFUSAL || tol <= MIN_SNAP * 1.0001) throw e;
+        this.rollbackTo(sp);
+        tol = Math.max(MIN_SNAP, tol / 4);
+      }
+    }
+  }
+
+  private insertPathsOnce(lines: Vec3[][], closed: boolean, tol: number): PathStep[][] {
     const raws: PathStep[][] = [];
     this.splitLog = new Map();
-    let paths: PathStep[][];
+    // Segments made by this insertion (checked for crossings at the end), and a limit on how many:
+    // with firm snapping, re-routing pieces through nearby points can keep splitting without end.
+    this.created = new Set();
+    // Firm attempts stop early (a cleaner one follows); the finest snapping, where insertion was always
+    // reliable, has no limit (large imports need the room).
+    this.insertBudget = tol <= MIN_SNAP * 1.0001 ? Infinity : 10000 + 40 * lines.reduce((n, l) => n + l.length, 0);
     try {
       for (const points of lines) {
         const ids: number[] = [];
@@ -392,23 +432,65 @@ export class Arrangement {
           const id = this.vertexFor(p, tol);
           if (ids.length === 0 || ids[ids.length - 1] !== id) ids.push(id);
         }
-        if (opts.closed && ids.length > 1 && ids[0] !== ids[ids.length - 1]) ids.push(ids[0]);
-        if (opts.closed && ids.length < 4) throw new TopologyError('The shape is too small to form an area at this zoom level.');
+        if (closed && ids.length > 1 && ids[0] !== ids[ids.length - 1]) ids.push(ids[0]);
+        if (closed && ids.length < 4) throw new TopologyError('The shape is too small to form an area at this zoom level.');
         const raw: PathStep[] = [];
         // Endpoints may have been moved into existing segments by later snapping; vertices persist.
-        for (let i = 0; i + 1 < ids.length; i++) raw.push(...this.insertPiece(ids[i], ids[i + 1], tol, 0, 0, 0));
+        for (let i = 0; i + 1 < ids.length; i++) for (const st of this.insertPiece(ids[i], ids[i + 1], tol, 0, 0, 0)) raw.push(st);
         raws.push(raw);
       }
-      paths = raws.map((raw) => raw.flatMap((st) => this.resolveStep(st)));
+      this.resolvedCache = new Map();
+      const paths = raws.map((raw) => {
+        const out: PathStep[] = [];
+        for (const st of raw) for (const x of this.resolveStep(st)) out.push(x);
+        if (this.created && (this.insertBudget -= out.length) < 0) throw new TopologyError(SNAP_REFUSAL);
+        return out;
+      });
+      // Never keep a map whose borders cross.
+      for (const sid of this.created) {
+        const sg = this.segments.get(sid);
+        if (!sg) continue;
+        const pa = this.v(sg.a), pb = this.v(sg.b);
+        const [lo, hi] = arcBox(pa, pb, 0);
+        for (const oid of this.sgrid.query(lo, hi)) {
+          if (oid === sid) continue;
+          const o = this.segments.get(oid)!;
+          if (o.a === sg.a || o.a === sg.b || o.b === sg.a || o.b === sg.b) continue;
+          if (arcsCross(pa, pb, this.v(o.a), this.v(o.b)) === 'cross') throw new TopologyError(SNAP_REFUSAL);
+        }
+      }
+      return paths;
     } finally {
       this.splitLog = null;
+      this.created = null;
+      this.resolvedCache = null;
     }
-    this.rebuildFaces();
-    return paths;
   }
+
+  /** The change log as it stands, to wind back to (see rollbackTo). */
+  private savepoint(): Map<string, RowChange> {
+    if (!this.log) throw new TopologyError('Kernel change outside an operation');
+    return new Map([...this.log].map(([k, c]) => [k, { ...c }]));
+  }
+
+  /** Undo every change made since a savepoint (rows changed before it keep their state at that time). */
+  private rollbackTo(sp: Map<string, RowChange>): void {
+    const entries = [...this.log!.entries()].reverse();
+    for (const [k, c] of entries) {
+      const at = sp.get(k);
+      const target = at ? at.after : c.before;
+      if (JSON.stringify(target) !== JSON.stringify(c.after)) this.applyRowChange(c.table, c.after, target);
+    }
+    this.log = sp;
+  }
+
+  /** Segments made by the insertion in progress, and how many more it may make. */
+  private created: Set<number> | null = null;
+  private insertBudget = 0;
 
   /** Insert one arc u->w, splitting at crossings and routing through nearby vertices. */
   private insertPiece(u: number, w: number, tol: number, left: number, right: number, depth: number): PathStep[] {
+    if (this.created && --this.insertBudget < 0) throw new TopologyError(SNAP_REFUSAL);
     if (u === w) return [];
     const existing = this.segmentBetween(u, w);
     if (existing !== undefined) {
@@ -454,6 +536,7 @@ export class Arrangement {
     if (splits.length === 0) {
       const id = this.ids.next('segment');
       this.putSegment({ id, space_id: this.spaceId, a: u, b: w, left_face: left, right_face: right });
+      this.created?.add(id);
       return [{ seg: id, fwd: true }];
     }
     splits.sort((p, q) => p.t - q.t || p.id - q.id);
@@ -461,7 +544,7 @@ export class Arrangement {
     for (const s of splits) if (chain[chain.length - 1] !== s.id) chain.push(s.id);
     if (chain[chain.length - 1] !== w) chain.push(w);
     const out: PathStep[] = [];
-    for (let i = 0; i + 1 < chain.length; i++) out.push(...this.insertPiece(chain[i], chain[i + 1], tol, left, right, depth + 1));
+    for (let i = 0; i + 1 < chain.length; i++) for (const st of this.insertPiece(chain[i], chain[i + 1], tol, left, right, depth + 1)) out.push(st);
     return out;
   }
 
@@ -996,9 +1079,23 @@ export class Arrangement {
 
   /** The steps of a path whose segments are walked a net number of times (out-and-back pieces enclose nothing). */
   netPath(path: PathStep[]): PathStep[] {
+    // A segment walked k more times one way than the other is kept k times, that way only. (Keeping
+    // every step of a segment whose count is not zero kept cancelled steps too: an outline that went
+    // back and forth along a border before closing over it then counted the far side of that border
+    // as inside, and could paint the whole planet.)
     const count = new Map<number, number>();
     for (const st of path) count.set(st.seg, (count.get(st.seg) ?? 0) + (st.fwd ? 1 : -1));
-    return path.filter((st) => (count.get(st.seg) ?? 0) !== 0);
+    const used = new Map<number, number>();
+    const out: PathStep[] = [];
+    for (const st of path) {
+      const c = count.get(st.seg) ?? 0;
+      if (c === 0 || (c > 0) !== st.fwd) continue;
+      const u = used.get(st.seg) ?? 0;
+      if (u >= Math.abs(c)) continue;
+      used.set(st.seg, u + 1);
+      out.push(st);
+    }
+    return out;
   }
 
   /**

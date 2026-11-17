@@ -54,7 +54,7 @@ The approved architecture is the Claude Doc "Map Maker — Technical Architectur
 - **Coastline clipping done.** Territory painted loosely over the sea ends at the coast (per-layer switch), lakes stay
   water, labels stay on land.
 - **Biggest open issues.** (1) D1 (Canvas renderer instead of deck.gl) still to reverse; D2 and D4 are reversed.
-  (2) The face-label issue above. (Flat maps of cities are no longer planned, D38.)
+  (2) Space maps are still to build (D38). The firm-snapping defects are fixed (D39).
 
 ## How to run it
 
@@ -73,7 +73,7 @@ For development (Linux or Windows, Node 22.18 or newer):
 | `xvfb-run -a node --disable-warning=ExperimentalWarning e2e/desktop.e2e.ts` | The 5-step desktop app test (build first) |
 | `node --disable-warning=ExperimentalWarning dist/server.mjs --port 4317 --projects <folder> [--open]` | Runs the app |
 | `sh scripts/check-all.sh` | Every check: type check, unit tests, build, the three interface tests |
-| `npm test` | 146 unit, randomised and scenario tests |
+| `npm test` | 150 unit, randomised and scenario tests |
 | `node --disable-warning=ExperimentalWarning test/geo-kernel.stress.ts <seeds> <rings>` | Long randomised kernel run |
 | `node --disable-warning=ExperimentalWarning e2e/vertical-slice.e2e.ts` | The 17-step interface test in Chrome (build first); screenshots in `e2e/output/` |
 | `node --disable-warning=ExperimentalWarning e2e/workflows.e2e.ts` | The 10-step workflow and export-inspection test; screenshots in `e2e/output/workflows/` |
@@ -138,7 +138,7 @@ The approved roadmap has 14 stages (0–13). Where each stands:
 
 ## Tests
 
-All pass as of 17 November 2026 (146 unit and randomised tests in 21 files, 22 + 17 + 5 interface steps).
+All pass as of 17 November 2026 (150 unit and randomised tests in 21 files, 22 + 17 + 5 interface steps).
 `sh scripts/check-all.sh` runs everything and prints ALL CHECKS PASSED only when every check passed.
 
 | Suite | Count | What it proves |
@@ -154,7 +154,7 @@ All pass as of 17 November 2026 (146 unit and randomised tests in 21 files, 22 +
 | `test/split-identity.test.ts` | 7 | The split-identity optimisation leaves history identical (6 random histories, with and without) and stops coastline relabelling |
 | `test/stroke.test.ts` | 7 | Freehand outlines: closed, open, figure-eight, tiny, orientation, reproducible irregularity |
 | `test/camera.test.ts` | 7 | Screen/map round trips in every projection, rotation and zoom 0–14; zoom keeps the cursor point fixed; city-level precision; panning across 180° |
-| `test/kernel-incremental.test.ts` | 5 | The kept half-edge structure equals a full rebuild after every kind of edit, undo and redo (4 seeds x 70 steps); nearly overlapping borders |
+| `test/kernel-incremental.test.ts` | 8 | The kept half-edge structure equals a full rebuild after every kind of edit, undo and redo (4 seeds x 70 steps); nearly overlapping borders; outlines kept under firm snapping, valid with no crossing borders after each (3 seeds x 60) |
 | `test/countries.test.ts` | 4 | Today's countries: holes, overseas parts, across 180°, all 242 at once as an event (about 5 s), one undo; land added into the user's own country |
 | `test/label-style.test.ts` | 3 | Label styles: layering, clamping, text, commands with undo |
 | `test/fills.test.ts` | 3 | Video timing; fill commands with undo; the 197 flags and their credit |
@@ -208,9 +208,10 @@ Remaining bottlenecks:
 7. **A control or occupation layer looks like a second fill** over the political layer; hatching and outline styles are needed.
 8. **New layers and alternative versions are named in the browser's own small prompt box**, which is plain but works.
 9. **View memory is per browser** and is lost if the app's port changes.
-10. **Face labels under firm snapping.** When an outline drawn zoomed out (snapping up to about 1°) runs along existing
-   borders, the kernel can give two separated regions the same face label. Painting detects it and uses the full
-   check, so results are right, but the face assembly should be examined (D26).
+10. **(Fixed 17 November 2026) Outlines under firm snapping.** Thought to be a face-assembly fault; it was two others
+   (D39): `netPath` kept cancelled back-and-forth steps (the far side of a border could count as inside), and firm
+   snapping could leave new borders crossing old ones (silently). Both fixed; an outline that cannot be joined
+   cleanly is retried with gentler snapping, and only refused if even the finest fails.
 11. **Uploaded pictures and videos, and border drafts, are not in automatic backups** (which copy the project file
    only). Copying the whole project folder keeps them.
 12. **Characters have one look** (a dot in their colour and their name); no pictures or icons yet, and shots show where
@@ -250,8 +251,9 @@ Remaining bottlenecks:
 1. The user tries the second round (installer from the latest "Windows build and tests" run) and reports back. Space
    maps are still wanted (D38); maps of cities are not.
 2. Characters: icons or pictures for markers, a visible trail in shots, characters following events automatically.
-3. Examine face assembly under firm snapping (Known bugs 10); then make face assembly incremental too.
+3. Make face assembly incremental too (Known bug 10 is fixed, D39).
 4. Reverse D1 (deck.gl renderer).
+5. Space maps (still wanted, D38).
 
 ## Earlier priorities (first feedback round)
 

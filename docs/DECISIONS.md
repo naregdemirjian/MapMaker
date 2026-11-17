@@ -59,6 +59,23 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D39. Firm snapping: the real causes, fixed; a gentler retry instead of a refusal
+
+The "two separated regions with one label" seen under firm snapping (D26) was not face assembly. Found by turning the
+painting guard off in a randomised search over 4,500 outlines:
+1. `netPath` (the net steps of a path) kept every step of a segment walked an odd number of times, so an outline that
+   went back and forth along a border before closing over it counted the far side of that border as inside: the
+   left-side search then flooded the planet. It now keeps exactly the net steps.
+2. With firm snapping (up to about 1.4°, zoomed far out), re-routing new borders through nearby points could, after 24
+   rounds, leave them crossing old borders, silently (the earlier randomised test rolled every outline back before
+   looking), or split without end. New borders are now checked for crossings, splitting and path lengths are bounded,
+   and an insertion that fails either is wound back (a savepoint in the kernel's change log) and retried with a quarter
+   of the snapping, down to the finest; only an outline that cannot be joined cleanly even then is refused. In a
+   randomised run of 1,500 outlines at snapping up to 0.03 radians none was refused; the slowest took about 0.3 s.
+Proved by `kernel-incremental` (outlines kept under firm snapping, structure and validity checked after each, with undo
+and redo), `geometry-worlds` (netPath; every simple loop separates faces) and the stress test. The guard (`separatesFaces`)
+stays as a cheap check.
+
 ### D38. No maps of cities (the user, 17 November 2026)
 
 The user dropped maps of cities ("forget about creating maps for cities and stuff"). Every map stays a sphere with its

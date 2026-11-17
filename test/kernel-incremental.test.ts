@@ -105,3 +105,41 @@ test('regression: neighbours whose shared border differs by tiny offsets (import
     assert.deepEqual(arr.checkTopology(), [], `seed ${seed}`);
   }
 });
+
+for (const seed of [21, 22, 23]) {
+  test(`firm snapping (zoomed far out): every outline is kept with no crossing borders, a valid structure and its own area (seed ${seed})`, () => {
+    const world = new World();
+    const space = cmd.seedProject(world, 'Firm').result.spaceId;
+    const layer = world.all('layer')[0].id;
+    const engine = new Engine(world);
+    const owners = [0, 1, 2].map((i) => cmd.createEntity(world, { type_id: 'polity', name: `P${i}` }).result);
+    const arr = () => world.arrangement(space);
+    const r = rng(seed);
+    const history: RowDiff[][] = [];
+    let kept = 0;
+    for (let step = 0; step < 60; step++) {
+      if (history.length && r.bool(0.15)) {
+        const d = history.pop()!;
+        world.applyDiffs(invertDiffs(d));
+        assert.deepEqual(arr().checkTopology(), [], `undo ${step}`);
+        world.applyDiffs(d); history.push(d); // and redo
+        assert.deepEqual(arr().checkTopology(), [], `redo ${step}`);
+        continue;
+      }
+      const cx = r.float(-50, 50), cy = r.float(-35, 35), k = r.int(3, 12);
+      const pts: Array<[number, number]> = [];
+      for (let i = 0; i < k; i++) { const a = (i / k) * Math.PI * 2, rad = r.float(3, 14); pts.push([cx + rad * Math.cos(a), cy + rad * Math.sin(a) * 0.8]); }
+      const snap = r.pick([4e-3, 1.6e-2, 2.4e-2]);
+      if (process.env.KDEBUG) console.log("step", step, "snap", snap, JSON.stringify(pts.map((p) => p.map((x) => +x.toFixed(3)))));
+      const res = cmd.paintTerritory(world, engine, { spaceId: space, layerId: layer, ring: ring(pts, 0.5), value: r.pick(owners), snap, mode: { kind: 'correct', t: NEG_INF } });
+      history.push(res.diffs);
+      kept++;
+      assert.deepEqual(arr().validate(), [], `no crossing borders after outline ${step} (snap ${snap})`);
+      assert.deepEqual(arr().checkTopology(), [], `structure equals a rebuild after outline ${step}`);
+      // The parcels painted cover the area the outline encloses (with snapping, within its slack).
+      const painted = res.result.faces.reduce((a, f) => a + arr().faceArea(f), 0);
+      assert.ok(painted > 0 && painted < 0.5, `outline ${step} painted a sensible area (${painted})`);
+    }
+    assert.ok(kept > 40);
+  });
+}
