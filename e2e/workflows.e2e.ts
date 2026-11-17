@@ -1001,6 +1001,8 @@ try {
     await page.getByTestId('picture-thumb').first().waitFor();
     const pics = await page.evaluate((n) => { const s = (window as any).__mapmaker.store; return JSON.parse(s.world.all('entity').find((e: any) => e.name === n).style).pictures; }, B);
     assert.equal(pics.length, 1, 'kept with the country');
+    // (The thumbnail loads from the data service: wait for it, a slower computer takes a moment.)
+    await page.waitForFunction(() => { const img = document.querySelector('[data-testid="picture-thumb"]') as HTMLImageElement | null; return !!img && img.complete && img.naturalWidth > 0; }, undefined, { timeout: 8000 }).catch(() => {});
     assert.ok(await page.getByTestId('picture-thumb').first().evaluate((img) => (img as HTMLImageElement).complete && (img as HTMLImageElement).naturalWidth === 40), 'and shown');
     // Data export: the map in 1890 as GeoJSON, and the record as CSV.
     await page.getByTestId('open-data-export').click();
