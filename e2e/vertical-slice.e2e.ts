@@ -22,6 +22,13 @@ const OUT = join(ROOT, 'e2e', 'output');
 const PROJECTS = join(ROOT, '.tmp', 'e2e-projects');
 const PORT = 4391;
 const A = 'Test Country A', B = 'Test Country B', EVENT = 'Test border war';
+// The window's size can be set from outside (MAPMAKER_E2E_VIEWPORT=1500x900), to check that no step
+// depends on exactly where things fall on screen (fonts differ between systems, and with them the
+// size of the map).
+const VIEWPORT = (() => {
+  const m = /^(\d+)x(\d+)$/.exec(process.env.MAPMAKER_E2E_VIEWPORT ?? '');
+  return m ? { width: Number(m[1]), height: Number(m[2]) } : { width: 1600, height: 950 };
+})();
 
 rmSync(PROJECTS, { recursive: true, force: true });
 rmSync(OUT, { recursive: true, force: true });
@@ -224,7 +231,7 @@ let colours: Record<string, string> = {};
 try {
   await startServer();
   browser = await chromium.launch({ channel: 'chrome', headless: true });
-  context = await browser.newContext({ viewport: { width: 1600, height: 950 }, deviceScaleFactor: 1 });
+  context = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 1 });
   page = watch(await context.newPage());
 
   await step('Open Map Maker and create a project', async () => {
@@ -629,15 +636,21 @@ try {
       samples.push({ ll, land: onLand(ll) });
     }
     // Labels are drawn on top of everything; points under them (before or after clipping) are left out.
-    type Label = { text: string; x: number; y: number; size: number };
+    type Label = { text: string; x: number; y: number; size: number; box?: [number, number, number, number] };
     const readLabels = () => page.evaluate(() => (window as any).__mapmaker.store.renderer.lastLabels as Label[]);
     const canvasBox = await page.getByTestId('map-canvas').boundingBox();
     const labelsBefore = await readLabels();
     const underLabel = async (ll: LL, labels: Label[]) => {
       const [px, py] = await toPage(ll);
       const x = px - canvasBox!.x, y = py - canvasBox!.y;
-      return labels.some((l) => Math.abs(x - l.x) < l.text.length * l.size * 0.35 + 6 && Math.abs(y - l.y) < l.size * 0.6 + 6);
+      // The box the label was drawn in (a long name may stand on two or three lines), with room for
+      // the outline around its letters.
+      return labels.some((l) => {
+        const b = l.box ?? [l.x - l.text.length * l.size * 0.35, l.y - l.size * 0.6, l.x + l.text.length * l.size * 0.35, l.y + l.size * 0.6];
+        return x > b[0] - 8 && x < b[2] + 8 && y > b[1] - 8 && y < b[3] + 8;
+      });
     };
+    const boxes = (labels: Label[]) => labels.map((l) => `${l.text} [${(l.box ?? []).map((v) => Math.round(v))}]`).join(', ');
     for (let i = samples.length - 1; i >= 0; i--) if (await underLabel(samples[i].ll, labelsBefore)) samples.splice(i, 1);
     let seaSamples = samples.filter((p) => !p.land), landSamples = samples.filter((p) => p.land);
     assert.ok(seaSamples.length >= 10 && landSamples.length >= 5, `${seaSamples.length} sea and ${landSamples.length} land samples inside the countries`);
@@ -648,17 +661,25 @@ try {
 
     await page.getByTestId('clip-to-land').check();
     await page.waitForTimeout(150);
-    // Once clipped, every label stands on land.
+    // Once clipped, every label stands on land. Labels are placed by the 1:50m coast in cells of an
+    // eighth of a degree (the land mask), so that is the coast they are judged by, give or take a cell.
+    const b50 = decodeBasemap(JSON.parse(readFileSync(join(ROOT, 'data', 'natural-earth', 'ne-50m.json'), 'utf8')) as BasemapFile);
+    const cell = 0.13;
+    const onLand50 = (ll: LL) => [[0, 0], [-cell, 0], [cell, 0], [0, -cell], [0, cell], [-cell, -cell], [cell, -cell], [-cell, cell], [cell, cell]]
+      .some(([dx, dy]) => geoContains(b50.land, [ll[0] + dx, ll[1] + dy]));
     const labelsAfter = await readLabels();
     assert.equal(labelsAfter.length, 2);
     for (const l of labelsAfter) {
       const ll = await toLL([l.x + canvasBox!.x, l.y + canvasBox!.y]);
-      assert.ok(onLand(ll), `the label "${l.text}" is on land (${ll})`);
+      assert.ok(onLand50(ll), `the label "${l.text}" is on land (${ll})`);
     }
     for (let i = samples.length - 1; i >= 0; i--) if (await underLabel(samples[i].ll, labelsAfter)) samples.splice(i, 1);
     seaSamples = samples.filter((p) => !p.land); landSamples = samples.filter((p) => p.land);
     for (const p of seaSamples) assert.ok(colourDiff(await canvasPixel(p.ll), ocean) <= 8, `clipped: the sea at ${p.ll} shows the ocean`);
-    for (const p of landSamples) assert.ok(colourDiff(await canvasPixel(p.ll), before.get(String(p.ll))!) <= 8, `clipped: the land at ${p.ll} keeps its territory colour`);
+    for (const p of landSamples) {
+      const now = await canvasPixel(p.ll), [px, py] = await toPage(p.ll);
+      assert.ok(colourDiff(now, before.get(String(p.ll))!) <= 8, `clipped: the land at ${p.ll} keeps its territory colour (${before.get(String(p.ll))} before, ${now} after; at ${Math.round(px - canvasBox!.x)},${Math.round(py - canvasBox!.y)} on the map; labels before: ${boxes(labelsBefore)}; after: ${boxes(labelsAfter)})`);
+    }
     await screenshot('coastline-clipping');
     // Undo brings the territory back over the sea.
     await page.getByTestId('undo').click();

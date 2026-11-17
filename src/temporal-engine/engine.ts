@@ -212,6 +212,9 @@ export class Engine {
    * the same out afresh as well and stop with an error if the two differ.
    */
   static verify = false;
+  /** What verify found (the messages of the errors it raised), for tests to read. */
+  static verifyFailures: string[] = [];
+  private static fail(message: string): never { Engine.verifyFailures.push(message); throw new Error(message); }
 
   ensure(): void {
     if (this.compiledRevision === this.world.historyRevision) return;
@@ -241,7 +244,7 @@ export class Engine {
     for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) {
       let at = 0;
       while (at < a[i].length && a[i][at] === b[i][at]) at++;
-      throw new Error(`History followed change by change differs from history compiled afresh (part ${i}, from character ${at}):
+      Engine.fail(`History followed change by change differs from history compiled afresh (part ${i}, from character ${at}):
   followed: ${a[i].slice(Math.max(0, at - 80), at + 200)}
   afresh:   ${b[i].slice(Math.max(0, at - 80), at + 200)}`);
     }
@@ -651,10 +654,10 @@ export class Engine {
         if (Engine.verify) {
           const show = (s: FaceState) => `${s.value}|${s.assignment ? `${s.assignment.effectId}#${s.assignment.entry}` : ''}|${s.transition ? `${s.transition.from}~${s.transition.progress}~${s.transition.prior ? s.transition.prior.effectId : ''}` : ''}`;
           const leaves = arr.leafFaces();
-          if (leaves.length !== derived.base.size) throw new Error(`A state worked out from the one before has ${derived.base.size} parcels; the map has ${leaves.length}.`);
+          if (leaves.length !== derived.base.size) Engine.fail(`A state worked out from the one before has ${derived.base.size} parcels; the map has ${leaves.length}.`);
           for (const f of leaves) {
             const got = derived.base.get(f), want = this.faceState(spaceId, layerId, f, t);
-            if (!got || show(got) !== show(want)) throw new Error(`A state worked out from the one before differs from one worked out afresh at parcel ${f}: ${got ? show(got) : 'missing'} against ${show(want)}.`);
+            if (!got || show(got) !== show(want)) Engine.fail(`A state worked out from the one before differs from one worked out afresh at parcel ${f}: ${got ? show(got) : 'missing'} against ${show(want)}.`);
           }
         }
       }
@@ -669,7 +672,9 @@ export class Engine {
         st = { base, changing, t };
         this.stats.statesWhole++;
       }
-      if (this.stretchCache.size >= 24) this.stretchCache.delete(this.stretchCache.keys().next().value!);
+      // (As many states as fit a budget of parcels: a few on a map of a hundred thousand, two dozen on a small one.)
+      const room = Math.max(4, Math.min(24, Math.floor(600_000 / Math.max(1, st.base.size))));
+      while (this.stretchCache.size >= room) this.stretchCache.delete(this.stretchCache.keys().next().value!);
       this.stretchCache.set(sk, st);
       // The states just worked out are those of this instant.
       if (st.changing.length) this.stateCache.set(`${sk}|${t.day}|${t.ms}`, st.base);
@@ -682,7 +687,8 @@ export class Engine {
     const out = new Map(st.base);
     for (const f of st.changing) out.set(f, this.faceState(spaceId, layerId, f, t));
     this.deltas.set(out, { from: new WeakRef(st.base), changed: st.changing, removed: [] });
-    if (this.stateCache.size >= 16) this.stateCache.delete(this.stateCache.keys().next().value!);
+    const room = Math.max(3, Math.min(16, Math.floor(400_000 / Math.max(1, out.size))));
+    while (this.stateCache.size >= room) this.stateCache.delete(this.stateCache.keys().next().value!);
     this.stateCache.set(key, out);
     return out;
   }
@@ -828,8 +834,11 @@ export class Engine {
   private detectConflicts(effects: EffectRow[], events: Map<string, EventRow>): void {
     const w = this.world;
     // Simultaneous and overlapping changes on overlapping parcels.
+    // (Changes are gone through in their own order, so that the list comes out the same however history was compiled.)
+    const inOrder: Array<[string, Assignment[]]> = [];
+    for (const ef of effects) { const list = this.effectAssignments.get(ef.id); if (list) inOrder.push([ef.id, list]); }
     const groups = new Map<string, Assignment[]>();
-    for (const list of this.effectAssignments.values()) for (const a of list) {
+    for (const [, list] of inOrder) for (const a of list) {
       if (a.eventId === BASE_EVENT_ID) continue;
       const k = `${a.t.day}:${a.t.ms}:${a.precedence}`;
       let g = groups.get(k);
@@ -869,7 +878,7 @@ export class Engine {
       }
     }
     // Overlapping transitions: only pairs that share land are compared (found through a land index).
-    const trans = [...this.effectAssignments.entries()].filter(([, l]) => l.length && l[0].transition).map(([id, l]) => ({ id, a: l[0] }));
+    const trans = inOrder.filter(([, l]) => l.length && l[0].transition).map(([id, l]) => ({ id, a: l[0] }));
     const transOnLeaf = new Map<string, number[]>();
     trans.forEach((x, i) => {
       const ef = layerOfEffect.get(x.id)!;

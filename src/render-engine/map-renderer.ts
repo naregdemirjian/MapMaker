@@ -21,6 +21,7 @@ import { resolveLabelStyle, resolvePointStyle, labelSize, labelFont, labelText, 
 import { imageNow, videoNow, drawImageFit, assetEpoch, type MediaChannel } from './assets.ts';
 import { Sheet, makeRing, addLine, projectPoint, isCylindrical, type Ring } from './plane.ts';
 import { BlockPath, setPaintRegion, type DeviceRect } from './blocks.ts';
+import { Kept as Weighed } from './kept.ts';
 import { parcelGeometry, type ParcelGeometry, type CycleGeom } from './parcel-geometry.ts';
 
 type LabelEntity = { name: string; style?: string; color?: string; type_id?: string };
@@ -151,7 +152,7 @@ interface PlacedLabel { lon: number; lat: number; font: number; lines: string[] 
  * The ways of writing a label (on one line, two, three), each placed when it is first asked for:
  * most names fit on one line, and then the others are never searched for.
  */
-interface Placings { count: number; at: (i: number) => PlacedLabel | null }
+interface Placings { count: number; at: (i: number) => PlacedLabel | null; /** How much it holds on to (the points of the outline searched). */ weight: number }
 
 interface FaceGeo { geo: GeoPermissibleObjects; area: number; centroid: [number, number] }
 
@@ -160,6 +161,8 @@ interface FaceGeo { geo: GeoPermissibleObjects; area: number; centroid: [number,
  * sheet's transform) or on the screen itself (shapes made for one frame).
  */
 interface Shape { path: Path2D | BlockPath; onSheet: boolean }
+/** How much a kept path weighs: the points it holds. */
+const pathWeight = (p: BlockPath | null) => (p ? p.size + 16 : 1);
 /** A shape as one path (for clipping to it). */
 const solid = (p: Path2D | BlockPath): Path2D => (p instanceof BlockPath ? p.whole() : p);
 
@@ -232,9 +235,9 @@ interface BorderPaths { plain: Array<Path2D | BlockPath>; inside: Map<string, Pa
 interface SheetParcels {
   arr: Arrangement;
   chains: Map<number, Array<Float32Array[] | undefined>>;
-  sets: Map<string, BlockPath | null>;
+  sets: Weighed<string, BlockPath | null>;
   /** Each owner's share of the borders, by the owner's parcels and which of its chains it draws. */
-  ownerBorders: Map<string, BlockPath | null>;
+  ownerBorders: Weighed<string, BlockPath | null>;
   borders: Map<string, BorderPaths>;
 }
 
@@ -309,7 +312,7 @@ export class MapRenderer {
 
   private parcelsOn(sheet: Sheet, arr: Arrangement): SheetParcels {
     let p = sheet.cache.get('parcels') as SheetParcels | undefined;
-    if (!p || p.arr !== arr) { p = { arr, chains: new Map(), sets: new Map(), ownerBorders: new Map(), borders: new Map() }; sheet.cache.set('parcels', p); }
+    if (!p || p.arr !== arr) { p = { arr, chains: new Map(), sets: new Weighed(4_000_000, pathWeight), ownerBorders: new Weighed(2_500_000, pathWeight), borders: new Map() }; sheet.cache.set('parcels', p); }
     return p;
   }
 
@@ -333,7 +336,6 @@ export class MapRenderer {
         if (geom.needsOutline(f)) { path.rect(-(1 << 19), -(1 << 19), 1 << 20, 1 << 20); any = true; }
       }
       p = any ? path : null;
-      if (sp.sets.size > 6000) sp.sets.clear();
       sp.sets.set(set.key, p);
     }
     return p ? { path: p, onSheet: true } : null;
@@ -410,6 +412,8 @@ export class MapRenderer {
   faceGeo(arr: Arrangement, face: number): FaceGeo {
     let c = this.geoCache.get(arr);
     if (!c) this.geoCache.set(arr, (c = new Map()));
+    // (Parcels that are gone are forgotten now and then.)
+    if (c.size > 3 * arr.faces.size + 2000) c.clear();
     const stamp = arr.faceStamp(face);
     const hit = c.get(face);
     if (hit && hit.stamp === stamp) return hit.g;
@@ -562,7 +566,7 @@ export class MapRenderer {
    * triples. The parcel across a chain is not kept: it gets a new number when it is split, without
    * anything about this set changing; it is looked up when the chain is used.
    */
-  private boundaryCache = new Map<string, Int32Array>();
+  private boundaryCache = new Weighed<string, Int32Array>(4_000_000, (b) => b.length + 16);
 
   private boundaryOf(arr: Arrangement, set: FaceSet): Int32Array {
     const key = `${arr.spaceId}|${set.key}`;
@@ -572,7 +576,6 @@ export class MapRenderer {
       const out: number[] = [];
       for (let q = 0; q < gr.n; q++) if (gr.across[q] < 0) out.push(gr.cycle[q].id, gr.index[q], gr.cycle[q].canonical[gr.index[q]]);
       b = Int32Array.from(out);
-      if (this.boundaryCache.size > 4000) this.boundaryCache.clear();
       this.boundaryCache.set(key, b);
     }
     return b;
@@ -663,7 +666,6 @@ export class MapRenderer {
         let any = false;
         for (const q of e.take) for (const l of this.chainLines(sp, sheet, geom, e.b[q], e.b[q + 1])) { path.addLine(l); any = true; }
         p = any ? path : null;
-        if (sp.ownerBorders.size > 6000) sp.ownerBorders.clear();
         sp.ownerBorders.set(e.key, p);
       }
       if (p) plain.push(p);
@@ -1872,9 +1874,10 @@ export class MapRenderer {
   // keep their labels where labels would collide. During an animated change the label glides from
   // where it was before the change to where it will be after it.
 
-  private pieceCache = new Map<string, OwnerPiece | null>();
-  private shapeCache = new Map<string, PlaneShape>();
-  private spotCache = new Map<string, Placings>();
+  // (Limited by the number of points held: outlines of large countries are heavy.)
+  private pieceCache = new Weighed<string, OwnerPiece | null>(6_000_000, (p) => (p ? p.arcs.length + 32 : 1));
+  private shapeCache = new Weighed<string, PlaneShape>(6_000_000, (sh) => 2 * sh.edges.length + 64);
+  private spotCache = new Weighed<string, Placings>(4_000_000, (pl) => pl.weight);
   private viewSpotCache = new Map<string, Placings>();
   private viewSpotKey = '';
 
@@ -1889,7 +1892,6 @@ export class MapRenderer {
       let p = this.pieceCache.get(key);
       if (p === undefined) {
         p = this.ownerPiece(arr, owner, set, mask);
-        if (this.pieceCache.size > 4000) this.pieceCache.clear();
         this.pieceCache.set(key, p);
       }
       // (The same parcels may have passed to another owner.)
@@ -1970,7 +1972,7 @@ export class MapRenderer {
   }
 
   /** Where a piece's label can go, for each way of breaking its text into lines (projection units). */
-  private placePiece(piece: OwnerPiece, view: View, text: string, st: LabelStyle, accept: ((lon: number, lat: number) => boolean) | null, cacheKey: string, cache: Map<string, Placings>, onScreenOnly = false, wantedFont = Infinity): Placings {
+  private placePiece(piece: OwnerPiece, view: View, text: string, st: LabelStyle, accept: ((lon: number, lat: number) => boolean) | null, cacheKey: string, cache: Map<string, Placings> | Weighed<string, Placings>, onScreenOnly = false, wantedFont = Infinity): Placings {
     const hit = cache.get(cacheKey);
     if (hit) return hit;
     const proj = view.camera.projection;
@@ -1978,7 +1980,6 @@ export class MapRenderer {
     let shape = this.shapeCache.get(sk);
     if (!shape) {
       shape = planeShape(piece.arcs, proj, piece.centreLon);
-      if (this.shapeCache.size > 1500) this.shapeCache.clear();
       this.shapeCache.set(sk, shape);
     }
     // The part of the plane on screen (from points along the screen's edges), to search only there.
@@ -2002,6 +2003,7 @@ export class MapRenderer {
     const outline = shape;
     const res: Placings = {
       count: choices.length,
+      weight: outline.edges.length + 16,
       at: (i) => {
         if (found[i] !== undefined) return found[i]!;
         const lines = choices[i];
@@ -2016,7 +2018,7 @@ export class MapRenderer {
         return (found[i] = spot ? { lon: spot.lon, lat: spot.lat, font: (Math.SQRT2 * spot.room * 1.15) / hEm, lines } : null);
       },
     };
-    if (cache.size > 3000) cache.clear();
+    if (cache instanceof Map && cache.size > 3000) cache.clear();
     cache.set(cacheKey, res);
     return res;
   }

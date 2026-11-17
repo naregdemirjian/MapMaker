@@ -55,7 +55,11 @@ export class Harness {
   async open(): Promise<void> {
     await this.startServer();
     this.browser = await chromium.launch({ channel: 'chrome', headless: true });
-    this.context = await this.browser.newContext({ viewport: { width: 1600, height: 950 }, deviceScaleFactor: 1 });
+    // (MAPMAKER_E2E_VIEWPORT=1500x900 tries another window size: no step should depend on exactly
+    // where things fall on screen, since fonts differ between systems and with them the map's size.)
+    const size = /^(\d+)x(\d+)$/.exec(process.env.MAPMAKER_E2E_VIEWPORT ?? '');
+    const viewport = size ? { width: Number(size[1]), height: Number(size[2]) } : { width: 1600, height: 950 };
+    this.context = await this.browser.newContext({ viewport, deviceScaleFactor: 1 });
     this.page = this.watch(await this.context.newPage());
     await this.page.goto(this.baseUrl);
     // Everything worked out from what was there before is also worked out afresh, and must be the same (see main.tsx).

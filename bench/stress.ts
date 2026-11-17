@@ -6,6 +6,7 @@
 //
 // Usage: node --disable-warning=ExperimentalWarning bench/stress.ts <fixtures folder> "<project>" [--steps 400] [--seed 1]
 //          [--throttle 4] (a computer that many times slower) [--scale 2] (a screen with that many pixels per point) [--no-verify]
+//          [--preset fastest|best] (the working view's speed settings)
 // Build first (node scripts/build.mjs). The project is not changed: the run works on a copy.
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
@@ -18,13 +19,14 @@ const flag = (name: string) => { const i = args.indexOf(name); if (i < 0) return
 const has = (name: string) => { const i = args.indexOf(name); if (i < 0) return false; args.splice(i, 1); return true; };
 const steps = Number(flag('--steps') ?? 400), seed = Number(flag('--seed') ?? 1), throttle = Number(flag('--throttle') ?? 1), scale = Number(flag('--scale') ?? 1);
 const verify = !has('--no-verify');
+const preset = flag('--preset');
 const [folder, name] = args;
 if (!folder || !name) { console.error('Give the fixtures folder and the project name.'); process.exit(1); }
 
 const work = workCopy(folder, [name]);
 const server = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', join(ROOT, 'dist', 'server.mjs'), '--port', '4458', '--projects', work.folder], { stdio: ['ignore', 'pipe', 'pipe'] });
 const baseUrl = await new Promise<string>((res) => { let t = ''; server.stdout!.on('data', (d) => { t += d; const m = /running at (http:\/\/\S+)/.exec(t); if (m) res(m[1]); }); });
-const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--enable-precise-memory-info'] });
+const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--enable-precise-memory-info', '--js-flags=--expose-gc'] });
 let failed = false;
 try {
   const context = await browser.newContext({ viewport: { width: 1600, height: 950 }, deviceScaleFactor: scale });
@@ -38,6 +40,9 @@ try {
   await page.getByTestId('map-canvas').waitFor();
   await page.waitForFunction(() => !!(window as any).__mapmaker.store.basemap);
   if (verify) await page.evaluate(() => (window as any).__mapmaker.verify());
+  // The working view's speed settings (Settings in the app): 'fastest' or 'best'; the default is 'balanced'.
+  if (preset === 'fastest') await page.evaluate(() => (window as any).__mapmaker.store.setViewSettings({ resolution: 0.75, detail: 'coarse', whileMoving: 'carry', names: 'hide', coast: 'medium', showSpeed: false }));
+  if (preset === 'best') await page.evaluate(() => (window as any).__mapmaker.store.setViewSettings({ resolution: 1, detail: 'fine', whileMoving: 'redraw', names: 'place', coast: 'full', showSpeed: false }));
   if (throttle > 1) { const cdp = await context.newCDPSession(page); await cdp.send('Emulation.setCPUThrottlingRate', { rate: throttle }); }
   const t0 = Date.now();
   const result = await page.evaluate(async ({ steps, seed }) => {
@@ -56,6 +61,7 @@ try {
     const cam = () => s.camera;
     const here = (): [number, number] => [cam().lon + (rnd() - 0.5) * 30 / (1 + cam().zoom), Math.max(-70, Math.min(75, cam().lat + (rnd() - 0.5) * 16 / (1 + cam().zoom)))];
     const counts: Record<string, number> = {}, refused: Record<string, number> = {};
+    const took: Record<string, number[]> = {};
     const frames: number[] = [], heap: number[] = [];
     let compared = 0, worstDiff = 0;
 
@@ -128,13 +134,17 @@ try {
       try { await act(); } catch (e) { return { failed: `step ${step} (${what}): ${(e as Error).stack ?? e}`, counts }; }
       await raf();
       frames.push(performance.now() - t);
+      (took[what] ??= []).push(performance.now() - t);
       // (A refused edit, such as a shape that cannot be drawn there, says so and changes nothing.)
       if (toasts() > before) refused[what] = (refused[what] ?? 0) + 1; else counts[what] = (counts[what] ?? 0) + 1;
       if (s.offline) return { failed: `step ${step} (${what}): editing stopped: ${s.offline}`, counts };
+      if (B.Engine.verifyFailures.length) return { failed: `step ${step} (${what}): ${B.Engine.verifyFailures[0]}`, counts };
       if (step % 10 === 9) {
         await s.flush();
         const bad = await compare();
         if (bad) return { failed: `step ${step} (after ${what}): ${bad}`, counts };
+        // (What is still held after a full collection: growth here is memory that is being kept.)
+        (window as any).gc?.();
         heap.push(Math.round(((performance as any).memory?.usedJSHeapSize ?? 0) / 1e6));
       }
     }
@@ -144,12 +154,14 @@ try {
     return {
       failed: null, counts, refused, compared, worstDifferencePercent: +(worstDiff * 100).toFixed(4),
       frames: { count: frames.length, median: at(0.5), p90: at(0.9), p99: at(0.99), max: at(1) },
-      heapMB: { first: heap[0], middle: heap[Math.floor(heap.length / 2)], last: heap[heap.length - 1], max: Math.max(...heap) },
+      // How long each kind of step took until the next frame was on screen: median and longest (ms).
+      took: Object.fromEntries(Object.entries(took).map(([k, l]) => { const o = [...l].sort((p, q) => p - q); return [k, `${o[Math.floor(o.length / 2)].toFixed(0)} / ${o[o.length - 1].toFixed(0)}`]; })),
+      heapMB: { first: heap[0], middle: heap[Math.floor(heap.length / 2)], last: heap[heap.length - 1], max: Math.max(...heap), every50steps: heap.filter((_, i) => i % 5 === 4) },
       engine: s.engine.stats, renderer: s.renderer.stats,
       parcels: s.world.arrangement(s.spaceId).leafFaces().length, events: s.world.all('event').length,
     };
   }, { steps, seed });
-  console.log(JSON.stringify({ project: name, steps, seed, throttle, scale, verify, seconds: Math.round((Date.now() - t0) / 1000), ...result }, null, 1));
+  console.log(JSON.stringify({ project: name, steps, seed, throttle, scale, verify, preset: preset ?? 'balanced', seconds: Math.round((Date.now() - t0) / 1000), ...result }, null, 1));
   if (result.failed || errors.length) {
     failed = true;
     if (errors.length) console.log(`Errors in the page:\n${[...new Set(errors)].slice(0, 12).join('\n')}`);
