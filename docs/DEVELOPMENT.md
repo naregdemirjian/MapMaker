@@ -5,7 +5,7 @@ Companion files: [REQUIREMENTS.md](REQUIREMENTS.md) (checklist against the maste
 [DECISIONS.md](DECISIONS.md) (architectural decisions and every deviation from the approved architecture).
 
 The approved architecture is the Claude Doc "Map Maker — Technical Architecture & Development Plan"
-(https://claude.ai/artifact/2JShAV3AWt6iECtNgBTsJN). All twelve of its decisions were approved on 15 November 2026.
+(https://claude.ai/artifact/2JShAV3AWt6iECtNgBTsJN). All twelve of its decisions were approved on 15 November 2026. A full copy is in `docs/ARCHITECTURE.md`: read it before building any new stage. The user's original specification will be added as `docs/SPECIFICATION.md`.
 
 ## Status at a glance (16 November 2026, version 0.2.0 + Earth basemap)
 
