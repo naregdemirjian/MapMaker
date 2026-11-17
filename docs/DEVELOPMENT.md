@@ -97,15 +97,19 @@ For development (Linux or Windows, Node 22.18 or newer):
 | `xvfb-run -a node --disable-warning=ExperimentalWarning e2e/desktop.e2e.ts` | The 5-step desktop app test (build first) |
 | `node --disable-warning=ExperimentalWarning dist/server.mjs --port 4317 --projects <folder> [--open]` | Runs the app |
 | `sh scripts/check-all.sh` | Every check: type check, unit tests, build, the four interface tests |
-| `npm test` | 189 unit, randomised and scenario tests |
-| `node --disable-warning=ExperimentalWarning e2e/render-compare.e2e.ts` | The renderer against the old one kept in `e2e/reference/` (35 scenes), and carried pictures against fresh ones (build first; `VERBOSE=1` lists every case) |
-| `node --disable-warning=ExperimentalWarning bench/make-fixtures.ts <folder>` | Makes the benchmark projects: "Bench Earth 242", "Bench Heavy", "Bench Random 1000" (minutes) |
+| `npm test` | 199 unit, randomised and scenario tests |
+| `node --disable-warning=ExperimentalWarning e2e/render-compare.e2e.ts` | The renderer against the old one kept in `e2e/reference/` (35 scenes); carried, patched and animated pictures against fresh ones (build first; `VERBOSE=1` lists every case) |
+| `node --disable-warning=ExperimentalWarning bench/make-fixtures.ts <folder> [massive]` | Makes the benchmark projects: "Bench Earth 242", "Bench Heavy", "Bench Random 1000" (minutes); with `massive`, one with 3,000 border changes as well. The benchmarks and tools below work on throwaway copies of them |
 | `node --disable-warning=ExperimentalWarning bench/render.bench.ts <folder> ["<project>"...] [--only a,b] [--label x] [--out file]` | Frame times in Chrome for each scenario (idle, pans at five zooms, zoom, scrub, stroke, play, exports); build first |
 | `node --disable-warning=ExperimentalWarning bench/edit.bench.ts <folder>` | Kernel and engine times for edits, without a browser |
-| `node --disable-warning=ExperimentalWarning bench/profile.ts <folder> "<project>" <scenario> out.cpuprofile`, then `node bench/top.mjs out.cpuprofile` | Where the time goes in one scenario |
+| `node --disable-warning=ExperimentalWarning bench/profile.ts <folder> "<project>" <scenario> out.cpuprofile`, then `node bench/top.mjs out.cpuprofile` | Where the script's time goes in one scenario (idle, select, panWorld, panRegion, panDeep, zoomIn, zoomOut, scrub, scrubSmall, stroke, play, playMoving) |
+| the same with an output name ending in `.trace.json`, then `node bench/trace.mjs out.trace.json 25` | What the browser does around the script (painting canvases, layers, presenting), per thread: what a script profile does not show (D61) |
+| `node --disable-warning=ExperimentalWarning bench/open.ts <folder> "<project>" out.cpuprofile` | How long opening a project takes, and a profile of it |
+| `node --disable-warning=ExperimentalWarning bench/stress.ts <folder> "<project>" [--steps 400] [--seed 1] [--throttle 4] [--scale 2] [--preset fastest\|best] [--no-verify]` | A long random session in the real interface with every result checked against one worked out afresh and the map compared with a fresh drawing (D57); `--throttle` makes the computer that many times slower, `--scale` the screen that many times denser. Reports frame times, time per kind of action and memory |
+| `MAPMAKER_E2E_VIEWPORT=1500x900 node ... e2e/vertical-slice.e2e.ts` (or `workflows`) | The interface tests in a window of another size (no step may depend on where things fall on screen) |
 | `node --disable-warning=ExperimentalWarning test/geo-kernel.stress.ts <seeds> <rings>` | Long randomised kernel run |
-| `node --disable-warning=ExperimentalWarning e2e/vertical-slice.e2e.ts` | The 17-step interface test in Chrome (build first); screenshots in `e2e/output/` |
-| `node --disable-warning=ExperimentalWarning e2e/workflows.e2e.ts` | The 10-step workflow and export-inspection test; screenshots in `e2e/output/workflows/` |
+| `node --disable-warning=ExperimentalWarning e2e/vertical-slice.e2e.ts` | The 23-step interface test in Chrome (build first); screenshots in `e2e/output/` |
+| `node --disable-warning=ExperimentalWarning e2e/workflows.e2e.ts` | The 21-step workflow and export-inspection test; screenshots in `e2e/output/workflows/` |
 | `node --disable-warning=ExperimentalWarning test/perf.bench.ts 100 300 1000 [--keep <folder>]` | Performance benchmark (minutes at 1000) |
 | `node node_modules/typescript/bin/tsc -p tsconfig.json` | Type check (must report nothing) |
 
@@ -134,9 +138,12 @@ Terminology: the interface calls them **maps** (DECISIONS D24); the code and old
 | `src/render-engine/` | Drawing the map | Camera and projections (d3-geo), the map renderer (fills, borders, labels, transitions), the Earth basemap (`basemap.ts`: decoding, choice of detail), stroke processing for the freehand brush. |
 | `src/render-engine/plane.ts` | Sheets (D49) | The projections' own formulas; rings with ranked points; a `Sheet` holds shapes projected once for a window around the view and places them on any view inside it by one transform. |
 | `src/render-engine/parcel-geometry.ts` | Parcel outlines | Each boundary cycle as longitude/latitude with point importance shared between neighbours; `dissolve` joins an owner's parcels into one outline. |
-| `src/render-engine/blocks.ts` | Blocks (D50) | `BlockPath`: shapes held in a tree of square blocks, so drawing part of the view only walks the points there. |
+| `src/render-engine/blocks.ts` | Blocks (D50) | `BlockPath`: shapes held in a tree of square blocks, so drawing part of the view only walks the points there. No path is closed with `closePath` (D64). |
+| `src/render-engine/map-renderer.ts` | The frame | `render` draws a frame; `layered` keeps the base map and the territories as pictures: kept, patched after an edit (D54), renewed where a change animates (D58), moved with the view with room around the frame (`slide`, D62), shown at another size while zooming (`zoomTogether`, D63). `verify` works snapshots out both ways (D57). |
+| `src/render-engine/kept.ts` | Caches by weight (D59) | A cache limited by how much its entries hold, not by how many there are. |
+| `src/temporal-engine/engine.ts` | History, kept up to date (D55) | `follow` applies the changes made since the last question instead of compiling everything; states of all parcels are derived from the state before; `Engine.verify` compares with a fresh compile. |
 | `src/ui/view-settings.ts`, `components/Settings.tsx` | Working-view settings (D53) | Presets and single options, kept in the browser, applied by `store.setViewSettings` and `MapView`; never read by exports. |
-| `bench/` | Measuring | Benchmark projects, frame-time and edit benchmarks, profiling helpers (see the commands above). |
+| `bench/` | Measuring | Benchmark projects, frame-time and edit benchmarks, script profiles and browser traces, opening, and the stress run (see the commands above). |
 | `data/` | Shipped map data | Natural Earth basemap files and `datasets.json` (source, version, licence, credit of every dataset); copied to `dist/ui/data/` by the build. |
 | `src/presentation/` | Shots and export | Shot settings (time remap, camera keys, overlays) and the export driver that renders frames off screen at the exact output size. |
 | `src/export/` | Files on disk | PNG encoder, export folders, `manifest.json`, `COMPOSITING_GUIDE.txt`. |
@@ -172,18 +179,20 @@ The approved roadmap has 14 stages (0–13). Where each stands:
 
 ## Tests
 
-All pass as of 17 November 2026 (189 unit and randomised tests in 28 files, 23 + 21 + 4 + 5 interface steps).
+All pass as of 17 November 2026 (199 unit and randomised tests in 30 files, 23 + 21 + 5 + 5 interface steps). The
+interface tests run with the verify mode on (D57): everything the app works out from what was there before is also
+worked out afresh, and any difference stops the test.
 `sh scripts/check-all.sh` runs everything and prints ALL CHECKS PASSED only when every check passed.
 
 | Suite | Count | What it proves |
 | --- | --- | --- |
 | `test/core-time.test.ts` | 8 | Known Gregorian dates; calendar round trips across trillions of years; exact arithmetic; parsing and formatting |
-| `test/geo-kernel.test.ts` | 12 | Predicates; parcels across the poles and the 180° line; nested islands; snapping; randomised point location against d3; rollback; vertex edits never break validity |
+| `test/geo-kernel.test.ts` | 13 | Predicates; parcels across the poles and the 180° line; nested islands; snapping; randomised point location against d3; rollback; vertex edits never break validity; a parcel's area summed on plain numbers against the earlier formula and d3 |
 | `test/geo-kernel.stress.ts` | CLI | 12 seeds × 50 random rings with full validation after each (0 refusals) |
 | `test/temporal-engine.test.ts` | 16 | Editing events never changes earlier history; compiled timelines equal a naive replay; simultaneous and overlapping events; stale intentions; broken references; corrections; variants; undo |
 | `test/scenarios.test.ts` | 9 | A region's history (secession, partition, insertion, deletion, moving events); order independence; simultaneous and overlapping events with durations; seconds and millennia apart; advancing fronts from minutes to years; occupation on its own layer; edits never corrupt unrelated data; formation, fragmentation, collapse |
 | `test/geometry-worlds.test.ts` | 7 | Degenerate and self-crossing outlines refused cleanly; poles, the 180° line, more than a hemisphere, 20-metre shapes; splitting and merging; 1 cm precision after reopening; independent worlds of different sizes; undo per world |
-| `test/storage.test.ts` | 6 | Reopening; undo and redo across reopening; atomic saves; process killed mid-save; versions and backups; PNG round trip |
+| `test/storage.test.ts` | 8 | Reopening; the snapshot the database writes as text against the row-by-row one; undo and redo across reopening; atomic saves; process killed mid-save; versions and backups; PNG round trip; export folders |
 | `test/recovery.test.ts` | 7 | Three kinds of file damage refused then recovered; damaged backups skipped; no usable backup; malformed rows; 120-step undo/redo compared state by state; old uncompressed history |
 | `test/split-identity.test.ts` | 7 | The split-identity optimisation leaves history identical (6 random histories, with and without) and stops coastline relabelling |
 | `test/stroke.test.ts` | 7 | Freehand outlines: closed, open, figure-eight, tiny, orientation, reproducible irregularity |
@@ -197,7 +206,9 @@ All pass as of 17 November 2026 (189 unit and randomised tests in 28 files, 23 +
 | `test/workflow.test.ts` | 4 | Groups of countries (made, renamed, moved in and out, deleted keeping members); labels and pictures of many at once; many events and countries deleted at once; one undo each |
 | `test/names.test.ts` | 1 | Names over time: before and after, renamed again at the same moment, in an event, from the beginning, reload, deleted with the thing, undo |
 | `test/flat-maps.test.ts` | 3 | Flat maps: plan view, the width on screen, exact screen conversions, straight borders, panning stops at the edge; true to scale within 1%; labels |
-| `test/label-place.test.ts` | 6 | Labels: every large country of today's 242 gets a place inside it in four projections; 24 countries labelled near their middle; across 180° and around the pole; lines for long names; all 242 placed quickly; the part on screen when zoomed in |
+| `test/label-place.test.ts` | 8 | Labels: every large country of today's 242 gets a place inside it in four projections; 24 countries labelled near their middle; across 180° and around the pole; lines for long names; all 242 placed quickly; the part on screen when zoomed in; the gridded distance to an outline; searches cut short (no place acceptable, too small) find the same place |
+| `test/land-mask.test.ts` | 1 | "Any land in this box?" against looking at every cell, for 6,000 random boxes (across the 180° line too) |
+| `test/engine-follow.test.ts` | 6 | History followed edit by edit equals a fresh compile after every step of random histories (18 kinds of edit, undo and redo; 5 seeds of 90 steps); checked to catch six planted mistakes |
 | `test/characters.test.ts` | 5 | Characters: travelling between places along the shortest path, appearing, leaving the map, moving a placement, in events and from the start, undo, reload, deleted characters reported, across 180°; cities founded, moved at once, abandoned, from the beginning |
 | `test/history-view.test.ts` | 2 | Periods (day, month, year, several years, before year 1), stepping; a country's gains and losses in a period and the changes that made them; lost and won back within a period |
 | `test/basemap.test.ts` | 16 | Natural Earth files decode correctly at both scales (land about 29% of the planet, no inside-out polygons, known places on land and at sea across 180° and the poles); dataset record; per-world setting and per-layer clipping setting with undo; culling never drops anything on screen (160 random views) |
@@ -205,11 +216,11 @@ All pass as of 17 November 2026 (189 unit and randomised tests in 28 files, 23 +
 | `test/engine-stretch.test.ts` | 2 | States shared between change instants equal states worked out afresh; edits to history are seen at once; edits that do not touch history do not recompile |
 | `test/plane.test.ts` | 8 | The projection formulas against d3-geo; a sheet covers exactly what the kernel says each parcel covers, across 180°, at the poles and on flat maps; neighbours simplified alike; dissolved outlines |
 | `test/blocks.test.ts` | 3 | A block keeps what matters inside it: the same fill (winding) and the same lines as the whole shape, on random shapes; stored working-view settings are made valid, presets recognised |
-| `e2e/render-compare.e2e.ts` | 4 steps | 35 scenes drawn by the renderer and by the old one (`e2e/reference/`) are the same picture (fills strictly, borders by position); a picture carried along as the view moves equals one drawn afresh; after brush strokes and an undo, the patched picture equals one drawn afresh |
-| `e2e/vertical-slice.e2e.ts` | 17 steps | The vertical slice in Chrome: projects, drawing, Earth's geography and data sources, border points, versions, events, dates, version restore and undo, full restart, animation, export with data credits, identical re-export, 1080p, coastline clipping |
+| `e2e/render-compare.e2e.ts` | 5 steps | 35 scenes drawn by the renderer and by the old one (`e2e/reference/`) are the same picture (fills strictly, borders by position); a picture carried along as the view moves equals one drawn afresh (six views, the planet's ends in view among them; whole-pixel moves, then 170 small ones with the room around the frame drawn first); after brush strokes inside countries and an undo, the patched picture equals one drawn afresh; every frame of an animated change, renewed only in its own area, equals one drawn afresh |
+| `e2e/vertical-slice.e2e.ts` | 23 steps | The vertical slice in Chrome: projects, drawing, Earth's geography and data sources, border points, versions, events, dates, version restore and undo, full restart, animation, export with data credits, identical re-export, 1080p, coastline clipping |
 | `e2e/desktop.e2e.ts` | 5 steps | The Electron app: own window, own data service on this computer only, project written to disk, one copy at a time, close and reopen with contents intact |
 | `test/event-groups.test.ts` | 4 | Event group commands with undo (several groups per event, filter rules, deletion keeps events, alternatives keep groups); a version 1 project file upgraded on opening (backup first, content and undo history intact, old backups restorable without rolling the format back); a file from a newer version refused untouched |
-| `e2e/workflows.e2e.ts` | 10 steps | Precise shapes; occupation layer; hiding layers; alternative versions; annexation; deleting and undoing events; fades; a second world; a camera move at 2.39:1 and 25 fps with frame timing, history in the pixels and pass stacking checked; square size, Natural Earth projection, 23.976 fps, transparency |
+| `e2e/workflows.e2e.ts` | 21 steps | Precise shapes; occupation layer; hiding layers; alternative versions; annexation; deleting and undoing events; fades; a second world; a camera move at 2.39:1 and 25 fps with frame timing, history in the pixels and pass stacking checked; square size, Natural Earth projection, 23.976 fps, transparency |
 
 Checked by hand: 4K and 8K exports; the unzipped package starts and works; requests from other hosts are refused.
 

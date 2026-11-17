@@ -6,11 +6,12 @@
 //
 // Usage: node --disable-warning=ExperimentalWarning bench/stress.ts <fixtures folder> "<project>" [--steps 400] [--seed 1]
 //          [--throttle 4] (a computer that many times slower) [--scale 2] (a screen with that many pixels per point) [--no-verify]
-//          [--preset fastest|best] (the working view's speed settings)
+//          [--preset fastest|best] (the working view's speed settings) [--dump <folder>] (where to write the two pictures when they differ)
 // Build first (node scripts/build.mjs). The project is not changed: the run works on a copy.
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import { join, resolve } from 'node:path';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { workCopy } from './tools/workcopy.ts';
 
 const ROOT = resolve(import.meta.dirname, '..');
@@ -20,6 +21,7 @@ const has = (name: string) => { const i = args.indexOf(name); if (i < 0) return 
 const steps = Number(flag('--steps') ?? 400), seed = Number(flag('--seed') ?? 1), throttle = Number(flag('--throttle') ?? 1), scale = Number(flag('--scale') ?? 1);
 const verify = !has('--no-verify');
 const preset = flag('--preset');
+const dump = flag('--dump');
 const [folder, name] = args;
 if (!folder || !name) { console.error('Give the fixtures folder and the project name.'); process.exit(1); }
 
@@ -64,6 +66,7 @@ try {
     const took: Record<string, number[]> = {};
     const frames: number[] = [], heap: number[] = [];
     let compared = 0, worstDiff = 0;
+    let pictures: { shown: string; fresh: string } | null = null;
 
     /** The picture on screen, once the view has come to rest, against the same view drawn by a renderer that keeps nothing. */
     const compare = async (): Promise<string | null> => {
@@ -91,17 +94,32 @@ try {
       // fresh one part way into it: the columns around them are left out.)
       const half = Math.PI * view.projection.scale();
       const sides = ['equirectangular', 'mercator'].includes(s.camera.projection) && !s.camera.rotation ? [k * (view.width / 2 - half), k * (view.width / 2 + half)] : [];
-      let differing = 0;
+      let differing = 0, x0 = W, y0 = H, x1 = -1, y1 = -1, dense = 0;
+      // (Also counted by squares of 8 by 8 pixels: a part of the picture that was not drawn again
+      // fills squares, while outlines that fall a fraction of a pixel apart leave single pixels.)
+      const bw = Math.ceil(W / 8), squares = new Uint8Array(bw * Math.ceil(H / 8));
       for (let i = 0; i < a.length; i += 4) {
         if (Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]) <= 90) continue;
-        const px = (i / 4) % W;
+        const px = (i / 4) % W, py = Math.floor(i / 4 / W);
         if (sides.length && (Math.abs(px + 0.5 - sides[0]) <= 1.5 || Math.abs(px + 0.5 - sides[1]) <= 1.5)) continue;
         differing++;
+        const q = (py >> 3) * bw + (px >> 3);
+        if (++squares[q] > dense) dense = squares[q];
+        if (px < x0) x0 = px; if (px > x1) x1 = px; if (py < y0) y0 = py; if (py > y1) y1 = py;
       }
+      const where = differing ? ` in ${x0},${y0} to ${x1},${y1} of ${W} x ${H}; view ${JSON.stringify(s.camera)}; parts ${JSON.stringify(s.renderer.lastParts)}` : '';
       compared++;
       worstDiff = Math.max(worstDiff, differing / (W * H));
       s.notify();
-      return differing / (W * H) > 0.0006 ? `${differing} pixels of the map differ from a fresh drawing (${((differing / (W * H)) * 100).toFixed(3)}%)` : null;
+      // With the coarsest outlines (the "Fastest" preset) the picture shown and the fresh one are
+      // drawn from outlines simplified for slightly different scales, and differ in single pixels
+      // along borders and coasts: more of those are allowed, never a filled square.
+      const allowed = s.viewSettings.detail === 'coarse' ? 0.002 : 0.0006;
+      if (differing / (W * H) <= allowed && dense < 28) return null;
+      // Both pictures, for looking at (written to --dump, if given).
+      const url = async (c: OffscreenCanvas) => { const blob = await c.convertToBlob(); return await new Promise<string>((r) => { const f = new FileReader(); f.onload = () => r(String(f.result)); f.readAsDataURL(blob); }); };
+      pictures = { shown: await url(mine), fresh: await url(off) };
+      return `${differing} pixels of the map differ from a fresh drawing (${((differing / (W * H)) * 100).toFixed(3)}%, up to ${dense} in a square of 8 by 8)${where}`;
     };
 
     const actions: Array<[string, number, () => void | Promise<void>]> = [
@@ -151,7 +169,7 @@ try {
       if (step % 10 === 9) {
         await s.flush();
         const bad = await compare();
-        if (bad) return { failed: `step ${step} (after ${what}): ${bad}`, counts };
+        if (bad) return { failed: `step ${step} (after ${what}): ${bad}`, counts, pictures };
         // (What is still held after a full collection: growth here is memory that is being kept.)
         (window as any).gc?.();
         heap.push(Math.round(((performance as any).memory?.usedJSHeapSize ?? 0) / 1e6));
@@ -170,7 +188,13 @@ try {
       parcels: s.world.arrangement(s.spaceId).leafFaces().length, events: s.world.all('event').length,
     };
   }, { steps, seed });
-  console.log(JSON.stringify({ project: name, steps, seed, throttle, scale, verify, preset: preset ?? 'balanced', seconds: Math.round((Date.now() - t0) / 1000), ...result }, null, 1));
+  const shown = (result as { pictures?: { shown: string; fresh: string } | null }).pictures;
+  if (shown && dump) {
+    mkdirSync(dump, { recursive: true });
+    for (const [k, v] of Object.entries(shown)) writeFileSync(join(dump, `${k}.png`), Buffer.from(v.split(',')[1], 'base64'));
+    console.log(`The picture shown and the fresh one are in ${dump}`);
+  }
+  console.log(JSON.stringify({ project: name, steps, seed, throttle, scale, verify, preset: preset ?? 'balanced', seconds: Math.round((Date.now() - t0) / 1000), ...result, pictures: undefined }, null, 1));
   if (result.failed || errors.length) {
     failed = true;
     if (errors.length) console.log(`Errors in the page:\n${[...new Set(errors)].slice(0, 12).join('\n')}`);

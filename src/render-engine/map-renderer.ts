@@ -989,6 +989,8 @@ export class MapRenderer {
   }
 
   private stamps = 0;
+  /** The rectangles around the changes animating, for the view and the changes they were found for (null: too large, or not to be had). */
+  private renewRects: { key: string; rects: DeviceRect[] | null } | null = null;
   /** This frame is one of many in quick succession through time (RenderOptions.hurried). */
   private hurried = false;
   /** This frame draws the room around kept pictures at rest (RenderOptions.fillAround). */
@@ -1170,10 +1172,12 @@ export class MapRenderer {
     };
     // The room around the frame that a picture at rest should hold (see RenderOptions.fillAround): a margin's width on every side.
     const room = (): [number, number, number, number] => [Math.max(0, b.ox - M), Math.max(0, b.oy - M), Math.min(b.canvas.width, b.ox + w + M), Math.min(b.canvas.height, b.oy + h + M)];
-    const noteRoom = () => { if (M && !renew) { const q = room(), v = b.valid; if (v[0] > q[0] || v[1] > q[1] || v[2] < q[2] || v[3] < q[3]) this.roomToFill = true; } };
+    // (A picture that is drawn again for every moment of an animation gets nothing drawn ahead or around it; one that stays at its moment while the view moves does.)
+    const playing = !!renew && b.moment !== renew.moment;
+    const noteRoom = () => { if (M && !playing) { const q = room(), v = b.valid; if (v[0] > q[0] || v[1] > q[1] || v[2] < q[2] || v[3] < q[3]) this.roomToFill = true; } };
     if (b.key === exact) {
       this.lastParts[name] = again(0, 0) ? 'renewed' : 'kept';
-      if (this.fillRoom && M && !renew) { const q = room(); this.extend(b, q[0], q[1], q[2], q[3], (rects) => paint(rects, 0, 0)); }
+      if (this.fillRoom && M && !playing) { const q = room(); this.extend(b, q[0], q[1], q[2], q[3], (rects) => paint(rects, 0, 0)); }
       noteRoom();
       blit();
       return;
@@ -1200,7 +1204,7 @@ export class MapRenderer {
           // Moved: the frame's window moves over the kept picture by whole pixels, and what it lacks is drawn
           // (where the kept picture stands: at most half a pixel from the view asked for). While a change
           // animates the picture changes in every frame, so nothing is drawn ahead.
-          if (nx || ny) this.slide(b, w, h, nx, ny, renew ? 0 : M, (rects) => paint(rects, rx, ry));
+          if (nx || ny) this.slide(b, w, h, nx, ny, playing ? 0 : M, (rects) => paint(rects, rx, ry));
           b.at = { ...at, x: at.x - rx, y: at.y - ry };
           b.key = whole ? exact : 'moved';
           if (!whole) this.lastApproximate = true;
@@ -1248,7 +1252,7 @@ export class MapRenderer {
       // view moves, or once it rests). While zooming out, the room around it is drawn at once: the
       // frames that follow show this picture smaller, and would each draw what lies around it.
       b.ox = b.oy = M;
-      drawnTo = this.zoomOut && !renew ? room() : [M, M, M + w, M + h];
+      drawnTo = this.zoomOut && !playing ? room() : [M, M, M + w, M + h];
       paint([[drawnTo[0], drawnTo[1], drawnTo[2] - drawnTo[0], drawnTo[3] - drawnTo[1]]], 0, 0, true);
     } else {
       b.ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -1498,15 +1502,28 @@ export class MapRenderer {
       // for each moment (unless they take up most of the frame, or the view is turned).
       const widestLine = Math.max(...prepared.map((p) => p.ls.borderWidth ?? style.borderWidth));
       let renew: Renew | null = null;
-      if (animated && !anyMedia && m.b === 0 && m.c === 0) {
-        const boxes: number[][] = [];
+      const terrName = `territory:${wantsFills ? 'f' : ''}${wantsBorders ? 'b' : ''}`;
+      const moment = `${t.day}:${t.ms}|${opts.mediaSeconds ?? 0}`;
+      const keptNow = this.kept.get(terrName);
+      // The kept picture is of this very moment (the view moves while the date stays): none of it is
+      // drawn again for the animation, so the rectangles around the changes are not needed.
+      if (animated && !anyMedia && m.b === 0 && m.c === 0 && keptNow?.canvas && keptNow.key && keptNow.moment === moment) renew = { rects: [], moment };
+      else if (animated && !anyMedia && m.b === 0 && m.c === 0) {
         const pad = 3 * front.glow * u + (front.width + widestLine) * u + 6;
-        let ok = true, total = 0;
-        outer: for (const p of prepared) for (const g of p.tg.groups.values()) for (const f of g.faces) {
-          if (!this.joinFace(boxes, view, arr, f, m, pad, ctx.canvas.width, ctx.canvas.height)) { ok = false; break outer; }
+        // (The rectangles are the same for as long as the view and the changes animating stay the
+        // same: finding them again in every frame, parcel by parcel, cost 9 ms a frame on a map
+        // with many changes under way, in frames that changed nothing.)
+        const rk = `${frameKey}|${pad}|${prepared.map((p) => `${p.snap.key}:${[...p.tg.groups.keys()].join(',')}`).join('|')}`;
+        if (this.renewRects?.key !== rk) {
+          const boxes: number[][] = [];
+          let ok = true, total = 0;
+          outer: for (const p of prepared) for (const g of p.tg.groups.values()) for (const f of g.faces) {
+            if (!this.joinFace(boxes, view, arr, f, m, pad, ctx.canvas.width, ctx.canvas.height)) { ok = false; break outer; }
+          }
+          for (const q of boxes) total += (q[2] - q[0]) * (q[3] - q[1]);
+          this.renewRects = { key: rk, rects: ok && total <= 0.6 * ctx.canvas.width * ctx.canvas.height ? boxes.map((q) => [q[0], q[1], q[2] - q[0], q[3] - q[1]] as DeviceRect) : null };
         }
-        for (const q of boxes) total += (q[2] - q[0]) * (q[3] - q[1]);
-        if (ok && total <= 0.6 * ctx.canvas.width * ctx.canvas.height) renew = { rects: boxes.map((q) => [q[0], q[1], q[2] - q[0], q[3] - q[1]] as DeviceRect), moment: `${t.day}:${t.ms}|${opts.mediaSeconds ?? 0}` };
+        if (this.renewRects.rects) renew = { rects: this.renewRects.rects, moment };
       }
       const key = animated && !renew && opts.transitions ? null : partKey(`${animated && !renew ? `${t.day}:${t.ms}|` : ''}${renew ? 'animated|' : ''}${wantsFills ? 'f' : ''}${wantsBorders ? 'b' : ''}|${world.revision}|${style.border}|${style.borderWidth}|${opts.basemap ? opts.basemap.scales.length : ''}${landKey}${anyMedia ? `|${assetEpoch()}|${this.mediaSeconds}|${this.mediaChannel}` : ''}`);
       // The working view, after an edit or a step in time that changed few parcels: only where they lie is drawn again.
@@ -1523,7 +1540,6 @@ export class MapRenderer {
         const stable = `${key.loose.slice(0, looseBase.length)}|${detail}|${wantsFills ? 'f' : ''}${wantsBorders ? 'b' : ''}|${style.border}|${style.borderWidth}|${opts.basemap ? opts.basemap.scales.length : ''}${layerSig}|${colours}`;
         patch = this.changesSince(view, arr, engine, prepared.map((p) => p.states), key.strict, stable, m, ctx.canvas.width, ctx.canvas.height, widestLine * u + 3);
       } else this.patchPrev = null;
-      const terrName = `territory:${wantsFills ? 'f' : ''}${wantsBorders ? 'b' : ''}`;
       const terrDraw = (c: CanvasRenderingContext2D) => {
         // (Where the frame lies on what is drawn on: the canvas itself, or a kept picture with room around the frame.)
         const cm = c.getTransform();
@@ -2456,19 +2472,24 @@ export class MapRenderer {
 
   private layerLabels(view: View, arr: Arrangement, snap: LayerSnap, states: Map<number, FaceState>, entities: Map<string, LabelEntity>, mask: LandMask | null = null): LabelInfo[] {
     // How far each owner's changes have come (by area), for labels gliding with an animated change.
-    const progress = new Map<string, { w: number; p: number }>();
-    if (snap.animating) for (const g of snap.groups.values()) for (const face of g.changing.faces) {
-      const st = states.get(face);
-      if (!st?.transition) continue;
-      const area = arr.faceArea(face);
-      if (area <= 0 || area > 2 * Math.PI) continue;
-      const p = Math.min(1, Math.max(0, st.transition.progress));
-      for (const o of [st.transition.from, st.value]) {
-        if (!o) continue;
-        const e = progress.get(o) ?? { w: 0, p: 0 };
-        e.w += area; e.p += area * p;
-        progress.set(o, e);
+    // (Kept for the states it was worked out from: the same for every frame of the same moment.)
+    let progress = this.progressOf.get(states);
+    if (!progress) {
+      progress = new Map<string, { w: number; p: number }>();
+      if (snap.animating) for (const g of snap.groups.values()) for (const face of g.changing.faces) {
+        const st = states.get(face);
+        if (!st?.transition) continue;
+        const area = arr.faceArea(face);
+        if (area <= 0 || area > 2 * Math.PI) continue;
+        const p = Math.min(1, Math.max(0, st.transition.progress));
+        for (const o of [st.transition.from, st.value]) {
+          if (!o) continue;
+          const e = progress.get(o) ?? { w: 0, p: 0 };
+          e.w += area; e.p += area * p;
+          progress.set(o, e);
+        }
       }
+      this.progressOf.set(states, progress);
     }
     // Each owner's main piece before and after the changes animating now (the same when none is):
     // worked out once for the stretch of time.
@@ -2568,6 +2589,8 @@ export class MapRenderer {
     }
     return out;
   }
+
+  private progressOf = new WeakMap<Map<number, FaceState>, Map<string, { w: number; p: number }>>();
 
   /** The look of one country's label (null: hidden); set for each frame by render(). */
   private labelLook: (id: string, name: string) => { style: LabelStyle; text: string } | null = (_id, name) => ({ style: resolveLabelStyle(), text: name });
