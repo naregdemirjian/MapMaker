@@ -13,7 +13,7 @@ import { parseJSON, slerpLonLat } from '../temporal-engine/engine.ts';
 import { type Instant, compare, diffMs } from '../core-time/index.ts';
 import { BASE_EVENT_ID } from '../world-model/schema.ts';
 import type { Vec3 } from '../geo-kernel/vec.ts';
-import { screenToLonLat, FLAT_EXTENT_DEG, type View } from './camera.ts';
+import { screenToLonLat, meridianOf, FLAT_EXTENT_DEG, type View } from './camera.ts';
 import type { Arrangement } from '../geo-kernel/arrangement.ts';
 import { BasemapPainter, chooseScale, landMaskOf, visibleBounds, boxIntersects, type Basemap, type LandMask } from './basemap.ts';
 import { planeShape, placeLabel, lineChoices, textWidthEm, blockHeightEm, LINE_HEIGHT, type PlaneShape } from './label-place.ts';
@@ -2002,7 +2002,7 @@ export class MapRenderer {
    * either side of the outline's edge.
    */
   private boxesOnScreen(view: View, box: readonly [number, number, number, number]): Box2[] {
-    const kind = view.camera.projection, flat = kind === 'flat', ref = flat ? 0 : view.camera.lon;
+    const kind = view.camera.projection, flat = kind === 'flat', ref = flat ? 0 : meridianOf(view.camera);
     const s = view.projection.scale(), [tx, ty] = view.projection.translate();
     const [w, so, e, n] = box;
     const turn = flat ? 0 : 360 * Math.round((ref - (w + e) / 2) / 360);
@@ -2062,7 +2062,7 @@ export class MapRenderer {
 
   /** Grow `acc` (x0, y0, x1, y1 on screen) to hold a box given in degrees (west, south, east, north; longitudes may be unwrapped). */
   private boxOnScreen(view: View, box: readonly [number, number, number, number], acc: Box2): void {
-    const kind = view.camera.projection, flat = kind === 'flat', ref = flat ? 0 : view.camera.lon;
+    const kind = view.camera.projection, flat = kind === 'flat', ref = flat ? 0 : meridianOf(view.camera);
     const s = view.projection.scale(), [tx, ty] = view.projection.translate();
     const [w, so, e, n] = box;
     const turn = flat ? 0 : 360 * Math.round((ref - (w + e) / 2) / 360);

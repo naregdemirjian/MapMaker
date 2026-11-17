@@ -16,7 +16,7 @@
 // a ring is simply drawn again one turn east or west where that copy is in view, and the outline of
 // the planet clips what lies beyond it.
 import type { ProjectionName, View } from './camera.ts';
-import { rotatePoint } from './camera.ts';
+import { rotatePoint, meridianOf } from './camera.ts';
 import { BlockPath } from './blocks.ts';
 
 const RAD = Math.PI / 180;
@@ -214,7 +214,7 @@ export class Sheet {
   constructor(view: View, o: SheetOptions) {
     this.kind = view.camera.projection;
     this.cyl = isCylindrical(this.kind);
-    this.lonRef = this.cyl || this.kind === 'flat' ? 0 : view.camera.lon;
+    this.lonRef = this.cyl || this.kind === 'flat' ? 0 : meridianOf(view.camera);
     this.S = view.projection.scale();
     this.tolerance = o.tolerance;
     this.centre = [view.camera.lon, Math.max(-89.9, Math.min(89.9, view.camera.lat))];
@@ -232,7 +232,7 @@ export class Sheet {
   /** Can this sheet draw the view (and `pad` view pixels around it): same projection, the view inside the window, a scale near its own? */
   covers(view: View, tolerance: number, pad = 0): boolean {
     if (view.camera.projection !== this.kind || tolerance !== this.tolerance) return false;
-    if (!this.cyl && this.kind !== 'flat' && view.camera.lon !== this.lonRef) return false;
+    if (!this.cyl && this.kind !== 'flat' && meridianOf(view.camera) !== this.lonRef) return false;
     const s = view.projection.scale(), k = s / this.S;
     if (k > 1.42 || k < 0.5) return false;
     const r = viewRect(view, this.lonRef), p = pad / s;

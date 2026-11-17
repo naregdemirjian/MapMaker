@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLive, store } from '../store.ts';
 import {
-  makeView, screenToLonLat, lonLatToScreen, panCamera, zoomCameraAt, radiansPerPixel, type View, type Camera,
+  makeView, screenToLonLat, lonLatToScreen, panCamera, zoomCameraAt, radiansPerPixel, cameraKey, shapedByMeridian, type View, type Camera,
 } from '../../render-engine/camera.ts';
 import { DEFAULT_STYLE, type PassName } from '../../render-engine/map-renderer.ts';
 import { placementMode } from './Characters.tsx';
@@ -130,6 +130,10 @@ function commitShotCamera(): void {
   store.set({ presentCamera: null });
 }
 
+/** The view the map was last drawn with (it may be holding a meridian while the map moves; see MapView), and whether that was a shot's preview. */
+let shownView: { view: View; preview: boolean } | null = null;
+export function shownMapView(): { view: View; preview: boolean } | null { return shownView; }
+
 /** How long after the last movement of the view the picture is drawn afresh, sharp (milliseconds). */
 const SETTLE_MS = 110;
 /** After this long at rest, the room around the map's kept pictures is drawn (see MapRenderer.slide). */
@@ -147,6 +151,12 @@ export function MapView() {
   const s = useLive();
   /** The view last drawn and when it last changed; the timer that sharpens the picture once it rests. */
   const motion = useRef({ sig: '', at: 0, timer: 0 });
+  /**
+   * The meridian the working view is laid out around while the map is being moved (maps shaped by
+   * their middle meridian only, see Camera.meridian): the camera last seen, when it last changed,
+   * and the meridian held since.
+   */
+  const held = useRef({ cam: '', at: -Infinity, meridian: Number.NaN });
   /** Filling the room around the map's kept pictures once the view rests: the view it was last done for, the timer, and whether the next frame does it. */
   const filling = useRef({ sig: '', timer: 0, due: false });
   const speedRef = useRef<HTMLDivElement | null>(null);
@@ -177,7 +187,26 @@ export function MapView() {
   // The region of the canvas where the map is drawn, and the camera used.
   const frame = shot ? frameRect(shot, size.w, size.h) : { x: 0, y: 0, w: size.w, h: size.h };
   const camera: Camera = shot ? (s.presentCamera ?? cameraAt(shot, s.shotFrame)) : s.camera;
-  const view: View = makeView(camera, frame.w, frame.h);
+  // Equal Earth and Natural Earth give everything another shape for every middle meridian, so that
+  // moving such a map east or west meant preparing and drawing all of it again in every frame
+  // (a shot's projection is chosen in its settings, and its camera is framed by dragging the
+  // preview). While the map is being moved by hand, the view therefore keeps the meridian it had:
+  // the picture only shifts and is carried along like any other. Once the map rests (or has moved
+  // further than the prepared part of the map reaches) it is laid out around the camera again, as
+  // a shot's frames and exports always are. A shot that is playing is never held.
+  let viewCamera = camera;
+  const hm = held.current;
+  if ((shot ? !!s.presentCamera : true) && s.viewSettings.whileMoving === 'carry' && shapedByMeridian(camera.projection)) {
+    const now = performance.now(), ck = cameraKey(camera, frame.w, frame.h);
+    if (hm.cam !== ck) { hm.cam = ck; hm.at = now; }
+    const off = Math.abs(((((camera.lon - hm.meridian) % 360) + 540) % 360) - 180);
+    // (The view is about 375° / 2^zoom wide; the prepared part of the map reaches 0.6 of that beyond it.)
+    const reach = Math.min(45, (0.5 * 375) / Math.pow(2, camera.zoom));
+    if (!(now - hm.at < SETTLE_MS) || !(off <= reach)) hm.meridian = camera.lon;
+    if (hm.meridian !== camera.lon) viewCamera = { ...camera, meridian: hm.meridian };
+  } else { hm.cam = ''; hm.meridian = Number.NaN; }
+  const holding = viewCamera !== camera;
+  const view: View = makeView(viewCamera, frame.w, frame.h);
   const time = shot ? timeAt(shot, s.shotFrame) : s.time;
 
   // Drawn before the browser paints (a passive effect would show each movement a frame late).
@@ -209,7 +238,9 @@ export function MapView() {
     // The view counts as moving from when it changes until it has rested for a moment: meanwhile the
     // picture may be carried along (see MapRenderer.carry), and it is drawn afresh once it rests.
     const mo = motion.current;
-    const sig = `${view.key}|${frame.x},${frame.y}|${c.width}x${c.height}`;
+    // (What the view is of, not how it is laid out: taking the camera's meridian again at rest is no movement.)
+    const sig = `${cameraKey(camera, frame.w, frame.h)}|${frame.x},${frame.y}|${c.width}x${c.height}`;
+    shownView = { view, preview: !!shot };
     if (sig !== mo.sig) { mo.at = mo.sig ? started : -Infinity; mo.sig = sig; }
     const moving = started - mo.at < SETTLE_MS;
     // The moment shown is being dragged along the timeline: names are placed less finely until it rests.
@@ -230,7 +261,7 @@ export function MapView() {
     // (Counted from the end of this frame, not from the movement that caused it: a frame that itself
     // takes longer than the wait would otherwise be followed at once by the sharp redraw, in the
     // middle of the movement, and a slow computer would draw everything twice.)
-    if ((moving || hurried) && (s.renderer.lastApproximate || namesHidden)) mo.timer = window.setTimeout(() => force((n) => n + 1), SETTLE_MS + 4);
+    if ((moving || hurried) && (s.renderer.lastApproximate || namesHidden || holding)) mo.timer = window.setTimeout(() => force((n) => n + 1), SETTLE_MS + 4);
     // Once the view has rested a moment after moving, the room around the kept pictures is drawn (once
     // per view): the next move, or zooming out a little, then starts with nothing to draw.
     window.clearTimeout(fl.timer);
@@ -623,7 +654,8 @@ export function MapView() {
     e.preventDefault();
     const p = local(e);
     if (e.altKey && !presentation) { store.setCamera({ ...camera, rotation: (camera.rotation + (e.deltaY > 0 ? 3 : -3)) % 360 }); return; }
-    const next = zoomCameraAt(camera, frame.w, frame.h, p[0], p[1], -e.deltaY / 400);
+    // (Worked out on the map as it is shown; the meridian held meanwhile is the view's, not the camera's.)
+    const { meridian: _held, ...next } = zoomCameraAt(viewCamera, frame.w, frame.h, p[0], p[1], -e.deltaY / 400);
     if (shot) {
       store.setLive({ presentCamera: next });
       // Stored once the wheel has been still for a moment (one undo step per zoom gesture).

@@ -59,6 +59,40 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D67. Equal Earth and Natural Earth: the view keeps its middle meridian while the map is moved
+
+Equal Earth and Natural Earth give every shape on the map another form for every middle meridian, and the view was
+always laid out around the camera's own longitude. Moving such a map east or west, or zooming at the pointer, was
+therefore not a shift of the picture: all of it was prepared and drawn again in every frame (today's 242 countries:
+130 to 150 ms a frame, 7 frames a second; the heavy benchmark project: 140 to 210 ms; several times that on a slow
+computer). A projection is chosen for a shot, so this is what framing a shot's camera in the preview cost.
+
+While the map is being moved by hand, the view now keeps the meridian it had (`Camera.meridian`, held by `MapView`):
+the map keeps its shape, the picture only shifts, and it is carried along like a map with upright meridians (D51,
+D62): 6 to 12 ms a frame on the same projects. The place grabbed stays exactly under the pointer (`panCamera` reads
+the new middle off the map as it is shown, instead of counting degrees per pixel, which was only roughly right on
+these maps). When the pointer rests for a moment, when the button is let go, or once the map has moved further than
+the prepared part of it reaches (half the width of the view, 45° at most), the view is laid out around the camera
+again: the picture is then exactly the one a shot's frames and exports show, which are never held. The price is
+that the map straightens a little at that moment (a few degrees of slant after dragging a third of the view far
+from the equator, next to nothing close in). "While the map moves: drawn again" in Settings keeps the old
+behaviour, exact in every frame. A shot that is playing is never held either.
+
+What a held view is: a view of the same map laid out around another meridian, with the camera still in the middle
+of the frame. Everything drawn on it (names, tools, what a click hits) uses that same view, so nothing lies beside
+the picture. Nothing of it is stored: a held meridian never reaches a shot or the project. Tests:
+`test/camera.test.ts` (every place moves by exactly the pixels dragged, the camera stays in the middle, a meridian is
+ignored by the maps that do not need one); `e2e/render-compare` (two Equal Earth views carried through 170 moves
+equal fresh drawings of the same held views); `e2e/workflows` (the preview of a Natural Earth shot dragged with the
+mouse: carried while held, laid out afresh at rest, no meridian stored with the shot).
+
+Also in this step: the carried-picture comparison weighs a colour by how opaque the pixel is (beyond a planet's
+outline next to nothing is drawn, and the colour of nothing is no difference), and judges by how many pixels differ
+at all (0.05%), how many strongly, and how many together, instead of by one count that another computer's drawing
+missed by a hair (the browser smooths the same outline a little differently according to what else is in the path:
+two fresh pictures of one view differ by a few dozen pixels along coasts when their geometry was prepared around
+different places).
+
 ### D66. Opening a project: the database writes the snapshot, the kernel works on plain numbers
 
 Opening the heavy benchmark project went from about 3.3 s to about 2.4 s (the map with 24,500 parcels from 3.9 s

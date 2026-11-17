@@ -5,7 +5,22 @@ import { geoEquirectangular, geoEqualEarth, geoMercator, geoNaturalEarth1, geoGn
 
 /** Projections for round maps; 'flat' is the plan view of a flat map (a city, a region). */
 export type ProjectionName = 'equirectangular' | 'equalEarth' | 'naturalEarth' | 'mercator' | 'flat';
-export interface Camera { lon: number; lat: number; zoom: number; rotation: number; projection: ProjectionName }
+export interface Camera {
+  lon: number; lat: number; zoom: number; rotation: number; projection: ProjectionName;
+  /**
+   * The meridian a round map is laid out around, when it is not the camera's own longitude. Equal
+   * Earth and Natural Earth change the shape of everything with their middle meridian, so the
+   * working view keeps the meridian it had while the map is being moved (the picture then only
+   * shifts, and can be carried along) and takes the camera's again once the map rests (see MapView).
+   * Never stored: shots, exports and a view at rest are laid out around the camera.
+   */
+  meridian?: number;
+}
+
+/** Does the shape of the map depend on its middle meridian (so that moving east or west is more than a shift)? */
+export const shapedByMeridian = (kind: ProjectionName): boolean => kind === 'equalEarth' || kind === 'naturalEarth';
+/** The meridian a camera's map is laid out around: its own longitude, or the one it holds (only maps shaped by it hold one). */
+export const meridianOf = (cam: Camera): number => (cam.meridian !== undefined && shapedByMeridian(cam.projection) ? cam.meridian : cam.lon);
 
 export const DESIGN_WIDTH = 1920;
 export const PROJECTIONS: Array<{ id: ProjectionName; name: string }> = [
@@ -45,15 +60,20 @@ export interface View {
   key: string;
 }
 
+/** What a view is of: the camera (without a held meridian) and the size of the frame. */
+export const cameraKey = (cam: Camera, width: number, height: number): string => `${cam.projection}|${cam.lon}|${cam.lat}|${cam.zoom}|${cam.rotation}|${width}x${height}`;
+
 export function makeView(cam: Camera, width: number, height: number): View {
   const flat = cam.projection === 'flat';
-  // A flat map's plan is centred on (0, 0) and never turned; round maps turn to the camera's longitude.
-  const p = (factories[cam.projection] ?? geoEquirectangular)().precision(flat ? 0.05 : 0.25).rotate([flat ? 0 : -cam.lon, 0]).scale(1).translate([0, 0]);
+  // A flat map's plan is centred on (0, 0) and never turned; round maps turn to the camera's
+  // longitude (or to the meridian it holds, see Camera.meridian).
+  const mid = flat ? 0 : meridianOf(cam);
+  const p = (factories[cam.projection] ?? geoEquirectangular)().precision(flat ? 0.05 : 0.25).rotate([-mid, 0]).scale(1).translate([0, 0]);
   if (cam.projection === 'mercator') p.clipExtent(null);
   let worldWidthAtUnit: number;
   if (flat) worldWidthAtUnit = 2 * Math.tan((FLAT_EXTENT_DEG * Math.PI) / 180);
   else {
-    const a = p([cam.lon - 179.999, 0]), b = p([cam.lon + 179.999, 0]);
+    const a = p([mid - 179.999, 0]), b = p([mid + 179.999, 0]);
     worldWidthAtUnit = Math.abs((b?.[0] ?? 3.14) - (a?.[0] ?? -3.14));
   }
   const base = (width * 0.96) / worldWidthAtUnit;
@@ -62,7 +82,7 @@ export function makeView(cam: Camera, width: number, height: number): View {
   const c = p([cam.lon, Math.max(-89.9, Math.min(89.9, cam.lat))]) ?? [width / 2, height / 2];
   p.translate([width / 2 + (width / 2 - c[0]), height / 2 + (height / 2 - c[1])]);
   const unit = width / DESIGN_WIDTH;
-  return { projection: p, width, height, rotation: cam.rotation, unit, camera: cam, key: `${cam.projection}|${cam.lon}|${cam.lat}|${cam.zoom}|${cam.rotation}|${width}x${height}` };
+  return { projection: p, width, height, rotation: cam.rotation, unit, camera: cam, key: cameraKey(cam, width, height) + (!flat && mid !== cam.lon ? `|m${mid}` : '') };
 }
 
 /** Screen pixel -> [lon, lat] (or null when outside the map). */
@@ -96,6 +116,13 @@ export function radiansPerPixel(v: View): number {
 }
 
 export function panCamera(cam: Camera, v: View, dx: number, dy: number): Camera {
+  // A map shaped by its middle meridian is not moved by so many degrees a pixel: the place that
+  // comes to the middle of the view is read off the map as it is shown (which, while the view
+  // holds its meridian, moves the picture by exactly the pixels asked for).
+  if (shapedByMeridian(cam.projection)) {
+    const ll = screenToLonLat(v, v.width / 2 - dx, v.height / 2 - dy);
+    if (ll) return { ...cam, lon: ((ll[0] + 540) % 360) - 180, lat: Math.max(-85, Math.min(85, ll[1])) };
+  }
   const [ux, uy] = rotatePoint(dx, dy, 0, 0, -cam.rotation);
   const degPerPx = (180 / Math.PI) / v.projection.scale();
   let lon = cam.lon - ux * degPerPx;

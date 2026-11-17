@@ -5,13 +5,19 @@ import { gregorian } from '../core-time/index.ts';
 import { lonLatToVec } from '../geo-kernel/vec.ts';
 import { makeView, screenToLonLat, lonLatToScreen } from '../render-engine/camera.ts';
 import { cameraAt, timeAt } from '../presentation/sequence.ts';
-import { currentShot, frameRect, shotOverlayRects } from './components/MapView.tsx';
+import { currentShot, frameRect, shotOverlayRects, shownMapView } from './components/MapView.tsx';
 import * as commands from '../domain/commands.ts';
 import { runExport } from '../presentation/export-driver.ts';
 import { decodeCountries, COUNTRY_GROUP_COLORS } from '../domain/countries.ts';
 import { MapRenderer } from '../render-engine/map-renderer.ts';
 import { labelStats } from '../render-engine/label-place.ts';
 import { Engine } from '../temporal-engine/engine.ts';
+
+/** The working map's view as it is shown (it may hold a meridian while the map moves), or the camera's own for that size. */
+function shown(width: number, height: number) {
+  const v = shownMapView();
+  return v && !v.preview && v.view.width === width && v.view.height === height ? v.view : makeView(store.camera, width, height);
+}
 
 // A small read-only window into the live state, used by the automated interface tests.
 // It changes nothing; everything the tests do to the project goes through the interface itself.
@@ -40,16 +46,18 @@ import { Engine } from '../temporal-engine/engine.ts';
     const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement | null;
     if (!c) return null;
     const r = c.getBoundingClientRect();
-    return screenToLonLat(makeView(store.camera, r.width, r.height), pageX - r.left, pageY - r.top);
+    return screenToLonLat(shown(r.width, r.height), pageX - r.left, pageY - r.top);
   },
   /** The point of the page where a map position is drawn, in world-building mode. */
   lonLatToPage(lon: number, lat: number) {
     const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement | null;
     if (!c) return null;
     const r = c.getBoundingClientRect();
-    const p = lonLatToScreen(makeView(store.camera, r.width, r.height), lon, lat);
+    const p = lonLatToScreen(shown(r.width, r.height), lon, lat);
     return p ? [p[0] + r.left, p[1] + r.top] : null;
   },
+  /** The meridian the working map is laid out around while it is being moved, or null (see Camera.meridian). */
+  heldMeridian() { return shownMapView()?.view.camera.meridian ?? null; },
   /** The historical instant shown by a frame of the current shot. */
   shotInstantAt(frame: number) {
     const shot = currentShot();
@@ -66,7 +74,8 @@ import { Engine } from '../temporal-engine/engine.ts';
     if (!shot || !c) return null;
     const r = c.getBoundingClientRect();
     const fr = frameRect(shot, r.width, r.height);
-    const p = lonLatToScreen(makeView(store.presentCamera ?? cameraAt(shot, store.shotFrame), fr.w, fr.h), lon, lat);
+    const v = shownMapView();
+    const p = lonLatToScreen(v && v.preview && v.view.width === fr.w && v.view.height === fr.h ? v.view : makeView(store.presentCamera ?? cameraAt(shot, store.shotFrame), fr.w, fr.h), lon, lat);
     return p ? [p[0] + fr.x + r.left, p[1] + fr.y + r.top] : null;
   },
   /** Where the shot preview drew its texts and events box, as page rectangles (id, x, y, w, h). */

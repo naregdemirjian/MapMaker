@@ -10,7 +10,7 @@ The approved architecture is the Claude Doc "Map Maker — Technical Architectur
 ## Status at a glance (17 November 2026, after the second optimisation stage)
 
 - **Second optimisation stage done** (the user's request to keep optimising the whole workflow and to stress test it
-  for massive projects on a slower computer; D55–D66; REQUIREMENTS.md, "The user's second optimisation request").
+  for massive projects on a slower computer; D55–D67; REQUIREMENTS.md, "The user's second optimisation request").
   Against the build before it, on the same benchmark projects: moving the map 16–39 ms a frame to 5–10 ms; zooming
   about half; a brush stroke 65–75 ms to about 33 ms (193 to 123 ms on the 24,500-parcel map); dragging the timeline
   a year a frame 29 to 10 ms on the heavy project; exports a fifth to a quarter faster; opening 3.2–5.6 s to
@@ -18,7 +18,8 @@ The approved architecture is the Claude Doc "Map Maker — Technical Architectur
   146 to 71 ms a frame, a stroke 227 to 155 ms. How: history, snapshots, borders and names are brought up to date
   from what was there before instead of worked out again (D55, D56, D60); kept pictures have room around the frame,
   hold the repeating map and are shown as one picture while zooming (D62, D63); the browser's hidden costs with
-  canvases and paths are avoided (D61, D64); the database writes the snapshot when a project opens (D66). A verify
+  canvases and paths are avoided (D61, D64); the database writes the snapshot when a project opens (D66); a shot
+  in Equal Earth or Natural Earth is framed at 6–12 ms a frame instead of 130–210 (D67). A verify
   mode and a random stress run check all of it (D57). **Six defects found and fixed on the way**: borders between
   countries could vanish after drawing inside a country (D56); moving east or west with the planet's ends in view
   showed a wrong picture (D62); the sharp redraw could fall in the middle of a slow movement and draw everything
@@ -114,7 +115,7 @@ For development (Linux or Windows, Node 22.18 or newer):
 | `xvfb-run -a node --disable-warning=ExperimentalWarning e2e/desktop.e2e.ts` | The 5-step desktop app test (build first) |
 | `node --disable-warning=ExperimentalWarning dist/server.mjs --port 4317 --projects <folder> [--open]` | Runs the app |
 | `sh scripts/check-all.sh` | Every check: type check, unit tests, build, the four interface tests |
-| `npm test` | 201 unit, randomised and scenario tests |
+| `npm test` | 202 unit, randomised and scenario tests |
 | `node --disable-warning=ExperimentalWarning e2e/render-compare.e2e.ts` | The renderer against the old one kept in `e2e/reference/` (35 scenes); carried, patched and animated pictures against fresh ones (build first; `VERBOSE=1` lists every case) |
 | `node --disable-warning=ExperimentalWarning bench/make-fixtures.ts <folder> [massive]` | Makes the benchmark projects: "Bench Earth 242", "Bench Heavy", "Bench Random 1000" (minutes); with `massive`, one with 3,000 border changes as well. The benchmarks and tools below work on throwaway copies of them |
 | `node --disable-warning=ExperimentalWarning bench/render.bench.ts <folder> ["<project>"...] [--only a,b] [--label x] [--out file]` | Frame times in Chrome for each scenario (idle, pans at five zooms, zoom, scrub, stroke, play, exports); build first |
@@ -126,7 +127,7 @@ For development (Linux or Windows, Node 22.18 or newer):
 | `MAPMAKER_E2E_VIEWPORT=1500x900 node ... e2e/vertical-slice.e2e.ts` (or `workflows`) | The interface tests in a window of another size (no step may depend on where things fall on screen) |
 | `node --disable-warning=ExperimentalWarning test/geo-kernel.stress.ts <seeds> <rings>` | Long randomised kernel run |
 | `node --disable-warning=ExperimentalWarning e2e/vertical-slice.e2e.ts` | The 23-step interface test in Chrome (build first); screenshots in `e2e/output/` |
-| `node --disable-warning=ExperimentalWarning e2e/workflows.e2e.ts` | The 21-step workflow and export-inspection test; screenshots in `e2e/output/workflows/` |
+| `node --disable-warning=ExperimentalWarning e2e/workflows.e2e.ts` | The 22-step workflow and export-inspection test; screenshots in `e2e/output/workflows/` |
 | `node --disable-warning=ExperimentalWarning test/perf.bench.ts 100 300 1000 [--keep <folder>]` | Performance benchmark (minutes at 1000) |
 | `node node_modules/typescript/bin/tsc -p tsconfig.json` | Type check (must report nothing) |
 
@@ -196,7 +197,7 @@ The approved roadmap has 14 stages (0–13). Where each stands:
 
 ## Tests
 
-All pass as of 17 November 2026 (201 unit and randomised tests in 31 files, 23 + 21 + 5 + 5 interface steps). The
+All pass as of 17 November 2026 (202 unit and randomised tests in 31 files, 23 + 22 + 5 + 5 interface steps). The
 interface tests run with the verify mode on (D57): everything the app works out from what was there before is also
 worked out afresh, and any difference stops the test.
 `sh scripts/check-all.sh` runs everything and prints ALL CHECKS PASSED only when every check passed.
@@ -213,7 +214,7 @@ worked out afresh, and any difference stops the test.
 | `test/recovery.test.ts` | 7 | Three kinds of file damage refused then recovered; damaged backups skipped; no usable backup; malformed rows; 120-step undo/redo compared state by state; old uncompressed history |
 | `test/split-identity.test.ts` | 7 | The split-identity optimisation leaves history identical (6 random histories, with and without) and stops coastline relabelling |
 | `test/stroke.test.ts` | 7 | Freehand outlines: closed, open, figure-eight, tiny, orientation, reproducible irregularity |
-| `test/camera.test.ts` | 7 | Screen/map round trips in every projection, rotation and zoom 0–14; zoom keeps the cursor point fixed; city-level precision; panning across 180° |
+| `test/camera.test.ts` | 8 | Screen/map round trips in every projection, rotation and zoom 0–14; zoom keeps the cursor point fixed; city-level precision; panning across 180°; a view that holds its middle meridian (Equal Earth, Natural Earth): the camera stays in the middle, every place moves by exactly the pixels dragged |
 | `test/kernel-incremental.test.ts` | 8 | The kept half-edge structure equals a full rebuild after every kind of edit, undo and redo (4 seeds x 70 steps); nearly overlapping borders; outlines kept under firm snapping, valid with no crossing borders after each (3 seeds x 60) |
 | `test/countries.test.ts` | 4 | Today's countries: holes, overseas parts, across 180°, all 242 at once as an event (about 5 s), one undo; land added into the user's own country |
 | `test/label-style.test.ts` | 3 | Label styles: layering, clamping, text, commands with undo |
@@ -234,11 +235,11 @@ worked out afresh, and any difference stops the test.
 | `test/engine-stretch.test.ts` | 2 | States shared between change instants equal states worked out afresh; edits to history are seen at once; edits that do not touch history do not recompile |
 | `test/plane.test.ts` | 8 | The projection formulas against d3-geo; a sheet covers exactly what the kernel says each parcel covers, across 180°, at the poles and on flat maps; neighbours simplified alike; dissolved outlines |
 | `test/blocks.test.ts` | 3 | A block keeps what matters inside it: the same fill (winding) and the same lines as the whole shape, on random shapes; stored working-view settings are made valid, presets recognised |
-| `e2e/render-compare.e2e.ts` | 5 steps | 35 scenes drawn by the renderer and by the old one (`e2e/reference/`) are the same picture (fills strictly, borders by position); a picture carried along as the view moves equals one drawn afresh (six views, the planet's ends in view among them; whole-pixel moves, then 170 small ones with the room around the frame drawn first); after brush strokes inside countries and an undo, the patched picture equals one drawn afresh; every frame of an animated change, renewed only in its own area, equals one drawn afresh |
+| `e2e/render-compare.e2e.ts` | 5 steps | 35 scenes drawn by the renderer and by the old one (`e2e/reference/`) are the same picture (fills strictly, borders by position); a picture carried along as the view moves equals one drawn afresh (eight views, the planet's ends in view and two Equal Earth views holding their meridian among them; whole-pixel moves, then 170 small ones with the room around the frame drawn first; judged by how many pixels differ, how strongly and how densely); after brush strokes inside countries and an undo, the patched picture equals one drawn afresh; every frame of an animated change, renewed only in its own area, equals one drawn afresh |
 | `e2e/vertical-slice.e2e.ts` | 23 steps | The vertical slice in Chrome: projects, drawing, Earth's geography and data sources, border points, versions, events, dates, version restore and undo, full restart, animation, export with data credits, identical re-export, 1080p, coastline clipping |
 | `e2e/desktop.e2e.ts` | 5 steps | The Electron app: own window, own data service on this computer only, project written to disk, one copy at a time, close and reopen with contents intact |
 | `test/event-groups.test.ts` | 4 | Event group commands with undo (several groups per event, filter rules, deletion keeps events, alternatives keep groups); a version 1 project file upgraded on opening (backup first, content and undo history intact, old backups restorable without rolling the format back); a file from a newer version refused untouched |
-| `e2e/workflows.e2e.ts` | 21 steps | Precise shapes; occupation layer; hiding layers; alternative versions; annexation; deleting and undoing events; fades; a second world; a camera move at 2.39:1 and 25 fps with frame timing, history in the pixels and pass stacking checked; square size, Natural Earth projection, 23.976 fps, transparency |
+| `e2e/workflows.e2e.ts` | 22 steps | Precise shapes; occupation layer; hiding layers; alternative versions; annexation; deleting and undoing events; fades; a second world; a camera move at 2.39:1 and 25 fps with frame timing, history in the pixels and pass stacking checked; square size, Natural Earth projection, 23.976 fps, transparency; the preview of that shot dragged with the mouse (carried while its meridian is held, laid out afresh at rest) |
 
 Checked by hand: 4K and 8K exports; the unzipped package starts and works; requests from other hosts are refused.
 
@@ -300,9 +301,10 @@ What still takes time, in order of what it would give:
    frame, and playing or exporting a shot that does (Heavy and Random 1000: 80–180 ms a frame). What is left is
    filling the changed territory again and joining each changed owner's parcels into one outline; a graphics card
    takes most of the first.
-2. **Maps in the Equal Earth and Natural Earth projections moved east or west**: every shape changes with the middle
-   meridian, so nothing can be carried and each frame prepares the map again (seconds on the largest maps). The
-   equirectangular and Mercator views, and flat maps, are not affected.
+2. **Shots in Equal Earth or Natural Earth whose camera moves east or west, while they play**: every shape changes
+   with the middle meridian, so each frame prepares the map again (130–210 ms a frame on these projects), as their
+   export does by design. Framing such a shot by hand no longer costs this (D67: 6–12 ms a frame, with the map
+   straightening a little when it comes to rest).
 3. **Zooming without a graphics card**: showing the kept picture at another size is the browser's dearest copy
    (about 15 ms a frame at this size), and a zoom ends with one full redraw at the new scale.
 4. **A world view with a thousand names on screen** (Random 1000: 25 ms a frame while moving): the names are placed

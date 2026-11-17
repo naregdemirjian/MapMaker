@@ -7,6 +7,7 @@
 // Usage: node --disable-warning=ExperimentalWarning bench/stress.ts <fixtures folder> "<project>" [--steps 400] [--seed 1]
 //          [--throttle 4] (a computer that many times slower) [--scale 2] (a screen with that many pixels per point) [--no-verify]
 //          [--preset fastest|best] (the working view's speed settings) [--dump <folder>] (where to write the two pictures when they differ)
+//          [--projection equalEarth|naturalEarth|mercator] (the session starts in that projection; Equal Earth and Natural Earth hold their middle meridian while the map moves)
 // Build first (node scripts/build.mjs). The project is not changed: the run works on a copy.
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
@@ -22,6 +23,7 @@ const steps = Number(flag('--steps') ?? 400), seed = Number(flag('--seed') ?? 1)
 const verify = !has('--no-verify');
 const preset = flag('--preset');
 const dump = flag('--dump');
+const projection = flag('--projection');
 const [folder, name] = args;
 if (!folder || !name) { console.error('Give the fixtures folder and the project name.'); process.exit(1); }
 
@@ -44,6 +46,7 @@ try {
   if (verify) await page.evaluate(() => (window as any).__mapmaker.verify());
   // The working view's speed settings (Settings in the app): 'fastest' or 'best'; the default is 'balanced'.
   if (preset === 'fastest') await page.evaluate(() => (window as any).__mapmaker.store.setViewSettings({ resolution: 0.75, detail: 'coarse', whileMoving: 'carry', names: 'hide', coast: 'medium', showSpeed: false }));
+  if (projection) await page.evaluate((p) => { const s = (window as any).__mapmaker.store; s.setCamera({ ...s.camera, projection: p }); }, projection);
   if (preset === 'best') await page.evaluate(() => (window as any).__mapmaker.store.setViewSettings({ resolution: 1, detail: 'fine', whileMoving: 'redraw', names: 'place', coast: 'full', showSpeed: false }));
   if (throttle > 1) { const cdp = await context.newCDPSession(page); await cdp.send('Emulation.setCPUThrottlingRate', { rate: throttle }); }
   const t0 = Date.now();
@@ -71,6 +74,8 @@ try {
     /** The picture on screen, once the view has come to rest, against the same view drawn by a renderer that keeps nothing. */
     const compare = async (): Promise<string | null> => {
       await wait(260); await raf();
+      // (At rest the view is laid out around the camera: a meridian is held only while the map moves, see MapView.)
+      if (m.heldMeridian() !== null) return `the view still holds the meridian ${m.heldMeridian()} at rest`;
       const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement;
       const W = c.width, H = c.height;
       const k = W / c.getBoundingClientRect().width;

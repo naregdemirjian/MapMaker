@@ -876,6 +876,59 @@ try {
     assert.ok(existsSync(join(ex.dir, 'manifest.json')));
   });
 
+  await h.step('Framing a shot in Natural Earth: the map follows the pointer while dragged, and is laid out around the camera again at rest', async () => {
+    // Natural Earth and Equal Earth give everything another shape for every middle meridian. While
+    // the preview is dragged it keeps the meridian it had, so the picture only shifts (and is
+    // carried along); at rest it is laid out around the camera again, as the exported frames are.
+    const hook = <T,>(name: string, ...args: unknown[]) => page.evaluate(([n, a]) => (window as any).__mapmaker[n as string](...(a as unknown[])), [name, args]) as Promise<T>;
+    const shotCamera = () => page.evaluate(() => JSON.parse((window as any).__mapmaker.store.world.all('sequence')[0].settings).camera[0].camera);
+    const before = await shotCamera();
+    assert.equal(before.projection, 'naturalEarth');
+    assert.equal(await hook('heldMeridian'), null, 'nothing held at rest');
+    // A place a little off the middle of the frame, and the pointer on it.
+    const place: LL = [before.lon + 6, before.lat + 3];
+    const start = await hook<[number, number]>('previewToPage', place[0], place[1]);
+    let x = Math.round(start[0]), y = Math.round(start[1]);
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    // While the meridian is held, a move of the pointer moves the place grabbed by exactly as
+    // much. (When the pointer pauses for a moment, as it may on a busy computer, the map comes to
+    // rest in between and is laid out afresh: such a move is not counted.)
+    let last = { at: start, held: null as number | null, x, y };
+    let exact = 0, carried = 0;
+    const seen: string[] = [];
+    for (let i = 0; i < 12; i++) {
+      x -= 19; y += 7;
+      await page.mouse.move(x, y);
+      const st = await page.evaluate(async ([lon, lat]) => {
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        const m = (window as any).__mapmaker;
+        return { at: m.previewToPage(lon, lat) as [number, number], held: m.heldMeridian() as number | null, parts: Object.values(m.store.renderer.lastParts) as string[] };
+      }, place);
+      const off = Math.hypot((st.at[0] - last.at[0]) - (x - last.x), (st.at[1] - last.at[1]) - (y - last.y));
+      seen.push(`${i + 1}: held ${st.held}, ${off.toFixed(2)} px off, ${st.parts.join('/')}`);
+      if (st.held !== null && (st.held === last.held || i === 0)) {
+        assert.ok(off < 0.6, `while its meridian is held, the place grabbed moved ${off.toFixed(2)} px differently from the pointer (${seen.join('; ')})`);
+        exact++;
+        if (st.parts.length && st.parts.every((q) => q === 'moved')) carried++;
+      }
+      last = { at: st.at, held: st.held, x, y };
+    }
+    assert.ok(exact >= 6, `the preview kept its middle meridian in ${exact} of 12 moves (${seen.join('; ')})`);
+    assert.ok(carried >= exact - 2, `the picture was carried along in ${carried} of those ${exact} moves (${seen.join('; ')})`);
+    await page.mouse.up();
+    await page.waitForTimeout(400);
+    await h.saved();
+    assert.equal(await hook('heldMeridian'), null, 'laid out around the camera again at rest');
+    const after = await shotCamera();
+    assert.ok(Math.abs(after.lon - before.lon) > 1, `the shot's camera moved (${before.lon} to ${after.lon})`);
+    assert.ok(!('meridian' in after), 'no held meridian is stored with the shot');
+    const rest = await hook<[number, number]>('previewToPage', place[0], place[1]);
+    assert.ok(Math.hypot(rest[0] - x, rest[1] - y) < 40, `at rest the place is still near the pointer (${Math.hypot(rest[0] - x, rest[1] - y).toFixed(1)} px)`);
+    if (process.env.VERBOSE) console.log(`\n    ${seen.join('\n    ')}`);
+    await h.screenshot('natural-earth-framed');
+  });
+
   await h.step('A flat map: a 10 km city plan with straight borders and a scale in metres or kilometres', async () => {
     await page.getByTestId('mode-world').click();
     await page.getByRole('button', { name: '+ Map' }).click();

@@ -194,19 +194,23 @@ try {
         let differing = 0, worst = 0, strong = 0, dense = 0;
         squares.fill(0);
         for (let i = 0; i < da.length; i += 4) {
-          const d = Math.max(Math.abs(da[i] - db[i]), Math.abs(da[i + 1] - db[i + 1]), Math.abs(da[i + 2] - db[i + 2]), Math.abs(da[i + 3] - db[i + 3]));
+          // (A colour counts for as much as the pixel is opaque: beyond a planet's outline next to
+          // nothing is drawn, and the colour of that nothing is no difference.)
+          const oa = da[i + 3] / 255, ob = db[i + 3] / 255;
+          const d = Math.max(Math.abs(da[i] * oa - db[i] * ob), Math.abs(da[i + 1] * oa - db[i + 1] * ob), Math.abs(da[i + 2] * oa - db[i + 2] * ob), Math.abs(da[i + 3] - db[i + 3]));
           if (d <= 6) continue;
           const p = i / 4, px = p % W;
           if (sides.some((sx) => Math.abs(px + 0.5 - sx) <= 1.5)) continue;
           differing++;
-          if (d > worst) worst = d;
+          if (d > worst) worst = Math.round(d);
           if (d > 96) strong++;
           const q = (px >> 3) + ((p - px) / W >> 3) * Math.ceil(W / 8);
           if (++squares[q] > dense) dense = squares[q];
         }
         return { differing: differing / (W * H), worst, strong, dense };
       };
-      const sidesOf = (v: any) => [W / 2 - Math.PI * v.projection.scale(), W / 2 + Math.PI * v.projection.scale()];
+      // (Only maps with upright meridians have such ends: an equirectangular world is 2 pi wide at scale 1.)
+      const sidesOf = (v: any) => (v.camera.projection === 'equirectangular' ? [W / 2 - Math.PI * v.projection.scale(), W / 2 + Math.PI * v.projection.scale()] : []);
       const cases = [
         { name: 'the world', zoom: 0.4, lon: 10, lat: 20, basemap: true },
         // (The planet's east and west ends are in view, or just beyond it: they stay where they are
@@ -216,6 +220,10 @@ try {
         { name: 'a region with coasts', zoom: 3.2, lon: 12, lat: 46, basemap: true },
         { name: 'a region without the Earth', zoom: 2.4, lon: 60, lat: 40, basemap: false },
         { name: 'close in', zoom: 6.5, lon: 14, lat: 50, basemap: true },
+        // Equal Earth gives everything another shape for every middle meridian: the view keeps the
+        // meridian it had while the map is moved (see Camera.meridian), so its picture only shifts.
+        { name: 'Equal Earth, a region, its meridian held', zoom: 3.2, lon: 12, lat: 46, basemap: true, projection: 'equalEarth', held: true },
+        { name: 'Equal Earth, the world inside its outline, its meridian held', zoom: 0.3, lon: 10, lat: 15, basemap: true, projection: 'equalEarth', held: true, tall: 0.3 },
       ];
       // Moves by whole pixels (right, down), one after the other.
       const moves = [[37, 0], [-5, 23], [120, -61], [0, 1], [-333, 40], [9, -200], [1, 1]];
@@ -224,9 +232,19 @@ try {
         carried.carry = true;
         fresh.caching = 'off';
         const opts = { passes: new Set(['background', 'graticule', 'land', 'fills', 'borders']), transparent: false, layerIds: layers, basemap: c.basemap ? s.basemap : null };
-        const cam = { lon: c.lon, lat: c.lat, zoom: c.zoom, rotation: 0, projection: 'equirectangular' };
+        const held = !!(c as { held?: boolean }).held;
+        const cam = { lon: c.lon, lat: c.lat, zoom: c.zoom, rotation: 0, projection: (c as { projection?: string }).projection ?? 'equirectangular', ...(held ? { meridian: c.lon } : {}) };
         let view = B.makeView(cam, W, H);
         const perDegree = (view.projection.scale() * Math.PI) / 180;
+        // The view after the map has been moved by x, y pixels from the start: so many degrees a
+        // pixel on a map with upright meridians; on one that holds its meridian, the place that
+        // comes to the middle is read off the map as it lies (as dragging does, see panCamera).
+        const v0 = view;
+        const viewAt = (px: number, py: number, more: object = {}) => {
+          if (!held) return B.makeView({ ...cam, lon: c.lon + px / perDegree, lat: c.lat - py / perDegree, ...more }, W, H);
+          const ll = v0.projection.invert([W / 2 + px, H / 2 + py]);
+          return B.makeView({ ...cam, lon: ll[0], lat: ll[1], ...more }, W, H);
+        };
         carried.render(a, view, s.world, s.engine, s.spaceId, t, opts);
         let x = 0, y = 0;
         // (Far out, moves north and south are made shorter: the view cannot go past the poles, and
@@ -236,7 +254,7 @@ try {
           const dy = Math.round(dy0 * tall);
           if (!dx && !dy) continue;
           x += dx; y += dy;
-          view = B.makeView({ ...cam, lon: c.lon + x / perDegree, lat: c.lat - y / perDegree }, W, H);
+          view = viewAt(x, y);
           carried.render(a, view, s.world, s.engine, s.spaceId, t, opts);
           fresh.render(b, view, s.world, s.engine, s.spaceId, t, opts);
           out.push({ name: `${c.name}, moved by ${dx}, ${dy}`, parts: Object.values(carried.lastParts).join(' '), approximate: carried.lastApproximate, ...compare(sidesOf(view)) });
@@ -252,7 +270,7 @@ try {
           const dy = Math.round(dy0 * tall);
           for (let i = 0; i < times; i++) {
             x += dx; y += dy;
-            view = B.makeView({ ...cam, lon: c.lon + x / perDegree, lat: c.lat - y / perDegree }, W, H);
+            view = viewAt(x, y);
             carried.render(a, view, s.world, s.engine, s.spaceId, t, { ...opts, moving: true });
             if (++n % 6 && i !== times - 1) continue;
             fresh.render(b, view, s.world, s.engine, s.spaceId, t, opts);
@@ -260,7 +278,7 @@ try {
           }
         }
         // A move by part of a pixel, and a zoom, while moving: approximate; drawn afresh once at rest.
-        const off = B.makeView({ ...cam, lon: c.lon + (x + 10.4) / perDegree, lat: c.lat - y / perDegree, zoom: c.zoom + 0.2 }, W, H);
+        const off = viewAt(x + 10.4, y, { zoom: c.zoom + 0.2 });
         carried.render(a, off, s.world, s.engine, s.spaceId, t, { ...opts, moving: true });
         const during = { parts: Object.values(carried.lastParts).join(' '), approximate: carried.lastApproximate };
         carried.render(a, off, s.world, s.engine, s.spaceId, t, opts);
