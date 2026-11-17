@@ -44,15 +44,26 @@ export function formatBytes(n: number): string {
 }
 
 /**
+ * How the PNG of a map grows with the picture: a picture twice as wide and high takes about two and a
+ * half times the bytes, not four times (flat colour packs to next to nothing; outlines and names,
+ * which grow with the width, are what is left). Measured on the benchmark projects from 320 to 1920
+ * pixels wide: between 2.3 and 2.7 times for every pass, at every size.
+ */
+const SIZE_GROWTH = 1.35;
+/** The bytes of a picture `times` as wide and high as one of `bytes` (see SIZE_GROWTH). */
+export function scaledBytes(bytes: number, times: number): number { return bytes * Math.pow(times, SIZE_GROWTH); }
+
+/**
  * About how many bytes an export will write: one frame from the middle of the shot is drawn for each
- * chosen pass (at most 1920 pixels wide, scaled up by area) and compressed as PNG, then multiplied
- * by the number of frames. Real frames vary, so this is an estimate.
+ * chosen pass and compressed as PNG, then multiplied by the number of frames. The frame is drawn at
+ * most 960 pixels wide and its size worked up from that (scaledBytes): drawing it at full size took
+ * twice as long, in the middle of work on the shot. Real frames vary, so this is an estimate.
  */
 export async function estimateExportBytes(world: World, engine: Engine, shot: ShotSettings, passNames: string[], scale = 1): Promise<number> {
   const defs = PASS_DEFS.filter((d) => passNames.includes(d.name));
   if (!defs.length) return 0;
   const W = Math.max(16, Math.round(shot.width * scale)), H = Math.max(16, Math.round(shot.height * scale));
-  const k = Math.min(1, 1920 / W);
+  const k = Math.min(1, 960 / W);
   const w = Math.max(16, Math.round(W * k)), h = Math.max(16, Math.round(H * k));
   const basemap = await basemapFor(world, shot.spaceId);
   const canvas = new OffscreenCanvas(w, h);
@@ -69,7 +80,7 @@ export async function estimateExportBytes(world: World, engine: Engine, shot: Sh
     const blob = await canvas.convertToBlob({ type: 'image/png' });
     perFrame += blob.size;
   }
-  return (perFrame * (W * H)) / (w * h) * shot.frames;
+  return scaledBytes(perFrame, W / w) * shot.frames;
 }
 
 let estimator: MapRenderer | null = null;

@@ -414,24 +414,20 @@ try {
       const layers = s.world.all('layer').filter((l: any) => l.space_id === s.spaceId && l.kind === 'partition').map((l: any) => l.id);
       const canvas = () => { const c = new OffscreenCanvas(W, H); return c.getContext('2d', { willReadFrequently: true }) as OffscreenCanvasRenderingContext2D; };
       const a = canvas(), b = canvas();
-      const out: Array<{ name: string; part: string; animating: number; differing: number; worst: number }> = [];
-      // `sides`: where the planet's east and west ends stand on the canvas. A carried picture ends
-      // there on a whole pixel, a fresh one part way into one (and there a fresh picture lets what
-      // lies under the land show through twice): the two columns around each end are left out.
-      const compare = (sides: number[] = []) => {
+      const out: Array<{ name: string; part: string; animating: number; differing: number; worst: number; crossing?: boolean }> = [];
+      const compare = () => {
         const da = a.getImageData(0, 0, W, H).data, db = b.getImageData(0, 0, W, H).data;
         let differing = 0, worst = 0;
         for (let i = 0; i < da.length; i += 4) {
-          const d = Math.max(Math.abs(da[i] - db[i]), Math.abs(da[i + 1] - db[i + 1]), Math.abs(da[i + 2] - db[i + 2]), Math.abs(da[i + 3] - db[i + 3]));
+          // (A colour counts for as much as the pixel is opaque: beyond a planet's outline next to nothing is drawn.)
+          const oa = da[i + 3] / 255, ob = db[i + 3] / 255;
+          const d = Math.max(Math.abs(da[i] * oa - db[i] * ob), Math.abs(da[i + 1] * oa - db[i + 1] * ob), Math.abs(da[i + 2] * oa - db[i + 2] * ob), Math.abs(da[i + 3] - db[i + 3]));
           if (d <= 6) continue;
-          const px = (i / 4) % W;
-          if (sides.some((sx) => Math.abs(px + 0.5 - sx) <= 1.5)) continue;
           differing++;
-          if (d > worst) worst = d;
+          if (d > worst) worst = Math.round(d);
         }
         return { differing: differing / (W * H), worst };
       };
-      const sidesOf = (v: any) => [W / 2 - Math.PI * v.projection.scale(), W / 2 + Math.PI * v.projection.scale()];
       for (const sc of scenes) for (const way of ['as exports are drawn', 'as the working view is drawn']) {
         const kept = new B.MapRenderer(), fresh = new B.MapRenderer();
         if (way === 'as exports are drawn') kept.caching = 'always'; else kept.carry = true;
@@ -447,18 +443,92 @@ try {
           fresh.render(b, view, s.world, s.engine, s.spaceId, t, opts);
           out.push({ name: `${sc.name}, ${way}, day ${days}`, part: kept.lastParts['territory:fb'], animating: kept.lastTransitions.length, ...compare() });
         }
+        // Into a change, out of it at either end, and from one change to another (as dragging the
+        // timeline through a history does): in the working view only the areas of the changes, and
+        // the land that changed hands, are drawn again.
+        if (way === 'as the working view is drawn') {
+          const Y = (y: number, mo: number) => B.gregorian.fromCivil({ year: y, month: mo, day: 1 });
+          // (Each change runs for two years from the start of its decade: 1950, 1960, 1970.)
+          const start = Math.floor(sc.year / 10) * 10;
+          const steps: Array<[string, unknown]> = [['back before it starts', Y(start - 1, 6)], ['under way again', Y(start, 9)], ['on to after it ends', Y(start + 3, 2)], ['back to under way', Y(start + 1, 3)],
+            ['to another change under way', Y(start === 1970 ? 1961 : start + 11, 2)], ['back to this one under way', Y(start + 1, 8)]];
+          for (const [label, t] of steps) {
+            kept.render(a, view, s.world, s.engine, s.spaceId, t, opts);
+            fresh.render(b, view, s.world, s.engine, s.spaceId, t, opts);
+            out.push({ name: `${sc.name}, ${way}, ${label}`, part: kept.lastParts['territory:fb'], animating: kept.lastTransitions.length, crossing: true, ...compare() });
+          }
+        }
       }
       return out;
     }, { scenes: animatedScenes, W, H });
-    let failed = 0, renewed = 0;
+    let failed = 0, renewed = 0, crossed = 0;
     for (const r of results) {
       if (r.part === 'renewed') renewed++;
-      const ok = r.differing <= 0.0002;
+      if (r.crossing && r.part === 'patched') crossed++;
+      const ok = r.differing <= 0.0002 && (!r.crossing || r.part === 'patched');
       if (!ok) failed++;
       if (!ok || process.env.VERBOSE) console.log(`    ${ok ? 'same' : 'DIFFERENT'}  ${r.name}: territory ${r.part}, ${r.animating} animating; ${(r.differing * 100).toFixed(4)}% of pixels differ (largest difference ${r.worst})`);
     }
     assert.equal(failed, 0, `${failed} of ${results.length} frames of animated changes differ from frames drawn afresh`);
     assert.ok(renewed >= results.length / 3, `the animated area alone was drawn again in ${renewed} of ${results.length} frames`);
+    assert.ok(crossed >= 6 * animatedScenes.length, `stepping into, out of and between changes drew only their areas again in ${crossed} of ${6 * animatedScenes.length} steps`);
+  });
+
+  await h.step('The frames of an export, each drawn from the one before, are the frames drawn afresh', async () => {
+    const W = 960, H = 540;
+    const results = await page.evaluate(async ({ W, H }) => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const Y = (y: number) => B.gregorian.fromCivil({ year: y });
+      const canvas = () => { const c = new OffscreenCanvas(W, H); return c.getContext('2d', { willReadFrequently: true }) as OffscreenCanvasRenderingContext2D; };
+      const a = canvas(), b = canvas();
+      const compare = () => {
+        const da = a.getImageData(0, 0, W, H).data, db = b.getImageData(0, 0, W, H).data;
+        let differing = 0, worst = 0;
+        for (let i = 0; i < da.length; i += 4) {
+          const oa = da[i + 3] / 255, ob = db[i + 3] / 255;
+          const d = Math.max(Math.abs(da[i] * oa - db[i] * ob), Math.abs(da[i + 1] * oa - db[i + 1] * ob), Math.abs(da[i + 2] * oa - db[i + 2] * ob), Math.abs(da[i + 3] - db[i + 3]));
+          if (d <= 6) continue;
+          differing++;
+          if (d > worst) worst = Math.round(d);
+        }
+        return { differing: differing / (W * H), worst };
+      };
+      const out: Array<{ name: string; part: string; differing: number; worst: number }> = [];
+      const defs = ['all', 'fills', 'borders'].map((n) => B.PASS_DEFS.find((d: any) => d.name === n));
+      const still = { lon: 20, lat: 50, zoom: 2.5, rotation: 0, projection: 'equirectangular' };
+      // Forty years in 80 frames: the changes of 1950, 1960 and 1970 animate for two years each, the
+      // one of 1980 happens at once. Then a short shot whose camera moves (nothing can be kept).
+      const shots: Array<[string, any]> = [['a still camera', B.defaultShot(s.spaceId, still, Y(1945), Y(1985), 24, 80 / 24)]];
+      const moving = B.defaultShot(s.spaceId, still, Y(1949), Y(1953), 24, 16 / 24);
+      moving.camera[1].camera = { ...still, lon: 26, zoom: 2.8 };
+      shots.push(['a moving camera', moving]);
+      for (const [label, shot] of shots) {
+        // One renderer for every pass of every frame, as an export has; and one that keeps nothing.
+        const kept = new B.MapRenderer(), fresh = new B.MapRenderer();
+        kept.quality = { ...B.EXPORT_QUALITY }; fresh.quality = { ...B.EXPORT_QUALITY };
+        kept.caching = 'always'; fresh.caching = 'off';
+        kept.verify = true;
+        for (let frame = 0; frame < shot.frames; frame++) for (const def of defs) {
+          B.renderFrame(a, kept, s.world, s.engine, shot, frame, def, W, H, s.basemap);
+          const part = Object.entries(kept.lastParts).filter(([n]) => n.startsWith('territory')).map(([, v]) => v).join(' ');
+          B.renderFrame(b, fresh, s.world, s.engine, shot, frame, def, W, H, s.basemap);
+          out.push({ name: `${label}, frame ${frame}, ${def.name}`, part, ...compare() });
+        }
+      }
+      return out;
+    }, { W, H });
+    let failed = 0;
+    const how: Record<string, number> = {};
+    for (const r of results) {
+      const ok = r.differing <= 0.0002;
+      if (!ok) failed++;
+      if (/a still camera/.test(r.name)) how[r.part] = (how[r.part] ?? 0) + 1;
+      if (!ok || process.env.VERBOSE) console.log(`    ${ok ? 'same' : 'DIFFERENT'}  ${r.name}: territory ${r.part}; ${(r.differing * 100).toFixed(4)}% of pixels differ (largest difference ${r.worst})`);
+    }
+    console.log(`    (the still shot's ${Object.values(how).reduce((p, q) => p + q, 0)} pictures: ${Object.entries(how).map(([k, n]) => `${n} ${k}`).join(', ')})`);
+    assert.equal(failed, 0, `${failed} of ${results.length} exported pictures differ from pictures drawn afresh`);
+    // After the first frame nothing is drawn whole again: only where a change is under way, or where land changed hands.
+    assert.ok((how.patched ?? 0) >= 9 && (how.renewed ?? 0) >= 9 && (how.drawn ?? 0) <= 3, `how the still shot's pictures were drawn: ${JSON.stringify(how)}`);
   });
 
   await h.finish();

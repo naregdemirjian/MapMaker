@@ -59,6 +59,66 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D69. The export size estimate, border points in view, and a like-for-like stress check
+
+Three smaller things found while measuring a session on a computer four times slower.
+
+- **The estimated export size** (D37) drew a frame of the shot at up to 1920 pixels wide 0.7 s after any setting of
+  the shot changed, for every pass chosen: about half a second on the heavy benchmark project, in the middle of
+  work on the shot (two seconds on a slow computer). The sample is now at most 960 pixels wide, drawn when the page
+  has nothing else to do, and its size is worked up by how PNGs of maps actually grow: a picture twice as wide and
+  high takes about two and a half times the bytes, not four times (measured from 320 to 1920 pixels wide, every
+  pass: 2.3 to 2.7 times; flat colour packs to next to nothing, outlines and names are what is left). The estimate
+  for 4K was about half too high before; the figure for a quarter-size preview, given beside it, was less than half
+  of what a preview takes. `e2e/workflows` now checks both within a factor of 2.5 of what is written (it was 4).
+- **The border points tool** worked out the place on screen of every border point of the map in every frame, to
+  draw the few hundred in view (20 ms a frame with 128,000 points). Only points inside the part of the planet in
+  view are worked out now.
+- **`bench/stress.ts`** compared the picture on screen with a fresh one whose geometry was prepared for exactly the
+  zoom shown. The app's geometry serves from half to 1.42 times the scale it was prepared for, at that scale's
+  detail (D49), so after a zoom the two pictures could show the coasts at two levels of detail, both within the
+  tolerance: on a screen twice as dense a run failed on 0.17% of pixels along every coast. The fresh renderer now
+  prepares its geometry for the same zoom as the app's; the two pictures are then the same to the pixel in that run
+  (0.0002% at most over 250 steps).
+
+### D68. Stepping into, out of and between changes under way draws only their areas; exports draw each frame from the one before
+
+Found by recording what each frame of a timeline drag draws on the heavy benchmark project: whenever the moment
+shown stepped into a change under way (a fade, an expansion, an advancing front), out of one at either end, or from
+one to the next, the whole territory picture was drawn again (35 to 75 ms), while the frames around it drew a few
+small rectangles (7 to 12 ms). A history full of animated changes is crossed like that every few frames. The picture
+before was not allowed to stand in for anything because a change under way looks different at every moment.
+
+It does stand in for everything else. The territory picture now changes from one frame to the next only (1) where
+land changed hands (D56), (2) where the picture before showed a change under way, and (3) where this one does. Those
+rectangles are drawn again and nothing else (`MapRenderer.render`: `patch` with the rectangles of `changesSince`,
+of the frame before and of this one; D58's rectangles around changes are kept for the frame they were found for).
+Dragging the timeline on the heavy project: 9 in 10 frames now take under 20 ms (62 ms before).
+
+**Exports draw the same way.** An export's frames follow one another exactly as the frames of a drag do, and until
+now each frame in which anything changed hands was drawn whole (a still camera through a long history: nearly every
+frame). The export's renderer now draws each frame from the one before as well: with a still camera only the areas
+above are drawn again, per pass. Exported 1080p frames of the heavy project: 190 to 114 ms a frame, 4K 485 to
+276 ms, eight layers of each frame 443 to 289 ms (drawing is what an export waits for on a computer with few
+processors). What is kept from the frame before is kept per picture (`patchPrev`, `animPrev` by the picture's name),
+so the passes of one frame do not get in each other's way.
+
+How exact: a picture drawn from the one before is the picture drawn afresh except for single pixels on outlines
+at the edge of what was drawn again, where the browser smooths an edge a little differently when it draws part of
+a shape (D67). Measured on 60 frames of the heavy project's shot in three passes (180 pictures, 171 of them drawn
+from the one before): at most 0.012% of a picture's pixels differ, none by more than 15% of full contrast. That is
+less than two fresh pictures of one view differ by when their geometry was prepared around different places, and
+it is how frames of animated changes have been exported since D58. A camera that moves keeps nothing, as before.
+
+Tests: `e2e/render-compare` steps into, out of and between changes in four scenes (24 steps, each drawn in part
+and equal to a fresh picture), and draws an 80-frame shot through forty years as an export does, in three passes,
+against frames drawn afresh (after the first frame nothing is drawn whole). Exports of the interface tests are
+unchanged in what they check (identical re-export, the passes stacked give the full picture).
+
+Also: an advancing front whose land does not touch its new owner's found the nearest point of that owner's land by
+working out the direction of each of a million pairs of points afresh (100 ms the first time such a change showed):
+each point's direction is now worked out once (2 ms).
+
 ### D67. Equal Earth and Natural Earth: the view keeps its middle meridian while the map is moved
 
 Equal Earth and Natural Earth give every shape on the map another form for every middle meridian, and the view was
@@ -159,7 +219,7 @@ of that; its east and west sides stay where they are on the canvas while the map
 picture therefore holds the repeating map, ended only north and south, and the sides are cut when the picture is
 laid on the canvas (on a whole pixel when the frame is upright). This also mends a defect that was there before:
 with the planet's ends in view, moving east or west showed the ends moving with the map until something else caused
-a redraw. Exports are not touched by any of this: they carry nothing from frame to frame, and are cut by the outline
+a redraw. Exports are not touched by any of this: no picture is carried along with a moving view there, and they are cut by the outline
 itself. `e2e/render-compare` moves six views by whole pixels, 170 small moves each, and compares with fresh pictures
 (the two columns of pixels at the planet's sides aside); with the repeating map switched off it fails 73 times.
 
@@ -398,7 +458,8 @@ under it, explained as exported separately. The choice is kept with each shot (`
 means "All"). Files are still written in stacking order, bottom first, with "All" last, as the compositing guide lists
 them. The estimated size draws one frame from the middle of the shot for each chosen layer (at most 1920 pixels wide,
 scaled up by area), compresses it as PNG and multiplies by the number of frames; the interface test compares it with a
-real export (it must be within a factor of four; it is usually much closer).
+real export (it must be within a factor of four; it is usually much closer). (Changed by D69: the sample is at most
+960 pixels wide and its size is worked up by how such pictures were measured to grow; within a factor of 2.5.)
 
 ### D36. "Changes over time": comparing a country at the start and the end of a period
 

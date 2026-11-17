@@ -8,6 +8,7 @@
 //          [--throttle 4] (a computer that many times slower) [--scale 2] (a screen with that many pixels per point) [--no-verify]
 //          [--preset fastest|best] (the working view's speed settings) [--dump <folder>] (where to write the two pictures when they differ)
 //          [--projection equalEarth|naturalEarth|mercator] (the session starts in that projection; Equal Earth and Natural Earth hold their middle meridian while the map moves)
+//          [--only "moving the map,zooming"] (only these kinds of step) [--profile out.cpuprofile] (a CPU profile of the session; summarise with bench/top.mjs)
 // Build first (node scripts/build.mjs). The project is not changed: the run works on a copy.
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
@@ -24,6 +25,7 @@ const verify = !has('--no-verify');
 const preset = flag('--preset');
 const dump = flag('--dump');
 const projection = flag('--projection');
+const only = flag('--only')?.split(',').map((q) => q.trim()) ?? null, profile = flag('--profile');
 const [folder, name] = args;
 if (!folder || !name) { console.error('Give the fixtures folder and the project name.'); process.exit(1); }
 
@@ -48,9 +50,11 @@ try {
   if (preset === 'fastest') await page.evaluate(() => (window as any).__mapmaker.store.setViewSettings({ resolution: 0.75, detail: 'coarse', whileMoving: 'carry', names: 'hide', coast: 'medium', showSpeed: false }));
   if (projection) await page.evaluate((p) => { const s = (window as any).__mapmaker.store; s.setCamera({ ...s.camera, projection: p }); }, projection);
   if (preset === 'best') await page.evaluate(() => (window as any).__mapmaker.store.setViewSettings({ resolution: 1, detail: 'fine', whileMoving: 'redraw', names: 'place', coast: 'full', showSpeed: false }));
-  if (throttle > 1) { const cdp = await context.newCDPSession(page); await cdp.send('Emulation.setCPUThrottlingRate', { rate: throttle }); }
+  const cdp = await context.newCDPSession(page);
+  if (throttle > 1) await cdp.send('Emulation.setCPUThrottlingRate', { rate: throttle });
+  if (profile) { await cdp.send('Profiler.enable'); await cdp.send('Profiler.setSamplingInterval', { interval: 200 }); await cdp.send('Profiler.start'); }
   const t0 = Date.now();
-  const result = await page.evaluate(async ({ steps, seed }) => {
+  const result = await page.evaluate(async ({ steps, seed, only }) => {
     const m = (window as any).__mapmaker, s = m.store, B = m.bench;
     let x = seed >>> 0;
     const rnd = () => { x = (Math.imul(x, 1664525) + 1013904223) >>> 0; return x / 4294967296; };
@@ -88,12 +92,22 @@ try {
       fresh.quality = { ...s.renderer.quality };
       const layers = s.world.all('layer').filter((l: any) => l.space_id === s.spaceId && l.kind === 'partition' && l.visible).sort((a: any, b: any) => a.sort_order - b.sort_order).map((l: any) => l.id);
       const earth = /natural-earth/.test(s.world.get('map_space', s.spaceId).settings ?? '') ? s.basemap : null;
-      fresh.render(ctx, view, s.world, s.engine, s.spaceId, s.time, { passes: new Set(['background', 'land', 'fills', 'borders', 'graticule']), transparent: false, layerIds: layers, basemap: earth, referenceBorders: s.referenceBorders });
+      const what = { passes: new Set(['background', 'land', 'fills', 'borders', 'graticule']), transparent: false, layerIds: layers, basemap: earth, referenceBorders: s.referenceBorders };
+      // Like with like: geometry prepared for one zoom serves from half to 1.42 times its scale, at
+      // the detail of the scale it was prepared for. When the app's was prepared for another zoom
+      // than the one shown, the fresh renderer prepares its own for that zoom too (by drawing that
+      // view first); otherwise the two pictures show the coasts at two levels of detail.
+      const ratio = s.renderer.sheet ? view.projection.scale() / s.renderer.sheet.S : 1;
+      if (Math.abs(ratio - 1) > 1e-6 && ratio >= 0.5 && ratio <= 1.42) {
+        fresh.render(ctx, B.makeView({ ...s.camera, zoom: s.camera.zoom - Math.log2(ratio) }, W / k, H / k), s.world, s.engine, s.spaceId, s.time, what);
+        ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, W, H); ctx.setTransform(k, 0, 0, k, 0, 0);
+      }
+      fresh.render(ctx, view, s.world, s.engine, s.spaceId, s.time, what);
       // Only the map itself is compared (names, cities and the tools' own drawings lie over it on screen).
       const mine = new OffscreenCanvas(W, H);
       const mctx = mine.getContext('2d', { willReadFrequently: true }) as OffscreenCanvasRenderingContext2D;
       mctx.setTransform(k, 0, 0, k, 0, 0);
-      s.renderer.render(mctx, view, s.world, s.engine, s.spaceId, s.time, { passes: new Set(['background', 'land', 'fills', 'borders', 'graticule']), transparent: false, layerIds: layers, basemap: earth, referenceBorders: s.referenceBorders });
+      s.renderer.render(mctx, view, s.world, s.engine, s.spaceId, s.time, what);
       const a = mctx.getImageData(0, 0, W, H).data, b = ctx.getImageData(0, 0, W, H).data;
       // (Where the planet's east and west ends stand, a carried picture ends on a whole pixel and a
       // fresh one part way into it: the columns around them are left out.)
@@ -112,7 +126,9 @@ try {
         if (++squares[q] > dense) dense = squares[q];
         if (px < x0) x0 = px; if (px > x1) x1 = px; if (py < y0) y0 = py; if (py > y1) y1 = py;
       }
-      const where = differing ? ` in ${x0},${y0} to ${x1},${y1} of ${W} x ${H}; view ${JSON.stringify(s.camera)}; parts ${JSON.stringify(s.renderer.lastParts)}` : '';
+      // (The geometry the app's renderer holds may have been prepared for another zoom: it serves from half to 1.42 times its own scale.)
+      const freshRatio = fresh.sheet ? view.projection.scale() / fresh.sheet.S : 1;
+      const where = differing ? ` in ${x0},${y0} to ${x1},${y1} of ${W} x ${H}; view ${JSON.stringify(s.camera)}; parts ${JSON.stringify(s.renderer.lastParts)}; geometry prepared for ${(1 / ratio).toFixed(3)} of this scale (the fresh picture's for ${(1 / freshRatio).toFixed(3)})` : '';
       compared++;
       worstDiff = Math.max(worstDiff, differing / (W * H));
       s.notify();
@@ -157,7 +173,9 @@ try {
       }],
       ['a layer hidden or shown', 1, () => { const l = pick(s.world.all('layer').filter((q: any) => q.space_id === s.spaceId)) as any; s.execute((w: any) => B.commands.updateLayer(w, l.id, { visible: l.visible ? 0 : 1 })); }],
     ];
-    const bag = actions.flatMap(([n, weight], i) => Array.from({ length: weight }, () => i));
+    const unknown = (only ?? []).filter((n) => !actions.some(([a]) => a === n));
+    if (unknown.length) return { failed: `no such kind of step: ${unknown.join(', ')} (there are: ${actions.map(([a]) => a).join(', ')})`, counts };
+    const bag = actions.flatMap(([n, weight], i) => (only && !only.includes(n as string) ? [] : Array.from({ length: weight }, () => i)));
     const toasts = () => s.toasts.filter((t: any) => t.kind === 'error').length;
     for (let step = 0; step < steps; step++) {
       const [what, , act] = actions[bag[Math.floor(rnd() * bag.length)]];
@@ -192,7 +210,8 @@ try {
       engine: s.engine.stats, renderer: s.renderer.stats,
       parcels: s.world.arrangement(s.spaceId).leafFaces().length, events: s.world.all('event').length,
     };
-  }, { steps, seed });
+  }, { steps, seed, only });
+  if (profile) { const { profile: prof } = await cdp.send('Profiler.stop'); writeFileSync(profile, JSON.stringify(prof)); console.log(`wrote ${profile}`); }
   const shown = (result as { pictures?: { shown: string; fresh: string } | null }).pictures;
   if (shown && dump) {
     mkdirSync(dump, { recursive: true });

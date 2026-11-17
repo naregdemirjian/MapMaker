@@ -689,11 +689,17 @@ try {
     assert.equal(m.fps, 25);
     assert.deepEqual(m.frames, [0, 24]);
     for (const pass of [...separate, 'all']) assert.equal(ex.frames(pass).length, 25, pass);
-    // The estimate is of the right size: the preview (¼ size) is about a sixteenth of it.
+    // The estimate is of the right size. (A picture a quarter as wide and high takes about a sixth or
+    // a seventh of the bytes, not a sixteenth: flat colour packs to next to nothing, outlines do not.)
     let written = 0;
     for (const pass of [...separate, 'all']) for (const f of ex.frames(pass)) written += statSync(f).size;
-    const ratio = written / 1024 / (everything / 16);
-    assert.ok(ratio > 0.25 && ratio < 4, `the estimated size is close (written ${(written / 1024).toFixed(0)} KB at ¼ size, estimated ${(everything / 16).toFixed(0)} KB)`);
+    const preview = everything * Math.pow(0.25, 1.35);
+    const ratio = written / 1024 / preview;
+    assert.ok(ratio > 0.4 && ratio < 2.5, `the estimated size is close (written ${(written / 1024).toFixed(0)} KB at ¼ size, estimated ${preview.toFixed(0)} KB)`);
+    const shownPreview = /¼ size, about ([\d.]+) (KB|MB|GB)/.exec((await page.locator('p', { has: page.getByTestId('export-size') }).textContent()) ?? '');
+    assert.ok(shownPreview, 'the size of a preview is given too');
+    const shownKB = Number(shownPreview![1]) * { KB: 1, MB: 1024, GB: 1024 * 1024 }[shownPreview![2] as 'KB'];
+    assert.ok(shownKB > written / 1024 / 2.5 && shownKB < (written / 1024) * 2.5, `the preview's estimated size is close too (written ${(written / 1024).toFixed(0)} KB, estimated ${shownKB.toFixed(0)} KB)`);
     assert.match(readFileSync(join(ex.dir, 'COMPOSITING_GUIDE.txt'), 'utf8'), /25 fps/);
 
     // Frame timing: evenly spaced through the chosen range, first and last exactly on the ends.

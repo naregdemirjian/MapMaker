@@ -4,7 +4,7 @@ import { Api } from '../api.ts';
 import * as cmd from '../../domain/commands.ts';
 import { type Instant, add, fromJSONValue, toJSONValue, fromStore, compare, gregorian, type Precision } from '../../core-time/index.ts';
 import { defaultShot, timeAt, cameraAt, RESOLUTIONS, FRAME_RATES, shotTransitions, withStillCamera, cameraMoves, resetCamera, type ShotSettings, type Ease, type ShotTransitions } from '../../presentation/sequence.ts';
-import { PASS_DEFS, runExport, exportPassesOf, estimateExportBytes, formatBytes } from '../../presentation/export-driver.ts';
+import { PASS_DEFS, runExport, exportPassesOf, estimateExportBytes, scaledBytes, formatBytes } from '../../presentation/export-driver.ts';
 import { eventsBoxOf, type EventsBox } from '../../presentation/events-box.ts';
 import { LABEL_FONTS } from '../../render-engine/label-style.ts';
 import { PROJECTIONS, type ProjectionName } from '../../render-engine/camera.ts';
@@ -293,7 +293,7 @@ export function ShotEditor() {
             {shot.exportDir && <button className="small" onClick={() => update({ exportDir: null })} title="Back to the project's exports folder">Reset</button>}
           </div>
           <p className="muted" data-testid="export-summary">{shot.frames} frames × {passes.length} {passes.length === 1 ? 'image sequence' : 'image sequences'} at {shot.width} x {shot.height}.
-            {' '}{estimate?.key === estimateKey ? <>Estimated size: <b data-testid="export-size">about {formatBytes(estimate.bytes)}</b> (a preview, ¼ size, about {formatBytes(estimate.bytes / 16)}).</> : passes.length ? 'Estimating the size…' : ''}</p>
+            {' '}{estimate?.key === estimateKey ? <>Estimated size: <b data-testid="export-size">about {formatBytes(estimate.bytes)}</b> (a preview, ¼ size, about {formatBytes(scaledBytes(estimate.bytes, 0.25))}).</> : passes.length ? 'Estimating the size…' : ''}</p>
           {progress ? (
             <div className="progress"><div className="bar"><div style={{ width: `${(100 * progress.done) / progress.total}%` }} /></div>
               <span>{progress.label}: {progress.done} / {progress.total}</span><button onClick={() => (cancel.current = true)}>Cancel</button></div>
@@ -316,11 +316,18 @@ function SizeEstimate({ shot, passes, estimateKey, onEstimate }: { shot: ShotSet
   const s = useStore();
   useEffect(() => {
     let stale = false;
-    const timer = window.setTimeout(() => {
-      if (!passes.length || !s.world || !s.engine) return;
+    // (Drawing the sample frame takes a moment on a large map: it waits until the settings have
+    // stopped changing and the page has nothing else to do, so it does not land in the middle of work.)
+    let idle = 0;
+    const run = () => {
+      if (stale || !passes.length || !s.world || !s.engine) return;
       estimateExportBytes(s.world, s.engine, shot, passes).then((bytes) => { if (!stale) onEstimate({ key: estimateKey, bytes }); }, () => undefined);
+    };
+    const timer = window.setTimeout(() => {
+      if (typeof window.requestIdleCallback === 'function') idle = window.requestIdleCallback(run, { timeout: 2500 });
+      else run();
     }, 700);
-    return () => { stale = true; clearTimeout(timer); };
+    return () => { stale = true; clearTimeout(timer); if (idle) window.cancelIdleCallback?.(idle); };
   }, [estimateKey]);
   return null;
 }

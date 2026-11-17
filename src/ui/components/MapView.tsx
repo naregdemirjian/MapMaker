@@ -14,7 +14,7 @@ import { transitionOptions, drawShotOverlays } from '../../presentation/export-d
 import { parseJSON, slerpLonLat } from '../../temporal-engine/engine.ts';
 import { compare, fromStore } from '../../core-time/index.ts';
 import { basemapSourceOf } from '../../world-model/world-settings.ts';
-import { loadBasemapDetail, pixelsPerDegree, DETAIL_PIXELS_PER_DEGREE, type Basemap } from '../../render-engine/basemap.ts';
+import { loadBasemapDetail, pixelsPerDegree, visibleBounds, DETAIL_PIXELS_PER_DEGREE, type Basemap } from '../../render-engine/basemap.ts';
 import * as cmd from '../../domain/commands.ts';
 
 type Drag =
@@ -361,8 +361,14 @@ export function MapView() {
     if (s.tool === 'vertex') {
       ctx.fillStyle = 'rgba(255,255,255,0.85)';
       let n = 0;
+      // Only points in the part of the planet in view are worked out on screen (a map with a
+      // hundred thousand border points took 20 ms a frame to find the few hundred in view).
+      const vb = visibleBounds(v);
+      const mid = vb ? (vb.west + vb.east) / 2 : 0, half = vb ? (vb.east - vb.west) / 2 : 0;
       for (const vr of arr.vertices.values()) {
-        const p = lonLatToScreen(v, vr.lon / E7, vr.lat / E7);
+        const lon = vr.lon / E7, lat = vr.lat / E7;
+        if (vb && (lat < vb.south || lat > vb.north || Math.abs(((((lon - mid) % 360) + 540) % 360) - 180) > half)) continue;
+        const p = lonLatToScreen(v, lon, lat);
         if (!p || p[0] < -5 || p[1] < -5 || p[0] > v.width + 5 || p[1] > v.height + 5) continue;
         if (++n > 6000) break;
         ctx.fillRect(p[0] - 1.5, p[1] - 1.5, 3, 3);

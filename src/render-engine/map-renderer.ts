@@ -922,7 +922,9 @@ export class MapRenderer {
   }
 
   /** What the territory picture last showed: its key, what besides ownership it depends on, who held each parcel, and the map's state. */
-  private patchPrev: { strict: string; stable: string; arr: Arrangement; revision: number; layers: Array<Map<number, FaceState>> } | null = null;
+  private patchPrev = new Map<string, { strict: string; stable: string; arr: Arrangement; revision: number; layers: Array<Map<number, FaceState>> }>();
+  /** The changes that were under way in a territory picture as last drawn (see patchPrev): its key, the frame it was drawn for, and the rectangles around them there. */
+  private animPrev = new Map<string, { strict: string; frame: string; rects: DeviceRect[] }>();
 
   /**
    * After an edit (or a step in time) that changed little: the rectangles of the canvas where the
@@ -936,8 +938,8 @@ export class MapRenderer {
    * lie along the borders added). A parcel that takes in the rest of the planet has no box: when one
    * is among those, everything is drawn.
    */
-  private changesSince(view: View, arr: Arrangement, engine: Engine, layers: Array<Map<number, FaceState>>, strict: string, stable: string, m: DOMMatrix, width: number, height: number, pad: number): { from: string; rects: DeviceRect[] } | null {
-    const prev = this.patchPrev;
+  private changesSince(name: string, view: View, arr: Arrangement, engine: Engine, layers: Array<Map<number, FaceState>>, strict: string, stable: string, m: DOMMatrix, width: number, height: number, pad: number): { from: string; rects: DeviceRect[] } | null {
+    const prev = this.patchPrev.get(name);
     if (prev && prev.strict === strict) return null;
     let out: { from: string; rects: DeviceRect[] } | null = null;
     if (prev && prev.arr === arr && prev.stable === stable && prev.layers.length === layers.length && m.b === 0 && m.c === 0) {
@@ -974,7 +976,7 @@ export class MapRenderer {
         if (total <= 0.5 * width * height) out = { from: prev.strict, rects: boxes.map((q) => [q[0], q[1], q[2] - q[0], q[3] - q[1]] as DeviceRect) };
       }
     }
-    this.patchPrev = { strict, stable, arr, revision: arr.revision, layers };
+    this.patchPrev.set(name, { strict, stable, arr, revision: arr.revision, layers });
     return out;
   }
 
@@ -1182,7 +1184,7 @@ export class MapRenderer {
       blit();
       return;
     }
-    if (patch && this.carry && b.key === exactOf(patch.from)) {
+    if (patch && (this.carry || mode === 'always') && b.key === exactOf(patch.from)) {
       // Patched: the kept picture shows the state before a change that touched only these rectangles; they alone are drawn again.
       paint(inBuffer(patch.rects), 0, 0);
       b.valid = windowOf();
@@ -1507,13 +1509,14 @@ export class MapRenderer {
       const keptNow = this.kept.get(terrName);
       // The kept picture is of this very moment (the view moves while the date stays): none of it is
       // drawn again for the animation, so the rectangles around the changes are not needed.
+      // (The rectangles are the same for as long as the view and the changes animating stay the
+      // same: finding them again in every frame, parcel by parcel, cost 9 ms a frame on a map
+      // with many changes under way, in frames that changed nothing.)
+      const animPad = 3 * front.glow * u + (front.width + widestLine) * u + 6;
+      const rk = animated ? `${frameKey}|${animPad}|${prepared.map((p) => `${p.snap.key}:${[...p.tg.groups.keys()].join(',')}`).join('|')}` : '';
       if (animated && !anyMedia && m.b === 0 && m.c === 0 && keptNow?.canvas && keptNow.key && keptNow.moment === moment) renew = { rects: [], moment };
       else if (animated && !anyMedia && m.b === 0 && m.c === 0) {
-        const pad = 3 * front.glow * u + (front.width + widestLine) * u + 6;
-        // (The rectangles are the same for as long as the view and the changes animating stay the
-        // same: finding them again in every frame, parcel by parcel, cost 9 ms a frame on a map
-        // with many changes under way, in frames that changed nothing.)
-        const rk = `${frameKey}|${pad}|${prepared.map((p) => `${p.snap.key}:${[...p.tg.groups.keys()].join(',')}`).join('|')}`;
+        const pad = animPad;
         if (this.renewRects?.key !== rk) {
           const boxes: number[][] = [];
           let ok = true, total = 0;
@@ -1527,8 +1530,15 @@ export class MapRenderer {
       }
       const key = animated && !renew && opts.transitions ? null : partKey(`${animated && !renew ? `${t.day}:${t.ms}|` : ''}${renew ? 'animated|' : ''}${wantsFills ? 'f' : ''}${wantsBorders ? 'b' : ''}|${world.revision}|${style.border}|${style.borderWidth}|${opts.basemap ? opts.basemap.scales.length : ''}${landKey}${anyMedia ? `|${assetEpoch()}|${this.mediaSeconds}|${this.mediaChannel}` : ''}`);
       // The working view, after an edit or a step in time that changed few parcels: only where they lie is drawn again.
+      // A change under way looks different at every moment, and different again once it is over: where
+      // the picture before showed one, and where this one does, is drawn again along with the parcels
+      // that changed hands. (Stepping into a change, out of it, or from one to the next used to draw the
+      // whole picture: every few frames when the timeline is dragged through a history full of them.)
+      // `under`: the rectangles around the changes under way in this picture, for this view (null: not
+      // known, or too much of the frame; then the picture is not patched, nor the one after it).
+      const under: DeviceRect[] | null = !animated ? [] : this.renewRects && this.renewRects.key === rk ? this.renewRects.rects : null;
       let patch: { from: string; rects: DeviceRect[] } | null = null;
-      if (key && this.carry && !animated && !anyMedia) {
+      if (key && (this.carry || this.caching === 'always') && !anyMedia && m.b === 0 && m.c === 0 && under) {
         // (How every country looks, whoever holds land now: a changed colour means the whole picture.)
         let colours = 0;
         for (const e of entities.values()) {
@@ -1538,8 +1548,21 @@ export class MapRenderer {
           colours = (colours + (hsh >>> 0)) % 4294967291;
         }
         const stable = `${key.loose.slice(0, looseBase.length)}|${detail}|${wantsFills ? 'f' : ''}${wantsBorders ? 'b' : ''}|${style.border}|${style.borderWidth}|${opts.basemap ? opts.basemap.scales.length : ''}${layerSig}|${colours}`;
-        patch = this.changesSince(view, arr, engine, prepared.map((p) => p.states), key.strict, stable, m, ctx.canvas.width, ctx.canvas.height, widestLine * u + 3);
-      } else this.patchPrev = null;
+        const W = ctx.canvas.width, H = ctx.canvas.height;
+        const own = this.changesSince(terrName, view, arr, engine, prepared.map((p) => p.states), key.strict, stable, m, W, H, widestLine * u + 3);
+        const before = this.animPrev.get(terrName);
+        if (own && before && before.strict === own.from) {
+          if (!before.rects.length && !under.length) patch = own;
+          else if (before.frame === frameKey) {
+            const boxes: number[][] = [];
+            for (const [x, y, rw, rh] of [...own.rects, ...before.rects, ...under]) this.joinRect(boxes, [x, y, x + rw, y + rh]);
+            let total = 0;
+            for (const q of boxes) total += (q[2] - q[0]) * (q[3] - q[1]);
+            if (total <= 0.6 * W * H) patch = { from: own.from, rects: boxes.map((q) => [q[0], q[1], q[2] - q[0], q[3] - q[1]] as DeviceRect) };
+          }
+        }
+        this.animPrev.set(terrName, { strict: key.strict, frame: frameKey, rects: under });
+      } else { this.patchPrev.delete(terrName); this.animPrev.delete(terrName); }
       const terrDraw = (c: CanvasRenderingContext2D) => {
         // (Where the frame lies on what is drawn on: the canvas itself, or a kept picture with room around the frame.)
         const cm = c.getTransform();
@@ -1880,8 +1903,15 @@ export class MapRenderer {
           return all.filter((_, i) => i % step === 0);
         };
         const cs = sample(changing, 300), hs = sample(held, 3000);
-        let best = Infinity, pc: [number, number] = cs[0], ph: [number, number] = hs[0];
-        for (const c of cs) { const vc = vec3(c); for (const h of hs) { const vh = vec3(h); const d = -(vc[0] * vh[0] + vc[1] * vh[1] + vc[2] * vh[2]); if (d < best) { best = d; pc = c; ph = h; } } }
+        // (Each point's direction is worked out once, not once for every pair: a million pairs.)
+        const dirs = (pts: Array<[number, number]>) => { const o = new Float64Array(3 * pts.length); pts.forEach((q, i) => { const v = vec3(q); o[3 * i] = v[0]; o[3 * i + 1] = v[1]; o[3 * i + 2] = v[2]; }); return o; };
+        const vc = dirs(cs), vh = dirs(hs);
+        let best = Infinity, ic = 0, ih = 0;
+        for (let i = 0; i < cs.length; i++) {
+          const x = vc[3 * i], y = vc[3 * i + 1], z = vc[3 * i + 2];
+          for (let j = 0; j < hs.length; j++) { const d = -(x * vh[3 * j] + y * vh[3 * j + 1] + z * vh[3 * j + 2]); if (d < best) { best = d; ic = i; ih = j; } }
+        }
+        const pc = cs[ic], ph = hs[ih];
         src = { lonlat: Float64Array.from([pc[0], pc[1], ph[0], ph[1]]), line: true };
       } else src = null;
       if (this.borderCache.size > 200) this.borderCache.clear();
