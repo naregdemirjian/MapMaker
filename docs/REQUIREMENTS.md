@@ -201,5 +201,20 @@ status. Last updated: 17 November 2026 (after the user's second feedback round; 
 | Drag the date, title and events box freely | Tested | `sequence`, `e2e/workflows` (follows the pointer; undo) | |
 | Export: only "All" chosen at first, at the top, the others explained as separate | Tested | `sequence`, `e2e/workflows`, `e2e/vertical-slice` | D37. The choice is kept with the shot |
 | Estimated total export size | Tested | `e2e/workflows` (compared with a real export) | D37 |
-| No maps of cities (space maps still wanted) | Done | | D38 |
+| No maps of cities (space maps still wanted) | Superseded | | D38; the third round allowed them at no performance cost (D44) |
+
+## The user's third feedback round (17 November 2026)
+
+| Request | Status | Evidence | Notes |
+| --- | --- | --- | --- |
+| Grey borders left by a deleted country ("Since the starting map") | Fixed | `temporal-engine`, `workflow` | Deleting takes it out of history; older projects: land shown as nobody's, History Health removes them |
+| "+ Layer" did nothing | Fixed | `e2e/desktop` (adds a layer), `e2e/workflows` | The desktop app has no browser prompt; the app's own dialog is used (also for group and alternative names) |
+| Cities listed with the countries they belong to | Tested | `e2e/workflows` 'Working with many' | Under the country whose land they stand on at the date viewed |
+| Group and categorise countries in the list | Tested | `workflow`, `e2e/workflows` | Groups (folders) that fold away; made from a choice by right-click or "New group…" |
+| Right-click menus with quick actions; for groups too | Tested | `e2e/workflows` | Hide or show labels, pictures off or on, move to a group, delete; a group's menu does it for all of it |
+| Choose several with Ctrl (and Shift) | Tested | `e2e/workflows` | |
+| Delete many events quickly | Tested | `workflow` (one undo), `e2e/workflows` (Shift + click three, Delete) | Also countries; Delete key and menus |
+| Labels and city names move apart or the less important is hidden | Tested | `e2e/workflows` (nothing drawn overlaps; two cities side by side) | D43. Countries before cities, larger before smaller |
+| A tool to erase borders | Tested | `e2e/vertical-slice` 'Border eraser' | D42 |
+| City (flat) maps, only with no performance cost | Tested | `flat-maps` (true to scale within 1%, straight borders, labels), `e2e/workflows` 'A flat map' | D44: the same kernel, nothing slower |
 

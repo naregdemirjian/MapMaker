@@ -164,18 +164,31 @@ export function NewWorldDialog() {
   const [name, setName] = useState('');
   const [km, setKm] = useState('6371');
   const [earth, setEarth] = useState(false);
+  const [flat, setFlat] = useState(false);
+  const [widthKm, setWidthKm] = useState('20');
   const close = () => s.set({ dialog: null });
   const create = () => {
-    const id = s.execute((w) => cmd.createWorld(w, name.trim() || 'New map', Number(km), earth ? 'natural-earth' : 'none'));
+    const id = flat
+      ? s.execute((w) => cmd.createFlatMap(w, name.trim() || 'New flat map', Number(widthKm)))
+      : s.execute((w) => cmd.createWorld(w, name.trim() || 'New map', Number(km), earth ? 'natural-earth' : 'none'));
     if (id) { s.set({ spaceId: id, layerId: s.world!.all('layer').find((l) => l.space_id === id)?.id ?? '', selection: null }); close(); }
   };
   return (
     <Modal title="New map" onClose={close}>
-      <p className="muted">Each map has its own geography, layers and territorial history; events and countries are shared by the whole project. A round map is a planet or moon: Earth, another real body, or one you invent (it starts as an empty sphere). Flat maps (a city plan, the solar system, the galaxy) come with the space-maps stage.</p>
-      <label>Name<input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Aster Prime" /></label>
-      <label>Radius (km)<input type="number" value={km} onChange={(e) => setKm(e.target.value)} /></label>
-      <div className="presets">{WORLD_PRESETS.map((p) => <button key={p.name} className="small" onClick={() => { setName(p.name); setKm(String(p.km)); setEarth(p.name === 'Earth'); }}>{p.name}</button>)}</div>
-      <label className="check"><input type="checkbox" checked={earth} onChange={(e) => setEarth(e.target.checked)} data-testid="new-world-earth" /> Start with Earth's geography (land, lakes and coastlines)</label>
+      <p className="muted">Each map has its own geography, layers and territorial history; events and countries are shared by the whole project.</p>
+      <div className="choice-row">
+        <label className="check"><input type="radio" name="map-kind" checked={!flat} onChange={() => setFlat(false)} /> Round: a planet or moon (Earth, another real body, or one of your own)</label>
+        <label className="check"><input type="radio" name="map-kind" checked={flat} onChange={() => setFlat(true)} data-testid="new-map-flat" /> Flat: a city, a battlefield, a region (a plan, true to scale)</label>
+      </div>
+      <label>Name<input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={flat ? 'e.g. Old Town' : 'e.g. Aster Prime'} data-testid="new-map-name" /></label>
+      {flat ? <>
+        <label>Width (km)<input type="number" min={0.01} max={5000} value={widthKm} onChange={(e) => setWidthKm(e.target.value)} data-testid="new-map-width" /></label>
+        <p className="muted">Borders on a flat map are straight lines; the scale bar reads in metres and kilometres.</p>
+      </> : <>
+        <label>Radius (km)<input type="number" value={km} onChange={(e) => setKm(e.target.value)} /></label>
+        <div className="presets">{WORLD_PRESETS.map((p) => <button key={p.name} className="small" onClick={() => { setName(p.name); setKm(String(p.km)); setEarth(p.name === 'Earth'); }}>{p.name}</button>)}</div>
+        <label className="check"><input type="checkbox" checked={earth} onChange={(e) => setEarth(e.target.checked)} data-testid="new-world-earth" /> Start with Earth's geography (land, lakes and coastlines)</label>
+      </>}
       <div className="modal-actions"><button onClick={close}>Cancel</button><button className="primary" onClick={create}>Create map</button></div>
     </Modal>
   );

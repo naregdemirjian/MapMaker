@@ -3,7 +3,7 @@ import { useStore, store, type Tool } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
 import { type Instant, gregorian, fromStore, formatYear, compare, NEG_INF } from '../../core-time/index.ts';
 import { BASE_EVENT_ID, type EffectRow } from '../../world-model/schema.ts';
-import { basemapSourceOf } from '../../world-model/world-settings.ts';
+import { basemapSourceOf, worldSettings } from '../../world-model/world-settings.ts';
 import { parseJSON, leafDescendants, isUntracked, type Resolution, type TransitionSpec } from '../../temporal-engine/engine.ts';
 import type { World } from '../../world-model/world.ts';
 import { lonLatToVec } from '../../geo-kernel/vec.ts';
@@ -97,6 +97,7 @@ const TOOLS: Array<{ id: Tool; name: string; hint: string }> = [
   { id: 'polygon', name: 'Precise shape', hint: 'Click points; double-click or Enter to finish; Esc to cancel.' },
   { id: 'pen', name: 'Border pen', hint: 'Draw a border at your own pace: drag or click, let go, pan and zoom, carry on later. Enter finishes; Backspace takes back the last piece. Drafts are kept with the project.' },
   { id: 'vertex', name: 'Border points', hint: 'Drag a border point to correct the border shape for all time. Double-click a border to add a point; Delete removes the point under the cursor.' },
+  { id: 'erase', name: 'Border eraser', hint: 'Drag across borders to erase them: the country where you start takes the land across each border you cross, from the date viewed (or in the event being recorded). Start outside any country to clear land.' },
   { id: 'place', name: 'Characters & cities', hint: 'Click the map to put the chosen character or city there from the date being viewed (a point, no borders). With Select, drag one to move it.' },
 ];
 
@@ -296,10 +297,10 @@ export function Outliner() {
       <Section title="Maps" onAdd={() => s.set({ dialog: 'new-world' })} addLabel="Map">
         {w.all('map_space').sort((a, b) => a.sort_order - b.sort_order).map((sp) => (
           <div key={sp.id} className={`row ${sp.id === s.spaceId ? 'sel' : ''}`} onClick={() => s.set({ spaceId: sp.id, layerId: w.all('layer').find((l) => l.space_id === sp.id && l.kind === 'partition')?.id ?? '' })}>
-            {sp.name}<span className="muted"> · radius {Math.round((sp.radius_m ?? 0) / 1000).toLocaleString()} km</span>
+            {sp.name}<span className="muted"> · {sp.kind === 'plane' ? `flat, ${(worldSettings(sp) as { widthKm?: number }).widthKm?.toLocaleString() ?? '?'} km wide` : `radius ${Math.round((sp.radius_m ?? 0) / 1000).toLocaleString()} km`}</span>
           </div>
         ))}
-        {currentSpace && (
+        {currentSpace && currentSpace.kind !== 'plane' && (
           <div className="world-options">
             <label className="check" title="Land, lakes and coastlines from Natural Earth, drawn under the territories">
               <input type="checkbox" data-testid="basemap-toggle" checked={basemapSourceOf(currentSpace) === 'natural-earth'}

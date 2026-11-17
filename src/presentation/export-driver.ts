@@ -106,7 +106,7 @@ export function renderFrame(ctx: CanvasRenderingContext2D, renderer: MapRenderer
   ctx.clearRect(0, 0, width, height);
   if (passes.size) {
     const transparent = def.name === 'all' ? shot.transparent : !def.background;
-    renderer.render(ctx, view, world, engine, shot.spaceId, t, { passes, transparent, layerIds: visibleLayers(world, shot), basemap, transitions: transitionOptions(shot, frame), mediaSeconds: frame / shot.fps, mediaChannel: 'export', trails: !!shot.trails });
+    renderer.render(ctx, view, world, engine, shot.spaceId, t, { passes, transparent, layerIds: visibleLayers(world, shot), basemap, transitions: transitionOptions(shot, frame), mediaSeconds: frame / shot.fps, mediaChannel: 'export', trails: !!shot.trails, layout: { labels: !!shot.labels, cities: shot.cities !== false } });
   }
   if (def.overlays) drawShotOverlays(ctx, width, height, world, shot, frame, t);
 }

@@ -514,6 +514,25 @@ try {
     await page.getByTestId(`cities-of-${A}`).click();
     await page.getByTestId('entity-row-Testa Harbour').waitFor();
     assert.match((await page.getByTestId(`entity-row-${A}`).textContent()) ?? '', /1 city/);
+    // A second city right beside it: names and labels move apart, or the less important is hidden;
+    // nothing drawn overlaps.
+    await page.getByRole('button', { name: '+ City' }).click();
+    await page.getByTestId('new-city-name').fill('Testa Port');
+    await page.getByTestId('new-city-create').click();
+    await page.mouse.click(q[0] + 14, q[1] + 3);
+    await h.saved();
+    await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastCities.length >= 2);
+    type B = [number, number, number, number];
+    const boxes = await page.evaluate(() => {
+      const r = (window as any).__mapmaker.store.renderer;
+      return [...r.lastLabels.filter((l: any) => l.drawn).map((l: any) => ({ name: l.text, box: l.box })), ...r.lastCities.filter((c: any) => c.named).map((c: any) => ({ name: c.name, box: c.box }))];
+    }) as Array<{ name: string; box: B }>;
+    const overlap = (a: B, b: B) => !(a[2] < b[0] || a[0] > b[2] || a[3] < b[1] || a[1] > b[3]);
+    for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) assert.ok(!overlap(boxes[i].box, boxes[j].box), `"${boxes[i].name}" and "${boxes[j].name}" do not overlap`);
+    assert.ok(boxes.some((b) => b.name === A), 'the country keeps its label');
+    const dots = await page.evaluate(() => (window as any).__mapmaker.store.renderer.lastCities.map((c: any) => c.name)) as string[];
+    assert.ok(dots.includes('Testa Port') && dots.includes('Testa Harbour'), 'both cities are drawn');
+    await h.screenshot('labels-apart');
     // Events: Shift + click chooses a run; Delete deletes them all (one question, one undo).
     await page.getByTestId('tool-select').click();
     const evRows = page.locator('[data-testid^=event-row-]');
@@ -820,6 +839,38 @@ try {
     assert.equal(img.width, 1000); assert.equal(img.height, 1000);
     assert.equal(pixel(img, 1, 1)[3], 0, 'transparent corner (outside the Natural Earth outline)');
     assert.ok(existsSync(join(ex.dir, 'manifest.json')));
+  });
+
+  await h.step('A flat map: a 10 km city plan with straight borders and a scale in metres or kilometres', async () => {
+    await page.getByTestId('mode-world').click();
+    await page.getByRole('button', { name: '+ Map' }).click();
+    await page.getByTestId('new-map-flat').check();
+    await page.getByTestId('new-map-name').fill('Old Town');
+    await page.getByTestId('new-map-width').fill('10');
+    await page.getByRole('button', { name: 'Create map' }).click();
+    await page.waitForFunction(() => (window as any).__mapmaker.store.world.get('map_space', (window as any).__mapmaker.store.spaceId)?.name === 'Old Town');
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.camera.projection), 'flat', 'seen in plan');
+    assert.equal(await page.getByTestId('basemap-toggle').count(), 0, 'no Earth geography for a flat map');
+    assert.match((await page.locator('.left .row', { hasText: 'Old Town' }).textContent()) ?? '', /flat, 10 km wide/);
+    // A square with the precise shape tool: drawn, owned, straight.
+    await h.newCountry('Guild Quarter');
+    await page.getByTestId('tool-polygon').click();
+    const { cx, cy } = await h.centre();
+    for (const [x, y] of [[cx - 80, cy - 60], [cx + 80, cy - 60], [cx + 80, cy + 60]]) await page.mouse.click(x, y);
+    await page.mouse.dblclick(cx - 80, cy + 60);
+    await page.getByTestId('choice-correct').click();
+    await page.getByTestId('confirm-edit').click();
+    const mid = await h.toLL([cx, cy]);
+    const now = await page.getByTestId('current-date').inputValue();
+    await h.waitOwner(mid, now, 'Guild Quarter');
+    await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastLabels.some((l: any) => l.text === 'Guild Quarter' && l.drawn), null, { timeout: 5000 });
+    const scale = (await page.locator('.scalebar span').textContent()) ?? '';
+    assert.match(scale, /^\d[\d,.]* (m|km)$/, `a scale in metres or kilometres (${scale})`);
+    const kmShown = /km/.test(scale) ? Number(scale.replace(/[^\d.]/g, '')) : Number(scale.replace(/[^\d.]/g, '')) / 1000;
+    assert.ok(kmShown > 0 && kmShown <= 10, `a sensible distance on a 10 km plan (${scale})`);
+    await h.screenshot('flat-map');
+    await page.locator('header select').first().selectOption({ label: 'Earth' });
+    assert.notEqual(await page.evaluate(() => (window as any).__mapmaker.store.camera.projection), 'flat', 'Earth is round again');
   });
 
   await h.step('History Health lists the overlap, nothing else; no browser errors', async () => {

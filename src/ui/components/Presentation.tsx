@@ -154,7 +154,7 @@ export function ShotEditor() {
             <button onClick={() => setCamera(resetCamera(shot))} data-testid="reset-camera" title="The whole map, straight and centred">Reset camera</button>
           </div>
           <label>Projection<select value={shot.camera[0].camera.projection} onChange={(e) => update({ camera: shot.camera.map((k) => ({ ...k, camera: { ...k.camera, projection: e.target.value as ProjectionName } })) })}>
-            {PROJECTIONS.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            {shot.camera[0].camera.projection === 'flat' ? <option value="flat">Flat map (plan)</option> : PROJECTIONS.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select></label>
           <label>Rotation (degrees)<NumberField min={-360} max={360} step={1} value={Math.round(liveCamera.rotation)} onCommit={(n) => setCamera({ ...liveCamera, rotation: n })} testId="camera-rotation" /></label>
         </Group>

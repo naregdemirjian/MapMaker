@@ -12,6 +12,7 @@ import type { Vec3 } from '../geo-kernel/vec.ts';
 import { worldSettings, type BasemapSource } from '../world-model/world-settings.ts';
 import type { LabelStyle, CountryLabel } from '../render-engine/label-style.ts';
 import { ringFromMapPoints } from '../render-engine/stroke.ts';
+import { flatRadiusKm } from '../render-engine/camera.ts';
 
 export interface CommandResult<T = unknown> { label: string; diffs: RowDiff[]; result: T }
 
@@ -74,15 +75,25 @@ export function seedProject(world: World, name: string, firstWorld = { name: 'Ea
   });
 }
 
-function createWorldIn(tx: Tx, name: string, radiusKm: number, basemap: BasemapSource): string {
+/**
+ * A flat map (a city, a region): a plan of the given width, with no geography. Stored as a small part
+ * of a large sphere (see camera.ts FLAT_EXTENT_DEG), so it uses the same kernel at no extra cost.
+ */
+export function createFlatMap(world: World, name: string, widthKm: number): CommandResult<string> {
+  if (!(widthKm > 0) || widthKm > 5000) throw new Error('A flat map is between a few metres and 5,000 km wide.');
+  return run(world, `Create flat map "${name}"`, (tx) => createWorldIn(tx, name, flatRadiusKm(widthKm), 'none', { kind: 'flat', widthKm }));
+}
+
+function createWorldIn(tx: Tx, name: string, radiusKm: number, basemap: BasemapSource, flat?: { kind: 'flat'; widthKm: number }): string {
   const w = tx.world;
   const spaceId = newId('space');
   const bodyId = newId('ent');
   tx.insert('entity', { id: bodyId, type_id: 'body', branch_id: MAIN_BRANCH, name, color: '#7a8b99', notes: '', created_seq: w.nextSeq('entity'), style: '{}', group_id: '' });
   const root = w.ids.next('face');
   tx.insert('map_space', {
-    id: spaceId, name, kind: 'sphere', body_id: bodyId, radius_m: radiusKm * 1000, unit: null, parent_space_id: null,
-    root_face: root, sort_order: w.all('map_space').length, settings: JSON.stringify({ projection: 'equirectangular', basemap }),
+    id: spaceId, name, kind: flat ? 'plane' : 'sphere', body_id: bodyId, radius_m: radiusKm * 1000, unit: null, parent_space_id: null,
+    root_face: root, sort_order: w.all('map_space').length,
+    settings: JSON.stringify(flat ? { projection: 'flat', basemap: 'none', widthKm: flat.widthKm } : { projection: 'equirectangular', basemap }),
   });
   tx.insert('face', { id: root, space_id: spaceId, parent_id: null, is_leaf: 1 });
   tx.insert('layer', {

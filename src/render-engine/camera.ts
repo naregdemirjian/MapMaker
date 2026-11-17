@@ -1,9 +1,10 @@
 // Camera and projections. The map is always flat; the camera chooses the projection, the centre,
 // the zoom and a 2D rotation. Layouts are defined for a 1920-pixel-wide design frame and scale with
 // the output size, so a preview and an 8K export show exactly the same picture.
-import { geoEquirectangular, geoEqualEarth, geoMercator, geoNaturalEarth1, type GeoProjection } from 'd3-geo';
+import { geoEquirectangular, geoEqualEarth, geoMercator, geoNaturalEarth1, geoGnomonic, type GeoProjection } from 'd3-geo';
 
-export type ProjectionName = 'equirectangular' | 'equalEarth' | 'naturalEarth' | 'mercator';
+/** Projections for round maps; 'flat' is the plan view of a flat map (a city, a region). */
+export type ProjectionName = 'equirectangular' | 'equalEarth' | 'naturalEarth' | 'mercator' | 'flat';
 export interface Camera { lon: number; lat: number; zoom: number; rotation: number; projection: ProjectionName }
 
 export const DESIGN_WIDTH = 1920;
@@ -16,7 +17,22 @@ export const PROJECTIONS: Array<{ id: ProjectionName; name: string }> = [
 
 export const defaultCamera = (): Camera => ({ lon: 0, lat: 0, zoom: 0, rotation: 0, projection: 'equirectangular' });
 
-const factories = { equirectangular: geoEquirectangular, equalEarth: geoEqualEarth, naturalEarth: geoNaturalEarth1, mercator: geoMercator };
+const factories = { equirectangular: geoEquirectangular, equalEarth: geoEqualEarth, naturalEarth: geoNaturalEarth1, mercator: geoMercator, flat: geoGnomonic };
+
+/**
+ * A flat map is a small part of a large sphere: a square FLAT_EXTENT_DEG either side of (0, 0), drawn
+ * with the gnomonic projection, which shows every border as a straight line. Within 5 degrees the
+ * plan is true to scale to within 1%, and positions keep their fixed-point precision (about a
+ * millimetre on a city map). The geometry kernel is the same: flat maps cost nothing extra.
+ */
+export const FLAT_EXTENT_DEG = 5;
+
+/** The radius of the sphere a flat map of this width (km) lies on. */
+export function flatRadiusKm(widthKm: number): number {
+  return widthKm / 2 / ((FLAT_EXTENT_DEG * Math.PI) / 180);
+}
+
+export const flatCamera = (): Camera => ({ lon: 0, lat: 0, zoom: 0, rotation: 0, projection: 'flat' });
 
 export interface View {
   projection: GeoProjection;
@@ -30,10 +46,16 @@ export interface View {
 }
 
 export function makeView(cam: Camera, width: number, height: number): View {
-  const p = factories[cam.projection]().precision(0.25).rotate([-cam.lon, 0]).scale(1).translate([0, 0]);
+  const flat = cam.projection === 'flat';
+  // A flat map's plan is centred on (0, 0) and never turned; round maps turn to the camera's longitude.
+  const p = (factories[cam.projection] ?? geoEquirectangular)().precision(flat ? 0.05 : 0.25).rotate([flat ? 0 : -cam.lon, 0]).scale(1).translate([0, 0]);
   if (cam.projection === 'mercator') p.clipExtent(null);
-  const a = p([cam.lon - 179.999, 0]), b = p([cam.lon + 179.999, 0]);
-  const worldWidthAtUnit = Math.abs((b?.[0] ?? 3.14) - (a?.[0] ?? -3.14));
+  let worldWidthAtUnit: number;
+  if (flat) worldWidthAtUnit = 2 * Math.tan((FLAT_EXTENT_DEG * Math.PI) / 180);
+  else {
+    const a = p([cam.lon - 179.999, 0]), b = p([cam.lon + 179.999, 0]);
+    worldWidthAtUnit = Math.abs((b?.[0] ?? 3.14) - (a?.[0] ?? -3.14));
+  }
   const base = (width * 0.96) / worldWidthAtUnit;
   const scale = base * Math.pow(2, cam.zoom);
   p.scale(scale).translate([width / 2, height / 2]);
@@ -79,6 +101,8 @@ export function panCamera(cam: Camera, v: View, dx: number, dy: number): Camera 
   let lon = cam.lon - ux * degPerPx;
   lon = ((lon + 540) % 360) - 180;
   const lat = Math.max(-85, Math.min(85, cam.lat + uy * degPerPx));
+  // A flat map's plan does not go on round the sphere.
+  if (cam.projection === 'flat') { const m = FLAT_EXTENT_DEG * 1.6; return { ...cam, lon: Math.max(-m, Math.min(m, lon)), lat: Math.max(-m, Math.min(m, lat)) }; }
   return { ...cam, lon, lat };
 }
 

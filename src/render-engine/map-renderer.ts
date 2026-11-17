@@ -5,14 +5,14 @@
 // renderer; deck.gl could not be installed in the offline build environment, so this backend sits
 // behind the same inputs (world, engine, view, time, options) and can be replaced without touching
 // the world model, the engine, the interface or the export pipeline.
-import { geoPath, geoGraticule10, geoCircle, geoCentroid, geoArea, type GeoPermissibleObjects } from 'd3-geo';
+import { geoPath, geoGraticule10, geoGraticule, geoCircle, geoCentroid, geoArea, type GeoPermissibleObjects } from 'd3-geo';
 import type { World } from '../world-model/world.ts';
 import type { Engine, FaceState, Assignment, CompiledTransition } from '../temporal-engine/engine.ts';
 import { parseJSON, slerpLonLat } from '../temporal-engine/engine.ts';
 import { type Instant, compare, diffMs } from '../core-time/index.ts';
 import { BASE_EVENT_ID } from '../world-model/schema.ts';
 import type { Vec3 } from '../geo-kernel/vec.ts';
-import { screenToLonLat, type View } from './camera.ts';
+import { screenToLonLat, FLAT_EXTENT_DEG, type View } from './camera.ts';
 import type { Arrangement } from '../geo-kernel/arrangement.ts';
 import { E7 } from '../geo-kernel/vec.ts';
 import { BasemapPainter, landMaskOf, visibleBounds, type Basemap, type LandMask } from './basemap.ts';
@@ -60,6 +60,11 @@ export interface RenderOptions {
   mediaChannel?: MediaChannel;
   /** Draw each character's route so far (shots with trails on). */
   trails?: boolean;
+  /**
+   * What the full picture shows, when only some passes are drawn (exports): texts are placed as in
+   * the full picture. Default: as the passes drawn.
+   */
+  layout?: { labels: boolean; cities: boolean };
 }
 
 /** A picture or video fill (see domain/commands.ts CountryFill). */
@@ -151,8 +156,8 @@ export class MapRenderer {
   lastCharacters: Array<{ entity: string; name: string; x: number; y: number; lon: number; lat: number; moving: boolean }> = [];
   /** How many characters' trails the last frame drew. */
   lastTrails = 0;
-  /** The cities drawn in the last frame (same form). */
-  lastCities: Array<{ entity: string; name: string; x: number; y: number; lon: number; lat: number; moving: boolean }> = [];
+  /** The cities drawn in the last frame (same form; `named`: whether its name had room). */
+  lastCities: Array<{ entity: string; name: string; x: number; y: number; lon: number; lat: number; moving: boolean; named: boolean; box?: [number, number, number, number] }> = [];
   /** The animated changes drawn in the last frame (style and eased progress), for checks and tests. */
   lastTransitions: Array<{ style: string; progress: number }> = [];
 
@@ -205,7 +210,15 @@ export class MapRenderer {
     if (opts.passes.has('graticule')) {
       ctx.strokeStyle = style.graticule;
       ctx.lineWidth = 0.8 * u;
-      ctx.stroke(new Path2D(geoPath(view.projection)(geoGraticule10()) ?? ''));
+      const space = world.get('map_space', spaceId);
+      if (view.camera.projection === 'flat' && space?.radius_m) {
+        // A flat map: a grid in round kilometres or metres, about eight lines across the view.
+        const kmPerRad = space.radius_m / 1000, viewKm = (view.width / view.projection.scale()) * kmPerRad;
+        const raw = viewKm / 8, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+        const stepKm = [1, 2, 5, 10].map((k) => k * mag).find((k) => k >= raw) ?? 10 * mag;
+        const stepDeg = (stepKm / kmPerRad) * (180 / Math.PI), ext = FLAT_EXTENT_DEG * 1.6;
+        ctx.stroke(new Path2D(geoPath(view.projection)(geoGraticule().extent([[-ext, -ext], [ext, ext]]).step([stepDeg, stepDeg]).precision(stepDeg)()) ?? ''));
+      } else ctx.stroke(new Path2D(geoPath(view.projection)(geoGraticule10()) ?? ''));
     }
     if (opts.passes.has('land') && opts.basemap) {
       const oceanBelow = opts.passes.has('background') && !opts.transparent;
@@ -238,7 +251,11 @@ export class MapRenderer {
     // Draw in the same order whether everything is drawn at once or pass by pass (as exported):
     // the fills of every layer, then the borders of every layer, then the labels. Stacking the
     // exported passes in Premiere then reproduces the full picture exactly, with several layers too.
-    const drawsLayers = opts.passes.has('fills') || opts.passes.has('borders') || opts.passes.has('labels');
+    // What the full picture shows (an export pass drawn on its own still places its texts as the full
+    // picture does, so stacked passes match it).
+    const layout = opts.layout ?? { labels: opts.passes.has('labels'), cities: opts.passes.has('cities') };
+    const placesText = opts.passes.has('labels') || opts.passes.has('cities');
+    const drawsLayers = opts.passes.has('fills') || opts.passes.has('borders') || (placesText && layout.labels);
     type LayerStyle = { fillOpacity?: number; borderWidth?: number; clipToLand?: boolean };
     const prepared: Array<{ ls: LayerStyle; states: Map<number, FaceState>; tg: ReturnType<MapRenderer['transitionGroups']>; clip: boolean }> = [];
     for (const layerId of drawsLayers ? opts.layerIds : []) {
@@ -335,15 +352,18 @@ export class MapRenderer {
       ctx.restore();
     }
 
-    this.lastCities = [];
-    if (opts.passes.has('cities')) this.drawCities(ctx, view, engine, spaceId, t, entities);
-
     // One label per country: a country on several layers (its land, and its military control, say) is
     // labelled from the lowest layer it is on.
-    if (opts.passes.has('labels')) for (const { states, clip } of prepared) {
+    if (placesText && layout.labels) for (const { states, clip } of prepared) {
       for (const l of this.layerLabels(view, arr, states, entities, clip ? landMaskOf(opts.basemap!) : null)) if (!labels.some((x) => x.entityId === l.entityId)) labels.push(l);
     }
-
+    // Country labels and city names are placed together: they move apart where they would overlap,
+    // and where they cannot the one with less priority is hidden (larger countries, then smaller
+    // ones, then cities).
+    const cities = placesText && layout.cities ? this.cityItems(view, engine, spaceId, t, entities) : [];
+    if (placesText) this.placeTexts(ctx, labels, cities);
+    this.lastCities = cities.map((c) => ({ entity: c.entity, name: c.name, x: c.x, y: c.y, lon: c.lon, lat: c.lat, moving: false, named: c.drawn, box: c.box }));
+    if (opts.passes.has('cities')) this.drawCities(ctx, cities, u);
     if (opts.passes.has('labels')) this.drawLabels(ctx, labels, style, u);
     this.lastLabels = labels;
     this.lastCharacters = [];
@@ -1043,34 +1063,101 @@ export class MapRenderer {
   /** The look of one country's label (null: hidden); set for each frame by render(). */
   private labelLook: (id: string, name: string) => { style: LabelStyle; text: string } | null = (_id, name) => ({ style: resolveLabelStyle(), text: name });
 
-  /** Cities (settlements): a small white dot and the name in a serif face, under the country labels. */
-  private drawCities(ctx: CanvasRenderingContext2D, view: View, engine: Engine, spaceId: string, t: Instant, entities: Map<string, LabelEntity>): void {
+  /** Cities on screen at this moment (their dots), with their names to be placed. */
+  private cityItems(view: View, engine: Engine, spaceId: string, t: Instant, entities: Map<string, LabelEntity>): CityItem[] {
     const u = view.unit;
-    const list = engine.charactersAt(spaceId, t).filter((c) => entities.get(c.entity)?.type_id === 'settlement');
-    if (!list.length) return;
-    ctx.save();
-    ctx.lineJoin = 'round';
-    for (const c of list) {
-      const e = entities.get(c.entity)!;
+    const out: CityItem[] = [];
+    for (const c of engine.charactersAt(spaceId, t)) {
+      const e = entities.get(c.entity);
+      if (!e || e.type_id !== 'settlement') continue;
       const p = view.projection([c.lon, c.lat]);
       if (!p || p[0] < -50 || p[1] < -50 || p[0] > view.width + 50 || p[1] > view.height + 50) continue;
-      const r = 4.5 * u;
+      out.push({ entity: c.entity, name: e.name, lon: c.lon, lat: c.lat, x: p[0], y: p[1], r: 4.5 * u, size: 17 * u, tx: p[0], ty: p[1], align: 'left', drawn: false });
+    }
+    // A steady order (the same every frame).
+    return out.sort((a, b) => a.name.localeCompare(b.name) || a.entity.localeCompare(b.entity));
+  }
+
+  /** Cities: a small white dot and, where it has room, the name in a serif face. */
+  private drawCities(ctx: CanvasRenderingContext2D, items: CityItem[], u: number): void {
+    if (!items.length) return;
+    ctx.save();
+    ctx.lineJoin = 'round';
+    for (const c of items) {
       ctx.beginPath();
-      ctx.arc(p[0], p[1], r, 0, Math.PI * 2);
+      ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2);
       ctx.fillStyle = '#f4efe6';
       ctx.fill();
       ctx.lineWidth = 1.6 * u;
       ctx.strokeStyle = '#0a1018';
       ctx.stroke();
-      ctx.font = `500 ${(17 * u).toFixed(1)}px Georgia, "Times New Roman", serif`;
-      ctx.textAlign = 'left';
+      if (!c.drawn) continue;
+      ctx.font = cityFont(c.size);
+      ctx.textAlign = c.align;
       ctx.textBaseline = 'middle';
       ctx.lineWidth = 3.5 * u;
       ctx.strokeStyle = 'rgba(10,16,24,0.8)';
-      ctx.strokeText(e.name, p[0] + r + 4 * u, p[1]);
+      ctx.strokeText(c.name, c.tx, c.ty);
       ctx.fillStyle = '#f4efe6';
-      ctx.fillText(e.name, p[0] + r + 4 * u, p[1]);
-      this.lastCities.push({ entity: c.entity, name: e.name, x: p[0], y: p[1], lon: c.lon, lat: c.lat, moving: c.moving });
+      ctx.fillText(c.name, c.tx, c.ty);
+    }
+    ctx.restore();
+  }
+
+  /**
+   * Place country labels and city names so that none overlap. In order of priority (larger countries,
+   * smaller countries, cities), each takes the first free place among a few near its own: a country
+   * label its centre, then a little above, below or to the side; a city name right of its dot, then
+   * left, above or below. One that finds no free place is hidden.
+   */
+  private placeTexts(ctx: CanvasRenderingContext2D, labels: LabelInfo[], cities: CityItem[]): void {
+    type Box = [number, number, number, number];
+    const placed: Box[] = [];
+    const dots: Box[] = cities.map((c) => [c.x - c.r, c.y - c.r, c.x + c.r, c.y + c.r]);
+    const hits = (b: Box, list: Box[]) => list.some((o) => !(b[2] < o[0] || b[0] > o[2] || b[3] < o[1] || b[1] > o[3]));
+    ctx.save();
+    const sorted = [...labels].sort((a, b) => b.priority - a.priority || b.size - a.size || a.text.localeCompare(b.text));
+    for (const l of sorted) {
+      l.drawn = false;
+      const st = l.style;
+      ctx.font = labelFont(st, l.size);
+      const spacing = st.letterSpacing * l.size;
+      (ctx as CanvasRenderingContext2D & { letterSpacing?: string }).letterSpacing = `${spacing.toFixed(2)}px`;
+      const lines = l.lines.length ? l.lines : [l.text];
+      const w = Math.max(...lines.map((t) => ctx.measureText(t).width));
+      const h = l.size + (lines.length - 1) * l.size * LINE_HEIGHT;
+      const at = (dx: number, dy: number): Box => [l.x + dx - w / 2, l.y + dy - h / 2, l.x + dx + w / 2, l.y + dy + h / 2];
+      const tries: Array<[number, number]> = [[0, 0], [0, -0.75 * h], [0, 0.75 * h], [-0.3 * w, 0], [0.3 * w, 0], [0, -1.4 * h], [0, 1.4 * h]];
+      // First keeping clear of city dots too; failing that, only of other labels.
+      let found: [number, number] | null = null;
+      for (const avoidDots of [true, false]) {
+        for (const [dx, dy] of tries) { const b = at(dx, dy); if (!hits(b, placed) && (!avoidDots || !hits(b, dots))) { found = [dx, dy]; break; } }
+        if (found) break;
+      }
+      if (!found) continue;
+      l.x += found[0]; l.y += found[1];
+      l.box = [l.x - w / 2, l.y - h / 2, l.x + w / 2, l.y + h / 2];
+      l.drawn = true;
+      placed.push(l.box);
+    }
+    (ctx as CanvasRenderingContext2D & { letterSpacing?: string }).letterSpacing = '0px';
+    for (const c of cities) {
+      ctx.font = cityFont(c.size);
+      const w = ctx.measureText(c.name).width, h = c.size, gap = c.r + 4 * (c.size / 17);
+      const others = dots.filter((d) => !(d[0] === c.x - c.r && d[1] === c.y - c.r));
+      const options: Array<{ tx: number; ty: number; align: CanvasTextAlign; box: Box }> = [
+        { tx: c.x + gap, ty: c.y, align: 'left', box: [c.x + gap, c.y - h / 2, c.x + gap + w, c.y + h / 2] },
+        { tx: c.x - gap, ty: c.y, align: 'right', box: [c.x - gap - w, c.y - h / 2, c.x - gap, c.y + h / 2] },
+        { tx: c.x + gap * 0.6, ty: c.y - h * 0.8, align: 'left', box: [c.x + gap * 0.6, c.y - h * 1.3, c.x + gap * 0.6 + w, c.y - h * 0.3] },
+        { tx: c.x + gap * 0.6, ty: c.y + h * 0.8, align: 'left', box: [c.x + gap * 0.6, c.y + h * 0.3, c.x + gap * 0.6 + w, c.y + h * 1.3] },
+        { tx: c.x - gap * 0.6, ty: c.y - h * 0.8, align: 'right', box: [c.x - gap * 0.6 - w, c.y - h * 1.3, c.x - gap * 0.6, c.y - h * 0.3] },
+        { tx: c.x - gap * 0.6, ty: c.y + h * 0.8, align: 'right', box: [c.x - gap * 0.6 - w, c.y + h * 0.3, c.x - gap * 0.6, c.y + h * 1.3] },
+      ];
+      const ok = options.find((o) => !hits(o.box, placed) && !hits(o.box, others));
+      c.drawn = !!ok;
+      if (!ok) continue;
+      c.tx = ok.tx; c.ty = ok.ty; c.align = ok.align; c.box = ok.box;
+      placed.push(ok.box);
     }
     ctx.restore();
   }
@@ -1145,28 +1232,18 @@ export class MapRenderer {
   }
 
   private drawLabels(ctx: CanvasRenderingContext2D, labels: LabelInfo[], _style: MapStyle, _u: number): void {
-    const placed: Array<[number, number, number, number]> = [];
-    // Larger territories first: where labels would overlap, theirs are kept.
-    const sorted = [...labels].sort((a, b) => b.priority - a.priority || b.size - a.size || a.text.localeCompare(b.text));
     ctx.save();
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.lineJoin = 'round';
-    for (const l of sorted) {
-      l.drawn = false;
+    for (const l of labels) {
+      if (!l.drawn) continue; // no free place (see placeTexts)
       const st = l.style;
       ctx.font = labelFont(st, l.size);
       const spacing = st.letterSpacing * l.size;
       (ctx as CanvasRenderingContext2D & { letterSpacing?: string }).letterSpacing = `${spacing.toFixed(2)}px`;
       const lines = l.lines.length ? l.lines : [l.text];
-      const w = Math.max(...lines.map((t) => ctx.measureText(t).width));
       const lh = l.size * LINE_HEIGHT;
-      const h = l.size + (lines.length - 1) * lh;
-      const box: [number, number, number, number] = [l.x - w / 2, l.y - h / 2, l.x + w / 2, l.y + h / 2];
-      if (placed.some((b) => !(box[2] < b[0] || box[0] > b[2] || box[3] < b[1] || box[1] > b[3]))) continue;
-      placed.push(box);
-      l.drawn = true;
-      l.box = box;
       // With letter spacing the text grows to the right; shift it back so it stays centred.
       const x = l.x + spacing / 2;
       ctx.globalAlpha = st.opacity;
@@ -1184,7 +1261,13 @@ export class MapRenderer {
     ctx.restore();
   }
 
+
 }
+
+/** A city on screen: its dot, and where its name goes (if anywhere: `drawn`). */
+interface CityItem { entity: string; name: string; lon: number; lat: number; x: number; y: number; r: number; size: number; tx: number; ty: number; align: CanvasTextAlign; drawn: boolean; box?: [number, number, number, number] }
+
+const cityFont = (size: number) => `500 ${size.toFixed(1)}px Georgia, "Times New Roman", serif`;
 
 /** An advancing front from a border: how far it must travel, and the area reached at a distance. */
 interface BorderFront { maxDist: number; reach: (r: number) => Path2D }

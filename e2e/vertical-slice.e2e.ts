@@ -324,6 +324,20 @@ try {
     await screenshot('two-countries');
   });
 
+  await step('Border eraser: a stroke from A across the border gives A the land on the other side; undo', async () => {
+    await page.getByTestId('tool-erase').click();
+    const { cx, cy } = await centre();
+    await page.mouse.move(cx - 120, cy); await page.mouse.down();
+    await page.mouse.move(cx + 40, cy, { steps: 12 }); await page.mouse.up();
+    await waitOwner(P.eastB, '2000', A);
+    assert.equal(await ownerAt(P.westA, '2000'), A);
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('event').length), 1, 'no event was made');
+    await saved();
+    await page.getByTestId('undo').click();
+    await waitOwner(P.eastB, '2000', B);
+    await page.getByTestId('tool-select').click();
+  });
+
   await step('Edit a border by dragging one of its points', async () => {
     await page.getByTestId('tool-vertex').click();
     const v = await page.evaluate(() => {

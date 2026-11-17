@@ -29,7 +29,9 @@ type Drag =
   // A text or the current-events box dragged on the shot preview.
   | { kind: 'overlay'; id: string; x: number; y: number; from: { x: number; y: number } }
   // A character's marker dragged to a new place (from the date being viewed).
-  | { kind: 'character'; entity: string; moved: number };
+  | { kind: 'character'; entity: string; moved: number }
+  // The border eraser's stroke (map positions).
+  | { kind: 'erase'; points: Pt[] };
 
 /** Where the shot preview last drew its texts and the events box (frame pixels), to pick them up. */
 let overlayRects: OverlayRect[] = [];
@@ -49,6 +51,61 @@ export function frameRect(shot: ShotSettings, w: number, h: number) {
   let fw = w - 24, fh = fw / aspect;
   if (fh > h - 24) { fh = h - 24; fw = fh * aspect; }
   return { x: (w - fw) / 2, y: (h - fh) / 2, w: Math.max(1, fw), h: Math.max(1, fh) };
+}
+
+/**
+ * The border eraser: every border the stroke crosses (or passes within a few pixels of) is erased:
+ * the country where the stroke starts takes the land on the other side of each, from the date being
+ * viewed (or in the event being recorded). One undo step.
+ */
+function eraseBorders(stroke: Pt[], view: View): void {
+  const s = store, w = s.world!, e = s.engine!;
+  if (stroke.length < 2 || !s.layerId) return;
+  const arr = w.arrangement(s.spaceId);
+  const scr = stroke.map((q) => lonLatToScreen(view, q[0], q[1])).filter((q): q is Pt => !!q);
+  if (scr.length < 2) return;
+  const states = e.partitionState(s.spaceId, s.layerId, s.time);
+  const ownerOf = (f: number) => states.get(f)?.value ?? null;
+  const start = e.valueAtPoint(s.spaceId, s.layerId, lonLatToVec(stroke[0][0], stroke[0][1]), s.time);
+  // Only borders on screen near the stroke: a box test first, then the distance in pixels.
+  const lons = stroke.map((q) => q[0]), lats = stroke.map((q) => q[1]);
+  const pad = 2;
+  const box = [Math.min(...lons) - pad, Math.min(...lats) - pad, Math.max(...lons) + pad, Math.max(...lats) + pad];
+  const near = (a: Pt, b: Pt) => {
+    for (let i = 1; i < scr.length; i++) if (segSegDist(a, b, scr[i - 1], scr[i]) <= 5) return true;
+    return false;
+  };
+  const take = new Set<number>();
+  let crossed = 0;
+  for (const sg of arr.segments.values()) {
+    const va = arr.vertices.get(sg.a)!, vb = arr.vertices.get(sg.b)!;
+    const ax = va.lon / E7, ay = va.lat / E7, bx = vb.lon / E7, by = vb.lat / E7;
+    if (Math.max(ax, bx) < box[0] || Math.min(ax, bx) > box[2] || Math.max(ay, by) < box[1] || Math.min(ay, by) > box[3]) continue;
+    const l = ownerOf(sg.left_face), r = ownerOf(sg.right_face);
+    if ((l ?? '') === (r ?? '')) continue; // not a border at this date
+    const pa = lonLatToScreen(view, ax, ay), pb = lonLatToScreen(view, bx, by);
+    if (!pa || !pb || !near(pa, pb)) continue;
+    crossed++;
+    if ((l ?? '') !== (start ?? '')) take.add(sg.left_face);
+    if ((r ?? '') !== (start ?? '')) take.add(sg.right_face);
+  }
+  if (!take.size) { s.toast(crossed ? 'Nothing to erase there.' : 'Drag across a border to erase it.'); return; }
+  const who = start ? w.get('entity', start)?.name ?? 'the country' : 'nobody';
+  const rev = w.revision;
+  s.execute((wd, en) => cmd.assignFaces(wd, en, { spaceId: s.spaceId, layerId: s.layerId, leaves: [...take], value: start, mode: placementMode() }));
+  if (w.revision !== rev) s.toast(`Erased: the land across went to ${who}.`);
+}
+
+function segSegDist(a: Pt, b: Pt, c: Pt, d: Pt): number {
+  const cross = (p: Pt, q: Pt, r: Pt) => (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]);
+  const d1 = cross(a, b, c), d2 = cross(a, b, d), d3 = cross(c, d, a), d4 = cross(c, d, b);
+  if (((d1 > 0) !== (d2 > 0)) && ((d3 > 0) !== (d4 > 0))) return 0;
+  const pd = (p: Pt, u: Pt, v: Pt) => {
+    const dx = v[0] - u[0], dy = v[1] - u[1], L = dx * dx + dy * dy;
+    const t = L ? Math.max(0, Math.min(1, ((p[0] - u[0]) * dx + (p[1] - u[1]) * dy) / L)) : 0;
+    return Math.hypot(p[0] - u[0] - t * dx, p[1] - u[1] - t * dy);
+  };
+  return Math.min(pd(a, c, d), pd(b, c, d), pd(c, a, b), pd(d, a, b));
 }
 
 /** Store the preview's view as the current shot's camera (still for the whole shot). */
@@ -113,7 +170,7 @@ export function MapView() {
     if (!shot || shot.characters !== false) passes.add('characters');
     if (!shot || shot.cities !== false) passes.add('cities');
     try {
-      s.renderer.render(ctx, view, s.world, s.engine, s.spaceId, time, { passes, transparent: !!shot?.transparent, layerIds: layers, basemap, referenceBorders: !shot && s.referenceBorders, transitions: shot ? transitionOptions(shot, s.shotFrame) : undefined, mediaSeconds: shot ? s.shotFrame / shot.fps : 0, trails: !!shot?.trails });
+      s.renderer.render(ctx, view, s.world, s.engine, s.spaceId, time, { passes, transparent: !!shot?.transparent, layerIds: layers, basemap, referenceBorders: !shot && s.referenceBorders, transitions: shot ? transitionOptions(shot, s.shotFrame) : undefined, mediaSeconds: shot ? s.shotFrame / shot.fps : 0, trails: !!shot?.trails, layout: { labels: !shot || shot.labels, cities: !shot || shot.cities !== false } });
     } catch (e) {
       console.error(e);
     }
@@ -183,6 +240,14 @@ export function MapView() {
         if (q) { ctx.beginPath(); ctx.arc(q[0], q[1], 4, 0, Math.PI * 2); ctx.stroke(); }
       }
       ctx.restore();
+    }
+    // The border eraser's stroke.
+    if (drag.current.kind === 'erase') {
+      const pts = drag.current.points.map((q) => lonLatToScreen(v, q[0], q[1])).filter((q): q is Pt => !!q);
+      if (pts.length > 1) {
+        ctx.save(); ctx.strokeStyle = 'rgba(255,107,107,0.9)'; ctx.lineWidth = 10; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.globalAlpha = 0.5;
+        ctx.beginPath(); pts.forEach((q, i) => (i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]))); ctx.stroke(); ctx.restore();
+      }
     }
     // A character being dragged: where it will go.
     if (drag.current.kind === 'character' && cursor) {
@@ -303,6 +368,12 @@ export function MapView() {
       const hit = overlayAt(p);
       if (hit) { drag.current = { kind: 'overlay', id: hit.id, x: p[0], y: p[1], from: { x: hit.x / frame.w, y: hit.y / frame.h } }; return; }
     }
+    // Border eraser: a stroke across borders.
+    if (!presentation && e.button === 0 && s.tool === 'erase') {
+      const ll = screenToLonLat(view, p[0], p[1]);
+      if (ll) { drag.current = { kind: 'erase', points: [ll] }; force((n) => n + 1); }
+      return;
+    }
     // Characters tool: a click puts the chosen character here, from the date being viewed.
     if (!presentation && e.button === 0 && s.tool === 'place') {
       const ll = screenToLonLat(view, p[0], p[1]);
@@ -362,6 +433,13 @@ export function MapView() {
       return;
     }
     if (d.kind === 'character') { d.moved += 1; setCursor(p); return; }
+    if (d.kind === 'erase') {
+      const ll = screenToLonLat(view, p[0], p[1]);
+      const last = d.points[d.points.length - 1];
+      const ls = lonLatToScreen(view, last[0], last[1]);
+      if (ll && (!ls || Math.hypot(p[0] - ls[0], p[1] - ls[1]) > 2)) { d.points.push(ll); force((n) => n + 1); }
+      return;
+    }
     if (presentation && d.kind === 'none') {
       const over = !!overlayAt(p);
       if (over !== overOverlay) setOverOverlay(over);
@@ -404,6 +482,7 @@ export function MapView() {
     const p = local(e);
     // Framing the shot: the view dragged to becomes the shot's camera (still for the whole shot).
     if (presentation && d.kind === 'pan') { if (d.moved >= 1) commitShotCamera(); return; }
+    if (d.kind === 'erase') { eraseBorders(d.points, view); force((n) => n + 1); return; }
     // A character dropped: it is there from the date being viewed (a click just selects it).
     if (d.kind === 'character') {
       setCursor(null);

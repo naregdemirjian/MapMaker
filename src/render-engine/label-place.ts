@@ -6,10 +6,10 @@
 // label's proportions that fits inside the outline (the "pole of inaccessibility", stretched to the
 // text), mildly drawn towards the middle of the piece. The work is done in the map projection's own
 // plane, so the room measured is the room seen on screen.
-import { geoEquirectangular, geoEqualEarth, geoMercator, geoNaturalEarth1, type GeoProjection } from 'd3-geo';
+import { geoEquirectangular, geoEqualEarth, geoMercator, geoNaturalEarth1, geoGnomonic, type GeoProjection } from 'd3-geo';
 import type { ProjectionName } from './camera.ts';
 
-const factories = { equirectangular: geoEquirectangular, equalEarth: geoEqualEarth, naturalEarth: geoNaturalEarth1, mercator: geoMercator };
+const factories = { equirectangular: geoEquirectangular, equalEarth: geoEqualEarth, naturalEarth: geoNaturalEarth1, mercator: geoMercator, flat: geoGnomonic };
 const RAD = Math.PI / 180;
 
 /** A territory's outline in a projection's plane (scale 1), centred on the territory. */
@@ -32,7 +32,8 @@ export function planeShape(arcs: ArrayLike<number>, projectionName: ProjectionNa
   const P = (lon: number, lat: number) => projection([lon, Math.max(-maxLat, Math.min(maxLat, lat))]);
   // Half the width of the projected world: an edge longer than this crosses the cut behind the planet.
   const a0 = P(centreLon - 179.999, 0), a1 = P(centreLon + 179.999, 0);
-  const halfWorld = a0 && a1 ? Math.abs(a1[0] - a0[0]) / 2 : Math.PI;
+  // A flat map's plan has no back side (and the gnomonic projection does not show the whole world).
+  const halfWorld = projectionName === 'flat' ? Infinity : a0 && a1 ? Math.abs(a1[0] - a0[0]) / 2 : Math.PI;
   for (let i = 0; i + 3 < arcs.length; i += 4) {
     const lon0 = arcs[i], lat0 = arcs[i + 1], lon1 = arcs[i + 2], lat1 = arcs[i + 3];
     // Long arcs are followed as great circles, in pieces of at most one degree.

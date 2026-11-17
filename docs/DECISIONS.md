@@ -59,6 +59,38 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D44. Flat maps cost nothing extra: a small part of a large sphere, seen in plan (the user, 17 November 2026)
+
+The user allowed maps of cities if they do not reduce performance at all. A flat map is a square FLAT_EXTENT_DEG (5°)
+either side of (0, 0) on a sphere whose radius makes it the chosen width; it is always shown with the gnomonic
+projection ("flat"), where every border (a great-circle arc) is a straight line. Within 5° the plan is true to scale to
+within 1%, and the fixed-point vertices keep about a millimetre of precision on a city map. The kernel, history, labels
+and exports are unchanged, so nothing is slower. The map kind is `plane`; the camera is kept in plan, panning stops at
+the plan's edge, the grid is in round metres or kilometres, there is no Earth geography.
+
+### D43. Country labels and city names are placed together
+
+One placement for both, in priority order: larger countries, smaller countries, then cities. Each takes the first free
+place among a few near its own (a country label its centre, then a little above, below or to the side, keeping clear
+of city dots where it can; a city name right of its dot, then left, above or below); one that finds none is hidden
+(a city keeps its dot). An export pass drawn on its own places its texts as the full picture does
+(`RenderOptions.layout`), so stacked passes still match.
+
+### D42. The border eraser takes the land across, from the date being viewed
+
+Dragging the eraser across borders: the country where the stroke starts takes the parcels on the other side of each
+border crossed (whole parcels), from the date being viewed (as "correct this period") or in the event being recorded;
+starting outside any country clears that land. No question asked; one undo step.
+
+### D41. Working with many things at once (the user, 17 November 2026)
+
+Lists take Ctrl + click (add or remove) and Shift + click (a run); the Delete key and right-click menus act on
+everything chosen, each as one undo step however many it changes. Countries can be put in groups (folders, table
+`entity_group`, file format 4) that fold away; a group's menu hides or shows all its labels, switches its pictures off
+(colours) or back on, selects or deletes its members. Pictures switched off are kept (`fill.off`). Cities are listed
+under the country whose land they stand on at the date viewed. Deleting a country takes it out of history (its land
+goes back to its previous holders); the desktop app has no browser prompt, so names are asked in the app's own dialog.
+
 ### D40. Cities are placements too
 
 Cities (entities of type "City or settlement") use the same dated placements as characters (D35), but never travel:
@@ -87,7 +119,8 @@ stays as a cheap check.
 
 The user dropped maps of cities ("forget about creating maps for cities and stuff"). Every map stays a sphere with its
 own radius, so the plane version of the kernel is no longer planned for city plans. **Confirmed 17 November 2026:**
-space maps (the solar system, nearby stars, the galaxy) are still wanted; they stay in the roadmap.
+space maps (the solar system, nearby stars, the galaxy) are still wanted; they stay in the roadmap. **Later the same
+day** the user allowed city maps if they cost no performance: built that way (D44).
 
 ### D37. Export: "All" alone by default; an estimated size
 

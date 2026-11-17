@@ -7,7 +7,15 @@ Companion files: [REQUIREMENTS.md](REQUIREMENTS.md) (checklist against the maste
 The approved architecture is the Claude Doc "Map Maker — Technical Architecture & Development Plan"
 (https://claude.ai/artifact/2JShAV3AWt6iECtNgBTsJN). All twelve of its decisions were approved on 15 November 2026.
 
-## Status at a glance (17 November 2026, after the user's second feedback round)
+## Status at a glance (17 November 2026, after the user's third feedback round)
+
+- **Third feedback round done** (REQUIREMENTS.md, "The user's third feedback round"; D41–D44): deleted countries no
+  longer leave grey land and borders; "+ Layer" works in the desktop app; Ctrl/Shift to choose several, right-click
+  menus, groups of countries that fold away, many events or countries deleted at once (one undo); cities listed under
+  their country; labels and city names move apart or the less important is hidden; a border eraser; flat maps (a city,
+  a region) at no performance cost. Project file format 4.
+- **Also done since the second round:** firm-snapping defects in the kernel fixed (D39); cities (D40); characters'
+  routes in shots.
 
 - **The user's second feedback round is done** (fourth session, 17 November; every item with its evidence is in
   REQUIREMENTS.md, "The user's second feedback round"; decisions D31–D38): labels placed where each country has room,
@@ -73,7 +81,7 @@ For development (Linux or Windows, Node 22.18 or newer):
 | `xvfb-run -a node --disable-warning=ExperimentalWarning e2e/desktop.e2e.ts` | The 5-step desktop app test (build first) |
 | `node --disable-warning=ExperimentalWarning dist/server.mjs --port 4317 --projects <folder> [--open]` | Runs the app |
 | `sh scripts/check-all.sh` | Every check: type check, unit tests, build, the three interface tests |
-| `npm test` | 151 unit, randomised and scenario tests |
+| `npm test` | 159 unit, randomised and scenario tests |
 | `node --disable-warning=ExperimentalWarning test/geo-kernel.stress.ts <seeds> <rings>` | Long randomised kernel run |
 | `node --disable-warning=ExperimentalWarning e2e/vertical-slice.e2e.ts` | The 17-step interface test in Chrome (build first); screenshots in `e2e/output/` |
 | `node --disable-warning=ExperimentalWarning e2e/workflows.e2e.ts` | The 10-step workflow and export-inspection test; screenshots in `e2e/output/workflows/` |
@@ -138,7 +146,7 @@ The approved roadmap has 14 stages (0–13). Where each stands:
 
 ## Tests
 
-All pass as of 17 November 2026 (151 unit and randomised tests in 21 files, 22 + 18 + 5 interface steps).
+All pass as of 17 November 2026 (159 unit and randomised tests in 23 files, 23 + 20 + 5 interface steps).
 `sh scripts/check-all.sh` runs everything and prints ALL CHECKS PASSED only when every check passed.
 
 | Suite | Count | What it proves |
@@ -160,6 +168,8 @@ All pass as of 17 November 2026 (151 unit and randomised tests in 21 files, 22 +
 | `test/fills.test.ts` | 3 | Video timing; fill commands with undo; the 197 flags and their credit |
 | `test/events-box.test.ts` | 2 | Current events: started and not ended, lingering, alternatives, groups, fades, limits |
 | `test/sequence.test.ts` | 6 | Screen seconds through even and eased pacing; transition settings and styles; the still camera and its reset; moving texts and the events box; export choices and sizes |
+| `test/workflow.test.ts` | 4 | Groups of countries (made, renamed, moved in and out, deleted keeping members); labels and pictures of many at once; many events and countries deleted at once; one undo each |
+| `test/flat-maps.test.ts` | 3 | Flat maps: plan view, the width on screen, exact screen conversions, straight borders, panning stops at the edge; true to scale within 1%; labels |
 | `test/label-place.test.ts` | 6 | Labels: every large country of today's 242 gets a place inside it in four projections; 24 countries labelled near their middle; across 180° and around the pole; lines for long names; all 242 placed quickly; the part on screen when zoomed in |
 | `test/characters.test.ts` | 5 | Characters: travelling between places along the shortest path, appearing, leaving the map, moving a placement, in events and from the start, undo, reload, deleted characters reported, across 180°; cities founded, moved at once, abandoned, from the beginning |
 | `test/history-view.test.ts` | 2 | Periods (day, month, year, several years, before year 1), stepping; a country's gains and losses in a period and the changes that made them; lost and won back within a period |
@@ -243,7 +253,8 @@ Remaining bottlenecks:
 | 15–16 Nov 2026 | Stage work from an empty folder: time system and kernel; world model, engine and commands; data service; interface; end-to-end fixes; documentation (0.1.0) | `2a564fc` → `0966b07` |
 | 16 Nov 2026 | Testing and refinement: scenario, geometry, world, recovery, camera and A/B tests; second interface test; benchmark; 11 defects fixed; performance work (0.2.0) | `6a3c64a` → `343d84c` |
 | 16 Nov 2026 (3rd) | The user's first feedback round (14 items) and the engine redesign; two kernel defects fixed | `aca87e0` → `db6423b` |
-| 17 Nov 2026 | The user's second feedback round (12 items): labels, add into a country, characters, corrections from the date drawn, changes over time, still camera, advancing front, draggable texts, graphic as the box, export choices and size | `6525557` → latest |
+| 17 Nov 2026 | The user's second feedback round (12 items): labels, add into a country, characters, corrections from the date drawn, changes over time, still camera, advancing front, draggable texts, graphic as the box, export choices and size | `6525557` → `83c103a` |
+| 17 Nov 2026 (2nd) | Firm-snapping kernel defects (D39), cities (D40), trails; the third feedback round: grey borders and "+ Layer" fixed, choosing several, right-click menus, groups, bulk delete, cities under countries, labels apart, border eraser, flat maps (D41–D44) | `ed163e3` → latest |
 | 16 Nov 2026 (2nd) | Package installs work; Natural Earth basemap (land, lakes, coastlines, present-day borders guide), land export pass, data sources dialog and export credits; coastline clipping with land-aware labels; real React types (D4 reversed); desktop app, Windows installer and Windows test run (D2 reversed); Windows fix; event groups and the first file-format upgrade | `071deac` → `9004a90` |
 
 ## Next priorities (after the second feedback round)

@@ -7,7 +7,7 @@ import { World } from '../world-model/world.ts';
 import { Engine } from '../temporal-engine/engine.ts';
 import type { CommandResult } from '../domain/commands.ts';
 import { type Instant, gregorian, toJSONValue, fromJSONValue } from '../core-time/index.ts';
-import { type Camera, defaultCamera, PROJECTIONS } from '../render-engine/camera.ts';
+import { type Camera, defaultCamera, flatCamera, PROJECTIONS } from '../render-engine/camera.ts';
 import { MapRenderer } from '../render-engine/map-renderer.ts';
 import { loadBasemap, type Basemap } from '../render-engine/basemap.ts';
 import { DEFAULT_PERIOD, type PeriodSpec } from '../domain/history-view.ts';
@@ -19,7 +19,7 @@ export type Mode = 'world' | 'present';
 /** One line of a right-click menu: an action, a heading, or a divider. */
 export type MenuItem = { label: string; run: () => void; danger?: boolean; testId?: string } | { heading: string } | 'divider';
 
-export type Tool = 'select' | 'lasso' | 'polygon' | 'pen' | 'vertex' | 'place';
+export type Tool = 'select' | 'lasso' | 'polygon' | 'pen' | 'vertex' | 'place' | 'erase';
 export type Selection =
   | { kind: 'entity'; id: string }
   | { kind: 'event'; id: string }
@@ -157,7 +157,7 @@ class AppStore {
       if (!v) return;
       if (v.spaceId && w.get('map_space', v.spaceId)) this.spaceId = v.spaceId;
       for (const [k, c] of v.cameras ?? []) {
-        const ok = c && [c.lon, c.lat, c.zoom, c.rotation].every((n) => typeof n === 'number' && Number.isFinite(n)) && PROJECTIONS.some((p) => p.id === c.projection);
+        const ok = c && [c.lon, c.lat, c.zoom, c.rotation].every((n) => typeof n === 'number' && Number.isFinite(n)) && (c.projection === 'flat' || PROJECTIONS.some((p) => p.id === c.projection));
         if (ok && w.get('map_space', k)) this.cameras.set(k, c);
       }
       if (Array.isArray(v.eventFilter)) this.eventFilter = v.eventFilter.filter((g): g is string => typeof g === 'string' && (g === '__ungrouped' || !!w.get('event_group', g)));
@@ -181,7 +181,10 @@ class AppStore {
 
   get camera(): Camera {
     let c = this.cameras.get(this.spaceId);
-    if (!c) { c = defaultCamera(); this.cameras.set(this.spaceId, c); }
+    // A flat map is always seen in plan; a round map never is.
+    const flat = this.world?.get('map_space', this.spaceId)?.kind === 'plane';
+    if (c && (c.projection === 'flat') !== flat) c = undefined;
+    if (!c) { c = flat ? flatCamera() : defaultCamera(); this.cameras.set(this.spaceId, c); }
     return c;
   }
   setCamera(c: Camera) { this.cameras.set(this.spaceId, c); this.notify(); }
