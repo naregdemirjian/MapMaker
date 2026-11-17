@@ -27,11 +27,15 @@ while Map Maker is closed. Don't keep projects inside OneDrive or Dropbox while 
 
 ## What it can do now (version 0.2.0 and later)
 
-- Create projects and maps (Earth, the Moon, planets or your own), countries and factions.
-- Draw territory freehand or point by point, and correct borders by dragging their points.
-- Record history as dated events; move through time and see the map exactly as it was on any date, from millennia down
-  to milliseconds.
-- Animate changes (an advancing front or a fade) over the length of an event.
+- Create projects and maps (Earth, the Moon, planets or your own), countries and factions, and characters.
+- Draw territory freehand, point by point or with the border pen, and correct borders by dragging their points.
+- Add today's countries (all 242, or by continent or name), as countries of their own or into a country of yours.
+- Record history as dated events, or change the map from a date on without an event; move through time and see the
+  map exactly as it was on any date, from millennia down to milliseconds. See what a country gained and lost in any
+  day, month, year or span of years.
+- Characters are points that travel between their places over time.
+- Animate changes (an advancing front from the border, an expansion or a fade); style labels, fill countries with
+  colours, flags, pictures or videos; add a current-events box to shots.
 - Make shots and export PNG image sequences with transparency, in separate layers for Premiere, at HD, 4K, 8K or any
   size and frame rate.
 - Earth's real geography (Natural Earth land, lakes and coastlines); countries can be painted loosely over the sea and
