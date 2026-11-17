@@ -12,6 +12,7 @@ const loadFlags = () => (flagList ??= fetch('data/flags/index.json').then((r) =>
 /** A small sample of a country's fill, for lists. */
 export function FillSwatch({ entity }: { entity: { color: string; style?: string } }) {
   const fill = cmd.entityStyle(entity).fill;
+  if (fill?.off) return <span className="swatch" style={{ background: entity.color }} />;
   if (fill?.kind === 'image' && fill.asset) return <span className="swatch picture" style={{ backgroundImage: `url("${assetUrl(fill.asset)}")` }} />;
   if (fill?.kind === 'video') return <span className="swatch video" style={{ background: entity.color }} title="Video">▶</span>;
   return <span className="swatch" style={{ background: entity.color }} />;
@@ -66,6 +67,11 @@ export function CountryFillSection({ id }: { id: string }) {
         <FillSwatch entity={e} /> Filled with {kind === 'color' ? 'its colour' : kind === 'image' ? (fill?.asset?.startsWith('data/flags/') ? 'a flag' : 'a picture') : 'a video'}
         {kind !== 'color' && <button className="small" onClick={() => save(null)} data-testid="fill-color">Use the colour</button>}
       </div>
+      {kind !== 'color' && fill?.asset && (
+        <label className="check" title="Switch the picture off for now: the colour shows, and the picture is kept">
+          <input type="checkbox" checked={!fill.off} onChange={(ev) => s.execute((wd) => cmd.setFillsShown(wd, [id], ev.target.checked))} data-testid="fill-shown" /> Show the {kind === 'video' ? 'video' : 'picture'} (off: its colour, the {kind === 'video' ? 'video' : 'picture'} is kept)
+        </label>
+      )}
       <div className="buttons">
         <button className="small" onClick={() => setPicking(true)} data-testid="choose-flag">Choose a flag…</button>
         <label className="file-button small">Picture of your own…<input type="file" accept="image/*" onChange={(ev) => upload(ev.target.files?.[0], 'image')} data-testid="fill-upload-picture" /></label>

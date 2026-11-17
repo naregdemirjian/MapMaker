@@ -370,7 +370,7 @@ export function readSnapshot(file: string): Snapshot {
 export function diffSnapshots(from: Snapshot, to: Snapshot): RowDiff[] {
   const diffs: RowDiff[] = [];
   // Deletions in reverse dependency order, inserts and updates in forward order.
-  const order: TableName[] = ['meta', 'entity_type', 'event_type', 'map_space', 'face', 'vertex', 'segment', 'layer', 'entity', 'event', 'effect', 'sequence', 'event_group', 'event_group_member'];
+  const order: TableName[] = ['meta', 'entity_type', 'event_type', 'map_space', 'face', 'vertex', 'segment', 'layer', 'entity', 'event', 'effect', 'sequence', 'event_group', 'event_group_member', 'entity_group'];
   const keyedAll = (rows: AnyRow[] | undefined, t: TableName) => new Map((rows ?? []).map((r) => [(r as unknown as Record<string, string | number>)[TABLES[t].key], r]));
   // The file format version describes the file, not the project's content: never restored.
   const keyed = (rows: AnyRow[] | undefined, t: TableName) => {

@@ -207,3 +207,16 @@ label.file-button.small { padding: 3px 8px; font-size: 12px; }
 .period-nav { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
 .history-section .gain { color: #5fe08a; }
 .history-section .loss { color: #ff6b6b; }
+
+/* Right-click menus */
+.context-menu { position: fixed; z-index: 1000; min-width: 220px; max-width: 320px; background: #1b2430; border: 1px solid rgba(255,255,255,0.14); border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); padding: 4px; }
+.context-menu button { display: block; width: 100%; text-align: left; background: none; border: none; padding: 6px 10px; border-radius: 5px; color: inherit; font: inherit; cursor: pointer; }
+.context-menu button:hover { background: rgba(79,155,217,0.25); }
+.context-menu button.danger { color: #ff8a8a; }
+.context-menu hr { border: none; border-top: 1px solid rgba(255,255,255,0.1); margin: 4px 2px; }
+.context-menu .menu-title { font-weight: 600; padding: 6px 10px 4px; opacity: 0.85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.context-menu .menu-heading { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.55; padding: 6px 10px 2px; }
+/* Groups in the lists */
+.row.group-head { font-size: 12.5px; }
+.twisty { display: inline-block; width: 14px; text-align: center; opacity: 0.7; cursor: pointer; }
+.small-hint { font-size: 11px; padding: 2px 8px 6px; }

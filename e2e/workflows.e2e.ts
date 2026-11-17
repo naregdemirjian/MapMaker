@@ -475,6 +475,60 @@ try {
     await h.screenshot('city');
   });
 
+  await h.step('Working with many: Ctrl/Shift to choose, right-click menus, groups of countries, labels of a group, cities under their country, several events deleted at once', async () => {
+    await page.getByTestId('tool-select').click();
+    await h.setDate('1650');
+    // Choose two countries with Ctrl + click; right-click: make a group of them.
+    await page.getByTestId(`entity-row-${A}`).click();
+    await page.getByTestId(`entity-row-${B}`).click({ modifiers: ['Control'] });
+    assert.deepEqual((await page.evaluate(() => (window as any).__mapmaker.store.multi?.ids.length)), 2, 'two chosen');
+    await page.getByTestId(`entity-row-${B}`).click({ button: 'right' });
+    await page.getByTestId('context-menu').waitFor();
+    await page.getByTestId('menu-new-group').click();
+    await page.getByTestId('ask-input').fill('Main powers');
+    await page.getByTestId('ask-input').press('Enter');
+    await page.getByTestId('entity-group-Main powers').waitFor();
+    // Fold the group: its countries leave the list; unfold.
+    await page.getByTestId('entity-group-Main powers').click();
+    assert.equal(await page.getByTestId(`entity-row-${A}`).count(), 0, 'folded away');
+    await page.getByTestId('entity-group-Main powers').click();
+    await page.getByTestId(`entity-row-${A}`).waitFor();
+    // Hide the labels of the whole group from its menu, and show them again.
+    const labelled = async () => page.evaluate(() => (window as any).__mapmaker.store.renderer.lastLabels.map((l: any) => l.text)) as Promise<string[]>;
+    assert.ok((await labelled()).some((t) => t === A), 'A is labelled');
+    await page.getByTestId('entity-group-Main powers').click({ button: 'right' });
+    await page.getByTestId('menu-hide-labels').click();
+    await h.saved();
+    assert.ok(!(await labelled()).some((t) => t === A || t === B), 'the group\'s labels are hidden');
+    await page.getByTestId('entity-group-Main powers').click({ button: 'right' });
+    await page.getByTestId('menu-show-labels').click();
+    assert.ok((await labelled()).some((t) => t === A), 'shown again');
+    await h.screenshot('group-and-menu');
+    // A city on A's land is listed under A.
+    await page.getByRole('button', { name: '+ City' }).click();
+    await page.getByTestId('new-city-name').fill('Testa Harbour');
+    await page.getByTestId('new-city-create').click();
+    await page.evaluate(([lon, lat]) => (window as any).__mapmaker.store.setCamera({ lon, lat, zoom: 1.5, rotation: 0, projection: 'equirectangular' }), P.a);
+    const q = await h.toPage(P.a); await page.mouse.click(q[0], q[1]);
+    await h.saved();
+    await page.getByTestId(`cities-of-${A}`).click();
+    await page.getByTestId('entity-row-Testa Harbour').waitFor();
+    assert.match((await page.getByTestId(`entity-row-${A}`).textContent()) ?? '', /1 city/);
+    // Events: Shift + click chooses a run; Delete deletes them all (one question, one undo).
+    await page.getByTestId('tool-select').click();
+    const evRows = page.locator('[data-testid^=event-row-]');
+    const before = await evRows.count();
+    await evRows.nth(0).click();
+    await evRows.nth(2).click({ modifiers: ['Shift'] });
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.chosen('event').length), 3);
+    page.once('dialog', (d) => void d.accept());
+    await page.keyboard.press('Delete');
+    await page.waitForFunction((n) => document.querySelectorAll('[data-testid^=event-row-]').length === n - 3, before);
+    await h.saved();
+    await page.getByTestId('undo').click();
+    await page.waitForFunction((n) => document.querySelectorAll('[data-testid^=event-row-]').length === n, before);
+  });
+
   await h.step("Changes over time: a country shown lightly, the land it gained in a year, a decade, a century", async () => {
     await page.getByTestId('tool-select').click();
     await page.locator('.left .row', { hasText: A }).first().click();

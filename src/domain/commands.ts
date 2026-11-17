@@ -78,7 +78,7 @@ function createWorldIn(tx: Tx, name: string, radiusKm: number, basemap: BasemapS
   const w = tx.world;
   const spaceId = newId('space');
   const bodyId = newId('ent');
-  tx.insert('entity', { id: bodyId, type_id: 'body', branch_id: MAIN_BRANCH, name, color: '#7a8b99', notes: '', created_seq: w.nextSeq('entity'), style: '{}' });
+  tx.insert('entity', { id: bodyId, type_id: 'body', branch_id: MAIN_BRANCH, name, color: '#7a8b99', notes: '', created_seq: w.nextSeq('entity'), style: '{}', group_id: '' });
   const root = w.ids.next('face');
   tx.insert('map_space', {
     id: spaceId, name, kind: 'sphere', body_id: bodyId, radius_m: radiusKm * 1000, unit: null, parent_space_id: null,
@@ -142,6 +142,8 @@ export interface CountryFill {
   speed?: number;
   /** Videos: seconds into the video at the start of a shot. */
   start?: number;
+  /** Switched off for now: the country shows its colour; the picture is kept for switching back. */
+  off?: boolean;
 }
 
 /** What is stored in entity.style (JSON). */
@@ -191,7 +193,7 @@ export function createEntity(world: World, e: { type_id: string; name: string; c
   if (!e.name.trim()) throw new Error('Give it a name.');
   return run(world, `Create "${e.name}"`, (tx) => {
     const id = newId('ent');
-    tx.insert('entity', { id, type_id: e.type_id, branch_id: MAIN_BRANCH, name: e.name.trim(), color: e.color ?? suggestColor(world), notes: e.notes ?? '', created_seq: world.nextSeq('entity'), style: '{}' });
+    tx.insert('entity', { id, type_id: e.type_id, branch_id: MAIN_BRANCH, name: e.name.trim(), color: e.color ?? suggestColor(world), notes: e.notes ?? '', created_seq: world.nextSeq('entity'), style: '{}', group_id: '' });
     return id;
   });
 }
@@ -310,11 +312,90 @@ export function updateEvent(world: World, id: string, patch: Partial<EventInput>
 
 export function deleteEvent(world: World, id: string): CommandResult {
   if (id === BASE_EVENT_ID) throw new Error('The starting map cannot be deleted.');
-  const name = world.get('event', id)?.name ?? '';
-  return run(world, `Delete event "${name}"`, (tx) => {
-    for (const ef of world.all('effect').filter((f) => f.event_id === id)) tx.remove('effect', ef.id);
-    for (const m of world.all('event_group_member').filter((g) => g.event_id === id)) tx.remove('event_group_member', m.id);
-    tx.remove('event', id);
+  return deleteEvents(world, [id]);
+}
+
+/** Delete many events and their changes at once (one undo step). The starting map is never deleted. */
+export function deleteEvents(world: World, ids: string[]): CommandResult {
+  const set = new Set(ids.filter((id) => id !== BASE_EVENT_ID && world.get('event', id)));
+  if (!set.size) throw new Error('Choose at least one event.');
+  const first = world.get('event', [...set][0])!.name;
+  return run(world, set.size === 1 ? `Delete event "${first}"` : `Delete ${set.size} events`, (tx) => {
+    for (const ef of world.all('effect')) if (set.has(ef.event_id)) tx.remove('effect', ef.id);
+    for (const m of world.all('event_group_member')) if (set.has(m.event_id)) tx.remove('event_group_member', m.id);
+    for (const id of set) tx.remove('event', id);
+  });
+}
+
+// ---------------------------------------------------------------- groups of countries (folders) and changes to many at once
+
+/** Make a group (folder) in the list, optionally moving some countries (or cities, characters) into it. */
+export function createEntityGroup(world: World, name: string, members: string[] = []): CommandResult<string> {
+  if (!name.trim()) throw new Error('Give the group a name.');
+  return run(world, `Create group "${name.trim()}"`, (tx) => {
+    const id = newId('egrp');
+    const n = world.all('entity_group').length;
+    tx.insert('entity_group', { id, name: name.trim(), color: GROUP_COLORS[n % GROUP_COLORS.length], sort_order: n, created_seq: world.nextSeq('entity_group') });
+    for (const m of members) if (world.get('entity', m)) tx.patch('entity', m, { group_id: id });
+    return id;
+  });
+}
+
+export function renameEntityGroup(world: World, id: string, name: string): CommandResult {
+  if (!world.get('entity_group', id)) throw new Error('That group no longer exists.');
+  if (!name.trim()) throw new Error('Give the group a name.');
+  return run(world, 'Rename group', (tx) => tx.patch('entity_group', id, { name: name.trim() }));
+}
+
+/** Delete a group; what was in it stays, ungrouped. */
+export function deleteEntityGroup(world: World, id: string): CommandResult {
+  const g = world.get('entity_group', id);
+  if (!g) throw new Error('That group no longer exists.');
+  return run(world, `Delete group "${g.name}"`, (tx) => {
+    for (const e of world.all('entity')) if (e.group_id === id) tx.patch('entity', e.id, { group_id: '' });
+    tx.remove('entity_group', id);
+  });
+}
+
+/** Put countries (or cities, characters) into a group, or take them out ('' = no group). */
+export function setEntitiesGroup(world: World, ids: string[], groupId: string): CommandResult {
+  if (groupId && !world.get('entity_group', groupId)) throw new Error('That group no longer exists.');
+  return run(world, groupId ? `Move to "${world.get('entity_group', groupId)!.name}"` : 'Take out of the group', (tx) => {
+    for (const id of ids) { const e = world.get('entity', id); if (e && e.group_id !== groupId) tx.patch('entity', id, { group_id: groupId }); }
+  });
+}
+
+/** Hide or show the labels of many countries at once (one undo step). */
+export function setLabelsHidden(world: World, ids: string[], hidden: boolean): CommandResult {
+  return run(world, hidden ? 'Hide labels' : 'Show labels', (tx) => {
+    for (const id of ids) {
+      const e = world.get('entity', id);
+      if (!e) continue;
+      const st = entityStyle(e);
+      const label: CountryLabel = { ...(st.label ?? {}) };
+      if (hidden) label.hidden = true; else delete label.hidden;
+      const next: EntityStyle = { ...st, label };
+      if (!Object.keys(label).length) delete next.label;
+      const json = JSON.stringify(next);
+      if (json !== (e.style || '{}')) tx.patch('entity', id, { style: json });
+    }
+  });
+}
+
+/**
+ * Switch the pictures and videos of many countries off (they show their colours) or back on. The
+ * picture each one had is kept, so switching back restores it.
+ */
+export function setFillsShown(world: World, ids: string[], shown: boolean): CommandResult {
+  return run(world, shown ? 'Show pictures' : 'Use colours', (tx) => {
+    for (const id of ids) {
+      const e = world.get('entity', id);
+      const st = entityStyle(e);
+      if (!e || !st.fill?.asset) continue;
+      const fill: CountryFill = { ...st.fill };
+      if (shown) delete fill.off; else fill.off = true;
+      tx.patch('entity', id, { style: JSON.stringify({ ...st, fill }) });
+    }
   });
 }
 
@@ -398,6 +479,15 @@ export function setEventGroups(world: World, eventId: string, groupIds: string[]
   });
 }
 
+/** Add many events to one event group (one undo step); events already in it are left as they are. */
+export function addEventsToGroup(world: World, eventIds: string[], groupId: string): CommandResult {
+  const g = world.get('event_group', groupId);
+  if (!g) throw new Error('That group no longer exists.');
+  return run(world, `Add to "${g.name}"`, (tx) => {
+    for (const id of eventIds) if (id !== BASE_EVENT_ID && world.get('event', id)) insertMember(tx, groupId, id);
+  });
+}
+
 /** The groups an event belongs to, in display order. */
 export function groupsOfEvent(world: World, eventId: string): string[] {
   const order = new Map(world.all('event_group').map((g) => [g.id, g.sort_order]));
@@ -472,7 +562,7 @@ export function addCountries(world: World, engine: Engine, o: { spaceId: string;
       if (!id) {
         id = newId('ent');
         const style = c.fill?.asset ? JSON.stringify({ fill: c.fill }) : '{}';
-        tx.insert('entity', { id, type_id: 'polity', branch_id: MAIN_BRANCH, name: c.name, color: c.color ?? suggestColor(world), notes: '', created_seq: world.nextSeq('entity'), style });
+        tx.insert('entity', { id, type_id: 'polity', branch_id: MAIN_BRANCH, name: c.name, color: c.color ?? suggestColor(world), notes: '', created_seq: world.nextSeq('entity'), style, group_id: '' });
         existing.set(c.name.toLowerCase(), id);
       }
       if (!entities.includes(id)) entities.push(id);

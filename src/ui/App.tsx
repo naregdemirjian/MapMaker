@@ -7,6 +7,7 @@ import { EditPrompt, NewWorldDialog, NewEventDialog, VersionsDialog, HealthDialo
 import { ShotsPanel, ShotEditor, ShotTimeline } from './components/Presentation.tsx';
 import { LabelStyleDialog } from './components/LabelStyles.tsx';
 import { AddCountriesDialog } from './components/AddCountries.tsx';
+import { ContextMenu, deleteEntitiesAsked, deleteEventsAsked } from './components/ContextMenu.tsx';
 
 export function App() {
   const s = useStore();
@@ -17,6 +18,11 @@ export function App() {
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); store.undo(); }
       if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) { e.preventDefault(); store.redo(); }
+      // Delete: everything chosen in the lists (the Border points tool uses Delete for points).
+      if (e.key === 'Delete' && store.tool !== 'vertex' && store.mode !== 'present' && !store.pending) {
+        const ents = store.chosen('entity'), evs = store.chosen('event');
+        if (ents.length) { e.preventDefault(); deleteEntitiesAsked(ents); } else if (evs.length) { e.preventDefault(); deleteEventsAsked(evs); }
+      }
     };
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
@@ -36,6 +42,7 @@ export function App() {
       <footer className="bottom">{s.mode === 'world' ? <Timeline /> : <ShotTimeline />}</footer>
       <EditPrompt />
       <AskDialog />
+      <ContextMenu />
       {s.dialog === 'new-world' && <NewWorldDialog />}
       {s.dialog === 'new-event' && <NewEventDialog />}
       {s.dialog === 'versions' && <VersionsDialog />}

@@ -80,7 +80,7 @@ test('event groups: deleting an event removes its memberships; an alternative ve
 /** Turn a project file into exactly what version 1 of Map Maker wrote. */
 function makeVersion1(file: string): void {
   const db = new DatabaseSync(file);
-  db.exec("DROP TABLE event_group; DROP TABLE event_group_member; ALTER TABLE entity DROP COLUMN style; UPDATE meta SET value = '1' WHERE key = 'schema_version';");
+  db.exec("DROP TABLE event_group; DROP TABLE event_group_member; DROP TABLE entity_group; ALTER TABLE entity DROP COLUMN style; ALTER TABLE entity DROP COLUMN group_id; UPDATE meta SET value = '1' WHERE key = 'schema_version';");
   db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
   db.close();
 }
@@ -170,7 +170,7 @@ test('a version 2 file gains entity styles when opened; its old undo history sti
     reg.closeAll();
     const file = ProjectDb.databasePath(join(root, `${info.id}.mapmaker`));
     const raw = new DatabaseSync(file);
-    raw.exec("ALTER TABLE entity DROP COLUMN style; UPDATE meta SET value = '2' WHERE key = 'schema_version'; PRAGMA wal_checkpoint(TRUNCATE);");
+    raw.exec("ALTER TABLE entity DROP COLUMN style; ALTER TABLE entity DROP COLUMN group_id; DROP TABLE entity_group; UPDATE meta SET value = '2' WHERE key = 'schema_version'; PRAGMA wal_checkpoint(TRUNCATE);");
     raw.close();
 
     const reg2 = new ProjectRegistry(root);

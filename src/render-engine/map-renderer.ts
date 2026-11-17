@@ -63,7 +63,7 @@ export interface RenderOptions {
 }
 
 /** A picture or video fill (see domain/commands.ts CountryFill). */
-interface CountryFillLike { kind: 'color' | 'image' | 'video'; asset?: string; fit?: 'cover' | 'contain' | 'stretch' | 'tile'; tileSize?: number; play?: 'loop' | 'once'; speed?: number; start?: number }
+interface CountryFillLike { kind: 'color' | 'image' | 'video'; asset?: string; off?: boolean; fit?: 'cover' | 'contain' | 'stretch' | 'tile'; tileSize?: number; play?: 'loop' | 'once'; speed?: number; start?: number }
 
 /** x, y, width, height on screen. */
 type Box2 = [number, number, number, number];
@@ -220,7 +220,7 @@ export class MapRenderer {
     const fillOf = (v: string): CountryFillLike | null => {
       if (fills.has(v)) return fills.get(v)!;
       const f = parseJSON<{ fill?: CountryFillLike }>(entities.get(v)?.style ?? '{}', {})?.fill ?? null;
-      const ok = f && f.asset && (f.kind === 'image' || f.kind === 'video') ? f : null;
+      const ok = f && f.asset && !f.off && (f.kind === 'image' || f.kind === 'video') ? f : null;
       fills.set(v, ok);
       return ok;
     };

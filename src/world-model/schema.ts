@@ -18,7 +18,11 @@ export interface EntityRow {
   id: string; type_id: string; branch_id: string; name: string; color: string; notes: string; created_seq: number;
   /** Look of the entity on the map (JSON): label overrides, fills. Added in file format 3. */
   style: Json;
+  /** The user's group (folder) it is listed in; '' for none. Added in file format 4. */
+  group_id: string;
 }
+/** A group (folder) of countries, factions, cities or characters, made by the user. Added in file format 4. */
+export interface EntityGroupRow { id: string; name: string; color: string; sort_order: number; created_seq: number }
 export interface LayerRow { id: string; space_id: string; kind: LayerKind; name: string; sort_order: number; visible: number; style: Json; export_pass: string }
 export interface EventTypeRow { id: string; name: string; builtin: number; fields: Json }
 export interface EventRow {
@@ -40,7 +44,7 @@ export interface SequenceRow { id: string; name: string; created_seq: number; se
 export interface Rows {
   meta: MetaRow; map_space: MapSpaceRow; entity_type: EntityTypeRow; entity: EntityRow; layer: LayerRow;
   event_type: EventTypeRow; event: EventRow; effect: EffectRow; sequence: SequenceRow;
-  event_group: EventGroupRow; event_group_member: EventGroupMemberRow;
+  event_group: EventGroupRow; event_group_member: EventGroupMemberRow; entity_group: EntityGroupRow;
   vertex: VertexRow; segment: SegmentRow; face: FaceRow;
 }
 export type TableName = keyof Rows;
@@ -57,7 +61,7 @@ export const TABLES: { [K in TableName]: TableDef } = {
   meta: { key: 'key', columns: { key: 'text', value: 'text' } },
   map_space: { key: 'id', columns: { id: 'text', name: 'text', kind: 'text', body_id: 'text?', radius_m: 'real?', unit: 'text?', parent_space_id: 'text?', root_face: 'int', sort_order: 'int', settings: 'text' } },
   entity_type: { key: 'id', columns: { id: 'text', name: 'text', category: 'text', builtin: 'int' } },
-  entity: { key: 'id', columns: { id: 'text', type_id: 'text', branch_id: 'text', name: 'text', color: 'text', notes: 'text', created_seq: 'int', style: 'text' }, defaults: { style: '{}' } },
+  entity: { key: 'id', columns: { id: 'text', type_id: 'text', branch_id: 'text', name: 'text', color: 'text', notes: 'text', created_seq: 'int', style: 'text', group_id: 'text' }, defaults: { style: '{}', group_id: '' } },
   layer: { key: 'id', columns: { id: 'text', space_id: 'text', kind: 'text', name: 'text', sort_order: 'int', visible: 'int', style: 'text', export_pass: 'text' } },
   event_type: { key: 'id', columns: { id: 'text', name: 'text', builtin: 'int', fields: 'text' } },
   event: { key: 'id', columns: { id: 'text', type_id: 'text', branch_id: 'text', name: 'text', start_day: 'int', start_ms: 'int', end_day: 'int?', end_ms: 'int?', precision: 'text', precedence: 'int', description: 'text', fields: 'text', presentation: 'text', created_seq: 'int', variant_group: 'text?', variant_active: 'int' } },
@@ -65,6 +69,7 @@ export const TABLES: { [K in TableName]: TableDef } = {
   sequence: { key: 'id', columns: { id: 'text', name: 'text', created_seq: 'int', settings: 'text' } },
   event_group: { key: 'id', columns: { id: 'text', name: 'text', color: 'text', sort_order: 'int', created_seq: 'int' } },
   event_group_member: { key: 'id', columns: { id: 'text', group_id: 'text', event_id: 'text' } },
+  entity_group: { key: 'id', columns: { id: 'text', name: 'text', color: 'text', sort_order: 'int', created_seq: 'int' } },
   vertex: { key: 'id', kernel: true, columns: { id: 'int', space_id: 'text', lon: 'int', lat: 'int' } },
   segment: { key: 'id', kernel: true, columns: { id: 'int', space_id: 'text', a: 'int', b: 'int', left_face: 'int', right_face: 'int' } },
   face: { key: 'id', kernel: true, columns: { id: 'int', space_id: 'text', parent_id: 'int?', is_leaf: 'int' } },
@@ -85,10 +90,10 @@ export function invertDiffs(diffs: RowDiff[]): RowDiff[] {
 
 /**
  * The project file format. 1: first release. 2: event groups (tables event_group, event_group_member).
- * 3: entity.style (label looks and fills). Older files are upgraded when opened (see ProjectDb.migrate),
- * after an automatic backup.
+ * 3: entity.style (label looks and fills). 4: groups of countries (table entity_group, entity.group_id).
+ * Older files are upgraded when opened (see ProjectDb.migrate), after an automatic backup.
  */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 /** A row with values for any columns it predates (old backups, old undo history). */
 export function withDefaults<T extends AnyRow>(table: TableName, row: T): T {

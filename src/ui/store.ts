@@ -16,6 +16,9 @@ import type { Vec3 } from '../geo-kernel/vec.ts';
 import type { StrokeSettings } from '../render-engine/stroke.ts';
 
 export type Mode = 'world' | 'present';
+/** One line of a right-click menu: an action, a heading, or a divider. */
+export type MenuItem = { label: string; run: () => void; danger?: boolean; testId?: string } | { heading: string } | 'divider';
+
 export type Tool = 'select' | 'lasso' | 'polygon' | 'pen' | 'vertex' | 'place';
 export type Selection =
   | { kind: 'entity'; id: string }
@@ -48,6 +51,40 @@ class AppStore {
   tool: Tool = 'select';
   selection: Selection = null;
   paintValue: string | null = null;
+  /**
+   * Several things chosen at once in the lists (Ctrl or Shift + click): countries, cities and
+   * characters, or events. Right-click and the Delete key act on all of them.
+   */
+  multi: { kind: 'entity' | 'event'; ids: string[] } | null = null;
+  /** The right-click menu that is open. */
+  menu: { x: number; y: number; title?: string; items: MenuItem[] } | null = null;
+  /** Folded groups and countries in the lists (remembered per project). */
+  collapsed: string[] = [];
+  /** The ids chosen now: the several chosen, else the one selected (of that kind). */
+  chosen(kind: 'entity' | 'event'): string[] {
+    if (this.multi?.kind === kind && this.multi.ids.length) return this.multi.ids;
+    return this.selection?.kind === kind ? [this.selection.id] : [];
+  }
+  /** A click on a row of a list: plain (select it), Ctrl (add or remove it), Shift (a run from the last one). */
+  pick(kind: 'entity' | 'event', id: string, e: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean }, order: string[]): void {
+    if (e.shiftKey && this.pickAnchor && order.includes(this.pickAnchor)) {
+      const a = order.indexOf(this.pickAnchor), b = order.indexOf(id);
+      const run = order.slice(Math.min(a, b), Math.max(a, b) + 1);
+      this.set({ multi: { kind, ids: run }, selection: { kind, id } as Selection });
+      return;
+    }
+    if (e.ctrlKey || e.metaKey) {
+      const cur = this.chosen(kind);
+      const ids = cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id];
+      this.pickAnchor = id;
+      this.set({ multi: { kind, ids }, selection: ids.length ? ({ kind, id: ids[ids.length - 1] } as Selection) : null });
+      return;
+    }
+    this.pickAnchor = id;
+    this.set({ multi: null, selection: { kind, id } as Selection });
+  }
+  private pickAnchor: string | null = null;
+  toggleCollapsed(key: string) { this.set({ collapsed: this.collapsed.includes(key) ? this.collapsed.filter((k) => k !== key) : [...this.collapsed, key] }); }
   /** A question for a line of text, shown in the app's own dialog (the desktop app has no prompt()). */
   ask: { title: string; label: string; value: string; ok: string; resolve: (v: string | null) => void } | null = null;
   /** Ask for a line of text; resolves to null when cancelled. */
@@ -103,7 +140,7 @@ class AppStore {
     this.viewTimer = setTimeout(() => {
       if (this.projectId !== id) return;
       try {
-        localStorage.setItem(`mapmaker.view.${id}`, JSON.stringify({ spaceId: this.spaceId, time: toJSONValue(this.time), cameras: [...this.cameras.entries()], eventFilter: this.eventFilter }));
+        localStorage.setItem(`mapmaker.view.${id}`, JSON.stringify({ spaceId: this.spaceId, time: toJSONValue(this.time), cameras: [...this.cameras.entries()], eventFilter: this.eventFilter, collapsed: this.collapsed }));
       } catch { /* storage may be unavailable */ }
     }, 500);
   }
@@ -113,8 +150,10 @@ class AppStore {
     this.cameras = new Map();
     this.time = gregorian.fromCivil({ year: 2000 });
     this.eventFilter = null;
+    this.collapsed = [];
+    this.multi = null;
     try {
-      const v = JSON.parse(localStorage.getItem(`mapmaker.view.${id}`) ?? 'null') as { spaceId?: string; time?: unknown; cameras?: [string, Camera][]; eventFilter?: unknown } | null;
+      const v = JSON.parse(localStorage.getItem(`mapmaker.view.${id}`) ?? 'null') as { spaceId?: string; time?: unknown; cameras?: [string, Camera][]; eventFilter?: unknown; collapsed?: unknown } | null;
       if (!v) return;
       if (v.spaceId && w.get('map_space', v.spaceId)) this.spaceId = v.spaceId;
       for (const [k, c] of v.cameras ?? []) {
@@ -123,9 +162,15 @@ class AppStore {
       }
       if (Array.isArray(v.eventFilter)) this.eventFilter = v.eventFilter.filter((g): g is string => typeof g === 'string' && (g === '__ungrouped' || !!w.get('event_group', g)));
       if (v.time) this.time = fromJSONValue(v.time as Parameters<typeof fromJSONValue>[0]);
+      if (Array.isArray(v.collapsed)) this.collapsed = v.collapsed.filter((k): k is string => typeof k === 'string');
     } catch { /* a damaged view record is ignored */ }
   }
-  set(patch: Partial<AppStore>) { Object.assign(this, patch); this.notify(); }
+  set(patch: Partial<AppStore>) {
+    // Selecting one thing (on the map, from a panel) ends a choice of several, unless it is part of it.
+    if ('selection' in patch && !('multi' in patch)) patch = { ...patch, multi: null };
+    Object.assign(this, patch);
+    this.notify();
+  }
 
   toast(text: string, kind: Toast['kind'] = 'info') {
     const id = ++this.toastSeq;

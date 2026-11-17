@@ -12,6 +12,7 @@ import { GroupChecks, eventVisible } from './EventGroups.tsx';
 import { CountryLabelSection } from './LabelStyles.tsx';
 import { CountryFillSection, FillSwatch } from './CountryFill.tsx';
 import { CharacterSection } from './Characters.tsx';
+import { openMenu, entityMenu, groupMenu, eventMenu } from './ContextMenu.tsx';
 import { CountryHistorySection } from './CountryHistory.tsx';
 
 export const fmt = (t: Instant, precision: 'year' | 'day' | 'minute' = 'day') => gregorian.format(t, precision);
@@ -225,11 +226,71 @@ export function Outliner() {
       <button onClick={() => setNewEntity(null)}>Cancel</button>
     </div>
   );
-  const entityRow = (e: { id: string; name: string; color: string; type_id: string }) => (
-    <div key={e.id} className={`row ${s.selection?.kind === 'entity' && s.selection.id === e.id ? 'sel' : ''}`} onClick={() => s.set({ selection: { kind: 'entity', id: e.id } })}>
-      <FillSwatch entity={e} />{e.name}
-    </div>
-  );
+  // The lists: groups (folders) of the user's own, each country with the cities in it (at the date
+  // viewed), Ctrl/Shift + click to choose several, right-click for quick actions.
+  type Ent = (typeof political)[number];
+  const groups = w.all('entity_group').sort((a, b) => a.sort_order - b.sort_order || a.created_seq - b.created_seq);
+  const cityIn = new Map<string, string>(); // city -> the country holding the place it stands on
+  if (s.layerId) for (const c of s.engine!.charactersAt(s.spaceId, s.time)) {
+    if (w.get('entity', c.entity)?.type_id !== 'settlement') continue;
+    const owner = s.engine!.valueAtPoint(s.spaceId, s.layerId, lonLatToVec(c.lon, c.lat), s.time);
+    if (owner) cityIn.set(c.entity, owner);
+  }
+  const citiesOf = new Map<string, Ent[]>();
+  for (const e of w.all('entity')) {
+    const owner = e.type_id === 'settlement' ? cityIn.get(e.id) : undefined;
+    if (owner && w.get('entity', owner)) { const l = citiesOf.get(owner) ?? []; l.push(e); citiesOf.set(owner, l); }
+  }
+  for (const l of citiesOf.values()) l.sort((a, b) => a.name.localeCompare(b.name));
+  type Item = { kind: 'group'; g: (typeof groups)[number]; members: string[] } | { kind: 'entity'; e: Ent; depth: number; cities: number };
+  /** Rows for a section: its groups (with their members), then what is in no group. */
+  const itemsFor = (members: Ent[], showEmptyGroups: boolean): Item[] => {
+    const out: Item[] = [];
+    const add = (e: Ent, depth: number) => {
+      const kids = citiesOf.get(e.id) ?? [];
+      out.push({ kind: 'entity', e, depth, cities: kids.length });
+      if (kids.length && s.collapsed.includes(`open:${e.id}`)) for (const c of kids) out.push({ kind: 'entity', e: c, depth: depth + 1, cities: 0 });
+    };
+    for (const g of groups) {
+      const inside = members.filter((e) => e.group_id === g.id);
+      if (!inside.length && !showEmptyGroups) continue;
+      out.push({ kind: 'group', g, members: w.all('entity').filter((e) => e.group_id === g.id).map((e) => e.id) });
+      if (!s.collapsed.includes(`grp:${g.id}`)) for (const e of inside) add(e, 1);
+    }
+    for (const e of members) if (!e.group_id || !w.get('entity_group', e.group_id)) add(e, 0);
+    return out;
+  };
+  const renderItems = (items: Item[]) => {
+    const order = items.filter((it): it is Extract<Item, { kind: 'entity' }> => it.kind === 'entity').map((it) => it.e.id);
+    const chosen = new Set(s.chosen('entity'));
+    return items.map((it) => {
+      if (it.kind === 'group') {
+        const folded = s.collapsed.includes(`grp:${it.g.id}`);
+        return (
+          <div key={`g-${it.g.id}`} className="row group-head" onClick={() => s.toggleCollapsed(`grp:${it.g.id}`)} data-testid={`entity-group-${it.g.name}`}
+            onContextMenu={(ev) => openMenu(ev, groupMenu(w, it.g.id, it.members), it.g.name)}>
+            <span className="twisty">{folded ? '▸' : '▾'}</span><span className="swatch" style={{ background: it.g.color }} /><b>{it.g.name}</b><span className="muted"> · {it.members.length}</span>
+          </div>
+        );
+      }
+      const e = it.e;
+      const open = s.collapsed.includes(`open:${e.id}`);
+      return (
+        <div key={e.id} className={`row ${chosen.has(e.id) ? 'sel' : ''}`} style={{ paddingLeft: 8 + it.depth * 14 }} data-testid={`entity-row-${e.name}`}
+          onClick={(ev) => s.pick('entity', e.id, ev, order)}
+          onContextMenu={(ev) => {
+            const cur = s.chosen('entity');
+            const ids = cur.includes(e.id) ? cur : [e.id];
+            if (!cur.includes(e.id)) s.pick('entity', e.id, {}, order);
+            openMenu(ev, entityMenu(w, ids), ids.length === 1 ? e.name : `${ids.length} chosen`);
+          }}>
+          {it.cities > 0 && <span className="twisty" title={open ? 'Hide its cities' : 'Show its cities'} onClick={(ev) => { ev.stopPropagation(); s.toggleCollapsed(`open:${e.id}`); }} data-testid={`cities-of-${e.name}`}>{open ? '▾' : '▸'}</span>}
+          <FillSwatch entity={e} />{e.name}{it.cities > 0 && <span className="muted"> · {it.cities} {it.cities === 1 ? 'city' : 'cities'}</span>}
+        </div>
+      );
+    });
+  };
+  const looseOthers = others.filter((e) => !(e.type_id === 'settlement' && cityIn.has(e.id) && w.get('entity', cityIn.get(e.id)!)));
   return (
     <aside className="left">
       <Section title="Maps" onAdd={() => s.set({ dialog: 'new-world' })} addLabel="Map">
@@ -270,28 +331,43 @@ export function Outliner() {
       </Section>
       <Section title="Countries and factions" onAdd={() => setNewEntity({ name: '', type: 'polity' })} addLabel="New">
         {newEntityForm('countries')}
-        {political.map(entityRow)}
+        {renderItems(itemsFor(political, true))}
+        {political.length > 0 && <div className="muted small-hint">Ctrl or Shift + click to choose several; right-click for quick actions.</div>}
+        <button className="link pad-link" onClick={async () => { const name = await s.askText('New group', 'Name of the group (for example "My nations" or "Europe")', '', 'Create group'); if (name) s.execute((wd) => cmd.createEntityGroup(wd, name, s.chosen('entity'))); }} data-testid="new-entity-group">New group{s.chosen('entity').length > 1 ? ` of the ${s.chosen('entity').length} chosen` : ''}…</button>
         {political.length > 0 && <button className="link pad-link" onClick={() => s.set({ dialog: 'label-style' })} data-testid="open-label-style">Label style for all countries…</button>}
         {currentSpace && basemapSourceOf(currentSpace) === 'natural-earth' && <button className="link pad-link" onClick={() => s.set({ dialog: 'add-countries' })} data-testid="open-add-countries">Add today's countries…</button>}
         {!political.length && !newEntity && <div className="muted pad">None yet.</div>}
       </Section>
       <Section title="Characters" onAdd={() => setNewEntity({ name: '', type: 'character' })} addLabel="Character">
         {newEntityForm('characters')}
-        {characters.map(entityRow)}
+        {renderItems(itemsFor(characters, false))}
         {!characters.length && !(newEntity?.type === 'character') && <div className="muted pad">None yet. Characters are points on the map that move over time.</div>}
       </Section>
       <Section title="Cities and others" onAdd={() => setNewEntity({ name: '', type: 'settlement' })} addLabel="City">
         {newEntityForm('cities')}
-        {others.map(entityRow)}
+        {renderItems(itemsFor(looseOthers, false))}
         {!others.length && newEntity?.type !== 'settlement' && <div className="muted pad">None yet. Cities are points on the map, founded and abandoned at dates.</div>}
+        {others.length > looseOthers.length && <div className="muted small-hint">Cities in a country are listed under it.</div>}
       </Section>
       <Section title="Events" onAdd={() => s.set({ dialog: 'new-event' })} addLabel="Event">
-        {events.filter((e) => eventVisible(w, e.id)).map((e) => (
-          <div key={e.id} className={`row ${s.selection?.kind === 'event' && s.selection.id === e.id ? 'sel' : ''} ${e.variant_group && !e.variant_active ? 'dim' : ''}`}
-            onClick={() => s.set({ selection: { kind: 'event', id: e.id }, time: fromStore(e.start_day, e.start_ms) })}>
-            <span className="date">{fmt(fromStore(e.start_day, e.start_ms), e.precision === 'year' ? 'year' : 'day')}</span> {e.name}
-          </div>
-        ))}
+        {(() => {
+          const shown = events.filter((e) => eventVisible(w, e.id));
+          const order = shown.map((e) => e.id);
+          const chosenEv = new Set(s.chosen('event'));
+          return shown.map((e) => (
+            <div key={e.id} className={`row ${chosenEv.has(e.id) ? 'sel' : ''} ${e.variant_group && !e.variant_active ? 'dim' : ''}`} data-testid={`event-row-${e.name}`}
+              onClick={(ev) => { s.pick('event', e.id, ev, order); if (!ev.ctrlKey && !ev.metaKey && !ev.shiftKey) s.setTime(fromStore(e.start_day, e.start_ms)); }}
+              onContextMenu={(ev) => {
+                const cur = s.chosen('event');
+                const ids = cur.includes(e.id) ? cur : [e.id];
+                if (!cur.includes(e.id)) s.pick('event', e.id, {}, order);
+                openMenu(ev, eventMenu(w, ids), ids.length === 1 ? e.name : `${ids.length} events`);
+              }}>
+              <span className="date">{fmt(fromStore(e.start_day, e.start_ms), e.precision === 'year' ? 'year' : 'day')}</span> {e.name}
+            </div>
+          ));
+        })()}
+        {events.length > 1 && <div className="muted small-hint">Ctrl or Shift + click to choose several; Delete or right-click to delete them.</div>}
         {!events.length && <div className="muted pad">No events yet.</div>}
         {events.some((e) => !eventVisible(w, e.id)) && (
           <div className="muted pad" data-testid="events-hidden">{events.filter((e) => !eventVisible(w, e.id)).length} hidden by the group filter · <button className="link" onClick={() => s.set({ eventFilter: null })}>show all</button></div>
