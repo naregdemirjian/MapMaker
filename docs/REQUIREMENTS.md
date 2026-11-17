@@ -84,7 +84,7 @@ status. Last updated: 18 November 2026 (Stage 4; see DEVELOPMENT.md).
 | Event durations respected | Tested | `scenarios` | |
 | Changes seconds apart and millennia apart | Tested | `scenarios` | |
 | The edit prompt: new change, correct this period, correct for all time (border shapes) | Tested | `e2e/vertical-slice` | |
-| Dated moves of border points | Not implemented | | Border points correct for all time; dated changes use the territory brush (Stage 3) |
+| Dated moves of border points | Tested | `split-merge` (dated moves), `e2e/workflows` 'Split and merge' | D77. A point on a border between two countries; junctions use the territory brush |
 | Broken dependencies flagged with "leave or auto-adapt" | Tested | `temporal-engine`, `recovery` | |
 | Alternative versions of an event | Tested | `temporal-engine`, `e2e/workflows` step 3 | |
 | Full alternative timelines | Not implemented | | Stage 13 |

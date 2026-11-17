@@ -31,7 +31,8 @@ export type Selection =
 
 export type PendingEdit =
   | { kind: 'paint'; spaceId: string; layerId: string; rings: Vec3[][]; value: string | null; sample: [number, number] | null; origin: [number, number]; snap: number; draftId?: string }
-  | { kind: 'vertex'; spaceId: string; vertexId: number; to: Vec3 }
+  /** A border point dragged: moved for all time (refused with `blocked` when that would cross a border), or from the date viewed (D77). */
+  | { kind: 'vertex'; spaceId: string; vertexId: number; to: Vec3; layerId?: string | null; blocked?: string | null }
   /** An area, line or point drawn with the features tool: a new feature, or a new shape for one (`reshape`). Parts in longitude, latitude. */
   | { kind: 'feature'; layerId: string; parts: Array<Array<[number, number]>>; reshape: string | null }
   /** A line drawn across a country with the Split tool and the part clicked (longitude, latitude; D76). */

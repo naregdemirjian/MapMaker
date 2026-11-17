@@ -9,7 +9,7 @@ import { Engine } from '../src/temporal-engine/engine.ts';
 import * as cmd from '../src/domain/commands.ts';
 import { gregorian, NEG_INF } from '../src/core-time/index.ts';
 import { invertDiffs } from '../src/world-model/schema.ts';
-import { lonLatToVec, slerp, dot, type Vec3 } from '../src/geo-kernel/vec.ts';
+import { lonLatToVec, vecToLonLat, slerp, dot, type Vec3 } from '../src/geo-kernel/vec.ts';
 import { ring, square } from './helpers.ts';
 
 const Y = (y: number, m = 1, d = 1) => gregorian.fromCivil({ year: y, month: m, day: d });
@@ -129,4 +129,52 @@ test('merging countries: into one of them, or into a new country in an event; th
   // Refused: nothing to merge, or no land at the date.
   assert.throws(() => cmd.mergeTerritory(s.world, s.engine, { spaceId: s.space, layerId: s.layer, ids: [s.A], into: s.A, t: Y(1900), mode: { kind: 'change', t: Y(1900) } }), /at least two/);
   assert.throws(() => cmd.mergeTerritory(s.world, s.engine, { spaceId: s.space, layerId: s.layer, ids: [s.B, s.C], into: s.C, t: Y(1850), mode: { kind: 'change', t: Y(1850) } }), /Bergholt holds no land/);
+});
+
+test('a border point moved from a date on: the land between the old and new line changes hands then; junctions refused', () => {
+  const world = new World();
+  const space = cmd.seedProject(world, 'Border').result.spaceId;
+  const layer = world.all('layer')[0].id;
+  const engine = new Engine(world);
+  const A = cmd.createEntity(world, { type_id: 'polity', name: 'Aldmark' }).result;
+  const B = cmd.createEntity(world, { type_id: 'polity', name: 'Bergholt' }).result;
+  for (const [o, lon] of [[A, 0], [B, 20]] as const) cmd.paintTerritory(world, engine, { spaceId: space, layerId: layer, ring: ring(square(lon, 0, 10)), value: o, snap: 1e-6, mode: { kind: 'correct', t: NEG_INF } });
+  const at = (lon: number, lat: number, t: ReturnType<typeof Y>) => engine.valueAtPoint(space, layer, lonLatToVec(lon, lat), t);
+  const arr = world.arrangement(space);
+  // (Points along the shared border, about a degree apart: the one nearest the equator.)
+  const vid = arr.nearestVertex(lonLatToVec(10, 0), 0.02)!;
+  assert.ok(vid !== null);
+  const vlat = vecToLonLat(arr.v(vid))[1];
+  Engine.verify = true;
+  Engine.verifyFailures = [];
+  try {
+    const segs = arr.segments.size;
+    // Into Bergholt from 1800: Aldmark gains the sliver.
+    const r = cmd.moveBorderFrom(world, engine, { spaceId: space, layerId: layer, vertexId: vid, to: lonLatToVec(12, vlat), t: Y(1800), mode: { kind: 'change', t: Y(1800) }, snap: 1e-9 });
+    assert.equal(r.result.gainer, A);
+    assert.equal(at(11, vlat, Y(1801)), A);
+    assert.equal(at(11, vlat, Y(1799)), B, 'before the date, the old border');
+    assert.equal(at(10.5, 3, Y(1801)), B, 'only around the point');
+    assert.ok(arr.vertices.has(vid), 'the old point stays (it is the border before the date)');
+    // Undone in one step.
+    world.applyDiffs(invertDiffs(r.diffs));
+    assert.equal(at(11, vlat, Y(1801)), B);
+    assert.equal(arr.segments.size, segs);
+    // The other way, in an event: Bergholt gains, when the event happens.
+    const ev = cmd.createEvent(world, { name: 'Border treaty', start: Y(1850) }).result;
+    const vid2 = arr.nearestVertex(lonLatToVec(10, 4), 0.02)!;
+    const lat2 = vecToLonLat(arr.v(vid2))[1];
+    const r2 = cmd.moveBorderFrom(world, engine, { spaceId: space, layerId: layer, vertexId: vid2, to: lonLatToVec(8.5, lat2), t: Y(1850), mode: { kind: 'new', eventId: ev }, snap: 1e-9 });
+    assert.equal(r2.result.gainer, B);
+    assert.equal(at(9.4, lat2, Y(1851)), B);
+    assert.equal(at(9.4, lat2, Y(1849)), A);
+    assert.deepEqual(Engine.verifyFailures, []);
+  } finally {
+    Engine.verify = false;
+  }
+  // A corner where Aldmark, Bergholt and the sea meet: refused. A point inside a country: not a border.
+  const corner = arr.nearestVertex(lonLatToVec(10, 10), 0.002)!;
+  assert.throws(() => cmd.moveBorderFrom(world, engine, { spaceId: space, layerId: layer, vertexId: corner, to: lonLatToVec(10, 11), t: Y(1900), mode: { kind: 'change', t: Y(1900) }, snap: 1e-9 }), /joins 3 borders/);
+  // Across into the sea beyond Bergholt: refused.
+  assert.throws(() => cmd.moveBorderFrom(world, engine, { spaceId: space, layerId: layer, vertexId: vid, to: lonLatToVec(45, 0), t: Y(1900), mode: { kind: 'change', t: Y(1900) }, snap: 1e-9 }), /across another country/);
 });

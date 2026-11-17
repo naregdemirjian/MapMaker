@@ -60,6 +60,19 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D77. A border point moved from a date on (Stage 3)
+
+Dragging a border point with the Border points tool now asks whether to correct the border's shape for all time (as
+before, `moveVertex`) or to **move it from the date viewed on** (`commands.ts` moveBorderFrom). From a date, the
+point's old place stays (it is the border before the date); the new line from its neighbour to the new place to its
+other neighbour is drawn into the parcel map, and the sliver between the old and new line goes, from that date (or in
+the event being recorded), to the country the point moved away from. Only a point on a border between exactly two
+owners on that date can be moved so (a junction of three borders is refused: the Territory brush does it), and the
+new place and the land on the way must belong to those two (not across a third country or out to sea, unless the sea
+is one side of the border). When a move for all time would cross another border it is no longer refused outright:
+the prompt explains why and offers the move from a date, which may still be possible. While an event is recorded,
+the move from a date is preselected.
+
 ### D76. Splitting along a line and merging countries (Stage 2)
 
 **Split** (a tool on the toolbar): drag a line right across a country, then click the part that changes hands. The line

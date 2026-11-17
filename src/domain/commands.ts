@@ -8,7 +8,7 @@ import { type Instant, toStore, fromStore, NEG_INF, compare } from '../core-time
 import {
   BASE_EVENT_ID, MAIN_BRANCH, SCHEMA_VERSION, type RowDiff, type EffectRow, type EventRow, type EntityRow, type LayerKind, type FeatureRow, type RelationRow,
 } from '../world-model/schema.ts';
-import type { Vec3 } from '../geo-kernel/vec.ts';
+import { type Vec3, vecToLonLat, normalize } from '../geo-kernel/vec.ts';
 import { worldSettings, type BasemapSource } from '../world-model/world-settings.ts';
 import { resolvePointStyle, type LabelStyle, type CountryLabel, type PointStyle } from '../render-engine/label-style.ts';
 import { DEFAULT_FEATURE_STYLE, isFeatureKind, type FeatureKind, type FeatureStyle } from '../render-engine/feature-style.ts';
@@ -1350,6 +1350,46 @@ export function setEffectTransition(world: World, effectId: string, spec: Transi
 
 export function moveVertex(world: World, o: { spaceId: string; vertexId: number; to: Vec3; snap: number }): CommandResult {
   return run(world, 'Move border point (all time)', (tx) => tx.kernel(o.spaceId, (arr) => arr.moveVertex(o.vertexId, o.to, o.snap)));
+}
+
+/**
+ * Move a border point from a date on (Stage 3, D77): the border between two countries runs through
+ * the new place from then on, and the land between the old and the new line changes hands (it goes to
+ * the country the point moved away from). For all time, a border point is moved with moveVertex
+ * instead. Only a point on a border between exactly two owners on that date can be moved so.
+ */
+export function moveBorderFrom(world: World, engine: Engine, o: { spaceId: string; layerId: string; vertexId: number; to: Vec3; t: Instant; mode: EditMode; snap: number }): CommandResult<{ gainer: string | null }> {
+  checkTarget(world, { spaceId: o.spaceId, layerId: o.layerId, mode: o.mode });
+  const arr = world.arrangement(o.spaceId);
+  if (!arr.vertices.has(o.vertexId)) throw new Error('That border point no longer exists.');
+  const states = engine.partitionState(o.spaceId, o.layerId, o.t);
+  const ownerOf = ownerReader(arr, states);
+  // The borders through the point on that date (segments with different owners on their two sides).
+  const borders: Array<{ other: number; sides: [string | null, string | null] }> = [];
+  for (const sg of arr.segments.values()) {
+    if (sg.a !== o.vertexId && sg.b !== o.vertexId) continue;
+    const l = ownerOf(sg.left_face), r = ownerOf(sg.right_face);
+    if ((l ?? '') !== (r ?? '')) borders.push({ other: sg.a === o.vertexId ? sg.b : sg.a, sides: [l, r] });
+  }
+  if (borders.length === 0) throw new Error('This point is not on a border on this date.');
+  if (borders.length !== 2) throw new Error(`This point joins ${borders.length} borders: only a point on a border between two countries can be moved from a date. Use the Territory brush here.`);
+  const pair = new Set(borders.flatMap((b) => b.sides.map((x) => x ?? '')));
+  if (pair.size !== 2) throw new Error('This point joins borders of more than two countries: use the Territory brush here.');
+  const [x, y] = [...pair].map((v) => v || null);
+  const v = arr.v(o.vertexId);
+  // The land between the old line (P, V, N) and the new one (P, V', N); its owner now loses it.
+  const pts = [arr.v(borders[0].other), o.to, arr.v(borders[1].other), v].map((q) => vecToLonLat(q));
+  const ring = ringFromMapPoints(pts, 0.25);
+  if (!ring) throw new Error('Move the point a little further.');
+  const mid = normalize([v[0] + o.to[0], v[1] + o.to[1], v[2] + o.to[2]]);
+  // (The new place and the land on the way must belong to the two countries of the border.)
+  const before = engine.valueAtPoint(o.spaceId, o.layerId, mid, o.t);
+  const dest = engine.valueAtPoint(o.spaceId, o.layerId, o.to, o.t);
+  const ours = (v: string | null) => (v ?? '') === (x ?? '') || (v ?? '') === (y ?? '');
+  if (!ours(before) || !ours(dest)) throw new Error('The point was moved across another country (or out to sea): move it less far, or use the Territory brush.');
+  const gainer = (before ?? '') === (x ?? '') ? y : x;
+  const r = paintTerritory(world, engine, { spaceId: o.spaceId, layerId: o.layerId, ring, value: gainer, snap: o.snap, mode: o.mode });
+  return { label: `Move a border point from ${o.t.day === -Infinity ? 'the beginning' : 'a date'}`, diffs: r.diffs, result: { gainer } };
 }
 
 export function insertBorderVertex(world: World, o: { spaceId: string; segmentId: number; at: Vec3 }): CommandResult<number> {

@@ -277,3 +277,4 @@ label.indent { margin-left: 24px; }
 .type-length input { width: 56px; }
 .type-length select { flex: 1; min-width: 0; }
 .type-actions { display: flex; gap: 4px; }
+.choice.disabled { opacity: 0.55; }

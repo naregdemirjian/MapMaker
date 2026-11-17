@@ -777,9 +777,9 @@ export function MapView() {
       const ll = screenToLonLat(view, p[0], p[1]);
       if (!ll) { store.toast('That is outside the map.', 'error'); return; }
       const to = lonLatToVec(ll[0], ll[1]);
+      // (A move for all time that would cross a border is refused; a move from a date may still do.)
       const check = store.world!.arrangement(store.spaceId).canMoveVertex(d.vid, to, snapRadians());
-      if (!check.ok) { store.toast(check.reason, 'error'); force((n) => n + 1); return; }
-      store.set({ pending: { kind: 'vertex', spaceId: store.spaceId, vertexId: d.vid, to } });
+      store.set({ pending: { kind: 'vertex', spaceId: store.spaceId, vertexId: d.vid, to, layerId: store.layerId, blocked: check.ok ? null : check.reason } });
     }
   }
 

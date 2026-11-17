@@ -765,6 +765,27 @@ try {
     assert.equal(await h.ownerAt(north, '1940'), 'Splitland', 'before 1950, one country');
     // The line went away with the split; the tool waits for a new one.
     assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.splitLine), null);
+    // A point of the new border moved from 1960 on (not for all time): the sliver between changes hands then.
+    await h.setDate('1960');
+    await page.getByTestId('tool-vertex').click();
+    const centreLL = await h.toLL([cx, cy]);
+    const v = await page.evaluate(([lon, lat]) => {
+      const s = (window as any).__mapmaker.store, arr = s.world.arrangement(s.spaceId);
+      let best: any = null, bd = Infinity;
+      for (const r of arr.vertices.values()) { const d = Math.hypot(r.lon / 1e7 - lon, r.lat / 1e7 - lat); if (d < bd) { bd = d; best = r; } }
+      return [best.lon / 1e7, best.lat / 1e7] as [number, number];
+    }, centreLL);
+    const vp = await h.toPage(v);
+    await page.mouse.move(vp[0], vp[1]);
+    await page.mouse.down();
+    await page.mouse.move(vp[0], vp[1] - 30, { steps: 8 });
+    await page.mouse.up();
+    await page.getByTestId('vertex-choice-dated').click();
+    await page.getByTestId('confirm-vertex').click();
+    await h.saved();
+    const sliver = await h.toLL([vp[0], vp[1] - 12]);
+    assert.equal(await h.ownerAt(sliver, '1961'), 'Splitland', 'from 1960 the border runs through the new place');
+    assert.equal(await h.ownerAt(sliver, '1955'), 'North Splitland', 'before 1960 it runs as it did');
     await page.getByTestId('tool-select').click();
     // Merge the two again, into a new country, in a new event of 1970.
     await h.setDate('1970');
@@ -886,7 +907,8 @@ try {
     // With Select, a click on the battle chooses it.
     await page.getByTestId('tool-select').click();
     await page.mouse.click(pb[0] - 40, pb[1] + 10);
-    await page.getByTestId('feature-panel').waitFor();
+    // (The claim's panel is open already: wait for the battle's to replace it.)
+    await page.waitForFunction(() => (document.querySelector('[data-testid="feature-panel-name"]') as HTMLInputElement | null)?.value === 'Battle of the Ford', undefined, { timeout: 5000 }).catch(() => {});
     assert.equal(await page.getByTestId('feature-panel-name').inputValue(), 'Battle of the Ford');
     await h.screenshot('areas-lines-points');
     // The front moves in 1880: a new shape from that date, through the panel.

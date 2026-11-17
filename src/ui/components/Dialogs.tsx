@@ -12,6 +12,7 @@ import { GroupChecks } from './EventGroups.tsx';
 import { FeaturePrompt } from './Features.tsx';
 import { TypeDot, TypeSelect } from './EventTypes.tsx';
 import { SplitPrompt } from './SplitMerge.tsx';
+import { placementMode } from './Characters.tsx';
 import { defaultEnd, typeSettings, type Spread } from '../../domain/event-types.ts';
 
 function Modal({ title, children, onClose, wide }: { title: string; children: React.ReactNode; onClose: () => void; wide?: boolean }) {
@@ -162,16 +163,33 @@ function PaintPrompt({ p }: { p: Extract<PendingEdit, { kind: 'paint' }> }) {
 function VertexPrompt({ p }: { p: Extract<PendingEdit, { kind: 'vertex' }> }) {
   const s = useStore();
   const close = () => s.set({ pending: null });
+  // From a date when an event is being recorded or when a move for all time is not possible; else for all time (D77).
+  const [choice, setChoice] = useState<'all' | 'dated'>(s.recordEventId || p.blocked ? 'dated' : 'all');
+  const rec = s.recordEventId ? s.world!.get('event', s.recordEventId) : null;
+  const confirm = () => {
+    if (choice === 'all') {
+      if (p.blocked) { s.toast(p.blocked, 'error'); return; }
+      s.execute((w) => cmd.moveVertex(w, { spaceId: p.spaceId, vertexId: p.vertexId, to: p.to, snap: 1e-9 }));
+    } else {
+      if (!p.layerId) { s.toast('This map has no political layer.', 'error'); return; }
+      const r = s.execute((w, e) => cmd.moveBorderFrom(w, e, { spaceId: p.spaceId, layerId: p.layerId!, vertexId: p.vertexId, to: p.to, t: s.time, mode: placementMode(), snap: 1e-9 }));
+      if (r === undefined) return;
+    }
+    close();
+  };
   return (
     <Modal title="Move this border point?" onClose={close}>
-      <div className="choice on">
+      <div className={`choice ${choice === 'all' ? 'on' : ''} ${p.blocked ? 'disabled' : ''}`} onClick={() => setChoice('all')} data-testid="vertex-choice-all">
         <b>Correct the border's shape for all time</b>
-        <div className="muted">Every date where this border exists shows the new position. Nothing else about history changes.</div>
+        <div className="muted">{p.blocked ? `Not possible here: ${p.blocked}` : 'Every date where this border exists shows the new position. Nothing else about history changes.'}</div>
       </div>
-      <p className="muted small-note">To move a border from a particular date onward (for example after a war), draw the area that changes hands with the Territory brush instead: it asks whether that is a new change or a correction.</p>
+      <div className={`choice ${choice === 'dated' ? 'on' : ''}`} onClick={() => setChoice('dated')} data-testid="vertex-choice-dated">
+        <b>Move it from {fmt(s.time)} on{rec ? `, in “${rec.name}”` : ''}</b>
+        <div className="muted">Before then the border runs as it did; from then on through the new place, and the land between changes hands. For a point on a border between two countries.</div>
+      </div>
       <div className="modal-actions">
         <button onClick={close}>Cancel</button>
-        <button className="primary" data-testid="confirm-vertex" onClick={() => { s.execute((w) => cmd.moveVertex(w, { spaceId: p.spaceId, vertexId: p.vertexId, to: p.to, snap: 1e-9 })); close(); }}>Correct for all time</button>
+        <button className="primary" data-testid="confirm-vertex" onClick={confirm}>{choice === 'all' ? 'Correct for all time' : `Move from ${fmt(s.time)}`}</button>
       </div>
     </Modal>
   );
