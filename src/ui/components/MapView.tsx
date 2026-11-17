@@ -37,7 +37,9 @@ type Drag =
   // A freehand area or line on a feature layer (map positions).
   | { kind: 'feature'; points: Pt[] }
   // The line between two dates being compared, dragged across the map.
-  | { kind: 'split' };
+  | { kind: 'swipe' }
+  // The Split tool: a line drawn across a country, or a click on the part that changes hands (map positions; D76).
+  | { kind: 'cut'; points: Pt[]; x: number; y: number; moved: number };
 
 /** Where the shot preview last drew its texts and the events box (frame pixels), to pick them up. */
 let overlayRects: OverlayRect[] = [];
@@ -472,6 +474,17 @@ export function MapView() {
       if (cursor && drag.current.kind !== 'pen') { ctx.setLineDash([3, 4]); ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(end[0], end[1]); ctx.lineTo(cursor[0], cursor[1]); ctx.stroke(); }
       ctx.restore();
     }
+    // The Split tool's line: being drawn, or waiting for the click on the part that changes hands.
+    const cutLine = drag.current.kind === 'cut' && drag.current.moved >= 4 ? toScreen(drag.current.points) : s.tool === 'split' && s.splitLine ? toScreen(s.splitLine) : null;
+    if (cutLine && cutLine.length > 1) {
+      ctx.save();
+      ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      ctx.strokeStyle = 'rgba(10,16,24,0.8)'; ctx.lineWidth = 5;
+      ctx.beginPath(); cutLine.forEach((q, i) => (i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]))); ctx.stroke();
+      ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 2.5; ctx.setLineDash([8, 5]);
+      ctx.stroke();
+      ctx.restore();
+    }
     const featureLayer = s.tool === 'feature' ? w.get('layer', s.featureLayerId) : null;
     const pts = drag.current.kind === 'lasso' || drag.current.kind === 'feature' ? toScreen(drag.current.points) : polygon.length ? [...toScreen(polygon), ...(cursor ? [cursor] : [])] : null;
     if (pts && pts.length > 1 && featureLayer?.kind === 'line') {
@@ -538,7 +551,7 @@ export function MapView() {
     e.currentTarget.setPointerCapture(e.pointerId);
     const p = local(e);
     // Comparing two dates: the line between them is picked up (a few pixels either side).
-    if (!presentation && e.button === 0 && s.compare.on && Math.abs(p[0] - s.compare.split * frame.w) <= 8) { drag.current = { kind: 'split' }; return; }
+    if (!presentation && e.button === 0 && s.compare.on && Math.abs(p[0] - s.compare.split * frame.w) <= 8) { drag.current = { kind: 'swipe' }; return; }
     // In the shot preview, a text or the events box under the pointer is picked up and moved.
     if (presentation && e.button === 0) {
       const hit = overlayAt(p);
@@ -548,6 +561,12 @@ export function MapView() {
     if (!presentation && e.button === 0 && s.tool === 'erase') {
       const ll = screenToLonLat(view, p[0], p[1]);
       if (ll) { drag.current = { kind: 'erase', points: [ll] }; force((n) => n + 1); }
+      return;
+    }
+    // Split: a drag draws the line across a country; then a click chooses the part that changes hands.
+    if (!presentation && e.button === 0 && s.tool === 'split') {
+      const ll = screenToLonLat(view, p[0], p[1]);
+      if (ll) { drag.current = { kind: 'cut', points: [ll], x: p[0], y: p[1], moved: 0 }; force((n) => n + 1); }
       return;
     }
     // Areas, lines and points: a click puts a point; a drag draws an area or line freehand; or click by click.
@@ -616,14 +635,15 @@ export function MapView() {
   function onPointerMove(e: React.PointerEvent<HTMLCanvasElement>) {
     const p = local(e);
     const d = drag.current;
-    if (d.kind === 'split') { store.setLive({ compare: { ...store.compare, split: Math.max(0.02, Math.min(0.98, p[0] / frame.w)) } }); return; }
+    if (d.kind === 'swipe') { store.setLive({ compare: { ...store.compare, split: Math.max(0.02, Math.min(0.98, p[0] / frame.w)) } }); return; }
     if (d.kind === 'overlay') {
       store.setLive({ presentOverlay: { id: d.id, dx: (p[0] - d.x) / frame.w, dy: (p[1] - d.y) / frame.h, from: d.from } });
       return;
     }
     // (Moved once the pointer is a few pixels from where it went down, however few movements were reported.)
     if (d.kind === 'character') { d.moved = Math.max(d.moved, Math.hypot(p[0] - d.from[0], p[1] - d.from[1])); setCursor(p); return; }
-    if (d.kind === 'erase' || d.kind === 'feature') {
+    if (d.kind === 'cut') d.moved = Math.max(d.moved, Math.hypot(p[0] - d.x, p[1] - d.y));
+    if (d.kind === 'erase' || d.kind === 'feature' || d.kind === 'cut') {
       const ll = screenToLonLat(view, p[0], p[1]);
       const last = d.points[d.points.length - 1];
       const ls = lonLatToScreen(view, last[0], last[1]);
@@ -704,6 +724,24 @@ export function MapView() {
       return;
     }
     if (d.kind === 'pen') return; // the draft is saved; carry on whenever you like
+    if (d.kind === 'cut') {
+      force((n) => n + 1);
+      // A click with a line waiting: the part clicked changes hands (the question follows).
+      if (d.moved < 4) {
+        const line = store.splitLine;
+        if (!line) { store.toast('Drag a line right across the country first.'); return; }
+        if (!store.layerId) { store.toast('This map has no political layer to split.', 'error'); return; }
+        store.set({ pending: { kind: 'split', spaceId: store.spaceId, layerId: store.layerId, line, pick: d.points[0], snap: snapRadians() } });
+        return;
+      }
+      // A line: cleaned up at the current zoom, as a feature line is; it waits for the click.
+      const screen = d.points.map((q) => lonLatToScreen(view, q[0], q[1])).filter((q): q is Pt => !!q);
+      const clean = simplify(smooth(dedupe(screen, 1), Math.min(2, store.stroke.smoothness), false), 0.6);
+      const line = clean.map((q) => screenToLonLat(view, q[0], q[1])).filter((q): q is [number, number] => !!q);
+      if (line.length < 2) return;
+      store.set({ splitLine: line });
+      return;
+    }
     if (d.kind === 'feature') {
       // Cleaned up at the current zoom (as the brush is): an area as one or more rings, a line as one line.
       const layer = store.world!.get('layer', store.featureLayerId);
@@ -805,7 +843,7 @@ export function MapView() {
     const key = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-      if (e.key === 'Escape') { setPolygon([]); setCursor(null); drag.current = { kind: 'none' }; force((n) => n + 1); }
+      if (e.key === 'Escape') { setPolygon([]); setCursor(null); drag.current = { kind: 'none' }; if (store.splitLine && !store.pending) store.set({ splitLine: null }); force((n) => n + 1); }
       if (e.key === 'Enter' && polygon.length) finishPolygon();
       if (e.key === 'Enter' && store.tool === 'pen' && !store.pending) finishDraft();
       if ((e.key === 'Backspace' || (e.key.toLowerCase() === 'z' && (e.ctrlKey || e.metaKey))) && store.tool === 'pen' && store.draft?.pieces.length) {
@@ -834,7 +872,7 @@ export function MapView() {
     }
   }
 
-  const cursorStyle = drag.current.kind === 'split' || (overSplit && s.compare.on && !presentation) ? 'ew-resize' : presentation ? (drag.current.kind === 'overlay' || overOverlay ? 'move' : 'grab') : s.tool === 'select' ? 'grab' : s.tool === 'vertex' ? (hoverVertex !== null ? 'move' : 'default') : 'crosshair';
+  const cursorStyle = drag.current.kind === 'swipe' || (overSplit && s.compare.on && !presentation) ? 'ew-resize' : presentation ? (drag.current.kind === 'overlay' || overOverlay ? 'move' : 'grab') : s.tool === 'select' ? 'grab' : s.tool === 'vertex' ? (hoverVertex !== null ? 'move' : 'default') : 'crosshair';
   return (
     <div className="map-wrap" ref={wrapRef}>
       <canvas

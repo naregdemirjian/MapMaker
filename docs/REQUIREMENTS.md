@@ -47,7 +47,7 @@ status. Last updated: 18 November 2026 (Stage 4; see DEVELOPMENT.md).
 | Precise point-by-point shapes | Tested | `e2e/workflows` step 1 | |
 | Vertex editing: move | Tested | `geo-kernel`, `e2e/vertical-slice` step 5 | Moves that would cross a border are refused |
 | Vertex editing: add and remove | Needs testing | `geo-kernel` | Kernel tested; the interface gestures (double-click a border, Delete) are not driven by an automated test |
-| Splitting and merging regions | Partial | `geometry-worlds`, `scenarios`, `e2e/workflows` | Drawing splits and merges territory; the border pen draws borders over many sessions (drafts kept with the project). No dedicated split or merge tools |
+| Splitting and merging regions | Tested | `split-merge` (3 tests), `geometry-worlds`, `scenarios`, `e2e/workflows` 'Split and merge' | D76. The Split tool cuts a country along a drawn line; "Merge into one" joins chosen countries; the brush and the border pen also split and merge |
 | Invalid or complex geometry handled safely | Tested | `geometry-worlds`, `geo-kernel.stress` | Fixed in 0.2.0: an outline enclosing no area or folding back could repaint the whole world |
 | Geometry stored precisely | Tested | `geometry-worlds` (1e-7°, about 1 cm; exact after reopening) | |
 | Shapes across the poles, the 180° line, larger than a hemisphere, metres across | Tested | `geometry-worlds`, `geo-kernel` | |

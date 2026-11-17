@@ -20,7 +20,7 @@ export type Mode = 'world' | 'present';
 /** One line of a right-click menu: an action, a heading, or a divider. */
 export type MenuItem = { label: string; run: () => void; danger?: boolean; testId?: string } | { heading: string } | 'divider';
 
-export type Tool = 'select' | 'lasso' | 'polygon' | 'pen' | 'vertex' | 'place' | 'erase' | 'feature';
+export type Tool = 'select' | 'lasso' | 'polygon' | 'pen' | 'vertex' | 'place' | 'erase' | 'feature' | 'split';
 export type Selection =
   | { kind: 'entity'; id: string }
   | { kind: 'event'; id: string }
@@ -33,7 +33,9 @@ export type PendingEdit =
   | { kind: 'paint'; spaceId: string; layerId: string; rings: Vec3[][]; value: string | null; sample: [number, number] | null; origin: [number, number]; snap: number; draftId?: string }
   | { kind: 'vertex'; spaceId: string; vertexId: number; to: Vec3 }
   /** An area, line or point drawn with the features tool: a new feature, or a new shape for one (`reshape`). Parts in longitude, latitude. */
-  | { kind: 'feature'; layerId: string; parts: Array<Array<[number, number]>>; reshape: string | null };
+  | { kind: 'feature'; layerId: string; parts: Array<Array<[number, number]>>; reshape: string | null }
+  /** A line drawn across a country with the Split tool and the part clicked (longitude, latitude; D76). */
+  | { kind: 'split'; spaceId: string; layerId: string; line: Array<[number, number]>; pick: [number, number]; snap: number };
 
 export interface Toast { id: number; text: string; kind: 'info' | 'error' }
 
@@ -110,6 +112,10 @@ class AppStore {
   cameras = new Map<string, Camera>();
   stroke: StrokeSettings = { smoothness: 1, irregularity: 0, precision: 1.2, seed: 1 };
   pending: PendingEdit | null = null;
+  /** The Split tool's line, drawn and waiting for the part that changes hands to be clicked (D76). */
+  splitLine: Array<[number, number]> | null = null;
+  /** The countries chosen for "Merge into one" (D76). */
+  mergeIds: string[] = [];
   toasts: Toast[] = [];
   busy: string | null = null;
   timeline = { start: 900, end: 2100 };

@@ -11,6 +11,7 @@ import { loadDatasetRecords, type DatasetRecord } from '../../render-engine/base
 import { GroupChecks } from './EventGroups.tsx';
 import { FeaturePrompt } from './Features.tsx';
 import { TypeDot, TypeSelect } from './EventTypes.tsx';
+import { SplitPrompt } from './SplitMerge.tsx';
 import { defaultEnd, typeSettings, type Spread } from '../../domain/event-types.ts';
 
 function Modal({ title, children, onClose, wide }: { title: string; children: React.ReactNode; onClose: () => void; wide?: boolean }) {
@@ -28,7 +29,7 @@ export function EditPrompt() {
   const s = useStore();
   const p = s.pending;
   if (!p) return null;
-  return p.kind === 'paint' ? <PaintPrompt p={p} /> : p.kind === 'feature' ? <FeaturePrompt p={p} /> : <VertexPrompt p={p} />;
+  return p.kind === 'paint' ? <PaintPrompt p={p} /> : p.kind === 'feature' ? <FeaturePrompt p={p} /> : p.kind === 'split' ? <SplitPrompt p={p} /> : <VertexPrompt p={p} />;
 }
 
 function PaintPrompt({ p }: { p: Extract<PendingEdit, { kind: 'paint' }> }) {

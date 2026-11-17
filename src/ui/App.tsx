@@ -11,6 +11,7 @@ import { SettingsDialog } from './components/Settings.tsx';
 import { NewLayerDialog } from './components/Features.tsx';
 import { DataExportDialog } from './components/Search.tsx';
 import { EventTypesDialog } from './components/EventTypes.tsx';
+import { MergeDialog } from './components/SplitMerge.tsx';
 import { ContextMenu, deleteEntitiesAsked, deleteEventsAsked } from './components/ContextMenu.tsx';
 
 export function App() {
@@ -54,6 +55,7 @@ export function App() {
       {s.dialog === 'new-layer' && <NewLayerDialog />}
       {s.dialog === 'data-export' && <DataExportDialog />}
       {s.dialog === 'event-types' && <EventTypesDialog />}
+      {s.dialog === 'merge' && <MergeDialog />}
       {s.dialog === 'versions' && <VersionsDialog />}
       {s.dialog === 'health' && <HealthDialog />}
       {s.dialog === 'data-sources' && <DataSourcesDialog />}

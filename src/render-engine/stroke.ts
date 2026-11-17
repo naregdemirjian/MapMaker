@@ -190,3 +190,22 @@ export function ringFromMapPoints(points: Array<[number, number]>, maxStepDeg = 
   }
   return out;
 }
+
+/** An open line through map points (longitude, latitude), densified along great circles: a split line (D76). */
+export function lineFromMapPoints(points: Array<[number, number]>, maxStepDeg = 0.5): Vec3[] | null {
+  const pts: Array<[number, number]> = [];
+  for (const p of points) {
+    const last = pts[pts.length - 1];
+    if (!last || Math.abs(last[0] - p[0]) > 1e-9 || Math.abs(last[1] - p[1]) > 1e-9) pts.push(p);
+  }
+  if (pts.length < 2) return null;
+  const out: Vec3[] = [];
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const a = lonLatToVec(pts[i][0], pts[i][1]), b = lonLatToVec(pts[i + 1][0], pts[i + 1][1]);
+    const ang = (Math.acos(Math.max(-1, Math.min(1, a[0] * b[0] + a[1] * b[1] + a[2] * b[2]))) * 180) / Math.PI;
+    const n = Math.max(1, Math.ceil(ang / maxStepDeg));
+    for (let k = 0; k < n; k++) out.push(slerp(a, b, k / n));
+  }
+  out.push(lonLatToVec(pts[pts.length - 1][0], pts[pts.length - 1][1]));
+  return out;
+}

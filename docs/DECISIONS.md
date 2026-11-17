@@ -60,6 +60,21 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D76. Splitting along a line and merging countries (Stage 2)
+
+**Split** (a tool on the toolbar): drag a line right across a country, then click the part that changes hands. The line
+is inserted into the parcel map as an open path (it becomes a border, as an outline does); the part is the country's
+land reached from the click without crossing the line (`commands.ts` splitTerritory; owners of parcels split by the line
+are read through their parents, so the country is the one on the date viewed). If the line does not divide the
+country (it stops inside it), the split is refused and the line taken back. The part goes to a new country (named by
+its side of the line: "North Aldmark") or an existing one. **Merge** ("Merge into one…" on the right-click menu of two
+or more chosen countries): all their land on the date viewed goes to one of them (the largest is offered), another
+country or a new one; the others keep their names and history and hold no land from then on (`mergeTerritory`). Both
+ask when the change holds, as the drawing prompt does: from the date viewed (the default), as a correction of the
+period, or in an event (existing, or a new one made in the same step). Making the new country, the event, the border
+and the change is one undo step. Splits and merges are ordinary territory changes (no intention is kept, unlike an
+annexation: a later edit to the country's earlier borders does not move them).
+
 ### D75. Event types are templates: a colour, a usual way of spreading and a usual length (Stage 3)
 
 The architecture calls a custom event type "a template combining" kinds of change. What a type now carries, kept as

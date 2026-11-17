@@ -59,6 +59,8 @@ export function entityMenu(w: World, ids: string[]): MenuItem[] {
     if (pictured.length && off < pictured.length) items.push({ label: 'Use colours (pictures off)', run: () => store.execute((wd) => cmd.setFillsShown(wd, pids, false)), testId: 'menu-pictures-off' });
     if (off > 0) items.push({ label: 'Show their pictures again', run: () => store.execute((wd) => cmd.setFillsShown(wd, pids, true)), testId: 'menu-pictures-on' });
   }
+  const countries = ents.filter((e) => e.type_id === 'polity' || e.type_id === 'faction');
+  if (countries.length >= 2) items.push({ label: `Merge into one…`, testId: 'menu-merge', run: () => store.set({ dialog: 'merge', mergeIds: countries.map((e) => e.id) }) });
   const groups = w.all('entity_group').sort((a, b) => a.sort_order - b.sort_order);
   items.push({ heading: 'Group' });
   items.push({ label: 'New group from ' + plural(ents.length, 'this', 'these') + '…', testId: 'menu-new-group', run: async () => {

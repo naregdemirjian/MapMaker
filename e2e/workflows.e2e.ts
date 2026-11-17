@@ -732,6 +732,68 @@ try {
     assert.equal((await typeOf('Siege warfare'))?.id, siege.id);
   });
 
+  await h.step('Split and merge: a line drawn across a country, the part clicked becomes a new country; two countries merged into a new one in an event; undone', async () => {
+    await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: -150, lat: -30, zoom: 3, rotation: 0, projection: 'equirectangular' }));
+    await h.setDate('1930');
+    await h.newCountry('Splitland');
+    await page.getByTestId('tool-lasso').click();
+    const { cx, cy } = await h.centre();
+    await h.drawLasso(blob(cx, cy, 150, 100));
+    await page.getByTestId('choice-correct').waitFor();
+    await page.keyboard.press('Enter');
+    await page.getByTestId('choice-correct').waitFor({ state: 'detached' });
+    await h.saved();
+    const north = await h.toLL([cx, cy - 50]), south = await h.toLL([cx, cy + 50]);
+    assert.equal(await h.ownerAt(north, '1960'), 'Splitland');
+    // Split from 1950: a line right across, then a click on the northern part.
+    await h.setDate('1950');
+    await page.getByTestId('tool-split').click();
+    await page.mouse.move(cx - 220, cy + 5);
+    await page.mouse.down();
+    await page.mouse.move(cx + 220, cy - 5, { steps: 12 });
+    await page.mouse.up();
+    await page.getByTestId('split-again').waitFor();
+    await page.mouse.click(cx + 10, cy - 50);
+    await page.getByTestId('split-prompt').waitFor();
+    assert.equal(await page.getByTestId('split-new-name').inputValue(), 'North Splitland');
+    await h.screenshot('split-prompt');
+    await page.keyboard.press('Enter');
+    await page.getByTestId('split-prompt').waitFor({ state: 'detached' });
+    await h.saved();
+    assert.equal(await h.ownerAt(north, '1951'), 'North Splitland');
+    assert.equal(await h.ownerAt(south, '1951'), 'Splitland');
+    assert.equal(await h.ownerAt(north, '1940'), 'Splitland', 'before 1950, one country');
+    // The line went away with the split; the tool waits for a new one.
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.splitLine), null);
+    await page.getByTestId('tool-select').click();
+    // Merge the two again, into a new country, in a new event of 1970.
+    await h.setDate('1970');
+    await page.getByTestId('entity-row-Splitland').click();
+    await page.getByTestId('entity-row-North Splitland').click({ modifiers: ['Control'] });
+    await page.getByTestId('entity-row-North Splitland').click({ button: 'right' });
+    await page.getByTestId('menu-merge').click();
+    await page.getByTestId('merge-dialog').waitFor();
+    await page.getByTestId('merge-into').selectOption('new');
+    await page.getByTestId('merge-new-name').fill('Reunited Splitland');
+    await page.getByTestId('when-event').click();
+    await page.getByTestId('when-event-name').fill('Reunification');
+    await page.getByTestId('confirm-merge').click();
+    await page.getByTestId('merge-dialog').waitFor({ state: 'detached' });
+    await h.saved();
+    for (const ll of [north, south]) assert.equal(await h.ownerAt(ll, '1971'), 'Reunited Splitland');
+    assert.equal(await h.ownerAt(north, '1960'), 'North Splitland');
+    assert.ok(await page.evaluate(() => (window as any).__mapmaker.store.world.all('event').some((e: any) => e.name === 'Reunification')));
+    await h.screenshot('merged');
+    // One step: undone, the event and the new country are gone.
+    await page.getByTestId('undo').click();
+    await h.saved();
+    assert.equal(await h.ownerAt(north, '1971'), 'North Splitland');
+    assert.ok(!(await page.evaluate(() => (window as any).__mapmaker.store.world.all('entity').some((e: any) => e.name === 'Reunited Splitland'))));
+    await page.getByTestId('redo').click();
+    await h.saved();
+    assert.equal(await h.ownerAt(south, '1971'), 'Reunited Splitland');
+  });
+
   await h.step('Areas, lines and points: layers of each kind, drawn by mouse, chosen by clicking, restyled, reshaped from a date, ended, undone', async () => {
     const feats = () => page.evaluate(() => { const s = (window as any).__mapmaker.store; return s.world.all('feature').map((f: any) => ({ id: f.id, name: f.name, layer: s.world.get('layer', f.layer_id).name, kind: s.world.get('layer', f.layer_id).kind, style: f.style })); }) as Promise<Array<{ id: string; name: string; layer: string; kind: string; style: string }>>;
     const shown = (name: string, date: string) => page.evaluate(([n, d]) => {

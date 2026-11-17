@@ -20,6 +20,7 @@ import { RelationsSection } from './Relations.tsx';
 import { SearchBox } from './Search.tsx';
 import { PicturesSection } from './Pictures.tsx';
 import { TypeDot, TypeSelect } from './EventTypes.tsx';
+import { SplitToolOptions } from './SplitMerge.tsx';
 import { typeColor } from '../../domain/event-types.ts';
 import { isFeatureKind } from '../../render-engine/feature-style.ts';
 
@@ -110,7 +111,7 @@ export function TopBar() {
       <div className="spacer" />
       <SearchBox />
       <button disabled={!s.journal.canUndo} title={s.journal.undoLabel ? `Undo: ${s.journal.undoLabel} (Ctrl+Z)` : 'Nothing to undo'} onClick={() => s.undo()} data-testid="undo">Undo</button>
-      <button disabled={!s.journal.canRedo} title={s.journal.redoLabel ? `Redo: ${s.journal.redoLabel} (Ctrl+Y)` : 'Nothing to redo'} onClick={() => s.redo()}>Redo</button>
+      <button disabled={!s.journal.canRedo} title={s.journal.redoLabel ? `Redo: ${s.journal.redoLabel} (Ctrl+Y)` : 'Nothing to redo'} onClick={() => s.redo()} data-testid="redo">Redo</button>
       <button onClick={() => s.set({ dialog: 'versions' })} title="Save a named version, restore versions and backups">Versions</button>
       <button className={problems ? 'warn' : ''} onClick={() => s.set({ dialog: 'health' })} data-testid="health">
         History Health{problems ? ` (${problems})` : ' ✓'}
@@ -127,6 +128,7 @@ const TOOLS: Array<{ id: Tool; name: string; hint: string }> = [
   { id: 'polygon', name: 'Precise shape', hint: 'Click points; double-click or Enter to finish; Esc to cancel.' },
   { id: 'pen', name: 'Border pen', hint: 'Draw a border at your own pace: drag or click, let go, pan and zoom, carry on later. Enter finishes; Backspace takes back the last piece. Drafts are kept with the project.' },
   { id: 'vertex', name: 'Border points', hint: 'Drag a border point to correct the border shape for all time. Double-click a border to add a point; Delete removes the point under the cursor.' },
+  { id: 'split', name: 'Split', hint: 'Draw a line right across a country, then click the part that changes hands: it goes to a new country or another one, from the date viewed, as a correction or in an event. Esc starts the line again.' },
   { id: 'erase', name: 'Border eraser', hint: 'Drag across borders to erase them: the country where you start takes the land across each border you cross, from the date viewed (or in the event being recorded). Start outside any country to clear land.' },
   { id: 'feature', name: 'Areas, lines & points', hint: 'Draw on a layer of areas, lines or points: claims and zones, front lines, roads and arrows, battles and sites. They overlap freely and never change who holds the land.' },
   { id: 'place', name: 'Characters & cities', hint: 'Click the map to put the chosen character or city there from the date being viewed (a point, no borders). With Select, drag one to move it.' },
@@ -196,6 +198,7 @@ export function ToolBar() {
         </div>
       )}
     {s.tool === 'feature' && <FeatureToolOptions />}
+    {s.tool === 'split' && <SplitToolOptions />}
     {s.tool === 'place' && (
       <div className="toolbar sub">
         <label className="inline">Place

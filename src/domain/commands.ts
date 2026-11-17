@@ -853,6 +853,106 @@ export function assignFaces(world: World, engine: Engine, o: { spaceId: string; 
   });
 }
 
+// ---------------------------------------------------------------- splitting and merging (Stage 2, D76)
+
+/** Who gets the land: an existing owner, or a new country made in the same step. */
+export type NewOwner = string | { name: string; color?: string; type_id?: string };
+
+function ownerIn(tx: Tx, to: NewOwner): string {
+  if (typeof to === 'string') {
+    if (!tx.world.get('entity', to)) throw new Error('That owner no longer exists.');
+    return to;
+  }
+  if (!to.name.trim()) throw new Error('Give the new country a name.');
+  const id = newId('ent');
+  tx.insert('entity', { id, type_id: to.type_id ?? 'polity', branch_id: MAIN_BRANCH, name: to.name.trim(), color: to.color ?? suggestColor(tx.world), notes: '', created_seq: tx.world.nextSeq('entity'), style: '{}', group_id: '' });
+  return id;
+}
+
+/** The owner of every parcel at a date, also for parcels split since the date was read (children inherit). */
+function ownerReader(arr: ReturnType<World['arrangement']>, states: Map<number, { value: string | null }>): (f: number) => string | null {
+  return (f) => {
+    const st = states.get(f);
+    if (st) return st.value;
+    for (const a of arr.ancestors(f)) { const x = states.get(a); if (x) return x.value; }
+    return null;
+  };
+}
+
+/**
+ * Split a country along a line: the line becomes a border (it cuts the parcel map, as an outline
+ * does), and the part of the country on the side that was clicked (`pick`: its land reached from
+ * there without crossing the line) goes to `to`, an existing owner or a new country. The country is
+ * the one holding `pick` on date `t`. With `newEvent`, an event is made for it in the same step.
+ */
+export function splitTerritory(world: World, engine: Engine, o: { spaceId: string; layerId: string; line: Vec3[]; pick: Vec3; t: Instant; snap: number; to: NewOwner; mode: EditMode; newEvent?: EventInput; transition?: TransitionSpec | null }): CommandResult<{ owner: string; faces: number[]; eventId?: string }> {
+  checkTarget(world, { spaceId: o.spaceId, layerId: o.layerId, mode: o.newEvent ? undefined : o.mode });
+  if (o.line.length < 2) throw new Error('Draw a line across the country.');
+  const states = engine.partitionState(o.spaceId, o.layerId, o.t);
+  const country = engine.valueAtPoint(o.spaceId, o.layerId, o.pick, o.t);
+  if (!country) throw new Error('Click the part of a country that changes hands.');
+  const name = world.get('entity', country)?.name ?? 'the country';
+  if (typeof o.to === 'string' && o.to === country) throw new Error(`That part already belongs to ${name}.`);
+  return run(world, `Split ${name}`, (tx) => {
+    const [path] = tx.kernel(o.spaceId, (arr) => arr.insertPaths([o.line], { closed: false, snap: o.snap }));
+    const arr = world.arrangement(o.spaceId);
+    const ownerOf = ownerReader(arr, states);
+    const barrier = new Set(path.map((st) => st.seg));
+    // The country's land reached from the click without crossing the line.
+    const start = arr.locate(o.pick);
+    const part = new Set([start]);
+    const queue = [start];
+    const topo = arr.topology();
+    while (queue.length) {
+      const f = queue.pop()!;
+      for (const c of topo.facesCycles.get(f) ?? []) for (const h of topo.cycles.get(c)!) {
+        const sid = h >> 1;
+        if (barrier.has(sid)) continue;
+        const sg = arr.segments.get(sid)!;
+        const g = (h & 1) === 0 ? sg.right_face : sg.left_face;
+        if (g !== f && !part.has(g) && ownerOf(g) === country) { part.add(g); queue.push(g); }
+      }
+    }
+    // The line must divide the country: somewhere along it, the country lies on both sides, one side in the part and the other not.
+    let divides = false;
+    for (const id of barrier) {
+      const sg = arr.segments.get(id)!;
+      if (ownerOf(sg.left_face) === country && ownerOf(sg.right_face) === country && part.has(sg.left_face) !== part.has(sg.right_face)) { divides = true; break; }
+    }
+    if (!divides) throw new Error(`The line does not cut ${name} in two. Draw it right across, from outside the country to outside it (or from border to border).`);
+    const owner = ownerIn(tx, o.to);
+    const eventId = o.newEvent ? insertEventIn(tx, o.newEvent) : undefined;
+    const mode: EditMode = eventId ? { kind: 'new', eventId } : o.mode;
+    const faces = [...part];
+    writeAssignments(tx, engine, o.spaceId, o.layerId, mode, [{ leaves: faces, value: owner }], { transition: mode.kind === 'new' ? o.transition ?? null : null, intent: { op: 'paint', value: owner } });
+    return { owner, faces, eventId };
+  });
+}
+
+/**
+ * Merge countries: all the land the others hold on date `t` goes to `into` (one of them, another
+ * owner, or a new country made in the same step). The others keep their names and history; from then
+ * on they hold no land there.
+ */
+export function mergeTerritory(world: World, engine: Engine, o: { spaceId: string; layerId: string; ids: string[]; into: NewOwner; t: Instant; mode: EditMode; newEvent?: EventInput; transition?: TransitionSpec | null }): CommandResult<{ owner: string; faces: number[]; eventId?: string }> {
+  checkTarget(world, { spaceId: o.spaceId, layerId: o.layerId, mode: o.newEvent ? undefined : o.mode });
+  for (const id of o.ids) if (!world.get('entity', id)) throw new Error('One of them no longer exists.');
+  // (Into one of them, another country, or a new one: at least one country's land moves.)
+  const moving = new Set(o.ids.filter((id) => id !== o.into));
+  if (!moving.size) throw new Error('Choose at least two countries to merge.');
+  const leaves: number[] = [];
+  for (const [f, st] of engine.partitionState(o.spaceId, o.layerId, o.t)) if (st.value && moving.has(st.value)) leaves.push(f);
+  const names = o.ids.map((id) => world.get('entity', id)!.name);
+  if (!leaves.length) throw new Error(`${moving.size === 1 ? `${world.get('entity', [...moving][0])!.name} holds` : 'They hold'} no land on this map at this date.`);
+  return run(world, `Merge ${names.join(', ')}`, (tx) => {
+    const owner = ownerIn(tx, o.into);
+    const eventId = o.newEvent ? insertEventIn(tx, o.newEvent) : undefined;
+    const mode: EditMode = eventId ? { kind: 'new', eventId } : o.mode;
+    writeAssignments(tx, engine, o.spaceId, o.layerId, mode, [{ leaves, value: owner }], { transition: mode.kind === 'new' ? o.transition ?? null : null, intent: { op: 'paint', value: owner } });
+    return { owner, faces: leaves, eventId };
+  });
+}
+
 /** Intention-bearing change: everything `from` holds just before the event goes to `to`. */
 export function annex(world: World, engine: Engine, o: { spaceId: string; layerId: string; eventId: string; from: string; to: string; at?: Instant | null; transition?: TransitionSpec | null }): CommandResult<string> {
   const a = world.get('entity', o.from)?.name ?? '?', b = world.get('entity', o.to)?.name ?? '?';
