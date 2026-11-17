@@ -78,9 +78,10 @@ of city dots where it can; a city name right of its dot, then left, above or bel
 
 ### D42. The border eraser takes the land across, from the date being viewed
 
-Dragging the eraser across borders: the country where the stroke starts takes the parcels on the other side of each
-border crossed (whole parcels), from the date being viewed (as "correct this period") or in the event being recorded;
-starting outside any country clears that land. No question asked; one undo step.
+Dragging the eraser across borders: the country where the stroke starts takes the whole touching piece of land on the
+other side of each border crossed (every parcel of that owner connected to it, so no border reappears further on),
+from the date being viewed (as "correct this period") or in the event being recorded; starting outside any country
+clears that piece. No question asked; one undo step.
 
 ### D41. Working with many things at once (the user, 17 November 2026)
 

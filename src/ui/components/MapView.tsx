@@ -90,6 +90,20 @@ function eraseBorders(stroke: Pt[], view: View): void {
     if ((r ?? '') !== (start ?? '')) take.add(sg.right_face);
   }
   if (!take.size) { s.toast(crossed ? 'Nothing to erase there.' : 'Drag across a border to erase it.'); return; }
+  // The whole touching piece across each border goes (a country drawn in several parcels is still one
+  // piece), so no border reappears further on.
+  const sameOwner = new Map<number, number[]>();
+  for (const sg of arr.segments.values()) {
+    const l = sg.left_face, r = sg.right_face;
+    if (l === r || (ownerOf(l) ?? '') !== (ownerOf(r) ?? '')) continue;
+    (sameOwner.get(l) ?? sameOwner.set(l, []).get(l)!).push(r);
+    (sameOwner.get(r) ?? sameOwner.set(r, []).get(r)!).push(l);
+  }
+  const stack = [...take];
+  while (stack.length) {
+    const f = stack.pop()!;
+    for (const g of sameOwner.get(f) ?? []) if (!take.has(g) && ownerOf(g) !== null) { take.add(g); stack.push(g); }
+  }
   const who = start ? w.get('entity', start)?.name ?? 'the country' : 'nobody';
   const rev = w.revision;
   s.execute((wd, en) => cmd.assignFaces(wd, en, { spaceId: s.spaceId, layerId: s.layerId, leaves: [...take], value: start, mode: placementMode() }));
