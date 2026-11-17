@@ -512,8 +512,25 @@ export function addEventsToGroup(world: World, eventIds: string[], groupId: stri
 
 /** The groups an event belongs to, in display order. */
 export function groupsOfEvent(world: World, eventId: string): string[] {
-  const order = new Map(world.all('event_group').map((g) => [g.id, g.sort_order]));
-  return world.all('event_group_member').filter((m) => m.event_id === eventId).map((m) => m.group_id).sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
+  return eventGroupIndex(world).get(eventId) ?? [];
+}
+
+/** The groups of every event that is in any (in the groups' order), kept until groups or memberships change. */
+const groupIndexes = new WeakMap<World, { key: string; index: Map<string, string[]> }>();
+function eventGroupIndex(world: World): Map<string, string[]> {
+  const key = `${world.tableRevision('event_group')}|${world.tableRevision('event_group_member')}`;
+  let kept = groupIndexes.get(world);
+  if (!kept || kept.key !== key) {
+    const order = new Map(world.rows('event_group').map((g) => [g.id, g.sort_order]));
+    const index = new Map<string, string[]>();
+    for (const m of world.rows('event_group_member')) {
+      const l = index.get(m.event_id);
+      if (l) l.push(m.group_id); else index.set(m.event_id, [m.group_id]);
+    }
+    for (const l of index.values()) l.sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
+    groupIndexes.set(world, (kept = { key, index }));
+  }
+  return kept.index;
 }
 
 /**
@@ -522,9 +539,9 @@ export function groupsOfEvent(world: World, eventId: string): string[] {
  */
 export function eventShown(world: World, eventId: string, filter: Set<string> | null): boolean {
   if (!filter) return true;
-  const groups = world.all('event_group_member').filter((m) => m.event_id === eventId);
-  if (!groups.length) return filter.has(UNGROUPED);
-  return groups.some((m) => filter.has(m.group_id));
+  const groups = eventGroupIndex(world).get(eventId);
+  if (!groups || !groups.length) return filter.has(UNGROUPED);
+  return groups.some((g) => filter.has(g));
 }
 export const UNGROUPED = '__ungrouped';
 

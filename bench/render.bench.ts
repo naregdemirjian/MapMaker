@@ -77,6 +77,9 @@ try {
       if (want('panVeryDeep')) out.panVeryDeep = await run(40, (i) => s.setCamera({ ...base, zoom: 19, lon: 10 + i * 0.000005, lat: 48 }));
       s.setCamera({ ...base, zoom: 2.2 });
       if (want('scrub')) out.scrub = await run(40, (i) => s.setTime(Y(1000 + i * 25), true)); // as dragging along the timeline does
+      // Dragging along the timeline at an everyday pace: a year at a time, and a month at a time close in on one region.
+      if (want('scrubYears')) out.scrubYears = await run(40, (i) => s.setTime(Y(1500 + i), true));
+      if (want('scrubRegion')) { s.setCamera({ ...base, zoom: 4, lon: 10, lat: 48 }); out.scrubRegion = await run(40, (i) => s.setTime(B.gregorian.fromCivil({ year: 1600 + Math.floor(i / 12), month: 1 + (i % 12), day: 1 }), true)); s.setCamera({ ...base, zoom: 2.2 }); }
       if (want('scrubSmall')) out.scrubSmall = await run(40, (i) => s.setTime(B.gregorian.fromCivil({ year: 1950, month: 1, day: 1 + (i % 27) }), true));
       // A brush stroke over central Europe (in its own event), and the frame after it.
       if (want('stroke')) {

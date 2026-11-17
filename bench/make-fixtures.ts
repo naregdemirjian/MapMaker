@@ -2,7 +2,8 @@
 //   earth242   today's 242 countries on Earth (98,000 border points), cities, characters, a shot
 //   heavy      the same, plus hundreds of dated border changes (many parcels, long history)
 //   random1000 1,000 random overlapping territories (24,500 parcels), no basemap geography under them
-// Usage: node --disable-warning=ExperimentalWarning bench/make-fixtures.ts <folder> [earth242 heavy random1000]
+//   massive    as heavy, with 3,000 border changes (only when named)
+// Usage: node --disable-warning=ExperimentalWarning bench/make-fixtures.ts <folder> [earth242 heavy random1000 massive]
 import { readFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -82,14 +83,13 @@ if (wants('earth242')) {
   p.reg.closeAll();
 }
 
-if (wants('heavy')) {
-  const p = open('Bench Heavy');
+function heavy(name: string, N: number) {
+  const p = open(name);
   let ms = earth(p);
   const owners = p.world.all('entity').filter((e) => e.type_id === 'polity').map((e) => e.id);
   const r = rng(11);
   const t0 = performance.now();
   let refused = 0, slowest = 0;
-  const N = Number(process.env.HEAVY_EVENTS ?? 500);
   for (let i = 0; i < N; i++) {
     const ev = p.commit(cmd.createEvent(p.world, { name: `Border change ${i + 1}`, start: Y(1000 + Math.floor((i / N) * 1000)), end: r.bool(0.3) ? Y(1000 + Math.floor((i / N) * 1000) + 3) : null }));
     const t1 = performance.now();
@@ -106,9 +106,13 @@ if (wants('heavy')) {
   ms += performance.now() - t0;
   addShots(p, 1000, 2000);
   const arr = p.world.arrangement(p.space);
-  console.log(JSON.stringify({ project: 'heavy', id: p.info.id, buildSeconds: +(ms / 1000).toFixed(1), events: N, refused, slowestPaintMs: +slowest.toFixed(0), segments: arr.segments.size, parcels: arr.leafFaces().length }));
+  console.log(JSON.stringify({ project: name, id: p.info.id, buildSeconds: +(ms / 1000).toFixed(1), events: N, refused, slowestPaintMs: +slowest.toFixed(0), segments: arr.segments.size, parcels: arr.leafFaces().length }));
   p.reg.closeAll();
 }
+
+if (wants('heavy')) heavy('Bench Heavy', Number(process.env.HEAVY_EVENTS ?? 500));
+// Not made unless asked for by name: several thousand border changes (minutes to build).
+if (which.includes('massive')) heavy('Bench Massive', Number(process.env.MASSIVE_EVENTS ?? 3000));
 
 if (wants('random1000')) {
   const p = open('Bench Random 1000');

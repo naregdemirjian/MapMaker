@@ -19,7 +19,7 @@ import { BasemapPainter, chooseScale, landMaskOf, visibleBounds, boxIntersects, 
 import { planeShape, placeLabel, lineChoices, textWidthEm, blockHeightEm, LINE_HEIGHT, type PlaneShape } from './label-place.ts';
 import { resolveLabelStyle, resolvePointStyle, labelSize, labelFont, labelText, type LabelStyle, type CountryLabel } from './label-style.ts';
 import { imageNow, videoNow, drawImageFit, assetEpoch, type MediaChannel } from './assets.ts';
-import { Sheet, makeRing, addLine, projectPoint, type Ring } from './plane.ts';
+import { Sheet, makeRing, addLine, projectPoint, isCylindrical, type Ring } from './plane.ts';
 import { BlockPath, setPaintRegion, type DeviceRect } from './blocks.ts';
 import { parcelGeometry, type ParcelGeometry, type CycleGeom } from './parcel-geometry.ts';
 
@@ -95,7 +95,9 @@ export interface RenderOptions {
 interface Placing { a: number; b: number; c: number; d: number; x: number; y: number; s: number }
 /** What a kept part of the picture shows: exactly (the same pixels) and loosely (the same things, at whatever detail). */
 interface PartKey { strict: string; loose: string }
-interface Kept { canvas: OffscreenCanvas | null; ctx: CanvasRenderingContext2D | null; key: string; seen: string; strict: string; loose: string; at: Placing | null }
+interface Kept { canvas: OffscreenCanvas | null; ctx: CanvasRenderingContext2D | null; key: string; seen: string; strict: string; loose: string; at: Placing | null; /** The moment the parts that change from frame to frame were drawn for (see Renew). */ moment: string }
+/** Rectangles of a kept picture that change from frame to frame (where a change is animating), and what says which frame this is. */
+interface Renew { rects: DeviceRect[]; moment: string }
 
 /** A picture or video fill (see domain/commands.ts CountryFill). */
 interface CountryFillLike { kind: 'color' | 'image' | 'video'; asset?: string; off?: boolean; fit?: 'cover' | 'contain' | 'stretch' | 'tile'; tileSize?: number; play?: 'loop' | 'once'; speed?: number; start?: number }
@@ -737,7 +739,7 @@ export class MapRenderer {
   private keptBuffer(name: string, target: CanvasRenderingContext2D): Kept & { canvas: OffscreenCanvas; ctx: CanvasRenderingContext2D } {
     const w = target.canvas.width, h = target.canvas.height;
     let b = this.kept.get(name);
-    if (!b) b = { canvas: null, ctx: null, key: '', seen: '', strict: '', loose: '', at: null };
+    if (!b) b = { canvas: null, ctx: null, key: '', seen: '', strict: '', loose: '', at: null, moment: '' };
     // Most recently used last.
     this.kept.delete(name);
     this.kept.set(name, b);
@@ -778,32 +780,12 @@ export class MapRenderer {
     const prev = this.patchPrev;
     if (prev && prev.strict === strict) return null;
     let out: { from: string; rects: DeviceRect[] } | null = null;
-    if (prev && prev.arr === arr && prev.stable === stable && prev.layers.length === layers.length && m.b === 0 && m.c === 0 && visibleBounds(view) !== null) {
+    if (prev && prev.arr === arr && prev.stable === stable && prev.layers.length === layers.length && m.b === 0 && m.c === 0) {
       const borders = arr.bordersChangedSince(prev.revision);
       let ok = borders !== null, changed = 0;
       // Boxes as x0, y0, x1, y1; joined while joining wastes little, a handful at most.
       const boxes: number[][] = [];
-      const area = (q: number[]) => (q[2] - q[0]) * (q[3] - q[1]);
-      const add = (sb: Box2) => {
-        const d = this.deviceBox(sb, m, pad, width, height);
-        if (d[2] <= 0 || d[3] <= 0) return;
-        let box = [d[0], d[1], d[0] + d[2], d[1] + d[3]];
-        for (let again = true; again;) {
-          again = false;
-          for (let j = 0; j < boxes.length; j++) {
-            const o = boxes[j];
-            const u = [Math.min(o[0], box[0]), Math.min(o[1], box[1]), Math.max(o[2], box[2]), Math.max(o[3], box[3])];
-            if (area(u) <= 1.3 * (area(o) + area(box)) + 4096 || boxes.length >= 6) { boxes.splice(j, 1); box = u; again = true; break; }
-          }
-        }
-        boxes.push(box);
-      };
-      if (ok && borders) {
-        const acc: Box2 = [Infinity, Infinity, -Infinity, -Infinity];
-        this.boxOnScreen(view, borders, acc);
-        if (acc[2] > acc[0] && acc[3] > acc[1]) add([acc[0], acc[1], acc[2] - acc[0], acc[3] - acc[1]]);
-      }
-      const geom = parcelGeometry(arr);
+      if (ok && borders) this.joinBox(boxes, view, borders, m, pad, width, height);
       if (ok) outer: for (let i = 0; i < layers.length; i++) {
         const was = prev.layers[i], now = layers[i];
         // Where the states were worked out from those of before, only the parcels worked out again can differ.
@@ -823,16 +805,12 @@ export class MapRenderer {
             }
             if (piece) continue;
           }
-          if (++changed > 600) { ok = false; break outer; }
-          if (geom.needsOutline(face)) { ok = false; break outer; }
-          const sb = this.screenBox(view, arr, [face]);
-          if (sb[0] === 0 && sb[1] === 0 && sb[2] === view.width && sb[3] === view.height) { ok = false; break outer; }
-          add(sb);
+          if (++changed > 600 || !this.joinFace(boxes, view, arr, face, m, pad, width, height)) { ok = false; break outer; }
         }
       }
       if (ok) {
         let total = 0;
-        for (const q of boxes) total += area(q);
+        for (const q of boxes) total += (q[2] - q[0]) * (q[3] - q[1]);
         if (total <= 0.5 * width * height) out = { from: prev.strict, rects: boxes.map((q) => [q[0], q[1], q[2] - q[0], q[3] - q[1]] as DeviceRect) };
       }
     }
@@ -854,12 +832,12 @@ export class MapRenderer {
    * Draw a part of the picture, through its kept picture when it may be kept (`key` says what it
    * shows; null: never kept; `at`: where the map lies on the canvas in this frame).
    */
-  private layered(name: string, ctx: CanvasRenderingContext2D, key: PartKey | null, at: Placing, draw: (c: CanvasRenderingContext2D) => void, patch: { from: string; rects: DeviceRect[] } | null = null): void {
+  private layered(name: string, ctx: CanvasRenderingContext2D, key: PartKey | null, at: Placing, draw: (c: CanvasRenderingContext2D) => void, patch: { from: string; rects: DeviceRect[] } | null = null, renew: Renew | null = null): void {
     const mode = this.caching;
     const w = ctx.canvas.width, h = ctx.canvas.height;
     const usable = key !== null && mode !== 'off' && w * h <= MapRenderer.KEEP_LIMIT;
     let rec = this.kept.get(name);
-    if (!rec) this.kept.set(name, (rec = { canvas: null, ctx: null, key: '', seen: '', strict: '', loose: '', at: null }));
+    if (!rec) this.kept.set(name, (rec = { canvas: null, ctx: null, key: '', seen: '', strict: '', loose: '', at: null, moment: '' }));
     const exactOf = (strict: string) => `${strict}|${w}x${h}|${at.a},${at.b},${at.c},${at.d},${at.x},${at.y},${at.s}`;
     const exact = key ? exactOf(key.strict) : '';
     if (!usable || (mode === 'lazy' && !this.carry && rec.seen !== exact)) {
@@ -875,8 +853,27 @@ export class MapRenderer {
       ctx.drawImage(b.canvas as CanvasImageSource, 0, 0);
       ctx.restore();
     };
-    if (b.key === exact) { this.lastParts[name] = 'kept'; blit(); return; }
     const t = ctx.getTransform();
+    // Where a change is animating, the kept picture is right everywhere else: only that is drawn again for a new moment.
+    const again = (dx: number, dy: number): boolean => {
+      if (!renew || b.moment === renew.moment) return false;
+      const bc = b.ctx;
+      bc.save();
+      bc.setTransform(1, 0, 0, 1, 0, 0);
+      bc.globalAlpha = 1;
+      bc.globalCompositeOperation = 'source-over';
+      for (const [x, y, rw, rh] of renew.rects) bc.clearRect(x, y, rw, rh);
+      if (renew.rects.length) {
+        this.clipTo(bc, renew.rects);
+        bc.setTransform(t.a, t.b, t.c, t.d, t.e - dx, t.f - dy);
+        this.region = renew.rects; setPaintRegion(renew.rects);
+        try { draw(bc); } finally { this.region = null; setPaintRegion(null); }
+      }
+      bc.restore();
+      b.moment = renew.moment;
+      return true;
+    };
+    if (b.key === exact) { this.lastParts[name] = again(0, 0) ? 'renewed' : 'kept'; blit(); return; }
     if (patch && this.carry && b.key === exactOf(patch.from)) {
       // Patched: the kept picture shows the state before a change that touched only these rectangles; they alone are drawn again.
       const bc = b.ctx;
@@ -891,6 +888,7 @@ export class MapRenderer {
       try { draw(bc); } finally { this.region = null; setPaintRegion(null); }
       bc.restore();
       b.key = exact; b.strict = key!.strict; b.loose = key!.loose;
+      b.moment = renew ? renew.moment : '';
       this.lastParts[name] = 'patched';
       blit();
       return;
@@ -925,11 +923,12 @@ export class MapRenderer {
           b.at = { ...at, x: at.x - rx, y: at.y - ry };
           b.key = whole ? exact : 'moved';
           if (!whole) this.lastApproximate = true;
+          again(rx, ry);
           this.lastParts[name] = 'moved';
           blit();
           return;
         }
-      } else if (this.moving && Math.abs(r - 1) >= 1e-9 && r >= 0.75 && r <= 1.7) {
+      } else if (this.moving && Math.abs(r - 1) >= 1e-9 && r >= 0.75 && r <= 1.7 && !(renew && b.moment !== renew.moment)) {
         // Scaled (a zoom under way): the kept picture is shown at the new size, and what lies around it is drawn.
         const x0 = Math.max(0, Math.ceil(tx)), y0 = Math.max(0, Math.ceil(ty)), x1 = Math.min(w, Math.floor(tx + r * w)), y1 = Math.min(h, Math.floor(ty + r * h));
         if (x1 > x0 && y1 > y0) {
@@ -966,6 +965,7 @@ export class MapRenderer {
     b.ctx.restore();
     b.key = exact;
     b.strict = key!.strict; b.loose = key!.loose; b.at = at;
+    b.moment = renew ? renew.moment : '';
     this.lastParts[name] = 'drawn';
     blit();
   }
@@ -975,11 +975,13 @@ export class MapRenderer {
    * into a mask that every layer's fills and borders then use, instead of each tracing the coast.
    */
   private maskLand(lc: CanvasRenderingContext2D, view: View, sheet: Sheet, basemap: Basemap, frameKey: string, lakes: boolean): void {
-    // (Only part of the frame is being drawn: the buffer is limited to that part, and so is the trimming.)
-    if (this.region || this.caching === 'off' || lc.canvas.width * lc.canvas.height > MapRenderer.MASK_LIMIT) { this.basemapPainter.maskToLand(lc, view, sheet, basemap, lakes); return; }
+    const direct = () => this.basemapPainter.maskToLand(lc, view, sheet, basemap, lakes);
+    if (this.caching === 'off' || lc.canvas.width * lc.canvas.height > MapRenderer.MASK_LIMIT) { direct(); return; }
     const b = this.keptBuffer('mask', lc);
     const key = `${frameKey}|${sheet.id}|${basemap.scales.length}`;
     if (b.key !== key) {
+      // Only part of the frame is being drawn and there is no mask of this view yet: trimmed there directly.
+      if (this.region) { direct(); return; }
       b.ctx.setTransform(1, 0, 0, 1, 0, 0);
       b.ctx.clearRect(0, 0, b.canvas.width, b.canvas.height);
       b.ctx.setTransform(lc.getTransform());
@@ -1143,7 +1145,22 @@ export class MapRenderer {
       const front = opts.transitions?.front ?? { show: true, color: style.frontGlow, width: 2.2, glow: 10 };
       // A change under way looks different at every instant (and in a shot, at every frame, which is
       // drawn afresh); so do videos. Pictures are kept until one loads.
-      const key = animated && opts.transitions ? null : partKey(`${animated ? `${t.day}:${t.ms}|` : ''}${wantsFills ? 'f' : ''}${wantsBorders ? 'b' : ''}|${world.revision}|${style.border}|${style.borderWidth}|${opts.basemap ? opts.basemap.scales.length : ''}${landKey}${anyMedia ? `|${assetEpoch()}|${this.mediaSeconds}|${this.mediaChannel}` : ''}`);
+      // While a change animates, everything outside its area stays as it is throughout the stretch of
+      // time: the picture is kept, and only the rectangles around the animated changes are drawn again
+      // for each moment (unless they take up most of the frame, or the view is turned).
+      const widestLine = Math.max(...prepared.map((p) => p.ls.borderWidth ?? style.borderWidth));
+      let renew: Renew | null = null;
+      if (animated && !anyMedia && m.b === 0 && m.c === 0) {
+        const boxes: number[][] = [];
+        const pad = 3 * front.glow * u + (front.width + widestLine) * u + 6;
+        let ok = true, total = 0;
+        outer: for (const p of prepared) for (const g of p.tg.groups.values()) for (const f of g.faces) {
+          if (!this.joinFace(boxes, view, arr, f, m, pad, ctx.canvas.width, ctx.canvas.height)) { ok = false; break outer; }
+        }
+        for (const q of boxes) total += (q[2] - q[0]) * (q[3] - q[1]);
+        if (ok && total <= 0.6 * ctx.canvas.width * ctx.canvas.height) renew = { rects: boxes.map((q) => [q[0], q[1], q[2] - q[0], q[3] - q[1]] as DeviceRect), moment: `${t.day}:${t.ms}|${opts.mediaSeconds ?? 0}` };
+      }
+      const key = animated && !renew && opts.transitions ? null : partKey(`${animated && !renew ? `${t.day}:${t.ms}|` : ''}${renew ? 'animated|' : ''}${wantsFills ? 'f' : ''}${wantsBorders ? 'b' : ''}|${world.revision}|${style.border}|${style.borderWidth}|${opts.basemap ? opts.basemap.scales.length : ''}${landKey}${anyMedia ? `|${assetEpoch()}|${this.mediaSeconds}|${this.mediaChannel}` : ''}`);
       // The working view, after an edit or a step in time that changed few parcels: only where they lie is drawn again.
       let patch: { from: string; rects: DeviceRect[] } | null = null;
       if (key && this.carry && !animated && !anyMedia) {
@@ -1156,8 +1173,7 @@ export class MapRenderer {
           colours = (colours + (hsh >>> 0)) % 4294967291;
         }
         const stable = `${key.loose.slice(0, looseBase.length)}|${detail}|${wantsFills ? 'f' : ''}${wantsBorders ? 'b' : ''}|${style.border}|${style.borderWidth}|${opts.basemap ? opts.basemap.scales.length : ''}${layerSig}|${colours}`;
-        const widest = Math.max(...prepared.map((p) => p.ls.borderWidth ?? style.borderWidth));
-        patch = this.changesSince(view, arr, engine, prepared.map((p) => p.states), key.strict, stable, m, ctx.canvas.width, ctx.canvas.height, widest * u + 3);
+        patch = this.changesSince(view, arr, engine, prepared.map((p) => p.states), key.strict, stable, m, ctx.canvas.width, ctx.canvas.height, widestLine * u + 3);
       } else this.patchPrev = null;
       this.layered(`territory:${wantsFills ? 'f' : ''}${wantsBorders ? 'b' : ''}`, ctx, key, at, (c) => {
         c.save();
@@ -1240,7 +1256,7 @@ export class MapRenderer {
           c.restore();
         }
         c.restore();
-      }, patch);
+      }, patch, renew);
     }
 
     // One label per country: a country on several layers (its land, and its military control, say) is
@@ -1601,6 +1617,71 @@ export class MapRenderer {
     }
     const [x0, y0, x1, y1] = acc;
     return Number.isFinite(x0) && x1 > x0 && y1 > y0 ? [x0, y0, x1 - x0, y1 - y0] : whole;
+  }
+
+  /**
+   * The boxes on screen (x0, y0, x1, y1) of a box given in degrees (west, south, east, north;
+   * longitudes may be unwrapped): one for each copy of the world it shows in. On a map that repeats
+   * east and west, the copies a turn either way; on one drawn inside the planet's outline, the parts
+   * either side of the outline's edge.
+   */
+  private boxesOnScreen(view: View, box: readonly [number, number, number, number]): Box2[] {
+    const kind = view.camera.projection, flat = kind === 'flat', ref = flat ? 0 : view.camera.lon;
+    const s = view.projection.scale(), [tx, ty] = view.projection.translate();
+    const [w, so, e, n] = box;
+    const turn = flat ? 0 : 360 * Math.round((ref - (w + e) / 2) / 360);
+    const a = w + turn - ref, b = e + turn - ref;
+    // The corners, and the latitude nearest the equator (where the map is widest).
+    const mid = so > 0 ? so : n < 0 ? n : 0;
+    const out: Box2[] = [];
+    const one = (lo: number, hi: number) => {
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const lat of [so, n, mid]) for (const lon of [lo, hi]) {
+        const [px, py] = projectPoint(kind, lon, lat);
+        const x = tx + s * px, y = ty + s * py;
+        if (x < x0) x0 = x; if (y < y0) y0 = y; if (x > x1) x1 = x; if (y > y1) y1 = y;
+      }
+      if (x1 >= 0 && y1 >= 0 && x0 <= view.width && y0 <= view.height) out.push([x0, y0, x1, y1]);
+    };
+    if (flat) one(a, b);
+    else if (isCylindrical(kind)) for (const k of [-1, 0, 1]) one(a + 360 * k, b + 360 * k);
+    else for (const k of [-1, 0, 1]) { const lo = Math.max(-180, a + 360 * k), hi = Math.min(180, b + 360 * k); if (hi > lo) one(lo, hi); }
+    return out;
+  }
+
+  /** Join a rectangle of canvas pixels (x0, y0, x1, y1) to a short list of them: with one it nearly fills together with, or (beyond six) with any. */
+  private joinRect(list: number[][], add: number[]): void {
+    const area = (q: number[]) => (q[2] - q[0]) * (q[3] - q[1]);
+    let box = add;
+    for (let again = true; again;) {
+      again = false;
+      for (let j = 0; j < list.length; j++) {
+        const o = list[j];
+        const u = [Math.min(o[0], box[0]), Math.min(o[1], box[1]), Math.max(o[2], box[2]), Math.max(o[3], box[3])];
+        if (area(u) <= 1.3 * (area(o) + area(box)) + 4096 || list.length >= 6) { list.splice(j, 1); box = u; again = true; break; }
+      }
+    }
+    list.push(box);
+  }
+
+  /** Join to `list` the rectangles of the canvas that a box in degrees shows in, grown by `pad` view pixels. */
+  private joinBox(list: number[][], view: View, box: readonly [number, number, number, number], m: DOMMatrix, pad: number, width: number, height: number): void {
+    for (const sb of this.boxesOnScreen(view, box)) {
+      const d = this.deviceBox([sb[0], sb[1], sb[2] - sb[0], sb[3] - sb[1]], m, pad, width, height);
+      if (d[2] > 0 && d[3] > 0) this.joinRect(list, [d[0], d[1], d[0] + d[2], d[1] + d[3]]);
+    }
+  }
+
+  /** Join to `list` the rectangles of the canvas a parcel shows in; false when it has none to give (it takes in the rest of the planet). */
+  private joinFace(list: number[][], view: View, arr: Arrangement, face: number, m: DOMMatrix, pad: number, width: number, height: number): boolean {
+    const geom = parcelGeometry(arr), t = arr.topology();
+    if (geom.needsOutline(face)) return false;
+    for (const c of t.facesCycles.get(face) ?? []) {
+      const g = geom.cycle(c, t);
+      if (g.wind !== 0) return false;
+      this.joinBox(list, view, g.box, m, pad, width, height);
+    }
+    return true;
   }
 
   /** Grow `acc` (x0, y0, x1, y1 on screen) to hold a box given in degrees (west, south, east, north; longitudes may be unwrapped). */

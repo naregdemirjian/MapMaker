@@ -16,6 +16,8 @@ export function newId(prefix: string): string {
   return `${prefix}_${s.slice(0, 12)}`;
 }
 
+let worldSerial = 0;
+
 /** One change that can alter history as the temporal engine compiles it (see World.historySince). */
 export interface HistoryStep { rev: number; table: TableName; before: AnyRow | null; after: AnyRow | null }
 
@@ -84,6 +86,28 @@ export class World {
     return [...(this.tables.get(table)?.values() ?? [])] as Rows[K][];
   }
 
+  /** A number that changes whenever a row of the table is added, changed or deleted (not for the parcel maps' tables). */
+  tableRevision(table: TableName): number {
+    return this.tableRevisions.get(table) ?? 0;
+  }
+  private readonly tableRevisions = new Map<TableName, number>();
+  private readonly rowLists = new Map<TableName, { revision: number; rows: readonly AnyRow[] }>();
+
+  /**
+   * The rows of a table as a list that must not be changed (not sorted in place either): the same
+   * list is given until the table changes. For what is asked again and again (drawing, long lists);
+   * `all` gives a list of one's own.
+   */
+  rows<K extends TableName>(table: K): readonly Rows[K][] {
+    const revision = this.tableRevision(table);
+    let kept = this.rowLists.get(table);
+    if (!kept || kept.revision !== revision) this.rowLists.set(table, (kept = { revision, rows: Object.freeze(this.all(table)) as readonly AnyRow[] }));
+    return kept.rows as readonly Rows[K][];
+  }
+
+  /** Tells one loaded project from another (for what is kept per project). */
+  readonly serial = ++worldSerial;
+
   arrangement(spaceId: string): Arrangement {
     const a = this.arrangements.get(spaceId);
     if (!a) throw new Error(`No parcel map for map space ${spaceId}`);
@@ -114,6 +138,7 @@ export class World {
     const map = this.tables.get(d.table)!;
     if (d.before) map.delete(rowKey(d.table, d.before));
     if (d.after) map.set(rowKey(d.table, d.after), { ...withDefaults(d.table, d.after) });
+    this.tableRevisions.set(d.table, (this.tableRevisions.get(d.table) ?? 0) + 1);
     if (d.table === 'event' || d.table === 'effect' || ((d.table === 'layer' || d.table === 'map_space' || d.table === 'entity') && (!d.before || !d.after))) this.noteHistory(d.table, d.before, d.after);
     if (d.table === 'map_space') {
       const sp = (d.after ?? d.before) as MapSpaceRow;

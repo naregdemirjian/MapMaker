@@ -330,6 +330,55 @@ try {
     assert.equal(failed, 0, `${failed} of ${results.length} patched pictures differ from fresh ones`);
   });
 
+  await h.step('While a change animates only its area is drawn again, and every frame is the picture drawn afresh', async () => {
+    const W = 1100, H = 640;
+    const animatedScenes = scenes.filter((sc) => /under way|front with coasts/.test(sc.name));
+    assert.ok(animatedScenes.length >= 3, 'scenes with a change under way');
+    const results = await page.evaluate(async ({ scenes, W, H }) => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const layers = s.world.all('layer').filter((l: any) => l.space_id === s.spaceId && l.kind === 'partition').map((l: any) => l.id);
+      const canvas = () => { const c = new OffscreenCanvas(W, H); return c.getContext('2d', { willReadFrequently: true }) as OffscreenCanvasRenderingContext2D; };
+      const a = canvas(), b = canvas();
+      const out: Array<{ name: string; part: string; animating: number; differing: number; worst: number }> = [];
+      const compare = () => {
+        const da = a.getImageData(0, 0, W, H).data, db = b.getImageData(0, 0, W, H).data;
+        let differing = 0, worst = 0;
+        for (let i = 0; i < da.length; i += 4) {
+          const d = Math.max(Math.abs(da[i] - db[i]), Math.abs(da[i + 1] - db[i + 1]), Math.abs(da[i + 2] - db[i + 2]), Math.abs(da[i + 3] - db[i + 3]));
+          if (d > 6) differing++;
+          if (d > worst) worst = d;
+        }
+        return { differing: differing / (W * H), worst };
+      };
+      for (const sc of scenes) for (const way of ['as exports are drawn', 'as the working view is drawn']) {
+        const kept = new B.MapRenderer(), fresh = new B.MapRenderer();
+        if (way === 'as exports are drawn') kept.caching = 'always'; else kept.carry = true;
+        kept.verify = true;
+        fresh.caching = 'off';
+        const view = B.makeView(sc.camera, W, H);
+        const opts = { passes: new Set(['background', 'graticule', 'land', 'fills', 'borders']), transparent: false, layerIds: layers, basemap: sc.basemap ? s.basemap : null };
+        const t0 = B.gregorian.fromCivil({ year: sc.year, month: sc.month ?? 1, day: 1 });
+        // Moments a few days apart, forwards and back (as playing and scrubbing do).
+        for (const days of [0, 3, 6, 9, 4, 12, 15]) {
+          const t = { day: t0.day + days, ms: t0.ms };
+          kept.render(a, view, s.world, s.engine, s.spaceId, t, opts);
+          fresh.render(b, view, s.world, s.engine, s.spaceId, t, opts);
+          out.push({ name: `${sc.name}, ${way}, day ${days}`, part: kept.lastParts['territory:fb'], animating: kept.lastTransitions.length, ...compare() });
+        }
+      }
+      return out;
+    }, { scenes: animatedScenes, W, H });
+    let failed = 0, renewed = 0;
+    for (const r of results) {
+      if (r.part === 'renewed') renewed++;
+      const ok = r.differing <= 0.0002;
+      if (!ok) failed++;
+      if (!ok || process.env.VERBOSE) console.log(`    ${ok ? 'same' : 'DIFFERENT'}  ${r.name}: territory ${r.part}, ${r.animating} animating; ${(r.differing * 100).toFixed(4)}% of pixels differ (largest difference ${r.worst})`);
+    }
+    assert.equal(failed, 0, `${failed} of ${results.length} frames of animated changes differ from frames drawn afresh`);
+    assert.ok(renewed >= results.length / 3, `the animated area alone was drawn again in ${renewed} of ${results.length} frames`);
+  });
+
   await h.finish();
 } catch (e) {
   await h.finish(e);

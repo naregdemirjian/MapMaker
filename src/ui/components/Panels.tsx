@@ -1,10 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, memo } from 'react';
 import { useStore, useLive, store, type Tool } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
 import { type Instant, gregorian, fromStore, formatYear, compare, NEG_INF } from '../../core-time/index.ts';
 import { BASE_EVENT_ID, type EffectRow } from '../../world-model/schema.ts';
 import { basemapSourceOf, worldSettings } from '../../world-model/world-settings.ts';
-import { parseJSON, leafDescendants, isUntracked, type Resolution, type TransitionSpec } from '../../temporal-engine/engine.ts';
+import { parseJSON, leafDescendants, isUntracked, resolutionOf, type Resolution, type TransitionSpec } from '../../temporal-engine/engine.ts';
 import type { World } from '../../world-model/world.ts';
 import { lonLatToVec } from '../../geo-kernel/vec.ts';
 import { stepChange } from './Timeline.tsx';
@@ -138,7 +138,7 @@ function PenControls() {
 export function ToolBar() {
   const s = useStore();
   const w = s.world!;
-  const owners = w.all('entity').filter((e) => e.type_id === 'polity' || e.type_id === 'faction').sort((a, b) => a.name.localeCompare(b.name));
+  const owners = outlinerLists(s).political;
   const rec = s.recordEventId ? w.get('event', s.recordEventId) : null;
   return (
     <>
@@ -209,19 +209,154 @@ function Section({ title, onAdd, addLabel, children }: { title: string; onAdd?: 
 
 /** Which country each city stands in at the date viewed: worked out once per state of the project and date. */
 let cityMemo: { key: string; map: Map<string, string> } | null = null;
+const cityFaces = new Map<string, { arr: unknown; lon: number; lat: number; face: number; stamp: number }>();
 function citiesInCountries(s: ReturnType<typeof useStore>): Map<string, string> {
   const w = s.world!;
   const key = `${w.revision}|${s.spaceId}|${s.layerId}|${s.time.day}:${s.time.ms}`;
   if (cityMemo?.key === key) return cityMemo.map;
   const map = new Map<string, string>();
-  if (s.layerId) for (const c of s.engine!.charactersAt(s.spaceId, s.time)) {
-    if (w.get('entity', c.entity)?.type_id !== 'settlement') continue;
-    const owner = s.engine!.valueAtPoint(s.spaceId, s.layerId, lonLatToVec(c.lon, c.lat), s.time);
-    if (owner) map.set(c.entity, owner);
+  if (s.layerId) {
+    const arr = w.arrangement(s.spaceId);
+    for (const c of s.engine!.charactersAt(s.spaceId, s.time)) {
+      if (w.get('entity', c.entity)?.type_id !== 'settlement') continue;
+      // The parcel a city stands in is looked up once, and again only when that parcel's outline has
+      // changed (finding it is the slow part, and most edits are nowhere near most cities).
+      let at = cityFaces.get(c.entity);
+      if (!at || at.arr !== arr || at.lon !== c.lon || at.lat !== c.lat || !arr.faces.get(at.face)?.is_leaf || arr.faceStamp(at.face) !== at.stamp) {
+        const face = arr.locate(lonLatToVec(c.lon, c.lat));
+        cityFaces.set(c.entity, (at = { arr, lon: c.lon, lat: c.lat, face, stamp: arr.faceStamp(face) }));
+      }
+      const owner = s.engine!.valueAtPoint(s.spaceId, s.layerId, lonLatToVec(c.lon, c.lat), s.time, at.face);
+      if (owner) map.set(c.entity, owner);
+    }
   }
   cityMemo = { key, map };
   return map;
 }
+
+type Ent = ReturnType<World['all']>[number] & { id: string; name: string; type_id: string; group_id?: string | null; color: string; style?: string };
+type EntGroup = { id: string; name: string; color: string; sort_order: number; created_seq: number };
+type OutlinerItem = { kind: 'group'; g: EntGroup; members: string[] } | { kind: 'entity'; e: Ent; depth: number; cities: number };
+
+/** Events in order of their dates, kept until an event changes. */
+const eventLists = new WeakMap<World, { revision: number; list: ReturnType<World['all']> }>();
+function sortedEvents(w: World) {
+  let kept = eventLists.get(w);
+  const revision = w.tableRevision('event');
+  if (!kept || kept.revision !== revision) eventLists.set(w, (kept = { revision, list: w.all('event').filter((e) => e.id !== BASE_EVENT_ID).sort((a, b) => a.start_day - b.start_day || a.start_ms - b.start_ms) }));
+  return kept.list as ReturnType<typeof w.all<'event'>>;
+}
+
+/**
+ * What the lists of countries, characters and cities show, worked out once for each state of it:
+ * the things themselves in order of their names, the groups (folders) of the user's own, and each
+ * country's cities (at the date viewed). `sig` changes whenever any of it does.
+ */
+let outlinerMemo: { key: string; value: ReturnType<typeof buildOutlinerLists> } | null = null;
+function outlinerLists(s: ReturnType<typeof useStore>) {
+  const w = s.world!;
+  const cityIn = citiesInCountries(s); // city -> the country holding the place it stands on
+  let where = '';
+  for (const [city, country] of cityIn) where += `${city}>${country},`;
+  const key = `${w.serial}|${w.tableRevision('entity')}|${w.tableRevision('entity_group')}|${s.collapsed.join(',')}|${where}`;
+  if (!outlinerMemo || outlinerMemo.key !== key) outlinerMemo = { key, value: buildOutlinerLists(w, cityIn, s.collapsed, key) };
+  return outlinerMemo.value;
+}
+
+function buildOutlinerLists(w: World, cityIn: Map<string, string>, collapsed: string[], sig: string) {
+  const all = w.all('entity') as Ent[];
+  const byName = (a: Ent, b: Ent) => a.name.localeCompare(b.name);
+  const political = all.filter((e) => e.type_id === 'polity' || e.type_id === 'faction').sort(byName);
+  const characters = all.filter((e) => e.type_id === 'character').sort(byName);
+  const others = all.filter((e) => e.type_id !== 'polity' && e.type_id !== 'faction' && e.type_id !== 'body' && e.type_id !== 'character').sort((a, b) => (a.type_id === 'settlement' ? 0 : 1) - (b.type_id === 'settlement' ? 0 : 1) || byName(a, b));
+  const groups = w.all('entity_group').sort((a, b) => a.sort_order - b.sort_order || a.created_seq - b.created_seq) as EntGroup[];
+  const groupMembers = new Map<string, string[]>();
+  for (const e of all) if (e.group_id) { const l = groupMembers.get(e.group_id); if (l) l.push(e.id); else groupMembers.set(e.group_id, [e.id]); }
+  const citiesOf = new Map<string, Ent[]>();
+  for (const e of all) {
+    const owner = e.type_id === 'settlement' ? cityIn.get(e.id) : undefined;
+    if (owner && w.get('entity', owner)) { const l = citiesOf.get(owner) ?? []; l.push(e); citiesOf.set(owner, l); }
+  }
+  for (const l of citiesOf.values()) l.sort(byName);
+  const looseOthers = others.filter((e) => !(e.type_id === 'settlement' && cityIn.has(e.id) && w.get('entity', cityIn.get(e.id)!)));
+  /** Rows for a section: its groups (with their members), then what is in no group. */
+  const itemsFor = (members: Ent[], showEmptyGroups: boolean): OutlinerItem[] => {
+    const out: OutlinerItem[] = [];
+    const add = (e: Ent, depth: number) => {
+      const kids = citiesOf.get(e.id) ?? [];
+      out.push({ kind: 'entity', e, depth, cities: kids.length });
+      if (kids.length && collapsed.includes(`open:${e.id}`)) for (const c of kids) out.push({ kind: 'entity', e: c, depth: depth + 1, cities: 0 });
+    };
+    const inGroup = new Map<string, Ent[]>();
+    for (const e of members) if (e.group_id) { const l = inGroup.get(e.group_id); if (l) l.push(e); else inGroup.set(e.group_id, [e]); }
+    for (const g of groups) {
+      const inside = inGroup.get(g.id) ?? [];
+      if (!inside.length && !showEmptyGroups) continue;
+      out.push({ kind: 'group', g, members: groupMembers.get(g.id) ?? [] });
+      if (!collapsed.includes(`grp:${g.id}`)) for (const e of inside) add(e, 1);
+    }
+    for (const e of members) if (!e.group_id || !w.get('entity_group', e.group_id)) add(e, 0);
+    return out;
+  };
+  return { sig, political, characters, others, looseOthers, items: { countries: itemsFor(political, true), characters: itemsFor(characters, false), cities: itemsFor(looseOthers, false) } };
+}
+
+/**
+ * The rows of one of the lists of countries, characters or cities. Drawn again only when `sig`
+ * changes (what the lists show, and what is chosen in them): not for every stroke on the map.
+ */
+const EntityRows = memo(function EntityRows({ section }: { sig: string; section: 'countries' | 'characters' | 'cities' }) {
+  const s = store, w = s.world!;
+  const items = outlinerLists(s).items[section];
+  const order = items.filter((it): it is Extract<OutlinerItem, { kind: 'entity' }> => it.kind === 'entity').map((it) => it.e.id);
+  const chosen = new Set(s.chosen('entity'));
+  return <>{items.map((it) => {
+    if (it.kind === 'group') {
+      const folded = s.collapsed.includes(`grp:${it.g.id}`);
+      return (
+        <div key={`g-${it.g.id}`} className="row group-head" onClick={() => s.toggleCollapsed(`grp:${it.g.id}`)} data-testid={`entity-group-${it.g.name}`}
+          onContextMenu={(ev) => openMenu(ev, groupMenu(w, it.g.id, it.members), it.g.name)}>
+          <span className="twisty">{folded ? '▸' : '▾'}</span><span className="swatch" style={{ background: it.g.color }} /><b>{it.g.name}</b><span className="muted"> · {it.members.length}</span>
+        </div>
+      );
+    }
+    const e = it.e;
+    const open = s.collapsed.includes(`open:${e.id}`);
+    return (
+      <div key={e.id} className={`row ${chosen.has(e.id) ? 'sel' : ''}`} style={{ paddingLeft: 8 + it.depth * 14 }} data-testid={`entity-row-${e.name}`}
+        onClick={(ev) => s.pick('entity', e.id, ev, order)}
+        onContextMenu={(ev) => {
+          const cur = s.chosen('entity');
+          const ids = cur.includes(e.id) ? cur : [e.id];
+          if (!cur.includes(e.id)) s.pick('entity', e.id, {}, order);
+          openMenu(ev, entityMenu(s.world!, ids), ids.length === 1 ? e.name : `${ids.length} chosen`);
+        }}>
+        {it.cities > 0 && <span className="twisty" title={open ? 'Hide its cities' : 'Show its cities'} onClick={(ev) => { ev.stopPropagation(); s.toggleCollapsed(`open:${e.id}`); }} data-testid={`cities-of-${e.name}`}>{open ? '▾' : '▸'}</span>}
+        <FillSwatch entity={e} />{e.name}{it.cities > 0 && <span className="muted"> · {it.cities} {it.cities === 1 ? 'city' : 'cities'}</span>}
+      </div>
+    );
+  })}</>;
+});
+
+/** The rows of the list of events (those the group filter shows). Drawn again only when `sig` changes. */
+const EventRows = memo(function EventRows(_: { sig: string }) {
+  const s = store, w = s.world!;
+  const shown = sortedEvents(w).filter((e) => eventVisible(w, e.id));
+  const order = shown.map((e) => e.id);
+  const chosenEv = new Set(s.chosen('event'));
+  return <>{shown.map((e) => (
+    <div key={e.id} className={`row ${chosenEv.has(e.id) ? 'sel' : ''} ${e.variant_group && !e.variant_active ? 'dim' : ''}`} data-testid={`event-row-${e.name}`}
+      onClick={(ev) => { s.pick('event', e.id, ev, order); if (!ev.ctrlKey && !ev.metaKey && !ev.shiftKey) s.setTime(fromStore(e.start_day, e.start_ms)); }}
+      onContextMenu={(ev) => {
+        const cur = s.chosen('event');
+        const ids = cur.includes(e.id) ? cur : [e.id];
+        if (!cur.includes(e.id)) s.pick('event', e.id, {}, order);
+        openMenu(ev, eventMenu(s.world!, ids), ids.length === 1 ? e.name : `${ids.length} events`);
+      }}>
+      <span className="date">{fmt(fromStore(e.start_day, e.start_ms), e.precision === 'year' ? 'year' : 'day')}</span> {e.name}
+    </div>
+  ))}</>;
+});
 
 export function Outliner() {
   const s = useStore();
@@ -230,10 +365,13 @@ export function Outliner() {
   const layers = w.all('layer').filter((l) => l.space_id === s.spaceId).sort((a, b) => a.sort_order - b.sort_order);
   const types = w.all('entity_type');
   const currentSpace = w.get('map_space', s.spaceId);
-  const political = w.all('entity').filter((e) => e.type_id === 'polity' || e.type_id === 'faction').sort((a, b) => a.name.localeCompare(b.name));
-  const characters = w.all('entity').filter((e) => e.type_id === 'character').sort((a, b) => a.name.localeCompare(b.name));
-  const others = w.all('entity').filter((e) => e.type_id !== 'polity' && e.type_id !== 'faction' && e.type_id !== 'body' && e.type_id !== 'character').sort((a, b) => (a.type_id === 'settlement' ? 0 : 1) - (b.type_id === 'settlement' ? 0 : 1) || a.name.localeCompare(b.name));
-  const events = w.all('event').filter((e) => e.id !== BASE_EVENT_ID).sort((a, b) => a.start_day - b.start_day || a.start_ms - b.start_ms);
+  const lists = outlinerLists(s);
+  const { political, characters, others, looseOthers } = lists;
+  // Long lists are drawn again only when what they show changes (see EntityRows and EventRows).
+  const entitySig = `${lists.sig}|${s.chosen('entity').join(',')}`;
+  const eventSig = [w.serial, w.tableRevision('event'), w.tableRevision('event_group'), w.tableRevision('event_group_member'), (s.eventFilter ?? ['*']).join(','), s.chosen('event').join(',')].join('|');
+  const events = sortedEvents(w);
+  const hiddenEvents = s.eventFilter ? events.reduce((n, e) => n + (eventVisible(w, e.id) ? 0 : 1), 0) : 0;
   const createEntity = () => {
     if (!newEntity || !newEntity.name.trim()) return;
     const id = s.execute((wd) => cmd.createEntity(wd, { type_id: newEntity.type, name: newEntity.name }));
@@ -255,66 +393,6 @@ export function Outliner() {
       <button onClick={() => setNewEntity(null)}>Cancel</button>
     </div>
   );
-  // The lists: groups (folders) of the user's own, each country with the cities in it (at the date
-  // viewed), Ctrl/Shift + click to choose several, right-click for quick actions.
-  type Ent = (typeof political)[number];
-  const groups = w.all('entity_group').sort((a, b) => a.sort_order - b.sort_order || a.created_seq - b.created_seq);
-  const cityIn = citiesInCountries(s); // city -> the country holding the place it stands on
-  const citiesOf = new Map<string, Ent[]>();
-  for (const e of w.all('entity')) {
-    const owner = e.type_id === 'settlement' ? cityIn.get(e.id) : undefined;
-    if (owner && w.get('entity', owner)) { const l = citiesOf.get(owner) ?? []; l.push(e); citiesOf.set(owner, l); }
-  }
-  for (const l of citiesOf.values()) l.sort((a, b) => a.name.localeCompare(b.name));
-  type Item = { kind: 'group'; g: (typeof groups)[number]; members: string[] } | { kind: 'entity'; e: Ent; depth: number; cities: number };
-  /** Rows for a section: its groups (with their members), then what is in no group. */
-  const itemsFor = (members: Ent[], showEmptyGroups: boolean): Item[] => {
-    const out: Item[] = [];
-    const add = (e: Ent, depth: number) => {
-      const kids = citiesOf.get(e.id) ?? [];
-      out.push({ kind: 'entity', e, depth, cities: kids.length });
-      if (kids.length && s.collapsed.includes(`open:${e.id}`)) for (const c of kids) out.push({ kind: 'entity', e: c, depth: depth + 1, cities: 0 });
-    };
-    for (const g of groups) {
-      const inside = members.filter((e) => e.group_id === g.id);
-      if (!inside.length && !showEmptyGroups) continue;
-      out.push({ kind: 'group', g, members: w.all('entity').filter((e) => e.group_id === g.id).map((e) => e.id) });
-      if (!s.collapsed.includes(`grp:${g.id}`)) for (const e of inside) add(e, 1);
-    }
-    for (const e of members) if (!e.group_id || !w.get('entity_group', e.group_id)) add(e, 0);
-    return out;
-  };
-  const renderItems = (items: Item[]) => {
-    const order = items.filter((it): it is Extract<Item, { kind: 'entity' }> => it.kind === 'entity').map((it) => it.e.id);
-    const chosen = new Set(s.chosen('entity'));
-    return items.map((it) => {
-      if (it.kind === 'group') {
-        const folded = s.collapsed.includes(`grp:${it.g.id}`);
-        return (
-          <div key={`g-${it.g.id}`} className="row group-head" onClick={() => s.toggleCollapsed(`grp:${it.g.id}`)} data-testid={`entity-group-${it.g.name}`}
-            onContextMenu={(ev) => openMenu(ev, groupMenu(w, it.g.id, it.members), it.g.name)}>
-            <span className="twisty">{folded ? '▸' : '▾'}</span><span className="swatch" style={{ background: it.g.color }} /><b>{it.g.name}</b><span className="muted"> · {it.members.length}</span>
-          </div>
-        );
-      }
-      const e = it.e;
-      const open = s.collapsed.includes(`open:${e.id}`);
-      return (
-        <div key={e.id} className={`row ${chosen.has(e.id) ? 'sel' : ''}`} style={{ paddingLeft: 8 + it.depth * 14 }} data-testid={`entity-row-${e.name}`}
-          onClick={(ev) => s.pick('entity', e.id, ev, order)}
-          onContextMenu={(ev) => {
-            const cur = s.chosen('entity');
-            const ids = cur.includes(e.id) ? cur : [e.id];
-            if (!cur.includes(e.id)) s.pick('entity', e.id, {}, order);
-            openMenu(ev, entityMenu(w, ids), ids.length === 1 ? e.name : `${ids.length} chosen`);
-          }}>
-          {it.cities > 0 && <span className="twisty" title={open ? 'Hide its cities' : 'Show its cities'} onClick={(ev) => { ev.stopPropagation(); s.toggleCollapsed(`open:${e.id}`); }} data-testid={`cities-of-${e.name}`}>{open ? '▾' : '▸'}</span>}
-          <FillSwatch entity={e} />{e.name}{it.cities > 0 && <span className="muted"> · {it.cities} {it.cities === 1 ? 'city' : 'cities'}</span>}
-        </div>
-      );
-    });
-  };
-  const looseOthers = others.filter((e) => !(e.type_id === 'settlement' && cityIn.has(e.id) && w.get('entity', cityIn.get(e.id)!)));
   return (
     <aside className="left">
       <Section title="Maps" onAdd={() => s.set({ dialog: 'new-world' })} addLabel="Map">
@@ -355,7 +433,7 @@ export function Outliner() {
       </Section>
       <Section title="Countries and factions" onAdd={() => setNewEntity({ name: '', type: 'polity' })} addLabel="New">
         {newEntityForm('countries')}
-        {renderItems(itemsFor(political, true))}
+        <EntityRows sig={entitySig} section="countries" />
         {political.length > 0 && <div className="muted small-hint">Ctrl or Shift + click to choose several; right-click for quick actions.</div>}
         <button className="link pad-link" onClick={async () => { const name = await s.askText('New group', 'Name of the group (for example "My nations" or "Europe")', '', 'Create group'); if (name) s.execute((wd) => cmd.createEntityGroup(wd, name, s.chosen('entity'))); }} data-testid="new-entity-group">New group{s.chosen('entity').length > 1 ? ` of the ${s.chosen('entity').length} chosen` : ''}…</button>
         {political.length > 0 && <button className="link pad-link" onClick={() => s.set({ dialog: 'label-style' })} data-testid="open-label-style">Label style for all countries…</button>}
@@ -364,37 +442,21 @@ export function Outliner() {
       </Section>
       <Section title="Characters" onAdd={() => setNewEntity({ name: '', type: 'character' })} addLabel="Character">
         {newEntityForm('characters')}
-        {renderItems(itemsFor(characters, false))}
+        <EntityRows sig={entitySig} section="characters" />
         {!characters.length && !(newEntity?.type === 'character') && <div className="muted pad">None yet. Characters are points on the map that move over time.</div>}
       </Section>
       <Section title="Cities and others" onAdd={() => setNewEntity({ name: '', type: 'settlement' })} addLabel="City">
         {newEntityForm('cities')}
-        {renderItems(itemsFor(looseOthers, false))}
+        <EntityRows sig={entitySig} section="cities" />
         {!others.length && newEntity?.type !== 'settlement' && <div className="muted pad">None yet. Cities are points on the map, founded and abandoned at dates.</div>}
         {others.length > looseOthers.length && <div className="muted small-hint">Cities in a country are listed under it.</div>}
       </Section>
       <Section title="Events" onAdd={() => s.set({ dialog: 'new-event' })} addLabel="Event">
-        {(() => {
-          const shown = events.filter((e) => eventVisible(w, e.id));
-          const order = shown.map((e) => e.id);
-          const chosenEv = new Set(s.chosen('event'));
-          return shown.map((e) => (
-            <div key={e.id} className={`row ${chosenEv.has(e.id) ? 'sel' : ''} ${e.variant_group && !e.variant_active ? 'dim' : ''}`} data-testid={`event-row-${e.name}`}
-              onClick={(ev) => { s.pick('event', e.id, ev, order); if (!ev.ctrlKey && !ev.metaKey && !ev.shiftKey) s.setTime(fromStore(e.start_day, e.start_ms)); }}
-              onContextMenu={(ev) => {
-                const cur = s.chosen('event');
-                const ids = cur.includes(e.id) ? cur : [e.id];
-                if (!cur.includes(e.id)) s.pick('event', e.id, {}, order);
-                openMenu(ev, eventMenu(w, ids), ids.length === 1 ? e.name : `${ids.length} events`);
-              }}>
-              <span className="date">{fmt(fromStore(e.start_day, e.start_ms), e.precision === 'year' ? 'year' : 'day')}</span> {e.name}
-            </div>
-          ));
-        })()}
+        <EventRows sig={eventSig} />
         {events.length > 1 && <div className="muted small-hint">Ctrl or Shift + click to choose several; Delete or right-click to delete them.</div>}
         {!events.length && <div className="muted pad">No events yet.</div>}
-        {events.some((e) => !eventVisible(w, e.id)) && (
-          <div className="muted pad" data-testid="events-hidden">{events.filter((e) => !eventVisible(w, e.id)).length} hidden by the group filter · <button className="link" onClick={() => s.set({ eventFilter: null })}>show all</button></div>
+        {hiddenEvents > 0 && (
+          <div className="muted pad" data-testid="events-hidden">{hiddenEvents} hidden by the group filter · <button className="link" onClick={() => s.set({ eventFilter: null })}>show all</button></div>
         )}
       </Section>
     </aside>
@@ -444,7 +506,7 @@ function EntityPanel({ id }: { id: string }) {
     const arr = w.arrangement(s.spaceId);
     for (const [f, st] of s.engine!.partitionState(s.spaceId, s.layerId, s.time)) if (st.value === id) { areaSr += arr.faceArea(f); parcels++; }
   }
-  const changes = w.all('effect').filter((f) => parseJSON<Resolution>(f.resolution, { set: [] }).set.some(([, v]) => v === id));
+  const changes = w.rows('effect').filter((f) => resolutionOf(f).set.some(([, v]) => v === id));
   return (
     <div className="panel" data-testid="entity-panel">
       <h3><span className="swatch big" style={{ background: e.color }} /> {e.name}</h3>

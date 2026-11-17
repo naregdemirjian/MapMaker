@@ -96,6 +96,14 @@ export function parseJSON<T>(text: string, fallback: T): T {
   try { return JSON.parse(text) as T; } catch { return fallback; }
 }
 
+/** What a territory change gives to whom, read from its row once (rows are replaced, never changed, so the reading holds). Not to be modified. */
+const resolutions = new WeakMap<EffectRow, Resolution>();
+export function resolutionOf(ef: EffectRow): Resolution {
+  let r = resolutions.get(ef);
+  if (!r) resolutions.set(ef, (r = parseJSON<Resolution>(ef.resolution, { set: [] })));
+  return r;
+}
+
 
 /** Children of every face (lineage tree), kept by the parcel map itself; callers must not modify it. */
 export function childrenMap(arr: Arrangement): Map<number, number[]> {
@@ -314,7 +322,7 @@ export class Engine {
     const compiled: CompiledTransition | null = hasTransition
       ? { style: spec.style, origin: spec.origin ? lonLatToVec(spec.origin[0], spec.origin[1]) : null, maxDist: 0, easing: spec.easing ?? 'smooth' }
       : null;
-    const res = parseJSON<Resolution>(ef.resolution, { set: [] });
+    const res = resolutionOf(ef);
     const list: Assignment[] = [];
     let lm = this.timelines.get(layer.id);
     if (!lm) this.timelines.set(layer.id, (lm = new Map()));
@@ -757,9 +765,10 @@ export class Engine {
   }
 
   /** Exact value at a point: accounts for in-progress transitions (later-starting changes take over). */
-  valueAtPoint(spaceId: string, layerId: string, p: Vec3, t: Instant): string | null {
+  valueAtPoint(spaceId: string, layerId: string, p: Vec3, t: Instant, inFace?: number): string | null {
     const arr = this.world.arrangement(spaceId);
-    const face = arr.locate(p);
+    // (The parcel the point lies in, when the caller already knows it.)
+    const face = inFace ?? arr.locate(p);
     let a = this.latest(spaceId, layerId, face, t);
     let guard = 0;
     while (a && a.transition && compare(t, a.end) < 0 && compare(this.arrivalTime(a, p), t) > 0 && guard++ < 1000) {

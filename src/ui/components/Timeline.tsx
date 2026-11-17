@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useStore, useLive, store } from '../store.ts';
 import {
   type Instant, toApproxYear, fromApproxYear, gregorian, formatYear, floorTo, instant, add, compare, fromStore, MS_PER_DAY,
@@ -6,6 +6,17 @@ import {
 import { BASE_EVENT_ID } from '../../world-model/schema.ts';
 import * as cmd from '../../domain/commands.ts';
 import { GroupFilter, eventFilterSet } from './EventGroups.tsx';
+
+/** Widths of event names on the timeline (one font), measured once each. */
+const labelWidths = new Map<string, number>();
+function labelWidth(ctx: CanvasRenderingContext2D, label: string): number {
+  let w = labelWidths.get(label);
+  if (w === undefined) {
+    if (labelWidths.size > 20000) labelWidths.clear();
+    labelWidths.set(label, (w = ctx.measureText(label).width));
+  }
+  return w;
+}
 
 const RULER = 26;
 const LANE = 20;
@@ -92,12 +103,21 @@ export function Timeline() {
   const xOf = (y: number) => ((y - start) / (end - start)) * w;
   const yearAt = (x: number) => start + (x / w) * (end - start);
 
-  useEffect(() => {
+  /** Everything but the playhead, kept as a picture until something it shows changes (dragging through time redraws the playhead only). */
+  const still = useRef<{ key: string; canvas: OffscreenCanvas; bars: Array<{ id: string; x0: number; x1: number; y: number }> } | null>(null);
+
+  useLayoutEffect(() => {
     const c = ref.current;
     if (!c || !s.world) return;
     const dpr = window.devicePixelRatio || 1;
-    c.width = w * dpr; c.height = h * dpr;
-    const ctx = c.getContext('2d')!;
+    const W = Math.max(1, Math.round(w * dpr)), H = Math.max(1, Math.round(h * dpr));
+    if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
+    const world = s.world;
+    const key = [world.serial, world.tableRevision('event'), world.tableRevision('event_group'), world.tableRevision('event_group_member'), s.engine!.revision, start, end, W, H, dpr,
+      s.selection?.kind === 'event' ? s.selection.id : '', s.recordEventId ?? '', (s.eventFilter ?? ['*']).join(',')].join('|');
+    if (!still.current || still.current.key !== key) {
+      const canvas = still.current && still.current.canvas.width === W && still.current.canvas.height === H ? still.current.canvas : new OffscreenCanvas(W, H);
+      const ctx = canvas.getContext('2d') as unknown as CanvasRenderingContext2D;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = '#10161d';
     ctx.fillRect(0, 0, w, h);
@@ -126,7 +146,7 @@ export function Timeline() {
     const events = s.world.all('event').filter((e) => e.id !== BASE_EVENT_ID && cmd.eventShown(s.world!, e.id, filter)).sort((a, b) => a.start_day - b.start_day || a.start_ms - b.start_ms);
     const groupColor = new Map(s.world.all('event_group').map((g) => [g.id, g.color]));
     const laneEnds: number[] = [];
-    bars.current = [];
+    const found: Array<{ id: string; x0: number; x1: number; y: number }> = [];
     for (const e of events) {
       const ys = toApproxYear(fromStore(e.start_day, e.start_ms));
       const ye = e.end_day !== null ? toApproxYear(fromStore(e.end_day, e.end_ms ?? 0)) : ys;
@@ -136,7 +156,7 @@ export function Timeline() {
       if (lane === -1) { lane = laneEnds.length; laneEnds.push(0); }
       ctx.font = '11px "Segoe UI", Inter, Arial, sans-serif';
       const label = e.variant_group && !e.variant_active ? `${e.name} (inactive alternative)` : e.name;
-      const tw = ctx.measureText(label).width;
+      const tw = labelWidth(ctx, label);
       laneEnds[lane] = Math.max(x1, x0 + tw + 10);
       const y = RULER + 6 + lane * LANE;
       if (y + LANE > h) continue;
@@ -151,8 +171,15 @@ export function Timeline() {
       ctx.fillStyle = '#e8eef4';
       ctx.fillText(label, Math.max(x0, 0) + (x1 - x0 > tw + 8 ? 4 : x1 - x0 + 4), y + (LANE - 6) / 2);
       ctx.globalAlpha = 1;
-      bars.current.push({ id: e.id, x0, x1: Math.max(x1, x0 + tw + 8), y });
+      found.push({ id: e.id, x0, x1: Math.max(x1, x0 + tw + 8), y });
     }
+      still.current = { key, canvas, bars: found };
+    }
+    bars.current = still.current.bars;
+    const ctx = c.getContext('2d')!;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(still.current.canvas, 0, 0);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     // playhead
     const px = xOf(toApproxYear(s.time));
     ctx.strokeStyle = '#ff6b6b';
