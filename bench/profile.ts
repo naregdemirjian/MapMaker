@@ -3,7 +3,7 @@
 // Usage: node --disable-warning=ExperimentalWarning bench/profile.ts <fixtures folder> "<project>" <scenario> <out.cpuprofile>
 // With an output name ending in .trace.json, a browser trace is recorded instead (everything the browser
 // does around the script: style, layout, painting, presenting the canvas); summarise with bench/trace.mjs.
-// Scenarios: idle, select, panWorld, panRegion, panDeep, scrub, scrubSmall, stroke, play, playMoving
+// Scenarios: idle, select, panWorld, panRegion, panDeep, zoomIn, zoomOut, scrub, scrubSmall, stroke, play, playMoving
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import { join, resolve } from 'node:path';
@@ -53,6 +53,8 @@ try {
       else if (sc === 'panWorld') s.setCamera({ ...base, zoom: 0, lon: 15 + i * 1.5 });
       else if (sc === 'panRegion') s.setCamera({ ...base, zoom: 3.5, lon: 5 + i * 0.25 });
       else if (sc === 'panDeep') s.setCamera({ ...base, zoom: 13, lon: 10 + i * 0.0003 });
+      else if (sc === 'zoomIn') s.setCamera({ ...base, zoom: 2.2 + i * 0.04 });
+      else if (sc === 'zoomOut') s.setCamera({ ...base, zoom: 3.2 - i * 0.04 });
       else if (sc === 'scrub') s.setTime(Y(1000 + i * 25), true);
       else if (sc === 'scrubSmall') s.setTime(B.gregorian.fromCivil({ year: 1950, month: 1, day: 1 + (i % 27) }), true);
       else if (sc === 'select') { const ids = s.world.all('entity').filter((e: any) => e.type_id === 'polity').map((e: any) => e.id); s.set({ selection: { kind: 'entity', id: ids[i % ids.length] } }); }

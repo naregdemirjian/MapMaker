@@ -96,7 +96,17 @@ export interface RenderOptions {
 interface Placing { a: number; b: number; c: number; d: number; x: number; y: number; s: number }
 /** What a kept part of the picture shows: exactly (the same pixels) and loosely (the same things, at whatever detail). */
 interface PartKey { strict: string; loose: string }
-interface Kept { canvas: OffscreenCanvas | null; ctx: CanvasRenderingContext2D | null; key: string; seen: string; strict: string; loose: string; at: Placing | null; /** The moment the parts that change from frame to frame were drawn for (see Renew). */ moment: string }
+interface Kept {
+  canvas: OffscreenCanvas | null; ctx: CanvasRenderingContext2D | null; key: string; seen: string; strict: string; loose: string; at: Placing | null;
+  /** The moment the parts that change from frame to frame were drawn for (see Renew). */
+  moment: string;
+  /** Where the frame's top left pixel lies in the buffer (a carried picture has room around the frame, see MapRenderer.slide). */
+  ox: number; oy: number;
+  /** The part of the buffer that holds the picture, as x0, y0, x1, y1 in buffer pixels (it always takes in the frame). */
+  valid: [number, number, number, number];
+}
+type KeptOn = Kept & { canvas: OffscreenCanvas; ctx: CanvasRenderingContext2D };
+const newKept = (): Kept => ({ canvas: null, ctx: null, key: '', seen: '', strict: '', loose: '', at: null, moment: '', ox: 0, oy: 0, valid: [0, 0, 0, 0] });
 /** Rectangles of a kept picture that change from frame to frame (where a change is animating), and what says which frame this is. */
 interface Renew { rects: DeviceRect[]; moment: string }
 
@@ -257,11 +267,11 @@ function outsideOf(shape: Path2D): Path2D {
   return p;
 }
 
-/** Is any of the view outside the planet's outline (so that the outline must clip what is drawn)? */
-function outlineInView(view: View): boolean {
+/** Is any of the view (and `pad` view pixels around it) outside the planet's outline, so that the outline must clip what is drawn? */
+function outlineInView(view: View, pad = 0): boolean {
   if (view.camera.projection === 'flat') return false;
-  const w = view.width, h = view.height;
-  for (const [x, y] of [[0, 0], [w, 0], [0, h], [w, h], [w / 2, 0], [w / 2, h], [0, h / 2], [w, h / 2]]) if (!screenToLonLat(view, x, y)) return true;
+  const w = view.width, h = view.height, a = -pad, b = w + pad, c = h + pad;
+  for (const [x, y] of [[a, a], [b, a], [a, c], [b, c], [w / 2, a], [w / 2, c], [a, h / 2], [b, h / 2]]) if (!screenToLonLat(view, x, y)) return true;
   return false;
 }
 
@@ -280,6 +290,41 @@ function graticule10(): Ring[] {
     }
   }
   return graticuleLines;
+}
+
+/** Boxes on the frame (x0, y0, x1, y1), found by the squares they reach into: does a box touch any of them? */
+class BoxGrid {
+  private static readonly CELL = 128;
+  private cells = new Map<number, Array<[number, number, number, number]>>();
+
+  private span(b: readonly [number, number, number, number]): [number, number, number, number] {
+    const c = BoxGrid.CELL, lim = (v: number) => Math.max(-64, Math.min(1000, Math.floor(v / c)));
+    return [lim(b[0]), lim(b[1]), lim(b[2]), lim(b[3])];
+  }
+
+  add(b: [number, number, number, number]): void {
+    const [x0, y0, x1, y1] = this.span(b);
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      const k = (y + 64) * 2048 + x + 64;
+      const list = this.cells.get(k);
+      if (list) list.push(b); else this.cells.set(k, [b]);
+    }
+  }
+
+  /** `except`: a box that does not count, nor any box with the same corner as it (a city's own dot). */
+  hits(b: readonly [number, number, number, number], except: readonly [number, number, number, number] | null = null): boolean {
+    const [x0, y0, x1, y1] = this.span(b);
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      const list = this.cells.get((y + 64) * 2048 + x + 64);
+      if (!list) continue;
+      for (const o of list) {
+        if (b[2] < o[0] || b[0] > o[2] || b[3] < o[1] || b[1] > o[3]) continue;
+        if (except && o[0] === except[0] && o[1] === except[1]) continue;
+        return true;
+      }
+    }
+    return false;
+  }
 }
 
 export class MapRenderer {
@@ -308,8 +353,9 @@ export class MapRenderer {
   private place: [number, number, number] = [1, 0, 0];
 
   /** The sheet to draw a view from: the current one while the view stays on it, else a new one. */
-  private sheetFor(view: View, spaceId: string): Sheet {
-    if (!this.sheet || this.sheetSpace !== spaceId || !this.sheet.covers(view, this.quality.tolerance)) {
+  /** The sheet to draw the view on; `pad`: view pixels around the view that are drawn on too (the room around carried pictures). */
+  private sheetFor(view: View, spaceId: string, pad = 0): Sheet {
+    if (!this.sheet || this.sheetSpace !== spaceId || !this.sheet.covers(view, this.quality.tolerance, pad)) {
       this.sheet = new Sheet(view, this.quality);
       this.sheetSpace = spaceId;
       this.stats.sheets++;
@@ -738,6 +784,16 @@ export class MapRenderer {
   private holdNames = false;
   /** While only part of a frame is drawn: the device rectangles being drawn (buffers are limited to them). */
   private region: DeviceRect[] | null = null;
+  /** The region is the whole frame (a kept picture with room around it is drawn in its middle). */
+  private regionWhole = false;
+  /**
+   * For this frame, where pictures are carried and the map repeats east and west (see render): the
+   * planet's north and south ends (view pixels), and its sides when they are in view.
+   */
+  private band: [number, number] | null = null;
+  private bandCut: [number, number] | null = null;
+  /** Set while a carried picture of a repeating map is being drawn: the band it is ended by (instead of the planet's outline). */
+  private periodic: [number, number] | null = null;
   private kept = new Map<string, Kept>();
   /** Kept pictures are used up to this many pixels (a 4K frame); the land mask up to an 8K frame. */
   private static readonly KEEP_LIMIT = 10_000_000;
@@ -746,10 +802,11 @@ export class MapRenderer {
   /** Kept pictures may take this much memory together (the least recently used go first). */
   private static readonly KEEP_BYTES = 420_000_000;
 
-  private keptBuffer(name: string, target: CanvasRenderingContext2D): Kept & { canvas: OffscreenCanvas; ctx: CanvasRenderingContext2D } {
-    const w = target.canvas.width, h = target.canvas.height;
+  /** The buffer of a kept picture: the size of the target, and `margin` pixels more on every side. */
+  private keptBuffer(name: string, target: CanvasRenderingContext2D, margin = 0): KeptOn {
+    const w = target.canvas.width + 2 * margin, h = target.canvas.height + 2 * margin;
     let b = this.kept.get(name);
-    if (!b) b = { canvas: null, ctx: null, key: '', seen: '', strict: '', loose: '', at: null, moment: '' };
+    if (!b) b = newKept();
     // Most recently used last.
     this.kept.delete(name);
     this.kept.set(name, b);
@@ -767,8 +824,64 @@ export class MapRenderer {
       const willReadFrequently = !!target.getContextAttributes?.().willReadFrequently;
       b.ctx = b.canvas.getContext('2d', { willReadFrequently }) as unknown as CanvasRenderingContext2D;
       b.key = '';
+      b.ox = b.oy = margin;
+      b.valid = [0, 0, 0, 0];
     }
-    return b as Kept & { canvas: OffscreenCanvas; ctx: CanvasRenderingContext2D };
+    return b as KeptOn;
+  }
+
+  /**
+   * Room kept around the frame in a picture that is carried along as the view moves (device pixels
+   * on every side; none where pictures are not carried: exports).
+   */
+  private marginFor(w: number, h: number): number {
+    return this.carry ? Math.max(48, Math.min(192, Math.round(0.14 * Math.min(w, h)))) : 0;
+  }
+
+  /**
+   * The frame moves over a kept picture by whole pixels: (nx, ny) is how far the picture moves on
+   * the canvas. The picture stays where it is in its buffer, which is larger than the frame, and the
+   * frame's window moves over it; what the window then lacks is drawn (`paint`, rectangles of the
+   * buffer), with `lead` pixels to spare on that side, so that the frames that follow need nothing
+   * drawn at all: drawing a strip costs about as much whether it is narrow or wide, since most of the
+   * cost is in the number of shapes it crosses. When the window runs out of buffer, the picture is
+   * moved within it, leaving the most room ahead. (It is copied, moved over, into a spare buffer that
+   * then takes its place: a canvas copied onto itself is first copied whole by the browser.)
+   */
+  private slide(b: KeptOn, w: number, h: number, nx: number, ny: number, lead: number, paint: (rects: DeviceRect[]) => void): void {
+    const W = b.canvas.width, H = b.canvas.height;
+    let ox = b.ox - nx, oy = b.oy - ny;
+    let v = b.valid;
+    if (ox < 0 || oy < 0 || ox + w > W || oy + h > H) {
+      const tx = nx > 0 ? W - w : nx < 0 ? 0 : Math.max(0, Math.min(W - w, ox));
+      const ty = ny > 0 ? H - h : ny < 0 ? 0 : Math.max(0, Math.min(H - h, oy));
+      const sx = tx - ox, sy = ty - oy;
+      const spare = this.spareFor(b);
+      const sc = spare.ctx;
+      sc.setTransform(1, 0, 0, 1, 0, 0);
+      sc.globalAlpha = 1;
+      sc.globalCompositeOperation = 'copy';
+      sc.drawImage(b.canvas as CanvasImageSource, sx, sy);
+      sc.globalCompositeOperation = 'source-over';
+      this.spare = { canvas: b.canvas, ctx: b.ctx };
+      b.canvas = spare.canvas; b.ctx = spare.ctx;
+      v = [Math.max(0, v[0] + sx), Math.max(0, v[1] + sy), Math.min(W, v[2] + sx), Math.min(H, v[3] + sy)];
+      ox = tx; oy = ty;
+    }
+    b.ox = ox; b.oy = oy;
+    if (v[0] > ox || v[1] > oy || v[2] < ox + w || v[3] < oy + h) {
+      // What the picture holds from now on: what it held, the window, and the room ahead.
+      const x0 = ox < v[0] ? Math.max(0, ox - lead) : v[0], x1 = ox + w > v[2] ? Math.min(W, ox + w + lead) : v[2];
+      const y0 = oy < v[1] ? Math.max(0, oy - lead) : v[1], y1 = oy + h > v[3] ? Math.min(H, oy + h + lead) : v[3];
+      const rects: DeviceRect[] = [];
+      if (x0 < v[0]) rects.push([x0, y0, v[0] - x0, y1 - y0]);
+      if (x1 > v[2]) rects.push([v[2], y0, x1 - v[2], y1 - y0]);
+      if (y0 < v[1] && v[2] > v[0]) rects.push([v[0], y0, v[2] - v[0], v[1] - y0]);
+      if (y1 > v[3] && v[2] > v[0]) rects.push([v[0], v[3], v[2] - v[0], y1 - v[3]]);
+      paint(rects);
+      v = [x0, y0, x1, y1];
+    }
+    b.valid = v;
   }
 
   /** A buffer to move a kept picture into (see layered); the picture's old buffer becomes the next spare. */
@@ -859,7 +972,7 @@ export class MapRenderer {
     const w = ctx.canvas.width, h = ctx.canvas.height;
     const usable = key !== null && mode !== 'off' && w * h <= MapRenderer.KEEP_LIMIT;
     let rec = this.kept.get(name);
-    if (!rec) this.kept.set(name, (rec = { canvas: null, ctx: null, key: '', seen: '', strict: '', loose: '', at: null, moment: '' }));
+    if (!rec) this.kept.set(name, (rec = newKept()));
     const exactOf = (strict: string) => `${strict}|${w}x${h}|${at.a},${at.b},${at.c},${at.d},${at.x},${at.y},${at.s}`;
     const exact = key ? exactOf(key.strict) : '';
     // `opening`: this part is the first thing drawn in a frame that fills the canvas, and the canvas
@@ -879,48 +992,70 @@ export class MapRenderer {
       draw(ctx);
       return;
     }
-    const b = this.keptBuffer(name, ctx);
+    // While pictures are carried along, a kept picture has room around the frame (see slide).
+    const M = this.marginFor(w, h);
+    const b = this.keptBuffer(name, ctx, M);
+    const t = ctx.getTransform();
+    // A carried picture of a repeating map: only the turn inside the planet's sides is shown.
+    const cut = M ? this.bandCut : null;
+    // (On an upright frame the sides are taken to the nearest whole pixel: copying through a clip
+    // that falls between pixels is half as fast again, and an upright edge shows no steps.)
+    const cutSides = () => {
+      if (!cut) return;
+      ctx.beginPath();
+      if (t.b === 0 && t.c === 0) {
+        const x0 = Math.round(t.a * cut[0] + t.e), x1 = Math.round(t.a * cut[1] + t.e);
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.rect(x0, 0, x1 - x0, h);
+      } else ctx.rect(cut[0], -1e6, cut[1] - cut[0], 2e6);
+      ctx.clip();
+    };
     const blit = () => {
+      if (cut) wipe();
       ctx.save();
+      cutSides();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      if (opening) ctx.globalCompositeOperation = 'copy';
-      ctx.drawImage(b.canvas as CanvasImageSource, 0, 0);
+      if (opening && !cut) ctx.globalCompositeOperation = 'copy';
+      ctx.drawImage(b.canvas as CanvasImageSource, -b.ox, -b.oy);
       ctx.restore();
     };
-    const t = ctx.getTransform();
-    // Where a change is animating, the kept picture is right everywhere else: only that is drawn again for a new moment.
-    const again = (dx: number, dy: number): boolean => {
-      if (!renew || b.moment === renew.moment) return false;
+    const windowOf = (): [number, number, number, number] => [b.ox, b.oy, b.ox + w, b.oy + h];
+    /** Rectangles of the frame as rectangles of the buffer. */
+    const inBuffer = (rects: DeviceRect[]) => rects.map(([x, y, rw, rh]) => [x + b.ox, y + b.oy, rw, rh] as DeviceRect);
+    /**
+     * Draw again what lies in some rectangles of the buffer. (dx, dy): how far the kept picture
+     * stands from the view asked for (at most half a pixel); `whole`: the rectangle is the frame.
+     */
+    const paint = (rects: DeviceRect[], dx: number, dy: number, whole = false) => {
       const bc = b.ctx;
       bc.save();
       bc.setTransform(1, 0, 0, 1, 0, 0);
       bc.globalAlpha = 1;
       bc.globalCompositeOperation = 'source-over';
-      for (const [x, y, rw, rh] of renew.rects) bc.clearRect(x, y, rw, rh);
-      if (renew.rects.length) {
-        this.clipTo(bc, renew.rects);
-        bc.setTransform(t.a, t.b, t.c, t.d, t.e - dx, t.f - dy);
-        this.region = renew.rects; setPaintRegion(renew.rects);
-        try { draw(bc); } finally { this.region = null; setPaintRegion(null); }
+      for (const [x, y, rw, rh] of rects) bc.clearRect(x, y, rw, rh);
+      if (rects.length) {
+        this.clipTo(bc, rects);
+        bc.setTransform(t.a, t.b, t.c, t.d, t.e - dx + b.ox, t.f - dy + b.oy);
+        this.region = rects; this.regionWhole = whole; setPaintRegion(rects);
+        this.periodic = M ? this.band : null;
+        try { draw(bc); } finally { this.region = null; this.regionWhole = false; this.periodic = null; setPaintRegion(null); }
       }
       bc.restore();
+    };
+    // Where a change is animating, the kept picture is right everywhere else: only that is drawn again for a new moment.
+    const again = (dx: number, dy: number): boolean => {
+      if (!renew || b.moment === renew.moment) return false;
+      paint(inBuffer(renew.rects), dx, dy);
+      // (Only what is in the frame was drawn again: the room around it no longer counts.)
+      b.valid = windowOf();
       b.moment = renew.moment;
       return true;
     };
     if (b.key === exact) { this.lastParts[name] = again(0, 0) ? 'renewed' : 'kept'; blit(); return; }
     if (patch && this.carry && b.key === exactOf(patch.from)) {
       // Patched: the kept picture shows the state before a change that touched only these rectangles; they alone are drawn again.
-      const bc = b.ctx;
-      bc.save();
-      bc.setTransform(1, 0, 0, 1, 0, 0);
-      bc.globalAlpha = 1;
-      bc.globalCompositeOperation = 'source-over';
-      for (const [x, y, rw, rh] of patch.rects) bc.clearRect(x, y, rw, rh);
-      this.clipTo(bc, patch.rects);
-      bc.setTransform(t);
-      this.region = patch.rects; setPaintRegion(patch.rects);
-      try { draw(bc); } finally { this.region = null; setPaintRegion(null); }
-      bc.restore();
+      paint(inBuffer(patch.rects), 0, 0);
+      b.valid = windowOf();
       b.key = exact; b.strict = key!.strict; b.loose = key!.loose;
       b.moment = renew ? renew.moment : '';
       this.lastParts[name] = 'patched';
@@ -935,31 +1070,10 @@ export class MapRenderer {
         const nx = Math.round(tx), ny = Math.round(ty), rx = tx - nx, ry = ty - ny;
         const whole = Math.abs(rx) < 0.02 && Math.abs(ry) < 0.02;
         if ((whole || this.moving) && Math.abs(nx) < w * 0.9 && Math.abs(ny) < h * 0.9) {
-          // Moved: the kept picture is shifted by whole pixels and the strips that came into view are drawn into it.
-          if (nx || ny) {
-            // (Copied, moved over, into a spare buffer that then takes its place: a canvas copied onto
-            // itself is first copied whole by the browser, which made this the largest cost of a
-            // frame while the map moves.)
-            const spare = this.spareFor(b);
-            const bc = spare.ctx;
-            bc.setTransform(1, 0, 0, 1, 0, 0);
-            bc.globalAlpha = 1;
-            bc.globalCompositeOperation = 'copy';
-            bc.drawImage(b.canvas as CanvasImageSource, nx, ny);
-            bc.globalCompositeOperation = 'source-over';
-            this.spare = { canvas: b.canvas, ctx: b.ctx };
-            b.canvas = spare.canvas; b.ctx = spare.ctx;
-            const rects: DeviceRect[] = [];
-            if (nx > 0) rects.push([0, 0, nx, h]); else if (nx < 0) rects.push([w + nx, 0, -nx, h]);
-            if (ny > 0) rects.push([0, 0, w, ny]); else if (ny < 0) rects.push([0, h + ny, w, -ny]);
-            bc.save();
-            this.clipTo(bc, rects);
-            // (Drawn where the kept picture now stands: at most half a pixel from the view asked for.)
-            bc.setTransform(t.a, t.b, t.c, t.d, t.e - rx, t.f - ry);
-            this.region = rects; setPaintRegion(rects);
-            try { draw(bc); } finally { this.region = null; setPaintRegion(null); }
-            bc.restore();
-          }
+          // Moved: the frame's window moves over the kept picture by whole pixels, and what it lacks is drawn
+          // (where the kept picture stands: at most half a pixel from the view asked for). While a change
+          // animates the picture changes in every frame, so nothing is drawn ahead.
+          if (nx || ny) this.slide(b, w, h, nx, ny, renew ? 0 : M, (rects) => paint(rects, rx, ry));
           b.at = { ...at, x: at.x - rx, y: at.y - ry };
           b.key = whole ? exact : 'moved';
           if (!whole) this.lastApproximate = true;
@@ -969,18 +1083,22 @@ export class MapRenderer {
           return;
         }
       } else if (this.moving && Math.abs(r - 1) >= 1e-9 && r >= 0.75 && r <= 1.7 && !(renew && b.moment !== renew.moment)) {
-        // Scaled (a zoom under way): the kept picture is shown at the new size, and what lies around it is drawn.
-        const x0 = Math.max(0, Math.ceil(tx)), y0 = Math.max(0, Math.ceil(ty)), x1 = Math.min(w, Math.floor(tx + r * w)), y1 = Math.min(h, Math.floor(ty + r * h));
+        // Scaled (a zoom under way): the kept picture is shown at the new size, with what it holds around
+        // the frame (less a pixel, which smoothing would mix with what lies beyond), and the rest is drawn.
+        const v = b.valid, e = M ? 1 : 0;
+        const x0 = Math.max(0, Math.ceil(tx + r * (v[0] + e - b.ox))), y0 = Math.max(0, Math.ceil(ty + r * (v[1] + e - b.oy)));
+        const x1 = Math.min(w, Math.floor(tx + r * (v[2] - e - b.ox))), y1 = Math.min(h, Math.floor(ty + r * (v[3] - e - b.oy)));
         if (x1 > x0 && y1 > y0) {
           wipe();
           ctx.save();
+          cutSides();
           ctx.setTransform(1, 0, 0, 1, 0, 0);
           ctx.beginPath();
           ctx.rect(x0, y0, x1 - x0, y1 - y0);
           ctx.clip();
           ctx.imageSmoothingEnabled = true;
           ctx.setTransform(r, 0, 0, r, tx, ty);
-          ctx.drawImage(b.canvas as CanvasImageSource, 0, 0);
+          ctx.drawImage(b.canvas as CanvasImageSource, -b.ox, -b.oy);
           ctx.restore();
           const rects = ([[0, 0, w, y0], [0, y1, w, h - y1], [0, y0, x0, y1 - y0], [x1, y0, w - x1, y1 - y0]] as DeviceRect[]).filter((q) => q[2] > 0 && q[3] > 0);
           if (rects.length) {
@@ -996,14 +1114,22 @@ export class MapRenderer {
         }
       }
     }
-    b.ctx.setTransform(1, 0, 0, 1, 0, 0);
-    b.ctx.globalAlpha = 1;
-    b.ctx.globalCompositeOperation = 'source-over';
-    b.ctx.clearRect(0, 0, b.canvas.width, b.canvas.height);
-    b.ctx.setTransform(t);
-    b.ctx.save();
-    draw(b.ctx);
-    b.ctx.restore();
+    if (M) {
+      // Drawn afresh, in the middle of the buffer: the frame alone (the room around it fills as the view moves).
+      b.ox = b.oy = M;
+      paint([[M, M, w, h]], 0, 0, true);
+    } else {
+      b.ctx.setTransform(1, 0, 0, 1, 0, 0);
+      b.ctx.globalAlpha = 1;
+      b.ctx.globalCompositeOperation = 'source-over';
+      b.ctx.clearRect(0, 0, b.canvas.width, b.canvas.height);
+      b.ctx.setTransform(t);
+      b.ctx.save();
+      draw(b.ctx);
+      b.ctx.restore();
+      b.ox = b.oy = 0;
+    }
+    b.valid = windowOf();
     b.key = exact;
     b.strict = key!.strict; b.loose = key!.loose; b.at = at;
     b.moment = renew ? renew.moment : '';
@@ -1019,16 +1145,21 @@ export class MapRenderer {
     const direct = () => this.basemapPainter.maskToLand(lc, view, sheet, basemap, lakes);
     if (this.caching === 'off' || lc.canvas.width * lc.canvas.height > MapRenderer.MASK_LIMIT) { direct(); return; }
     const b = this.keptBuffer('mask', lc);
-    const key = `${frameKey}|${sheet.id}|${basemap.scales.length}`;
+    const lt = lc.getTransform();
+    const key = `${frameKey}|${sheet.id}|${basemap.scales.length}|${lt.e},${lt.f}`;
+    const part = this.region && !this.regionWhole ? this.region : null;
     if (b.key !== key) {
       // Only part of the frame is being drawn and there is no mask of this view yet: trimmed there directly.
-      if (this.region) { direct(); return; }
+      if (part) { direct(); return; }
       b.ctx.setTransform(1, 0, 0, 1, 0, 0);
       b.ctx.clearRect(0, 0, b.canvas.width, b.canvas.height);
-      b.ctx.setTransform(lc.getTransform());
+      b.ctx.setTransform(lt);
       this.basemapPainter.fillLand(b.ctx, view, sheet, basemap);
       b.key = key;
-    }
+      // (The mask holds the land where drawing was going on: the frame, or the whole buffer.)
+      const q = this.region?.[0];
+      b.valid = q ? [q[0], q[1], q[0] + q[2], q[1] + q[3]] : [0, 0, b.canvas.width, b.canvas.height];
+    } else if (part && !part.every(([x, y, rw, rh]) => x >= b.valid[0] && y >= b.valid[1] && x + rw <= b.valid[2] && y + rh <= b.valid[3])) { direct(); return; }
     lc.save();
     lc.setTransform(1, 0, 0, 1, 0, 0);
     lc.globalAlpha = 1;
@@ -1044,7 +1175,11 @@ export class MapRenderer {
     const style = opts.style ?? DEFAULT_STYLE;
     const arr = world.arrangement(spaceId);
     const u = view.unit;
-    const sheet = this.sheetFor(view, spaceId);
+    // Carried pictures hold some of the map around the frame (see slide): the sheet must reach that
+    // far, and the planet's outline counts as in view when it lies there.
+    const m00 = ctx.getTransform();
+    const keepPad = this.caching !== 'off' && this.carry ? (this.marginFor(ctx.canvas.width, ctx.canvas.height) + 2) / (Math.hypot(m00.a, m00.b) || 1) : 0;
+    const sheet = this.sheetFor(view, spaceId, keepPad);
     const sp = this.parcelsOn(sheet, arr);
     this.moving = !!opts.moving;
     this.holdNames = !!opts.holdNames;
@@ -1078,9 +1213,30 @@ export class MapRenderer {
     const detail = `${sheet.S}|${sheet.tolerance}|${opts.basemap ? chooseScale(opts.basemap, view).scale : ''}`;
     const partKey = (content: string, more = ''): PartKey => ({ loose: `${looseBase}|${content}`, strict: `${looseBase}|${content}|${detail}|${more}` });
     const sphere = new Path2D(geoPath(view.projection)({ type: 'Sphere' }) ?? '');
+    // A map with upright meridians (equirectangular, Mercator) repeats east and west, and the planet's
+    // outline, whose sides move with the view, shows one turn of it. A picture that is carried along
+    // holds the repeating map, ended north and south where the planet ends: that stays right however
+    // far the view moves east or west. The outline's sides are cut when the picture is laid on the
+    // canvas, where they are in view (see layered). What is drawn straight onto the canvas, and
+    // every export, is cut by the outline itself.
+    this.band = null; this.bandCut = null;
+    if (this.carry && this.caching !== 'off' && isCylindrical(view.camera.projection)) {
+      const [[bx0, by0], [bx1, by1]] = geoPath(view.projection).bounds({ type: 'Sphere' });
+      if (bx1 > bx0 && by1 > by0) {
+        this.band = [by0, by1];
+        const reach = (view.rotation ? Math.hypot(view.width, view.height) : view.width) / 2 + 1;
+        if (bx0 > view.width / 2 - reach || bx1 < view.width / 2 + reach) this.bandCut = [bx0, bx1];
+      }
+    }
     // Prepared geometry runs on past the planet's outline (a ring is drawn again a turn east or
     // west where that copy shows): where the outline is in view, it clips everything on the map.
-    const clipSphere = outlineInView(view);
+    const clipSphere = outlineInView(view, this.band ? 0 : keepPad);
+    /** Clip to the planet: its outline, or in a carried picture of a repeating map the band between its north and south ends. */
+    const clipPlanet = (c: CanvasRenderingContext2D) => {
+      const band = this.periodic;
+      if (band) { c.beginPath(); c.rect(-1e6, band[0], 2e6, band[1] - band[0]); c.clip(); }
+      else if (clipSphere) c.clip(sphere);
+    };
 
     const space = world.get('map_space', spaceId);
     if (wantsBase) {
@@ -1091,10 +1247,11 @@ export class MapRenderer {
       this.layered(`base:${wantsBackground ? 'o' : ''}${opts.passes.has('graticule') ? 'g' : ''}${wantsLand ? 'l' : ''}`, ctx, baseKey, at, (c) => {
         if (wantsBackground) {
           c.fillStyle = style.ocean;
-          c.fill(sphere);
+          const band = this.periodic;
+          if (band) c.fillRect(-1e6, band[0], 2e6, band[1] - band[0]); else c.fill(sphere);
         }
         c.save();
-        if (clipSphere) c.clip(sphere);
+        clipPlanet(c);
         if (opts.passes.has('graticule')) {
           c.strokeStyle = style.graticule;
           let key = 'graticule', lines: Ring[] | null = null;
@@ -1224,8 +1381,10 @@ export class MapRenderer {
         patch = this.changesSince(view, arr, engine, prepared.map((p) => p.states), key.strict, stable, m, ctx.canvas.width, ctx.canvas.height, widestLine * u + 3);
       } else this.patchPrev = null;
       this.layered(`territory:${wantsFills ? 'f' : ''}${wantsBorders ? 'b' : ''}`, ctx, key, at, (c) => {
+        // (Where the frame lies on what is drawn on: the canvas itself, or a kept picture with room around the frame.)
+        const cm = c.getTransform();
         c.save();
-        if (clipSphere) c.clip(sphere);
+        clipPlanet(c);
         if (wantsFills) for (const { ls, snap, tg, clip } of prepared) {
           // Each layer is painted fully opaque in a scratch buffer and laid onto the map once at the
           // layer's opacity: neighbouring parcels then never show seams, and fades mix correctly.
@@ -1279,7 +1438,7 @@ export class MapRenderer {
               c.shadowColor = front.color;
               c.shadowBlur = front.glow * view.unit;
               // Only the part of the buffer around the change (blurring the glow over the whole frame is slow).
-              const [bx, by, bw, bh] = this.deviceBox(this.screenBox(view, arr, g.changingFaces), m, 3 * front.glow * view.unit + w + 4, c.canvas.width, c.canvas.height);
+              const [bx, by, bw, bh] = this.deviceBox(this.screenBox(view, arr, g.changingFaces), cm, 3 * front.glow * view.unit + w + 4, c.canvas.width, c.canvas.height);
               if (bw > 0 && bh > 0) c.drawImage(band.canvas as CanvasImageSource, bx, by, bw, bh, bx, by, bw, bh);
             } else {
               c.strokeStyle = front.color;
@@ -1796,19 +1955,35 @@ export class MapRenderer {
   private scratches: Array<{ canvas: OffscreenCanvas; ctx: CanvasRenderingContext2D; /** Limited to the part of the frame being drawn (see region). */ limited: boolean; /** Where it was last drawn on (null: anywhere). */ used: DeviceRect[] | null }> = [];
   private scratchNext = 0;
   private scratchIdle = 0;
+  /** The largest target (in pixels) a buffer was asked for in this frame, and for how many frames the buffers have been much larger than that. */
+  private scratchWant = 0;
+  private scratchLarge = 0;
 
-  /** At the start of a frame: the buffers are free again; those beyond two that have long gone unused are given up. */
+  /** At the start of a frame: the buffers are free again; those beyond two that have long gone unused are given up, and all of them when they have long been much larger than needed. */
   private scratchReset(): void {
     if (this.scratches.length > 2 && this.scratchNext < this.scratches.length) {
       if (++this.scratchIdle > 120) { this.scratches.length = Math.max(2, this.scratchNext); this.scratchIdle = 0; }
     } else this.scratchIdle = 0;
+    const first = this.scratches[0];
+    if (first && this.scratchWant > 0) {
+      if (first.canvas.width * first.canvas.height > 1.5 * this.scratchWant) { if (++this.scratchLarge > 240) { this.scratches = []; this.scratchLarge = 0; } }
+      else this.scratchLarge = 0;
+    }
+    this.scratchWant = 0;
     this.scratchNext = 0;
   }
 
-  /** A cleared buffer the size of the target, with the target's current transform. */
+  /**
+   * A cleared buffer with the target's current transform, at least the size of the target (one left
+   * by a larger target serves as well: the working view draws now on the canvas, now on a kept picture
+   * that is larger, and making new buffers at every change of size would cost more than it saves).
+   */
   private scratch(ctx: CanvasRenderingContext2D): CanvasRenderingContext2D {
-    const w = ctx.canvas.width, h = ctx.canvas.height;
-    if (this.scratches.length && (this.scratches[0].canvas.width !== w || this.scratches[0].canvas.height !== h)) this.scratches = [];
+    let w = ctx.canvas.width, h = ctx.canvas.height;
+    this.scratchWant = Math.max(this.scratchWant, w * h);
+    const first = this.scratches[0];
+    if (first && (first.canvas.width < w || first.canvas.height < h)) this.scratches = [];
+    else if (first) { w = first.canvas.width; h = first.canvas.height; }
     const most = Math.max(1, Math.min(4, Math.floor(40_000_000 / (w * h))));
     const i = this.scratchNext++ % most;
     let s = this.scratches[i];
@@ -2033,7 +2208,7 @@ export class MapRenderer {
   }
 
   /** Where a piece's label can go, for each way of breaking its text into lines (projection units). */
-  private placePiece(piece: OwnerPiece, view: View, text: string, st: LabelStyle, accept: ((lon: number, lat: number) => boolean) | null, cacheKey: string, cache: Map<string, Placings> | Weighed<string, Placings>, onScreenOnly = false, wantedFont = Infinity, minFont = 0): Placings {
+  private placePiece(piece: OwnerPiece, view: View, text: string, st: LabelStyle, accept: ((lon: number, lat: number) => boolean) | null, cacheKey: string, cache: Map<string, Placings> | Weighed<string, Placings>, onScreenOnly = false, wantedFont = Infinity, minFont = 0, rough = 1, mask: LandMask | null = null): Placings {
     const hit = cache.get(cacheKey);
     if (hit) return hit;
     const proj = view.camera.projection;
@@ -2062,6 +2237,20 @@ export class MapRenderer {
     const choices = lineChoices(text);
     const found: Array<PlacedLabel | null | undefined> = choices.map(() => undefined);
     const outline = shape;
+    // Where territory ends at the coast: is there any land in a box of the plane? (The box in degrees
+    // is taken from its corners and middle, with room for the projection's curve between them.)
+    const anyLand = !mask ? undefined : (x0: number, y0: number, x1: number, y1: number): boolean => {
+      let w = Infinity, so = Infinity, e = -Infinity, no = -Infinity;
+      for (const [x, y] of [[x0, y0], [x1, y0], [x0, y1], [x1, y1], [(x0 + x1) / 2, (y0 + y1) / 2]]) {
+        const ll = outline.projection.invert?.([x, y]);
+        if (!ll || !Number.isFinite(ll[0]) || !Number.isFinite(ll[1])) return true;
+        if (ll[0] < w) w = ll[0]; if (ll[0] > e) e = ll[0]; if (ll[1] < so) so = ll[1]; if (ll[1] > no) no = ll[1];
+      }
+      // (A box across the line where longitudes start again spans nearly all of them: counted whole.
+      // A cell of the mask more on every side; and where meridians curve, room for the curve.)
+      const pad = (isCylindrical(proj) ? 0 : 0.15 * Math.max(e - w, no - so)) + 360 / mask.width;
+      return mask.anyLand(w - pad, so - pad, e + pad, no + pad);
+    };
     const res: Placings = {
       count: choices.length,
       weight: outline.edges.length + 16,
@@ -2075,7 +2264,7 @@ export class MapRenderer {
         const cap = wantedFont < Infinity ? (wantedFont * hEm * 1.1) / (Math.SQRT2 * 1.15) : Infinity;
         // A place where the label would be smaller than `minFont` is of no use: not searched for.
         const floor = minFont > 0 ? (minFont * hEm) / (Math.SQRT2 * 1.15) : 0;
-        const spot = placeLabel(outline, wEm / hEm, accept ?? undefined, within, cap, floor);
+        const spot = placeLabel(outline, wEm / hEm, accept ?? undefined, within, cap, { floor, rough, anyAccepted: anyLand });
         // A box with the label's proportions fits inside the ellipse found when its height is sqrt(2)
         // times the ellipse's half-height. Labels may spill a little past narrow places.
         return (found[i] = spot ? { lon: spot.lon, lat: spot.lat, font: (Math.SQRT2 * spot.room * 1.15) / hEm, lines } : null);
@@ -2155,21 +2344,24 @@ export class MapRenderer {
       // The label is never larger than the territory's area suggests: where there is room for more
       // than twice that, more room is worth nothing (and looking for it takes long in a large country).
       const natural = Math.sqrt(piece.total) * 0.18 * st.sizeScale;
-      let pl = this.chooseLines(this.placePiece(piece, view, text, st, landOk, ck, this.spotCache, false, 2 * natural), wanted, scale, view.unit);
+      let pl = this.chooseLines(this.placePiece(piece, view, text, st, landOk, ck, this.spotCache, false, 2 * natural, 0, 1, mask), wanted, scale, view.unit);
       let p = pl ? view.projection([pl.lon, pl.lat]) as [number, number] | null : null;
       // The best place is off screen while part of the territory is in view (zoomed in on a large
       // country): place the label in the part that is in view.
       if ((!pl || !onScreen(p)) && vis !== null && boxIntersects(piece.box, vis)) {
         const inView = (lon: number, lat: number) => onScreen(view.projection([lon, lat]) as [number, number] | null) && (!landOk || landOk(lon, lat));
-        const before = held?.get(`${ck}|view`);
+        // (While the map moves the place is found less finely: it is found again, finely, when the map rests.)
+        const rough = this.moving ? 4 : 1, vk = `${ck}|view${rough > 1 ? '|rough' : ''}`;
+        const before = held?.get(vk);
         if (before) {
           // Held while the map moves: a place found, for as long as it stays in view; and that none
           // was found, until the view has moved on a little (looking again in every frame is what
           // made moving the map slow next to large countries).
           const kept = this.chooseLines(before, wanted, scale, view.unit);
-          if (kept ? onScreen(view.projection([kept.lon, kept.lat]) as [number, number] | null) : this.nearSearch(view, before)) { this.viewSpotCache.set(`${ck}|view`, before); this.lastApproximate = true; }
+          if (kept ? onScreen(view.projection([kept.lon, kept.lat]) as [number, number] | null) : this.nearSearch(view, before)) { this.viewSpotCache.set(vk, before); this.lastApproximate = true; }
         }
-        const alt = this.chooseLines(this.placePiece(piece, view, text, st, inView, `${ck}|view`, this.viewSpotCache, true, (wanted * view.unit) / scale, (MIN_VIEW_LABEL * view.unit) / scale), wanted, scale, view.unit);
+        const alt = this.chooseLines(this.placePiece(piece, view, text, st, inView, vk, this.viewSpotCache, true, (wanted * view.unit) / scale, (MIN_VIEW_LABEL * view.unit) / scale, rough, mask), wanted, scale, view.unit);
+        if (rough > 1) this.lastApproximate = true;
         if (alt && (alt.font * scale) / view.unit >= MIN_VIEW_LABEL) { pl = alt; p = view.projection([alt.lon, alt.lat]) as [number, number] | null; }
       }
       if (!pl || !p) return null;
@@ -2296,9 +2488,12 @@ export class MapRenderer {
    */
   private placeTexts(ctx: CanvasRenderingContext2D, labels: LabelInfo[], cities: CityItem[]): void {
     type Box = [number, number, number, number];
-    const placed: Box[] = [];
+    // (Boxes are kept by the squares of the frame they reach into: with hundreds of names, looking
+    // through all of them for each place tried took longer than drawing them.)
+    const placed = new BoxGrid(), dotGrid = new BoxGrid();
     const dots: Box[] = cities.map((c) => [c.x - c.r, c.y - c.r, c.x + c.r, c.y + c.r]);
-    const hits = (b: Box, list: Box[]) => list.some((o) => !(b[2] < o[0] || b[0] > o[2] || b[3] < o[1] || b[1] > o[3]));
+    for (const d of dots) dotGrid.add(d);
+    const hits = (b: Box, grid: BoxGrid, except: Box | null = null) => grid.hits(b, except);
     ctx.save();
     const sorted = [...labels].sort((a, b) => b.priority - a.priority || b.size - a.size || a.text.localeCompare(b.text));
     for (const l of sorted) {
@@ -2312,20 +2507,22 @@ export class MapRenderer {
       // First keeping clear of city dots too; failing that, only of other labels.
       let found: [number, number] | null = null;
       for (const avoidDots of [true, false]) {
-        for (const [dx, dy] of tries) { const b = at(dx, dy); if (!hits(b, placed) && (!avoidDots || !hits(b, dots))) { found = [dx, dy]; break; } }
+        for (const [dx, dy] of tries) { const b = at(dx, dy); if (!hits(b, placed) && (!avoidDots || !hits(b, dotGrid))) { found = [dx, dy]; break; } }
         if (found) break;
       }
       if (!found) continue;
       l.x += found[0]; l.y += found[1];
       l.box = [l.x - w / 2, l.y - h / 2, l.x + w / 2, l.y + h / 2];
       l.drawn = true;
-      placed.push(l.box);
+      placed.add(l.box);
     }
     (ctx as CanvasRenderingContext2D & { letterSpacing?: string }).letterSpacing = '0px';
-    for (const c of cities) {
+    for (let i = 0; i < cities.length; i++) {
+      const c = cities[i];
       if (!c.size) { c.drawn = false; continue; }
       const w = this.textWidth(ctx, cityFont(c.size), 0, c.name), h = c.size, gap = c.r + 4 * (c.size / 17);
-      const others = dots.filter((d) => !(d[0] === c.x - c.r && d[1] === c.y - c.r));
+      // (Every dot but the city's own, and any other dot at the very same place.)
+      const own = dots[i];
       const options: Array<{ tx: number; ty: number; align: CanvasTextAlign; box: Box }> = [
         { tx: c.x + gap, ty: c.y, align: 'left', box: [c.x + gap, c.y - h / 2, c.x + gap + w, c.y + h / 2] },
         { tx: c.x - gap, ty: c.y, align: 'right', box: [c.x - gap - w, c.y - h / 2, c.x - gap, c.y + h / 2] },
@@ -2334,11 +2531,11 @@ export class MapRenderer {
         { tx: c.x - gap * 0.6, ty: c.y - h * 0.8, align: 'right', box: [c.x - gap * 0.6 - w, c.y - h * 1.3, c.x - gap * 0.6, c.y - h * 0.3] },
         { tx: c.x - gap * 0.6, ty: c.y + h * 0.8, align: 'right', box: [c.x - gap * 0.6 - w, c.y + h * 0.3, c.x - gap * 0.6, c.y + h * 1.3] },
       ];
-      const ok = options.find((o) => !hits(o.box, placed) && !hits(o.box, others));
+      const ok = options.find((o) => !hits(o.box, placed) && !hits(o.box, dotGrid, own));
       c.drawn = !!ok;
       if (!ok) continue;
       c.tx = ok.tx; c.ty = ok.ty; c.align = ok.align; c.box = ok.box;
-      placed.push(ok.box);
+      placed.add(ok.box);
     }
     ctx.restore();
   }

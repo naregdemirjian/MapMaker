@@ -183,18 +183,29 @@ try {
       const a = canvas(), b = canvas();
       const t = B.gregorian.fromCivil({ year: 1990 });
       const out: Array<{ name: string; parts: string; differing: number; worst: number; approximate: boolean }> = [];
-      const compare = () => {
+      // `sides`: where the planet's east and west ends stand on the canvas. A carried picture ends
+      // there on a whole pixel, a fresh one part way into one (and there a fresh picture lets what
+      // lies under the land show through twice): the two columns around each end are left out.
+      const compare = (sides: number[] = []) => {
         const da = a.getImageData(0, 0, W, H).data, db = b.getImageData(0, 0, W, H).data;
         let differing = 0, worst = 0;
         for (let i = 0; i < da.length; i += 4) {
           const d = Math.max(Math.abs(da[i] - db[i]), Math.abs(da[i + 1] - db[i + 1]), Math.abs(da[i + 2] - db[i + 2]), Math.abs(da[i + 3] - db[i + 3]));
-          if (d > 6) differing++;
+          if (d <= 6) continue;
+          const px = (i / 4) % W;
+          if (sides.some((sx) => Math.abs(px + 0.5 - sx) <= 1.5)) continue;
+          differing++;
           if (d > worst) worst = d;
         }
         return { differing: differing / (W * H), worst };
       };
+      const sidesOf = (v: any) => [W / 2 - Math.PI * v.projection.scale(), W / 2 + Math.PI * v.projection.scale()];
       const cases = [
         { name: 'the world', zoom: 0.4, lon: 10, lat: 20, basemap: true },
+        // (The planet's east and west ends are in view, or just beyond it: they stay where they are
+        // on the canvas while the map moves under them.)
+        { name: 'the whole world with its ends in view', zoom: -0.35, lon: -60, lat: 5, basemap: true, tall: 0.25 },
+        { name: 'the world with its ends just out of view', zoom: 0.15, lon: 150, lat: 0, basemap: true, tall: 0.4 },
         { name: 'a region with coasts', zoom: 3.2, lon: 12, lat: 46, basemap: true },
         { name: 'a region without the Earth', zoom: 2.4, lon: 60, lat: 40, basemap: false },
         { name: 'close in', zoom: 6.5, lon: 14, lat: 50, basemap: true },
@@ -211,12 +222,31 @@ try {
         const perDegree = (view.projection.scale() * Math.PI) / 180;
         carried.render(a, view, s.world, s.engine, s.spaceId, t, opts);
         let x = 0, y = 0;
-        for (const [dx, dy] of moves) {
+        // (Far out, moves north and south are made shorter: the view cannot go past the poles, and
+        // a move it cannot make whole is not the move under test.)
+        const tall = (c as { tall?: number }).tall ?? 1;
+        for (const [dx, dy0] of moves) {
+          const dy = Math.round(dy0 * tall);
+          if (!dx && !dy) continue;
           x += dx; y += dy;
           view = B.makeView({ ...cam, lon: c.lon + x / perDegree, lat: c.lat - y / perDegree }, W, H);
           carried.render(a, view, s.world, s.engine, s.spaceId, t, opts);
           fresh.render(b, view, s.world, s.engine, s.spaceId, t, opts);
-          out.push({ name: `${c.name}, moved by ${dx}, ${dy}`, parts: Object.values(carried.lastParts).join(' '), approximate: carried.lastApproximate, ...compare() });
+          out.push({ name: `${c.name}, moved by ${dx}, ${dy}`, parts: Object.values(carried.lastParts).join(' '), approximate: carried.lastApproximate, ...compare(sidesOf(view)) });
+        }
+        // Many small moves one way, then another, then back (the kept picture has room around the
+        // frame and is drawn ahead of the move: see MapRenderer.slide), checked every few moves.
+        let n = 0;
+        for (const [dx, dy0, times] of [[7, 3, 45], [-11, 5, 40], [0, -9, 30], [13, 0, 30], [-4, 4, 25]]) {
+          const dy = Math.round(dy0 * tall);
+          for (let i = 0; i < times; i++) {
+            x += dx; y += dy;
+            view = B.makeView({ ...cam, lon: c.lon + x / perDegree, lat: c.lat - y / perDegree }, W, H);
+            carried.render(a, view, s.world, s.engine, s.spaceId, t, { ...opts, moving: true });
+            if (++n % 6 && i !== times - 1) continue;
+            fresh.render(b, view, s.world, s.engine, s.spaceId, t, opts);
+            out.push({ name: `${c.name}, after ${n} small moves (the last by ${dx}, ${dy})`, parts: Object.values(carried.lastParts).join(' '), approximate: carried.lastApproximate, ...compare(sidesOf(view)) });
+          }
         }
         // A move by part of a pixel, and a zoom, while moving: approximate; drawn afresh once at rest.
         const off = B.makeView({ ...cam, lon: c.lon + (x + 10.4) / perDegree, lat: c.lat - y / perDegree, zoom: c.zoom + 0.2 }, W, H);
@@ -224,7 +254,7 @@ try {
         const during = { parts: Object.values(carried.lastParts).join(' '), approximate: carried.lastApproximate };
         carried.render(a, off, s.world, s.engine, s.spaceId, t, opts);
         fresh.render(b, off, s.world, s.engine, s.spaceId, t, opts);
-        out.push({ name: `${c.name}, at rest after a zoom (${during.parts}, approximate: ${during.approximate})`, parts: during.approximate ? 'moved moved' : 'not approximate', approximate: carried.lastApproximate, ...compare() });
+        out.push({ name: `${c.name}, at rest after a zoom (${during.parts}, approximate: ${during.approximate})`, parts: during.approximate ? 'moved moved' : 'not approximate', approximate: carried.lastApproximate, ...compare(sidesOf(off)) });
       }
       return out;
     }, { W, H });
@@ -248,16 +278,23 @@ try {
       const owners = s.world.all('entity').filter((e: any) => e.type_id === 'polity').map((e: any) => e.id);
       const ring = (cx: number, cy: number, r: number) => Array.from({ length: 48 }, (_, i) => { const q = (i / 48) * Math.PI * 2; return B.lonLatToVec(cx + r * 1.3 * Math.cos(q), cy + r * Math.sin(q)); });
       const out: Array<{ name: string; part: string; differing: number; worst: number }> = [];
-      const compare = () => {
+      // `sides`: where the planet's east and west ends stand on the canvas. A carried picture ends
+      // there on a whole pixel, a fresh one part way into one (and there a fresh picture lets what
+      // lies under the land show through twice): the two columns around each end are left out.
+      const compare = (sides: number[] = []) => {
         const da = a.getImageData(0, 0, W, H).data, db = b.getImageData(0, 0, W, H).data;
         let differing = 0, worst = 0;
         for (let i = 0; i < da.length; i += 4) {
           const d = Math.max(Math.abs(da[i] - db[i]), Math.abs(da[i + 1] - db[i + 1]), Math.abs(da[i + 2] - db[i + 2]), Math.abs(da[i + 3] - db[i + 3]));
-          if (d > 6) differing++;
+          if (d <= 6) continue;
+          const px = (i / 4) % W;
+          if (sides.some((sx) => Math.abs(px + 0.5 - sx) <= 1.5)) continue;
+          differing++;
           if (d > worst) worst = d;
         }
         return { differing: differing / (W * H), worst };
       };
+      const sidesOf = (v: any) => [W / 2 - Math.PI * v.projection.scale(), W / 2 + Math.PI * v.projection.scale()];
       for (const c of [{ name: 'a region with coasts', zoom: 3.2, lon: 12, lat: 46, basemap: true }, { name: 'a region without the Earth', zoom: 2.6, lon: 20, lat: 48, basemap: false }]) {
         const working = new B.MapRenderer(), fresh = new B.MapRenderer();
         working.carry = true;
@@ -340,16 +377,23 @@ try {
       const canvas = () => { const c = new OffscreenCanvas(W, H); return c.getContext('2d', { willReadFrequently: true }) as OffscreenCanvasRenderingContext2D; };
       const a = canvas(), b = canvas();
       const out: Array<{ name: string; part: string; animating: number; differing: number; worst: number }> = [];
-      const compare = () => {
+      // `sides`: where the planet's east and west ends stand on the canvas. A carried picture ends
+      // there on a whole pixel, a fresh one part way into one (and there a fresh picture lets what
+      // lies under the land show through twice): the two columns around each end are left out.
+      const compare = (sides: number[] = []) => {
         const da = a.getImageData(0, 0, W, H).data, db = b.getImageData(0, 0, W, H).data;
         let differing = 0, worst = 0;
         for (let i = 0; i < da.length; i += 4) {
           const d = Math.max(Math.abs(da[i] - db[i]), Math.abs(da[i + 1] - db[i + 1]), Math.abs(da[i + 2] - db[i + 2]), Math.abs(da[i + 3] - db[i + 3]));
-          if (d > 6) differing++;
+          if (d <= 6) continue;
+          const px = (i / 4) % W;
+          if (sides.some((sx) => Math.abs(px + 0.5 - sx) <= 1.5)) continue;
+          differing++;
           if (d > worst) worst = d;
         }
         return { differing: differing / (W * H), worst };
       };
+      const sidesOf = (v: any) => [W / 2 - Math.PI * v.projection.scale(), W / 2 + Math.PI * v.projection.scale()];
       for (const sc of scenes) for (const way of ['as exports are drawn', 'as the working view is drawn']) {
         const kept = new B.MapRenderer(), fresh = new B.MapRenderer();
         if (way === 'as exports are drawn') kept.caching = 'always'; else kept.carry = true;

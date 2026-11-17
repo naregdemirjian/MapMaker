@@ -229,14 +229,14 @@ export class Sheet {
   /** A path for shapes on this sheet, held in blocks so that drawing part of the view only touches the shapes there. */
   blocks(): BlockPath { return new BlockPath([this.wx0, this.wy0, this.wx1, this.wy1]); }
 
-  /** Can this sheet draw the view: same projection, the view inside the window, a scale near its own? */
-  covers(view: View, tolerance: number): boolean {
+  /** Can this sheet draw the view (and `pad` view pixels around it): same projection, the view inside the window, a scale near its own? */
+  covers(view: View, tolerance: number, pad = 0): boolean {
     if (view.camera.projection !== this.kind || tolerance !== this.tolerance) return false;
     if (!this.cyl && this.kind !== 'flat' && view.camera.lon !== this.lonRef) return false;
-    const k = view.projection.scale() / this.S;
+    const s = view.projection.scale(), k = s / this.S;
     if (k > 1.42 || k < 0.5) return false;
-    const r = viewRect(view, this.lonRef);
-    return r[0] >= this.x0 && r[1] >= this.y0 && r[2] <= this.x1 && r[3] <= this.y1;
+    const r = viewRect(view, this.lonRef), p = pad / s;
+    return r[0] - p >= this.x0 && r[1] - p >= this.y0 && r[2] + p <= this.x1 && r[3] + p <= this.y1;
   }
 
   /** The transform that puts the sheet on the view: [scale, x offset, y offset] (screen = scale * sheet + offset). */

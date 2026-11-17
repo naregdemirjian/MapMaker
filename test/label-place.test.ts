@@ -149,3 +149,40 @@ test('the gridded distance to an outline equals the edge-by-edge one, inside and
     }
   }
 });
+
+test('labels: dropping what cannot be accepted, or is too small, changes the time a search takes and not the place it finds', async () => {
+  const { labelStats } = await import('../src/render-engine/label-place.ts');
+  const aspect = textWidthEm('Russia', false, 0) / blockHeightEm(1);
+  for (const name of ['Russia', 'Canada', 'Brazil', 'Indonesia', 'Norway']) {
+    const rings = mainPiece(all.find((c) => c.name === name)!);
+    const lon0 = centreLon(rings[0]);
+    const shape = planeShape(arcsOf(rings), 'equirectangular', lon0);
+    // Only places in a band of latitudes are accepted (a stand-in for "on land" or "on screen").
+    let s = Infinity, n = -Infinity;
+    for (const [, lat] of rings[0]) { if (lat < s) s = lat; if (lat > n) n = lat; }
+    const lo = s + 0.55 * (n - s), hi = s + 0.8 * (n - s);
+    const accept = (_lon: number, lat: number) => lat >= lo && lat <= hi;
+    // The plane is equirectangular: y is minus the latitude in radians.
+    const anyAccepted = (_x0: number, y0: number, _x1: number, y1: number) => -y0 * 180 / Math.PI >= lo && -y1 * 180 / Math.PI <= hi;
+    labelStats.cells = 0; labelStats.stopped = 0;
+    const plain = placeLabel(shape, aspect, accept);
+    const before = labelStats.cells, stopped = labelStats.stopped > 0;
+    labelStats.cells = 0;
+    const pruned = placeLabel(shape, aspect, accept, undefined, Infinity, { anyAccepted });
+    const after = labelStats.cells;
+    assert.ok(plain && pruned, `${name}: placed both ways`);
+    assert.ok(accept(pruned.lon, pruned.lat) && geoContains(polygon(rings), [pruned.lon, pruned.lat]), `${name}: an accepted place inside`);
+    assert.ok(after <= before, `${name}: no more places looked at (${after} against ${before})`);
+    // A search that ends by itself finds the same place either way. One stopped at its limit (a long
+    // coast, much of it not accepted) had spent its steps on what cannot be accepted: with those
+    // dropped it gets further, and the place it finds is as good or better.
+    if (!stopped) assert.ok(Math.abs(plain.lon - pruned.lon) < 1e-9 && Math.abs(plain.lat - pruned.lat) < 1e-9 && Math.abs(plain.room - pruned.room) < 1e-12, `${name}: the same place (${plain.lon}, ${plain.lat} and ${pruned.lon}, ${pruned.lat})`);
+    else assert.ok(pruned.room >= plain.room * 0.97, `${name}: as much room (${pruned.room} against ${plain.room})`);
+    // A floor below the room found changes nothing; one above it means no place at all, found quickly.
+    const low = placeLabel(shape, aspect, accept, undefined, Infinity, { floor: plain.room * 0.5 });
+    assert.ok(low && Math.abs(low.lon - plain.lon) < 1e-9 && Math.abs(low.lat - plain.lat) < 1e-9, `${name}: the same place with a floor below its room`);
+    labelStats.cells = 0;
+    assert.equal(placeLabel(shape, aspect, accept, undefined, Infinity, { floor: plain.room * 3 }), null, `${name}: no place with three times the room`);
+    assert.ok(labelStats.cells < before, `${name}: and that is found sooner (${labelStats.cells} against ${before})`);
+  }
+});

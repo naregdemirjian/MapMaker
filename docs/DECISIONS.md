@@ -59,6 +59,101 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D62. A carried picture has room around the frame and holds the repeating map (the working view)
+
+While the view moves, the kept pictures of the base map and of the territories (D51) used to be moved along and the
+strip that came into view drawn in every frame. A strip costs about as much narrow as wide (the cost is in the number
+of shapes it crosses), so the kept pictures are now larger than the frame (14% of its shorter side on every side,
+48 to 192 pixels). The frame's window moves over the picture; when it reaches the edge of what the picture holds, a
+strip as wide as that margin is drawn ahead of the move (`MapRenderer.slide`), and when the window runs out of buffer
+the picture is moved within it. Most frames then draw nothing and copy the picture once. Anything that changes the
+picture inside the frame (a patch after an edit, D54; an animating change, D58) makes the room around the frame count
+as not drawn, so nothing stale can come into view.
+
+Maps with upright meridians (equirectangular, Mercator) repeat east and west, and the planet's outline shows one turn
+of that; its east and west sides stay where they are on the canvas while the map passes under them. A carried
+picture therefore holds the repeating map, ended only north and south, and the sides are cut when the picture is
+laid on the canvas (on a whole pixel when the frame is upright). This also mends a defect that was there before:
+with the planet's ends in view, moving east or west showed the ends moving with the map until something else caused
+a redraw. Exports are not touched by any of this: they carry nothing from frame to frame, and are cut by the outline
+itself. `e2e/render-compare` moves six views by whole pixels, 170 small moves each, and compares with fresh pictures
+(the two columns of pixels at the planet's sides aside); with the repeating map switched off it fails 73 times.
+
+### D61. What the browser does with canvases (found by tracing, not by profiling the script)
+
+A script profile shows the time inside `drawImage` but not why. A browser trace does (`bench/profile.ts` with an
+output name ending in `.trace.json`, summed up by `bench/trace.mjs`). Chrome records what is drawn on a canvas and
+paints it when the canvas is read; four things followed from that, each measured in `Chrome` without a graphics card:
+
+- **A scratch buffer used twice in a frame is copied whole.** A buffer that has been drawn onto another canvas, and
+  is drawn on again before that canvas has been painted, is first copied by the browser (it must keep what the first
+  drawing showed): about 3 ms at the size of a window, several times that at 4K, in every frame that drew territory
+  ending at the coast (fills, then borders). Each use within a frame now has a buffer of its own, up to four.
+- **A canvas copied onto itself is copied twice.** Moving a kept picture goes through a spare buffer that then takes
+  its place.
+- **Copying part of a larger canvas is two to three times slower than copying a whole one at an offset**, so a kept
+  picture larger than the frame is laid on with a negative offset, never with a source rectangle.
+- **Clearing and then drawing** the first kept picture is replaced by one copy that replaces what the canvas showed.
+
+### D60. Names: searches that end early
+
+Finding the place for a name is a search over the territory's outline (D32). Four ways it ran long, each removed:
+(1) a search that could not succeed (a large country with only a sliver in view) followed the whole outline to the
+finest detail in every frame: a place where the name would be too small to draw is now not looked into, and while the
+map moves a failure is remembered until the view has moved a twentieth of the frame; (2) where territory ends at the
+coast, a territory lying over the sea was combed all over for a point on land: a part of the plane with no land in it
+is now dropped whole (`LandMask.anyLand`, exact to the mask's cells, from sums over blocks of cells); (3) while the
+map moves, the place in the part of a country in view is found a quarter as finely, and found again when the map
+rests; (4) names that would overlap were found by looking through every name placed so far, now through a grid.
+Places found do not change (tests compare searches with and without the short cuts), except that a search that used
+to stop at its limit of steps now gets further.
+
+### D59. Memory is limited by what is held, not by how many things
+
+The renderer's caches (owners' outlines and borders, label pieces, shapes and places) were limited by number of
+entries; one outline of a large country can hold a hundred thousand points, another a dozen. They are now limited by
+the points they hold (`render-engine/kept.ts`), and the history engine keeps fewer worked-out states the more parcels
+a map has. A long random session on the 24,500-parcel project used to grow by about 0.8 MB a step; memory now levels
+off (about 430 MB there, 310 MB on the heavy project), measured after forced collections by `bench/stress.ts`.
+
+### D58. Animated changes redraw only their own area; lists and the timeline keep what they drew
+
+While a change animates, the picture of the territories is kept for the stretch of time and only the rectangles
+around the animated changes are drawn again for each moment, in the working view and in exports alike (everything is
+drawn when they take up most of the frame). The lists of countries, cities and events are drawn again only when what
+they show changes; the timeline keeps its events as a picture and redraws only the playhead; event groups and the
+country a city stands in are looked up through indexes kept until the tables change. What a tool needs besides its
+button lies over the top edge of the map, so choosing a tool no longer resizes the map (a resized map was drawn again
+in full, and moved under the pointer).
+
+### D57. A verify mode, and a stress run that uses it
+
+Everything that is now worked out from what was there before (D55, D56) can also be worked out afresh and compared:
+`Engine.verify` and `MapRenderer.verify` do so after every change and stop on any difference. The interface tests
+run with it on, and `bench/stress.ts` drives a long random session in the real interface with it on (strokes of every
+kind, undo, jumps in time, moving and zooming, events moved and deleted), comparing the map on screen with a fresh
+drawing every ten steps, on a computer made several times slower if asked. It found the two defects fixed in D55
+and D56 that no hand-written test had.
+
+### D56. The renderer is brought up to date owner by owner
+
+A snapshot of who owns what (and each owner's outline, borders and label piece) is made from the snapshot before:
+only owners of parcels that changed get new ones. One pass over an owner's parcels serves its outline, its borders
+and its label. Defect found and fixed on the way: the borders kept for an owner still named the parcel across each
+border, and when that parcel was split by a stroke inside the neighbouring country the border vanished at the next
+full redraw; the parcel across is now looked up when the border is used.
+
+### D55. The history engine follows edits one by one
+
+After an edit the engine used to compile the whole history again (50 ms on the 24,500-parcel project, on every
+stroke). It now follows the changes made (`Engine.follow`): changes of territory and events added, changed and
+deleted, names, placements, parcels split and made whole. Countries, layers and maps coming or going still compile
+everything. A state of all parcels is worked out from the state given before it: only parcels under a change made
+since, or under a change between the two moments, are looked at again. The list of problems (History Health) is
+worked out when asked for. `test/engine-follow.test.ts` follows random histories step by step against fresh compiles
+(and is checked to catch six planted mistakes). Found by the stress run: problems of the kind "two changes at the
+same moment" came out in a different order when followed than when compiled; they are now listed in a fixed order.
+
 ### D54. After an edit, only what changed is drawn again (the working view)
 
 The kept picture of the territories is brought up to date instead of being drawn again: the kernel records, revision

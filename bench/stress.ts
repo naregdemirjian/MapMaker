@@ -87,8 +87,17 @@ try {
       mctx.setTransform(k, 0, 0, k, 0, 0);
       s.renderer.render(mctx, view, s.world, s.engine, s.spaceId, s.time, { passes: new Set(['background', 'land', 'fills', 'borders', 'graticule']), transparent: false, layerIds: layers, basemap: earth, referenceBorders: s.referenceBorders });
       const a = mctx.getImageData(0, 0, W, H).data, b = ctx.getImageData(0, 0, W, H).data;
+      // (Where the planet's east and west ends stand, a carried picture ends on a whole pixel and a
+      // fresh one part way into it: the columns around them are left out.)
+      const half = Math.PI * view.projection.scale();
+      const sides = ['equirectangular', 'mercator'].includes(s.camera.projection) && !s.camera.rotation ? [k * (view.width / 2 - half), k * (view.width / 2 + half)] : [];
       let differing = 0;
-      for (let i = 0; i < a.length; i += 4) if (Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]) > 90) differing++;
+      for (let i = 0; i < a.length; i += 4) {
+        if (Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]) <= 90) continue;
+        const px = (i / 4) % W;
+        if (sides.length && (Math.abs(px + 0.5 - sides[0]) <= 1.5 || Math.abs(px + 0.5 - sides[1]) <= 1.5)) continue;
+        differing++;
+      }
       compared++;
       worstDiff = Math.max(worstDiff, differing / (W * H));
       s.notify();

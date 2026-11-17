@@ -414,6 +414,42 @@ export class LandMask {
     const y = Math.min(this.height - 1, Math.max(0, Math.floor(((90 - lat) / 180) * this.height)));
     return this.bits[y * this.width + Math.min(this.width - 1, x)] === 1;
   }
+
+  /** Land cells in each block of BLOCK by BLOCK cells, summed from the top left, made on first use. */
+  private sums: Int32Array | null = null;
+  private static readonly BLOCK = 8;
+
+  /** Is there any land in a box of longitudes and latitudes (degrees)? Exact to the mask's cells. */
+  anyLand(west: number, south: number, east: number, north: number): boolean {
+    const W = this.width, H = this.height, K = LandMask.BLOCK, nx = Math.ceil(W / K), ny = Math.ceil(H / K);
+    if (!this.sums) {
+      const sums = new Int32Array((nx + 1) * (ny + 1));
+      for (let by = 0; by < ny; by++) for (let bx = 0; bx < nx; bx++) {
+        let n = 0;
+        for (let y = by * K; y < Math.min(H, (by + 1) * K); y++) for (let x = bx * K; x < Math.min(W, (bx + 1) * K); x++) n += this.bits[y * W + x];
+        sums[(by + 1) * (nx + 1) + bx + 1] = n + sums[by * (nx + 1) + bx + 1] + sums[(by + 1) * (nx + 1) + bx] - sums[by * (nx + 1) + bx];
+      }
+      this.sums = sums;
+    }
+    const sums = this.sums;
+    const y0 = Math.max(0, Math.min(H - 1, Math.floor(((90 - north) / 180) * H))), y1 = Math.max(y0, Math.min(H - 1, Math.floor(((90 - south) / 180) * H)));
+    // Columns x0..x1 of rows y0..y1 (no wrapping): whole blocks by their sums, the cells around them one by one.
+    const any = (x0: number, x1: number): boolean => {
+      const bx0 = Math.ceil(x0 / K), bx1 = Math.floor((x1 + 1) / K) - 1, by0 = Math.ceil(y0 / K), by1 = Math.floor((y1 + 1) / K) - 1;
+      const whole = bx1 >= bx0 && by1 >= by0;
+      if (whole && sums[(by1 + 1) * (nx + 1) + bx1 + 1] - sums[by0 * (nx + 1) + bx1 + 1] - sums[(by1 + 1) * (nx + 1) + bx0] + sums[by0 * (nx + 1) + bx0] > 0) return true;
+      const scan = (ax0: number, ay0: number, ax1: number, ay1: number): boolean => {
+        for (let y = ay0; y <= ay1; y++) { const row = y * W; for (let x = ax0; x <= ax1; x++) if (this.bits[row + x]) return true; }
+        return false;
+      };
+      if (!whole) return scan(x0, y0, x1, y1);
+      const ix0 = bx0 * K, ix1 = (bx1 + 1) * K - 1, iy0 = by0 * K, iy1 = (by1 + 1) * K - 1;
+      return scan(x0, y0, x1, iy0 - 1) || scan(x0, iy1 + 1, x1, y1) || scan(x0, iy0, ix0 - 1, iy1) || scan(ix1 + 1, iy0, x1, iy1);
+    };
+    if (!(east - west < 360 - 360 / W)) return any(0, W - 1);
+    const x0 = Math.floor(((((west + 180) % 360) + 360) % 360) / 360 * W), x1 = x0 + Math.floor(((east - west) / 360) * W) + 1;
+    return x1 <= W - 1 ? any(x0, x1) : any(x0, W - 1) || any(0, Math.min(W - 1, x1 - W));
+  }
 }
 
 const masks = new WeakMap<Basemap, LandMask | null>();

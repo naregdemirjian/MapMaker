@@ -163,6 +163,9 @@ export function signedDistance(shape: PlaneShape, x: number, y: number, stretch:
   return inside ? dist : -dist;
 }
 
+/** Counts for benchmarks and tests: searches made, places looked at, places with room that were not accepted, searches stopped at their limit of steps. */
+export const labelStats = { searches: 0, cells: 0, refused: 0, stopped: 0 };
+
 export interface LabelSpot {
   /** Projection-plane position (scale 1, turned to the territory). */
   x: number;
@@ -173,18 +176,34 @@ export interface LabelSpot {
   lat: number;
 }
 
+/** Finer points of a search for a label's place (see placeLabel). */
+export interface PlaceOptions {
+  /**
+   * Places with less room than this are of no use (the label would be too small to draw), so parts
+   * of the plane that cannot have that much are not looked into: a search that finds nothing then
+   * ends quickly instead of following the whole outline down to the finest detail.
+   */
+  floor?: number;
+  /** How many times less finely than usual the place is found (the search is that much shorter). */
+  rough?: number;
+  /**
+   * Could any place in this box of the plane (x0, y0, x1, y1) be accepted? "No" must be certain. With
+   * it, parts of a territory where nothing is accepted (the sea, for a territory that ends at the
+   * coast) are dropped whole instead of being searched down to the finest detail.
+   */
+  anyAccepted?: (x0: number, y0: number, x1: number, y1: number) => boolean;
+}
+
 /**
  * The best place for a label `aspect` times as wide as it is tall: where the widest ellipse with
  * those proportions fits inside the outline, mildly drawn towards the middle. `accept` can rule
  * places out (for example the sea, or off screen); `within` limits the search to a box of the plane.
  * `cap`: room beyond this (in the plane's units) is worth no more, so among places with that much
  * room the one nearest the middle wins, and the search need not measure how much more there is.
- * `floor`: places with less room than this are of no use (the label would be too small to draw), so
- * parts of the plane that cannot have that much are not looked into: a search that finds nothing
- * then ends quickly instead of following the whole outline down to the finest detail.
  * Null when nothing inside is acceptable.
  */
-export function placeLabel(shape: PlaneShape, aspect: number, accept?: (lon: number, lat: number) => boolean, within?: [number, number, number, number], cap = Infinity, floor = 0): LabelSpot | null {
+export function placeLabel(shape: PlaneShape, aspect: number, accept?: (lon: number, lat: number) => boolean, within?: [number, number, number, number], cap = Infinity, o: PlaceOptions = {}): LabelSpot | null {
+  const floor = o.floor ?? 0, rough = o.rough ?? 1, anyAccepted = o.anyAccepted;
   const { edges, projection } = shape;
   let bbox = shape.bbox;
   // Searching only part of the territory (the part on screen, say): start from that part's box.
@@ -198,19 +217,23 @@ export function placeLabel(shape: PlaneShape, aspect: number, accept?: (lon: num
   const R = Math.max(W, H) / 2;
   const bias = (dc: number) => 1 - 0.3 * Math.min(1, Math.max(0, dc) / R);
   const evalAt = (x: number, y: number) => signedDistance(shape, x * st, y, st, cap);
-  const precision = Math.max(W, H) / 400;
+  // (`rough`: so many times less finely, for a place that is only shown in passing.)
+  const precision = (Math.max(W, H) / 400) * rough;
   const lonlatOf = (x: number, y: number) => projection.invert?.([x * st, y]) ?? null;
   const ok = (x: number, y: number) => {
     if (!accept) return true;
     const ll = lonlatOf(x, y);
     return !!ll && accept(ll[0], ll[1]);
   };
-  type Cell = { x: number; y: number; h: number; d: number; score: number; max: number };
+  type Cell = { x: number; y: number; h: number; d: number; score: number; max: number; /** Its middle has room enough but is not accepted. */ refused: boolean };
+  labelStats.searches++;
   const make = (x: number, y: number, h: number): Cell => {
+    labelStats.cells++;
     const d = evalAt(x, y);
     const dc = Math.hypot(x - cx0, y - cy0);
-    const good = d > 0 && d >= floor && ok(x, y);
-    return { x, y, h, d, score: good ? d * bias(dc) : -Infinity, max: Math.min(d + h * Math.SQRT2, cap) * bias(dc - h * Math.SQRT2) };
+    const roomy = d > 0 && d >= floor, good = roomy && ok(x, y);
+    if (roomy && !good) labelStats.refused++;
+    return { x, y, h, d, score: good ? d * bias(dc) : -Infinity, max: Math.min(d + h * Math.SQRT2, cap) * bias(dc - h * Math.SQRT2), refused: roomy && !good };
   };
   // (No place in the cell can have `floor` of room: not worth looking into.)
   const worth = (c: Cell) => c.d + c.h * Math.SQRT2 >= floor;
@@ -222,14 +245,18 @@ export function placeLabel(shape: PlaneShape, aspect: number, accept?: (lon: num
   const centre = make(cx0, cy0, 0);
   if (centre.score > -Infinity) best = centre;
   let n = 0;
-  while (heap.size && n++ < 6000) {
+  const most = 6000 / rough;
+  while (heap.size && n++ < most) {
     const c = heap.pop()!;
     if (c.score > (best?.score ?? -Infinity)) best = c;
     if (best && c.max - best.score <= precision) continue;
     if (c.h < precision / 4) continue;
+    // (Its middle is not accepted, and nothing else in it can be.)
+    if (c.refused && anyAccepted && !anyAccepted((c.x - c.h) * st, c.y - c.h, (c.x + c.h) * st, c.y + c.h)) continue;
     const h = c.h / 2;
     for (let q = 0; q < 4; q++) { const k = make(c.x + (q & 1 ? h : -h), c.y + (q & 2 ? h : -h), h); if (worth(k)) heap.push(k); }
   }
+  if (heap.size && n > most) labelStats.stopped++;
   if (!best) return null;
   const ll = lonlatOf(best.x, best.y);
   if (!ll) return null;
