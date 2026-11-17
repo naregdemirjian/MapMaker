@@ -9,6 +9,7 @@ import { join, resolve } from 'node:path';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { capture } from './harness.ts';
 
 // The path of the Electron program (the 'electron' package exports it when required from Node).
 const electronPath = createRequire(import.meta.url)('electron') as unknown as string;
@@ -69,7 +70,7 @@ try {
     await page.getByTestId('ask-input').fill('Religion');
     await page.getByTestId('ask-input').press('Enter');
     await page.locator('.left .row', { hasText: 'Religion' }).waitFor();
-    await page.screenshot({ path: join(OUT, '01-desktop-window.png') });
+    await capture(page, join(OUT, '01-desktop-window.png'));
   });
 
   await step('Only one copy runs: starting it again brings the open window forward', async () => {
@@ -90,7 +91,7 @@ try {
     await row.click();
     await page.getByTestId('map-canvas').waitFor();
     await page.locator('.left .row', { hasText: 'Desktop Country' }).waitFor();
-    await page.screenshot({ path: join(OUT, '02-reopened.png') });
+    await capture(page, join(OUT, '02-reopened.png'));
   });
 
   await step('No errors in the interface', async () => {

@@ -182,22 +182,29 @@ try {
       const canvas = () => { const c = new OffscreenCanvas(W, H); return c.getContext('2d', { willReadFrequently: true }) as OffscreenCanvasRenderingContext2D; };
       const a = canvas(), b = canvas();
       const t = B.gregorian.fromCivil({ year: 1990 });
-      const out: Array<{ name: string; parts: string; differing: number; worst: number; approximate: boolean }> = [];
+      const out: Array<{ name: string; parts: string; differing: number; worst: number; strong: number; dense: number; approximate: boolean }> = [];
       // `sides`: where the planet's east and west ends stand on the canvas. A carried picture ends
       // there on a whole pixel, a fresh one part way into one (and there a fresh picture lets what
       // lies under the land show through twice): the two columns around each end are left out.
+      // Counted: pixels that differ at all (by more than 6 of 255), those that differ strongly (by
+      // more than 96), and the most differing pixels in any square of 8 by 8.
+      const squares = new Uint8Array(Math.ceil(W / 8) * Math.ceil(H / 8));
       const compare = (sides: number[] = []) => {
         const da = a.getImageData(0, 0, W, H).data, db = b.getImageData(0, 0, W, H).data;
-        let differing = 0, worst = 0;
+        let differing = 0, worst = 0, strong = 0, dense = 0;
+        squares.fill(0);
         for (let i = 0; i < da.length; i += 4) {
           const d = Math.max(Math.abs(da[i] - db[i]), Math.abs(da[i + 1] - db[i + 1]), Math.abs(da[i + 2] - db[i + 2]), Math.abs(da[i + 3] - db[i + 3]));
           if (d <= 6) continue;
-          const px = (i / 4) % W;
+          const p = i / 4, px = p % W;
           if (sides.some((sx) => Math.abs(px + 0.5 - sx) <= 1.5)) continue;
           differing++;
           if (d > worst) worst = d;
+          if (d > 96) strong++;
+          const q = (px >> 3) + ((p - px) / W >> 3) * Math.ceil(W / 8);
+          if (++squares[q] > dense) dense = squares[q];
         }
-        return { differing: differing / (W * H), worst };
+        return { differing: differing / (W * H), worst, strong, dense };
       };
       const sidesOf = (v: any) => [W / 2 - Math.PI * v.projection.scale(), W / 2 + Math.PI * v.projection.scale()];
       const cases = [
@@ -262,12 +269,21 @@ try {
       }
       return out;
     }, { W, H });
-    let failed = 0;
+    // The same outline is not shaded the same to the last grey level in two pictures: the browser
+    // smooths an edge a little differently according to how much else is in the path it is drawn
+    // with, and a carried picture is put together from other paths (other blocks of the plane) than
+    // a fresh one. Two fresh pictures of one view differ in the same way when their geometry was
+    // prepared around different places: a few dozen pixels along coasts, by a tenth of full
+    // contrast. So: at most 0.05% of the pixels may differ at all, no more than a handful strongly,
+    // and nowhere many together (an area not drawn, or drawn a pixel off, fails all three).
+    let failed = 0, most = 0;
     for (const r of results) {
-      const ok = r.parts.split(' ').every((p) => p === 'moved') && !r.approximate && r.differing <= 0.0002;
+      const ok = r.parts.split(' ').every((p) => p === 'moved') && !r.approximate && r.differing <= 0.0005 && r.strong <= 6 && r.dense < 28;
       if (!ok) failed++;
-      if (!ok || process.env.VERBOSE) console.log(`    ${ok ? 'same' : 'DIFFERENT'}  ${r.name}: parts ${r.parts}; ${(r.differing * 100).toFixed(4)}% of pixels differ (largest difference ${r.worst})`);
+      most = Math.max(most, r.differing);
+      if (!ok || process.env.VERBOSE) console.log(`    ${ok ? 'same' : 'DIFFERENT'}  ${r.name}: parts ${r.parts}; ${(r.differing * 100).toFixed(4)}% of pixels differ (largest difference ${r.worst}; ${r.strong} strongly; at most ${r.dense} in a square of 8 by 8)`);
     }
+    console.log(`    (the most pixels differing in any of ${results.length} comparisons: ${(most * 100).toFixed(4)}%; allowed 0.05%)`);
     assert.equal(failed, 0, `${failed} of ${results.length} carried pictures differ from fresh ones`);
   });
 

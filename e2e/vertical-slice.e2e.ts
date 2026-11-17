@@ -13,6 +13,7 @@ import { inflateSync } from 'node:zlib';
 import assert from 'node:assert/strict';
 import { geoContains } from 'd3-geo';
 import { decodeBasemap, type BasemapFile } from '../src/render-engine/basemap.ts';
+import { capture } from './harness.ts';
 
 type LL = [number, number];
 type Pt = [number, number];
@@ -85,7 +86,7 @@ async function step(name: string, fn: () => Promise<void>): Promise<void> {
 
 async function screenshot(name: string): Promise<void> {
   await page.waitForTimeout(150);
-  await page.screenshot({ path: join(OUT, `${String(++shotNo).padStart(2, '0')}-${name}.png`) });
+  await capture(page, join(OUT, `${String(++shotNo).padStart(2, '0')}-${name}.png`));
 }
 
 function watch(p: Page): Page {

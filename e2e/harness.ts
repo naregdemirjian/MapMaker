@@ -10,6 +10,25 @@ export type LL = [number, number];
 export type Pt = [number, number];
 export const ROOT = resolve(import.meta.dirname, '..');
 
+/**
+ * A picture of the page for the record. The browser now and then cannot give one at that instant
+ * ("Unable to capture screenshot": seen once on a Windows runner, on the very first picture of a
+ * run, before anything was drawn): asked again a moment later, up to three times. A page that
+ * still gives none fails the step.
+ */
+export async function capture(page: Page, path: string): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await page.screenshot({ path });
+      return;
+    } catch (e) {
+      if (attempt >= 3 || !/Unable to capture screenshot/.test(String((e as Error)?.message ?? e))) throw e;
+      console.log(`(no picture of the page at the ${attempt === 1 ? 'first' : 'second'} asking; asking again)`);
+      await page.waitForTimeout(400 * attempt);
+    }
+  }
+}
+
 export class Harness {
   server: ChildProcess | null = null;
   baseUrl = '';
@@ -90,7 +109,7 @@ export class Harness {
 
   async screenshot(name: string): Promise<void> {
     await this.page.waitForTimeout(150);
-    await this.page.screenshot({ path: join(this.out, `${String(++this.shotNo).padStart(2, '0')}-${name}.png`) });
+    await capture(this.page, join(this.out, `${String(++this.shotNo).padStart(2, '0')}-${name}.png`));
   }
 
   async finish(error?: unknown): Promise<void> {

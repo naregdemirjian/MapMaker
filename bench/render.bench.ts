@@ -75,6 +75,9 @@ try {
       if (want('panClose')) out.panClose = await run(40, (i) => s.setCamera({ ...base, zoom: 7, lon: 10 + i * 0.02, lat: 48 }));
       if (want('panDeep')) out.panDeep = await run(40, (i) => s.setCamera({ ...base, zoom: 13, lon: 10 + i * 0.0003, lat: 48 }));
       if (want('panVeryDeep')) out.panVeryDeep = await run(40, (i) => s.setCamera({ ...base, zoom: 19, lon: 10 + i * 0.000005, lat: 48 }));
+      // The same in a projection whose shape depends on the middle meridian (Equal Earth): east and west.
+      if (want('panWorldEE')) out.panWorldEE = await run(20, (i) => s.setCamera({ ...base, projection: 'equalEarth', lon: 15 + i * 1.5 }));
+      if (want('panRegionEE')) out.panRegionEE = await run(20, (i) => s.setCamera({ ...base, projection: 'equalEarth', zoom: 3.5, lon: 5 + i * 0.25, lat: 50 - i * 0.05 }));
       s.setCamera({ ...base, zoom: 2.2 });
       if (want('scrub')) out.scrub = await run(40, (i) => s.setTime(Y(1000 + i * 25), true)); // as dragging along the timeline does
       // Dragging along the timeline at an everyday pace: a year at a time, and a month at a time close in on one region.
