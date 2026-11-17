@@ -16,6 +16,7 @@ import { openMenu, entityMenu, groupMenu, eventMenu } from './ContextMenu.tsx';
 import { CountryHistorySection } from './CountryHistory.tsx';
 import { NamesSection } from './Names.tsx';
 import { FeatureToolOptions, FeaturePanel, FeatureRows, featureLayers } from './Features.tsx';
+import { RelationsSection } from './Relations.tsx';
 import { isFeatureKind } from '../../render-engine/feature-style.ts';
 
 export const fmt = (t: Instant, precision: 'year' | 'day' | 'minute' = 'day') => gregorian.format(t, precision);
@@ -538,6 +539,7 @@ function EntityPanel({ id }: { id: string }) {
       {!changes.length && e.type_id !== 'character' && e.type_id !== 'settlement' && <div className="muted">None yet.</div>}
       {(e.type_id === 'polity' || e.type_id === 'faction') && <><CountryHistorySection id={id} /><CountryFillSection id={id} /><CountryLabelSection id={id} /></>}
       {(e.type_id === 'character' || e.type_id === 'settlement') && <CharacterSection id={id} />}
+      {e.type_id !== 'body' && <RelationsSection id={id} />}
       {e.type_id !== 'body' && <NamesSection id={id} />}
       <button className="danger" onClick={() => { if (confirm(`Delete ${e.name}? Events that refer to it will be flagged in History Health.`)) { s.execute((wd) => cmd.deleteEntity(wd, id)); s.set({ selection: null }); } }}>Delete</button>
     </div>
@@ -574,6 +576,12 @@ function describeEffect(s: ReturnType<typeof useStore>, f: EffectRow): string {
   if (f.kind === 'rename') {
     const i = parseJSON<{ entity: string; name: string }>(f.intent, { entity: '', name: '' });
     return `${name(i.entity)} is called ${i.name}`;
+  }
+  if (f.kind === 'relate') {
+    const i = parseJSON<{ relation: string; on?: boolean }>(f.intent, { relation: '' });
+    const r = w.get('relation', i.relation);
+    const what = r ? cmd.describeRelation(w, r) : '(a deleted relationship)';
+    return `${i.on ? 'Begins' : 'Ends'}: ${what}${f.at_day !== null ? ` (at ${fmt(fromStore(f.at_day, f.at_ms ?? 0), 'minute')})` : ''}`;
   }
   if (f.kind === 'shape') {
     const i = parseJSON<{ feature: string; off?: boolean }>(f.intent, { feature: '' });

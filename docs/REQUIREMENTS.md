@@ -103,7 +103,7 @@ status. Last updated: 17 November 2026 (after the user's second feedback round; 
 | Exporting layers independently | Partial | `e2e/workflows` | Passes are separated by kind (fills, borders, labels…) across visible layers; a single layer is exported by hiding the others |
 | Countries and factions | Tested | `e2e/*` | |
 | Characters, cities, units as entities | Partial | `characters`, `e2e/workflows` 'A character', 'A city' | Characters travel between dated places; cities are founded (at a date or from the beginning), moved at once and abandoned; both have their own export layers. Units have no place on the map yet (Stage 7); city renames over time not yet |
-| Relationships (part of, at war with, successor of…) | Not implemented | | Stage 4. Annexation (an intention tied to two countries) exists and is tested |
+| Relationships (part of, at war with, successor of…) | Tested | `relations`, `e2e/workflows` 'Relationships' | At war, allied, part of, vassal of, member of, leads, successor of, travels with; each holds over periods begun and ended at dates or by events, read from either side (D72). Annexation (an intention tied to two countries) is separate and tested. Their use on the map (front lines from wars) is Stage 7 |
 
 ## Military, characters and movement
 

@@ -745,6 +745,35 @@ try {
     await page.getByTestId('tool-select').click();
   });
 
+  await h.step('Relationships: a war added from a country\'s panel, with an end date, read from both sides, ended again later', async () => {
+    await h.setDate('1850');
+    await page.locator('.left .row', { hasText: A }).first().click();
+    await page.getByTestId('entity-panel').waitFor();
+    await page.getByTestId('relation-new').click();
+    await page.getByTestId('relation-kind').selectOption({ label: 'at war with' });
+    await page.getByTestId('relation-other').selectOption({ label: B });
+    await page.getByTestId('relation-until').fill('1860');
+    await page.getByTestId('relation-until').press('Enter');
+    await page.getByTestId('relation-add').click();
+    const row = page.getByTestId('relation-row');
+    await row.waitFor();
+    assert.match((await row.textContent()) ?? '', new RegExp(`At war with\\s*${B}`));
+    assert.match((await page.getByTestId('relation-periods').textContent()) ?? '', /1 January 1850 – 1 January 1860/);
+    // From the other side.
+    await row.getByRole('button', { name: B }).click();
+    await page.getByTestId('entity-panel').locator('h3', { hasText: B }).waitFor();
+    assert.match((await page.getByTestId('relation-row').textContent()) ?? '', new RegExp(`At war with\\s*${A}`));
+    // A second war from 1870 ("Again from"), then peace in 1871 ("Ends on").
+    await h.setDate('1870');
+    await page.getByTestId('relation-resume').click();
+    await h.setDate('1871');
+    await page.getByTestId('relation-end').click();
+    await h.saved();
+    assert.match((await page.getByTestId('relation-periods').textContent()) ?? '', /1850 – 1 January 1860; 1 January 1870 – 1 January 1871/);
+    const holds = await page.evaluate(() => { const m = (window as any).__mapmaker, s = m.store, B = m.bench; const r = s.world.all('relation')[0]; return [1855, 1865, 1870.5, 1872].map((y) => s.engine.relationHolds(r.id, B.gregorian.fromCivil({ year: Math.floor(y), month: y % 1 ? 7 : 1 }))); });
+    assert.deepEqual(holds, [true, false, true, false]);
+  });
+
   await h.step('A shot framed in the preview (still camera, reset) at 2.39:1 and 25 fps; inspect every exported pass', async () => {
     colours = await page.evaluate((names) => Object.fromEntries(names.map((n) => [n, (window as any).__mapmaker.store.world.all('entity').find((e: any) => e.name === n).color])), [A, B]);
     await page.locator('.left .row', { hasText: 'Union' }).click();

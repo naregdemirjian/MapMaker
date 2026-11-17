@@ -59,6 +59,15 @@ export interface RenameIntent { op: 'rename'; entity: string; name: string }
  */
 export interface ShapeIntent { op: 'shape'; feature: string; parts?: number[][]; off?: boolean }
 
+/** A relationship holds (`on`) or no longer holds from a date on (an effect of kind 'relate'). */
+export interface RelateIntent { op: 'relate'; relation: string; on: boolean }
+
+/** One compiled step of a relationship: it holds, or not, from a moment on. */
+export interface RelateStep { t: Instant; on: boolean; effectId: string; eventId: string; precedence: number; eventSeq: number; ordinal: number }
+
+/** A period in which a relationship holds: from, until (null: still holding), and the changes that began and ended it. */
+export interface RelationPeriod { from: Instant; to: Instant | null; fromEffect: string; toEffect: string | null }
+
 /** One compiled step of a feature's history: its shape from a moment on (null: it does not exist). */
 export interface ShapeStep { t: Instant; parts: number[][] | null; effectId: string; eventId: string; precedence: number; eventSeq: number; ordinal: number }
 
@@ -178,6 +187,8 @@ export class Engine {
   private names = new Map<string, Array<{ t: Instant; name: string; order: [number, number, number] }>>();
   /** Characters' tracks: map -> character -> waypoints in time order. */
   private tracks = new Map<string, Map<string, Waypoint[]>>();
+  /** Every relationship's steps (in time order; one step per moment). */
+  private relates = new Map<string, RelateStep[]>();
   /** Every feature's shapes over time, by layer then feature (in time order; one step per moment). */
   private shapes = new Map<string, Map<string, ShapeStep[]>>();
   private effectAssignments = new Map<string, Assignment[]>();
@@ -256,6 +267,7 @@ export class Engine {
       e.timeIndex.map((x) => `${timeKey(x.t)}`).join(' '),
       JSON.stringify([...e.names.entries()].sort()), JSON.stringify([...e.tracks.entries()].map(([sp, m]) => [sp, [...m.entries()].sort()])),
       JSON.stringify([...e.shapes.entries()].sort().map(([l, m]) => [l, [...m.entries()].sort()])),
+      JSON.stringify([...e.relates.entries()].sort()),
       JSON.stringify(e.conflicts),
     ];
     const a = show(this), b = show(fresh);
@@ -420,14 +432,27 @@ export class Engine {
     this.tracks.clear();
     this.names.clear();
     this.shapes.clear();
+    this.relates.clear();
     const count = (t: Instant) => { if (t.day !== -Infinity) { this.pointTimes.push(t); this.countTime(t, 1, false); } };
     for (const ef of effects) {
-      if (ef.kind !== 'rename' && ef.kind !== 'place' && ef.kind !== 'shape') continue;
+      if (ef.kind !== 'rename' && ef.kind !== 'place' && ef.kind !== 'shape' && ef.kind !== 'relate') continue;
       this.broken.delete(ef.id);
       const ev = events.get(ef.event_id);
       const problem = (message: string) => this.broken.set(ef.id, [{ kind: 'broken', effectId: ef.id, eventId: ev ? ev.id : ef.event_id, message }]);
       if (!ev) { problem('This change belongs to an event that no longer exists.'); continue; }
       if (!this.isActiveEvent(ev)) continue;
+      if (ef.kind === 'relate') {
+        const it = parseJSON<RelateIntent | null>(ef.intent, null);
+        const r = it ? w.get('relation', it.relation) : undefined;
+        if (!it || !r) { problem('This change is of a relationship that no longer exists.'); continue; }
+        if (!w.get('entity', r.a) || !w.get('entity', r.b)) { problem('This relationship is with something that no longer exists.'); continue; }
+        let steps = this.relates.get(r.id);
+        if (!steps) this.relates.set(r.id, (steps = []));
+        const t = effectTime(ef, ev);
+        steps.push({ t, on: !!it.on, effectId: ef.id, eventId: ev.id, precedence: isUntracked(ef) ? UNTRACKED_PRECEDENCE : ev.precedence, eventSeq: ev.created_seq, ordinal: ef.ordinal });
+        count(t);
+        continue;
+      }
       if (ef.kind === 'shape') {
         const it = parseJSON<ShapeIntent | null>(ef.intent, null);
         const f = it ? w.get('feature', it.feature) : undefined;
@@ -474,6 +499,10 @@ export class Engine {
       // Several placements at one moment: the last in order stands.
       for (let i = tr.length - 2; i >= 0; i--) if (compare(tr[i].t, tr[i + 1].t) === 0) tr.splice(i, 1);
     }
+    for (const steps of this.relates.values()) {
+      steps.sort((a, b) => compare(a.t, b.t) || a.precedence - b.precedence || a.eventSeq - b.eventSeq || a.ordinal - b.ordinal);
+      for (let i = steps.length - 2; i >= 0; i--) if (compare(steps[i].t, steps[i + 1].t) === 0) steps.splice(i, 1);
+    }
     for (const byLayer of this.shapes.values()) for (const steps of byLayer.values()) {
       steps.sort((a, b) => compare(a.t, b.t) || a.precedence - b.precedence || a.eventSeq - b.eventSeq || a.ordinal - b.ordinal);
       // Several shapes at one moment: the last in order stands.
@@ -503,11 +532,11 @@ export class Engine {
       if (s.table === 'vertex' || s.table === 'face') { spaces.add(((s.after ?? s.before) as { space_id: string }).space_id); continue; }
       if (s.table === 'effect') {
         effects.add(((s.after ?? s.before) as EffectRow).id);
-        for (const r of [s.before, s.after] as Array<EffectRow | null>) if (r && (r.kind === 'rename' || r.kind === 'place' || r.kind === 'shape')) points = true;
+        for (const r of [s.before, s.after] as Array<EffectRow | null>) if (r && (r.kind === 'rename' || r.kind === 'place' || r.kind === 'shape' || r.kind === 'relate')) points = true;
         continue;
       }
       // An area, line or point that came or went: its shapes are compiled again (with the names and places).
-      if (s.table === 'feature') { points = true; continue; }
+      if (s.table === 'feature' || s.table === 'relation') { points = true; continue; }
       if (s.table === 'event') {
         const id = ((s.after ?? s.before) as EventRow).id;
         if (!events.has(id)) events.set(id, s.before as EventRow | null);
@@ -522,7 +551,7 @@ export class Engine {
       if (!(before && now && sameStanding(before, now))) moved.add(id);
     }
     const all = moved.size || points ? w.all('effect') : null;
-    if (moved.size) for (const ef of all!) if (moved.has(ef.event_id)) { effects.add(ef.id); if (ef.kind === 'rename' || ef.kind === 'place' || ef.kind === 'shape') points = true; }
+    if (moved.size) for (const ef of all!) if (moved.has(ef.event_id)) { effects.add(ef.id); if (ef.kind === 'rename' || ef.kind === 'place' || ef.kind === 'shape' || ef.kind === 'relate') points = true; }
     // Parcels: one that is gone may not be referred to; land whose outline changed may change how far an animation reaches.
     const again = new Set<string>();
     const gone: number[] = [];
@@ -668,6 +697,42 @@ export class Engine {
     this.ensure();
     const f = this.world.get('feature', featureId);
     return (f && this.shapes.get(f.layer_id)?.get(featureId)) || [];
+  }
+
+  /** Whether a relationship holds at instant t. */
+  relationHolds(relationId: string, t: Instant): boolean {
+    this.ensure();
+    const steps = this.relates.get(relationId);
+    if (!steps) return false;
+    let k = -1;
+    for (let lo = 0, hi = steps.length - 1; lo <= hi;) { const m = (lo + hi) >> 1; if (compare(steps[m].t, t) <= 0) { k = m; lo = m + 1; } else hi = m - 1; }
+    return k >= 0 && steps[k].on;
+  }
+
+  /** The relationships that hold at instant t (ids). */
+  relationsAt(t: Instant): string[] {
+    this.ensure();
+    const out: string[] = [];
+    for (const id of this.relates.keys()) if (this.relationHolds(id, t)) out.push(id);
+    return out;
+  }
+
+  /** The periods in which a relationship holds, in time order. */
+  relationPeriods(relationId: string): RelationPeriod[] {
+    this.ensure();
+    const out: RelationPeriod[] = [];
+    let open: RelationPeriod | null = null;
+    for (const st of this.relates.get(relationId) ?? []) {
+      if (st.on && !open) { open = { from: st.t, to: null, fromEffect: st.effectId, toEffect: null }; out.push(open); }
+      else if (!st.on && open) { open.to = st.t; open.toEffect = st.effectId; open = null; }
+    }
+    return out;
+  }
+
+  /** A relationship's steps (beginning and ending), in time order. */
+  relationSteps(relationId: string): RelateStep[] {
+    this.ensure();
+    return this.relates.get(relationId) ?? [];
   }
 
   /** The characters on a map with a track (placed at least once). */

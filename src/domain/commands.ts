@@ -2,16 +2,17 @@
 // in-memory world and returns the exact row diffs to save (and to undo). Commands never draw anything.
 import { World, Tx, newId } from '../world-model/world.ts';
 import {
-  Engine, canonicalFaces, leafDescendants, hashFaces, parseJSON, type Resolution, type TransitionSpec, type AnnexIntent, type PlaceIntent, type RenameIntent, type ShapeIntent,
+  Engine, canonicalFaces, leafDescendants, hashFaces, parseJSON, type Resolution, type TransitionSpec, type AnnexIntent, type PlaceIntent, type RenameIntent, type ShapeIntent, type RelateIntent,
 } from '../temporal-engine/engine.ts';
-import { type Instant, toStore, NEG_INF, compare } from '../core-time/index.ts';
+import { type Instant, toStore, fromStore, NEG_INF, compare } from '../core-time/index.ts';
 import {
-  BASE_EVENT_ID, MAIN_BRANCH, SCHEMA_VERSION, type RowDiff, type EffectRow, type EventRow, type EntityRow, type LayerKind, type FeatureRow,
+  BASE_EVENT_ID, MAIN_BRANCH, SCHEMA_VERSION, type RowDiff, type EffectRow, type EventRow, type EntityRow, type LayerKind, type FeatureRow, type RelationRow,
 } from '../world-model/schema.ts';
 import type { Vec3 } from '../geo-kernel/vec.ts';
 import { worldSettings, type BasemapSource } from '../world-model/world-settings.ts';
 import { resolvePointStyle, type LabelStyle, type CountryLabel, type PointStyle } from '../render-engine/label-style.ts';
 import { DEFAULT_FEATURE_STYLE, isFeatureKind, type FeatureKind, type FeatureStyle } from '../render-engine/feature-style.ts';
+import { relationKind, isRelationKind, type RelationKind } from './relations.ts';
 export { FEATURE_KINDS, DEFAULT_FEATURE_STYLE, isFeatureKind, featureStyle, type FeatureKind, type FeatureStyle } from '../render-engine/feature-style.ts';
 import { ringFromMapPoints } from '../render-engine/stroke.ts';
 import { flatRadiusKm } from '../render-engine/camera.ts';
@@ -244,6 +245,8 @@ export function deleteEntities(world: World, ids: string[]): CommandResult {
     purgeFromHistory(tx, set);
     // Areas, lines and points that belonged to them stay, belonging to nothing.
     for (const f of tx.world.all('feature')) if (set.has(f.entity_id)) tx.patch('feature', f.id, { entity_id: '' });
+    // Their relationships go, with the changes that began and ended them.
+    removeRelations(tx, new Set(tx.world.all('relation').filter((r) => set.has(r.a) || set.has(r.b)).map((r) => r.id)));
     for (const id of set) tx.remove('entity', id);
   });
 }
@@ -1072,6 +1075,103 @@ function writeShape(tx: Tx, feature: string, mode: EditMode, what: { parts?: num
   tx.insert('effect', {
     id, event_id: eventId, ordinal: nextOrdinal(world, eventId), kind: 'shape', space_id: layer?.space_id ?? null, layer_id: layer?.id ?? null,
     at_day: at ? at[0] : null, at_ms: at ? at[1] : null, transition: '', intent: JSON.stringify(intent), resolution: JSON.stringify({ set: [] }), basis_hash: '',
+  });
+  return id;
+}
+
+// ---------------------------------------------------------------- relationships between entities
+
+/** The relationship of a kind between two entities, if there is one (either way round for mutual kinds). */
+export function findRelation(world: World, kind: string, a: string, b: string): RelationRow | undefined {
+  const mutual = relationKind(kind)?.mutual;
+  return world.all('relation').find((r) => r.kind === kind && ((r.a === a && r.b === b) || (mutual && r.a === b && r.b === a)));
+}
+
+/**
+ * A relationship begins (A is at war with B, A is part of B…) as the edit mode says: in an event,
+ * from the date viewed, or always ('correct' at the beginning of time). `until`: it ends then
+ * (in the same event, or without one). The same kind between the same two again (a second war)
+ * adds a period to the relationship there is.
+ */
+export function relate(world: World, o: { kind: RelationKind; a: string; b: string; mode: EditMode; until?: Instant | null; notes?: string }): CommandResult<string> {
+  if (!isRelationKind(o.kind)) throw new Error('Choose what kind of relationship it is.');
+  const ea = world.get('entity', o.a), eb = world.get('entity', o.b);
+  if (!ea || !eb) throw new Error('Choose who it is between.');
+  if (o.a === o.b) throw new Error('A relationship needs two different parties.');
+  const k = relationKind(o.kind)!;
+  const start: Instant | null = o.mode.kind === 'new' ? (o.mode.at ?? eventStartOf(world, o.mode.eventId)) : o.mode.t;
+  if (o.until && start && compare(o.until, start) <= 0) throw new Error('It must end after it begins.');
+  return run(world, `${ea.name} ${k.sentence} ${eb.name}`, (tx) => {
+    let r = findRelation(world, o.kind, o.a, o.b);
+    if (!r) {
+      r = { id: newId('rel'), kind: o.kind, a: o.a, b: o.b, notes: o.notes ?? '', created_seq: world.nextSeq('relation') };
+      tx.insert('relation', r);
+    }
+    writeRelate(tx, r.id, o.mode, true);
+    if (o.until) writeRelate(tx, r.id, o.mode.kind === 'new' ? { kind: 'new', eventId: o.mode.eventId, at: o.until } : { kind: 'change', t: o.until }, false);
+    return r.id;
+  });
+}
+
+/** A relationship ends (peace is made, a province breaks away) as the edit mode says. */
+export function endRelation(world: World, o: { relation: string; mode: EditMode }): CommandResult<string> {
+  const r = world.get('relation', o.relation);
+  if (!r) throw new Error('That relationship no longer exists.');
+  if (o.mode.kind === 'correct' && o.mode.t.day === -Infinity) throw new Error('To remove it altogether, delete it.');
+  return run(world, `End of "${describeRelation(world, r)}"`, (tx) => writeRelate(tx, r.id, o.mode.kind === 'correct' ? { kind: 'change', t: o.mode.t } : o.mode, false));
+}
+
+/** A relationship holds again from a date (a second war between the same two). */
+export function resumeRelation(world: World, o: { relation: string; mode: EditMode }): CommandResult<string> {
+  const r = world.get('relation', o.relation);
+  if (!r) throw new Error('That relationship no longer exists.');
+  return run(world, `"${describeRelation(world, r)}" again`, (tx) => writeRelate(tx, r.id, o.mode, true));
+}
+
+export function updateRelation(world: World, id: string, patch: { notes?: string }): CommandResult {
+  if (!world.get('relation', id)) throw new Error('That relationship no longer exists.');
+  return run(world, 'Change relationship', (tx) => tx.patch('relation', id, { ...(patch.notes !== undefined ? { notes: patch.notes } : {}) }));
+}
+
+/** Delete relationships and every change that began or ended them (one undo step). */
+export function deleteRelations(world: World, ids: string[]): CommandResult {
+  const set = new Set(ids.filter((id) => world.get('relation', id)));
+  if (!set.size) throw new Error('Those no longer exist.');
+  return run(world, set.size === 1 ? `Delete "${describeRelation(world, world.get('relation', [...set][0])!)}"` : `Delete ${set.size} relationships`, (tx) => removeRelations(tx, set));
+}
+
+/** "Kingdom of Testa is at war with Duchy of Proba". */
+export function describeRelation(world: World, r: Pick<RelationRow, 'kind' | 'a' | 'b'>): string {
+  const name = (id: string) => world.get('entity', id)?.name ?? '(deleted)';
+  return `${name(r.a)} ${relationKind(r.kind)?.sentence ?? r.kind} ${name(r.b)}`;
+}
+
+function removeRelations(tx: Tx, ids: Set<string>): void {
+  if (!ids.size) return;
+  for (const ef of tx.world.all('effect')) if (ef.kind === 'relate' && ids.has(parseJSON<RelateIntent | null>(ef.intent, null)?.relation ?? '')) tx.remove('effect', ef.id);
+  for (const id of ids) tx.remove('relation', id);
+}
+
+function eventStartOf(world: World, eventId: string): Instant | null {
+  const ev = world.get('event', eventId);
+  return ev ? fromStore(ev.start_day, ev.start_ms) : null;
+}
+
+function writeRelate(tx: Tx, relation: string, mode: EditMode, on: boolean): string {
+  const world = tx.world;
+  const eventId = mode.kind === 'new' ? mode.eventId : BASE_EVENT_ID;
+  if (mode.kind === 'new' && !world.get('event', eventId)) throw new Error('That event no longer exists.');
+  const t: Instant | null = mode.kind === 'new' ? mode.at ?? null : mode.t;
+  const at = t && t.day !== -Infinity ? toStore(t) : null;
+  const intent = JSON.stringify({ op: 'relate', relation, on } satisfies RelateIntent);
+  // The same relationship, event and moment: that step is replaced.
+  const same = world.all('effect').find((f) => f.kind === 'relate' && f.event_id === eventId && f.at_day === (at ? at[0] : null) && f.at_ms === (at ? at[1] : null)
+    && parseJSON<RelateIntent | null>(f.intent, null)?.relation === relation);
+  if (same) { tx.patch('effect', same.id, { intent }); return same.id; }
+  const id = newId('eff');
+  tx.insert('effect', {
+    id, event_id: eventId, ordinal: nextOrdinal(world, eventId), kind: 'relate', space_id: null, layer_id: null,
+    at_day: at ? at[0] : null, at_ms: at ? at[1] : null, transition: '', intent, resolution: JSON.stringify({ set: [] }), basis_hash: '',
   });
   return id;
 }

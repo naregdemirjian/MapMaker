@@ -60,6 +60,28 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D72. Relationships between entities: a relation table, and their periods as changes (Stage 4)
+
+The architecture's relationships ("typed links between entities, with start and end dates set by events, just like
+other properties") are built like features (D71): a row of the new table `relation` (file format 6) names the kind
+and the two parties; **when it holds is given by changes of a new kind, `relate`**, that begin it or end it, in an
+event or without one. So a war begins with one event and ends with another, a second war between the same two is a
+second period of the same relationship, alternative versions of an event bring or drop it, and undo, History
+Health and the engine's change-by-change following (D55, verify mode) cover it as they cover everything else.
+
+Kinds (`src/domain/relations.ts`): at war with and allied with (mutual: one relationship either way round); part
+of / has as a part, vassal of / overlord of, member of / has as a member, leads / led by, successor of / succeeded
+by, travels with / accompanied by (each read from either side). The architecture's "participant in" is what events
+already record through their changes, so it is not a separate kind.
+
+In the interface, every country, faction, character and city has a **Relationships** section: each relationship
+read from its side ("At war with Duchy of Proba"), the periods it holds (dates that go to the date), whether it
+holds at the date viewed, "Ends on <date>" or "Again from <date>", and Delete; "+ Relationship" adds one from the
+date viewed, always, or with an event, with an optional end date. Deleting a party deletes its relationships; an
+event's list of changes says what begins and ends. Using them on the map (front lines between countries at war,
+grouped colours for parts and vassals) is Stage 7 and 10 work. Tests: `test/relations.test.ts` (4 tests, 150 random
+edits followed one by one in verify mode) and `e2e/workflows` 'Relationships'.
+
 ### D71. Areas, lines and points: a feature table, and their shapes over time as changes (Stage 4)
 
 The architecture's second spatial representation ("features: independent points, lines and polygons with lifespans
