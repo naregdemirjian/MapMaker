@@ -51,7 +51,7 @@ status. Last updated: 17 November 2026 (after the user's second feedback round; 
 | Invalid or complex geometry handled safely | Tested | `geometry-worlds`, `geo-kernel.stress` | Fixed in 0.2.0: an outline enclosing no area or folding back could repaint the whole world |
 | Geometry stored precisely | Tested | `geometry-worlds` (1e-7°, about 1 cm; exact after reopening) | |
 | Shapes across the poles, the 180° line, larger than a hemisphere, metres across | Tested | `geometry-worlds`, `geo-kernel` | |
-| Overlapping geographical entities | Partial | `scenarios`, `e2e/workflows` | Territories overlap freely across layers. Within one territory layer each place has one owner at a time (by design). Overlapping areas, lines and points of other kinds await those layer kinds (Stage 4) |
+| Overlapping geographical entities | Partial | `scenarios`, `features`, `e2e/workflows` | Territories overlap freely across layers. Within one territory layer each place has one owner at a time (by design). Areas, lines and points on feature layers overlap freely (D71) |
 | Geography-aware and terrain-aware drawing | Not implemented | | Needs terrain data; will not be claimed until tested on real data (Stage 12) |
 | Strategic and military drawing assistance | Not implemented | | Stage 12 |
 | Geographical modification (coasts, rivers, terrain changing over time) | Not implemented | | Stage 8 |
@@ -98,7 +98,7 @@ status. Last updated: 17 November 2026 (after the user's second feedback round; 
 | --- | --- | --- | --- |
 | Unlimited custom layers, created, shown and hidden, historically changed | Tested | `scenarios`, `e2e/workflows` step 2 | Territory layers only |
 | Polygon (territory) layers | Tested | as above | |
-| Line, point, route, heatmap and raster/numerical layers | Not implemented | | Stages 4, 7, 9 |
+| Line, point, route, heatmap and raster/numerical layers | Partial | `features` | Area, line and point layers with lifespans and dated shapes (D71): claims, zones, roads, front lines with teeth, arrows, battles and other symbols; their own export pass. The interface tools for them come next (Stage 4). Routes, heatmaps and rasters: Stages 7 and 9 |
 | Layer styling | Partial | | Opacity and border width per layer, no editor; no hatching or outline styles (a control layer currently looks like a second fill) |
 | Exporting layers independently | Partial | `e2e/workflows` | Passes are separated by kind (fills, borders, labels…) across visible layers; a single layer is exported by hiding the others |
 | Countries and factions | Tested | `e2e/*` | |

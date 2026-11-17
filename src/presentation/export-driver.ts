@@ -10,17 +10,19 @@ import { type ShotSettings, type OverlayRect, EVENTS_BOX_ID, timeAt, cameraAt, o
 import { gregorian, type Instant } from '../core-time/index.ts';
 import { eventsBoxOf, currentEvents, drawEventsBox } from './events-box.ts';
 import { eventShown, entityStyle } from '../domain/commands.ts';
+import { isFeatureKind } from '../render-engine/feature-style.ts';
 import { preloadImages, prepareVideos } from '../render-engine/assets.ts';
 import { basemapSourceOf, loadBasemap, loadBasemapDetail, loadDatasetRecords, type Basemap } from '../render-engine/basemap.ts';
 
 export interface ExportPassDef { name: string; label: string; blend: string; passes: PassName[]; overlays: boolean; background: boolean; note?: string }
 
 export const PASS_DEFS: ExportPassDef[] = [
-  { name: 'all', label: 'All', blend: 'Normal', passes: ['background', 'graticule', 'land', 'fills', 'borders', 'cities', 'labels', 'characters'], overlays: true, background: true, note: 'everything combined in one image sequence' },
+  { name: 'all', label: 'All', blend: 'Normal', passes: ['background', 'graticule', 'land', 'fills', 'borders', 'features', 'cities', 'labels', 'characters'], overlays: true, background: true, note: 'everything combined in one image sequence' },
   { name: 'background', label: 'Background', blend: 'Normal', passes: ['background', 'graticule'], overlays: false, background: true, note: 'ocean and grid' },
   { name: 'land', label: 'Land (Natural Earth)', blend: 'Normal', passes: ['land'], overlays: false, background: false, note: 'land, lakes and coastlines; empty for worlds without the Earth basemap' },
   { name: 'fills', label: 'Territory fills', blend: 'Normal', passes: ['fills'], overlays: false, background: false, note: 'lower the opacity in Premiere to taste' },
   { name: 'borders', label: 'Borders', blend: 'Normal', passes: ['borders'], overlays: false, background: false },
+  { name: 'features', label: 'Areas, lines and points', blend: 'Normal', passes: ['features'], overlays: false, background: false, note: 'claims, zones, routes, front lines, battles' },
   { name: 'cities', label: 'Cities', blend: 'Normal', passes: ['cities'], overlays: false, background: false, note: 'city dots and names' },
   { name: 'labels', label: 'Labels', blend: 'Normal', passes: ['labels'], overlays: false, background: false },
   { name: 'characters', label: 'Characters', blend: 'Normal', passes: ['characters'], overlays: false, background: false, note: 'character markers and names' },
@@ -87,7 +89,7 @@ let estimator: MapRenderer | null = null;
 
 export function visibleLayers(world: World, shot: ShotSettings): string[] {
   return world.all('layer')
-    .filter((l) => l.space_id === shot.spaceId && l.kind === 'partition' && (shot.layers.length ? shot.layers.includes(l.id) : !!l.visible))
+    .filter((l) => l.space_id === shot.spaceId && (l.kind === 'partition' || isFeatureKind(l.kind)) && (shot.layers.length ? shot.layers.includes(l.id) : !!l.visible))
     .sort((a, b) => a.sort_order - b.sort_order)
     .map((l) => l.id);
 }

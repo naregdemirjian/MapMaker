@@ -666,7 +666,7 @@ try {
     await page.getByTestId('shot-trails').uncheck();
 
     // What to export: only "All" at first, explained; then every separate layer too.
-    const separate = ['background', 'land', 'fills', 'borders', 'cities', 'labels', 'characters', 'overlays'];
+    const separate = ['background', 'land', 'fills', 'borders', 'features', 'cities', 'labels', 'characters', 'overlays'];
     assert.ok(await page.getByTestId('pass-all').isChecked(), '"All" is chosen by default');
     for (const p of separate) assert.ok(!(await page.getByTestId(`pass-${p}`).isChecked()), `${p} is not chosen by default`);
     assert.match((await page.getByTestId('separate-passes-note').textContent()) ?? '', /exported separately/);

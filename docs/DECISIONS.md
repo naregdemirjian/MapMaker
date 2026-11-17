@@ -20,6 +20,7 @@ model, the history engine, the parcel kernel, storage or the export writer.
   (detailed terrain, thousands of features), which the planned WebGL renderer handles better. Measured on 16 November
   2026: about 210 ms per 1080p frame with 24,500 parcels (fine for export, about 5 frames a second when scrubbing).
 - **Way back.** Replace this one module once packages can be installed.
+- **Update (18 November 2026).** After the two optimisation stages (D48–D70) the Canvas renderer draws territories, features and names fast enough on large projects; reversing D1 is moved to Stages 8 and 9, where terrain and fields need the graphics card.
 
 ### D2. Local service and browser instead of an Electron app (reversed, 16 November 2026)
 
@@ -58,6 +59,37 @@ model, the history engine, the parcel kernel, storage or the export writer.
 Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
+
+### D71. Areas, lines and points: a feature table, and their shapes over time as changes (Stage 4)
+
+The architecture's second spatial representation ("features: independent points, lines and polygons with lifespans
+and dated shapes; overlap freely") is built as three new kinds of layer, `area`, `line` and `point` (the layer kinds
+were already in the schema). A feature is a row of the new table `feature` (file format 5): its layer, name, the
+country or faction it belongs to (optional), its own look and notes. **Its shapes over time are changes of a new
+kind, `shape`**, in the same table as every other change, instead of the separate `feature_version` table the
+architecture sketched: a shape then belongs to an event or to none, is moved with its event, follows an event's
+alternative versions, is listed in the event's changes and in History Health, is undone like any edit, and the
+engine follows it change by change (D55) and checks it in verify mode. A shape holds parts (an area's rings,
+even-odd; a line's polylines; a point's place) in longitude and latitude, joined by great-circle arcs like
+borders. **A feature's lifespan is its shapes**: it exists from its first shape on, and a shape marked `off` ends it
+(until a later shape). The three edit choices mean what they mean for territory: a new change in an event, a change
+from the date viewed without an event, or a correction of the shape in force at the date viewed (where the feature
+does not exist then, it is given that shape from then on).
+
+Features never touch the parcel map: drawing one cuts no border and gives no land to anyone, and areas on one layer
+overlap freely. They are drawn in a new pass, **"Areas, lines and points"** (`features`), over the territories and
+under the names, layer by layer, and exported as their own pass (the passes still stack into the full picture).
+Their outlines are projected once per sheet, like borders; what is measured in screen pixels (line widths, dashes,
+the teeth of a front line, arrowheads, symbols, names) keeps its size, and symbols and names follow the zoom as
+cities do. Looks: a kind's defaults, then the layer's style, then the feature's own; the colour is the feature's
+own, else that of the country it belongs to, else the layer's. Areas: fill opacity, hatching (diagonal, crossed,
+dotted), outline width and dashes. Lines: width, dashes, teeth on either side (a front line), arrowheads at one or
+both ends. Points: circle, square, triangle, diamond, star, cross, crossed swords (a battle). Deleting a country
+leaves its features belonging to nothing; deleting a feature takes its shapes. Animating a feature's change (a line
+drawing itself, a zone growing) is Stage 6 and 7 work; for now a shape changes at its date. Tests:
+`test/features.test.ts` (7 tests: kinds and checks, dated shapes and lifespans with the three edit modes, events
+with undo, reloading and alternative versions, deleting and broken references, tidy shapes across 180°, looks, and
+120 random edits followed one by one in verify mode).
 
 ### D70. While the view zooms in, the geometry it started with serves twice as far
 

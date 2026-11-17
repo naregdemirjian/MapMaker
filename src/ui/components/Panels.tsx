@@ -562,6 +562,13 @@ function describeEffect(s: ReturnType<typeof useStore>, f: EffectRow): string {
     const i = parseJSON<{ entity: string; name: string }>(f.intent, { entity: '', name: '' });
     return `${name(i.entity)} is called ${i.name}`;
   }
+  if (f.kind === 'shape') {
+    const i = parseJSON<{ feature: string; off?: boolean }>(f.intent, { feature: '' });
+    const ft = w.get('feature', i.feature);
+    const what = ft ? `"${ft.name}"` : '(deleted)';
+    const layer = f.layer_id ? w.get('layer', f.layer_id)?.name ?? '' : '';
+    return `${layer ? `${layer}: ` : ''}${i.off ? `${what} ends` : `${what} takes its shape`}${f.at_day !== null ? ` (at ${fmt(fromStore(f.at_day, f.at_ms ?? 0), 'minute')})` : ''}`;
+  }
   if (f.kind === 'place') {
     const i = parseJSON<{ entity: string; lon?: number; lat?: number; off?: boolean }>(f.intent, { entity: '' });
     return i.off ? `${name(i.entity)} leaves the map` : `${name(i.entity)} is at ${Math.abs(i.lat ?? 0).toFixed(2)}°${(i.lat ?? 0) >= 0 ? 'N' : 'S'}, ${Math.abs(i.lon ?? 0).toFixed(2)}°${(i.lon ?? 0) >= 0 ? 'E' : 'W'}`;
@@ -626,7 +633,7 @@ function EventPanel({ id }: { id: string }) {
         <div key={f.id} className="effect">
           <div>{isUntracked(f) && <span className="date">{fmt(fromStore(f.at_day!, f.at_ms ?? 0))} · </span>}{describeEffect(s, f)}</div>
           {base && isUntracked(f) && <div className="effect-tools"><button className="small" onClick={() => s.setTime(fromStore(f.at_day!, f.at_ms ?? 0))}>Go to</button><button className="small danger" onClick={() => s.execute((wd) => cmd.deleteEffect(wd, f.id))}>Remove</button></div>}
-          {!base && f.layer_id && (
+          {!base && f.layer_id && f.kind !== 'shape' && (
             <div className="effect-tools">
               <label className="inline">Animation
                 <select value={parseJSON<TransitionSpec | null>(f.transition, null)?.style ?? 'instant'} onChange={(ev) => setTransition(f, ev.target.value)} disabled={!end} title={end ? '' : 'Give the event an end date to animate its changes'} data-testid="transition-style">

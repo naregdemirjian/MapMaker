@@ -2,15 +2,17 @@
 // in-memory world and returns the exact row diffs to save (and to undo). Commands never draw anything.
 import { World, Tx, newId } from '../world-model/world.ts';
 import {
-  Engine, canonicalFaces, leafDescendants, hashFaces, parseJSON, type Resolution, type TransitionSpec, type AnnexIntent, type PlaceIntent, type RenameIntent,
+  Engine, canonicalFaces, leafDescendants, hashFaces, parseJSON, type Resolution, type TransitionSpec, type AnnexIntent, type PlaceIntent, type RenameIntent, type ShapeIntent,
 } from '../temporal-engine/engine.ts';
 import { type Instant, toStore, NEG_INF, compare } from '../core-time/index.ts';
 import {
-  BASE_EVENT_ID, MAIN_BRANCH, SCHEMA_VERSION, type RowDiff, type EffectRow, type EventRow, type EntityRow, type LayerKind,
+  BASE_EVENT_ID, MAIN_BRANCH, SCHEMA_VERSION, type RowDiff, type EffectRow, type EventRow, type EntityRow, type LayerKind, type FeatureRow,
 } from '../world-model/schema.ts';
 import type { Vec3 } from '../geo-kernel/vec.ts';
 import { worldSettings, type BasemapSource } from '../world-model/world-settings.ts';
 import { resolvePointStyle, type LabelStyle, type CountryLabel, type PointStyle } from '../render-engine/label-style.ts';
+import { DEFAULT_FEATURE_STYLE, isFeatureKind, type FeatureKind, type FeatureStyle } from '../render-engine/feature-style.ts';
+export { FEATURE_KINDS, DEFAULT_FEATURE_STYLE, isFeatureKind, featureStyle, type FeatureKind, type FeatureStyle } from '../render-engine/feature-style.ts';
 import { ringFromMapPoints } from '../render-engine/stroke.ts';
 import { flatRadiusKm } from '../render-engine/camera.ts';
 
@@ -120,7 +122,8 @@ export function createLayer(world: World, spaceId: string, name: string, kind: L
   return run(world, `Create layer "${name}"`, (tx) => {
     const id = newId('layer');
     const order = world.all('layer').filter((l) => l.space_id === spaceId).length;
-    tx.insert('layer', { id, space_id: spaceId, kind, name, sort_order: order, visible: 1, style: JSON.stringify({ fillOpacity: 0.6, borderWidth: 1 }), export_pass: name.toLowerCase().replace(/\W+/g, '-') });
+    const style = kind === 'partition' ? { fillOpacity: 0.6, borderWidth: 1 } : { ...DEFAULT_FEATURE_STYLE[kind as FeatureKind] };
+    tx.insert('layer', { id, space_id: spaceId, kind, name, sort_order: order, visible: 1, style: JSON.stringify(style), export_pass: name.toLowerCase().replace(/\W+/g, '-') });
     return id;
   });
 }
@@ -239,6 +242,8 @@ export function deleteEntities(world: World, ids: string[]): CommandResult {
   const first = world.get('entity', [...set][0])!.name;
   return run(world, set.size === 1 ? `Delete "${first}"` : `Delete ${set.size} items`, (tx) => {
     purgeFromHistory(tx, set);
+    // Areas, lines and points that belonged to them stay, belonging to nothing.
+    for (const f of tx.world.all('feature')) if (set.has(f.entity_id)) tx.patch('feature', f.id, { entity_id: '' });
     for (const id of set) tx.remove('entity', id);
   });
 }
@@ -917,6 +922,158 @@ export function placementFromBeginning(world: World, effectId: string): CommandR
   if (!ef || ef.kind !== 'place') throw new Error('That placement no longer exists.');
   if (ef.event_id !== BASE_EVENT_ID) throw new Error('This place belongs to an event; change the event instead.');
   return run(world, 'From the beginning', (tx) => tx.patch('effect', effectId, { at_day: null, at_ms: null }));
+}
+
+// ---------------------------------------------------------------- areas, lines and points (feature layers)
+
+/** The kind of a feature (its layer's), or null when its layer is gone or is not a feature layer. */
+export function featureKind(world: World, f: Pick<FeatureRow, 'layer_id'>): FeatureKind | null {
+  const k = world.get('layer', f.layer_id)?.kind;
+  return k && isFeatureKind(k) ? k : null;
+}
+
+/**
+ * Checked shape parts for a kind of feature (see ShapeIntent): longitudes brought into -180..180 for
+ * the first point of each part and kept continuous along it, latitudes within the poles, consecutive
+ * repeats dropped. An area needs a ring of three places or more, a line two, a point one.
+ */
+export function shapeParts(kind: FeatureKind, parts: Array<Array<[number, number]>>): number[][] {
+  const out: number[][] = [];
+  const need = kind === 'area' ? 3 : kind === 'line' ? 2 : 1;
+  for (const pts of kind === 'point' ? parts.slice(0, 1) : parts) {
+    const flat: number[] = [];
+    let prevLon = NaN, prevLat = NaN;
+    for (const [lon0, lat0] of kind === 'point' ? pts.slice(0, 1) : pts) {
+      if (!Number.isFinite(lon0) || !Number.isFinite(lat0)) continue;
+      const lat = Math.max(-90, Math.min(90, lat0));
+      let lon = ((((lon0 + 180) % 360) + 360) % 360) - 180;
+      // Continuous along the part: never a jump of more than half a turn between neighbours.
+      if (prevLon === prevLon) lon += 360 * Math.round((prevLon - lon) / 360);
+      if (lon === prevLon && lat === prevLat) continue;
+      flat.push(+lon.toFixed(7), +lat.toFixed(7));
+      prevLon = lon; prevLat = lat;
+    }
+    // A ring given closed (its last place repeats its first) is kept open: rings close themselves.
+    if (kind === 'area' && flat.length >= 4 && Math.abs(flat[0] - flat[flat.length - 2]) < 1e-9 && Math.abs(flat[1] - flat[flat.length - 1]) < 1e-9) flat.splice(-2, 2);
+    if (flat.length >= 2 * need) out.push(flat);
+  }
+  if (!out.length) throw new Error(kind === 'area' ? 'An area needs at least three places.' : kind === 'line' ? 'A line needs at least two places.' : 'That place is not on the map.');
+  return out;
+}
+
+/**
+ * Draw a new area, line or point on a feature layer: it exists from the date the edit mode gives
+ * ('correct' at the beginning of time: always), as part of an event (mode 'new') or not.
+ */
+export function createFeature(world: World, o: { layerId: string; name: string; entity?: string; parts: Array<Array<[number, number]>>; mode: EditMode; style?: FeatureStyle }): CommandResult<string> {
+  const layer = world.get('layer', o.layerId);
+  if (!layer || !isFeatureKind(layer.kind)) throw new Error('Choose a layer of areas, lines or points first.');
+  if (o.entity && !world.get('entity', o.entity)) throw new Error('That country or faction no longer exists.');
+  const parts = shapeParts(layer.kind, o.parts);
+  const name = o.name.trim() || ({ area: 'Area', line: 'Line', point: 'Point' } as const)[layer.kind];
+  return run(world, `Draw "${name}"`, (tx) => {
+    const id = newId('feat');
+    tx.insert('feature', { id, layer_id: layer.id, name, entity_id: o.entity ?? '', style: o.style ? JSON.stringify(o.style) : '{}', notes: '', created_seq: world.nextSeq('feature') });
+    writeShape(tx, id, o.mode, { parts });
+    return id;
+  });
+}
+
+/**
+ * A new shape for a feature. Mode 'new' (in an event) or 'change' (no event): from that date on,
+ * until it is shaped again. Mode 'correct': the shape the feature has at that date is redrawn,
+ * wherever it began (at the beginning of time when the feature does not exist yet).
+ */
+export function reshapeFeature(world: World, engine: Engine, o: { feature: string; parts: Array<Array<[number, number]>>; mode: EditMode }): CommandResult<string> {
+  const f = world.get('feature', o.feature);
+  const kind = f ? featureKind(world, f) : null;
+  if (!f || !kind) throw new Error('That area, line or point no longer exists.');
+  const parts = shapeParts(kind, o.parts);
+  return run(world, `Reshape "${f.name}"`, (tx) => correctOrWrite(tx, engine, f, o.mode, { parts }));
+}
+
+/** A feature stops existing from a date on (until shaped again): a city wall torn down, a claim given up. */
+export function endFeature(world: World, engine: Engine, o: { feature: string; mode: EditMode }): CommandResult<string> {
+  const f = world.get('feature', o.feature);
+  if (!f) throw new Error('That area, line or point no longer exists.');
+  if (o.mode.kind === 'correct' && o.mode.t.day === -Infinity) throw new Error('To remove it altogether, delete it.');
+  return run(world, `"${f.name}" ends`, (tx) => correctOrWrite(tx, engine, f, o.mode.kind === 'correct' ? { kind: 'change', t: o.mode.t } : o.mode, { off: true }));
+}
+
+/** Name, what it belongs to, look and notes of a feature (not dated). */
+export function updateFeature(world: World, id: string, patch: Partial<{ name: string; entity_id: string; style: FeatureStyle | null; notes: string; layer_id: string }>): CommandResult {
+  const f = world.get('feature', id);
+  if (!f) throw new Error('That area, line or point no longer exists.');
+  if (patch.entity_id && !world.get('entity', patch.entity_id)) throw new Error('That country or faction no longer exists.');
+  if (patch.layer_id !== undefined) {
+    const to = world.get('layer', patch.layer_id), from = world.get('layer', f.layer_id);
+    if (!to || to.kind !== from?.kind || to.space_id !== from.space_id) throw new Error('It can only move to another layer of the same kind on the same map.');
+  }
+  const row: Partial<FeatureRow> = {};
+  if (patch.name !== undefined) row.name = patch.name.trim() || f.name;
+  if (patch.entity_id !== undefined) row.entity_id = patch.entity_id;
+  if (patch.notes !== undefined) row.notes = patch.notes;
+  if (patch.layer_id !== undefined) row.layer_id = patch.layer_id;
+  if (patch.style !== undefined) row.style = patch.style ? JSON.stringify({ ...parseJSON<object>(f.style, {}), ...patch.style }) : '{}';
+  return run(world, `Change "${f.name}"`, (tx) => tx.patch('feature', id, row));
+}
+
+/** Delete features and all their shapes over time (one undo step). */
+export function deleteFeatures(world: World, ids: string[]): CommandResult {
+  const set = new Set(ids.filter((id) => world.get('feature', id)));
+  if (!set.size) throw new Error('Those no longer exist.');
+  const first = world.get('feature', [...set][0])!.name;
+  return run(world, set.size === 1 ? `Delete "${first}"` : `Delete ${set.size} areas, lines and points`, (tx) => {
+    for (const ef of tx.world.all('effect')) if (ef.kind === 'shape' && set.has(parseJSON<ShapeIntent | null>(ef.intent, null)?.feature ?? '')) tx.remove('effect', ef.id);
+    for (const id of set) tx.remove('feature', id);
+  });
+}
+
+/** A shape made without an event holds from the beginning instead of from its date. */
+export function shapeFromBeginning(world: World, effectId: string): CommandResult {
+  const ef = world.get('effect', effectId);
+  if (!ef || ef.kind !== 'shape') throw new Error('That shape no longer exists.');
+  if (ef.event_id !== BASE_EVENT_ID) throw new Error('This shape belongs to an event; change the event instead.');
+  return run(world, 'From the beginning', (tx) => tx.patch('effect', effectId, { at_day: null, at_ms: null }));
+}
+
+/** 'correct': redraw the shape in force at the date; otherwise write a new step as the mode says. */
+function correctOrWrite(tx: Tx, engine: Engine, f: FeatureRow, mode: EditMode, what: { parts?: number[][]; off?: boolean }): string {
+  if (mode.kind === 'correct') {
+    const steps = engine.featureHistory(f.id);
+    let k = -1;
+    for (let i = 0; i < steps.length; i++) if (compare(steps[i].t, mode.t) <= 0) k = i;
+    const st = k >= 0 ? steps[k] : null;
+    if (st && st.parts) {
+      const ef = tx.world.get('effect', st.effectId)!;
+      tx.patch('effect', ef.id, { intent: JSON.stringify({ op: 'shape', feature: f.id, ...(what.off ? { off: true } : { parts: what.parts }) } satisfies ShapeIntent) });
+      return ef.id;
+    }
+    // Not there at that date (not yet, or no longer): it is given this shape from that date.
+    if (st && !st.parts) return writeShape(tx, f.id, { kind: 'change', t: mode.t }, what);
+    return writeShape(tx, f.id, { kind: 'correct', t: NEG_INF }, what);
+  }
+  return writeShape(tx, f.id, mode, what);
+}
+
+function writeShape(tx: Tx, feature: string, mode: EditMode, what: { parts?: number[][]; off?: boolean }): string {
+  const world = tx.world;
+  const eventId = mode.kind === 'new' ? mode.eventId : BASE_EVENT_ID;
+  if (mode.kind === 'new' && !world.get('event', eventId)) throw new Error('That event no longer exists.');
+  const t: Instant | null = mode.kind === 'new' ? mode.at ?? null : mode.t;
+  const at = t && t.day !== -Infinity ? toStore(t) : null;
+  const intent: ShapeIntent = what.off ? { op: 'shape', feature, off: true } : { op: 'shape', feature, parts: what.parts };
+  // The same feature, event and moment: that shape is replaced.
+  const same = world.all('effect').find((f) => f.kind === 'shape' && f.event_id === eventId && f.at_day === (at ? at[0] : null) && f.at_ms === (at ? at[1] : null)
+    && parseJSON<ShapeIntent | null>(f.intent, null)?.feature === feature);
+  if (same) { tx.patch('effect', same.id, { intent: JSON.stringify(intent) }); return same.id; }
+  const layer = world.get('layer', world.get('feature', feature)?.layer_id ?? '');
+  const id = newId('eff');
+  tx.insert('effect', {
+    id, event_id: eventId, ordinal: nextOrdinal(world, eventId), kind: 'shape', space_id: layer?.space_id ?? null, layer_id: layer?.id ?? null,
+    at_day: at ? at[0] : null, at_ms: at ? at[1] : null, transition: '', intent: JSON.stringify(intent), resolution: JSON.stringify({ set: [] }), basis_hash: '',
+  });
+  return id;
 }
 
 function writePlacement(tx: Tx, spaceId: string, entity: string, mode: EditMode, what: { lon?: number; lat?: number; off?: boolean; arrive?: 'travel' | 'jump' }): string {

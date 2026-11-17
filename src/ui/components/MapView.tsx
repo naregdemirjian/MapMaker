@@ -4,6 +4,7 @@ import {
   makeView, screenToLonLat, lonLatToScreen, panCamera, zoomCameraAt, radiansPerPixel, cameraKey, shapedByMeridian, type View, type Camera,
 } from '../../render-engine/camera.ts';
 import { DEFAULT_STYLE, type PassName } from '../../render-engine/map-renderer.ts';
+import { isFeatureKind } from '../../render-engine/feature-style.ts';
 import { placementMode } from './Characters.tsx';
 import { periodChangesNow, GAINED_COLOR, LOST_COLOR } from './CountryHistory.tsx';
 import { processLasso, densify, orientInteriorLeft, signedArea, splitLoops, type Pt, dedupe, ringFromMapPoints } from '../../render-engine/stroke.ts';
@@ -226,8 +227,8 @@ export function MapView() {
     // (The renderer clears or replaces the frame itself; only a shot's frame leaves canvas around it.)
     if (shot) ctx.clearRect(0, 0, c.width, c.height);
     ctx.setTransform(dpr, 0, 0, dpr, frame.x * dpr, frame.y * dpr);
-    const layers = s.world.all('layer').filter((l) => l.space_id === s.spaceId && l.kind === 'partition' && (shot ? (shot.layers.length ? shot.layers.includes(l.id) : l.visible) : l.visible)).sort((a, b) => a.sort_order - b.sort_order).map((l) => l.id);
-    const passes = new Set<PassName>(['background', 'land', 'fills', 'borders']);
+    const layers = s.world.all('layer').filter((l) => l.space_id === s.spaceId && (l.kind === 'partition' || isFeatureKind(l.kind)) && (shot ? (shot.layers.length ? shot.layers.includes(l.id) : l.visible) : l.visible)).sort((a, b) => a.sort_order - b.sort_order).map((l) => l.id);
+    const passes = new Set<PassName>(['background', 'land', 'fills', 'borders', 'features']);
     const full = basemapSourceOf(s.world.get('map_space', s.spaceId)) === 'natural-earth' ? s.basemap : null;
     const basemap = full && vs.coast === 'medium' ? withoutDetail(full) : full;
     // Close up, load the detailed coastlines (once) and redraw when they arrive.

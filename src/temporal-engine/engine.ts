@@ -50,6 +50,21 @@ export interface PlaceIntent { op: 'place'; entity: string; lon?: number; lat?: 
 /** A new name for a country, city or character from a date on (an effect of kind 'rename'). */
 export interface RenameIntent { op: 'rename'; entity: string; name: string }
 
+/**
+ * The shape of an area, line or point on a feature layer from a date on (an effect of kind 'shape').
+ * `parts`: for an area its rings (even-odd: a ring inside another is a hole), for a line its
+ * polylines, for a point one part with one place; each part is longitude, latitude, longitude,
+ * latitude... in degrees. `off`: the feature no longer exists from this date (until shaped again).
+ * A feature exists from its first shape on: its lifespan is its shapes.
+ */
+export interface ShapeIntent { op: 'shape'; feature: string; parts?: number[][]; off?: boolean }
+
+/** One compiled step of a feature's history: its shape from a moment on (null: it does not exist). */
+export interface ShapeStep { t: Instant; parts: number[][] | null; effectId: string; eventId: string; precedence: number; eventSeq: number; ordinal: number }
+
+/** A feature as it is at a moment: its shape, and the change that gave it. */
+export interface FeatureAt { feature: string; layer: string; parts: number[][]; effectId: string; since: Instant }
+
 /** One compiled waypoint of a character's track. */
 export interface Waypoint { t: Instant; lon: number; lat: number; off: boolean; arrive: 'travel' | 'jump'; effectId: string; eventId: string; precedence: number; eventSeq: number; ordinal: number }
 
@@ -163,6 +178,8 @@ export class Engine {
   private names = new Map<string, Array<{ t: Instant; name: string; order: [number, number, number] }>>();
   /** Characters' tracks: map -> character -> waypoints in time order. */
   private tracks = new Map<string, Map<string, Waypoint[]>>();
+  /** Every feature's shapes over time, by layer then feature (in time order; one step per moment). */
+  private shapes = new Map<string, Map<string, ShapeStep[]>>();
   private effectAssignments = new Map<string, Assignment[]>();
   /** For each territory change: the layer it writes to, and the instants it takes place and ends at. */
   private effectLayer = new Map<string, string>();
@@ -238,6 +255,7 @@ export class Engine {
       [...e.timelines.entries()].sort((x, y) => (x[0] < y[0] ? -1 : 1)).map(([layer, lm]) => `${layer}{${[...lm.entries()].sort((x, y) => x[0] - y[0]).map(([f, tl]) => `${f}:${tl.map((a) => `${a.effectId}#${a.entry}`).join(',')}`).join(' ')}}`).join('\n'),
       e.timeIndex.map((x) => `${timeKey(x.t)}`).join(' '),
       JSON.stringify([...e.names.entries()].sort()), JSON.stringify([...e.tracks.entries()].map(([sp, m]) => [sp, [...m.entries()].sort()])),
+      JSON.stringify([...e.shapes.entries()].sort().map(([l, m]) => [l, [...m.entries()].sort()])),
       JSON.stringify(e.conflicts),
     ];
     const a = show(this), b = show(fresh);
@@ -401,14 +419,32 @@ export class Engine {
     this.pointTimes = [];
     this.tracks.clear();
     this.names.clear();
+    this.shapes.clear();
     const count = (t: Instant) => { if (t.day !== -Infinity) { this.pointTimes.push(t); this.countTime(t, 1, false); } };
     for (const ef of effects) {
-      if (ef.kind !== 'rename' && ef.kind !== 'place') continue;
+      if (ef.kind !== 'rename' && ef.kind !== 'place' && ef.kind !== 'shape') continue;
       this.broken.delete(ef.id);
       const ev = events.get(ef.event_id);
       const problem = (message: string) => this.broken.set(ef.id, [{ kind: 'broken', effectId: ef.id, eventId: ev ? ev.id : ef.event_id, message }]);
       if (!ev) { problem('This change belongs to an event that no longer exists.'); continue; }
       if (!this.isActiveEvent(ev)) continue;
+      if (ef.kind === 'shape') {
+        const it = parseJSON<ShapeIntent | null>(ef.intent, null);
+        const f = it ? w.get('feature', it.feature) : undefined;
+        if (!it || !f) { problem('This change of shape is of an area, line or point that no longer exists.'); continue; }
+        const layer = w.get('layer', f.layer_id);
+        if (!layer) { problem('This change of shape is on a layer that no longer exists.'); continue; }
+        const parts = it.off ? null : (it.parts ?? []).filter((p) => Array.isArray(p) && p.length >= 2 && p.every((v) => Number.isFinite(v)));
+        if (parts && !parts.length) { problem('This change of shape has no points.'); continue; }
+        let byLayer = this.shapes.get(layer.id);
+        if (!byLayer) this.shapes.set(layer.id, (byLayer = new Map()));
+        let steps = byLayer.get(f.id);
+        if (!steps) byLayer.set(f.id, (steps = []));
+        const t = effectTime(ef, ev);
+        steps.push({ t, parts, effectId: ef.id, eventId: ev.id, precedence: isUntracked(ef) ? UNTRACKED_PRECEDENCE : ev.precedence, eventSeq: ev.created_seq, ordinal: ef.ordinal });
+        count(t);
+        continue;
+      }
       if (ef.kind === 'rename') {
         const it = parseJSON<RenameIntent | null>(ef.intent, null);
         if (!it || !w.get('entity', it.entity)) { problem('This change of name is of something that no longer exists.'); continue; }
@@ -438,6 +474,11 @@ export class Engine {
       // Several placements at one moment: the last in order stands.
       for (let i = tr.length - 2; i >= 0; i--) if (compare(tr[i].t, tr[i + 1].t) === 0) tr.splice(i, 1);
     }
+    for (const byLayer of this.shapes.values()) for (const steps of byLayer.values()) {
+      steps.sort((a, b) => compare(a.t, b.t) || a.precedence - b.precedence || a.eventSeq - b.eventSeq || a.ordinal - b.ordinal);
+      // Several shapes at one moment: the last in order stands.
+      for (let i = steps.length - 2; i >= 0; i--) if (compare(steps[i].t, steps[i + 1].t) === 0) steps.splice(i, 1);
+    }
   }
 
   /** The state of the parcel maps as of the last compile, to find what was touched since (see follow). */
@@ -462,9 +503,11 @@ export class Engine {
       if (s.table === 'vertex' || s.table === 'face') { spaces.add(((s.after ?? s.before) as { space_id: string }).space_id); continue; }
       if (s.table === 'effect') {
         effects.add(((s.after ?? s.before) as EffectRow).id);
-        for (const r of [s.before, s.after] as Array<EffectRow | null>) if (r && (r.kind === 'rename' || r.kind === 'place')) points = true;
+        for (const r of [s.before, s.after] as Array<EffectRow | null>) if (r && (r.kind === 'rename' || r.kind === 'place' || r.kind === 'shape')) points = true;
         continue;
       }
+      // An area, line or point that came or went: its shapes are compiled again (with the names and places).
+      if (s.table === 'feature') { points = true; continue; }
       if (s.table === 'event') {
         const id = ((s.after ?? s.before) as EventRow).id;
         if (!events.has(id)) events.set(id, s.before as EventRow | null);
@@ -479,7 +522,7 @@ export class Engine {
       if (!(before && now && sameStanding(before, now))) moved.add(id);
     }
     const all = moved.size || points ? w.all('effect') : null;
-    if (moved.size) for (const ef of all!) if (moved.has(ef.event_id)) { effects.add(ef.id); if (ef.kind === 'rename' || ef.kind === 'place') points = true; }
+    if (moved.size) for (const ef of all!) if (moved.has(ef.event_id)) { effects.add(ef.id); if (ef.kind === 'rename' || ef.kind === 'place' || ef.kind === 'shape') points = true; }
     // Parcels: one that is gone may not be referred to; land whose outline changed may change how far an animation reaches.
     const again = new Set<string>();
     const gone: number[] = [];
@@ -603,6 +646,28 @@ export class Engine {
   characterTrack(spaceId: string, entity: string): Waypoint[] {
     this.ensure();
     return this.tracks.get(spaceId)?.get(entity) ?? [];
+  }
+
+  /** The areas, lines or points of a layer as they are at instant t (those that exist then), in the order they were made. */
+  featuresAt(layerId: string, t: Instant): FeatureAt[] {
+    this.ensure();
+    const out: FeatureAt[] = [];
+    const byLayer = this.shapes.get(layerId);
+    if (!byLayer) return out;
+    for (const [feature, steps] of byLayer) {
+      let lo = 0, hi = steps.length - 1, k = -1;
+      while (lo <= hi) { const m = (lo + hi) >> 1; if (compare(steps[m].t, t) <= 0) { k = m; lo = m + 1; } else hi = m - 1; }
+      const st = k >= 0 ? steps[k] : null;
+      if (st?.parts) out.push({ feature, layer: layerId, parts: st.parts, effectId: st.effectId, since: st.t });
+    }
+    return out;
+  }
+
+  /** A feature's shapes over time (null parts: it does not exist from that moment), in time order. */
+  featureHistory(featureId: string): ShapeStep[] {
+    this.ensure();
+    const f = this.world.get('feature', featureId);
+    return (f && this.shapes.get(f.layer_id)?.get(featureId)) || [];
   }
 
   /** The characters on a map with a track (placed at least once). */

@@ -119,7 +119,7 @@ For development (Linux or Windows, Node 22.18 or newer):
 | `xvfb-run -a node --disable-warning=ExperimentalWarning e2e/desktop.e2e.ts` | The 5-step desktop app test (build first) |
 | `node --disable-warning=ExperimentalWarning dist/server.mjs --port 4317 --projects <folder> [--open]` | Runs the app |
 | `sh scripts/check-all.sh` | Every check: type check, unit tests, build, the four interface tests |
-| `npm test` | 202 unit, randomised and scenario tests |
+| `npm test` | 209 unit, randomised and scenario tests |
 | `node --disable-warning=ExperimentalWarning e2e/render-compare.e2e.ts` | The renderer against the old one kept in `e2e/reference/` (35 scenes); carried, patched and animated pictures against fresh ones (build first; `VERBOSE=1` lists every case) |
 | `node --disable-warning=ExperimentalWarning bench/make-fixtures.ts <folder> [massive]` | Makes the benchmark projects: "Bench Earth 242", "Bench Heavy", "Bench Random 1000" (minutes); with `massive`, one with 3,000 border changes as well. The benchmarks and tools below work on throwaway copies of them |
 | `node --disable-warning=ExperimentalWarning bench/render.bench.ts <folder> ["<project>"...] [--only a,b] [--label x] [--out file]` | Frame times in Chrome for each scenario (idle, pans at five zooms, zoom, scrub, stroke, play, exports); build first |
@@ -177,6 +177,7 @@ Terminology: the interface calls them **maps** (DECISIONS D24); the code and old
 | `data/flags/` | Flags | 197 SVG flags (flag-icons, MIT) and `index.json`. |
 | `src/render-engine/label-place.ts` | Label places | Where a country's label has the most room (stretched pole of inaccessibility in the projection's plane), line breaking for long names (D31). |
 | `src/domain/history-view.ts` | Changes over time | Periods (day, month, year, several years) and a country's gains, losses and changes in one (D36); shown by `ui/components/CountryHistory.tsx`. |
+| `src/render-engine/feature-style.ts` | Features (D71) | Areas, lines and points: their looks (kind defaults, layer, own). Shapes are changes of kind `shape` (`commands.ts` createFeature, reshapeFeature, endFeature), compiled by the engine (`featuresAt`, `featureHistory`), drawn in the `features` pass (`MapRenderer.drawFeatures`, `featureAt` for the pointer). |
 | Characters | Points over time | Placements are effects of kind `place` (`commands.ts` placeCharacter, characterLeaves); the engine compiles them into tracks (`charactersAt`, `characterTrack`); drawn in the `characters` pass; panel in `ui/components/Characters.tsx` (D35). |
 | `test/`, `e2e/` | Tests | See "Tests" below. |
 
@@ -186,22 +187,22 @@ if the project changed underneath) → the journal entry is the undo step.
 
 ## Roadmap position
 
-The approved roadmap has 14 stages (0–13). Where each stands:
+The approved roadmap has 14 stages (0–13). Where each stands (brought up to date 18 November 2026):
 
 | Stage | Status | Done | Still to do |
 | --- | --- | --- | --- |
-| 0 Groundwork | Mostly done | Sphere-safe kernel, two-part time, SQLite storage, transparent PNG export, pannable/zoomable/rotatable map, Natural Earth basemap, Electron shell, Windows installer built automatically | Installer test on the user's PC; reference-image render tests |
-| 1 Project, storage, world model | Mostly done | Projects, schema with upgrades (version 2; upgrade from 1 tested), undo journal, autosave, versions, backups with restore, crash safety, multiple worlds, entities with names, colours, notes; event groups with a timeline filter (D8); outliner and inspector | Automatic groups (by world, by country) if wanted |
-| 2 Parcel map and territory editing | Partly done | Production kernel, territory brush, precise shape tool, border-point editing, snapping, smoothing, irregularity, political fills, derived borders, labels, present-day borders as a guide | Border pen, explicit split and merge tools, administrative boundaries as parcel edges, region picker, coastline clipping |
-| 3 Time and event engine | Mostly done | Instants, Gregorian calendar, events, effects with intention, compiler, any-date reconstruction, zoomable timeline, edit prompt, record mode, History Health with keep and re-apply, precedence and overlap rules | Custom event types (interface), date comparison, dated border-point moves |
-| 4 Layers, entities, lore | Started | Unlimited custom layers (territory kind), alternative versions of events | Area, line and point layers; relationships; lifespans; cities; search; GeoJSON and CSV export |
-| 5 First shots and export | Mostly done | Shots, time remap, start and end camera, date and title overlays, PNG sequences with passes and transparency at any resolution up to 8K and every listed frame rate, preview, manifest, compositing guide, deterministic output | Multi-key camera, styles, version-pinned shots, the Premiere checklist on the user's PC |
-| 6 Transitions | Started | Advancing front and fade; borders and labels follow the animation | Arrival-time fields, front keyframes, more styles, the approved per-event "out of sync" override |
+| 0 Groundwork | Mostly done | Sphere-safe kernel, two-part time, SQLite storage, transparent PNG export, pannable/zoomable/rotatable map, Natural Earth basemap, Electron shell, Windows installer built automatically, reference-image render tests (`e2e/render-compare`) | Installer test on the user's PC |
+| 1 Project, storage, world model | Done | Projects, schema with upgrades (format 5; every upgrade tested), undo journal, autosave, versions, backups with restore, crash safety, multiple maps, entities with names, colours, notes; event groups (D8); groups of countries; outliner and inspector | Automatic groups (by world, by country) if wanted |
+| 2 Parcel map and territory editing | Mostly done | Production kernel (faces rebuilt around an edit), territory brush, precise shape tool, border pen with drafts, border points (move, add, remove), border eraser, snapping, smoothing, irregularity, political fills, derived borders, labels, coastline clipping, today's countries in one step, flat maps | Dedicated split and merge tools, sub-national boundaries as parcel edges, region picker |
+| 3 Time and event engine | Mostly done | Instants, Gregorian calendar, events, effects with intention, compiler followed change by change, any-date reconstruction, zoomable timeline, edit prompt, record mode, History Health, precedence and overlap rules, alternative versions, names over time, changes over time | Custom event types (interface), date comparison, dated border-point moves |
+| 4 Layers, entities, lore | Under way | Territory layers, **area, line and point layers with lifespans and dated shapes (D71)**, cities with lifespans, characters, alternative versions of events | Tools and panel for features, relationships, search, GeoJSON and CSV export, notes with pictures |
+| 5 First shots and export | Mostly done | Shots, time remap, still camera, date, title and current-events overlays, PNG sequences with passes and transparency up to 8K at every listed frame rate, preview, manifest, compositing guide, deterministic output | Multi-key camera, styles, version-pinned shots, the Premiere checklist on the user's PC |
+| 6 Transitions | Started | Advancing front, expansion and fade; borders and labels follow the animation; shot-level transition settings | Arrival-time fields, front keyframes, more styles, animated features, the per-event "out of sync" override |
 | 7–13 | Not started | | Military and movement, terrain, environment, presentation polish, space maps (nearby stars to 50 light-years), smart brushes, branches and calendars |
 
 ## Tests
 
-All pass as of 17 November 2026 (202 unit and randomised tests in 31 files, 23 + 22 + 6 + 5 interface steps). The
+All pass as of 17 November 2026 (209 unit and randomised tests in 32 files, 23 + 22 + 6 + 5 interface steps). The
 interface tests run with the verify mode on (D57): everything the app works out from what was there before is also
 worked out afresh, and any difference stops the test.
 `sh scripts/check-all.sh` runs everything and prints ALL CHECKS PASSED only when every check passed.
@@ -231,6 +232,7 @@ worked out afresh, and any difference stops the test.
 | `test/label-place.test.ts` | 8 | Labels: every large country of today's 242 gets a place inside it in four projections; 24 countries labelled near their middle; across 180° and around the pole; lines for long names; all 242 placed quickly; the part on screen when zoomed in; the gridded distance to an outline; searches cut short (no place acceptable, too small) find the same place |
 | `test/land-mask.test.ts` | 1 | "Any land in this box?" against looking at every cell, for 6,000 random boxes (across the 180° line too) |
 | `test/kept.test.ts` | 2 | Things kept up to a total weight: what was used longest ago goes first, the newest always stays, the total stays within its limit over 20,000 random steps |
+| `test/features.test.ts` | 7 | Areas, lines and points (D71): each kind checks its shape and cuts no border; dated shapes and lifespans with the three edit choices; in an event (moved with it, undone, reloaded, alternative versions); deleting and broken references; shapes across 180°; looks; 120 random edits followed one by one in verify mode |
 | `test/engine-follow.test.ts` | 6 | History followed edit by edit equals a fresh compile after every step of random histories (18 kinds of edit, undo and redo; 5 seeds of 90 steps); checked to catch six planted mistakes |
 | `test/characters.test.ts` | 5 | Characters: travelling between places along the shortest path, appearing, leaving the map, moving a placement, in events and from the start, undo, reload, deleted characters reported, across 180°; cities founded, moved at once, abandoned, from the beginning |
 | `test/history-view.test.ts` | 2 | Periods (day, month, year, several years, before year 1), stepping; a country's gains and losses in a period and the changes that made them; lost and won back within a period |
@@ -430,12 +432,25 @@ recompiling the 1,000-territory history took about 800 ms after every edit.
 | 17 Nov 2026 (2nd) | Firm-snapping kernel defects (D39), cities (D40), trails; the third feedback round: grey borders and "+ Layer" fixed, choosing several, right-click menus, groups, bulk delete, cities under countries, labels apart, border eraser, flat maps (D41–D44) | `ed163e3` → latest |
 | 16 Nov 2026 (2nd) | Package installs work; Natural Earth basemap (land, lakes, coastlines, present-day borders guide), land export pass, data sources dialog and export credits; coastline clipping with land-aware labels; real React types (D4 reversed); desktop app, Windows installer and Windows test run (D2 reversed); Windows fix; event groups and the first file-format upgrade | `071deac` → `9004a90` |
 
+## Next priorities (18 November 2026)
+
+1. The user tries the latest installer (from the newest "Windows build and tests" run) and reports back.
+2. Stage 4, in order: tools and a panel for areas, lines and points; dated relationships between countries,
+   factions and characters; search; GeoJSON and CSV export; notes with pictures.
+3. Then the rest of Stages 2 and 3 (split and merge tools, region picker, custom event types, date comparison,
+   dated border-point moves) and Stage 7 (military: control, frontlines, units, routes), which builds on Stage 4.
+4. Characters: icons or pictures for markers.
+5. Space maps (still wanted, D38).
+
+(D1, reversing to the deck.gl renderer, is moved to when terrain and fields arrive (Stages 8 and 9), which need the
+graphics card: for territories, features and names the Canvas renderer is now fast enough (D48–D70).)
+
 ## Next priorities (after the second feedback round)
 
 1. The user tries the second round (installer from the latest "Windows build and tests" run) and reports back. Space
    maps are still wanted (D38); maps of cities are not.
 2. Characters: icons or pictures for markers, characters following events automatically.
-3. Make face assembly incremental too (the first edit after opening a large map; Known bug 10 is fixed, D39).
+3. Make face assembly incremental too (the first edit after opening a large map; Known bug 10 is fixed, D39). (Done in the optimisation stage.)
 4. Reverse D1 (deck.gl renderer).
 5. Space maps (still wanted, D38).
 

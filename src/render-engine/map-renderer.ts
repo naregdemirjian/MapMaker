@@ -23,12 +23,13 @@ import { Sheet, makeRing, addLine, projectPoint, isCylindrical, SHARP_UP_TO, typ
 import { BlockPath, setPaintRegion, type DeviceRect } from './blocks.ts';
 import { Kept as Weighed } from './kept.ts';
 import { parcelGeometry, type ParcelGeometry, type CycleGeom } from './parcel-geometry.ts';
+import { featureStyle, featureColor, isFeatureKind, type FeatureKind, type FeatureStyle } from './feature-style.ts';
 
 type LabelEntity = { name: string; style?: string; color?: string; type_id?: string };
 
-export type PassName = 'background' | 'graticule' | 'land' | 'fills' | 'borders' | 'cities' | 'labels' | 'characters';
+export type PassName = 'background' | 'graticule' | 'land' | 'fills' | 'borders' | 'features' | 'cities' | 'labels' | 'characters';
 /** Drawing order. The grid lies under the land, so stacked export passes match the full picture. */
-export const ALL_PASSES: PassName[] = ['background', 'graticule', 'land', 'fills', 'borders', 'cities', 'labels', 'characters'];
+export const ALL_PASSES: PassName[] = ['background', 'graticule', 'land', 'fills', 'borders', 'features', 'cities', 'labels', 'characters'];
 
 export interface MapStyle {
   ocean: string;
@@ -354,6 +355,8 @@ export class MapRenderer {
   lastLabels: LabelInfo[] = [];
   /** The characters drawn in the last frame, where (screen) and on the map, for picking and tests. */
   lastCharacters: Array<{ entity: string; name: string; x: number; y: number; lon: number; lat: number; moving: boolean }> = [];
+  /** The areas, lines and points drawn in the last frame, topmost last (for finding what is under the pointer: see featureAt). */
+  lastFeatures: Array<{ id: string; kind: FeatureKind; path: Path2D | null; place: [number, number, number]; lines: Float32Array[]; x: number; y: number; r: number; width: number }> = [];
   /** The project's sizes for cities and characters (set for each frame by render()). */
   private pointSizes = { city: 1, character: 1 };
   /** How many characters' trails the last frame drew. */
@@ -1664,6 +1667,10 @@ export class MapRenderer {
       }
     } else if (base) this.layered(base.name, ctx, base.key, at, base.draw, null, null, opens);
 
+    // Areas, lines and points of the feature layers, over the territories and under the names.
+    if (opts.passes.has('features')) this.drawFeatures(ctx, view, sheet, world, engine, spaceId, t, opts.layerIds, u, clipSphere ? sphere : null);
+    else this.lastFeatures = [];
+
     // One label per country: a country on several layers (its land, and its military control, say) is
     // labelled from the lowest layer it is on.
     if (placesText && layout.labels) for (const { states, snap, clip } of prepared) {
@@ -1681,6 +1688,264 @@ export class MapRenderer {
     this.lastCharacters = [];
     this.lastTrails = 0;
     if (opts.passes.has('characters')) this.drawCharacters(ctx, view, engine, spaceId, t, entities, !!opts.trails);
+    ctx.restore();
+  }
+
+  /**
+   * The area, line or point under a place of the view (in the view's own, unturned coordinates) in
+   * the last frame drawn: the topmost; `tolerance` in view pixels. Null when there is none.
+   */
+  featureAt(x: number, y: number, tolerance = 5): string | null {
+    const probe = (this.hitCtx ??= (new OffscreenCanvas(1, 1).getContext('2d') as unknown as CanvasRenderingContext2D));
+    for (let i = this.lastFeatures.length - 1; i >= 0; i--) {
+      const f = this.lastFeatures[i];
+      if (f.kind === 'point') { if (Math.hypot(x - f.x, y - f.y) <= f.r + tolerance) return f.id; continue; }
+      const [k, e, g] = f.place;
+      probe.setTransform(1, 0, 0, 1, 0, 0);
+      probe.lineWidth = f.width + 2 * tolerance;
+      probe.lineCap = 'round';
+      probe.lineJoin = 'round';
+      for (const l of f.lines) {
+        const p = new Path2D();
+        addLine(p, l);
+        if (probe.isPointInStroke(p, x, y)) return f.id;
+      }
+      if (f.kind === 'area' && f.path) {
+        probe.setTransform(k, 0, 0, k, e, g);
+        if (probe.isPointInPath(f.path, x, y, 'evenodd')) return f.id;
+      }
+    }
+    return null;
+  }
+  private hitCtx: CanvasRenderingContext2D | null = null;
+
+  /**
+   * Areas, lines and points of the feature layers among `layerIds`, as they are at t, layer by layer
+   * in the order given. Their outlines are worked out once per sheet (like borders); what is drawn in
+   * screen pixels (dashes, teeth, arrowheads, symbols, names) keeps its size at every zoom.
+   */
+  private drawFeatures(ctx: CanvasRenderingContext2D, view: View, sheet: Sheet, world: World, engine: Engine, spaceId: string, t: Instant, layerIds: string[], u: number, clip: Path2D | null): void {
+    this.lastFeatures = [];
+    const [k, e, g] = this.place;
+    const toScreen = (l: Float32Array) => { const o = new Float32Array(l.length); for (let i = 0; i < l.length; i += 2) { o[i] = l[i] * k + e; o[i + 1] = l[i + 1] * k + g; } return o; };
+    let cache = sheet.cache.get('features') as WeakMap<number[][], { path: Path2D | null; lines: Float32Array[] }> | undefined;
+    if (!cache) sheet.cache.set('features', (cache = new WeakMap()));
+    const shapeOf = (kind: FeatureKind, parts: number[][]) => {
+      let c = cache!.get(parts);
+      if (c) return c;
+      c = { path: null, lines: [] };
+      if (kind === 'area') c.path = new Path2D();
+      for (const p of parts) {
+        const n = p.length >> 1;
+        const lon = new Float64Array(n), lat = new Float64Array(n);
+        for (let i = 0; i < n; i++) { lon[i] = p[2 * i]; lat[i] = p[2 * i + 1]; }
+        if (kind === 'area') {
+          sheet.ring(c.path!, makeRing(lon, lat, true, true));
+          // The outline: the ring followed back to its first place.
+          const closedLon = Float64Array.from([...lon, lon[0]]), closedLat = Float64Array.from([...lat, lat[0]]);
+          c.lines.push(...sheet.lines(makeRing(closedLon, closedLat, false, true)));
+        } else c.lines.push(...sheet.lines(makeRing(lon, lat, false, true)));
+      }
+      cache!.set(parts, c);
+      return c;
+    };
+    const entities = new Map(world.rows('entity').map((x) => [x.id, x]));
+    // Symbols and names grow and shrink with the zoom as cities do (and with the cities' size setting);
+    // names too small to read are left out.
+    const kDot = pointScale(view, 0.5, 1.3), kName = pointScale(view, 0.3, 1.15) * this.pointSizes.city;
+    const nameSize = 15 * kName >= MIN_CITY_NAME ? 15 * kName * u : 0;
+    ctx.save();
+    if (clip) ctx.clip(clip);
+    for (const layerId of layerIds) {
+      const layer = world.get('layer', layerId);
+      if (!layer || !isFeatureKind(layer.kind) || layer.space_id !== spaceId) continue;
+      const kind = layer.kind;
+      for (const fa of engine.featuresAt(layerId, t)) {
+        const row = world.get('feature', fa.feature);
+        if (!row) continue;
+        const st = featureStyle(kind, layer.style, row.style);
+        const color = featureColor(kind, layer.style, row.style, entities.get(row.entity_id)?.color);
+        const width = Math.max(0.5, (st.width ?? 2) * u);
+        const dash = st.dash === 'dashed' ? [4 * width, 2.5 * width] : st.dash === 'dotted' ? [0.01, 2 * width] : [];
+        if (kind === 'point') {
+          const lon = fa.parts[0][0], lat = fa.parts[0][1];
+          for (const [x, y] of this.pointCopies(view, lon, lat)) {
+            const r = Math.max(2, ((st.size ?? 9) / 2) * kDot * u);
+            this.drawSymbol(ctx, st.symbol ?? 'circle', x, y, r, color, u);
+            if (st.showName && nameSize) this.featureName(ctx, row.name, x + r + 4 * u, y, 'left', 0, u, nameSize);
+            this.lastFeatures.push({ id: row.id, kind, path: null, place: [k, e, g], lines: [], x, y, r, width });
+          }
+          continue;
+        }
+        const sh = shapeOf(kind, fa.parts);
+        const screen = sh.lines.map(toScreen);
+        if (!screen.length && !sh.path) continue;
+        if (kind === 'area' && sh.path) {
+          ctx.save();
+          ctx.transform(k, 0, 0, k, e, g);
+          if ((st.fillOpacity ?? 0) > 0) { ctx.globalAlpha = Math.min(1, st.fillOpacity!); ctx.fillStyle = color; ctx.fill(sh.path, 'evenodd'); ctx.globalAlpha = 1; }
+          if (st.hatch && st.hatch !== 'none') {
+            const m = ctx.getTransform();
+            ctx.clip(sh.path, 'evenodd');
+            ctx.setTransform(m.a / k, m.b / k, m.c / k, m.d / k, m.e - (m.a * e + m.c * g) / k, m.f - (m.b * e + m.d * g) / k);
+            ctx.fillStyle = this.hatchPattern(ctx, st.hatch, color, u);
+            ctx.fillRect(-view.width, -view.height, 3 * view.width, 3 * view.height);
+          }
+          ctx.restore();
+        }
+        if (width > 0 && screen.length) {
+          ctx.save();
+          ctx.strokeStyle = color;
+          ctx.lineWidth = width;
+          ctx.lineJoin = 'round';
+          ctx.lineCap = st.dash === 'dotted' ? 'round' : 'butt';
+          ctx.setLineDash(dash);
+          for (const l of screen) { ctx.beginPath(); addLine(ctx, l); ctx.stroke(); }
+          ctx.setLineDash([]);
+          if (kind === 'line') {
+            ctx.fillStyle = color;
+            if (st.teeth && st.teeth !== 'none') for (const l of screen) this.drawTeeth(ctx, l, width, st.teeth === 'left' ? -1 : 1);
+            if (st.arrow && st.arrow !== 'none') for (const l of screen) {
+              this.drawArrowhead(ctx, l, width, true);
+              if (st.arrow === 'both') this.drawArrowhead(ctx, l, width, false);
+            }
+          }
+          ctx.restore();
+        }
+        if (st.showName && nameSize && screen.length) {
+          const at: [number, number, number] | null = kind === 'area' ? (() => { const m = areaMiddle(screen); return m ? [m[0], m[1], 0] as [number, number, number] : null; })() : lineMiddle(screen);
+          if (at) this.featureName(ctx, row.name, at[0], at[1], 'center', at[2], u, nameSize, kind === 'line' ? -(width / 2 + nameSize / 2 + 2 * u) : 0);
+        }
+        this.lastFeatures.push({ id: row.id, kind, path: sh.path, place: [k, e, g], lines: screen, x: 0, y: 0, r: 0, width });
+      }
+    }
+    ctx.restore();
+  }
+
+  /** Where a place shows in the view (unturned): once, or once for each turn of a repeating map in view. */
+  private pointCopies(view: View, lon: number, lat: number): Array<[number, number]> {
+    const p = view.projection([lon, lat]);
+    if (!p) return [];
+    const out: Array<[number, number]> = [];
+    const turn = isCylindrical(view.camera.projection) ? 2 * Math.PI * view.projection.scale() : 0;
+    for (const n of turn ? [-1, 0, 1] : [0]) {
+      const x = p[0] + n * turn, y = p[1];
+      if (x >= -50 && x <= view.width + 50 && y >= -50 && y <= view.height + 50) out.push([x, y]);
+    }
+    return out;
+  }
+
+  private drawSymbol(ctx: CanvasRenderingContext2D, symbol: NonNullable<FeatureStyle['symbol']>, x: number, y: number, r: number, color: string, u: number): void {
+    ctx.save();
+    ctx.beginPath();
+    const poly = (n: number, rot: number, rr = r) => { for (let i = 0; i < n; i++) { const a = rot + (i / n) * Math.PI * 2; if (i) ctx.lineTo(x + rr * Math.cos(a), y + rr * Math.sin(a)); else ctx.moveTo(x + rr * Math.cos(a), y + rr * Math.sin(a)); } ctx.lineTo(x + rr * Math.cos(rot), y + rr * Math.sin(rot)); };
+    if (symbol === 'square') poly(4, Math.PI / 4, r * 1.2);
+    else if (symbol === 'diamond') poly(4, 0, r * 1.25);
+    else if (symbol === 'triangle') poly(3, -Math.PI / 2, r * 1.3);
+    else if (symbol === 'star') {
+      for (let i = 0; i <= 10; i++) { const a = -Math.PI / 2 + (i / 10) * Math.PI * 2, rr = i % 2 ? r * 0.5 : r * 1.35; if (i) ctx.lineTo(x + rr * Math.cos(a), y + rr * Math.sin(a)); else ctx.moveTo(x + rr * Math.cos(a), y + rr * Math.sin(a)); }
+    } else if (symbol === 'cross' || symbol === 'battle') {
+      // Two crossed bars (a battle: crossed swords, with hilts).
+      const w = r * 0.42;
+      for (const a of [Math.PI / 4, -Math.PI / 4]) {
+        const c = Math.cos(a), sn = Math.sin(a);
+        const pts: Array<[number, number]> = [[-r * 1.2, -w / 2], [r * 1.2, -w / 2], [r * 1.2, w / 2], [-r * 1.2, w / 2]];
+        pts.forEach(([px, py], i) => { const X = x + px * c - py * sn, Y = y + px * sn + py * c; if (i) ctx.lineTo(X, Y); else ctx.moveTo(X, Y); });
+        ctx.lineTo(x + pts[0][0] * c - pts[0][1] * sn, y + pts[0][0] * sn + pts[0][1] * c);
+        if (symbol === 'battle') for (const s of [-1, 1]) {
+          const hx = s * r * 0.7, q: Array<[number, number]> = [[hx - w * 0.3, -w * 1.4], [hx + w * 0.3, -w * 1.4], [hx + w * 0.3, w * 1.4], [hx - w * 0.3, w * 1.4]];
+          q.forEach(([px, py], i) => { const X = x + px * c - py * sn, Y = y + px * sn + py * c; if (i) ctx.lineTo(X, Y); else ctx.moveTo(X, Y); });
+          ctx.lineTo(x + q[0][0] * c - q[0][1] * sn, y + q[0][0] * sn + q[0][1] * c);
+        }
+      }
+    } else ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill('nonzero');
+    ctx.lineWidth = 1.4 * u;
+    ctx.strokeStyle = '#0a1018';
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /** Teeth along a line (a front line), pointing to one side: -1 left, 1 right of its direction. */
+  private drawTeeth(ctx: CanvasRenderingContext2D, l: Float32Array, width: number, side: number): void {
+    const step = 6 * width, size = 2.4 * width;
+    let carry = step / 2;
+    ctx.beginPath();
+    for (let i = 2; i + 1 < l.length; i += 2) {
+      const ax = l[i - 2], ay = l[i - 1], bx = l[i], by = l[i + 1];
+      const len = Math.hypot(bx - ax, by - ay);
+      if (!len) continue;
+      const dx = (bx - ax) / len, dy = (by - ay) / len, nx = -dy * side, ny = dx * side;
+      let d = carry;
+      for (; d + size / 2 <= len; d += step) {
+        const cx = ax + dx * d, cy = ay + dy * d;
+        ctx.moveTo(cx - dx * size / 2, cy - dy * size / 2);
+        ctx.lineTo(cx + nx * size, cy + ny * size);
+        ctx.lineTo(cx + dx * size / 2, cy + dy * size / 2);
+      }
+      carry = Math.max(0, d - len);
+    }
+    ctx.fill();
+  }
+
+  /** An arrowhead at the end of a line (or at its start). */
+  private drawArrowhead(ctx: CanvasRenderingContext2D, l: Float32Array, width: number, atEnd: boolean): void {
+    const n = l.length >> 1;
+    if (n < 2) return;
+    const tip = atEnd ? n - 1 : 0;
+    const tx = l[2 * tip], ty = l[2 * tip + 1];
+    // The direction over the last few pixels of the line.
+    let j = tip;
+    for (let s = 0; s < n - 1; s++) { j = atEnd ? j - 1 : j + 1; if (Math.hypot(l[2 * j] - tx, l[2 * j + 1] - ty) >= 3 * width || j === 0 || j === n - 1) break; }
+    const dx = tx - l[2 * j], dy = ty - l[2 * j + 1], len = Math.hypot(dx, dy);
+    if (!len) return;
+    const ux = dx / len, uy = dy / len, size = 4.5 * width + 4;
+    ctx.beginPath();
+    ctx.moveTo(tx + ux * size * 0.35, ty + uy * size * 0.35);
+    ctx.lineTo(tx - ux * size + -uy * size * 0.6, ty - uy * size + ux * size * 0.6);
+    ctx.lineTo(tx - ux * size - -uy * size * 0.6, ty - uy * size - ux * size * 0.6);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  private patterns = new Map<string, CanvasPattern>();
+  private hatchPattern(ctx: CanvasRenderingContext2D, hatch: 'diagonal' | 'cross' | 'dots', color: string, u: number): CanvasPattern {
+    const size = Math.max(4, Math.round(9 * u));
+    const key = `${hatch}|${color}|${size}`;
+    let p = this.patterns.get(key);
+    if (p) return p;
+    const c = new OffscreenCanvas(size, size), x = c.getContext('2d') as unknown as CanvasRenderingContext2D;
+    x.strokeStyle = color; x.fillStyle = color;
+    x.lineWidth = Math.max(1, 1.4 * u);
+    if (hatch === 'dots') { x.beginPath(); x.arc(size / 2, size / 2, Math.max(0.8, size / 7), 0, Math.PI * 2); x.fill(); }
+    else {
+      x.beginPath();
+      for (const o of [-size, 0, size]) { x.moveTo(o, size); x.lineTo(o + size, 0); }
+      if (hatch === 'cross') for (const o of [-size, 0, size]) { x.moveTo(o, 0); x.lineTo(o + size, size); }
+      x.stroke();
+    }
+    p = ctx.createPattern(c as unknown as CanvasImageSource, 'repeat')!;
+    if (this.patterns.size > 64) this.patterns.clear();
+    this.patterns.set(key, p);
+    return p;
+  }
+
+  /** The name of a feature, with a dark halo (`angle`: along a line; `lift`: moved across it). */
+  private featureName(ctx: CanvasRenderingContext2D, name: string, x: number, y: number, align: CanvasTextAlign, angle: number, u: number, size: number, lift = 0): void {
+    if (!name) return;
+    ctx.save();
+    ctx.translate(x, y);
+    if (angle) ctx.rotate(angle);
+    ctx.font = `italic 600 ${size.toFixed(1)}px Georgia, "Times New Roman", serif`;
+    ctx.textAlign = align;
+    ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = 3.5 * u;
+    ctx.strokeStyle = 'rgba(10,16,24,0.85)';
+    ctx.strokeText(name, 0, lift);
+    ctx.fillStyle = '#f4efe6';
+    ctx.fillText(name, 0, lift);
     ctx.restore();
   }
 
@@ -2894,6 +3159,38 @@ const MIN_CITY_NAME = 8;
 
 /** A city on screen: its dot, and where its name goes (if anywhere: `drawn`). */
 interface CityItem { entity: string; name: string; lon: number; lat: number; x: number; y: number; r: number; size: number; tx: number; ty: number; align: CanvasTextAlign; drawn: boolean; box?: [number, number, number, number] }
+
+/** The middle of the largest ring of an area on screen (its centroid), or null. */
+function areaMiddle(rings: Float32Array[]): [number, number] | null {
+  let best: [number, number] | null = null, bestA = 0;
+  for (const r of rings) {
+    let a = 0, cx = 0, cy = 0;
+    const n = r.length >> 1;
+    for (let i = 0, j = n - 1; i < n; j = i++) {
+      const c = r[2 * j] * r[2 * i + 1] - r[2 * i] * r[2 * j + 1];
+      a += c; cx += (r[2 * j] + r[2 * i]) * c; cy += (r[2 * j + 1] + r[2 * i + 1]) * c;
+    }
+    if (Math.abs(a) > bestA && a) { bestA = Math.abs(a); best = [cx / (3 * a), cy / (3 * a)]; }
+  }
+  return best;
+}
+
+/** The middle of the longest line on screen, and the angle of the line there (kept readable), or null. */
+function lineMiddle(lines: Float32Array[]): [number, number, number] | null {
+  let best: Float32Array | null = null, bestLen = 0;
+  for (const l of lines) { let len = 0; for (let i = 2; i + 1 < l.length; i += 2) len += Math.hypot(l[i] - l[i - 2], l[i + 1] - l[i - 1]); if (len > bestLen) { bestLen = len; best = l; } }
+  if (!best) return null;
+  let left = bestLen / 2;
+  for (let i = 2; i + 1 < best.length; i += 2) {
+    const dx = best[i] - best[i - 2], dy = best[i + 1] - best[i - 1], seg = Math.hypot(dx, dy);
+    if (seg < left) { left -= seg; continue; }
+    let a = Math.atan2(dy, dx);
+    if (a > Math.PI / 2) a -= Math.PI; else if (a < -Math.PI / 2) a += Math.PI;
+    const f = seg ? left / seg : 0;
+    return [best[i - 2] + dx * f, best[i - 1] + dy * f, a];
+  }
+  return null;
+}
 
 const cityFont = (size: number) => `500 ${size.toFixed(1)}px Georgia, "Times New Roman", serif`;
 /**

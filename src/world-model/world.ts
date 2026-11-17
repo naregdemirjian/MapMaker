@@ -144,7 +144,7 @@ export class World {
     if (d.before) map.delete(rowKey(d.table, d.before));
     if (d.after) map.set(rowKey(d.table, d.after), { ...withDefaults(d.table, d.after) });
     this.tableRevisions.set(d.table, (this.tableRevisions.get(d.table) ?? 0) + 1);
-    if (d.table === 'event' || d.table === 'effect' || ((d.table === 'layer' || d.table === 'map_space' || d.table === 'entity') && (!d.before || !d.after))) this.noteHistory(d.table, d.before, d.after);
+    if (d.table === 'event' || d.table === 'effect' || ((d.table === 'layer' || d.table === 'map_space' || d.table === 'entity' || d.table === 'feature') && (!d.before || !d.after))) this.noteHistory(d.table, d.before, d.after);
     if (d.table === 'map_space') {
       const sp = (d.after ?? d.before) as MapSpaceRow;
       if (!d.after) this.arrangements.delete(sp.id);
@@ -202,7 +202,7 @@ export class World {
     return s;
   }
 
-  nextSeq(table: 'entity' | 'event' | 'sequence' | 'event_group' | 'entity_group'): number {
+  nextSeq(table: 'entity' | 'event' | 'sequence' | 'event_group' | 'entity_group' | 'feature'): number {
     let m = 0;
     for (const r of this.all(table)) m = Math.max(m, r.created_seq);
     return m + 1;

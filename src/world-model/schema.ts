@@ -5,7 +5,7 @@ import type { VertexRow, SegmentRow, FaceRow } from '../geo-kernel/arrangement.t
 export type { VertexRow, SegmentRow, FaceRow };
 
 export type LayerKind = 'partition' | 'area' | 'line' | 'point' | 'field' | 'track';
-export type EffectKind = 'assign' | 'annex' | 'set_attribute' | 'place' | 'rename';
+export type EffectKind = 'assign' | 'annex' | 'set_attribute' | 'place' | 'rename' | 'shape';
 export type Json = string; // stored JSON text
 
 export interface MetaRow { key: string; value: string }
@@ -40,11 +40,19 @@ export interface EventGroupRow { id: string; name: string; color: string; sort_o
 /** Membership of an event in a group; an event can belong to several groups. Key: `${group_id}|${event_id}`. */
 export interface EventGroupMemberRow { id: string; group_id: string; event_id: string }
 export interface SequenceRow { id: string; name: string; created_seq: number; settings: Json }
+/**
+ * An area, line or point on a feature layer (a claim, an influence zone, a river, a road, a manual
+ * frontline, a battle, a base). Its shapes over time, and when it exists, are changes of kind
+ * 'shape' (see temporal-engine ShapeIntent). `entity_id`: what it belongs to or stands for ('' for
+ * nothing); `style`: its own look (JSON, see FeatureStyle). Added in file format 5.
+ */
+export interface FeatureRow { id: string; layer_id: string; name: string; entity_id: string; style: Json; notes: string; created_seq: number }
 
 export interface Rows {
   meta: MetaRow; map_space: MapSpaceRow; entity_type: EntityTypeRow; entity: EntityRow; layer: LayerRow;
   event_type: EventTypeRow; event: EventRow; effect: EffectRow; sequence: SequenceRow;
   event_group: EventGroupRow; event_group_member: EventGroupMemberRow; entity_group: EntityGroupRow;
+  feature: FeatureRow;
   vertex: VertexRow; segment: SegmentRow; face: FaceRow;
 }
 export type TableName = keyof Rows;
@@ -70,6 +78,7 @@ export const TABLES: { [K in TableName]: TableDef } = {
   event_group: { key: 'id', columns: { id: 'text', name: 'text', color: 'text', sort_order: 'int', created_seq: 'int' } },
   event_group_member: { key: 'id', columns: { id: 'text', group_id: 'text', event_id: 'text' } },
   entity_group: { key: 'id', columns: { id: 'text', name: 'text', color: 'text', sort_order: 'int', created_seq: 'int' } },
+  feature: { key: 'id', columns: { id: 'text', layer_id: 'text', name: 'text', entity_id: 'text', style: 'text', notes: 'text', created_seq: 'int' } },
   vertex: { key: 'id', kernel: true, columns: { id: 'int', space_id: 'text', lon: 'int', lat: 'int' } },
   segment: { key: 'id', kernel: true, columns: { id: 'int', space_id: 'text', a: 'int', b: 'int', left_face: 'int', right_face: 'int' } },
   face: { key: 'id', kernel: true, columns: { id: 'int', space_id: 'text', parent_id: 'int?', is_leaf: 'int' } },
@@ -91,9 +100,10 @@ export function invertDiffs(diffs: RowDiff[]): RowDiff[] {
 /**
  * The project file format. 1: first release. 2: event groups (tables event_group, event_group_member).
  * 3: entity.style (label looks and fills). 4: groups of countries (table entity_group, entity.group_id).
+ * 5: areas, lines and points on feature layers (table feature; changes of kind 'shape').
  * Older files are upgraded when opened (see ProjectDb.migrate), after an automatic backup.
  */
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 /** A row with values for any columns it predates (old backups, old undo history). */
 export function withDefaults<T extends AnyRow>(table: TableName, row: T): T {
