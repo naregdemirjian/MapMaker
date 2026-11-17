@@ -76,10 +76,11 @@ test('placements in events, from the start of history, undo, and reloading', () 
   const copy = World.fromSnapshot(JSON.parse(JSON.stringify(s.world.snapshot())));
   const e2 = new Engine(copy);
   assert.equal(e2.charactersAt(s.space, Y(1300))[0].lon, 25, 'after reloading');
-  // A deleted character's placements are reported, not drawn.
+  // Deleting a character takes its places with it.
   cmd.deleteEntity(s.world, s.hero);
   assert.deepEqual(s.engine.charactersAt(s.space, Y(1300)), []);
-  assert.ok(s.engine.conflicts.some((c) => c.kind === 'broken'));
+  assert.ok(!s.world.all('effect').some((f) => f.kind === 'place'), 'its places are gone');
+  assert.deepEqual(s.engine.conflicts, []);
   assert.throws(() => cmd.placeCharacter(s.world, { spaceId: s.space, entity: s.hero, lon: 0, lat: 0, mode: { kind: 'change', t: Y(1) } }), /no longer exists/);
 });
 

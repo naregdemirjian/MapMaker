@@ -48,6 +48,12 @@ class AppStore {
   tool: Tool = 'select';
   selection: Selection = null;
   paintValue: string | null = null;
+  /** A question for a line of text, shown in the app's own dialog (the desktop app has no prompt()). */
+  ask: { title: string; label: string; value: string; ok: string; resolve: (v: string | null) => void } | null = null;
+  /** Ask for a line of text; resolves to null when cancelled. */
+  askText(title: string, label: string, value = '', ok = 'OK'): Promise<string | null> {
+    return new Promise((resolve) => this.set({ ask: { title, label, value, ok, resolve } }));
+  }
   /** The character the Characters tool places. */
   placeValue: string | null = null;
   /**

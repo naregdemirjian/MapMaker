@@ -201,8 +201,57 @@ export function updateEntity(world: World, id: string, patch: Partial<Pick<Entit
 }
 
 export function deleteEntity(world: World, id: string): CommandResult {
-  const name = world.get('entity', id)?.name ?? '';
-  return run(world, `Delete "${name}"`, (tx) => tx.remove('entity', id));
+  return deleteEntities(world, [id]);
+}
+
+/**
+ * Delete countries, characters or cities, and take them out of history: the land they were given goes
+ * back to whoever held it before, their places and annexations go, changes left empty are removed.
+ * One undo step however many.
+ */
+export function deleteEntities(world: World, ids: string[]): CommandResult {
+  const set = new Set(ids.filter((id) => world.get('entity', id)));
+  if (!set.size) throw new Error('Those no longer exist.');
+  const first = world.get('entity', [...set][0])!.name;
+  return run(world, set.size === 1 ? `Delete "${first}"` : `Delete ${set.size} items`, (tx) => {
+    purgeFromHistory(tx, set);
+    for (const id of set) tx.remove('entity', id);
+  });
+}
+
+function purgeFromHistory(tx: Tx, gone: Set<string>): number {
+  let n = 0;
+  for (const ef of tx.world.all('effect')) {
+    if (ef.kind === 'place') {
+      const it = parseJSON<PlaceIntent | null>(ef.intent, null);
+      if (it && gone.has(it.entity)) { tx.remove('effect', ef.id); n++; }
+      continue;
+    }
+    if (ef.kind === 'annex') {
+      const it = parseJSON<AnnexIntent | null>(ef.intent, null);
+      if (it && (gone.has(it.from) || gone.has(it.to))) { tx.remove('effect', ef.id); n++; }
+      continue;
+    }
+    const res = parseJSON<Resolution>(ef.resolution, { set: [] });
+    const kept = (res.set ?? []).filter(([, v]) => !v || !gone.has(v));
+    if (kept.length === (res.set ?? []).length) continue;
+    n++;
+    if (kept.length) tx.patch('effect', ef.id, { resolution: JSON.stringify({ ...res, set: kept }) });
+    else tx.remove('effect', ef.id);
+  }
+  return n;
+}
+
+/** History Health: take countries that no longer exist out of history (their land goes back to its previous holders). */
+export function purgeDeletedOwners(world: World): CommandResult<number> {
+  const exists = new Set(world.all('entity').map((e) => e.id));
+  const gone = new Set<string>();
+  for (const ef of world.all('effect')) {
+    for (const [, v] of parseJSON<Resolution>(ef.resolution, { set: [] }).set ?? []) if (v && !exists.has(v)) gone.add(v);
+    const it = parseJSON<{ entity?: string; from?: string; to?: string } | null>(ef.intent, null);
+    for (const v of [it?.entity, it?.from, it?.to]) if (v && !exists.has(v) && (ef.kind === 'place' || ef.kind === 'annex')) gone.add(v);
+  }
+  return run(world, 'Remove deleted countries from history', (tx) => purgeFromHistory(tx, gone));
 }
 
 // ---------------------------------------------------------------- events

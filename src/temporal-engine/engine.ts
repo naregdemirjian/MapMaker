@@ -214,8 +214,11 @@ export class Engine {
         : null;
       const res = parseJSON<Resolution>(ef.resolution, { set: [] });
       const list: Assignment[] = [];
-      res.set.forEach(([faces, value], entry) => {
-        if (value && !w.get('entity', value)) this.conflictList.push({ kind: 'broken', effectId: ef.id, eventId: ev.id, message: 'This change gives territory to someone who no longer exists.' });
+      res.set.forEach(([faces, given], entry) => {
+        let value = given;
+        // Land given to a country that no longer exists is nobody's (and reported): it is never drawn
+        // as a nameless grey owner.
+        if (value && !w.get('entity', value)) { this.conflictList.push({ kind: 'broken', effectId: ef.id, eventId: ev.id, message: 'This change gives territory to someone who no longer exists.' }); value = null; }
         for (const face of faces) {
           if (!arr.faces.has(face)) { this.conflictList.push({ kind: 'broken', effectId: ef.id, eventId: ev.id, message: `Parcel ${face} no longer exists.` }); continue; }
           const a: Assignment = {

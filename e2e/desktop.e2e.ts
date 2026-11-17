@@ -54,7 +54,7 @@ try {
     assert.match(version, /^\d+\.\d+\.\d+$/);
   });
 
-  await step('Create a project; it is written to the projects folder; Earth is drawn', async () => {
+  await step('Create a project; it is written to the projects folder; Earth is drawn; a layer can be added', async () => {
     await page.getByTestId('project-name').fill('Desktop Test');
     await page.getByTestId('project-create').click();
     await page.getByTestId('map-canvas').waitFor();
@@ -64,6 +64,11 @@ try {
     await page.getByTestId('new-entity-name').fill('Desktop Country');
     await page.getByTestId('new-entity-create').click();
     await page.getByTestId('entity-panel').waitFor();
+    // Naming works in the desktop app (it has no browser prompt): a new layer.
+    await page.getByRole('button', { name: '+ Layer' }).click();
+    await page.getByTestId('ask-input').fill('Religion');
+    await page.getByTestId('ask-input').press('Enter');
+    await page.locator('.left .row', { hasText: 'Religion' }).waitFor();
     await page.screenshot({ path: join(OUT, '01-desktop-window.png') });
   });
 

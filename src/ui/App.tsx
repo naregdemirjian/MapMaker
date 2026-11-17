@@ -3,7 +3,7 @@ import { useStore, store } from './store.ts';
 import { TopBar, Outliner, ToolBar, Inspector, Toasts } from './components/Panels.tsx';
 import { MapView } from './components/MapView.tsx';
 import { Timeline } from './components/Timeline.tsx';
-import { EditPrompt, NewWorldDialog, NewEventDialog, VersionsDialog, HealthDialog, DataSourcesDialog, ProjectPicker, OfflineNotice } from './components/Dialogs.tsx';
+import { EditPrompt, NewWorldDialog, NewEventDialog, VersionsDialog, HealthDialog, DataSourcesDialog, ProjectPicker, OfflineNotice, AskDialog } from './components/Dialogs.tsx';
 import { ShotsPanel, ShotEditor, ShotTimeline } from './components/Presentation.tsx';
 import { LabelStyleDialog } from './components/LabelStyles.tsx';
 import { AddCountriesDialog } from './components/AddCountries.tsx';
@@ -35,6 +35,7 @@ export function App() {
       {s.mode === 'world' ? <Inspector /> : <ShotEditor />}
       <footer className="bottom">{s.mode === 'world' ? <Timeline /> : <ShotTimeline />}</footer>
       <EditPrompt />
+      <AskDialog />
       {s.dialog === 'new-world' && <NewWorldDialog />}
       {s.dialog === 'new-event' && <NewEventDialog />}
       {s.dialog === 'versions' && <VersionsDialog />}

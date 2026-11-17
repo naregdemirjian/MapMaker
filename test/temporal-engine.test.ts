@@ -224,7 +224,8 @@ test('broken references are reported, not hidden', () => {
   const A = s.ent('A'), B = s.ent('B');
   s.correct(square(0, 0, 10), A, NEG_INF);
   s.paint(square(0, 0, 3), B, s.event('E', Y(1500)));
-  cmd.deleteEntity(s.world, B);
+  // Removed without taking it out of history (as older versions deleted countries).
+  cmd.run(s.world, 'remove', (tx) => tx.remove('entity', B));
   s.engine.ensure();
   assert.ok(s.engine.conflicts.some((c) => c.kind === 'broken'));
 });
@@ -357,4 +358,27 @@ test('a change without an event survives saving and reloading, and shows in the 
   assert.equal(at(Y(1100)), A);
   assert.equal(at(Y(1300)), B);
   assert.equal(e2.valueAtPoint(s.spaceId, s.layerId, lonLatToVec(4, 4), Y(1300)), A);
+});
+
+test('deleting a country takes it out of history: its land goes back to its previous holders; older projects are cleaned up', () => {
+  const s = setup();
+  const A = s.ent('A'), B = s.ent('B');
+  s.correct(square(10, 45, 10), A, NEG_INF);
+  const war = s.event('War', Y(1500));
+  s.paint(square(14, 49, 3), B, war);
+  assert.equal(s.at(14, 49, Y(1600)), B);
+  const r = cmd.deleteEntities(s.world, [B]);
+  assert.equal(s.at(14, 49, Y(1600)), A, 'the land B took is A\'s again');
+  assert.ok(!s.world.all('effect').some((f) => f.event_id === war), 'the change left empty is removed');
+  assert.deepEqual(s.engine.conflicts, []);
+  s.world.applyDiffs(invertDiffs(r.diffs));
+  assert.equal(s.at(14, 49, Y(1600)), B, 'one undo brings B and its history back');
+  // A project from before this: the country was removed alone. Its land is nobody's (never a grey
+  // nameless owner), History Health reports it, and the clean-up removes it from history.
+  cmd.run(s.world, 'old delete', (tx) => tx.remove('entity', B));
+  assert.equal(s.at(14, 49, Y(1600)), null, 'shown as nobody\'s');
+  assert.ok((s.engine.conflicts as Array<{ kind: string }>).some((c) => c.kind === 'broken'));
+  cmd.purgeDeletedOwners(s.world);
+  assert.equal(s.at(14, 49, Y(1600)), A);
+  assert.deepEqual(s.engine.conflicts, []);
 });

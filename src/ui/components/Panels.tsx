@@ -253,7 +253,7 @@ export function Outliner() {
           </div>
         )}
       </Section>
-      <Section title="Layers" onAdd={() => { const name = prompt('Name of the new layer (for example "Religion" or "Military control")'); if (name?.trim()) { const id = s.execute((wd) => cmd.createLayer(wd, s.spaceId, name.trim())); if (id) s.set({ layerId: id }); } }} addLabel="Layer">
+      <Section title="Layers" onAdd={async () => { const name = await s.askText('New layer', 'Name (for example "Religion" or "Military control")', '', 'Create layer'); if (name) { const id = s.execute((wd) => cmd.createLayer(wd, s.spaceId, name)); if (id) s.set({ layerId: id }); } }} addLabel="Layer">
         {layers.map((l) => (
           <div key={l.id} className={`row ${l.id === s.layerId ? 'sel' : ''}`}>
             <input type="checkbox" checked={!!l.visible} title="Show or hide" onChange={(e) => s.execute((wd) => cmd.updateLayer(wd, l.id, { visible: e.target.checked ? 1 : 0 }))} />
@@ -491,7 +491,7 @@ function EventPanel({ id }: { id: string }) {
             {v.variant_active ? <span className="muted"> · active</span> : <button className="small" onClick={() => s.execute((wd) => cmd.activateVariant(wd, v.id))}>Use this version</button>}
           </div>
         ))}
-        <button onClick={() => { const n = prompt('Name of the alternative version', `${e.name} (alternative)`); if (n?.trim()) { const nid = s.execute((wd) => cmd.createVariant(wd, id, n.trim())); if (nid) s.set({ selection: { kind: 'event', id: nid } }); } }}>Create alternative version</button>
+        <button onClick={async () => { const n = await s.askText('Alternative version', 'Name of the alternative version', `${e.name} (alternative)`, 'Create'); if (n) { const nid = s.execute((wd) => cmd.createVariant(wd, id, n)); if (nid) s.set({ selection: { kind: 'event', id: nid } }); } }}>Create alternative version</button>
         <button className="danger" onClick={() => { if (confirm(`Delete the event "${e.name}" and its changes?`)) { s.execute((wd) => cmd.deleteEvent(wd, id)); s.set({ selection: null, recordEventId: s.recordEventId === id ? null : s.recordEventId }); } }}>Delete event</button>
       </>}
     </div>

@@ -60,8 +60,10 @@ try {
     P.b = await h.toLL([cx + 220, cy]);
     await h.waitOwner(P.b, '1500', B);
     // A custom layer for military control.
-    page.once('dialog', (d) => void d.accept('Military control'));
+    // Named in the app's own dialog (the desktop app has no browser prompt).
     await page.getByRole('button', { name: '+ Layer' }).click();
+    await page.getByTestId('ask-input').fill('Military control');
+    await page.getByTestId('ask-input').press('Enter');
     await page.locator('.left .row', { hasText: 'Military control' }).getByText('drawing here').waitFor();
     // Base: everyone controls their own land; then B occupies part of A in 1700.
     await page.getByTestId('tool-lasso').click();
@@ -107,8 +109,9 @@ try {
     await h.drawLasso(blob(ep[0], ep[1], 30, 25));
     await page.getByTestId('recording').getByRole('button', { name: 'Stop' }).click();
     await h.waitOwner(P.aEdge, '1850', B);
-    page.once('dialog', (d) => void d.accept('Border treaty (no cession)'));
     await page.getByRole('button', { name: 'Create alternative version' }).click();
+    await page.getByTestId('ask-input').fill('Border treaty (no cession)');
+    await page.getByTestId('ask-ok').click();
     await page.getByTestId('event-panel').getByText('Border treaty (no cession)').first().waitFor();
     // In the alternative, the cession is removed.
     await page.getByTestId('event-panel').getByRole('button', { name: 'Remove' }).first().click();

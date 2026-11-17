@@ -313,6 +313,13 @@ export function HealthDialog() {
     <Modal title="History Health" onClose={close} wide>
       <p className="muted">Problems in the history are listed here and never fixed silently. You decide what happens.</p>
       {conflicts.length === 0 && <div className="ok-box">No problems found. History is consistent.</div>}
+      {conflicts.some((c) => c.kind === 'broken' && /no longer exists/.test(c.message)) && (
+        <div className="conflict broken">
+          <div><b>Countries or characters that were deleted are still in history.</b></div>
+          <div className="muted">Their land is shown as nobody's. Removing them gives it back to whoever held it before.</div>
+          <div className="buttons"><button onClick={() => s.execute((wd) => cmd.purgeDeletedOwners(wd))} data-testid="purge-deleted">Remove them from history</button></div>
+        </div>
+      )}
       {conflicts.map((c, i) => (
         <div key={i} className={`conflict ${c.kind}`} data-testid={`conflict-${c.kind}`}>
           <div><b>{kinds[c.kind]}</b> · {w.get('event', c.eventId)?.name ?? 'unknown event'}</div>
@@ -395,3 +402,19 @@ export function OfflineNotice() {
 }
 
 export { store };
+
+/** The app's own "type a name" dialog (store.askText). */
+export function AskDialog() {
+  const s = useStore();
+  const a = s.ask;
+  const [v, setV] = useState(a?.value ?? '');
+  useEffect(() => setV(a?.value ?? ''), [a]);
+  if (!a) return null;
+  const done = (value: string | null) => { s.set({ ask: null }); a.resolve(value); };
+  return (
+    <Modal title={a.title} onClose={() => done(null)}>
+      <label>{a.label}<input autoFocus value={v} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && v.trim()) done(v.trim()); if (e.key === 'Escape') done(null); }} data-testid="ask-input" /></label>
+      <div className="modal-actions"><button onClick={() => done(null)}>Cancel</button><button className="primary" disabled={!v.trim()} onClick={() => done(v.trim())} data-testid="ask-ok">{a.ok}</button></div>
+    </Modal>
+  );
+}

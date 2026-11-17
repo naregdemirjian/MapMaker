@@ -55,7 +55,7 @@ export function GroupFilter() {
               </label>
               <span className="muted">{w.all('event_group_member').filter((m) => m.group_id === g.id).length}</span>
               <input type="color" value={g.color} title="Colour" onChange={(e) => s.execute((wd) => cmd.updateEventGroup(wd, g.id, { color: e.target.value }))} />
-              <button className="small" title="Rename" onClick={() => { const n = prompt('New name of the group', g.name); if (n?.trim() && n.trim() !== g.name) s.execute((wd) => cmd.updateEventGroup(wd, g.id, { name: n })); }}>Rename</button>
+              <button className="small" title="Rename" onClick={async () => { const n = await s.askText('Rename group', 'New name of the group', g.name, 'Rename'); if (n && n !== g.name) s.execute((wd) => cmd.updateEventGroup(wd, g.id, { name: n })); }}>Rename</button>
               <button className="small danger" title="Delete the group (its events stay)" onClick={() => {
                 if (!confirm(`Delete the group "${g.name}"? Its events stay; they only leave the group.`)) return;
                 s.execute((wd) => cmd.deleteEventGroup(wd, g.id));
