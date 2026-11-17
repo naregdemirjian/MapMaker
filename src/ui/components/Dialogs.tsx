@@ -9,6 +9,7 @@ import { lonLatToVec } from '../../geo-kernel/vec.ts';
 import { DateField, fmt } from './Panels.tsx';
 import { loadDatasetRecords, type DatasetRecord } from '../../render-engine/basemap.ts';
 import { GroupChecks } from './EventGroups.tsx';
+import { FeaturePrompt } from './Features.tsx';
 
 function Modal({ title, children, onClose, wide }: { title: string; children: React.ReactNode; onClose: () => void; wide?: boolean }) {
   return (
@@ -25,7 +26,7 @@ export function EditPrompt() {
   const s = useStore();
   const p = s.pending;
   if (!p) return null;
-  return p.kind === 'paint' ? <PaintPrompt p={p} /> : <VertexPrompt p={p} />;
+  return p.kind === 'paint' ? <PaintPrompt p={p} /> : p.kind === 'feature' ? <FeaturePrompt p={p} /> : <VertexPrompt p={p} />;
 }
 
 function PaintPrompt({ p }: { p: Extract<PendingEdit, { kind: 'paint' }> }) {

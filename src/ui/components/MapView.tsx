@@ -1,13 +1,14 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLive, store } from '../store.ts';
 import {
-  makeView, screenToLonLat, lonLatToScreen, panCamera, zoomCameraAt, radiansPerPixel, cameraKey, shapedByMeridian, type View, type Camera,
+  makeView, screenToLonLat, lonLatToScreen, panCamera, zoomCameraAt, radiansPerPixel, cameraKey, shapedByMeridian, rotatePoint, type View, type Camera,
 } from '../../render-engine/camera.ts';
 import { DEFAULT_STYLE, type PassName } from '../../render-engine/map-renderer.ts';
 import { isFeatureKind } from '../../render-engine/feature-style.ts';
+import { finishFeatureDrawing } from './Features.tsx';
 import { placementMode } from './Characters.tsx';
 import { periodChangesNow, GAINED_COLOR, LOST_COLOR } from './CountryHistory.tsx';
-import { processLasso, densify, orientInteriorLeft, signedArea, splitLoops, type Pt, dedupe, ringFromMapPoints } from '../../render-engine/stroke.ts';
+import { processLasso, densify, orientInteriorLeft, signedArea, splitLoops, simplify, smooth, type Pt, dedupe, ringFromMapPoints } from '../../render-engine/stroke.ts';
 import { geoCentroid } from 'd3-geo';
 import { lonLatToVec, E7 } from '../../geo-kernel/vec.ts';
 import { cameraAt, timeAt, overlaysAt, drawOverlays, withStillCamera, moveOverlay, type ShotSettings, type OverlayRect } from '../../presentation/sequence.ts';
@@ -32,7 +33,9 @@ type Drag =
   // A character's marker dragged to a new place (from the date being viewed).
   | { kind: 'character'; entity: string; from: Pt; moved: number }
   // The border eraser's stroke (map positions).
-  | { kind: 'erase'; points: Pt[] };
+  | { kind: 'erase'; points: Pt[] }
+  // A freehand area or line on a feature layer (map positions).
+  | { kind: 'feature'; points: Pt[] };
 
 /** Where the shot preview last drew its texts and the events box (frame pixels), to pick them up. */
 let overlayRects: OverlayRect[] = [];
@@ -288,6 +291,24 @@ export function MapView() {
 
   function drawEditingOverlay(ctx: CanvasRenderingContext2D, v: View) {
     const w = s.world!, arr = w.arrangement(s.spaceId);
+    // The chosen area, line or point is outlined (where the last frame drew it).
+    if (s.selection?.kind === 'feature') {
+      const id = s.selection.id;
+      const drawn = s.renderer.lastFeatures.filter((f) => f.id === id);
+      if (drawn.length) {
+        ctx.save();
+        if (v.rotation) { ctx.translate(v.width / 2, v.height / 2); ctx.rotate((v.rotation * Math.PI) / 180); ctx.translate(-v.width / 2, -v.height / 2); }
+        ctx.strokeStyle = '#ffd166'; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+        for (const f of drawn) {
+          if (f.kind === 'point') { ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(f.x, f.y, f.r + 5, 0, Math.PI * 2); ctx.stroke(); continue; }
+          ctx.lineWidth = 2;
+          ctx.setLineDash([6, 4]);
+          for (const l of f.lines) { ctx.beginPath(); ctx.moveTo(l[0], l[1]); for (let i = 2; i + 1 < l.length; i += 2) ctx.lineTo(l[i], l[i + 1]); ctx.stroke(); }
+          ctx.setLineDash([]);
+        }
+        ctx.restore();
+      }
+    }
     // "Changes over time": the country lightly, what it gained (green) and lost (red) in the period strongly.
     const selEnt = s.selection?.kind === 'entity' ? w.get('entity', s.selection.id) : null;
     if (s.historyView.on && selEnt && (selEnt.type_id === 'polity' || selEnt.type_id === 'faction') && s.layerId) {
@@ -412,8 +433,17 @@ export function MapView() {
       if (cursor && drag.current.kind !== 'pen') { ctx.setLineDash([3, 4]); ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(end[0], end[1]); ctx.lineTo(cursor[0], cursor[1]); ctx.stroke(); }
       ctx.restore();
     }
-    const pts = drag.current.kind === 'lasso' ? toScreen(drag.current.points) : polygon.length ? [...toScreen(polygon), ...(cursor ? [cursor] : [])] : null;
-    if (pts && pts.length > 1) {
+    const featureLayer = s.tool === 'feature' ? w.get('layer', s.featureLayerId) : null;
+    const pts = drag.current.kind === 'lasso' || drag.current.kind === 'feature' ? toScreen(drag.current.points) : polygon.length ? [...toScreen(polygon), ...(cursor ? [cursor] : [])] : null;
+    if (pts && pts.length > 1 && featureLayer?.kind === 'line') {
+      // A line being drawn: open, in a light colour.
+      ctx.save();
+      ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 2.5;
+      ctx.beginPath(); pts.forEach((q, i) => (i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]))); ctx.stroke();
+      ctx.restore();
+      if (polygon.length) for (const q of toScreen(polygon)) { ctx.fillStyle = '#fff'; ctx.fillRect(q[0] - 3, q[1] - 3, 6, 6); }
+    } else if (pts && pts.length > 1) {
       const owner = s.paintValue ? w.get('entity', s.paintValue) : null;
       ctx.save();
       ctx.beginPath();
@@ -479,6 +509,18 @@ export function MapView() {
       if (ll) { drag.current = { kind: 'erase', points: [ll] }; force((n) => n + 1); }
       return;
     }
+    // Areas, lines and points: a click puts a point; a drag draws an area or line freehand; or click by click.
+    if (!presentation && e.button === 0 && s.tool === 'feature') {
+      const ll = screenToLonLat(view, p[0], p[1]);
+      if (!ll) return;
+      const layer = s.world.get('layer', s.featureLayerId);
+      if (!layer || !isFeatureKind(layer.kind)) { store.toast('Choose or make a layer of areas, lines or points first.', 'error'); return; }
+      if (layer.kind === 'point') { finishFeatureDrawing(layer.id, [[ll]]); return; }
+      if (s.featureDraw === 'clicks') { setPolygon((poly) => [...poly, ll]); return; }
+      drag.current = { kind: 'feature', points: [ll] };
+      force((n) => n + 1);
+      return;
+    }
     // Characters tool: a click puts the chosen character here, from the date being viewed.
     if (!presentation && e.button === 0 && s.tool === 'place') {
       const ll = screenToLonLat(view, p[0], p[1]);
@@ -539,7 +581,7 @@ export function MapView() {
     }
     // (Moved once the pointer is a few pixels from where it went down, however few movements were reported.)
     if (d.kind === 'character') { d.moved = Math.max(d.moved, Math.hypot(p[0] - d.from[0], p[1] - d.from[1])); setCursor(p); return; }
-    if (d.kind === 'erase') {
+    if (d.kind === 'erase' || d.kind === 'feature') {
       const ll = screenToLonLat(view, p[0], p[1]);
       const last = d.points[d.points.length - 1];
       const ls = lonLatToScreen(view, last[0], last[1]);
@@ -607,11 +649,35 @@ export function MapView() {
     // A right-click (without dragging) deselects everything.
     if (d.kind === 'pan' && d.moved < 4 && !presentation && e.button === 2) { store.set({ selection: null }); return; }
     if (d.kind === 'pan' && d.moved < 4 && !presentation && e.button === 0) {
+      // An area, line or point under the pointer is chosen (the topmost drawn).
+      const [ux, uy] = rotatePoint(d.startX, d.startY, view.width / 2, view.height / 2, -view.rotation);
+      const hitFeature = s.tool === 'select' ? store.renderer.featureAt(ux, uy) : null;
+      if (hitFeature) { store.set({ selection: { kind: 'feature', id: hitFeature } }); return; }
       const ll = screenToLonLat(view, d.startX, d.startY);
       if (ll) store.set({ selection: { kind: 'point', lon: ll[0], lat: ll[1] } });
       return;
     }
     if (d.kind === 'pen') return; // the draft is saved; carry on whenever you like
+    if (d.kind === 'feature') {
+      // Cleaned up at the current zoom (as the brush is): an area as one or more rings, a line as one line.
+      const layer = store.world!.get('layer', store.featureLayerId);
+      const screen = d.points.map((q) => lonLatToScreen(view, q[0], q[1])).filter((q): q is Pt => !!q);
+      force((n) => n + 1);
+      if (!layer || screen.length < 2) return;
+      const back = (pts: Pt[]) => pts.map((q) => screenToLonLat(view, q[0], q[1])).filter((q): q is [number, number] => !!q);
+      if (layer.kind === 'area') {
+        if (screen.length < 4) return;
+        const loops = processLasso(screen, store.stroke);
+        const parts = loops.map(back).filter((r) => r.length >= 3);
+        if (!parts.length) { store.toast('The shape is too small. Zoom in or draw a larger area.', 'error'); return; }
+        finishFeatureDrawing(layer.id, parts);
+      } else {
+        const line = simplify(smooth(dedupe(screen, 1), Math.min(2, store.stroke.smoothness), false), 0.6);
+        if (line.length < 2 || Math.hypot(line[line.length - 1][0] - line[0][0], line[line.length - 1][1] - line[0][1]) < 3) return;
+        finishFeatureDrawing(layer.id, [back(line)]);
+      }
+      return;
+    }
     if (d.kind === 'lasso') {
       // Cleaned up at the current zoom, so smoothing and detail match what is on screen now.
       const screen = d.points.map((q) => lonLatToScreen(view, q[0], q[1])).filter((q): q is Pt => !!q);
@@ -648,6 +714,16 @@ export function MapView() {
   store.finishDraft = finishDraft;
 
   function finishPolygon() {
+    if (store.tool === 'feature') {
+      const layer = store.world!.get('layer', store.featureLayerId);
+      const need = layer?.kind === 'area' ? 3 : 2;
+      const pts = dedupe(polygon.map((q) => lonLatToScreen(view, q[0], q[1])).filter((q): q is Pt => !!q), 1);
+      setPolygon([]);
+      setCursor(null);
+      if (!layer || pts.length < need) return;
+      finishFeatureDrawing(layer.id, [pts.map((q) => screenToLonLat(view, q[0], q[1])).filter((q): q is [number, number] => !!q)]);
+      return;
+    }
     // A double-click to finish also places its point twice; repeated points are dropped.
     const pts = dedupe(polygon.map((q) => lonLatToScreen(view, q[0], q[1])).filter((q): q is Pt => !!q), 1);
     if (pts.length < 3) { setPolygon([]); setCursor(null); return; }
@@ -701,7 +777,7 @@ export function MapView() {
 
   function onDoubleClick(e: React.MouseEvent<HTMLCanvasElement>) {
     if (presentation) return;
-    if (s.tool === 'polygon') { finishPolygon(); return; }
+    if (s.tool === 'polygon' || (s.tool === 'feature' && polygon.length)) { finishPolygon(); return; }
     if (s.tool === 'vertex' && s.world) {
       const p = local(e);
       const ll = screenToLonLat(view, p[0], p[1]);

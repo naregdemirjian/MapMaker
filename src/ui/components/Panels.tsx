@@ -15,6 +15,8 @@ import { CharacterSection } from './Characters.tsx';
 import { openMenu, entityMenu, groupMenu, eventMenu } from './ContextMenu.tsx';
 import { CountryHistorySection } from './CountryHistory.tsx';
 import { NamesSection } from './Names.tsx';
+import { FeatureToolOptions, FeaturePanel, FeatureRows, featureLayers } from './Features.tsx';
+import { isFeatureKind } from '../../render-engine/feature-style.ts';
 
 export const fmt = (t: Instant, precision: 'year' | 'day' | 'minute' = 'day') => gregorian.format(t, precision);
 
@@ -105,6 +107,7 @@ const TOOLS: Array<{ id: Tool; name: string; hint: string }> = [
   { id: 'pen', name: 'Border pen', hint: 'Draw a border at your own pace: drag or click, let go, pan and zoom, carry on later. Enter finishes; Backspace takes back the last piece. Drafts are kept with the project.' },
   { id: 'vertex', name: 'Border points', hint: 'Drag a border point to correct the border shape for all time. Double-click a border to add a point; Delete removes the point under the cursor.' },
   { id: 'erase', name: 'Border eraser', hint: 'Drag across borders to erase them: the country where you start takes the land across each border you cross, from the date viewed (or in the event being recorded). Start outside any country to clear land.' },
+  { id: 'feature', name: 'Areas, lines & points', hint: 'Draw on a layer of areas, lines or points: claims and zones, front lines, roads and arrows, battles and sites. They overlap freely and never change who holds the land.' },
   { id: 'place', name: 'Characters & cities', hint: 'Click the map to put the chosen character or city there from the date being viewed (a point, no borders). With Select, drag one to move it.' },
 ];
 
@@ -171,6 +174,7 @@ export function ToolBar() {
           )}
         </div>
       )}
+    {s.tool === 'feature' && <FeatureToolOptions />}
     {s.tool === 'place' && (
       <div className="toolbar sub">
         <label className="inline">Place
@@ -416,14 +420,19 @@ export function Outliner() {
           </div>
         )}
       </Section>
-      <Section title="Layers" onAdd={async () => { const name = await s.askText('New layer', 'Name (for example "Religion" or "Military control")', '', 'Create layer'); if (name) { const id = s.execute((wd) => cmd.createLayer(wd, s.spaceId, name)); if (id) s.set({ layerId: id }); } }} addLabel="Layer">
-        {layers.map((l) => (
-          <div key={l.id} className={`row ${l.id === s.layerId ? 'sel' : ''}`}>
-            <input type="checkbox" checked={!!l.visible} title="Show or hide" onChange={(e) => s.execute((wd) => cmd.updateLayer(wd, l.id, { visible: e.target.checked ? 1 : 0 }))} />
-            <span onClick={() => s.set({ layerId: l.id })} title="Draw on this layer">{l.name}</span>
-            {l.id === s.layerId && <span className="muted"> · drawing here</span>}
-          </div>
-        ))}
+      <Section title="Layers" onAdd={() => s.set({ dialog: 'new-layer' })} addLabel="Layer">
+        {layers.map((l) => {
+          const feat = isFeatureKind(l.kind);
+          const here = feat ? s.tool === 'feature' && s.featureLayerId === l.id : l.id === s.layerId;
+          return (
+            <div key={l.id} className={`row ${here ? 'sel' : ''}`} data-testid="layer-row">
+              <input type="checkbox" checked={!!l.visible} title="Show or hide" onChange={(e) => s.execute((wd) => cmd.updateLayer(wd, l.id, { visible: e.target.checked ? 1 : 0 }))} />
+              <span onClick={() => (feat ? s.set({ featureLayerId: l.id, tool: 'feature', reshapeId: null }) : s.set({ layerId: l.id, tool: s.tool === 'feature' ? 'lasso' : s.tool }))} title="Draw on this layer">{l.name}</span>
+              {feat && <span className="muted"> · {l.kind === 'area' ? 'areas' : l.kind === 'line' ? 'lines' : 'points'}</span>}
+              {here && <span className="muted"> · drawing here</span>}
+            </div>
+          );
+        })}
         {layers.filter((l) => l.id === s.layerId && currentSpace && basemapSourceOf(currentSpace) === 'natural-earth').map((l) => (
           <label key={`clip-${l.id}`} className="check layer-option" title="Territory painted over the sea or lakes is not shown there. Untick for sea claims or maritime zones.">
             <input type="checkbox" data-testid="clip-to-land" checked={parseJSON<{ clipToLand?: boolean }>(l.style, {}).clipToLand !== false}
@@ -451,6 +460,9 @@ export function Outliner() {
         {!others.length && newEntity?.type !== 'settlement' && <div className="muted pad">None yet. Cities are points on the map, founded and abandoned at dates.</div>}
         {others.length > looseOthers.length && <div className="muted small-hint">Cities in a country are listed under it.</div>}
       </Section>
+      <Section title="Areas, lines and points" onAdd={() => (featureLayers(s).length ? s.set({ tool: 'feature' }) : s.set({ dialog: 'new-layer' }))} addLabel="Draw">
+        <FeatureRows />
+      </Section>
       <Section title="Events" onAdd={() => s.set({ dialog: 'new-event' })} addLabel="Event">
         <EventRows sig={eventSig} />
         {events.length > 1 && <div className="muted small-hint">Ctrl or Shift + click to choose several; Delete or right-click to delete them.</div>}
@@ -472,6 +484,7 @@ export function Inspector() {
       {sel?.kind === 'entity' && <EntityPanel id={sel.id} />}
       {sel?.kind === 'event' && <EventPanel id={sel.id} />}
       {sel?.kind === 'point' && <PointPanel lon={sel.lon} lat={sel.lat} />}
+      {sel?.kind === 'feature' && <FeaturePanel id={sel.id} />}
     </aside>
   );
 }

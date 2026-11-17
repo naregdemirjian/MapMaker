@@ -1693,27 +1693,33 @@ export class MapRenderer {
 
   /**
    * The area, line or point under a place of the view (in the view's own, unturned coordinates) in
-   * the last frame drawn: the topmost; `tolerance` in view pixels. Null when there is none.
+   * the last frame drawn; `tolerance` in view pixels. Null when there is none. Small targets come
+   * first: a point near the place, then a line or an area's outline, then the inside of an area
+   * (each the topmost drawn), so a battle inside a claim can be clicked.
    */
   featureAt(x: number, y: number, tolerance = 5): string | null {
     const probe = (this.hitCtx ??= (new OffscreenCanvas(1, 1).getContext('2d') as unknown as CanvasRenderingContext2D));
-    for (let i = this.lastFeatures.length - 1; i >= 0; i--) {
-      const f = this.lastFeatures[i];
-      if (f.kind === 'point') { if (Math.hypot(x - f.x, y - f.y) <= f.r + tolerance) return f.id; continue; }
-      const [k, e, g] = f.place;
-      probe.setTransform(1, 0, 0, 1, 0, 0);
+    const list = this.lastFeatures;
+    for (let i = list.length - 1; i >= 0; i--) { const f = list[i]; if (f.kind === 'point' && Math.hypot(x - f.x, y - f.y) <= f.r + tolerance) return f.id; }
+    probe.setTransform(1, 0, 0, 1, 0, 0);
+    probe.lineCap = 'round';
+    probe.lineJoin = 'round';
+    for (let i = list.length - 1; i >= 0; i--) {
+      const f = list[i];
+      if (f.kind === 'point') continue;
       probe.lineWidth = f.width + 2 * tolerance;
-      probe.lineCap = 'round';
-      probe.lineJoin = 'round';
       for (const l of f.lines) {
         const p = new Path2D();
         addLine(p, l);
         if (probe.isPointInStroke(p, x, y)) return f.id;
       }
-      if (f.kind === 'area' && f.path) {
-        probe.setTransform(k, 0, 0, k, e, g);
-        if (probe.isPointInPath(f.path, x, y, 'evenodd')) return f.id;
-      }
+    }
+    for (let i = list.length - 1; i >= 0; i--) {
+      const f = list[i];
+      if (f.kind !== 'area' || !f.path) continue;
+      const [k, e, g] = f.place;
+      probe.setTransform(k, 0, 0, k, e, g);
+      if (probe.isPointInPath(f.path, x, y, 'evenodd')) return f.id;
     }
     return null;
   }

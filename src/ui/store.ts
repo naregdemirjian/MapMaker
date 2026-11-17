@@ -20,17 +20,20 @@ export type Mode = 'world' | 'present';
 /** One line of a right-click menu: an action, a heading, or a divider. */
 export type MenuItem = { label: string; run: () => void; danger?: boolean; testId?: string } | { heading: string } | 'divider';
 
-export type Tool = 'select' | 'lasso' | 'polygon' | 'pen' | 'vertex' | 'place' | 'erase';
+export type Tool = 'select' | 'lasso' | 'polygon' | 'pen' | 'vertex' | 'place' | 'erase' | 'feature';
 export type Selection =
   | { kind: 'entity'; id: string }
   | { kind: 'event'; id: string }
   | { kind: 'point'; lon: number; lat: number }
   | { kind: 'shot'; id: string }
+  | { kind: 'feature'; id: string }
   | null;
 
 export type PendingEdit =
   | { kind: 'paint'; spaceId: string; layerId: string; rings: Vec3[][]; value: string | null; sample: [number, number] | null; origin: [number, number]; snap: number; draftId?: string }
-  | { kind: 'vertex'; spaceId: string; vertexId: number; to: Vec3 };
+  | { kind: 'vertex'; spaceId: string; vertexId: number; to: Vec3 }
+  /** An area, line or point drawn with the features tool: a new feature, or a new shape for one (`reshape`). Parts in longitude, latitude. */
+  | { kind: 'feature'; layerId: string; parts: Array<Array<[number, number]>>; reshape: string | null };
 
 export interface Toast { id: number; text: string; kind: 'info' | 'error' }
 
@@ -94,6 +97,10 @@ class AppStore {
   }
   /** The character the Characters tool places. */
   placeValue: string | null = null;
+  /** The layer of areas, lines or points the features tool draws on; how areas and lines are drawn; the feature being given a new shape (null: a new one). */
+  featureLayerId = '';
+  featureDraw: 'freehand' | 'clicks' = 'freehand';
+  reshapeId: string | null = null;
   /**
    * "Changes over time": the selected country is shown lightly, and the land it gained and lost in
    * the period around the date being viewed strongly. See domain/history-view.ts.

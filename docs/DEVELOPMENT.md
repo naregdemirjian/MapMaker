@@ -7,7 +7,14 @@ Companion files: [REQUIREMENTS.md](REQUIREMENTS.md) (checklist against the maste
 The approved architecture is the Claude Doc "Map Maker — Technical Architecture & Development Plan"
 (https://claude.ai/artifact/2JShAV3AWt6iECtNgBTsJN). All twelve of its decisions were approved on 15 November 2026.
 
-## Status at a glance (17 November 2026, after the second optimisation stage)
+## Status at a glance (18 November 2026, Stage 4 under way)
+
+- **Stage 4 (layers, entities and lore) under way.** Areas, lines and points (D71): "+ Layer" makes a layer of
+  territory, areas, lines or points; the **Areas, lines & points** tool draws claims and zones, front lines (with
+  teeth), roads and arrows, battles and other sites, freehand or click by click; each exists from a date (or always,
+  or with an event), can take a new shape from a later date and can end; they overlap freely and never change who
+  holds the land; they have their own look, list, panel and export pass. Next: relationships, search, GeoJSON and
+  CSV export, notes with pictures.
 
 - **Second optimisation stage done** (the user's request to keep optimising the whole workflow and to stress test it
   for massive projects on a slower computer; D55–D70; REQUIREMENTS.md, "The user's second optimisation request").
@@ -131,7 +138,7 @@ For development (Linux or Windows, Node 22.18 or newer):
 | `MAPMAKER_E2E_VIEWPORT=1500x900 node ... e2e/vertical-slice.e2e.ts` (or `workflows`) | The interface tests in a window of another size (no step may depend on where things fall on screen) |
 | `node --disable-warning=ExperimentalWarning test/geo-kernel.stress.ts <seeds> <rings>` | Long randomised kernel run |
 | `node --disable-warning=ExperimentalWarning e2e/vertical-slice.e2e.ts` | The 23-step interface test in Chrome (build first); screenshots in `e2e/output/` |
-| `node --disable-warning=ExperimentalWarning e2e/workflows.e2e.ts` | The 22-step workflow and export-inspection test; screenshots in `e2e/output/workflows/` |
+| `node --disable-warning=ExperimentalWarning e2e/workflows.e2e.ts` | The 23-step workflow and export-inspection test; screenshots in `e2e/output/workflows/` |
 | `node --disable-warning=ExperimentalWarning test/perf.bench.ts 100 300 1000 [--keep <folder>]` | Performance benchmark (minutes at 1000) |
 | `node node_modules/typescript/bin/tsc -p tsconfig.json` | Type check (must report nothing) |
 
@@ -195,14 +202,14 @@ The approved roadmap has 14 stages (0–13). Where each stands (brought up to da
 | 1 Project, storage, world model | Done | Projects, schema with upgrades (format 5; every upgrade tested), undo journal, autosave, versions, backups with restore, crash safety, multiple maps, entities with names, colours, notes; event groups (D8); groups of countries; outliner and inspector | Automatic groups (by world, by country) if wanted |
 | 2 Parcel map and territory editing | Mostly done | Production kernel (faces rebuilt around an edit), territory brush, precise shape tool, border pen with drafts, border points (move, add, remove), border eraser, snapping, smoothing, irregularity, political fills, derived borders, labels, coastline clipping, today's countries in one step, flat maps | Dedicated split and merge tools, sub-national boundaries as parcel edges, region picker |
 | 3 Time and event engine | Mostly done | Instants, Gregorian calendar, events, effects with intention, compiler followed change by change, any-date reconstruction, zoomable timeline, edit prompt, record mode, History Health, precedence and overlap rules, alternative versions, names over time, changes over time | Custom event types (interface), date comparison, dated border-point moves |
-| 4 Layers, entities, lore | Under way | Territory layers, **area, line and point layers with lifespans and dated shapes (D71)**, cities with lifespans, characters, alternative versions of events | Tools and panel for features, relationships, search, GeoJSON and CSV export, notes with pictures |
+| 4 Layers, entities, lore | Under way | Territory layers, **area, line and point layers with lifespans and dated shapes, their tool, list and panel (D71)**, cities with lifespans, characters, alternative versions of events | Relationships, search, GeoJSON and CSV export, notes with pictures |
 | 5 First shots and export | Mostly done | Shots, time remap, still camera, date, title and current-events overlays, PNG sequences with passes and transparency up to 8K at every listed frame rate, preview, manifest, compositing guide, deterministic output | Multi-key camera, styles, version-pinned shots, the Premiere checklist on the user's PC |
 | 6 Transitions | Started | Advancing front, expansion and fade; borders and labels follow the animation; shot-level transition settings | Arrival-time fields, front keyframes, more styles, animated features, the per-event "out of sync" override |
 | 7–13 | Not started | | Military and movement, terrain, environment, presentation polish, space maps (nearby stars to 50 light-years), smart brushes, branches and calendars |
 
 ## Tests
 
-All pass as of 17 November 2026 (209 unit and randomised tests in 32 files, 23 + 22 + 6 + 5 interface steps). The
+All pass as of 17 November 2026 (209 unit and randomised tests in 32 files, 23 + 23 + 6 + 5 interface steps). The
 interface tests run with the verify mode on (D57): everything the app works out from what was there before is also
 worked out afresh, and any difference stops the test.
 `sh scripts/check-all.sh` runs everything and prints ALL CHECKS PASSED only when every check passed.
@@ -245,7 +252,7 @@ worked out afresh, and any difference stops the test.
 | `e2e/vertical-slice.e2e.ts` | 23 steps | The vertical slice in Chrome: projects, drawing, Earth's geography and data sources, border points, versions, events, dates, version restore and undo, full restart, animation, export with data credits, identical re-export, 1080p, coastline clipping |
 | `e2e/desktop.e2e.ts` | 5 steps | The Electron app: own window, own data service on this computer only, project written to disk, one copy at a time, close and reopen with contents intact |
 | `test/event-groups.test.ts` | 4 | Event group commands with undo (several groups per event, filter rules, deletion keeps events, alternatives keep groups); a version 1 project file upgraded on opening (backup first, content and undo history intact, old backups restorable without rolling the format back); a file from a newer version refused untouched |
-| `e2e/workflows.e2e.ts` | 22 steps | Precise shapes; occupation layer; hiding layers; alternative versions; annexation; deleting and undoing events; fades; a second world; a camera move at 2.39:1 and 25 fps with frame timing, history in the pixels and pass stacking checked; square size, Natural Earth projection, 23.976 fps, transparency; the preview of that shot dragged with the mouse (carried while its meridian is held, laid out afresh at rest) |
+| `e2e/workflows.e2e.ts` | 23 steps | Precise shapes; occupation layer; hiding layers; alternative versions; annexation; deleting and undoing events; fades; a second world; a camera move at 2.39:1 and 25 fps with frame timing, history in the pixels and pass stacking checked; layers of lines, points and areas made with "+ Layer", drawn freehand, by a click and click by click, chosen by clicking, restyled, given a new shape from a date, ended and undone; square size, Natural Earth projection, 23.976 fps, transparency; the preview of that shot dragged with the mouse (carried while its meridian is held, laid out afresh at rest) |
 
 Checked by hand: 4K and 8K exports; the unzipped package starts and works; requests from other hosts are refused.
 
@@ -435,8 +442,8 @@ recompiling the 1,000-territory history took about 800 ms after every edit.
 ## Next priorities (18 November 2026)
 
 1. The user tries the latest installer (from the newest "Windows build and tests" run) and reports back.
-2. Stage 4, in order: tools and a panel for areas, lines and points; dated relationships between countries,
-   factions and characters; search; GeoJSON and CSV export; notes with pictures.
+2. Stage 4, in order: dated relationships between countries, factions and characters; search; GeoJSON and CSV
+   export; notes with pictures. (Areas, lines and points are done, D71.)
 3. Then the rest of Stages 2 and 3 (split and merge tools, region picker, custom event types, date comparison,
    dated border-point moves) and Stage 7 (military: control, frontlines, units, routes), which builds on Stage 4.
 4. Characters: icons or pictures for markers.

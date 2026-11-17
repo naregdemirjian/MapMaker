@@ -8,6 +8,7 @@ import { ShotsPanel, ShotEditor, ShotTimeline } from './components/Presentation.
 import { LabelStyleDialog } from './components/LabelStyles.tsx';
 import { AddCountriesDialog } from './components/AddCountries.tsx';
 import { SettingsDialog } from './components/Settings.tsx';
+import { NewLayerDialog } from './components/Features.tsx';
 import { ContextMenu, deleteEntitiesAsked, deleteEventsAsked } from './components/ContextMenu.tsx';
 
 export function App() {
@@ -48,6 +49,7 @@ export function App() {
       <ContextMenu />
       {s.dialog === 'new-world' && <NewWorldDialog />}
       {s.dialog === 'new-event' && <NewEventDialog />}
+      {s.dialog === 'new-layer' && <NewLayerDialog />}
       {s.dialog === 'versions' && <VersionsDialog />}
       {s.dialog === 'health' && <HealthDialog />}
       {s.dialog === 'data-sources' && <DataSourcesDialog />}

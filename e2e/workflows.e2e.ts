@@ -62,8 +62,8 @@ try {
     // A custom layer for military control.
     // Named in the app's own dialog (the desktop app has no browser prompt).
     await page.getByRole('button', { name: '+ Layer' }).click();
-    await page.getByTestId('ask-input').fill('Military control');
-    await page.getByTestId('ask-input').press('Enter');
+    await page.getByTestId('new-layer-name').fill('Military control');
+    await page.getByTestId('new-layer-name').press('Enter');
     await page.locator('.left .row', { hasText: 'Military control' }).getByText('drawing here').waitFor();
     // Base: everyone controls their own land; then B occupies part of A in 1700.
     await page.getByTestId('tool-lasso').click();
@@ -617,6 +617,132 @@ try {
     assert.equal(await page.getByTestId('history-period').textContent(), '1900–1999');
     assert.ok((await page.getByTestId('history-change').count()) >= 1);
     await page.getByTestId('history-mode').uncheck();
+  });
+
+  await h.step('Areas, lines and points: layers of each kind, drawn by mouse, chosen by clicking, restyled, reshaped from a date, ended, undone', async () => {
+    const feats = () => page.evaluate(() => { const s = (window as any).__mapmaker.store; return s.world.all('feature').map((f: any) => ({ id: f.id, name: f.name, layer: s.world.get('layer', f.layer_id).name, kind: s.world.get('layer', f.layer_id).kind, style: f.style })); }) as Promise<Array<{ id: string; name: string; layer: string; kind: string; style: string }>>;
+    const shown = (name: string, date: string) => page.evaluate(([n, d]) => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const f = s.world.all('feature').find((x: any) => x.name === n);
+      const t = B.gregorian.fromCivil({ year: Number(d) });
+      return !!f && s.engine.featuresAt(f.layer_id, t).some((x: any) => x.feature === f.id);
+    }, [name, date] as const);
+    await page.evaluate(([lon, lat]) => (window as any).__mapmaker.store.setCamera({ lon, lat, zoom: 1, rotation: 0, projection: 'equirectangular' }), P.b);
+    await h.setDate('1850');
+    await page.getByTestId('tool-select').click();
+    // A layer of lines: "+ Layer", the kind, a name. The features tool is chosen with it.
+    await page.locator('.section-head', { hasText: 'Layers' }).getByRole('button').click();
+    await page.getByTestId('new-layer-dialog').waitFor();
+    await page.getByTestId('layer-kind-line').click();
+    await page.getByTestId('new-layer-name').fill('Front lines');
+    await page.getByTestId('create-layer').click();
+    await page.getByTestId('feature-options').waitFor();
+    assert.ok(await page.getByTestId('tool-feature').evaluate((b) => b.classList.contains('on')), 'the features tool is chosen');
+    // A front line drawn freehand from A's land towards B's, existing from 1850 (no event).
+    const pb = await h.toPage(P.b);
+    const line: Array<[number, number]> = [];
+    for (let i = 0; i <= 12; i++) { const f = i / 12; line.push([pb[0] - 260 + 400 * f, pb[1] - 90 + 25 * Math.sin(f * Math.PI)]); }
+    await page.mouse.move(line[0][0], line[0][1]);
+    await page.mouse.down();
+    for (const q of line.slice(1)) await page.mouse.move(q[0], q[1], { steps: 3 });
+    await page.mouse.up();
+    await page.getByTestId('feature-prompt').waitFor();
+    await page.getByTestId('feature-name').fill('Northern front');
+    assert.ok(await page.getByTestId('feature-choice-change').evaluate((d) => d.classList.contains('on')), '"exists from the date viewed" is chosen');
+    await page.keyboard.press('Enter');
+    await page.getByTestId('feature-panel').waitFor();
+    let all = await feats();
+    assert.deepEqual(all.map((f) => [f.name, f.layer, f.kind]), [['Northern front', 'Front lines', 'line']]);
+    assert.ok(await shown('Northern front', '1850') && !(await shown('Northern front', '1849')), 'from 1850, not before');
+    // Restyled: teeth on the right, red, wider. The look is kept with the feature.
+    await page.getByTestId('feature-teeth').selectOption('right');
+    await page.getByTestId('feature-arrow').selectOption('end');
+    all = await feats();
+    assert.match(all[0].style, /"teeth":"right"/);
+    assert.match(all[0].style, /"arrow":"end"/);
+    // Drawn on the map: the line's colour is there under the middle of the stroke.
+    const mid = line[6];
+    const near = await page.evaluate(([x, y]) => {
+      const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement, r = c.getBoundingClientRect(), k = c.width / r.width;
+      const d = c.getContext('2d')!.getImageData(Math.round((x - r.left) * k) - 6, Math.round((y - r.top) * k) - 6, 13, 13).data;
+      let red = 0;
+      for (let i = 0; i < d.length; i += 4) if (d[i] > 180 && d[i + 1] < 120 && d[i + 2] < 120) red++;
+      return red;
+    }, mid);
+    assert.ok(near > 3, `the red front line is drawn where it was drawn (${near} red pixels)`);
+    // A layer of points; a battle put there with a click, in a new event.
+    await page.locator('.section-head', { hasText: 'Layers' }).getByRole('button').click();
+    await page.getByTestId('layer-kind-point').click();
+    await page.getByTestId('new-layer-name').fill('Battles');
+    await page.getByTestId('create-layer').click();
+    await h.setDate('1870');
+    await page.mouse.click(pb[0] - 40, pb[1] + 10);
+    await page.getByTestId('feature-prompt').waitFor();
+    await page.getByTestId('feature-name').fill('Battle of the Ford');
+    await page.getByTestId('feature-choice-event').click();
+    await page.getByTestId('feature-event-name').fill('Ford campaign');
+    await page.getByTestId('confirm-feature').click();
+    await page.getByTestId('feature-panel').waitFor();
+    assert.ok(await shown('Battle of the Ford', '1870') && !(await shown('Battle of the Ford', '1869')));
+    assert.ok(await page.evaluate(() => (window as any).__mapmaker.store.world.all('event').some((e: any) => e.name === 'Ford campaign')), 'the event was made');
+    await page.getByTestId('feature-symbol').selectOption('battle');
+    // A layer of areas, click by click, there from the beginning.
+    await page.locator('.section-head', { hasText: 'Layers' }).getByRole('button').click();
+    await page.getByTestId('layer-kind-area').click();
+    await page.getByTestId('new-layer-name').fill('Claims');
+    await page.getByTestId('create-layer').click();
+    await page.getByTestId('feature-draw').selectOption('clicks');
+    const ring: Array<[number, number]> = [[pb[0] - 70, pb[1] - 40], [pb[0] + 40, pb[1] - 50], [pb[0] + 50, pb[1] + 45], [pb[0] - 60, pb[1] + 50]];
+    for (const [x, y] of ring) await page.mouse.click(x, y);
+    await page.keyboard.press('Enter');
+    await page.getByTestId('feature-prompt').waitFor();
+    await page.getByTestId('feature-name').fill('Probian claim');
+    await page.getByTestId('feature-owner').selectOption({ label: B });
+    await page.getByTestId('feature-choice-always').click();
+    await page.getByTestId('confirm-feature').click();
+    await page.getByTestId('feature-panel').waitFor();
+    assert.ok(await shown('Probian claim', '1000'), 'there from the beginning');
+    await page.getByTestId('feature-hatch').selectOption('diagonal');
+    // Three layers, three features, listed under "Areas, lines and points"; nobody's land changed.
+    assert.equal(await page.getByTestId('feature-row').count(), 3);
+    assert.equal(await h.ownerAt(P.b, '1900'), A, 'the land under them is untouched');
+    // With Select, a click on the battle chooses it.
+    await page.getByTestId('tool-select').click();
+    await page.mouse.click(pb[0] - 40, pb[1] + 10);
+    await page.getByTestId('feature-panel').waitFor();
+    assert.equal(await page.getByTestId('feature-panel-name').inputValue(), 'Battle of the Ford');
+    await h.screenshot('areas-lines-points');
+    // The front moves in 1880: a new shape from that date, through the panel.
+    await page.locator('.left [data-testid=feature-row]', { hasText: 'Northern front' }).click();
+    await h.setDate('1880');
+    await page.getByTestId('feature-reshape').click();
+    await page.getByTestId('reshaping').waitFor();
+    await page.getByTestId('feature-draw').selectOption('freehand');
+    await page.mouse.move(line[0][0], line[0][1] + 70);
+    await page.mouse.down();
+    for (const q of line.slice(1)) await page.mouse.move(q[0], q[1] + 70, { steps: 3 });
+    await page.mouse.up();
+    await page.getByTestId('feature-prompt').waitFor();
+    assert.match((await page.getByTestId('feature-prompt').locator('h2').textContent()) ?? '', /new shape for “Northern front”/);
+    await page.keyboard.press('Enter');
+    await page.getByTestId('feature-panel').waitFor();
+    assert.equal(await page.getByTestId('feature-step').count(), 2, 'two shapes over time');
+    const lat = (date: string) => page.evaluate(([d]) => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const f = s.world.all('feature').find((x: any) => x.name === 'Northern front');
+      return s.engine.featuresAt(f.layer_id, B.gregorian.fromCivil({ year: Number(d) })).find((x: any) => x.feature === f.id)?.parts[0][1] ?? null;
+    }, [date] as const);
+    const before = await lat('1860'), after = await lat('1890');
+    assert.ok(before !== null && after !== null && after < before - 1, `moved south from 1880 (${before} -> ${after})`);
+    // It ends in 1910; undone, it carries on.
+    await h.setDate('1910');
+    await page.getByTestId('feature-end').click();
+    await h.saved();
+    assert.ok(!(await shown('Northern front', '1911')) && (await shown('Northern front', '1909')));
+    await page.keyboard.press('Control+z');
+    await h.saved();
+    assert.ok(await shown('Northern front', '1911'), 'undone: it carries on');
+    await page.getByTestId('tool-select').click();
   });
 
   await h.step('A shot framed in the preview (still camera, reset) at 2.39:1 and 25 fps; inspect every exported pass', async () => {

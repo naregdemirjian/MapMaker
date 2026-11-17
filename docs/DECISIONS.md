@@ -91,6 +91,19 @@ drawing itself, a zone growing) is Stage 6 and 7 work; for now a shape changes a
 with undo, reloading and alternative versions, deleting and broken references, tidy shapes across 180°, looks, and
 120 random edits followed one by one in verify mode).
 
+**In the interface.** "+ Layer" asks for the kind (territory, areas, lines or points; territory first, as before).
+A new tool, **Areas, lines & points**, draws on the feature layer chosen above the map: a click puts a point; areas
+and lines are drawn freehand (cleaned up like the brush) or click by click (double-click or Enter finishes). Then a
+short question: the name, what it belongs to, and when it holds: from the date viewed (the default; no event),
+always, or as part of an event (an existing one or a new one). While an event is being recorded, drawings go into it
+without asking. With Select, a click chooses the feature under the pointer (a point first, then a line or an area's
+outline, then the inside of an area, so a battle inside a claim can be clicked); it is outlined on the map, and its
+panel holds the name, owner, layer, look, its shapes over time (go to, from the beginning, remove a step), "Draw a new
+shape…" (the next drawing becomes its shape from the date viewed, a correction of the shape in force, or part of an
+event), "Ends on <date>", notes and Delete. The left panel lists the features of the map, layer by layer, dimming
+those not there at the date viewed. `e2e/workflows` drives all of it with the mouse (a step of its own) and exports
+the features pass with the others.
+
 ### D70. While the view zooms in, the geometry it started with serves twice as far
 
 Geometry prepared for one zoom (a sheet, D49) is drawn at up to 1.42 times its scale with its outlines within the

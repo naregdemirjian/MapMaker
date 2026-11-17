@@ -67,8 +67,8 @@ try {
     await page.getByTestId('entity-panel').waitFor();
     // Naming works in the desktop app (it has no browser prompt): a new layer.
     await page.getByRole('button', { name: '+ Layer' }).click();
-    await page.getByTestId('ask-input').fill('Religion');
-    await page.getByTestId('ask-input').press('Enter');
+    await page.getByTestId('new-layer-name').fill('Religion');
+    await page.getByTestId('new-layer-name').press('Enter');
     await page.locator('.left .row', { hasText: 'Religion' }).waitFor();
     await capture(page, join(OUT, '01-desktop-window.png'));
   });
