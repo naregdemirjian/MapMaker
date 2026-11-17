@@ -932,6 +932,17 @@ export class Engine {
     return best;
   }
 
+  /** When the last change up to `t` began (one made over a period begins at its start), or null: the
+   * map just before it is the map as it was before that change (comparing dates). */
+  lastChangeStart(t: Instant): Instant | null {
+    this.ensure();
+    let best: Instant | null = null;
+    const consider = (x: Instant) => { if (x.day !== -Infinity && compare(x, t) <= 0 && (!best || compare(x, best) > 0)) best = x; };
+    for (const times of this.effectTimes.values()) consider(times[0]);
+    for (const x of this.pointTimes) consider(x);
+    return best;
+  }
+
   /** All instants at which something changes (for timeline markers and stepping). */
   changeInstants(): Instant[] {
     this.ensure();

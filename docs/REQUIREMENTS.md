@@ -88,7 +88,8 @@ status. Last updated: 18 November 2026 (Stage 4; see DEVELOPMENT.md).
 | Broken dependencies flagged with "leave or auto-adapt" | Tested | `temporal-engine`, `recovery` | |
 | Alternative versions of an event | Tested | `temporal-engine`, `e2e/workflows` step 3 | |
 | Full alternative timelines | Not implemented | | Stage 13 |
-| Custom event types; date comparison; fictional calendars | Not implemented | | Stages 3, 13 |
+| Comparing two dates (a line across the map, dragged) | Tested | `temporal-engine` (when the last change began), `e2e/workflows` 'Compare two dates' (both sides by their colours, the line dragged both ways, the dates swapped) | D74 |
+| Custom event types; fictional calendars | Not implemented | | Stages 3, 13 |
 | Timeline navigation (zoom, scrub, next/previous change) | Tested | `e2e/vertical-slice` step 8 | |
 | Timeline playback in world-building mode | Not implemented | | Playback exists for shots |
 

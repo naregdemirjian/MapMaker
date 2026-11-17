@@ -619,6 +619,50 @@ try {
     await page.getByTestId('history-mode').uncheck();
   });
 
+  await h.step('Compare two dates: the date viewed left of a line, another right; the line dragged; the dates swapped', async () => {
+    const px = async (ll: LL) => { const q = await h.toPage(ll); return page.evaluate(([x, y]) => { const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement; const r = c.getBoundingClientRect(), k = c.width / r.width; return Array.from(c.getContext('2d')!.getImageData(Math.round((x - r.left) * k), Math.round((y - r.top) * k), 1, 1).data).slice(0, 3); }, q); };
+    const near = (a: number[], b: number[]) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]) <= 12;
+    await page.evaluate(([lon, lat]) => (window as any).__mapmaker.store.setCamera({ lon, lat, zoom: 1, rotation: 0, projection: 'equirectangular' }), P.b);
+    // B's land in 1899 (B's own) and in 1901 (annexed by A in 1900): two colours.
+    await h.setDate('1 June 1899');
+    const before = await px(P.b);
+    await h.setDate('1 June 1901');
+    const after = await px(P.b);
+    assert.ok(!near(before, after), `B's land changes colour in 1900 (${before} -> ${after})`);
+    // Comparing: the other date is at first the day before the last change (the annexation).
+    await page.getByTestId('compare-toggle').click();
+    const other = await page.getByTestId('compare-date').inputValue();
+    assert.match(other, /1899/, other);
+    const box = (await page.getByTestId('map-canvas').boundingBox())!;
+    const at = await h.toPage(P.b);
+    const split = () => page.evaluate(() => (window as any).__mapmaker.store.compare.split as number);
+    const lineX = async () => box.x + (await split()) * box.width;
+    // Drag the line to the left of B's land: B's land shows the other date (1899).
+    await page.mouse.move(await lineX(), box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(at[0] - 120, box.y + box.height / 2, { steps: 6 });
+    await page.mouse.up();
+    assert.ok((await lineX()) < at[0] - 100, 'the line moved');
+    assert.ok(near(await px(P.b), before), `right of the line: 1899 (${await px(P.b)} vs ${before})`);
+    await h.screenshot('compare-dates');
+    // To the right of it: the date viewed (1901).
+    await page.mouse.move(await lineX(), box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(at[0] + 120, box.y + box.height / 2, { steps: 6 });
+    await page.mouse.up();
+    assert.ok(near(await px(P.b), after), `left of the line: 1901 (${await px(P.b)} vs ${after})`);
+    // Swapped: the date viewed becomes 1899, the other 1901.
+    await page.getByTestId('compare-swap').click();
+    assert.match(await page.getByTestId('compare-date').inputValue(), /1901/);
+    assert.match(await page.getByTestId('current-date').inputValue(), /1899/);
+    assert.ok(near(await px(P.b), before), 'left of the line now 1899');
+    // Off again: the whole map at the date viewed.
+    await page.getByTestId('compare-toggle').click();
+    assert.equal(await page.getByTestId('compare-date').count(), 0);
+    assert.ok(near(await px(P.b), before));
+    await h.setDate('1 June 1901');
+  });
+
   await h.step('Areas, lines and points: layers of each kind, drawn by mouse, chosen by clicking, restyled, reshaped from a date, ended, undone', async () => {
     const feats = () => page.evaluate(() => { const s = (window as any).__mapmaker.store; return s.world.all('feature').map((f: any) => ({ id: f.id, name: f.name, layer: s.world.get('layer', f.layer_id).name, kind: s.world.get('layer', f.layer_id).kind, style: f.style })); }) as Promise<Array<{ id: string; name: string; layer: string; kind: string; style: string }>>;
     const shown = (name: string, date: string) => page.evaluate(([n, d]) => {

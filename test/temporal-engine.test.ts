@@ -382,3 +382,20 @@ test('deleting a country takes it out of history: its land goes back to its prev
   assert.equal(s.at(14, 49, Y(1600)), A);
   assert.deepEqual(s.engine.conflicts, []);
 });
+
+test('when the last change began (comparing dates): a change made over a period counts from its start; renames and places count too', () => {
+  const s = setup();
+  const A = s.ent('A'), B = s.ent('B');
+  s.correct(square(0, 0, 10), A, NEG_INF);
+  assert.equal(s.engine.lastChangeStart(Y(2000)), null, 'nothing but the starting map');
+  const war = s.event('War', Y(1700, 5, 1), Y(1700, 5, 11));
+  s.paint(square(0, 0, 8), B, war, null, { style: 'advance', origin: [-8, 0], easing: 'linear' });
+  // Half way through and after the war: it began on 1 May; the day before, A still held everything.
+  for (const t of [Y(1700, 5, 6), Y(1800)]) assert.deepEqual(s.engine.lastChangeStart(t), Y(1700, 5, 1));
+  assert.equal(s.at(-7, 0, Y(1700, 4, 30)), A);
+  assert.equal(s.engine.lastChangeStart(Y(1700, 4, 30)), null);
+  // A rename later on is a change too.
+  cmd.renameFrom(s.world, { entity: A, name: 'A2', mode: { kind: 'change', t: Y(1750) } });
+  assert.deepEqual(s.engine.lastChangeStart(Y(1800)), Y(1750));
+  assert.deepEqual(s.engine.lastChangeStart(Y(1749)), Y(1700, 5, 1));
+});

@@ -180,6 +180,15 @@ export function Timeline() {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.drawImage(still.current.canvas, 0, 0);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // The other date being compared (Stage 3): a dashed yellow line.
+    if (s.compare.on && s.mode === 'world') {
+      const cx = xOf(toApproxYear(s.compare.time));
+      ctx.strokeStyle = '#ffd166';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, h); ctx.stroke();
+      ctx.setLineDash([]);
+    }
     // playhead
     const px = xOf(toApproxYear(s.time));
     ctx.strokeStyle = '#ff6b6b';

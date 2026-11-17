@@ -128,6 +128,13 @@ class AppStore {
   /** Set when a change could not be saved; editing stops until the project is reloaded from disk. */
   offline: string | null = null;
   readonly renderer = new MapRenderer();
+  /**
+   * Comparing two dates: the map at the date viewed on the left of a line across the map, at
+   * `time` on the right; `split` is where the line is (a fraction of the map's width). Drawn by a
+   * renderer of its own, so neither side's kept pictures are thrown away by the other.
+   */
+  compare: { on: boolean; time: Instant; split: number } = { on: false, time: gregorian.fromCivil({ year: 1900 }), split: 0.5 };
+  readonly compareRenderer = new MapRenderer();
   /** How the working view is drawn on this computer (never part of a project or an export). */
   viewSettings: ViewSettings = loadViewSettings();
   setViewSettings(v: ViewSettings) {
@@ -137,8 +144,10 @@ class AppStore {
     this.notify();
   }
   private applyViewSettings() {
-    this.renderer.carry = this.viewSettings.whileMoving === 'carry';
-    this.renderer.quality = { ...VIEW_QUALITY, tolerance: DETAIL_TOLERANCE[this.viewSettings.detail] };
+    for (const r of [this.renderer, this.compareRenderer]) {
+      r.carry = this.viewSettings.whileMoving === 'carry';
+      r.quality = { ...VIEW_QUALITY, tolerance: DETAIL_TOLERANCE[this.viewSettings.detail] };
+    }
     return true;
   }
   private readonly viewSettingsApplied = this.applyViewSettings();

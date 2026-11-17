@@ -60,6 +60,19 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D74. Comparing two dates: a second renderer and a line across the map (Stage 3)
+
+"Compare" in the date bar shows the map at a second date to the right of a line across the map, the date viewed to
+its left; the line is dragged sideways (it is drawn in yellow with a handle and the two dates at its top). The second
+date starts as the day before the last change up to the date viewed (`Engine.lastChangeStart`; a change made over a
+period counts from its start), so turning it on shows at once what the last change did; it is typed in like any
+date, "⇄" swaps the two, and the timeline marks it with a dashed yellow line. The second date is drawn by a second
+`MapRenderer` (`store.compareRenderer`) with its own kept pictures, onto a canvas of its own laid over the right of
+the line, so moving the map or the line costs what the working view costs (each picture is carried, patched and
+drawn afresh at rest as before, D58–D70). Settings apply to both. Editing, choosing and the panels work on the date
+viewed (the left); the line is only for looking. Swiping was chosen over side by side: one map, one camera, and the
+change seen in place; side by side can be added if wanted. Not in shots or exports.
+
 ### D73. Search, data export (GeoJSON and CSV) and pictures with notes: the rest of Stage 4
 
 **Search** (`src/domain/search.ts`, the box in the top bar, Ctrl+F): countries, factions, characters, cities, areas,

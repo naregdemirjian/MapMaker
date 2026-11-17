@@ -14,7 +14,7 @@ import { lonLatToVec, E7 } from '../../geo-kernel/vec.ts';
 import { cameraAt, timeAt, overlaysAt, drawOverlays, withStillCamera, moveOverlay, type ShotSettings, type OverlayRect } from '../../presentation/sequence.ts';
 import { transitionOptions, drawShotOverlays } from '../../presentation/export-driver.ts';
 import { parseJSON, slerpLonLat } from '../../temporal-engine/engine.ts';
-import { compare, fromStore } from '../../core-time/index.ts';
+import { compare, fromStore, gregorian } from '../../core-time/index.ts';
 import { basemapSourceOf } from '../../world-model/world-settings.ts';
 import { loadBasemapDetail, pixelsPerDegree, visibleBounds, DETAIL_PIXELS_PER_DEGREE, type Basemap } from '../../render-engine/basemap.ts';
 import * as cmd from '../../domain/commands.ts';
@@ -35,7 +35,9 @@ type Drag =
   // The border eraser's stroke (map positions).
   | { kind: 'erase'; points: Pt[] }
   // A freehand area or line on a feature layer (map positions).
-  | { kind: 'feature'; points: Pt[] };
+  | { kind: 'feature'; points: Pt[] }
+  // The line between two dates being compared, dragged across the map.
+  | { kind: 'split' };
 
 /** Where the shot preview last drew its texts and the events box (frame pixels), to pick them up. */
 let overlayRects: OverlayRect[] = [];
@@ -165,6 +167,8 @@ export function MapView() {
   const filling = useRef({ sig: '', timer: 0, due: false });
   const speedRef = useRef<HTMLDivElement | null>(null);
   const frameTimes = useRef<number[]>([]);
+  // The picture of the other date being compared (Stage 3), drawn by its own renderer.
+  const compareCanvas = useRef<OffscreenCanvas | null>(null);
   useEffect(() => () => { window.clearTimeout(motion.current.timer); window.clearTimeout(filling.current.timer); }, []);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -177,6 +181,7 @@ export function MapView() {
   const [hoverVertex, setHoverVertex] = useState<number | null>(null);
   const [, force] = useState(0);
   const [overOverlay, setOverOverlay] = useState(false);
+  const [overSplit, setOverSplit] = useState(false);
   const presentation = s.mode === 'present';
   const shot = presentation ? currentShot() : null;
 
@@ -285,6 +290,40 @@ export function MapView() {
       ctx.lineWidth = 1;
       ctx.strokeRect(frame.x - 0.5, frame.y - 0.5, frame.w + 1, frame.h + 1);
       return;
+    }
+    // Comparing two dates: the other date drawn by its own renderer, laid on the right of the line.
+    if (s.compare.on && s.mode === 'world') {
+      const cmpCanvas = (compareCanvas.current ??= new OffscreenCanvas(c.width, c.height));
+      if (cmpCanvas.width !== c.width || cmpCanvas.height !== c.height) { cmpCanvas.width = c.width; cmpCanvas.height = c.height; }
+      const cc = cmpCanvas.getContext('2d') as unknown as CanvasRenderingContext2D;
+      cc.setTransform(dpr, 0, 0, dpr, frame.x * dpr, frame.y * dpr);
+      try {
+        s.compareRenderer.render(cc, view, s.world, s.engine, s.spaceId, s.compare.time, { passes, transparent: false, layerIds: layers, basemap, referenceBorders: s.referenceBorders, layout: { labels: !namesHidden, cities: true }, moving: moving && vs.whileMoving === 'carry', holdNames: moving && vs.names === 'hold', fillAround });
+      } catch (e) {
+        console.error(e);
+      }
+      // (Drawn roughly while moving: drawn afresh once the view rests, as the main picture is.)
+      if (moving && s.compareRenderer.lastApproximate) { window.clearTimeout(mo.timer); mo.timer = window.setTimeout(() => force((n) => n + 1), SETTLE_MS + 4); }
+      const x = Math.round((frame.x + Math.max(0, Math.min(1, s.compare.split)) * frame.w) * dpr);
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.drawImage(cmpCanvas as unknown as CanvasImageSource, x, 0, c.width - x, c.height, x, 0, c.width - x, c.height);
+      // The line, its handle, and the two dates.
+      ctx.fillStyle = '#ffd166';
+      ctx.fillRect(x - Math.round(dpr), 0, Math.max(2, Math.round(2 * dpr)), c.height);
+      ctx.beginPath(); ctx.arc(x, c.height / 2, 9 * dpr, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#10161d'; ctx.font = `bold ${11 * dpr}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('⇔', x, c.height / 2);
+      ctx.font = `600 ${12 * dpr}px system-ui, sans-serif`;
+      const tag = (text: string, tx: number, align: CanvasTextAlign) => {
+        ctx.textAlign = align;
+        const w = ctx.measureText(text).width + 14 * dpr;
+        const bx = align === 'right' ? tx - w : tx;
+        ctx.fillStyle = 'rgba(10,16,24,0.78)'; ctx.fillRect(bx, 8 * dpr, w, 22 * dpr);
+        ctx.fillStyle = '#ffd166'; ctx.fillText(text, align === 'right' ? tx - 7 * dpr : tx + 7 * dpr, 19 * dpr);
+      };
+      tag(gregorian.format(s.time, 'day'), x - 8 * dpr, 'right');
+      tag(gregorian.format(s.compare.time, 'day'), x + 8 * dpr, 'left');
+      ctx.restore();
     }
     drawEditingOverlay(ctx, view);
   });
@@ -498,6 +537,8 @@ export function MapView() {
     if (!s.world) return;
     e.currentTarget.setPointerCapture(e.pointerId);
     const p = local(e);
+    // Comparing two dates: the line between them is picked up (a few pixels either side).
+    if (!presentation && e.button === 0 && s.compare.on && Math.abs(p[0] - s.compare.split * frame.w) <= 8) { drag.current = { kind: 'split' }; return; }
     // In the shot preview, a text or the events box under the pointer is picked up and moved.
     if (presentation && e.button === 0) {
       const hit = overlayAt(p);
@@ -575,6 +616,7 @@ export function MapView() {
   function onPointerMove(e: React.PointerEvent<HTMLCanvasElement>) {
     const p = local(e);
     const d = drag.current;
+    if (d.kind === 'split') { store.setLive({ compare: { ...store.compare, split: Math.max(0.02, Math.min(0.98, p[0] / frame.w)) } }); return; }
     if (d.kind === 'overlay') {
       store.setLive({ presentOverlay: { id: d.id, dx: (p[0] - d.x) / frame.w, dy: (p[1] - d.y) / frame.h, from: d.from } });
       return;
@@ -591,6 +633,10 @@ export function MapView() {
     if (presentation && d.kind === 'none') {
       const over = !!overlayAt(p);
       if (over !== overOverlay) setOverOverlay(over);
+    }
+    if (!presentation && d.kind === 'none') {
+      const over = s.compare.on && Math.abs(p[0] - s.compare.split * frame.w) <= 8;
+      if (over !== overSplit) setOverSplit(over);
     }
     if (d.kind === 'pan') {
       const dx = e.clientX - d.x, dy = e.clientY - d.y;
@@ -788,7 +834,7 @@ export function MapView() {
     }
   }
 
-  const cursorStyle = presentation ? (drag.current.kind === 'overlay' || overOverlay ? 'move' : 'grab') : s.tool === 'select' ? 'grab' : s.tool === 'vertex' ? (hoverVertex !== null ? 'move' : 'default') : 'crosshair';
+  const cursorStyle = drag.current.kind === 'split' || (overSplit && s.compare.on && !presentation) ? 'ew-resize' : presentation ? (drag.current.kind === 'overlay' || overOverlay ? 'move' : 'grab') : s.tool === 'select' ? 'grab' : s.tool === 'vertex' ? (hoverVertex !== null ? 'move' : 'default') : 'crosshair';
   return (
     <div className="map-wrap" ref={wrapRef}>
       <canvas

@@ -1,7 +1,7 @@
 import { useState, useEffect, memo } from 'react';
 import { useStore, useLive, store, type Tool } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
-import { type Instant, gregorian, fromStore, formatYear, compare, NEG_INF } from '../../core-time/index.ts';
+import { type Instant, gregorian, fromStore, formatYear, compare, add, NEG_INF } from '../../core-time/index.ts';
 import { BASE_EVENT_ID, type EffectRow } from '../../world-model/schema.ts';
 import { basemapSourceOf, worldSettings } from '../../world-model/world-settings.ts';
 import { parseJSON, leafDescendants, isUntracked, resolutionOf, type Resolution, type TransitionSpec } from '../../temporal-engine/engine.ts';
@@ -63,6 +63,15 @@ function CurrentDate() {
   return <DateField value={s.time} onChange={(t) => t && s.setTime(t)} testId="current-date" />;
 }
 
+/** A first date to compare with: the day before the last change up to the date viewed (the map as it
+ * was before it), else a century earlier. */
+function defaultCompareTime(s: ReturnType<typeof useStore>): Instant {
+  const last = s.engine?.lastChangeStart(s.time);
+  if (last) return add(last, -1);
+  const c = gregorian.toCivil(s.time);
+  return gregorian.fromCivil({ year: c.year - 100, month: c.month, day: c.day });
+}
+
 export function TopBar() {
   const s = useStore();
   const w = s.world!;
@@ -88,6 +97,12 @@ export function TopBar() {
           <button onClick={() => stepChange(-1)} title="Previous change">◀</button>
           <CurrentDate />
           <button onClick={() => stepChange(1)} title="Next change">▶</button>
+          <button className={s.compare.on ? 'on' : ''} onClick={() => s.set({ compare: { ...s.compare, on: !s.compare.on, time: s.compare.on ? s.compare.time : defaultCompareTime(s) } })}
+            title="Compare two dates: the date viewed on the left of a line across the map, another date on the right (drag the line)" data-testid="compare-toggle">Compare</button>
+          {s.compare.on && <>
+            <DateField value={s.compare.time} onChange={(t) => t && s.set({ compare: { ...s.compare, time: t } })} testId="compare-date" />
+            <button onClick={() => { const a = s.time; s.setTime(s.compare.time); s.set({ compare: { ...s.compare, time: a } }); }} title="Swap the two dates" data-testid="compare-swap">⇄</button>
+          </>}
         </div>
       )}
       <div className="spacer" />
