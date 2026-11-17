@@ -6,6 +6,7 @@ import {
 import { BASE_EVENT_ID } from '../../world-model/schema.ts';
 import * as cmd from '../../domain/commands.ts';
 import { GroupFilter, eventFilterSet } from './EventGroups.tsx';
+import { typeColor } from '../../domain/event-types.ts';
 
 /** Widths of event names on the timeline (one font), measured once each. */
 const labelWidths = new Map<string, number>();
@@ -113,7 +114,7 @@ export function Timeline() {
     const W = Math.max(1, Math.round(w * dpr)), H = Math.max(1, Math.round(h * dpr));
     if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
     const world = s.world;
-    const key = [world.serial, world.tableRevision('event'), world.tableRevision('event_group'), world.tableRevision('event_group_member'), s.engine!.revision, start, end, W, H, dpr,
+    const key = [world.serial, world.tableRevision('event'), world.tableRevision('event_type'), world.tableRevision('event_group'), world.tableRevision('event_group_member'), s.engine!.revision, start, end, W, H, dpr,
       s.selection?.kind === 'event' ? s.selection.id : '', s.recordEventId ?? '', (s.eventFilter ?? ['*']).join(',')].join('|');
     if (!still.current || still.current.key !== key) {
       const canvas = still.current && still.current.canvas.width === W && still.current.canvas.height === H ? still.current.canvas : new OffscreenCanvas(W, H);
@@ -163,7 +164,7 @@ export function Timeline() {
       const selected = s.selection?.kind === 'event' && s.selection.id === e.id;
       const recording = s.recordEventId === e.id;
       ctx.globalAlpha = e.variant_group && !e.variant_active ? 0.4 : 1;
-      ctx.fillStyle = recording ? '#d1495b' : selected ? '#ffd166' : '#4f7ca8';
+      ctx.fillStyle = recording ? '#d1495b' : selected ? '#ffd166' : typeColor(world, e.type_id) ?? '#4f7ca8';
       ctx.beginPath(); ctx.roundRect(x0, y, x1 - x0, LANE - 6, 3); ctx.fill();
       // The colours of the event's groups, as stripes along the bar's top edge.
       const gs = cmd.groupsOfEvent(s.world, e.id);

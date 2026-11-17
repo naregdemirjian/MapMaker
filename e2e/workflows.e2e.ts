@@ -663,6 +663,75 @@ try {
     await h.setDate('1 June 1901');
   });
 
+  await h.step('Event types: a type of its own with a colour, a usual length and way of spreading; used for a new event and a drawing; renamed; deleted and undone', async () => {
+    const typeOf = (name: string) => page.evaluate((n) => { const w = (window as any).__mapmaker.store.world; const t = w.all('event_type').find((x: any) => x.name === n); return t ? { id: t.id as string, fields: JSON.parse(t.fields) } : null; }, name);
+    // (A field shows what follows from a choice once the page has drawn it again.)
+    const shows = (id: string, text: string) => page.waitForFunction(([i, t]) => ((document.querySelector(`[data-testid="${i}"]`) as HTMLInputElement | null)?.value ?? '').includes(t), [id, text] as const, { timeout: 5000 });
+    const eventOf = (name: string) => page.evaluate((n) => { const w = (window as any).__mapmaker.store.world; return w.all('event').find((x: any) => x.name === n) ?? null; }, name);
+    await page.getByTestId('open-event-types').click();
+    await page.getByTestId('new-type-name').fill('Siege');
+    await page.getByTestId('new-type-create').click();
+    await page.getByTestId('type-row-Siege').waitFor();
+    await page.getByTestId('type-color-Siege').fill('#aa3300');
+    await page.getByTestId('type-spread-Siege').selectOption('fade');
+    await page.getByTestId('type-length-Siege-n').fill('6');
+    await page.getByTestId('type-length-Siege-unit').selectOption('month');
+    await h.saved();
+    const siege = (await typeOf('Siege'))!;
+    assert.deepEqual(siege.fields, { color: '#aa3300', spread: 'fade', length: { n: 6, unit: 'month' } });
+    await h.screenshot('event-types');
+    await page.getByTestId('event-types-dialog').getByText('Close', { exact: true }).click();
+    // A new event of the type lasts six months unless another end is typed in; it is coloured by its type.
+    await page.getByRole('button', { name: '+ Event' }).click();
+    await page.getByTestId('event-name').fill('Siege of Proba');
+    await page.getByTestId('event-start').fill('1 March 1950');
+    await page.getByTestId('event-start').press('Enter');
+    await page.getByTestId('event-type').selectOption({ label: 'Siege' });
+    await shows('event-end', '1 September 1950');
+    await page.getByRole('checkbox', { name: 'Record what I draw next into' }).uncheck();
+    await page.getByTestId('event-create').click();
+    const ev = await eventOf('Siege of Proba');
+    assert.equal(ev.type_id, siege.id);
+    assert.equal(await page.getByTestId('event-panel-type').inputValue(), siege.id);
+    assert.equal(await page.getByTestId('event-row-Siege of Proba').locator('.swatch').evaluate((e) => getComputedStyle(e).backgroundColor), 'rgb(170, 51, 0)');
+    // Drawing into it: its territory fades in, as the type says, without choosing.
+    const b = await page.evaluate(() => (window as any).__mapmaker.store.world.all('entity').find((e: any) => e.name === 'Duchy of Proba').id);
+    await page.evaluate((id) => (window as any).__mapmaker.store.set({ tool: 'lasso', paintValue: id }), b);
+    await h.setDate('1 April 1950');
+    const at = await h.toPage(P.b);
+    await h.drawLasso(blob(at[0], at[1], 40, 30));
+    await page.getByTestId('choice-new').click();
+    await page.getByTestId('event-target').selectOption(ev.id);
+    await shows('spread-style', 'fade');
+    // (A new event of the type would last six months from the date viewed.)
+    await page.getByTestId('event-target').selectOption('new-event');
+    await page.getByTestId('new-event-type').selectOption({ label: 'Siege' });
+    await shows('new-event-end', '1 October 1950');
+    await page.getByTestId('event-target').selectOption(ev.id);
+    await page.keyboard.press('Enter');
+    await page.getByTestId('choice-new').waitFor({ state: 'detached' });
+    await h.saved();
+    const fx = await page.evaluate((id) => (window as any).__mapmaker.store.world.all('effect').filter((f: any) => f.event_id === id).map((f: any) => JSON.parse(f.transition || 'null')), ev.id);
+    assert.equal(fx.length, 1);
+    assert.equal(fx[0]?.style, 'fade');
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ tool: 'select' }));
+    // Renamed, then deleted: its event becomes a plain event; undo brings the type back.
+    await page.getByTestId('open-event-types').click();
+    await page.getByTestId('type-name-Siege').fill('Siege warfare');
+    await page.getByTestId('type-name-Siege').press('Enter');
+    await page.getByTestId('type-row-Siege warfare').waitFor();
+    page.once('dialog', (d) => void d.accept());
+    await page.getByTestId('type-delete-Siege warfare').click();
+    await page.getByTestId('type-row-Siege warfare').waitFor({ state: 'detached' });
+    assert.equal((await eventOf('Siege of Proba')).type_id, 'general');
+    await h.saved();
+    await page.getByTestId('event-types-dialog').getByText('Close', { exact: true }).click();
+    await page.getByTestId('undo').click();
+    await h.saved();
+    assert.equal((await eventOf('Siege of Proba')).type_id, siege.id);
+    assert.equal((await typeOf('Siege warfare'))?.id, siege.id);
+  });
+
   await h.step('Areas, lines and points: layers of each kind, drawn by mouse, chosen by clicking, restyled, reshaped from a date, ended, undone', async () => {
     const feats = () => page.evaluate(() => { const s = (window as any).__mapmaker.store; return s.world.all('feature').map((f: any) => ({ id: f.id, name: f.name, layer: s.world.get('layer', f.layer_id).name, kind: s.world.get('layer', f.layer_id).kind, style: f.style })); }) as Promise<Array<{ id: string; name: string; layer: string; kind: string; style: string }>>;
     const shown = (name: string, date: string) => page.evaluate(([n, d]) => {
@@ -724,6 +793,8 @@ try {
     await page.getByTestId('feature-prompt').waitFor();
     await page.getByTestId('feature-name').fill('Battle of the Ford');
     await page.getByTestId('feature-choice-event').click();
+    // (The event drawn into last is offered first: a new one is chosen.)
+    await page.getByTestId('feature-event').selectOption('new-event');
     await page.getByTestId('feature-event-name').fill('Ford campaign');
     await page.getByTestId('confirm-feature').click();
     await page.getByTestId('feature-panel').waitFor();

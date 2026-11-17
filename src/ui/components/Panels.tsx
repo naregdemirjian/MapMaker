@@ -19,6 +19,8 @@ import { FeatureToolOptions, FeaturePanel, FeatureRows, featureLayers } from './
 import { RelationsSection } from './Relations.tsx';
 import { SearchBox } from './Search.tsx';
 import { PicturesSection } from './Pictures.tsx';
+import { TypeDot, TypeSelect } from './EventTypes.tsx';
+import { typeColor } from '../../domain/event-types.ts';
 import { isFeatureKind } from '../../render-engine/feature-style.ts';
 
 export const fmt = (t: Instant, precision: 'year' | 'day' | 'minute' = 'day') => gregorian.format(t, precision);
@@ -376,7 +378,7 @@ const EventRows = memo(function EventRows(_: { sig: string }) {
         if (!cur.includes(e.id)) s.pick('event', e.id, {}, order);
         openMenu(ev, eventMenu(s.world!, ids), ids.length === 1 ? e.name : `${ids.length} events`);
       }}>
-      <span className="date">{fmt(fromStore(e.start_day, e.start_ms), e.precision === 'year' ? 'year' : 'day')}</span> {e.name}
+      <span className="date">{fmt(fromStore(e.start_day, e.start_ms), e.precision === 'year' ? 'year' : 'day')}</span> {(() => { const c = typeColor(w, e.type_id); return c ? <span className="swatch" style={{ background: c }} /> : null; })()}{e.name}
     </div>
   ))}</>;
 });
@@ -392,7 +394,7 @@ export function Outliner() {
   const { political, characters, others, looseOthers } = lists;
   // Long lists are drawn again only when what they show changes (see EntityRows and EventRows).
   const entitySig = `${lists.sig}|${s.chosen('entity').join(',')}`;
-  const eventSig = [w.serial, w.tableRevision('event'), w.tableRevision('event_group'), w.tableRevision('event_group_member'), (s.eventFilter ?? ['*']).join(','), s.chosen('event').join(',')].join('|');
+  const eventSig = [w.serial, w.tableRevision('event'), w.tableRevision('event_type'), w.tableRevision('event_group'), w.tableRevision('event_group_member'), (s.eventFilter ?? ['*']).join(','), s.chosen('event').join(',')].join('|');
   const events = sortedEvents(w);
   const hiddenEvents = s.eventFilter ? events.reduce((n, e) => n + (eventVisible(w, e.id) ? 0 : 1), 0) : 0;
   const createEntity = () => {
@@ -487,6 +489,7 @@ export function Outliner() {
         <EventRows sig={eventSig} />
         {events.length > 1 && <div className="muted small-hint">Ctrl or Shift + click to choose several; Delete or right-click to delete them.</div>}
         {!events.length && <div className="muted pad">No events yet.</div>}
+        <button className="link pad-link" onClick={() => s.set({ dialog: 'event-types' })} data-testid="open-event-types">Event types…</button>
         {hiddenEvents > 0 && (
           <div className="muted pad" data-testid="events-hidden">{hiddenEvents} hidden by the group filter · <button className="link" onClick={() => s.set({ eventFilter: null })}>show all</button></div>
         )}
@@ -654,7 +657,7 @@ function EventPanel({ id }: { id: string }) {
       <h3>{base ? 'Starting map and changes without an event' : e.name}</h3>
       {!base && <>
         <label>Name<input value={name} onChange={(ev) => setName(ev.target.value)} onBlur={() => name.trim() && name !== e.name && s.execute((wd) => cmd.updateEvent(wd, id, { name: name.trim() }))} /></label>
-        <label>Type<select value={e.type_id} onChange={(ev) => s.execute((wd) => cmd.updateEvent(wd, id, { type_id: ev.target.value }))}>{w.all('event_type').filter((t) => t.id !== 'base').map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
+        <label>Type<span className="row-inline"><TypeDot typeId={e.type_id} /><TypeSelect value={e.type_id} onChange={(t) => s.execute((wd) => cmd.updateEvent(wd, id, { type_id: t }))} testId="event-panel-type" /><button className="small" onClick={() => s.set({ dialog: 'event-types' })} title="Make, change and delete event types">Types…</button></span></label>
         <label>Starts<DateField value={start} onChange={(t) => t && s.execute((wd) => cmd.updateEvent(wd, id, { start: t }))} testId="event-panel-start" /></label>
         <label>Ends<DateField value={end} allowEmpty placeholder="(instantaneous)" onChange={(t) => s.execute((wd) => cmd.updateEvent(wd, id, { end: t }))} testId="event-panel-end" /></label>
         <label title="When two events change the same place at the same instant, the higher precedence wins">Precedence<NumberField value={e.precedence} step={1} onCommit={(n) => s.execute((wd) => cmd.updateEvent(wd, id, { precedence: Math.round(n) }))} /></label>

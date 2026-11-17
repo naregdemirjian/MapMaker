@@ -263,3 +263,17 @@ label.indent { margin-left: 24px; }
 .picture img { width: 100%; height: 64px; object-fit: cover; border-radius: 4px; cursor: zoom-in; display: block; }
 .picture button { position: absolute; top: 2px; right: 2px; padding: 0 5px; }
 .picture-large { max-width: 90vw; max-height: 90vh; margin: auto; display: block; border-radius: 6px; box-shadow: 0 10px 40px rgba(0,0,0,0.6); }
+
+/* Event types (D75) */
+.row-inline { display: flex; align-items: center; gap: 6px; }
+.row-inline select { flex: 1; min-width: 0; }
+.type-table { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; max-height: 52vh; overflow-y: auto; }
+.modal.types { width: min(940px, 96vw); max-width: 96vw; }
+.type-row { display: grid; grid-template-columns: 52px minmax(100px, 1fr) minmax(150px, 1.4fr) 150px 44px 118px; gap: 6px; align-items: center; }
+.type-row.head { font-size: 11px; color: var(--muted, #8a97a6); text-transform: uppercase; letter-spacing: 0.04em; }
+.type-row input[type=color] { width: 32px; height: 24px; padding: 0; border: none; background: none; }
+.type-color { display: flex; align-items: center; gap: 2px; }
+.type-length { display: flex; gap: 4px; }
+.type-length input { width: 56px; }
+.type-length select { flex: 1; min-width: 0; }
+.type-actions { display: flex; gap: 4px; }

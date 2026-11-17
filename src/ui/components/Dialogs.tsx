@@ -10,6 +10,8 @@ import { DateField, fmt } from './Panels.tsx';
 import { loadDatasetRecords, type DatasetRecord } from '../../render-engine/basemap.ts';
 import { GroupChecks } from './EventGroups.tsx';
 import { FeaturePrompt } from './Features.tsx';
+import { TypeDot, TypeSelect } from './EventTypes.tsx';
+import { defaultEnd, typeSettings, type Spread } from '../../domain/event-types.ts';
 
 function Modal({ title, children, onClose, wide }: { title: string; children: React.ReactNode; onClose: () => void; wide?: boolean }) {
   return (
@@ -45,8 +47,18 @@ function PaintPrompt({ p }: { p: Extract<PendingEdit, { kind: 'paint' }> }) {
     return now?.id ?? 'new-event';
   });
   const [evName, setEvName] = useState(p.value ? `${who} gains territory` : 'Territory abandoned');
-  const [end, setEnd] = useState<Instant | null>(null);
-  const [style, setStyle] = useState<'instant' | 'border' | 'advance' | 'fade'>('instant');
+  // A new event's type, and what follows from it until chosen by hand: its length and how its territory spreads (D75).
+  const [evType, setEvType] = useState(p.value ? 'conquest' : 'general');
+  const [end, setEnd] = useState<Instant | null>(() => defaultEnd(w, p.value ? 'conquest' : 'general', s.time));
+  const [endTyped, setEndTyped] = useState(false);
+  const typeOf = (t: string) => (t === 'new-event' ? evType : w.get('event', t)?.type_id ?? 'general');
+  const [style, setStyle] = useState<Spread>(() => typeSettings(w.get('event_type', typeOf(target))).spread ?? 'instant');
+  const [styleChosen, setStyleChosen] = useState(false);
+  const typeChanged = (tgt: string, ty: string) => {
+    const id = tgt === 'new-event' ? ty : typeOf(tgt);
+    if (!styleChosen) setStyle(typeSettings(w.get('event_type', id)).spread ?? 'instant');
+    if (tgt === 'new-event' && !endTyped) setEnd(defaultEnd(w, ty, s.time));
+  };
   const events = w.all('event').filter((x) => x.id !== BASE_EVENT_ID).sort((a, b) => a.start_day - b.start_day || a.start_ms - b.start_ms);
 
   let periodTo = 'the end of time';
@@ -71,7 +83,7 @@ function PaintPrompt({ p }: { p: Extract<PendingEdit, { kind: 'paint' }> }) {
       s.execute((wd, en) => cmd.paintTerritory(wd, en, { ...base, mode: { kind: 'change', t: s.time } }));
     } else if (target === 'new-event') {
       if (end && compare(end, s.time) < 0) { s.toast('The event cannot end before it starts.', 'error'); return; }
-      const r = s.execute((wd, en) => cmd.paintWithNewEvent(wd, en, { name: evName, start: s.time, end, type_id: p.value ? 'conquest' : 'general' }, { ...base, transition: end ? transition : null }));
+      const r = s.execute((wd, en) => cmd.paintWithNewEvent(wd, en, { name: evName, start: s.time, end, type_id: evType }, { ...base, transition: end ? transition : null }));
       if (r) s.set({ selection: { kind: 'event', id: r.eventId }, lastPaintEvent: r.eventId });
     } else {
       const ev = w.get('event', target)!;
@@ -105,7 +117,7 @@ function PaintPrompt({ p }: { p: Extract<PendingEdit, { kind: 'paint' }> }) {
         {choice === 'new' && (
           <div className="choice-body" onClick={(ev) => ev.stopPropagation()}>
             <label>Event
-              <select value={target} onChange={(ev) => setTarget(ev.target.value)} data-testid="event-target">
+              <select value={target} onChange={(ev) => { setTarget(ev.target.value); typeChanged(ev.target.value, evType); }} data-testid="event-target">
                 <option value="new-event">A new event…</option>
                 {events.map((x) => <option key={x.id} value={x.id}>{fmt(fromStore(x.start_day, x.start_ms))} · {x.name}</option>)}
               </select>
@@ -120,11 +132,12 @@ function PaintPrompt({ p }: { p: Extract<PendingEdit, { kind: 'paint' }> }) {
             })()}
             {target === 'new-event' && <>
               <label>Event name<input value={evName} onChange={(ev) => setEvName(ev.target.value)} data-testid="new-event-name" /></label>
-              <label>Ends (optional, for animated changes)<DateField value={end} allowEmpty placeholder="(happens at once)" onChange={setEnd} testId="new-event-end" /></label>
+              <label>Type<span className="row-inline"><TypeDot typeId={evType} /><TypeSelect value={evType} onChange={(t) => { setEvType(t); typeChanged('new-event', t); }} testId="new-event-type" /></span></label>
+              <label>Ends (optional, for animated changes)<DateField value={end} allowEmpty placeholder="(happens at once)" onChange={(t) => { setEnd(t); setEndTyped(true); }} testId="new-event-end" /></label>
             </>}
             {(target !== 'new-event' ? w.get('event', target)?.end_day !== null : !!end) && (
               <label>How it spreads
-                <select value={style} onChange={(ev) => setStyle(ev.target.value as typeof style)} data-testid="spread-style">
+                <select value={style} onChange={(ev) => { setStyle(ev.target.value as typeof style); setStyleChosen(true); }} data-testid="spread-style">
                   <option value="instant">At once</option>
                   <option value="border">Advancing front, out of the country's existing border</option>
                   <option value="advance">Expansion, a circle from where you started drawing</option>
@@ -238,6 +251,9 @@ export function NewEventDialog() {
   const [type, setType] = useState('general');
   const [start, setStart] = useState<Instant | null>(s.time);
   const [end, setEnd] = useState<Instant | null>(null);
+  // Until an end is typed in, it follows the type's usual length (D75).
+  const [endTyped, setEndTyped] = useState(false);
+  const follow = (t: string, st: Instant | null) => { if (!endTyped) setEnd(st ? defaultEnd(w, t, st) : null); };
   const [desc, setDesc] = useState('');
   const [record, setRecord] = useState(true);
   // A new event joins the groups the timeline is showing, so it does not disappear from view.
@@ -251,9 +267,9 @@ export function NewEventDialog() {
   return (
     <Modal title="New event" onClose={close}>
       <label>Name<input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Fall of the Northern March" data-testid="event-name" /></label>
-      <label>Type<select value={type} onChange={(e) => setType(e.target.value)}>{w.all('event_type').filter((t) => t.id !== 'base').map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
-      <label>Starts<DateField value={start} onChange={setStart} testId="event-start" /></label>
-      <label>Ends (optional)<DateField value={end} allowEmpty placeholder="(happens at once)" onChange={setEnd} testId="event-end" /></label>
+      <label>Type<span className="row-inline"><TypeDot typeId={type} /><TypeSelect value={type} onChange={(t) => { setType(t); follow(t, start); }} testId="event-type" /></span></label>
+      <label>Starts<DateField value={start} onChange={(t) => { setStart(t); follow(type, t); }} testId="event-start" /></label>
+      <label>Ends (optional)<DateField value={end} allowEmpty placeholder="(happens at once)" onChange={(t) => { setEnd(t); setEndTyped(true); }} testId="event-end" /></label>
       <label>Description<textarea rows={3} value={desc} onChange={(e) => setDesc(e.target.value)} /></label>
       {w.all('event_group').length > 0 && <><h4>Groups</h4><GroupChecks value={groups} onChange={setGroups} /></>}
       <label className="check"><input type="checkbox" checked={record} onChange={(e) => setRecord(e.target.checked)} /> Record what I draw next into this event</label>

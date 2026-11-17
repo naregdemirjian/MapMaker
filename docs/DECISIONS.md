@@ -60,6 +60,21 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D75. Event types are templates: a colour, a usual way of spreading and a usual length (Stage 3)
+
+The architecture calls a custom event type "a template combining" kinds of change. What a type now carries, kept as
+JSON in the `fields` of its `event_type` row (no new table, project file format unchanged; `src/domain/event-types.ts`):
+a **colour** (the event's bar on the timeline and a square in the events list and the event panel; a type without one
+keeps the usual blue), **how territory drawn into its events spreads** (at once, advancing front, expansion, fade;
+preselected in the drawing prompt when the event lasts a while, until chosen by hand), and **how long a new event of
+the type lasts** (days, months or years; fills in the end of a new event until one is typed in; a month later than
+31 January is the last day of February). "Event types…" (under the events list, and beside an event's type) makes,
+copies, renames, recolours and deletes types; the built-in types can be changed too. Deleting a type makes its events
+plain events ("Event"); "Event" and the starting map's type cannot be deleted. All are ordinary undoable edits. The
+drawing prompt's new event now has a type (Conquest when land is given, Event when cleared, as before). Not done:
+type-specific fields (a battle's casualties, a treaty's signatories), which wait for a use; a type does not yet decide
+which kinds of change its events hold (those are still chosen while drawing).
+
 ### D74. Comparing two dates: a second renderer and a line across the map (Stage 3)
 
 "Compare" in the date bar shows the map at a second date to the right of a line across the map, the date viewed to
