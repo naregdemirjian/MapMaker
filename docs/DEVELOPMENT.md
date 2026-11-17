@@ -10,22 +10,26 @@ The approved architecture is the Claude Doc "Map Maker — Technical Architectur
 ## Status at a glance (17 November 2026, after the second optimisation stage)
 
 - **Second optimisation stage done** (the user's request to keep optimising the whole workflow and to stress test it
-  for massive projects on a slower computer; D55–D67; REQUIREMENTS.md, "The user's second optimisation request").
-  Against the build before it, on the same benchmark projects: moving the map 16–39 ms a frame to 5–10 ms; zooming
-  about half; a brush stroke 65–75 ms to about 33 ms (193 to 123 ms on the 24,500-parcel map); dragging the timeline
-  a year a frame 29 to 10 ms on the heavy project; exports a fifth to a quarter faster; opening 3.2–5.6 s to
-  2.0–3.7 s; memory level in long sessions. On a computer made four times slower, the heavy project: moving the map
-  146 to 71 ms a frame, a stroke 227 to 155 ms. How: history, snapshots, borders and names are brought up to date
-  from what was there before instead of worked out again (D55, D56, D60); kept pictures have room around the frame,
-  hold the repeating map and are shown as one picture while zooming (D62, D63); the browser's hidden costs with
-  canvases and paths are avoided (D61, D64); the database writes the snapshot when a project opens (D66); a shot
-  in Equal Earth or Natural Earth is framed at 6–12 ms a frame instead of 130–210 (D67). A verify
-  mode and a random stress run check all of it (D57). **Six defects found and fixed on the way**: borders between
-  countries could vanish after drawing inside a country (D56); moving east or west with the planet's ends in view
-  showed a wrong picture (D62); the sharp redraw could fall in the middle of a slow movement and draw everything
-  twice (D65); problems in History Health could be listed in a different order after an edit than after reopening
-  (D55); memory grew in long sessions on large maps (D59); two interface-test steps depended on the size of the
-  window and failed on Windows (the software itself was right).
+  for massive projects on a slower computer; D55–D70; REQUIREMENTS.md, "The user's second optimisation request").
+  Against the build before it, on the same benchmark projects: moving the map 14–34 ms a frame to 5–9 ms (18 ms
+  where a thousand names are on screen; 170–240 ms to 5–11 ms in Equal Earth); zooming about half; a brush stroke 72–85 ms to 29–37 ms (188 to 120 ms on
+  the 24,500-parcel map); dragging the timeline a year a frame 33 to 13 ms on the heavy project; exported frames of
+  the heavy project in half the time (1080p 264 to 127 ms, 4K 545 to 269 ms); opening 2.9–5.9 s to 1.9–3.5 s;
+  memory level in long sessions. On a computer made four times slower, a session of 150 random steps on the heavy
+  project takes 62 s instead of 113 s: a stroke 344 to 159 ms, moving the map 148 to 56 ms a frame, dragging the
+  timeline 150 to 77 ms a frame. How: history, snapshots, borders and names are brought up to date from what was
+  there before instead of worked out again (D55, D56, D60); kept pictures have room around the frame, hold the
+  repeating map and are shown as one picture while zooming (D62, D63, D70); a picture changes from one frame to the
+  next only where land changed hands or a change is under way, in the working view and in exports alike (D58, D68);
+  the browser's hidden costs with canvases and paths are avoided (D61, D64); the database writes the snapshot when a
+  project opens (D66); Equal Earth and Natural Earth keep their middle meridian while the map is moved (D67). A
+  verify mode and a random stress run check all of it (D57). **Six defects found and fixed on the way**: borders
+  between countries could vanish after drawing inside a country (D56); moving east or west with the planet's ends
+  in view showed a wrong picture (D62); the sharp redraw could fall in the middle of a slow movement and draw
+  everything twice (D65); problems in History Health could be listed in a different order after an edit than after
+  reopening (D55); memory grew in long sessions on large maps (D59); the estimated size of a 4K export was half too
+  high and that of a preview less than half of the truth (D69). Three failures of the Windows run were the tests'
+  own (a window's size, a limit missed by a hair, a screenshot the browser could not give at once).
 
 - **Optimisation stage done** (the user's request to optimise everything before adding more detail; D48–D54, and the
   table in REQUIREMENTS.md, "The user's optimisation request"). On the map of today's 242 countries with detailed
@@ -247,9 +251,10 @@ Checked by hand: 4K and 8K exports; the unzipped package starts and works; reque
 
 Chrome in the development container, **drawing in software (no graphics card)**, map area 1360 x 843. Times are
 milliseconds per frame, the whole cost of a step until the page is idle again (median of 40 steps). "Before" is the
-build before this stage (commit 4db4bb8, Windows run 37), measured the same day with the same tool on the same
-projects. A real computer with a graphics card should be faster, a screen with more pixels slower; Settings shows the
-time on the user's machine.
+build before this stage (commit 4db4bb8, Windows run 37), measured with the same tool on the same projects straight
+before "now" (the container's speed drifts by a tenth or two over a day, so the two columns belong together). A
+real computer with a graphics card should be faster, a screen with more pixels slower; Settings shows the time on
+the user's machine.
 
 Benchmark projects (`bench/make-fixtures.ts`): **Earth 242**: today's 242 countries with 1:10m coasts, 30 events;
 **Heavy**: 128,000 border segments, 11,000 parcels, 500 events, about 12 events crossed per step of 25 years;
@@ -258,56 +263,66 @@ every date.
 
 | Step | Earth 242 before | now | Heavy before | now | Random 1000 before | now |
 | --- | --- | --- | --- | --- | --- | --- |
-| A click that changes nothing on the map | 19 | 14 | 19 | 16 | 21 | 12 |
-| Choosing a country | 16 | 17 | 30 | 19 | 30 | 19 |
-| Moving the map, whole world | 23 | 9.1 | 24 | 10 | 26 | 25 |
-| Moving the map, a region (zoom 3.5) | 23 | 8.9 | 39 | 7.8 | 27 | 5.7 |
-| Moving the map, close in (zoom 7) | 16 | 5.9 | 17 | 5.4 | 21 | 5.9 |
-| Moving the map, closer (zoom 13) | 24 | 5.9 | 19 | 5.4 | 21 | 5.4 |
-| Moving the map, very close in (zoom 19) | 24 | 5.7 | 20 | 5.4 | 19 | 5.7 |
-| Zooming (each step) | 39 | 18 | 56 | 28 | 31 | 24 |
-| Dragging the timeline, a year a frame | 7.6 | 8.1 | 29 | 9.5 | 43 | 33 |
-| Dragging the timeline, a month a frame, close in on a region | 6.1 | 6.8 | 9.6 | 6.2 | 37 | 16 |
-| Dragging the timeline, 25 years a frame (a dozen events crossed in each) | 10 | 8.3 | 163 | 102 | 239 | 183 |
-| Stepping day by day | 8.7 | 7.4 | 9.1 | 8.8 | 45 | 40 |
-| A brush stroke (the kernel, history and the redraw) | 65 | 33 | 75 | 32 | 193 | 123 |
-| Playing a shot, still camera | 7.8 | 8.5 | 95 | 82 | 138 | 131 |
-| Playing a shot, moving camera | 59 | 30 | 123 | 103 | 115 | 121 |
-| Export, 1080p, per frame | 94 | 77 | 245 | 190 | 253 | 196 |
-| Export, 4K, per frame | 242 | 209 | 546 | 485 | 530 | 389 |
-| Export, 1080p, eight layers of each frame | 256 | 207 | 486 | 443 | 435 | 310 |
-| Opening the project | 3.2 s | 2.0 s | 4.7 s | 2.9 s | 5.6 s | 3.7 s |
+| A click that changes nothing on the map | 17 | 14 | 26 | 15 | 26 | 12 |
+| Choosing a country | 16 | 14 | 23 | 21 | 32 | 17 |
+| Moving the map, whole world | 20 | 8.5 | 26 | 8.8 | 26 | 18 |
+| Moving the map, a region (zoom 3.5) | 22 | 7.3 | 34 | 7.3 | 29 | 5.1 |
+| Moving the map, close in (zoom 7) | 16 | 4.9 | 15 | 5.2 | 20 | 5.1 |
+| Moving the map, closer (zoom 13) | 32 | 5.1 | 14 | 5.2 | 22 | 5 |
+| Moving the map, very close in (zoom 19) | 24 | 4.8 | 15 | 5.7 | 22 | 4.9 |
+| Zooming (each step) | 38 | 20 | 55 | 25 | 32 | 22 |
+| Moving the map in Equal Earth, whole world | 168 | 11 | 209 | 10 | 244 | 5.8 |
+| Moving the map in Equal Earth, a region | 190 | 7.2 | 183 | 6.3 | 219 | 5.1 |
+| Dragging the timeline, a year a frame | 9.2 | 7.1 | 33 | 13 | 42 | 27 |
+| Dragging the timeline, a month a frame, close in on a region | 7.4 | 7.3 | 10 | 7.6 | 38 | 14 |
+| Dragging the timeline, 25 years a frame (a dozen events crossed in each) | 8.9 | 8.3 | 196 | 89 | 244 | 151 |
+| Stepping day by day | 8.8 | 7.9 | 12 | 9.5 | 42 | 37 |
+| A brush stroke (the kernel, history and the redraw) | 72 | 29 | 85 | 37 | 188 | 120 |
+| Playing a shot, still camera | 8.9 | 8.8 | 102 | 84 | 136 | 117 |
+| Playing a shot, moving camera | 61 | 33 | 136 | 94 | 112 | 110 |
+| Export, 1080p, per frame | 100 | 87 | 264 | 127 | 252 | 171 |
+| Export, 4K, per frame | 241 | 206 | 545 | 269 | 483 | 305 |
+| Export, 1080p, eight layers of each frame | 215 | 182 | 502 | 300 | 458 | 298 |
+| Opening the project | 2.9 s | 1.9 s | 5.1 s | 2.7 s | 5.9 s | 3.5 s |
 
 **A computer four times slower** (`bench/stress.ts --throttle 4`, 150 random steps, the heavy project; milliseconds
-for the whole action, before and now):
+for the whole action, before and now, measured one after the other):
 
 | Action | Balanced before | now | Fastest before | now |
 | --- | --- | --- | --- | --- |
-| A frame, median over the session | 110 | 79 | 72 | 66 |
-| A brush stroke | 227 | 155 | 172 | 137 |
-| Moving the map (ten frames) | 1,463 | 710 | 687 | 469 |
-| Zooming (eight frames) | 642 | 450 | 429 | 429 |
-| Dragging the timeline (twelve frames) | 1,459 | 1,412 | 1,529 | 1,373 |
-| A jump in time | 409 | 389 | 394 | 358 |
+| A frame, median over the session | 132 | 56 | 92 | 46 |
+| A brush stroke | 344 | 159 | 352 | 146 |
+| Undo | 312 | 182 | 299 | 172 |
+| A border point moved | 229 | 90 | 256 | 96 |
+| Moving the map (ten frames) | 1,484 | 562 | 844 | 345 |
+| Zooming (eight frames) | 769 | 448 | 544 | 381 |
+| Dragging the timeline (twelve frames) | 1,794 | 922 | 1,993 | 904 |
+| A jump in time | 498 | 339 | 455 | 355 |
+| The whole session of 150 steps | 113 s | 62 s | 96 s | 56 s |
 
-**Stress runs** (`bench/stress.ts`, verify mode on, the map compared with a fresh drawing every ten steps): 250 to
-300 random steps on each of the three projects, one on a screen twice as dense, and 150 steps each on a computer
-four times slower (both presets): no difference found, no error, and memory level after the first hundred steps
-(about 200 MB on Earth 242, 310 MB on Heavy, 400 MB on Random 1000).
+**Stress runs** (`bench/stress.ts`, verify mode on, the map compared with a fresh drawing every ten steps): thirteen
+sessions of 160 to 300 random steps on the three projects, among them three on a screen twice as dense, one that
+starts in Equal Earth, one of timeline drags and jumps only and one of zooming and moving only; and 150 steps on a
+computer four times slower in both presets. No difference found, no error, and memory level after the first hundred
+steps (about 200 MB on Earth 242, 270–310 MB on Heavy, 400 MB on Random 1000). One session did report a difference
+(0.17% of pixels along every coast, on the dense screen): the check was comparing two levels of coast detail, both
+within the tolerance (D69); with the fresh picture's geometry prepared for the same zoom the pictures are the same.
 
 What still takes time, in order of what it would give:
 
 1. **Changes of territory over large parts of the map in one frame**: dragging the timeline across a dozen events a
-   frame, and playing or exporting a shot that does (Heavy and Random 1000: 80–180 ms a frame). What is left is
-   filling the changed territory again and joining each changed owner's parcels into one outline; a graphics card
-   takes most of the first.
+   frame, and playing a shot that does (Heavy and Random 1000: 85–150 ms a frame). Half of what is left is filling
+   the changed territory again (a graphics card takes most of that); the rest is joining each changed owner's
+   parcels into one outline, and finding the place for the name of every country whose land changed (a quarter of
+   a frame of such a shot).
 2. **Shots in Equal Earth or Natural Earth whose camera moves east or west, while they play**: every shape changes
    with the middle meridian, so each frame prepares the map again (130–210 ms a frame on these projects), as their
-   export does by design. Framing such a shot by hand no longer costs this (D67: 6–12 ms a frame, with the map
+   export does by design. Framing such a shot by hand no longer costs this (D67: 5–11 ms a frame, with the map
    straightening a little when it comes to rest).
 3. **Zooming without a graphics card**: showing the kept picture at another size is the browser's dearest copy
-   (about 15 ms a frame at this size), and a zoom ends with one full redraw at the new scale.
-4. **A world view with a thousand names on screen** (Random 1000: 25 ms a frame while moving): the names are placed
+   (about 15 ms a frame at this size), and every three quarters of a level the picture is drawn whole (50–130 ms on
+   the heavy project). Geometry is no longer prepared again in the middle of zooming in (D70).
+4. **A world view with a thousand names on screen** (Random 1000: 18 ms a frame while moving): the names are placed
    and drawn again in every frame.
 5. **Opening**: about half is now the kernel preparing its map (the order of borders around every point, areas),
    the rest the first picture.
@@ -408,7 +423,7 @@ recompiling the 1,000-territory history took about 800 ms after every edit.
 | 16 Nov 2026 | Testing and refinement: scenario, geometry, world, recovery, camera and A/B tests; second interface test; benchmark; 11 defects fixed; performance work (0.2.0) | `6a3c64a` → `343d84c` |
 | 16 Nov 2026 (3rd) | The user's first feedback round (14 items) and the engine redesign; two kernel defects fixed | `aca87e0` → `db6423b` |
 | 17 Nov 2026 | The user's second feedback round (12 items): labels, add into a country, characters, corrections from the date drawn, changes over time, still camera, advancing front, draggable texts, graphic as the box, export choices and size | `6525557` → `83c103a` |
-| 17 Nov 2026 (4th) | Second optimisation stage: history, snapshots, borders and names brought up to date from what was there; animated changes redrawn only in their own area; kept pictures with room around the frame, holding the repeating map, one picture while zooming; Chrome's canvas copies and closePath avoided; the database writes the snapshot; weight-limited caches; a verify mode and a random stress run; six defects fixed (D55–D66) | `ef62f20` → `955a41e` and the documentation commit after it |
+| 17 Nov 2026 (4th) | Second optimisation stage: history, snapshots, borders and names brought up to date from what was there; animated changes redrawn only in their own area, and stepping into, out of and between them too; exports drawn frame from frame; kept pictures with room around the frame, holding the repeating map, one picture while zooming; Equal Earth and Natural Earth keep their meridian while moved; Chrome's canvas copies and closePath avoided; the database writes the snapshot; weight-limited caches; a verify mode and a random stress run; six defects fixed (D55–D70) | `ef62f20` → `ea7df4a` and the commit after it |
 | 17 Nov 2026 (3rd) | Optimisation stage: kernel faces rebuilt around an edit, engine states per stretch, the renderer rewritten on sheets and blocks, carried pictures, live and full interface updates, browser-encoded exports, patched redraws after edits, the Settings button; benchmark projects and tools; four defects fixed (D48–D54) | after `c9bdc89` |
 | 17 Nov 2026 (2nd) | Firm-snapping kernel defects (D39), cities (D40), trails; the third feedback round: grey borders and "+ Layer" fixed, choosing several, right-click menus, groups, bulk delete, cities under countries, labels apart, border eraser, flat maps (D41–D44) | `ed163e3` → latest |
 | 16 Nov 2026 (2nd) | Package installs work; Natural Earth basemap (land, lakes, coastlines, present-day borders guide), land export pass, data sources dialog and export credits; coastline clipping with land-aware labels; real React types (D4 reversed); desktop app, Windows installer and Windows test run (D2 reversed); Windows fix; event groups and the first file-format upgrade | `071deac` → `9004a90` |

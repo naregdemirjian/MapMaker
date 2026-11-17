@@ -79,7 +79,7 @@ try {
     const compare = async (): Promise<string | null> => {
       await wait(260); await raf();
       // (At rest the view is laid out around the camera: a meridian is held only while the map moves, see MapView.)
-      if (m.heldMeridian() !== null) return `the view still holds the meridian ${m.heldMeridian()} at rest`;
+      if (m.heldMeridian && m.heldMeridian() !== null) return `the view still holds the meridian ${m.heldMeridian()} at rest`;
       const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement;
       const W = c.width, H = c.height;
       const k = W / c.getBoundingClientRect().width;
@@ -188,7 +188,7 @@ try {
       // (A refused edit, such as a shape that cannot be drawn there, says so and changes nothing.)
       if (toasts() > before) refused[what] = (refused[what] ?? 0) + 1; else counts[what] = (counts[what] ?? 0) + 1;
       if (s.offline) return { failed: `step ${step} (${what}): editing stopped: ${s.offline}`, counts };
-      if (B.Engine.verifyFailures.length) return { failed: `step ${step} (${what}): ${B.Engine.verifyFailures[0]}`, counts };
+      if (B.Engine?.verifyFailures?.length) return { failed: `step ${step} (${what}): ${B.Engine.verifyFailures[0]}`, counts };
       if (step % 10 === 9) {
         await s.flush();
         const bad = await compare();

@@ -19,7 +19,7 @@ import { BasemapPainter, chooseScale, landMaskOf, visibleBounds, boxIntersects, 
 import { planeShape, placeLabel, lineChoices, textWidthEm, blockHeightEm, LINE_HEIGHT, type PlaneShape } from './label-place.ts';
 import { resolveLabelStyle, resolvePointStyle, labelSize, labelFont, labelText, type LabelStyle, type CountryLabel } from './label-style.ts';
 import { imageNow, videoNow, drawImageFit, assetEpoch, type MediaChannel } from './assets.ts';
-import { Sheet, makeRing, addLine, projectPoint, isCylindrical, type Ring } from './plane.ts';
+import { Sheet, makeRing, addLine, projectPoint, isCylindrical, SHARP_UP_TO, type Ring } from './plane.ts';
 import { BlockPath, setPaintRegion, type DeviceRect } from './blocks.ts';
 import { Kept as Weighed } from './kept.ts';
 import { parcelGeometry, type ParcelGeometry, type CycleGeom } from './parcel-geometry.ts';
@@ -53,6 +53,9 @@ export const DEFAULT_STYLE: MapStyle = {
  */
 export interface RenderQuality { tolerance: number; margin: number }
 /** The working view: errors of a third of a pixel at most, and room to pan before a new sheet is needed. */
+/** How many times its own scale a sheet may be drawn at while the view is on the move (see MapRenderer.render). */
+const MOVING_UP_TO = 2 * SHARP_UP_TO;
+
 export const VIEW_QUALITY: RenderQuality = { tolerance: 0.35, margin: 0.6 };
 /** Exports: a tenth of a pixel, whatever the working view is set to. */
 export const EXPORT_QUALITY: RenderQuality = { tolerance: 0.1, margin: 0.3 };
@@ -371,8 +374,8 @@ export class MapRenderer {
 
   /** The sheet to draw a view from: the current one while the view stays on it, else a new one. */
   /** The sheet to draw the view on; `pad`: view pixels around the view that are drawn on too (the room around carried pictures). */
-  private sheetFor(view: View, spaceId: string, pad = 0): Sheet {
-    if (!this.sheet || this.sheetSpace !== spaceId || !this.sheet.covers(view, this.quality.tolerance, pad)) {
+  private sheetFor(view: View, spaceId: string, pad = 0, upTo = SHARP_UP_TO): Sheet {
+    if (!this.sheet || this.sheetSpace !== spaceId || !this.sheet.covers(view, this.quality.tolerance, pad, upTo)) {
       this.sheet = new Sheet(view, this.quality);
       this.sheetSpace = spaceId;
       this.stats.sheets++;
@@ -1319,11 +1322,16 @@ export class MapRenderer {
     // far, and the planet's outline counts as in view when it lies there.
     const m00 = ctx.getTransform();
     const keepPad = this.caching !== 'off' && this.carry ? (this.marginFor(ctx.canvas.width, ctx.canvas.height) + 2) / (Math.hypot(m00.a, m00.b) || 1) : 0;
-    const sheet = this.sheetFor(view, spaceId, keepPad);
-    const sp = this.parcelsOn(sheet, arr);
     this.moving = !!opts.moving;
+    // While the view is on the move (zooming in), the geometry prepared for the zoom it started from
+    // serves on to twice as far as it stays sharp: preparing it again every half level of zoom, in
+    // the middle of the movement, for a picture that is shown enlarged from the one before anyway,
+    // is what made zooming in stutter on large maps. The frame counts as approximate, so the view
+    // is drawn from geometry prepared for its own zoom once it rests.
+    const sheet = this.sheetFor(view, spaceId, keepPad, this.moving ? MOVING_UP_TO : SHARP_UP_TO);
+    const sp = this.parcelsOn(sheet, arr);
     this.holdNames = !!opts.holdNames;
-    this.lastApproximate = false;
+    this.lastApproximate = view.projection.scale() / sheet.S > SHARP_UP_TO + 1e-9;
     this.lastParts = {};
     this.scratchReset();
     this.hurried = !!opts.hurried;

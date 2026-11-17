@@ -59,6 +59,19 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D70. While the view zooms in, the geometry it started with serves twice as far
+
+Geometry prepared for one zoom (a sheet, D49) is drawn at up to 1.42 times its scale with its outlines within the
+tolerance; beyond that it was prepared again. Zooming in with the wheel passes that mark every second notch, in the
+middle of the movement, for a frame that only shows the picture before enlarged. While the view is on the move, a
+sheet now serves up to 2.84 times its scale (`MOVING_UP_TO`): its outlines are then coarser than the tolerance by
+up to twice (0.7 of a pixel at the usual setting), in a picture that is being enlarged frame by frame anyway. Such
+a frame counts as approximate, so once the view rests it is drawn from geometry prepared for its own zoom. (A view
+that comes to rest within 1.42 times of the scale its geometry was prepared for keeps that geometry, as before.)
+Zooming in five levels in twenty steps on the heavy project: geometry prepared twice instead of six times on the
+way, the longest frame 131 ms instead of 203, 811 ms in all instead of 906. What is left of a zoom's cost is the
+drawing itself (D63). Exports and anything at rest are untouched (`SHARP_UP_TO`).
+
 ### D69. The export size estimate, border points in view, and a like-for-like stress check
 
 Three smaller things found while measuring a session on a computer four times slower.

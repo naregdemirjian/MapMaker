@@ -185,6 +185,9 @@ export interface SheetOptions {
   margin: number;
 }
 
+/** A sheet is drawn at up to this many times its own scale with its outlines within the tolerance (see Sheet.threshold). */
+export const SHARP_UP_TO = 1.42;
+
 export class Sheet {
   readonly id = ++sheetIds;
   readonly kind: ProjectionName;
@@ -229,12 +232,17 @@ export class Sheet {
   /** A path for shapes on this sheet, held in blocks so that drawing part of the view only touches the shapes there. */
   blocks(): BlockPath { return new BlockPath([this.wx0, this.wy0, this.wx1, this.wy1]); }
 
-  /** Can this sheet draw the view (and `pad` view pixels around it): same projection, the view inside the window, a scale near its own? */
-  covers(view: View, tolerance: number, pad = 0): boolean {
+  /**
+   * Can this sheet draw the view (and `pad` view pixels around it): same projection, the view inside
+   * the window, a scale near its own? `upTo`: how many times its own scale it may be drawn at (its
+   * detail is chosen for SHARP_UP_TO; beyond that the outlines are coarser than the tolerance by as
+   * much, which a picture that is on the move may be).
+   */
+  covers(view: View, tolerance: number, pad = 0, upTo = SHARP_UP_TO): boolean {
     if (view.camera.projection !== this.kind || tolerance !== this.tolerance) return false;
     if (!this.cyl && this.kind !== 'flat' && meridianOf(view.camera) !== this.lonRef) return false;
     const s = view.projection.scale(), k = s / this.S;
-    if (k > 1.42 || k < 0.5) return false;
+    if (k > upTo || k < 0.5) return false;
     const r = viewRect(view, this.lonRef), p = pad / s;
     return r[0] - p >= this.x0 && r[1] - p >= this.y0 && r[2] + p <= this.x1 && r[3] + p <= this.y1;
   }
