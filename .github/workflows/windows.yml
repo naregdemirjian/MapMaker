@@ -37,6 +37,8 @@ jobs:
         run: node --disable-warning=ExperimentalWarning e2e/vertical-slice.e2e.ts
       - name: Interface test (workflows, in Chromium)
         run: node --disable-warning=ExperimentalWarning e2e/workflows.e2e.ts
+      - name: Interface test (the renderer against the reference; carried and patched pictures)
+        run: node --disable-warning=ExperimentalWarning e2e/render-compare.e2e.ts
       - name: Interface test (desktop app)
         run: node --disable-warning=ExperimentalWarning e2e/desktop.e2e.ts
       - name: Build the Windows installer
