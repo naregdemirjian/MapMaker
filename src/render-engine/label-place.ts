@@ -179,9 +179,12 @@ export interface LabelSpot {
  * places out (for example the sea, or off screen); `within` limits the search to a box of the plane.
  * `cap`: room beyond this (in the plane's units) is worth no more, so among places with that much
  * room the one nearest the middle wins, and the search need not measure how much more there is.
+ * `floor`: places with less room than this are of no use (the label would be too small to draw), so
+ * parts of the plane that cannot have that much are not looked into: a search that finds nothing
+ * then ends quickly instead of following the whole outline down to the finest detail.
  * Null when nothing inside is acceptable.
  */
-export function placeLabel(shape: PlaneShape, aspect: number, accept?: (lon: number, lat: number) => boolean, within?: [number, number, number, number], cap = Infinity): LabelSpot | null {
+export function placeLabel(shape: PlaneShape, aspect: number, accept?: (lon: number, lat: number) => boolean, within?: [number, number, number, number], cap = Infinity, floor = 0): LabelSpot | null {
   const { edges, projection } = shape;
   let bbox = shape.bbox;
   // Searching only part of the territory (the part on screen, say): start from that part's box.
@@ -206,13 +209,15 @@ export function placeLabel(shape: PlaneShape, aspect: number, accept?: (lon: num
   const make = (x: number, y: number, h: number): Cell => {
     const d = evalAt(x, y);
     const dc = Math.hypot(x - cx0, y - cy0);
-    const good = d > 0 && ok(x, y);
+    const good = d > 0 && d >= floor && ok(x, y);
     return { x, y, h, d, score: good ? d * bias(dc) : -Infinity, max: Math.min(d + h * Math.SQRT2, cap) * bias(dc - h * Math.SQRT2) };
   };
+  // (No place in the cell can have `floor` of room: not worth looking into.)
+  const worth = (c: Cell) => c.d + c.h * Math.SQRT2 >= floor;
   const heap = new MaxHeap<Cell>((c) => c.max);
   const size = Math.min(W, H);
   const h0 = size / 2;
-  for (let x = cx0 - W / 2; x < cx0 + W / 2; x += size) for (let y = cy0 - H / 2; y < cy0 + H / 2; y += size) heap.push(make(x + h0, y + h0, h0));
+  for (let x = cx0 - W / 2; x < cx0 + W / 2; x += size) for (let y = cy0 - H / 2; y < cy0 + H / 2; y += size) { const c = make(x + h0, y + h0, h0); if (worth(c)) heap.push(c); }
   let best: Cell | null = null;
   const centre = make(cx0, cy0, 0);
   if (centre.score > -Infinity) best = centre;
@@ -223,8 +228,7 @@ export function placeLabel(shape: PlaneShape, aspect: number, accept?: (lon: num
     if (best && c.max - best.score <= precision) continue;
     if (c.h < precision / 4) continue;
     const h = c.h / 2;
-    heap.push(make(c.x - h, c.y - h, h)); heap.push(make(c.x + h, c.y - h, h));
-    heap.push(make(c.x - h, c.y + h, h)); heap.push(make(c.x + h, c.y + h, h));
+    for (let q = 0; q < 4; q++) { const k = make(c.x + (q & 1 ? h : -h), c.y + (q & 2 ? h : -h), h); if (worth(k)) heap.push(k); }
   }
   if (!best) return null;
   const ll = lonlatOf(best.x, best.y);

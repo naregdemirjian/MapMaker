@@ -1,6 +1,8 @@
 // CPU profile of one benchmark scenario in Chrome, written as a .cpuprofile (open in Chrome DevTools,
 // or summarise with bench/top.mjs).
 // Usage: node --disable-warning=ExperimentalWarning bench/profile.ts <fixtures folder> "<project>" <scenario> <out.cpuprofile>
+// With an output name ending in .trace.json, a browser trace is recorded instead (everything the browser
+// does around the script: style, layout, painting, presenting the canvas); summarise with bench/trace.mjs.
 // Scenarios: idle, select, panWorld, panRegion, panDeep, scrub, scrubSmall, stroke, play, playMoving
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
@@ -36,7 +38,9 @@ try {
     if (sc === 'play' || sc === 'playMoving') { const sh = s.world.all('sequence')[sc === 'play' ? 0 : 1]; s.set({ mode: 'present', shotId: sh.id, shotFrame: 0 }); }
     for (let i = 0; i < 3; i++) await raf();
   }, scenario);
-  await cdp.send('Profiler.start');
+  const tracing = outFile.endsWith('.trace.json');
+  if (tracing) await browser.startTracing(page, { categories: ['devtools.timeline', 'disabled-by-default-devtools.timeline', 'toplevel', 'blink', 'cc', 'viz', 'gpu'] });
+  else await cdp.send('Profiler.start');
   await page.evaluate(async (sc) => {
     const m = (window as any).__mapmaker, s = m.store, B = m.bench;
     const Y = (y: number) => B.gregorian.fromCivil({ year: y });
@@ -65,8 +69,11 @@ try {
       await hop(); await hop();
     }
   }, scenario);
-  const { profile } = await cdp.send('Profiler.stop');
-  writeFileSync(outFile, JSON.stringify(profile));
+  if (tracing) writeFileSync(outFile, await browser.stopTracing());
+  else {
+    const { profile } = await cdp.send('Profiler.stop');
+    writeFileSync(outFile, JSON.stringify(profile));
+  }
   console.log(`wrote ${outFile}`);
 } finally {
   await browser.close();

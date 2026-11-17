@@ -144,6 +144,8 @@ export interface LabelInfo {
 
 /** Labels keep this share of the frame's width and height clear of its edges. */
 const LABEL_MARGIN = 0.04;
+/** A label placed in the part of a country in view is at least this large (design pixels); smaller, the country goes without. */
+const MIN_VIEW_LABEL = 6;
 
 /** An owner's main piece of territory (for its label). */
 interface OwnerPiece { owner: string; key: string; arcs: Float64Array; centreLon: number; area: number; total: number; /** Its outline's box: west, south, east, north. */ box: [number, number, number, number] }
@@ -152,7 +154,13 @@ interface PlacedLabel { lon: number; lat: number; font: number; lines: string[] 
  * The ways of writing a label (on one line, two, three), each placed when it is first asked for:
  * most names fit on one line, and then the others are never searched for.
  */
-interface Placings { count: number; at: (i: number) => PlacedLabel | null; /** How much it holds on to (the points of the outline searched). */ weight: number }
+interface Placings {
+  count: number; at: (i: number) => PlacedLabel | null;
+  /** How much it holds on to (the points of the outline searched). */
+  weight: number;
+  /** For a search of the part in view: the middle of that view on the map and its scale (see layerLabels: what is held while the map moves). */
+  from?: { ll: [number, number] | null; scale: number };
+}
 
 interface FaceGeo { geo: GeoPermissibleObjects; area: number; centroid: [number, number] }
 
@@ -763,6 +771,18 @@ export class MapRenderer {
     return b as Kept & { canvas: OffscreenCanvas; ctx: CanvasRenderingContext2D };
   }
 
+  /** A buffer to move a kept picture into (see layered); the picture's old buffer becomes the next spare. */
+  private spare: { canvas: OffscreenCanvas; ctx: CanvasRenderingContext2D } | null = null;
+
+  private spareFor(b: { canvas: OffscreenCanvas; ctx: CanvasRenderingContext2D }): { canvas: OffscreenCanvas; ctx: CanvasRenderingContext2D } {
+    const w = b.canvas.width, h = b.canvas.height;
+    const willReadFrequently = !!b.ctx.getContextAttributes?.().willReadFrequently;
+    const sp = this.spare;
+    if (sp && sp.canvas.width === w && sp.canvas.height === h && !!sp.ctx.getContextAttributes?.().willReadFrequently === willReadFrequently) return sp;
+    const canvas = new OffscreenCanvas(w, h);
+    return { canvas, ctx: canvas.getContext('2d', { willReadFrequently }) as unknown as CanvasRenderingContext2D };
+  }
+
   /** What the territory picture last showed: its key, what besides ownership it depends on, who held each parcel, and the map's state. */
   private patchPrev: { strict: string; stable: string; arr: Arrangement; revision: number; layers: Array<Map<number, FaceState>> } | null = null;
 
@@ -834,7 +854,7 @@ export class MapRenderer {
    * Draw a part of the picture, through its kept picture when it may be kept (`key` says what it
    * shows; null: never kept; `at`: where the map lies on the canvas in this frame).
    */
-  private layered(name: string, ctx: CanvasRenderingContext2D, key: PartKey | null, at: Placing, draw: (c: CanvasRenderingContext2D) => void, patch: { from: string; rects: DeviceRect[] } | null = null, renew: Renew | null = null): void {
+  private layered(name: string, ctx: CanvasRenderingContext2D, key: PartKey | null, at: Placing, draw: (c: CanvasRenderingContext2D) => void, patch: { from: string; rects: DeviceRect[] } | null = null, renew: Renew | null = null, opening = false): void {
     const mode = this.caching;
     const w = ctx.canvas.width, h = ctx.canvas.height;
     const usable = key !== null && mode !== 'off' && w * h <= MapRenderer.KEEP_LIMIT;
@@ -842,9 +862,20 @@ export class MapRenderer {
     if (!rec) this.kept.set(name, (rec = { canvas: null, ctx: null, key: '', seen: '', strict: '', loose: '', at: null, moment: '' }));
     const exactOf = (strict: string) => `${strict}|${w}x${h}|${at.a},${at.b},${at.c},${at.d},${at.x},${at.y},${at.s}`;
     const exact = key ? exactOf(key.strict) : '';
+    // `opening`: this part is the first thing drawn in a frame that fills the canvas, and the canvas
+    // still shows the frame before. Its kept picture then replaces everything in one copy; drawn
+    // straight onto the canvas, the canvas is cleared first.
+    const wipe = () => {
+      if (!opening) return;
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+      ctx.restore();
+    };
     if (!usable || (mode === 'lazy' && !this.carry && rec.seen !== exact)) {
       rec.seen = exact;
       this.lastParts[name] = 'drawn';
+      wipe();
       draw(ctx);
       return;
     }
@@ -852,6 +883,7 @@ export class MapRenderer {
     const blit = () => {
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
+      if (opening) ctx.globalCompositeOperation = 'copy';
       ctx.drawImage(b.canvas as CanvasImageSource, 0, 0);
       ctx.restore();
     };
@@ -904,13 +936,19 @@ export class MapRenderer {
         const whole = Math.abs(rx) < 0.02 && Math.abs(ry) < 0.02;
         if ((whole || this.moving) && Math.abs(nx) < w * 0.9 && Math.abs(ny) < h * 0.9) {
           // Moved: the kept picture is shifted by whole pixels and the strips that came into view are drawn into it.
-          const bc = b.ctx;
           if (nx || ny) {
+            // (Copied, moved over, into a spare buffer that then takes its place: a canvas copied onto
+            // itself is first copied whole by the browser, which made this the largest cost of a
+            // frame while the map moves.)
+            const spare = this.spareFor(b);
+            const bc = spare.ctx;
             bc.setTransform(1, 0, 0, 1, 0, 0);
             bc.globalAlpha = 1;
             bc.globalCompositeOperation = 'copy';
             bc.drawImage(b.canvas as CanvasImageSource, nx, ny);
             bc.globalCompositeOperation = 'source-over';
+            this.spare = { canvas: b.canvas, ctx: b.ctx };
+            b.canvas = spare.canvas; b.ctx = spare.ctx;
             const rects: DeviceRect[] = [];
             if (nx > 0) rects.push([0, 0, nx, h]); else if (nx < 0) rects.push([w + nx, 0, -nx, h]);
             if (ny > 0) rects.push([0, 0, w, ny]); else if (ny < 0) rects.push([0, h + ny, w, -ny]);
@@ -934,6 +972,7 @@ export class MapRenderer {
         // Scaled (a zoom under way): the kept picture is shown at the new size, and what lies around it is drawn.
         const x0 = Math.max(0, Math.ceil(tx)), y0 = Math.max(0, Math.ceil(ty)), x1 = Math.min(w, Math.floor(tx + r * w)), y1 = Math.min(h, Math.floor(ty + r * h));
         if (x1 > x0 && y1 > y0) {
+          wipe();
           ctx.save();
           ctx.setTransform(1, 0, 0, 1, 0, 0);
           ctx.beginPath();
@@ -1011,8 +1050,18 @@ export class MapRenderer {
     this.holdNames = !!opts.holdNames;
     this.lastApproximate = false;
     this.lastParts = {};
+    this.scratchReset();
     ctx.save();
-    ctx.clearRect(0, 0, view.width, view.height);
+    // ---- The base map: ocean, grid and land. The same picture for as long as the view stays put.
+    const wantsBackground = opts.passes.has('background') && !opts.transparent;
+    const wantsLand = opts.passes.has('land') && !!opts.basemap;
+    const wantsBase = wantsBackground || opts.passes.has('graticule') || wantsLand;
+    // Where the frame fills the canvas and starts with the base map, the base map's kept picture
+    // replaces what the canvas showed in one copy (see layered); otherwise the frame's area is cleared.
+    const m0 = ctx.getTransform();
+    const opens = wantsBase && m0.b === 0 && m0.c === 0 && Math.abs(m0.e) < 0.5 && Math.abs(m0.f) < 0.5
+      && Math.abs(m0.a * view.width - ctx.canvas.width) < 1 && Math.abs(m0.d * view.height - ctx.canvas.height) < 1;
+    if (!opens) ctx.clearRect(0, 0, view.width, view.height);
     if (view.rotation) {
       ctx.translate(view.width / 2, view.height / 2);
       ctx.rotate((view.rotation * Math.PI) / 180);
@@ -1033,11 +1082,8 @@ export class MapRenderer {
     // west where that copy shows): where the outline is in view, it clips everything on the map.
     const clipSphere = outlineInView(view);
 
-    // ---- The base map: ocean, grid and land. The same picture for as long as the view stays put.
-    const wantsBackground = opts.passes.has('background') && !opts.transparent;
-    const wantsLand = opts.passes.has('land') && !!opts.basemap;
     const space = world.get('map_space', spaceId);
-    if (wantsBackground || opts.passes.has('graticule') || wantsLand) {
+    if (wantsBase) {
       // (A flat map's grid changes its spacing with the zoom.)
       const gridStep = opts.passes.has('graticule') && view.camera.projection === 'flat' && space?.radius_m ? Math.floor(Math.log10(view.width / view.projection.scale()) * 3) : 0;
       const baseKey = partKey(`${wantsBackground ? style.ocean : ''}|${opts.passes.has('graticule') ? style.graticule : ''}|${wantsLand ? `${opts.basemap!.scales.length}${opts.referenceBorders ? 'r' : ''}` : ''}|${space?.radius_m ?? 0}`, `${gridStep}`);
@@ -1073,7 +1119,7 @@ export class MapRenderer {
         }
         if (wantsLand) this.basemapPainter.draw(c, view, sheet, opts.basemap!, { referenceBorders: !!opts.referenceBorders, oceanColor: wantsBackground ? style.ocean : undefined });
         c.restore();
-      });
+      }, null, null, opens);
     }
 
     // Each name as it is at this moment (names can change over time).
@@ -1740,34 +1786,49 @@ export class MapRenderer {
   private mediaSeconds = 0;
   private mediaChannel: MediaChannel = 'live';
 
-  private scratchCanvas: OffscreenCanvas | null = null;
-  private scratchCtx: CanvasRenderingContext2D | null = null;
-  /** The scratch buffer is limited to the part of the frame being drawn (see region), and where it was last drawn on (null: anywhere). */
-  private scratchLimited = false;
-  private scratchUsed: DeviceRect[] | null = null;
+  /**
+   * Scratch buffers, one for each use within a frame. A buffer that has been drawn onto another
+   * canvas is copied whole by the browser when it is drawn on again before that canvas has been
+   * painted (the browser keeps what the first drawing showed): about 3 ms each time at the size of a
+   * window, several times that for a 4K frame. So a frame's uses each get a buffer of their own, up
+   * to four (fewer for very large frames); beyond that they take turns.
+   */
+  private scratches: Array<{ canvas: OffscreenCanvas; ctx: CanvasRenderingContext2D; /** Limited to the part of the frame being drawn (see region). */ limited: boolean; /** Where it was last drawn on (null: anywhere). */ used: DeviceRect[] | null }> = [];
+  private scratchNext = 0;
+  private scratchIdle = 0;
+
+  /** At the start of a frame: the buffers are free again; those beyond two that have long gone unused are given up. */
+  private scratchReset(): void {
+    if (this.scratches.length > 2 && this.scratchNext < this.scratches.length) {
+      if (++this.scratchIdle > 120) { this.scratches.length = Math.max(2, this.scratchNext); this.scratchIdle = 0; }
+    } else this.scratchIdle = 0;
+    this.scratchNext = 0;
+  }
 
   /** A cleared buffer the size of the target, with the target's current transform. */
   private scratch(ctx: CanvasRenderingContext2D): CanvasRenderingContext2D {
     const w = ctx.canvas.width, h = ctx.canvas.height;
-    if (!this.scratchCanvas || this.scratchCanvas.width !== w || this.scratchCanvas.height !== h) {
-      this.scratchCanvas = new OffscreenCanvas(w, h);
-      this.scratchLimited = false;
-      this.scratchUsed = null;
+    if (this.scratches.length && (this.scratches[0].canvas.width !== w || this.scratches[0].canvas.height !== h)) this.scratches = [];
+    const most = Math.max(1, Math.min(4, Math.floor(40_000_000 / (w * h))));
+    const i = this.scratchNext++ % most;
+    let s = this.scratches[i];
+    if (!s) {
+      const canvas = new OffscreenCanvas(w, h);
       // Match the target's memory placement so copying between them stays cheap.
       const willReadFrequently = !!ctx.getContextAttributes?.().willReadFrequently;
-      this.scratchCtx = this.scratchCanvas.getContext('2d', { willReadFrequently }) as unknown as CanvasRenderingContext2D;
+      s = this.scratches[i] = { canvas, ctx: canvas.getContext('2d', { willReadFrequently }) as unknown as CanvasRenderingContext2D, limited: false, used: null };
     }
-    const sc = this.scratchCtx!;
-    if (this.scratchLimited) { sc.restore(); this.scratchLimited = false; }
+    const sc = s.ctx;
+    if (s.limited) { sc.restore(); s.limited = false; }
     sc.setTransform(1, 0, 0, 1, 0, 0);
     sc.globalAlpha = 1;
     sc.globalCompositeOperation = 'source-over';
     // Only what was drawn on last needs clearing.
-    if (this.scratchUsed) for (const [x, y, rw, rh] of this.scratchUsed) sc.clearRect(x, y, rw, rh);
+    if (s.used) for (const [x, y, rw, rh] of s.used) sc.clearRect(x, y, rw, rh);
     else sc.clearRect(0, 0, w, h);
-    this.scratchUsed = this.region;
+    s.used = this.region;
     sc.setTransform(ctx.getTransform());
-    if (this.region) { sc.save(); this.clipTo(sc, this.region); this.scratchLimited = true; }
+    if (this.region) { sc.save(); this.clipTo(sc, this.region); s.limited = true; }
     return sc;
   }
 
@@ -1972,7 +2033,7 @@ export class MapRenderer {
   }
 
   /** Where a piece's label can go, for each way of breaking its text into lines (projection units). */
-  private placePiece(piece: OwnerPiece, view: View, text: string, st: LabelStyle, accept: ((lon: number, lat: number) => boolean) | null, cacheKey: string, cache: Map<string, Placings> | Weighed<string, Placings>, onScreenOnly = false, wantedFont = Infinity): Placings {
+  private placePiece(piece: OwnerPiece, view: View, text: string, st: LabelStyle, accept: ((lon: number, lat: number) => boolean) | null, cacheKey: string, cache: Map<string, Placings> | Weighed<string, Placings>, onScreenOnly = false, wantedFont = Infinity, minFont = 0): Placings {
     const hit = cache.get(cacheKey);
     if (hit) return hit;
     const proj = view.camera.projection;
@@ -2012,15 +2073,27 @@ export class MapRenderer {
         // Room for more than the size given is worth nothing: the label then stands as near the
         // middle as it can at that size (and the search is short).
         const cap = wantedFont < Infinity ? (wantedFont * hEm * 1.1) / (Math.SQRT2 * 1.15) : Infinity;
-        const spot = placeLabel(outline, wEm / hEm, accept ?? undefined, within, cap);
+        // A place where the label would be smaller than `minFont` is of no use: not searched for.
+        const floor = minFont > 0 ? (minFont * hEm) / (Math.SQRT2 * 1.15) : 0;
+        const spot = placeLabel(outline, wEm / hEm, accept ?? undefined, within, cap, floor);
         // A box with the label's proportions fits inside the ellipse found when its height is sqrt(2)
         // times the ellipse's half-height. Labels may spill a little past narrow places.
         return (found[i] = spot ? { lon: spot.lon, lat: spot.lat, font: (Math.SQRT2 * spot.room * 1.15) / hEm, lines } : null);
       },
     };
+    if (onScreenOnly) res.from = { ll: screenToLonLat(view, view.width / 2, view.height / 2), scale: view.projection.scale() };
     if (cache instanceof Map && cache.size > 3000) cache.clear();
     cache.set(cacheKey, res);
     return res;
+  }
+
+  /** Whether the view has moved little since a search of the part in view was made (a twentieth of the frame, a tenth in scale). */
+  private nearSearch(view: View, pl: Placings): boolean {
+    const f = pl.from;
+    if (!f || !f.ll) return false;
+    const p = view.projection(f.ll);
+    const k = view.projection.scale() / f.scale;
+    return !!p && k > 0.9 && k < 1.1 && Math.hypot(p[0] - view.width / 2, p[1] - view.height / 2) < 0.05 * Math.max(view.width, view.height);
   }
 
   /**
@@ -2089,10 +2162,15 @@ export class MapRenderer {
       if ((!pl || !onScreen(p)) && vis !== null && boxIntersects(piece.box, vis)) {
         const inView = (lon: number, lat: number) => onScreen(view.projection([lon, lat]) as [number, number] | null) && (!landOk || landOk(lon, lat));
         const before = held?.get(`${ck}|view`);
-        const kept = before ? this.chooseLines(before, wanted, scale, view.unit) : null;
-        if (before && kept && onScreen(view.projection([kept.lon, kept.lat]) as [number, number] | null)) { this.viewSpotCache.set(`${ck}|view`, before); this.lastApproximate = true; }
-        const alt = this.chooseLines(this.placePiece(piece, view, text, st, inView, `${ck}|view`, this.viewSpotCache, true, (wanted * view.unit) / scale), wanted, scale, view.unit);
-        if (alt && (alt.font * scale) / view.unit >= 6) { pl = alt; p = view.projection([alt.lon, alt.lat]) as [number, number] | null; }
+        if (before) {
+          // Held while the map moves: a place found, for as long as it stays in view; and that none
+          // was found, until the view has moved on a little (looking again in every frame is what
+          // made moving the map slow next to large countries).
+          const kept = this.chooseLines(before, wanted, scale, view.unit);
+          if (kept ? onScreen(view.projection([kept.lon, kept.lat]) as [number, number] | null) : this.nearSearch(view, before)) { this.viewSpotCache.set(`${ck}|view`, before); this.lastApproximate = true; }
+        }
+        const alt = this.chooseLines(this.placePiece(piece, view, text, st, inView, `${ck}|view`, this.viewSpotCache, true, (wanted * view.unit) / scale, (MIN_VIEW_LABEL * view.unit) / scale), wanted, scale, view.unit);
+        if (alt && (alt.font * scale) / view.unit >= MIN_VIEW_LABEL) { pl = alt; p = view.projection([alt.lon, alt.lat]) as [number, number] | null; }
       }
       if (!pl || !p) return null;
       return { pos: [pl.lon, pl.lat], fontPx: pl.font * scale, lines: pl.lines };
@@ -2101,13 +2179,13 @@ export class MapRenderer {
     const out: LabelInfo[] = [];
     const owners = new Set([...piecesAfter.keys(), ...piecesBefore.keys()]);
     for (const id of owners) {
+      const pa = piecesAfter.get(id), pb = piecesBefore.get(id);
+      // A country nowhere near the view has no label to place (most countries, close in).
+      if (vis !== null && !(pa && boxIntersects(pa.box, vis)) && !(pb && boxIntersects(pb.box, vis))) continue;
       const name = entities.get(id)?.name;
       if (!name) continue;
       const look = this.labelLook(id, name);
       if (!look) continue;
-      const pa = piecesAfter.get(id), pb = piecesBefore.get(id);
-      // A country nowhere near the view has no label to place (most countries, close in).
-      if (vis !== null && !(pa && boxIntersects(pa.box, vis)) && !(pb && boxIntersects(pb.box, vis))) continue;
       const a = pa ? place(pa, look.text, look.style) : null;
       const b = pb === pa ? a : pb ? place(pb, look.text, look.style) : null;
       if (!a && !b) continue;
