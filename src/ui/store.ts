@@ -284,7 +284,8 @@ class AppStore {
     this.notify();
     try {
       const data = await Api.open(id);
-      this.world = World.fromSnapshot(data.snapshot);
+      // (The rows just read are the world's to keep: nothing else holds them.)
+      this.world = World.fromSnapshot(data.snapshot, true);
       this.engine = new Engine(this.world);
       this.projectId = id;
       setAssetBase(`/api/projects/${encodeURIComponent(id)}/assets/`, () => this.notify());
@@ -530,7 +531,9 @@ class AppStore {
   }
 
   /** Go to a date; `live`: while scrubbing (the panels catch up when the scrubbing pauses). */
-  setTime(t: Instant, live = false) { this.time = t; if (live) this.notifyLive(); else this.notify(); }
+  /** When the moment shown was last changed by dragging (performance.now()): while that goes on, the map places names less finely (see MapView). */
+  timeDraggedAt = -Infinity;
+  setTime(t: Instant, live = false) { this.time = t; if (live) { this.timeDraggedAt = performance.now(); this.notifyLive(); } else this.notify(); }
 
   fitTimeline() {
     if (!this.world) return;

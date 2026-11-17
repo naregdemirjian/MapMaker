@@ -181,6 +181,21 @@ export class ProjectDb {
     return s as Snapshot;
   }
 
+  /**
+   * The snapshot as JSON text, written by the database itself: the same rows in the same order as
+   * JSON.stringify(snapshot()) gives, without first making an object of every row here (a quarter
+   * of a million of them for a large map). Opening such a project spent half a second on that.
+   */
+  snapshotJson(): string {
+    const parts: string[] = [];
+    for (const t of TABLE_NAMES) {
+      const pairs = Object.keys(TABLES[t].columns).map((c) => `'${c}', ${c}`).join(', ');
+      const row = this.db.prepare(`SELECT json_group_array(json_object(${pairs})) AS j FROM (SELECT * FROM ${t})`).get() as { j: string };
+      parts.push(`${JSON.stringify(t)}:${row.j}`);
+    }
+    return `{${parts.join(',')}}`;
+  }
+
   // ---------------------------------------------------------------- applying diffs
 
   private applyRow(d: RowDiff): void {

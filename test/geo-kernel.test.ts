@@ -263,3 +263,47 @@ test('adding and removing a vertex on a border', () => {
   assertSound(arr);
   assert.equal(arr.leafFaces().length, 2);
 });
+
+test('a parcel\'s area: the turns summed on plain numbers equal the turns from the arcs\' directions, and d3\'s area', async () => {
+  const { arcDirectionAtEnd, arcDirectionAtStart } = await import('../src/geo-kernel/vec.ts');
+  const { geoArea } = await import('d3-geo');
+  const r = rng(41);
+  const ids: IdSource = (() => { const n: Record<string, number> = { vertex: 0, segment: 0, face: 0 }; return { next: (t: string) => ++n[t] }; })() as IdSource;
+  const arr = Arrangement.createEmpty('s', ids).arrangement;
+  // Forty overlapping rings of every size, some across the 180° line and near the poles.
+  for (let i = 0; i < 40; i++) {
+    const lon = r.float(-180, 180), lat = r.float(-75, 75), h = r.float(0.5, 25), n = r.int(4, 24);
+    const pts: Array<[number, number]> = [];
+    for (let k = 0; k < n; k++) { const a = (k / n) * Math.PI * 2, q = h * r.float(0.6, 1); pts.push([lon + q * 1.4 * Math.cos(a), Math.max(-88, Math.min(88, lat + q * Math.sin(a)))]); }
+    try { insertRing(arr, pts); } catch { /* a refused ring changes nothing */ }
+  }
+  assertSound(arr);
+  const t = arr.topology() as unknown as { cycles: Map<number, number[]> };
+  const self = arr as unknown as { cycleLeftArea(c: number[], t: unknown): number; segments: Map<number, { a: number; b: number }>; v(id: number): Vec3 };
+  let checked = 0;
+  for (const c of t.cycles.values()) {
+    // As it used to be worked out: the angle between the incoming arc's direction and the outgoing arc's, at every corner.
+    let sum = 0;
+    const ends = (h: number) => { const s = self.segments.get(h >> 1)!; return (h & 1) === 0 ? [s.a, s.b] : [s.b, s.a]; };
+    for (let i = 0; i < c.length; i++) {
+      const [u, v] = ends(c[i]), [, w] = ends(c[(i + 1) % c.length]);
+      if (w === u) { sum += -Math.PI; continue; }
+      const pv = self.v(v), T = arcDirectionAtEnd(self.v(u), pv), O = arcDirectionAtStart(pv, self.v(w));
+      sum += Math.atan2(dot(cross(T, O), pv), dot(T, O));
+    }
+    const before = 2 * Math.PI - sum, now = self.cycleLeftArea(c, t);
+    assert.ok(Math.abs(before - now) < 1e-9, `a cycle of ${c.length} corners: ${now} against ${before}`);
+    checked++;
+  }
+  assert.ok(checked > 60, `${checked} cycles`);
+  // And each parcel against d3's area of its polygon.
+  let faces = 0;
+  for (const f of arr.leafFaces()) {
+    const poly = d3Polygon(arr, f);
+    if (!poly) continue;
+    const a = geoArea(poly), mine = arr.faceArea(f);
+    assert.ok(Math.abs(a - mine) < 1e-6 || Math.abs(4 * Math.PI - a - mine) < 1e-6, `parcel ${f}: ${mine} against d3's ${a}`);
+    faces++;
+  }
+  assert.ok(faces > 40, `${faces} parcels`);
+});

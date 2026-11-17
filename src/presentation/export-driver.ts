@@ -170,8 +170,13 @@ export async function runExport(o: {
   // Each frame is drawn, then encoded as a PNG by the browser while the next one is being drawn, and
   // sent to be written. A frame that is pixel for pixel the picture before it in its pass (a still
   // camera between events; the land and the background all through) is not encoded again: its file
-  // is copied. A few frames may be on their way at once; each pass's frames are written in order.
+  // is copied. Several frames may be on their way at once; each pass's frames are written in order.
   const last = new Map<string, { a: number; b: number; frame: number }>();
+  // How many frames may be on their way at once: one for each processor (encoding is what an export
+  // of a simple map waits for, and it runs beside the drawing), at least four and at most twelve,
+  // and no more than fit in about 400 MB (each holds a whole frame until it is encoded).
+  const cores = typeof navigator !== 'undefined' && navigator.hardwareConcurrency ? navigator.hardwareConcurrency : 4;
+  const inFlight = Math.max(2, Math.min(Math.max(4, Math.min(12, cores)), Math.floor(400_000_000 / (width * height * 4))));
   const pending = new Set<Promise<unknown>>();
   const queues = new Map<string, Promise<unknown>>();
   let failure: unknown = null;
@@ -199,7 +204,7 @@ export async function runExport(o: {
         queue(def.name, async () => Api.sendPngFrame(o.projectId, job.jobId, def.name, frame, await png));
       }
       // Not too many pictures waiting to be encoded and written (each holds a whole frame).
-      while (pending.size >= 4) await Promise.race(pending);
+      while (pending.size >= inFlight) await Promise.race(pending);
     }
   }
   await Promise.all(pending);

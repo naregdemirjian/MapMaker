@@ -398,7 +398,10 @@ export class LandMask {
     const canvas = new OffscreenCanvas(width, height);
     const ctx = canvas.getContext('2d', { willReadFrequently: true }) as unknown as CanvasRenderingContext2D;
     const projection = geoEquirectangular().scale(width / (2 * Math.PI)).translate([width / 2, height / 2]).precision(0);
-    const path = geoPath(projection, ctx);
+    // (Rings are left for the fill to close: in Chrome each closePath takes time in proportion to
+    // the whole path so far, which made this mask of 1,900 rings slow to make.)
+    const sink = { beginPath: () => ctx.beginPath(), moveTo: (x: number, y: number) => ctx.moveTo(x, y), lineTo: (x: number, y: number) => ctx.lineTo(x, y), arc: (x: number, y: number, r: number, a0: number, a1: number, ccw?: boolean) => ctx.arc(x, y, r, a0, a1, ccw), closePath: () => undefined };
+    const path = geoPath(projection, sink);
     ctx.fillStyle = '#fff';
     ctx.beginPath(); path(b.land); ctx.fill('nonzero');
     ctx.globalCompositeOperation = 'destination-out';

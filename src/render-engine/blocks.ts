@@ -40,13 +40,21 @@ function shows(ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number
   return false;
 }
 
+/**
+ * A canvas path of some shapes. A closed shape is not closed with closePath: in Chrome each
+ * closePath takes time in proportion to everything already in the path, so a path of a thousand
+ * rings took twenty times as long to make as its points warrant, and one of five thousand almost a
+ * second (measured in Chrome 153 and in the Electron the app ships with). Instead the ring goes
+ * back to its first point and on to its second: it fills the same, and drawn as a line it has a
+ * proper corner where it starts.
+ */
 function pathOf(subs: Sub[]): Path2D {
   const p = new Path2D();
   for (const s of subs) {
     const a = s.pts;
     p.moveTo(a[0], a[1]);
     for (let i = 2; i < a.length; i += 2) p.lineTo(a[i], a[i + 1]);
-    if (s.closed) p.closePath();
+    if (s.closed && a.length >= 6) { p.lineTo(a[0], a[1]); p.lineTo(a[2], a[3]); }
   }
   return p;
 }

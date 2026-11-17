@@ -96,6 +96,13 @@ export interface RenderOptions {
    * nothing to draw. `roomToFill` says after a frame whether there is any left to draw.
    */
   fillAround?: boolean;
+  /**
+   * The moment shown is changing quickly (the timeline is being dragged in the working view): the
+   * names of countries whose land changed are placed less finely, and `lastApproximate` says that a
+   * calmer frame would differ. Placing them finely for every moment passed through was a fifth of
+   * such a frame on a large map, for places nobody sees for longer than that frame.
+   */
+  hurried?: boolean;
 }
 
 /** Where the map's plane lies on the canvas: the transform's linear part, the plane's origin in device pixels and its scale. */
@@ -982,6 +989,8 @@ export class MapRenderer {
   }
 
   private stamps = 0;
+  /** This frame is one of many in quick succession through time (RenderOptions.hurried). */
+  private hurried = false;
   /** This frame draws the room around kept pictures at rest (RenderOptions.fillAround). */
   private fillRoom = false;
   /** After a frame: a kept picture has room around the frame that is not drawn yet (the working view fills it once the view rests). */
@@ -1311,6 +1320,7 @@ export class MapRenderer {
     this.lastApproximate = false;
     this.lastParts = {};
     this.scratchReset();
+    this.hurried = !!opts.hurried;
     this.fillRoom = !!opts.fillAround && !opts.moving;
     this.roomToFill = false;
     const scaleNow = view.projection.scale();
@@ -1918,7 +1928,10 @@ export class MapRenderer {
         const p = new Path2D();
         if (r <= 0) return p;
         // Every piece of the source widened by r: a rectangle along it and a circle at each end, all
-        // wound the same way so that filled with the nonzero rule they make one area.
+        // wound the same way so that filled with the nonzero rule they make one area. (None is closed
+        // with closePath: in Chrome each closePath takes time in proportion to the whole path so far,
+        // and a long border made this the dearest part of every frame of an advancing front. A
+        // rectangle goes back to its first corner instead; a circle ends where it began.)
         let lx = NaN, ly = NaN;
         const minLen = Math.max(0.5, r / 6);
         for (let i = 0; i < S.length; i += 4) {
@@ -1932,13 +1945,12 @@ export class MapRenderer {
             if (area < 0) quad.reverse();
             p.moveTo(quad[0][0], quad[0][1]);
             for (let k = 1; k < 4; k++) p.lineTo(quad[k][0], quad[k][1]);
-            p.closePath();
+            p.lineTo(quad[0][0], quad[0][1]);
           }
           for (const [x, y] of [[ax, ay], [bx, by]]) {
             if (Math.hypot(x - lx, y - ly) < minLen) continue;
             p.moveTo(x + r, y);
             p.arc(x, y, r, 0, Math.PI * 2, false);
-            p.closePath();
             lx = x; ly = y;
           }
         }
@@ -2485,7 +2497,10 @@ export class MapRenderer {
       // The label is never larger than the territory's area suggests: where there is room for more
       // than twice that, more room is worth nothing (and looking for it takes long in a large country).
       const natural = Math.sqrt(piece.total) * 0.18 * st.sizeScale;
-      let pl = this.chooseLines(this.placePiece(piece, view, text, st, landOk, ck, this.spotCache, false, 2 * natural, 0, 1, mask), wanted, scale, view.unit);
+      // (In a hurry, a place found less finely will do, unless the fine one is already known.)
+      const quick = this.hurried && !this.spotCache.has(ck);
+      if (quick) this.lastApproximate = true;
+      let pl = this.chooseLines(this.placePiece(piece, view, text, st, landOk, quick ? `${ck}|quick` : ck, this.spotCache, false, 2 * natural, 0, quick ? 12 : 1, mask), wanted, scale, view.unit);
       let p = pl ? view.projection([pl.lon, pl.lat]) as [number, number] | null : null;
       // The best place is off screen while part of the territory is in view (zoomed in on a large
       // country): place the label in the part that is in view.
@@ -2757,12 +2772,13 @@ export class MapRenderer {
   private zoomOut = false;
 
   /**
-   * The size a text is drawn at. While zooming, sizes go in steps of a twelfth: the browser keeps the
-   * letters it has drawn (and their outlines) by size, and a size never seen before in every frame
-   * made drawing the names the dearest part of a zoom's frame. Exact again when the zoom rests.
+   * The size a text is drawn at. While zooming (and while the timeline is dragged, when names grow
+   * and shrink with their countries), sizes go in steps of a twelfth: the browser keeps the letters
+   * it has drawn (and their outlines) by size, and a size never seen before in every frame made
+   * drawing the names the dearest part of a zoom's frame. Exact again at rest.
    */
   private sizeNow(size: number): number {
-    if (!this.zooming || !(size > 0)) return size;
+    if (!(this.zooming || this.hurried) || !(size > 0)) return size;
     const step = Math.log(1.085), q = Math.exp(Math.round(Math.log(size) / step) * step);
     if (Math.abs(q - size) > 0.02) this.lastApproximate = true;
     return q;

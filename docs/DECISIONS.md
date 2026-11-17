@@ -59,6 +59,41 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D66. Opening a project: the database writes the snapshot, the kernel works on plain numbers
+
+Opening the heavy benchmark project went from about 3.3 s to about 2.4 s (the map with 24,500 parcels from 3.9 s
+to about 3.5 s). (1) The data service used to read every row into an object and then turn the lot into JSON (half a
+second for a quarter of a million rows); the database now writes the same JSON itself (`ProjectDb.snapshotJson`,
+with SQLite's `json_group_array`): the same text byte for byte on the benchmark projects, and checked against the
+row-by-row snapshot in `test/storage.test.ts` with names that JSON must escape. (2) The rows just read are the
+world's to keep, so they are no longer copied one by one. (3) A parcel's area (asked for every parcel when the first
+picture is drawn) is summed on plain numbers instead of through three small arrays per corner, three times as fast;
+`test/geo-kernel.test.ts` checks it against the earlier formula and against d3. (4) The kernel's grid of nearby
+points and segments keeps lists instead of sets, and one number instead of a list for an item in a single cell.
+
+### D65. The settle redraw waits from the end of a frame; names are placed less finely while the timeline is dragged
+
+The sharp redraw after a movement (D51) was timed from the movement that caused the last frame. A frame that itself
+took longer than the wait (110 ms) was therefore followed at once by the sharp redraw, in the middle of the
+movement: on a slow computer, or in any heavy frame, everything was drawn twice. The wait now runs from the end of
+the frame. While the moment shown is being dragged along the timeline, the names of countries whose land changed are
+placed a twelfth as finely and drawn in size steps (as while zooming, D63), and placed properly when the dragging
+rests: placing them finely for every moment passed through was a fifth of such a frame on a large map. A click on
+the timeline, and the preview of a shot, place names properly at once.
+
+### D64. Chrome's closePath is slow in proportion to the path: no path of ours is closed with it
+
+Measured in Chrome 153 and in the Electron the app ships with (Chrome 156): each `closePath()`, on a `Path2D` and on
+a canvas's own path alike, takes time in proportion to everything already in the path. A path of 1,000 rings of 20
+points takes 30 ms to make instead of 1.5; one of 5,000 rings 700 ms instead of 8; 20,000 rings 11 seconds instead of
+0.03. (A path given as text with `Z` is not affected.) The app made such paths in three places: every block of a
+sheet and every whole shape (`blocks.ts`), the area reached by an advancing front (a rectangle and two circles for
+each piece of the border it starts from, twice for every frame of the animation), and the land mask. A ring now goes
+back to its first point and on to its second instead (it fills the same, and drawn as a line it has a proper corner
+where it starts); the front's rectangles go back to their first corner; the land mask's rings are left for the fill
+to close. `e2e/render-compare` shows the same pictures as before. On the heavy project: an exported 1080p frame 234
+to 208 ms, playing a shot 110 to 97 ms a frame, dragging the timeline across a dozen events a frame 141 to 111 ms.
+
 ### D63. Zooming: one picture at the new size, names in size steps, the room around the frame drawn at rest
 
 While zooming, the kept pictures are shown at the new size (D51). Three things made a frame of a zoom the dearest

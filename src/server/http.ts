@@ -64,7 +64,11 @@ async function json<T>(req: IncomingMessage): Promise<T> {
 }
 
 function send(res: ServerResponse, status: number, body: unknown): void {
-  const text = JSON.stringify(body);
+  sendText(res, status, JSON.stringify(body));
+}
+
+/** Send JSON that is already text. */
+function sendText(res: ServerResponse, status: number, text: string): void {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
   res.end(text);
 }
@@ -119,7 +123,8 @@ export function createAppServer(opts: ServerOptions): { server: Server; registry
     if (action === 'recover' && method === 'POST') return send(res, 200, registry.recover(id));
     const db = registry.get(id);
 
-    if (!action && method === 'GET') return send(res, 200, { id, snapshot: db.snapshot(), journal: db.journalState(), dir: db.dir });
+    // (The snapshot is written as text by the database: see ProjectDb.snapshotJson.)
+    if (!action && method === 'GET') return sendText(res, 200, `{"id":${JSON.stringify(id)},"snapshot":${db.snapshotJson()},"journal":${JSON.stringify(db.journalState())},"dir":${JSON.stringify(db.dir)}}`);
     if (action === 'commit' && method === 'POST') {
       const body = await json<{ label: string; diffs: RowDiff[]; baseHead: number }>(req);
       return send(res, 200, { journal: db.commit(body.label, body.diffs, body.baseHead) });

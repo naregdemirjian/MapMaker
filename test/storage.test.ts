@@ -55,6 +55,30 @@ test('a new project is created, saved and reopened with the same data', () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test('the snapshot written as text by the database is the snapshot (awkward names, a flat map\'s radius, empty tables)', () => {
+  const root = temp();
+  try {
+    const reg = new ProjectRegistry(root);
+    const info = reg.create('Text Snapshot');
+    const db = reg.get(info.id);
+    const s = session(db);
+    // Text that JSON must escape, and letters beyond the first plane.
+    const A = s.save(cmd.createEntity(s.world, { type_id: 'polity', name: 'Kingdom "of" Varn \\ back\\slash\n second line \t tab \u00e9\u4e2d\ud83d\ude00 \u2028' }));
+    s.save(cmd.paintTerritory(s.world, s.engine, { spaceId: s.space, layerId: s.layer, ring: ring(square(10, 45, 8)), value: A, snap: 1e-7, mode: { kind: 'correct', t: NEG_INF } }));
+    const ev = s.save(cmd.createEvent(s.world, { name: 'Conquest </script> \u0001', start: Y(1200) }));
+    s.save(cmd.paintTerritory(s.world, s.engine, { spaceId: s.space, layerId: s.layer, ring: ring(square(12, 47, 3)), value: A, snap: 1e-7, mode: { kind: 'new', eventId: ev } }));
+    // A map with a radius that is not a whole number (the only column of real numbers).
+    s.save(cmd.createWorld(s.world, 'A moon', 1737.400123456789));
+    const text = db.snapshotJson();
+    assert.deepEqual(JSON.parse(text), JSON.parse(JSON.stringify(db.snapshot())));
+    // Row for row in the same order (the order rows are read in decides the order of lists in the app).
+    const a = JSON.parse(text) as Record<string, Array<Record<string, unknown>>>, b = db.snapshot() as unknown as Record<string, Array<Record<string, unknown>>>;
+    for (const t of Object.keys(b)) assert.deepEqual(a[t].map((r) => Object.values(r)[0]), b[t].map((r) => Object.values(r)[0]), `the order of ${t}`);
+    assert.ok(a.vertex.length > 4 && a.entity.some((e) => String(e.name).includes('\ud83d\ude00')) && a.map_space.some((m) => typeof m.radius_m === 'number' && !Number.isInteger(m.radius_m)));
+    reg.closeAll();
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('undo and redo walk the journal exactly, across reopening', () => {
   const root = temp();
   try {

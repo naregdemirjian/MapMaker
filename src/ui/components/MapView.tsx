@@ -212,6 +212,8 @@ export function MapView() {
     const sig = `${view.key}|${frame.x},${frame.y}|${c.width}x${c.height}`;
     if (sig !== mo.sig) { mo.at = mo.sig ? started : -Infinity; mo.sig = sig; }
     const moving = started - mo.at < SETTLE_MS;
+    // The moment shown is being dragged along the timeline: names are placed less finely until it rests.
+    const hurried = !shot && started - s.timeDraggedAt < SETTLE_MS;
     const fl = filling.current;
     const fillAround = fl.due && !moving && !shot;
     fl.due = false;
@@ -220,12 +222,15 @@ export function MapView() {
     if (!shot || shot.characters !== false) passes.add('characters');
     if (!shot || shot.cities !== false) passes.add('cities');
     try {
-      s.renderer.render(ctx, view, s.world, s.engine, s.spaceId, time, { passes, transparent: !!shot?.transparent, layerIds: layers, basemap, referenceBorders: !shot && s.referenceBorders, transitions: shot ? transitionOptions(shot, s.shotFrame) : undefined, mediaSeconds: shot ? s.shotFrame / shot.fps : 0, trails: !!shot?.trails, layout: { labels: (!shot || shot.labels) && !namesHidden, cities: !shot || shot.cities !== false }, moving: moving && vs.whileMoving === 'carry', holdNames: moving && vs.names === 'hold', fillAround });
+      s.renderer.render(ctx, view, s.world, s.engine, s.spaceId, time, { passes, transparent: !!shot?.transparent, layerIds: layers, basemap, referenceBorders: !shot && s.referenceBorders, transitions: shot ? transitionOptions(shot, s.shotFrame) : undefined, mediaSeconds: shot ? s.shotFrame / shot.fps : 0, trails: !!shot?.trails, layout: { labels: (!shot || shot.labels) && !namesHidden, cities: !shot || shot.cities !== false }, moving: moving && vs.whileMoving === 'carry', holdNames: moving && vs.names === 'hold', fillAround, hurried });
     } catch (e) {
       console.error(e);
     }
     window.clearTimeout(mo.timer);
-    if (moving && (s.renderer.lastApproximate || namesHidden)) mo.timer = window.setTimeout(() => force((n) => n + 1), Math.max(0, SETTLE_MS - (performance.now() - mo.at)) + 4);
+    // (Counted from the end of this frame, not from the movement that caused it: a frame that itself
+    // takes longer than the wait would otherwise be followed at once by the sharp redraw, in the
+    // middle of the movement, and a slow computer would draw everything twice.)
+    if ((moving || hurried) && (s.renderer.lastApproximate || namesHidden)) mo.timer = window.setTimeout(() => force((n) => n + 1), SETTLE_MS + 4);
     // Once the view has rested a moment after moving, the room around the kept pictures is drawn (once
     // per view): the next move, or zooming out a little, then starts with nothing to draw.
     window.clearTimeout(fl.timer);

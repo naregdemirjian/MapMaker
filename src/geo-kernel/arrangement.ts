@@ -117,11 +117,15 @@ export class Arrangement {
     return { arrangement: arr, diff };
   }
 
-  static fromRows(spaceId: string, rootFace: number, vertices: Iterable<VertexRow>, segments: Iterable<SegmentRow>, faces: Iterable<FaceRow>, ids: IdSource): Arrangement {
+  /**
+   * A map from its stored rows. `own`: the rows are the map's to keep and change (rows just read
+   * from a file, that nothing else holds); otherwise each is copied.
+   */
+  static fromRows(spaceId: string, rootFace: number, vertices: Iterable<VertexRow>, segments: Iterable<SegmentRow>, faces: Iterable<FaceRow>, ids: IdSource, own = false): Arrangement {
     const arr = new Arrangement(spaceId, rootFace, ids);
-    for (const f of faces) arr.setFace(f.id, { ...f });
-    for (const v of vertices) arr.indexVertex({ ...v });
-    for (const s of segments) arr.indexSegment({ ...s });
+    for (const f of faces) arr.setFace(f.id, own ? f : { ...f });
+    for (const v of vertices) arr.indexVertex(own ? v : { ...v });
+    for (const s of segments) arr.indexSegment(own ? s : { ...s });
     // (Loading is not a change to what was there.)
     arr.changed = [];
     arr.changedFrom = arr.revision;
@@ -730,12 +734,13 @@ export class Arrangement {
       const area = this.cycleLeftArea(c, t);
       let cap: { c: Vec3; r: number } | null = null;
       let sx = 0, sy = 0, sz = 0;
-      for (const h of c) { const p = this.v(this.he(h).from); sx += p[0]; sy += p[1]; sz += p[2]; }
+      const start = (h: number): Vec3 => { const sg = this.segments.get(h >> 1)!; return this.v((h & 1) === 0 ? sg.a : sg.b); };
+      for (const h of c) { const p = start(h); sx += p[0]; sy += p[1]; sz += p[2]; }
       const len = Math.hypot(sx, sy, sz);
       if (len >= 1e-9) {
         const cc: Vec3 = [sx / len, sy / len, sz / len];
         let r = 0;
-        for (const h of c) r = Math.max(r, angle(cc, this.v(this.he(h).from)));
+        for (const h of c) r = Math.max(r, angle(cc, start(h)));
         if (r < Math.PI / 2 - 1e-9) cap = { c: cc, r: r + 1e-9 };
       }
       d = { area, cap };
@@ -891,16 +896,29 @@ export class Arrangement {
   }
 
   /** Signed turning sum of a cycle; area of its left region = 2*pi - sum (Gauss-Bonnet). */
-  private cycleLeftArea(c: number[], t: Topology): number {
+  private cycleLeftArea(c: number[], _t: Topology): number {
+    // The turn at each corner, summed. At corner v, between the arc from u and the arc to w, the
+    // turn is the angle between the arcs' directions there: the arcs lie in the planes with normals
+    // n1 = u x v and n2 = v x w, their directions at v are n1 x v and n2 x v, and for those the
+    // sine and cosine of the angle come out as (n1 x n2).v and n1.n2 (times the same positive
+    // number). Worked out on plain numbers: this runs for every corner of every parcel when a map
+    // is opened, and making three small arrays per corner took three times as long.
+    const n = c.length;
     let sum = 0;
-    for (let i = 0; i < c.length; i++) {
-      const a = this.he(c[i], t);
-      const b = this.he(c[(i + 1) % c.length], t);
-      const pu = this.v(a.from), pv = this.v(a.to), pw = this.v(b.to);
-      if (b.to === a.from) { sum += -Math.PI; continue; } // spike: turn around the tip, face on the left
-      const T = arcDirectionAtEnd(pu, pv);
-      const O = arcDirectionAtStart(pv, pw);
-      sum += Math.atan2(dot(cross(T, O), pv), dot(T, O));
+    const s0 = this.segments.get(c[0] >> 1)!;
+    let from = (c[0] & 1) === 0 ? s0.a : s0.b, to = (c[0] & 1) === 0 ? s0.b : s0.a;
+    let pu = this.v(from), pv = this.v(to);
+    let ax = pu[1] * pv[2] - pu[2] * pv[1], ay = pu[2] * pv[0] - pu[0] * pv[2], az = pu[0] * pv[1] - pu[1] * pv[0];
+    for (let i = 0; i < n; i++) {
+      const h = c[i + 1 < n ? i + 1 : 0];
+      const sb = this.segments.get(h >> 1)!;
+      const next = (h & 1) === 0 ? sb.b : sb.a;
+      const pw = this.v(next);
+      const bx = pv[1] * pw[2] - pv[2] * pw[1], by = pv[2] * pw[0] - pv[0] * pw[2], bz = pv[0] * pw[1] - pv[1] * pw[0];
+      // (A spike: the path turns around the tip, with the face on the left.)
+      if (next === from) sum += -Math.PI;
+      else sum += Math.atan2((ay * bz - az * by) * pv[0] + (az * bx - ax * bz) * pv[1] + (ax * by - ay * bx) * pv[2], ax * bx + ay * by + az * bz);
+      from = to; to = next; pu = pv; pv = pw; ax = bx; ay = by; az = bz;
     }
     return 2 * Math.PI - sum;
   }

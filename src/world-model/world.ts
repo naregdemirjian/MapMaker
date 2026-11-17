@@ -63,7 +63,12 @@ export class World {
     for (const t of TABLE_NAMES) if (!TABLES[t].kernel) this.tables.set(t, new Map());
   }
 
-  static fromSnapshot(s: Snapshot): World {
+  /**
+   * A world from a snapshot of its tables. `own`: the snapshot's rows of the parcel maps are the
+   * world's to keep (a snapshot just read and not used again): a quarter of a million rows of a
+   * large map are then not copied one by one.
+   */
+  static fromSnapshot(s: Snapshot, own = false): World {
     const w = new World();
     for (const t of TABLE_NAMES) {
       if (TABLES[t].kernel) continue;
@@ -73,7 +78,7 @@ export class World {
     for (const sp of w.all('map_space')) {
       if (sp.kind !== 'sphere') continue;
       const by = <T extends { space_id: string }>(rows: T[] | undefined) => (rows ?? []).filter((r) => r.space_id === sp.id);
-      w.arrangements.set(sp.id, Arrangement.fromRows(sp.id, sp.root_face, by(s.vertex), by(s.segment), by(s.face), w.ids));
+      w.arrangements.set(sp.id, Arrangement.fromRows(sp.id, sp.root_face, by(s.vertex), by(s.segment), by(s.face), w.ids, own));
     }
     return w;
   }
