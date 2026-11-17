@@ -1,6 +1,7 @@
 // Editing the look of country labels: the general style (all labels) and each country's own.
 import { useEffect, useState } from 'react';
 import { useStore } from '../store.ts';
+import { NumberField } from './Panels.tsx';
 import * as cmd from '../../domain/commands.ts';
 import { resolveLabelStyle, labelFont, labelText, LABEL_FONTS, type LabelStyle, type CountryLabel } from '../../render-engine/label-style.ts';
 
@@ -77,6 +78,12 @@ export function LabelStyleDialog({ onClose }: { onClose: () => void }) {
         <p className="muted">The look of every country label. A country can have its own look: select it and open “Label”.</p>
         <Preview style={style} text={labelText('Kingdom of Varn', style)} />
         <LabelStyleEditor value={style} onChange={(patch) => s.execute((wd) => cmd.setGeneralLabelStyle(wd, patch))} idPrefix="general-label" />
+        <h4>Cities and characters</h4>
+        <p className="muted">They grow as you zoom in and shrink as you zoom out; city names too small to read are left out. Their size overall:</p>
+        <div className="two">
+          <label>Cities (%)<NumberField min={25} max={400} step={5} value={Math.round(cmd.pointStyle(w).city * 100)} onCommit={(n) => s.execute((wd) => cmd.setPointStyle(wd, { city: n / 100 }))} testId="city-size" /></label>
+          <label>Characters (%)<NumberField min={25} max={400} step={5} value={Math.round(cmd.pointStyle(w).character * 100)} onCommit={(n) => s.execute((wd) => cmd.setPointStyle(wd, { character: n / 100 }))} testId="character-size" /></label>
+        </div>
         <div className="modal-actions">
           <button onClick={() => s.execute((wd) => cmd.setGeneralLabelStyle(wd, Object.fromEntries(Object.keys(stored).map((k) => [k, null]))))} disabled={!Object.keys(stored).length}>Reset to default</button>
           <button className="primary" onClick={onClose}>Done</button>

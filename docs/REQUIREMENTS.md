@@ -218,3 +218,12 @@ status. Last updated: 17 November 2026 (after the user's second feedback round; 
 | A tool to erase borders | Tested | `e2e/vertical-slice` 'Border eraser' | D42 |
 | City (flat) maps, only with no performance cost | Tested | `flat-maps` (true to scale within 1%, straight borders, labels), `e2e/workflows` 'A flat map' | D44: the same kernel, nothing slower |
 
+## The user's fourth feedback round (17 November 2026)
+
+| Request | Status | Evidence | Notes |
+| --- | --- | --- | --- |
+| The events box should show an event again each time it gains territory, without several events of the same name | Tested | `events-box` (one event, three advances, shown at each) | D45. Choose the same event when drawing later; the prompt says so |
+| Ctrl+Z with the border pen undid project changes | Fixed | `e2e/workflows` 'Border pen' (Ctrl+Z, Ctrl+Y, project untouched) | D45 |
+| City and character labels the same size whatever the zoom | Fixed | `e2e/workflows` 'A city' (no name at world zoom, named close up) | D46; sizes in the Label style dialog |
+| Next step: names over time | Tested | `names`, `e2e/workflows` 'A city' (renamed in 1620) | D47 |
+

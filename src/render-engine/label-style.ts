@@ -72,3 +72,13 @@ export function labelText(name: string, style: LabelStyle, override?: CountryLab
   const t = override?.text?.trim() ? override.text.trim() : name;
   return style.uppercase ? t.toLocaleUpperCase() : t;
 }
+
+/** Sizes of city and character markers and names (multipliers, 1 = as designed). Meta row 'point_style'. */
+export interface PointStyle { city: number; character: number }
+
+export function resolvePointStyle(stored: string | null | undefined): PointStyle {
+  let st: Partial<PointStyle> = {};
+  try { st = (JSON.parse(stored || '{}') as Partial<PointStyle> | null) ?? {}; } catch { /* a damaged setting falls back */ }
+  const ok = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(4, Math.max(0.25, v)) : 1);
+  return { city: ok(st.city), character: ok(st.character) };
+}

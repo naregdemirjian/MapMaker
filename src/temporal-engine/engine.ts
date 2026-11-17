@@ -47,6 +47,9 @@ export interface FaceState {
  */
 export interface PlaceIntent { op: 'place'; entity: string; lon?: number; lat?: number; off?: boolean; arrive?: 'travel' | 'jump' }
 
+/** A new name for a country, city or character from a date on (an effect of kind 'rename'). */
+export interface RenameIntent { op: 'rename'; entity: string; name: string }
+
 /** One compiled waypoint of a character's track. */
 export interface Waypoint { t: Instant; lon: number; lat: number; off: boolean; arrive: 'travel' | 'jump'; effectId: string; eventId: string; precedence: number; eventSeq: number; ordinal: number }
 
@@ -148,6 +151,8 @@ export function hashFaces(faces: number[]): string {
 export class Engine {
   private compiledRevision = -1;
   private timelines = new Map<string, Map<number, Assignment[]>>();
+  /** Names over time: entity -> dated names in order (the entity's own name holds before the first). */
+  private names = new Map<string, Array<{ t: Instant; name: string; order: [number, number, number] }>>();
   /** Characters' tracks: map -> character -> waypoints in time order. */
   private tracks = new Map<string, Map<string, Waypoint[]>>();
   private effectAssignments = new Map<string, Assignment[]>();
@@ -176,6 +181,7 @@ export class Engine {
     const w = this.world;
     this.timelines.clear();
     this.tracks.clear();
+    this.names.clear();
     this.effectAssignments.clear();
     this.conflictList = [];
     const events = new Map(w.all('event').map((e) => [e.id, e]));
@@ -185,6 +191,16 @@ export class Engine {
       const ev = events.get(ef.event_id);
       if (!ev) { this.conflictList.push({ kind: 'broken', effectId: ef.id, eventId: ef.event_id, message: 'This change belongs to an event that no longer exists.' }); continue; }
       if (!this.isActiveEvent(ev)) continue;
+      if (ef.kind === 'rename') {
+        const it = parseJSON<RenameIntent | null>(ef.intent, null);
+        if (!it || !w.get('entity', it.entity)) { this.conflictList.push({ kind: 'broken', effectId: ef.id, eventId: ev.id, message: 'This change of name is of something that no longer exists.' }); continue; }
+        const l = this.names.get(it.entity) ?? [];
+        l.push({ t: effectTime(ef, ev), name: it.name, order: [isUntracked(ef) ? UNTRACKED_PRECEDENCE : ev.precedence, ev.created_seq, ef.ordinal] });
+        this.names.set(it.entity, l);
+        const tt = effectTime(ef, ev);
+        if (tt.day !== -Infinity) times.set(`${tt.day}:${tt.ms}`, tt);
+        continue;
+      }
       if (ef.kind === 'place') {
         const it = parseJSON<PlaceIntent | null>(ef.intent, null);
         if (!it || !ef.space_id || !w.get('map_space', ef.space_id)) { this.conflictList.push({ kind: 'broken', effectId: ef.id, eventId: ev.id, message: 'This character placement refers to a map that no longer exists.' }); continue; }
@@ -239,6 +255,7 @@ export class Engine {
       if (compiled && end) times.set(`${end.day}:${end.ms}`, end);
     }
     for (const lm of this.timelines.values()) for (const tl of lm.values()) tl.sort(orderCmp);
+    for (const l of this.names.values()) l.sort((a, b) => compare(a.t, b.t) || a.order[0] - b.order[0] || a.order[1] - b.order[1] || a.order[2] - b.order[2]);
     for (const bySpace of this.tracks.values()) for (const tr of bySpace.values()) {
       tr.sort((a, b) => compare(a.t, b.t) || a.precedence - b.precedence || a.eventSeq - b.eventSeq || a.ordinal - b.ordinal);
       // Several placements at one moment: the last in order stands.
@@ -307,6 +324,22 @@ export class Engine {
   private stateCache = new Map<string, Map<number, FaceState>>();
 
   /** The state of every parcel of a layer at time t. Recent answers are reused; callers must not modify the result. */
+  /** The name something goes by at instant t, if it was renamed by then (null: its own name). */
+  nameAt(entity: string, t: Instant): string | null {
+    this.ensure();
+    const l = this.names.get(entity);
+    if (!l) return null;
+    let lo = 0, hi = l.length - 1, k = -1;
+    while (lo <= hi) { const m = (lo + hi) >> 1; if (compare(l[m].t, t) <= 0) { k = m; lo = m + 1; } else hi = m - 1; }
+    return k >= 0 ? l[k].name : null;
+  }
+
+  /** Every change of name of something, in time order. */
+  namesOf(entity: string): Array<{ t: Instant; name: string }> {
+    this.ensure();
+    return (this.names.get(entity) ?? []).map(({ t, name }) => ({ t, name }));
+  }
+
   /** A character's waypoints on a map, in time order. */
   characterTrack(spaceId: string, entity: string): Waypoint[] {
     this.ensure();

@@ -294,16 +294,32 @@ class AppStore {
   /** Add a point to the current draft; `newPiece` starts a new piece (pressing again after letting go). */
   penAdd(ll: [number, number], newPiece: boolean) {
     const id = this.draft && this.draft.spaceId === this.spaceId ? this.draftId! : this.newDraft();
+    if (newPiece) this.penRedo = []; // a new piece ends what can be put back
     this.changeDraft(id, (d) => ({ ...d, points: [...d.points, ll], pieces: newPiece ? [...d.pieces, d.points.length] : d.pieces }));
   }
 
-  /** Take back the last piece drawn. */
+  /** Take back the last piece drawn (it can be put back with penRedoPiece until a new piece is drawn). */
   penUndoPiece() {
     const d = this.draft;
     if (!d || !d.pieces.length) return;
     const from = d.pieces[d.pieces.length - 1];
+    this.penRedo = [...(this.penRedo.length && this.penRedoDraft === d.id ? this.penRedo : []), d.points.slice(from)];
+    this.penRedoDraft = d.id;
     this.changeDraft(d.id, (x) => ({ ...x, points: x.points.slice(0, from), pieces: x.pieces.slice(0, -1) }));
   }
+
+  /** Put back the piece last taken back. */
+  penRedoPiece() {
+    const d = this.draft;
+    if (!d || this.penRedoDraft !== d.id || !this.penRedo.length) return;
+    const piece = this.penRedo[this.penRedo.length - 1];
+    this.penRedo = this.penRedo.slice(0, -1);
+    this.changeDraft(d.id, (x) => ({ ...x, points: [...x.points, ...piece], pieces: [...x.pieces, x.points.length] }));
+  }
+
+  /** Pieces taken back from the current draft, to put back (last first). */
+  private penRedo: Array<Array<[number, number]>> = [];
+  private penRedoDraft: string | null = null;
 
   discardDraft(id: string) { this.changeDraft(id, () => null); }
   renameDraft(id: string, name: string) { this.changeDraft(id, (d) => ({ ...d, name })); }

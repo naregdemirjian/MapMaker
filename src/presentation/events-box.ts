@@ -56,30 +56,47 @@ export interface CurrentEvent { id: string; name: string; description: string; a
 
 /**
  * Events happening at instant t: started, and not yet ended (events without an end stay for
- * `linger` screen seconds). `secondsSince` converts history to screen time for this shot.
+ * `linger` screen seconds). An event can hold several changes on different dates (a war gaining land
+ * again and again): it shows again at each of them, as if it happened anew. `secondsSince` converts
+ * history to screen time for this shot.
  */
 export function currentEvents(world: World, box: EventsBox, t: Instant, secondsSince: (t: Instant) => number, inGroups: (eventId: string) => boolean): CurrentEvent[] {
+  // The dates of changes recorded in an event after its start.
+  const later = new Map<string, Instant[]>();
+  for (const ef of world.all('effect')) {
+    if (ef.at_day === null || ef.event_id === BASE_EVENT_ID) continue;
+    const l = later.get(ef.event_id) ?? [];
+    l.push(fromStore(ef.at_day, ef.at_ms ?? 0));
+    later.set(ef.event_id, l);
+  }
   const out: Array<CurrentEvent & { start: Instant }> = [];
   for (const e of world.all('event')) {
     if (e.id === BASE_EVENT_ID || (e.variant_group && !e.variant_active) || !inGroups(e.id)) continue;
     const start = fromStore(e.start_day, e.start_ms);
     if (compare(start, t) > 0) continue;
-    const sinceStart = secondsSince(start);
-    let alpha = box.fade > 0 && Number.isFinite(sinceStart) ? Math.min(1, Math.max(0, sinceStart) / box.fade) : 1;
-    if (e.end_day !== null) {
-      const end = fromStore(e.end_day, e.end_ms ?? 0);
-      if (compare(t, end) > 0) {
-        // Ended: fades out over `fade` seconds after the end.
-        const after = secondsSince(end);
-        if (!(after <= box.fade) || box.fade <= 0) continue;
-        alpha = Math.min(alpha, 1 - after / box.fade);
-      }
+    // The latest moment of the event at or before t: its start, or a change recorded in it later.
+    let last = start;
+    for (const m of later.get(e.id) ?? []) if (compare(m, t) <= 0 && compare(m, last) > 0) last = m;
+    const end = e.end_day !== null ? fromStore(e.end_day, e.end_ms ?? 0) : null;
+    let alpha: number;
+    if (end && compare(t, end) <= 0) {
+      // Under way: shown throughout, fading in at the start.
+      const sinceStart = secondsSince(start);
+      alpha = box.fade > 0 && Number.isFinite(sinceStart) ? Math.min(1, Math.max(0, sinceStart) / box.fade) : 1;
+    } else if (end && compare(last, end) <= 0) {
+      // Ended, with nothing after: fades out over `fade` seconds after the end.
+      const after = secondsSince(end);
+      if (!(after <= box.fade) || box.fade <= 0) continue;
+      alpha = 1 - after / box.fade;
     } else {
-      if (!(sinceStart <= box.linger)) continue;
-      if (box.fade > 0) alpha = Math.min(alpha, Math.max(0, (box.linger - sinceStart) / box.fade));
+      // A moment of an event without an end (or a change after the end): shown for `linger` seconds.
+      const since = secondsSince(last);
+      if (!(since <= box.linger)) continue;
+      alpha = box.fade > 0 && Number.isFinite(since) ? Math.min(1, Math.max(0, since) / box.fade) : 1;
+      if (box.fade > 0) alpha = Math.min(alpha, Math.max(0, (box.linger - since) / box.fade));
     }
     if (alpha <= 0) continue;
-    out.push({ id: e.id, name: e.name, description: e.description, alpha, start });
+    out.push({ id: e.id, name: e.name, description: e.description, alpha, start: last });
   }
   out.sort((a, b) => compare(b.start, a.start) || a.name.localeCompare(b.name));
   return out.slice(0, Math.max(0, box.maxEvents)).map(({ start: _s, ...rest }) => rest);

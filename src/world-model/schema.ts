@@ -5,7 +5,7 @@ import type { VertexRow, SegmentRow, FaceRow } from '../geo-kernel/arrangement.t
 export type { VertexRow, SegmentRow, FaceRow };
 
 export type LayerKind = 'partition' | 'area' | 'line' | 'point' | 'field' | 'track';
-export type EffectKind = 'assign' | 'annex' | 'set_attribute' | 'place';
+export type EffectKind = 'assign' | 'annex' | 'set_attribute' | 'place' | 'rename';
 export type Json = string; // stored JSON text
 
 export interface MetaRow { key: string; value: string }

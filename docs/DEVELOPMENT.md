@@ -7,7 +7,11 @@ Companion files: [REQUIREMENTS.md](REQUIREMENTS.md) (checklist against the maste
 The approved architecture is the Claude Doc "Map Maker — Technical Architecture & Development Plan"
 (https://claude.ai/artifact/2JShAV3AWt6iECtNgBTsJN). All twelve of its decisions were approved on 15 November 2026.
 
-## Status at a glance (17 November 2026, after the user's third feedback round)
+## Status at a glance (17 November 2026, after the user's fourth feedback round)
+
+- **Fourth round done** (D45–D47): the events box shows an event again at each of its dated changes; Ctrl+Z/Ctrl+Y with
+  the border pen touch the draft only; city and character markers and names scale with the zoom (sizes adjustable);
+  names over time for countries, cities and characters. Commercial sale was considered and dropped by the user.
 
 - **Third feedback round done** (REQUIREMENTS.md, "The user's third feedback round"; D41–D44): deleted countries no
   longer leave grey land and borders; "+ Layer" works in the desktop app; Ctrl/Shift to choose several, right-click
@@ -81,7 +85,7 @@ For development (Linux or Windows, Node 22.18 or newer):
 | `xvfb-run -a node --disable-warning=ExperimentalWarning e2e/desktop.e2e.ts` | The 5-step desktop app test (build first) |
 | `node --disable-warning=ExperimentalWarning dist/server.mjs --port 4317 --projects <folder> [--open]` | Runs the app |
 | `sh scripts/check-all.sh` | Every check: type check, unit tests, build, the three interface tests |
-| `npm test` | 159 unit, randomised and scenario tests |
+| `npm test` | 161 unit, randomised and scenario tests |
 | `node --disable-warning=ExperimentalWarning test/geo-kernel.stress.ts <seeds> <rings>` | Long randomised kernel run |
 | `node --disable-warning=ExperimentalWarning e2e/vertical-slice.e2e.ts` | The 17-step interface test in Chrome (build first); screenshots in `e2e/output/` |
 | `node --disable-warning=ExperimentalWarning e2e/workflows.e2e.ts` | The 10-step workflow and export-inspection test; screenshots in `e2e/output/workflows/` |
@@ -146,7 +150,7 @@ The approved roadmap has 14 stages (0–13). Where each stands:
 
 ## Tests
 
-All pass as of 17 November 2026 (159 unit and randomised tests in 23 files, 23 + 20 + 5 interface steps).
+All pass as of 17 November 2026 (161 unit and randomised tests in 24 files, 23 + 20 + 5 interface steps).
 `sh scripts/check-all.sh` runs everything and prints ALL CHECKS PASSED only when every check passed.
 
 | Suite | Count | What it proves |
@@ -169,6 +173,7 @@ All pass as of 17 November 2026 (159 unit and randomised tests in 23 files, 23 +
 | `test/events-box.test.ts` | 2 | Current events: started and not ended, lingering, alternatives, groups, fades, limits |
 | `test/sequence.test.ts` | 6 | Screen seconds through even and eased pacing; transition settings and styles; the still camera and its reset; moving texts and the events box; export choices and sizes |
 | `test/workflow.test.ts` | 4 | Groups of countries (made, renamed, moved in and out, deleted keeping members); labels and pictures of many at once; many events and countries deleted at once; one undo each |
+| `test/names.test.ts` | 1 | Names over time: before and after, renamed again at the same moment, in an event, from the beginning, reload, deleted with the thing, undo |
 | `test/flat-maps.test.ts` | 3 | Flat maps: plan view, the width on screen, exact screen conversions, straight borders, panning stops at the edge; true to scale within 1%; labels |
 | `test/label-place.test.ts` | 6 | Labels: every large country of today's 242 gets a place inside it in four projections; 24 countries labelled near their middle; across 180° and around the pole; lines for long names; all 242 placed quickly; the part on screen when zoomed in |
 | `test/characters.test.ts` | 5 | Characters: travelling between places along the shortest path, appearing, leaving the map, moving a placement, in events and from the start, undo, reload, deleted characters reported, across 180°; cities founded, moved at once, abandoned, from the beginning |
@@ -261,8 +266,8 @@ Remaining bottlenecks:
 
 1. The user tries the second round (installer from the latest "Windows build and tests" run) and reports back. Space
    maps are still wanted (D38); maps of cities are not.
-2. Characters: icons or pictures for markers, a visible trail in shots, characters following events automatically.
-3. Make face assembly incremental too (Known bug 10 is fixed, D39).
+2. Characters: icons or pictures for markers, characters following events automatically.
+3. Make face assembly incremental too (the first edit after opening a large map; Known bug 10 is fixed, D39).
 4. Reverse D1 (deck.gl renderer).
 5. Space maps (still wanted, D38).
 

@@ -42,3 +42,27 @@ test('current events: fade in and out, and at most maxEvents', () => {
   assert.ok(leaving.length === 3 && leaving.every((e) => e.alpha > 0.4 && e.alpha < 0.6), 'fading out a year after the end');
   assert.deepEqual(list(1953), [], 'gone after the fade');
 });
+
+test('current events: an event holding several changes on different dates shows again at each of them', async () => {
+  const { Engine } = await import('../src/temporal-engine/engine.ts');
+  const { ring, square } = await import('./helpers.ts');
+  const world = new World();
+  const space = cmd.seedProject(world, 'Box').result.spaceId;
+  const layer = world.all('layer')[0].id;
+  const engine = new Engine(world);
+  const owner = cmd.createEntity(world, { type_id: 'polity', name: 'Varn' }).result;
+  const war = cmd.createEvent(world, { name: 'Varn gains territory', start: Y(1900) }).result;
+  // Three advances in the one event: 1900, 1920 and 1940.
+  for (const [y, x] of [[1900, 0], [1920, 4], [1940, 8]] as const) {
+    cmd.paintTerritory(world, engine, { spaceId: space, layerId: layer, ring: ring(square(x, 0, 1.5)), value: owner, snap: 1e-7, mode: { kind: 'new', eventId: war, at: y === 1900 ? null : Y(y) } });
+  }
+  const box = eventsBoxOf({ show: true, linger: 3, fade: 0, maxEvents: 10 });
+  const at = (y: number, m = 1) => currentEvents(world, box, Y(y, m), secondsSince(Y(y, m)), () => true).map((e) => e.name);
+  assert.deepEqual(at(1901), ['Varn gains territory'], 'at its start');
+  assert.deepEqual(at(1910), [], 'gone after lingering');
+  assert.deepEqual(at(1921), ['Varn gains territory'], 'again at the second advance');
+  assert.deepEqual(at(1930), []);
+  assert.deepEqual(at(1941), ['Varn gains territory'], 'and the third');
+  // Listed once, never twice at the same moment.
+  assert.equal(at(1942).length, 1);
+});

@@ -17,7 +17,7 @@ import type { Arrangement } from '../geo-kernel/arrangement.ts';
 import { E7 } from '../geo-kernel/vec.ts';
 import { BasemapPainter, landMaskOf, visibleBounds, type Basemap, type LandMask } from './basemap.ts';
 import { planeShape, placeLabel, lineChoices, textWidthEm, blockHeightEm, LINE_HEIGHT, type PlaneShape } from './label-place.ts';
-import { resolveLabelStyle, labelSize, labelFont, labelText, type LabelStyle, type CountryLabel } from './label-style.ts';
+import { resolveLabelStyle, resolvePointStyle, labelSize, labelFont, labelText, type LabelStyle, type CountryLabel } from './label-style.ts';
 import { imageNow, videoNow, drawImageFit, type MediaChannel } from './assets.ts';
 
 type LabelEntity = { name: string; style?: string; color?: string; type_id?: string };
@@ -154,6 +154,8 @@ export class MapRenderer {
   lastLabels: LabelInfo[] = [];
   /** The characters drawn in the last frame, where (screen) and on the map, for picking and tests. */
   lastCharacters: Array<{ entity: string; name: string; x: number; y: number; lon: number; lat: number; moving: boolean }> = [];
+  /** The project's sizes for cities and characters (set for each frame by render()). */
+  private pointSizes = { city: 1, character: 1 };
   /** How many characters' trails the last frame drew. */
   lastTrails = 0;
   /** The cities drawn in the last frame (same form; `named`: whether its name had room). */
@@ -225,7 +227,8 @@ export class MapRenderer {
       this.basemapPainter.draw(ctx, view, opts.basemap, { referenceBorders: !!opts.referenceBorders, oceanColor: oceanBelow ? style.ocean : undefined });
     }
 
-    const entities = new Map(world.all('entity').map((e) => [e.id, e]));
+    // Each name as it is at this moment (names can change over time).
+    const entities = new Map(world.all('entity').map((e) => { const n = engine.nameAt(e.id, t); return [e.id, n ? { ...e, name: n } : e]; }));
     this.mediaSeconds = opts.mediaSeconds ?? 0;
     this.mediaChannel = opts.mediaChannel ?? 'live';
     // Pictures and videos filling territory, by owner.
@@ -246,6 +249,7 @@ export class MapRenderer {
       return { style: st, text: labelText(name, st, own) };
     };
     const colorOf = (v: string | null) => (v ? entities.get(v)?.color ?? '#888888' : null);
+    this.pointSizes = resolvePointStyle(world.get('meta', 'point_style')?.value);
     const labels: LabelInfo[] = [];
 
     // Draw in the same order whether everything is drawn at once or pass by pass (as exported):
@@ -1067,12 +1071,16 @@ export class MapRenderer {
   private cityItems(view: View, engine: Engine, spaceId: string, t: Instant, entities: Map<string, LabelEntity>): CityItem[] {
     const u = view.unit;
     const out: CityItem[] = [];
+    const k = pointScale(view, 0.3, 1.15) * this.pointSizes.city;
+    const kDot = pointScale(view, 0.5, 1) * Math.sqrt(this.pointSizes.city);
     for (const c of engine.charactersAt(spaceId, t)) {
       const e = entities.get(c.entity);
       if (!e || e.type_id !== 'settlement') continue;
       const p = view.projection([c.lon, c.lat]);
       if (!p || p[0] < -50 || p[1] < -50 || p[0] > view.width + 50 || p[1] > view.height + 50) continue;
-      out.push({ entity: c.entity, name: e.name, lon: c.lon, lat: c.lat, x: p[0], y: p[1], r: 4.5 * u, size: 17 * u, tx: p[0], ty: p[1], align: 'left', drawn: false });
+      // Too small to read: no name (marked by a size of 0), only the dot.
+      const size = 17 * k >= MIN_CITY_NAME ? 17 * k * u : 0;
+      out.push({ entity: c.entity, name: e.name, lon: c.lon, lat: c.lat, x: p[0], y: p[1], r: 4.5 * kDot * u, size, tx: p[0], ty: p[1], align: 'left', drawn: false });
     }
     // A steady order (the same every frame).
     return out.sort((a, b) => a.name.localeCompare(b.name) || a.entity.localeCompare(b.entity));
@@ -1142,6 +1150,7 @@ export class MapRenderer {
     }
     (ctx as CanvasRenderingContext2D & { letterSpacing?: string }).letterSpacing = '0px';
     for (const c of cities) {
+      if (!c.size) { c.drawn = false; continue; }
       ctx.font = cityFont(c.size);
       const w = ctx.measureText(c.name).width, h = c.size, gap = c.r + 4 * (c.size / 17);
       const others = dots.filter((d) => !(d[0] === c.x - c.r && d[1] === c.y - c.r));
@@ -1207,7 +1216,8 @@ export class MapRenderer {
       if (!e || e.type_id === 'settlement') continue;
       const p = view.projection([c.lon, c.lat]);
       if (!p || p[0] < -50 || p[1] < -50 || p[0] > view.width + 50 || p[1] > view.height + 50) continue;
-      const r = 8 * u;
+      const k = pointScale(view, 0.6, 1.3) * this.pointSizes.character;
+      const r = 8 * k * u;
       ctx.shadowColor = 'rgba(0,0,0,0.55)';
       ctx.shadowBlur = 6 * u;
       ctx.beginPath();
@@ -1215,17 +1225,17 @@ export class MapRenderer {
       ctx.fillStyle = e.color ?? '#ffd166';
       ctx.fill();
       ctx.shadowBlur = 0;
-      ctx.lineWidth = 2.2 * u;
+      ctx.lineWidth = 2.2 * Math.min(1, k) * u;
       ctx.strokeStyle = '#ffffff';
       ctx.stroke();
-      ctx.font = `600 ${(20 * u).toFixed(1)}px "Segoe UI", Arial, sans-serif`;
+      ctx.font = `600 ${(20 * k * u).toFixed(1)}px "Segoe UI", Arial, sans-serif`;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
-      ctx.lineWidth = 4 * u;
+      ctx.lineWidth = 4 * k * u;
       ctx.strokeStyle = 'rgba(10,16,24,0.85)';
-      ctx.strokeText(e.name, p[0] + r + 5 * u, p[1]);
+      ctx.strokeText(e.name, p[0] + r + 5 * k * u, p[1]);
       ctx.fillStyle = '#ffffff';
-      ctx.fillText(e.name, p[0] + r + 5 * u, p[1]);
+      ctx.fillText(e.name, p[0] + r + 5 * k * u, p[1]);
       this.lastCharacters.push({ entity: c.entity, name: e.name, x: p[0], y: p[1], lon: c.lon, lat: c.lat, moving: c.moving });
     }
     ctx.restore();
@@ -1263,6 +1273,19 @@ export class MapRenderer {
 
 
 }
+
+/**
+ * How large cities and characters are drawn at a zoom: from the design pixels per degree at the
+ * view's centre (the same in a preview and an export), small when zoomed out, as designed around a
+ * country's scale, a little larger close up.
+ */
+function pointScale(view: View, lo: number, hi: number): number {
+  const designPxPerDeg = (view.projection.scale() * Math.PI) / 180 / view.unit;
+  return Math.min(hi, Math.max(lo, Math.sqrt(designPxPerDeg / 25)));
+}
+
+/** City names smaller than this (design pixels) are left out; the dot stays. */
+const MIN_CITY_NAME = 8;
 
 /** A city on screen: its dot, and where its name goes (if anywhere: `drawn`). */
 interface CityItem { entity: string; name: string; lon: number; lat: number; x: number; y: number; r: number; size: number; tx: number; ty: number; align: CanvasTextAlign; drawn: boolean; box?: [number, number, number, number] }

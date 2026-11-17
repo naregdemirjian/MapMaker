@@ -14,6 +14,7 @@ import { CountryFillSection, FillSwatch } from './CountryFill.tsx';
 import { CharacterSection } from './Characters.tsx';
 import { openMenu, entityMenu, groupMenu, eventMenu } from './ContextMenu.tsx';
 import { CountryHistorySection } from './CountryHistory.tsx';
+import { NamesSection } from './Names.tsx';
 
 export const fmt = (t: Instant, precision: 'year' | 'day' | 'minute' = 'day') => gregorian.format(t, precision);
 
@@ -112,7 +113,8 @@ function PenControls() {
       {d ? <>
         <input className="draft-name" value={d.name} onChange={(e) => s.renameDraft(d.id, e.target.value)} title="Name of this draft" data-testid="draft-name" />
         <span className="muted">{d.points.length} points</span>
-        <button className="small" disabled={!d.pieces.length} onClick={() => s.penUndoPiece()} title="Backspace" data-testid="draft-undo">Take back last piece</button>
+        <button className="small" disabled={!d.pieces.length} onClick={() => s.penUndoPiece()} title="Ctrl+Z or Backspace (with the pen, undo only touches the draft)" data-testid="draft-undo">Take back last piece</button>
+        <button className="small" onClick={() => s.penRedoPiece()} title="Ctrl+Y" data-testid="draft-redo">Put back</button>
         <button className="small primary" disabled={d.points.length < 3} onClick={() => s.finishDraft()} data-testid="draft-finish">Finish <span className="key">Enter</span></button>
         <button className="small danger" onClick={() => { if (confirm(`Discard "${d.name}"?`)) s.discardDraft(d.id); }} data-testid="draft-discard">Discard</button>
         <button className="small" onClick={() => s.newDraft()} title="Keep this draft and start another">New draft</button>
@@ -440,6 +442,7 @@ function EntityPanel({ id }: { id: string }) {
       {!changes.length && e.type_id !== 'character' && e.type_id !== 'settlement' && <div className="muted">None yet.</div>}
       {(e.type_id === 'polity' || e.type_id === 'faction') && <><CountryHistorySection id={id} /><CountryFillSection id={id} /><CountryLabelSection id={id} /></>}
       {(e.type_id === 'character' || e.type_id === 'settlement') && <CharacterSection id={id} />}
+      {e.type_id !== 'body' && <NamesSection id={id} />}
       <button className="danger" onClick={() => { if (confirm(`Delete ${e.name}? Events that refer to it will be flagged in History Health.`)) { s.execute((wd) => cmd.deleteEntity(wd, id)); s.set({ selection: null }); } }}>Delete</button>
     </div>
   );
@@ -471,6 +474,10 @@ function describeEffect(s: ReturnType<typeof useStore>, f: EffectRow): string {
   if (f.kind === 'annex') {
     const i = parseJSON<{ from: string; to: string }>(f.intent, { from: '', to: '' });
     return `${name(i.to)} annexes everything ${name(i.from)} holds`;
+  }
+  if (f.kind === 'rename') {
+    const i = parseJSON<{ entity: string; name: string }>(f.intent, { entity: '', name: '' });
+    return `${name(i.entity)} is called ${i.name}`;
   }
   if (f.kind === 'place') {
     const i = parseJSON<{ entity: string; lon?: number; lat?: number; off?: boolean }>(f.intent, { entity: '' });

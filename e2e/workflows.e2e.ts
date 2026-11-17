@@ -360,6 +360,15 @@ try {
     await page.getByTestId('draft-undo').click();
     assert.equal(await draftPoints(), afterPiece1, 'the last piece is taken back');
     q = await h.toPage(corners[3]); await page.mouse.click(q[0], q[1]);
+    // With the pen, Ctrl+Z and Ctrl+Y act on the draft only; the project is untouched.
+    const revision = () => page.evaluate(() => (window as any).__mapmaker.store.world.revision) as Promise<number>;
+    const rev0 = await revision();
+    await page.keyboard.press('Control+z');
+    assert.equal(await draftPoints(), afterPiece1, 'Ctrl+Z took back the last piece');
+    assert.equal(await revision(), rev0, 'and did not undo anything in the project');
+    await page.keyboard.press('Control+y');
+    assert.equal(await draftPoints(), afterPiece1 + 1, 'Ctrl+Y put it back');
+    assert.equal(await revision(), rev0);
     await page.getByTestId('draft-name').fill('Zoomland claim');
     await page.waitForTimeout(500); // drafts are saved in the project folder shortly after each change
     await h.screenshot('border-pen-draft');
@@ -473,6 +482,29 @@ try {
     await page.getByTestId('place-from-beginning').click();
     assert.ok((await cities()).some((x) => x.name === 'Port Aster'), 'there from the beginning');
     await h.screenshot('city');
+    // Sizes follow the zoom: zoomed out to the whole world the name is left out (the dot stays);
+    // zoomed in, it is back.
+    const named = async (zoom: number) => {
+      await page.evaluate((z) => (window as any).__mapmaker.store.setCamera({ lon: -30, lat: 50, zoom: z, rotation: 0, projection: 'equirectangular' }), zoom);
+      await page.waitForTimeout(150);
+      return (await page.evaluate(() => (window as any).__mapmaker.store.renderer.lastCities.find((c: any) => c.name === 'Port Aster'))) as { named: boolean } | undefined;
+    };
+    const far = await named(0), near = await named(3);
+    assert.ok(far && !far.named, 'whole world: a dot, no name');
+    assert.ok(near && near.named, 'zoomed in: named');
+    // Renamed from 1620 on (it is abandoned in 1650): the map shows each name in its time.
+    await h.setDate('1620');
+    await page.getByTestId('rename-from').click();
+    await page.getByTestId('ask-input').fill('New Aster');
+    await page.getByTestId('ask-input').press('Enter');
+    await h.saved();
+    const cityNames = () => page.evaluate(() => (window as any).__mapmaker.store.renderer.lastCities.map((c: any) => c.name)) as Promise<string[]>;
+    assert.ok((await cityNames()).includes('New Aster'), 'called New Aster in 1620');
+    await h.setDate('1600');
+    assert.ok((await cityNames()).includes('Port Aster'), 'still Port Aster in 1600');
+    assert.equal(await page.getByTestId('rename-row').count(), 1);
+    await h.setDate('1620');
+    assert.match((await page.getByTestId('name-now').textContent()) ?? '', /New Aster/);
   });
 
   await h.step('Working with many: Ctrl/Shift to choose, right-click menus, groups of countries, labels of a group, cities under their country, several events deleted at once', async () => {

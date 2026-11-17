@@ -109,6 +109,14 @@ function PaintPrompt({ p }: { p: Extract<PendingEdit, { kind: 'paint' }> }) {
                 {events.map((x) => <option key={x.id} value={x.id}>{fmt(fromStore(x.start_day, x.start_ms))} · {x.name}</option>)}
               </select>
             </label>
+            {target !== 'new-event' && (() => {
+              const ev = w.get('event', target);
+              if (!ev) return null;
+              const later = compare(s.time, fromStore(ev.start_day, ev.start_ms)) > 0;
+              return <div className="muted small-note" data-testid="same-event-note">{later
+                ? `Added to “${ev.name}” on ${fmt(s.time)}: in shots, the current events box shows it again then, as if it happened anew.`
+                : `Added to “${ev.name}” at its start.`}</div>;
+            })()}
             {target === 'new-event' && <>
               <label>Event name<input value={evName} onChange={(ev) => setEvName(ev.target.value)} data-testid="new-event-name" /></label>
               <label>Ends (optional, for animated changes)<DateField value={end} allowEmpty placeholder="(happens at once)" onChange={setEnd} testId="new-event-end" /></label>

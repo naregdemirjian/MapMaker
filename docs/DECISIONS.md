@@ -59,6 +59,26 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D47. Names over time
+
+A country, city or character is renamed from a date on with a dated change of kind `rename` (without an event, in the
+event being recorded, or from the beginning); renaming again at the same moment replaces that name. The map, previews
+and exports draw the name in force at each date; lists keep the name it was given. Deleting the thing deletes its names.
+
+### D46. Cities and characters are sized by zoom
+
+Their markers and names scale with the design pixels per degree at the view's centre (the same in a preview and an
+export of any size): small when zoomed out, as designed at a country's scale, a little larger close up (cities 0.3-1.15,
+characters 0.6-1.3 of the design size). City names smaller than 8 design pixels are left out, the dot stays. Sizes
+overall per project (meta 'point_style'), in the Label style dialog.
+
+### D45. The events box shows an event again at each of its dated changes; pen-only undo (the user, 17 November 2026)
+
+An event can hold several border changes on different dates (choose the same event when drawing again later). The
+current-events box treats each as a new moment of the event: shown again for the linger time, so a long war can show
+"gains territory" at every advance without a new event each time. With the border pen tool, Ctrl+Z and Ctrl+Y take back
+and put back pieces of the draft only, never changes to the project.
+
 ### D44. Flat maps cost nothing extra: a small part of a large sphere, seen in plan (the user, 17 November 2026)
 
 The user allowed maps of cities if they do not reduce performance at all. A flat map is a square FLAT_EXTENT_DEG (5°)

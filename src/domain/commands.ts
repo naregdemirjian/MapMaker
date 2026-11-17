@@ -2,7 +2,7 @@
 // in-memory world and returns the exact row diffs to save (and to undo). Commands never draw anything.
 import { World, Tx, newId } from '../world-model/world.ts';
 import {
-  Engine, canonicalFaces, leafDescendants, hashFaces, parseJSON, type Resolution, type TransitionSpec, type AnnexIntent, type PlaceIntent,
+  Engine, canonicalFaces, leafDescendants, hashFaces, parseJSON, type Resolution, type TransitionSpec, type AnnexIntent, type PlaceIntent, type RenameIntent,
 } from '../temporal-engine/engine.ts';
 import { type Instant, toStore, NEG_INF, compare } from '../core-time/index.ts';
 import {
@@ -10,7 +10,7 @@ import {
 } from '../world-model/schema.ts';
 import type { Vec3 } from '../geo-kernel/vec.ts';
 import { worldSettings, type BasemapSource } from '../world-model/world-settings.ts';
-import type { LabelStyle, CountryLabel } from '../render-engine/label-style.ts';
+import { resolvePointStyle, type LabelStyle, type CountryLabel, type PointStyle } from '../render-engine/label-style.ts';
 import { ringFromMapPoints } from '../render-engine/stroke.ts';
 import { flatRadiusKm } from '../render-engine/camera.ts';
 
@@ -170,6 +170,17 @@ export function generalLabelStyle(world: World): Partial<LabelStyle> {
 }
 
 /** Change the general label style (only the fields given; null resets a field to the default). */
+export function pointStyle(world: World): PointStyle {
+  return resolvePointStyle(world.get('meta', 'point_style')?.value);
+}
+
+export function setPointStyle(world: World, patch: Partial<PointStyle>): CommandResult {
+  const value = JSON.stringify({ ...pointStyle(world), ...patch });
+  return run(world, 'Change the size of cities and characters', (tx) => {
+    if (world.get('meta', 'point_style')) tx.update('meta', { key: 'point_style', value }); else tx.insert('meta', { key: 'point_style', value });
+  });
+}
+
 export function setGeneralLabelStyle(world: World, patch: Partial<Record<keyof LabelStyle, unknown>>): CommandResult {
   const next: Record<string, unknown> = { ...generalLabelStyle(world) };
   for (const [k, v] of Object.entries(patch)) { if (v === null) delete next[k]; else next[k] = v; }
@@ -235,9 +246,9 @@ export function deleteEntities(world: World, ids: string[]): CommandResult {
 function purgeFromHistory(tx: Tx, gone: Set<string>): number {
   let n = 0;
   for (const ef of tx.world.all('effect')) {
-    if (ef.kind === 'place') {
-      const it = parseJSON<PlaceIntent | null>(ef.intent, null);
-      if (it && gone.has(it.entity)) { tx.remove('effect', ef.id); n++; }
+    if (ef.kind === 'place' || ef.kind === 'rename') {
+      const it = parseJSON<{ entity?: string } | null>(ef.intent, null);
+      if (it?.entity && gone.has(it.entity)) { tx.remove('effect', ef.id); n++; }
       continue;
     }
     if (ef.kind === 'annex') {
@@ -262,7 +273,7 @@ export function purgeDeletedOwners(world: World): CommandResult<number> {
   for (const ef of world.all('effect')) {
     for (const [, v] of parseJSON<Resolution>(ef.resolution, { set: [] }).set ?? []) if (v && !exists.has(v)) gone.add(v);
     const it = parseJSON<{ entity?: string; from?: string; to?: string } | null>(ef.intent, null);
-    for (const v of [it?.entity, it?.from, it?.to]) if (v && !exists.has(v) && (ef.kind === 'place' || ef.kind === 'annex')) gone.add(v);
+    for (const v of [it?.entity, it?.from, it?.to]) if (v && !exists.has(v) && (ef.kind === 'place' || ef.kind === 'annex' || ef.kind === 'rename')) gone.add(v);
   }
   return run(world, 'Remove deleted countries from history', (tx) => purgeFromHistory(tx, gone));
 }
@@ -853,6 +864,34 @@ export function setPlacementArrival(world: World, effectId: string, arrive: 'tra
   if (!ef || ef.kind !== 'place') throw new Error('That placement no longer exists.');
   const it = parseJSON<PlaceIntent>(ef.intent, { op: 'place', entity: '' });
   return run(world, arrive === 'travel' ? 'Travels there' : 'Appears there', (tx) => tx.patch('effect', effectId, { intent: JSON.stringify({ ...it, arrive }) }));
+}
+
+/**
+ * A new name from a date on (Constantinople becomes Istanbul): for a country, city or character.
+ * Without an event (mode 'change'), in an event (mode 'new'), or from the beginning (mode 'correct' at
+ * NEG_INF). Renaming again at the same moment replaces that name.
+ */
+export function renameFrom(world: World, o: { entity: string; name: string; mode: EditMode }): CommandResult<string> {
+  const e = world.get('entity', o.entity);
+  if (!e) throw new Error('That no longer exists.');
+  const name = o.name.trim();
+  if (!name) throw new Error('Give the new name.');
+  return run(world, `${e.name} is called ${name}`, (tx) => {
+    const eventId = o.mode.kind === 'new' ? o.mode.eventId : BASE_EVENT_ID;
+    if (o.mode.kind === 'new' && !world.get('event', eventId)) throw new Error('That event no longer exists.');
+    const t: Instant | null = o.mode.kind === 'new' ? o.mode.at ?? null : o.mode.t;
+    const at = t && t.day !== -Infinity ? toStore(t) : null;
+    const same = world.all('effect').find((f) => f.kind === 'rename' && f.event_id === eventId && f.at_day === (at ? at[0] : null) && f.at_ms === (at ? at[1] : null)
+      && parseJSON<RenameIntent | null>(f.intent, null)?.entity === o.entity);
+    const intent = JSON.stringify({ op: 'rename', entity: o.entity, name } satisfies RenameIntent);
+    if (same) { tx.patch('effect', same.id, { intent }); return same.id; }
+    const id = newId('eff');
+    tx.insert('effect', {
+      id, event_id: eventId, ordinal: nextOrdinal(world, eventId), kind: 'rename', space_id: null, layer_id: null,
+      at_day: at ? at[0] : null, at_ms: at ? at[1] : null, transition: '', intent, resolution: JSON.stringify({ set: [] }), basis_hash: '',
+    });
+    return id;
+  });
 }
 
 /** A placement made without an event holds from the beginning instead of from its date (the starting map). */
