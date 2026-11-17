@@ -7,6 +7,7 @@ import { DEFAULT_STYLE, type PassName } from '../../render-engine/map-renderer.t
 import { isFeatureKind } from '../../render-engine/feature-style.ts';
 import { finishFeatureDrawing } from './Features.tsx';
 import { placementMode } from './Characters.tsx';
+import { regionIndex } from './Regions.tsx';
 import { periodChangesNow, GAINED_COLOR, LOST_COLOR } from './CountryHistory.tsx';
 import { processLasso, densify, orientInteriorLeft, signedArea, splitLoops, simplify, smooth, type Pt, dedupe, ringFromMapPoints } from '../../render-engine/stroke.ts';
 import { geoCentroid } from 'd3-geo';
@@ -39,7 +40,9 @@ type Drag =
   // The line between two dates being compared, dragged across the map.
   | { kind: 'swipe' }
   // The Split tool: a line drawn across a country, or a click on the part that changes hands (map positions; D76).
-  | { kind: 'cut'; points: Pt[]; x: number; y: number; moved: number };
+  | { kind: 'cut'; points: Pt[]; x: number; y: number; moved: number }
+  // The region picker: a click on a region, or a box dragged around several (screen pixels; D78).
+  | { kind: 'pickbox'; x: number; y: number; cx: number; cy: number; moved: number };
 
 /** Where the shot preview last drew its texts and the events box (frame pixels), to pick them up. */
 let overlayRects: OverlayRect[] = [];
@@ -184,6 +187,8 @@ export function MapView() {
   const [, force] = useState(0);
   const [overOverlay, setOverOverlay] = useState(false);
   const [overSplit, setOverSplit] = useState(false);
+  // The region under the pointer with the Regions tool (D78).
+  const hoverRegion = useRef<number | null>(null);
   const presentation = s.mode === 'present';
   const shot = presentation ? currentShot() : null;
 
@@ -474,6 +479,40 @@ export function MapView() {
       if (cursor && drag.current.kind !== 'pen') { ctx.setLineDash([3, 4]); ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(end[0], end[1]); ctx.lineTo(cursor[0], cursor[1]); ctx.stroke(); }
       ctx.restore();
     }
+    // The region picker: the chosen regions filled lightly, the one under the pointer outlined, the box being dragged.
+    if (s.tool === 'regions') {
+      const ix = regionIndex(s.regionLevel);
+      const outline = (i: number) => {
+        ctx.beginPath();
+        for (const poly of ix!.regions[i].polygons) for (const r of poly) {
+          let open = false;
+          for (const [lon, lat] of r) { const q = lonLatToScreen(v, lon, lat); if (!q) { open = false; continue; } if (open) ctx.lineTo(q[0], q[1]); else { ctx.moveTo(q[0], q[1]); open = true; } }
+          ctx.closePath();
+        }
+      };
+      if (ix) {
+        ctx.save();
+        ctx.lineJoin = 'round';
+        for (const i of s.regionPicks) { if (!ix.regions[i]) continue; outline(i); ctx.fillStyle = 'rgba(255,209,102,0.28)'; ctx.fill('evenodd'); ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 1.5; ctx.stroke(); }
+        const h = hoverRegion.current;
+        if (h !== null && ix.regions[h]) {
+          outline(h); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.stroke();
+          const a = lonLatToScreen(v, ix.anchors[h][0], ix.anchors[h][1]);
+          if (a) {
+            const label = ix.regions[h].name === ix.regions[h].country ? ix.regions[h].name : `${ix.regions[h].name} (${ix.regions[h].country})`;
+            ctx.font = '600 12px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(10,16,24,0.85)'; ctx.strokeText(label, a[0], a[1]); ctx.fillStyle = '#fff'; ctx.fillText(label, a[0], a[1]);
+          }
+        }
+        ctx.restore();
+      }
+      const d = drag.current;
+      if (d.kind === 'pickbox' && d.moved >= 4) {
+        ctx.save(); ctx.setLineDash([5, 4]); ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 1.5;
+        ctx.strokeRect(Math.min(d.x, d.cx), Math.min(d.y, d.cy), Math.abs(d.cx - d.x), Math.abs(d.cy - d.y));
+        ctx.restore();
+      }
+    }
     // The Split tool's line: being drawn, or waiting for the click on the part that changes hands.
     const cutLine = drag.current.kind === 'cut' && drag.current.moved >= 4 ? toScreen(drag.current.points) : s.tool === 'split' && s.splitLine ? toScreen(s.splitLine) : null;
     if (cutLine && cutLine.length > 1) {
@@ -563,6 +602,11 @@ export function MapView() {
       if (ll) { drag.current = { kind: 'erase', points: [ll] }; force((n) => n + 1); }
       return;
     }
+    // Regions: a click toggles the region under it; a drag draws a box around several.
+    if (!presentation && e.button === 0 && s.tool === 'regions') {
+      drag.current = { kind: 'pickbox', x: p[0], y: p[1], cx: p[0], cy: p[1], moved: 0 };
+      return;
+    }
     // Split: a drag draws the line across a country; then a click chooses the part that changes hands.
     if (!presentation && e.button === 0 && s.tool === 'split') {
       const ll = screenToLonLat(view, p[0], p[1]);
@@ -642,6 +686,12 @@ export function MapView() {
     }
     // (Moved once the pointer is a few pixels from where it went down, however few movements were reported.)
     if (d.kind === 'character') { d.moved = Math.max(d.moved, Math.hypot(p[0] - d.from[0], p[1] - d.from[1])); setCursor(p); return; }
+    if (d.kind === 'pickbox') { d.cx = p[0]; d.cy = p[1]; d.moved = Math.max(d.moved, Math.hypot(p[0] - d.x, p[1] - d.y)); force((n) => n + 1); return; }
+    if (d.kind === 'none' && s.tool === 'regions' && !presentation) {
+      const ix = regionIndex(store.regionLevel), ll = screenToLonLat(view, p[0], p[1]);
+      const r = ix && ll ? ix.at(ll[0], ll[1]) : null;
+      if (r !== hoverRegion.current) { hoverRegion.current = r; force((n) => n + 1); }
+    }
     if (d.kind === 'cut') d.moved = Math.max(d.moved, Math.hypot(p[0] - d.x, p[1] - d.y));
     if (d.kind === 'erase' || d.kind === 'feature' || d.kind === 'cut') {
       const ll = screenToLonLat(view, p[0], p[1]);
@@ -724,6 +774,25 @@ export function MapView() {
       return;
     }
     if (d.kind === 'pen') return; // the draft is saved; carry on whenever you like
+    if (d.kind === 'pickbox') {
+      force((n) => n + 1);
+      const ix = regionIndex(store.regionLevel);
+      if (!ix) return;
+      const picks = new Set(store.regionPicks);
+      if (d.moved < 4) {
+        // A click: the region under it is chosen, or left out again.
+        const ll = screenToLonLat(view, d.x, d.y);
+        const r = ll ? ix.at(ll[0], ll[1]) : null;
+        if (r === null) return;
+        if (picks.has(r)) picks.delete(r); else picks.add(r);
+      } else {
+        // A box: every region whose middle is inside it.
+        const x0 = Math.min(d.x, d.cx), x1 = Math.max(d.x, d.cx), y0 = Math.min(d.y, d.cy), y1 = Math.max(d.y, d.cy);
+        ix.anchors.forEach((a, i) => { const q = lonLatToScreen(view, a[0], a[1]); if (q && q[0] >= x0 && q[0] <= x1 && q[1] >= y0 && q[1] <= y1) picks.add(i); });
+      }
+      store.set({ regionPicks: [...picks] });
+      return;
+    }
     if (d.kind === 'cut') {
       force((n) => n + 1);
       // A click with a line waiting: the part clicked changes hands (the question follows).
@@ -843,7 +912,8 @@ export function MapView() {
     const key = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-      if (e.key === 'Escape') { setPolygon([]); setCursor(null); drag.current = { kind: 'none' }; if (store.splitLine && !store.pending) store.set({ splitLine: null }); force((n) => n + 1); }
+      if (e.key === 'Escape') { setPolygon([]); setCursor(null); drag.current = { kind: 'none' }; if (store.splitLine && !store.pending) store.set({ splitLine: null }); if (store.tool === 'regions' && !store.dialog && store.regionPicks.length) store.set({ regionPicks: [] }); force((n) => n + 1); }
+      if (e.key === 'Enter' && store.tool === 'regions' && !store.dialog && store.regionPicks.length) store.set({ dialog: 'give-regions' });
       if (e.key === 'Enter' && polygon.length) finishPolygon();
       if (e.key === 'Enter' && store.tool === 'pen' && !store.pending) finishDraft();
       if ((e.key === 'Backspace' || (e.key.toLowerCase() === 'z' && (e.ctrlKey || e.metaKey))) && store.tool === 'pen' && store.draft?.pieces.length) {

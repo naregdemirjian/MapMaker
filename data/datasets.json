@@ -16,9 +16,9 @@
     "source": "https://www.naturalearthdata.com/ (files from https://github.com/nvkelso/natural-earth-vector)",
     "licence": "Public domain",
     "credit": "Made with Natural Earth. Free vector and raster map data @ naturalearthdata.com.",
-    "usedFor": "Earth basemap: land, lakes, coastlines and present-day country borders (reference only) at 1:110m, 1:50m and 1:10m; today's countries (1:50m) to add to a map",
+    "usedFor": "Earth basemap: land, lakes, coastlines and present-day country borders (reference only) at 1:110m, 1:50m and 1:10m; today's countries (1:50m) to add to a map; today's states and provinces (admin-1, 1:10m) for the region picker",
     "retrieved": "2026-11-16",
-    "converted": "Coordinates rounded to 0.0001 degrees; at 1:10m, land and lakes cut into 10-degree tiles and lines into pieces (for drawing speed); nothing else changed.",
+    "converted": "Coordinates rounded to 0.0001 degrees; at 1:10m, land and lakes cut into 10-degree tiles and lines into pieces (for drawing speed); nothing else changed. States and provinces: coordinates rounded to 0.001 degrees; coasts simplified to about 900 m, borders shared between regions kept point for point (scripts/fetch-regions.mjs).",
     "sources": [
       {
         "file": "ne_110m_land.geojson",

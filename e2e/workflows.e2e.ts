@@ -815,6 +815,45 @@ try {
     assert.equal(await h.ownerAt(south, '1971'), 'Reunited Splitland');
   });
 
+  await h.step("Region picker: today's states chosen by clicking (and left out again) and by a box, given to a new country from a date", async () => {
+    await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 11, lat: 51, zoom: 4, rotation: 0, projection: 'equirectangular' }));
+    await h.setDate('2000');
+    await page.getByTestId('tool-regions').click();
+    await page.getByTestId('region-level').selectOption('regions');
+    await page.getByText('Click regions to choose them').waitFor({ timeout: 20000 });
+    const click = async (ll: LL) => { const q = await h.toPage(ll); await page.mouse.click(q[0], q[1]); };
+    const picked = () => page.evaluate(() => { const s = (window as any).__mapmaker.store; return s.regionPicks.length as number; });
+    await click([11.5, 48.8]); // Bayern
+    await click([9.0, 48.6]); // Baden-Württemberg
+    assert.equal(await picked(), 2);
+    await click([11.5, 48.8]); // left out again
+    assert.equal(await picked(), 1);
+    // A box around Brandenburg and Berlin (their middles), not their neighbours'.
+    const a = await h.toPage([12.0, 53.3]), b = await h.toPage([14.8, 51.45]);
+    await page.mouse.move(a[0], a[1]);
+    await page.mouse.down();
+    await page.mouse.move(b[0], b[1], { steps: 8 });
+    await page.mouse.up();
+    assert.equal(await picked(), 3);
+    assert.equal(await page.getByTestId('region-count').textContent(), '3 chosen');
+    const hover = await h.toPage([10.0, 50.6]);
+    await page.mouse.move(hover[0], hover[1]);
+    await h.screenshot('region-picker');
+    await page.keyboard.press('Enter');
+    await page.getByTestId('give-regions').waitFor();
+    await page.getByTestId('regions-to').selectOption('new');
+    await page.getByTestId('regions-new-name').fill('Southwest and East');
+    await page.getByTestId('confirm-regions').click();
+    await page.getByTestId('give-regions').waitFor({ state: 'detached' });
+    await h.saved();
+    for (const ll of [[13.4, 52.52], [13.06, 52.4], [9.18, 48.78]] as LL[]) assert.equal(await h.ownerAt(ll, '2001'), 'Southwest and East', `${ll}`);
+    assert.equal(await h.ownerAt([11.58, 48.14], '2001'), null, 'Munich was left out');
+    assert.equal(await h.ownerAt([13.4, 52.52], '1999'), null, 'from 2000 on');
+    assert.equal(await picked(), 0, 'the choice is cleared');
+    await h.screenshot('regions-given');
+    await page.getByTestId('tool-select').click();
+  });
+
   await h.step('Areas, lines and points: layers of each kind, drawn by mouse, chosen by clicking, restyled, reshaped from a date, ended, undone', async () => {
     const feats = () => page.evaluate(() => { const s = (window as any).__mapmaker.store; return s.world.all('feature').map((f: any) => ({ id: f.id, name: f.name, layer: s.world.get('layer', f.layer_id).name, kind: s.world.get('layer', f.layer_id).kind, style: f.style })); }) as Promise<Array<{ id: string; name: string; layer: string; kind: string; style: string }>>;
     const shown = (name: string, date: string) => page.evaluate(([n, d]) => {

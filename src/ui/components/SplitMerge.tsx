@@ -15,7 +15,7 @@ import { defaultEnd } from '../../domain/event-types.ts';
 export interface When { choice: 'change' | 'correct' | 'event'; target: string; evName: string; evType: string; end: Instant | null }
 
 /** The choice of when a change holds, as the drawing prompt offers it. */
-function useWhen(defaultName: string, defaultType = 'general') {
+export function useWhen(defaultName: string, defaultType = 'general') {
   const s = useStore();
   const w = s.world!;
   const recording = s.recordEventId && w.get('event', s.recordEventId) ? s.recordEventId : null;
@@ -23,7 +23,7 @@ function useWhen(defaultName: string, defaultType = 'general') {
 }
 
 /** The edit mode (and the event to make, if any) for a choice of when. */
-function modeOf(when: When, t: Instant, world: ReturnType<typeof useStore>['world']): { mode: cmd.EditMode; newEvent?: cmd.EventInput } {
+export function modeOf(when: When, t: Instant, world: ReturnType<typeof useStore>['world']): { mode: cmd.EditMode; newEvent?: cmd.EventInput } {
   if (when.choice === 'change') return { mode: { kind: 'change', t } };
   if (when.choice === 'correct') return { mode: { kind: 'correct', t } };
   if (when.target === 'new-event') return { mode: { kind: 'change', t }, newEvent: { name: when.evName, type_id: when.evType, start: t, end: when.end } };
@@ -32,7 +32,7 @@ function modeOf(when: When, t: Instant, world: ReturnType<typeof useStore>['worl
   return { mode: { kind: 'new', eventId: when.target, at: compare(t, start) > 0 ? t : null } };
 }
 
-function WhenChooser({ when, setWhen }: { when: When; setWhen: (w: When) => void }) {
+export function WhenChooser({ when, setWhen }: { when: When; setWhen: (w: When) => void }) {
   const s = useStore();
   const w = s.world!;
   const events = w.all('event').filter((x) => x.id !== BASE_EVENT_ID).sort((a, b) => a.start_day - b.start_day || a.start_ms - b.start_ms);
@@ -68,7 +68,7 @@ function WhenChooser({ when, setWhen }: { when: When; setWhen: (w: When) => void
 }
 
 /** Enter applies, Escape closes (not while typing in a text box or choosing in a list). */
-function useKeys(confirm: () => void, close: () => void) {
+export function useKeys(confirm: () => void, close: () => void) {
   useEffect(() => {
     const key = (ev: KeyboardEvent) => {
       if (ev.key === 'Escape') { ev.preventDefault(); close(); return; }
@@ -83,7 +83,7 @@ function useKeys(confirm: () => void, close: () => void) {
   });
 }
 
-function Frame({ title, testId, onClose, children }: { title: string; testId: string; onClose: () => void; children: React.ReactNode }) {
+export function Frame({ title, testId, onClose, children }: { title: string; testId: string; onClose: () => void; children: React.ReactNode }) {
   return (
     <div className="modal-back" onPointerDown={(ev) => ev.target === ev.currentTarget && onClose()}>
       <div className="modal" role="dialog" aria-label={title} data-testid={testId}>
@@ -94,7 +94,7 @@ function Frame({ title, testId, onClose, children }: { title: string; testId: st
   );
 }
 
-const countriesOf = (w: NonNullable<ReturnType<typeof useStore>['world']>) => w.all('entity').filter((e) => e.type_id === 'polity' || e.type_id === 'faction').sort((a, b) => a.name.localeCompare(b.name));
+export const countriesOf = (w: NonNullable<ReturnType<typeof useStore>['world']>) => w.all('entity').filter((e) => e.type_id === 'polity' || e.type_id === 'faction').sort((a, b) => a.name.localeCompare(b.name));
 
 /** Which way the clicked part lies from the line ("North", "East"…), for the new country's name:
  * from the nearest point of the line to the click (longitudes scaled to the latitude). */

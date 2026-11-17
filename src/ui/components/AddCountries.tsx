@@ -8,7 +8,7 @@ import { NEG_INF } from '../../core-time/index.ts';
 import { fmt } from './Panels.tsx';
 
 let loading: Promise<CountryShape[]> | null = null;
-const loadCountries = () => (loading ??= fetch('data/natural-earth/countries-50m.json').then(async (r) => decodeCountries(await r.json() as CountriesFile)));
+export const loadCountries = () => (loading ??= fetch('data/natural-earth/countries-50m.json').then(async (r) => decodeCountries(await r.json() as CountriesFile)));
 
 const CONTINENTS = ['Africa', 'Asia', 'Europe', 'North America', 'South America', 'Oceania', 'Antarctica', 'Seven seas (open ocean)'];
 

@@ -7,8 +7,11 @@ Companion files: [REQUIREMENTS.md](REQUIREMENTS.md) (checklist against the maste
 The approved architecture is the Claude Doc "Map Maker — Technical Architecture & Development Plan"
 (https://claude.ai/artifact/2JShAV3AWt6iECtNgBTsJN). All twelve of its decisions were approved on 15 November 2026.
 
-## Status at a glance (18 November 2026, Stages 3 and 4 done; Stage 2 being finished)
+## Status at a glance (18 November 2026, Stages 2, 3 and 4 done)
 
+- **Stage 2 (parcel map and territory editing) done**: the **Regions** tool (D78) picks today's states and provinces
+  (4,596, Natural Earth admin-1) or today's countries on the map, by clicks or a box, and gives them to an existing or
+  new country, from the date viewed, as a correction or in an event.
 - **Stage 3 (time and events) done**: dated border-point moves (D77): a border point dragged can be moved from the
   date viewed on (the sliver between changes hands then) instead of for all time.
 - **Split and merge** (Stage 2, D76): the **Split** tool draws a line across a country and gives the part clicked to a
@@ -140,7 +143,7 @@ For development (Linux or Windows, Node 22.18 or newer):
 | `xvfb-run -a node --disable-warning=ExperimentalWarning e2e/desktop.e2e.ts` | The 5-step desktop app test (build first) |
 | `node --disable-warning=ExperimentalWarning dist/server.mjs --port 4317 --projects <folder> [--open]` | Runs the app |
 | `sh scripts/check-all.sh` | Every check: type check, unit tests, build, the four interface tests |
-| `npm test` | 225 unit, randomised and scenario tests |
+| `npm test` | 227 unit, randomised and scenario tests |
 | `node --disable-warning=ExperimentalWarning e2e/render-compare.e2e.ts` | The renderer against the old one kept in `e2e/reference/` (35 scenes); carried, patched and animated pictures against fresh ones (build first; `VERBOSE=1` lists every case) |
 | `node --disable-warning=ExperimentalWarning bench/make-fixtures.ts <folder> [massive]` | Makes the benchmark projects: "Bench Earth 242", "Bench Heavy", "Bench Random 1000" (minutes); with `massive`, one with 3,000 border changes as well. The benchmarks and tools below work on throwaway copies of them |
 | `node --disable-warning=ExperimentalWarning bench/render.bench.ts <folder> ["<project>"...] [--only a,b] [--label x] [--out file]` | Frame times in Chrome for each scenario (idle, pans at five zooms, zoom, scrub, stroke, play, exports); build first |
@@ -152,7 +155,7 @@ For development (Linux or Windows, Node 22.18 or newer):
 | `MAPMAKER_E2E_VIEWPORT=1500x900 node ... e2e/vertical-slice.e2e.ts` (or `workflows`) | The interface tests in a window of another size (no step may depend on where things fall on screen) |
 | `node --disable-warning=ExperimentalWarning test/geo-kernel.stress.ts <seeds> <rings>` | Long randomised kernel run |
 | `node --disable-warning=ExperimentalWarning e2e/vertical-slice.e2e.ts` | The 23-step interface test in Chrome (build first); screenshots in `e2e/output/` |
-| `node --disable-warning=ExperimentalWarning e2e/workflows.e2e.ts` | The 28-step workflow and export-inspection test; screenshots in `e2e/output/workflows/` |
+| `node --disable-warning=ExperimentalWarning e2e/workflows.e2e.ts` | The 29-step workflow and export-inspection test; screenshots in `e2e/output/workflows/` |
 | `node --disable-warning=ExperimentalWarning test/perf.bench.ts 100 300 1000 [--keep <folder>]` | Performance benchmark (minutes at 1000) |
 | `node node_modules/typescript/bin/tsc -p tsconfig.json` | Type check (must report nothing) |
 
@@ -199,6 +202,7 @@ Terminology: the interface calls them **maps** (DECISIONS D24); the code and old
 | `src/render-engine/label-place.ts` | Label places | Where a country's label has the most room (stretched pole of inaccessibility in the projection's plane), line breaking for long names (D31). |
 | `src/domain/history-view.ts` | Changes over time | Periods (day, month, year, several years) and a country's gains, losses and changes in one (D36); shown by `ui/components/CountryHistory.tsx`. |
 | `src/domain/search.ts`, `data-export.ts`, `ui/components/Search.tsx`, `Pictures.tsx` | Search, data export, pictures (D73) | Search over names, former names and notes; the map at a date as GeoJSON and the record as CSV (written by the data service's `data-export` route); pictures with notes (`commands.ts` setPictures). |
+| `src/domain/regions.ts`, `ui/components/Regions.tsx`, `scripts/fetch-regions.mjs` | Region picker (D78) | Regions of today by level, found by a point or a box; the Regions tool's bar and its "Give" question; the converter of Natural Earth's states and provinces. |
 | `ui/components/SplitMerge.tsx` (and `commands.ts` splitTerritory, mergeTerritory) | Split and merge (D76) | The Split tool's question, the "Merge into one" dialog, and the choice of when a change holds that both use. |
 | `src/domain/event-types.ts`, `ui/components/EventTypes.tsx` | Event types (D75) | A type's colour, usual way of spreading and usual length, kept in the `fields` of its row; the "Event types" dialog, the type chooser and its colour square. |
 | `src/domain/relations.ts`, `ui/components/Relations.tsx` | Relationships (D72) | Kinds and how each reads from either side; periods are changes of kind `relate` (`commands.ts` relate, endRelation, resumeRelation), compiled by the engine (`relationHolds`, `relationPeriods`). |
@@ -218,7 +222,7 @@ The approved roadmap has 14 stages (0–13). Where each stands (brought up to da
 | --- | --- | --- | --- |
 | 0 Groundwork | Mostly done | Sphere-safe kernel, two-part time, SQLite storage, transparent PNG export, pannable/zoomable/rotatable map, Natural Earth basemap, Electron shell, Windows installer built automatically, reference-image render tests (`e2e/render-compare`) | Installer test on the user's PC |
 | 1 Project, storage, world model | Done | Projects, schema with upgrades (format 5; every upgrade tested), undo journal, autosave, versions, backups with restore, crash safety, multiple maps, entities with names, colours, notes; event groups (D8); groups of countries; outliner and inspector | Automatic groups (by world, by country) if wanted |
-| 2 Parcel map and territory editing | Mostly done | Production kernel (faces rebuilt around an edit), territory brush, precise shape tool, border pen with drafts, border points (move, add, remove), border eraser, split along a line and merge (D76), snapping, smoothing, irregularity, political fills, derived borders, labels, coastline clipping, today's countries in one step, flat maps | Sub-national boundaries as parcel edges, region picker |
+| 2 Parcel map and territory editing | Done | Production kernel (faces rebuilt around an edit), territory brush, precise shape tool, border pen with drafts, border points (move, add, remove), border eraser, split along a line and merge (D76), region picker of today's countries and states (D78), snapping, smoothing, irregularity, political fills, derived borders, labels, coastline clipping, today's countries in one step, flat maps | Sub-national boundaries as permanent parcel edges if wanted (the region picker puts them in where used, D78) |
 | 3 Time and event engine | Done | Instants, Gregorian calendar, events, effects with intention, compiler followed change by change, any-date reconstruction, zoomable timeline, edit prompt, record mode, History Health, precedence and overlap rules, alternative versions, names over time, changes over time, comparing two dates, event types as templates, dated border-point moves (D77) | Fictional calendars (Stage 13) |
 | 4 Layers, entities, lore | Done | Territory layers; area, line and point layers with lifespans and dated shapes, their tool, list and panel (D71); dated relationships (D72); search, GeoJSON and CSV export, notes with pictures (D73); cities with lifespans, characters, alternative versions of events | Layer families across maps; hatching for occupied territory on territory layers (with Stage 7) |
 | 5 First shots and export | Mostly done | Shots, time remap, still camera, date, title and current-events overlays, PNG sequences with passes and transparency up to 8K at every listed frame rate, preview, manifest, compositing guide, deterministic output | Multi-key camera, styles, version-pinned shots, the Premiere checklist on the user's PC |
@@ -227,7 +231,7 @@ The approved roadmap has 14 stages (0–13). Where each stands (brought up to da
 
 ## Tests
 
-All pass as of 18 November 2026 (225 unit and randomised tests in 36 files, 23 + 28 + 6 + 5 interface steps). The
+All pass as of 18 November 2026 (227 unit and randomised tests in 37 files, 23 + 29 + 6 + 5 interface steps). The
 interface tests run with the verify mode on (D57): everything the app works out from what was there before is also
 worked out afresh, and any difference stops the test.
 `sh scripts/check-all.sh` runs everything and prints ALL CHECKS PASSED only when every check passed.
@@ -240,6 +244,7 @@ worked out afresh, and any difference stops the test.
 | `test/temporal-engine.test.ts` | 18 | Editing events never changes earlier history; compiled timelines equal a naive replay; simultaneous and overlapping events; stale intentions; broken references; corrections; variants; undo; when the last change began (comparing dates) |
 | `test/event-types.test.ts` | 3 | Event types made, copied, renamed, recoloured, given a way of spreading and a usual length (days, months to the end of a shorter month, years, before the year 1); deleted (their events become plain events), undone, reloaded |
 | `test/split-merge.test.ts` | 4 | A line across a country: the part clicked to a new country from a date (verify mode), to an existing one in a new event (moved with it), as a correction of the starting map; refused when the line stops inside (and taken back), on the sea, or to its own country; merging into one of them or a new country in an event; one undo step each; a border point moved from a date (either way, in an event, verify mode), junctions and moves across a third country refused |
+| `test/regions.test.ts` | 2 | Today's 4,596 states and provinces found by a point (Berlin, an enclave of Brandenburg; New York; Fiji by the 180th meridian; the sea); anchors inside their regions; today's countries the same way; Brandenburg and Berlin given to two owners meet exactly (areas within 0.2%, no unowned sample along their border) |
 | `test/scenarios.test.ts` | 9 | A region's history (secession, partition, insertion, deletion, moving events); order independence; simultaneous and overlapping events with durations; seconds and millennia apart; advancing fronts from minutes to years; occupation on its own layer; edits never corrupt unrelated data; formation, fragmentation, collapse |
 | `test/geometry-worlds.test.ts` | 7 | Degenerate and self-crossing outlines refused cleanly; poles, the 180° line, more than a hemisphere, 20-metre shapes; splitting and merging; 1 cm precision after reopening; independent worlds of different sizes; undo per world |
 | `test/storage.test.ts` | 8 | Reopening; the snapshot the database writes as text against the row-by-row one; undo and redo across reopening; atomic saves; process killed mid-save; versions and backups; PNG round trip; export folders |
@@ -274,7 +279,7 @@ worked out afresh, and any difference stops the test.
 | `e2e/vertical-slice.e2e.ts` | 23 steps | The vertical slice in Chrome: projects, drawing, Earth's geography and data sources, border points, versions, events, dates, version restore and undo, full restart, animation, export with data credits, identical re-export, 1080p, coastline clipping |
 | `e2e/desktop.e2e.ts` | 5 steps | The Electron app: own window, own data service on this computer only, project written to disk, one copy at a time, close and reopen with contents intact |
 | `test/event-groups.test.ts` | 4 | Event group commands with undo (several groups per event, filter rules, deletion keeps events, alternatives keep groups); a version 1 project file upgraded on opening (backup first, content and undo history intact, old backups restorable without rolling the format back); a file from a newer version refused untouched |
-| `e2e/workflows.e2e.ts` | 28 steps | Precise shapes; occupation layer; hiding layers; alternative versions; annexation; deleting and undoing events; fades; a second world; a camera move at 2.39:1 and 25 fps with frame timing, history in the pixels and pass stacking checked; layers of lines, points and areas made with "+ Layer", drawn freehand, by a click and click by click, chosen by clicking, restyled, given a new shape from a date, ended and undone; a war added from a country's panel, read from both sides, resumed and ended; two dates compared across a dragged line and swapped; an event type made with a colour, a way of spreading and a length, used by a new event and a drawing, renamed, deleted and undone; a country split along a dragged line (the part clicked named by its side), a point of the new border moved from a date, and the two merged into a new country in a new event, undone and redone; search (a country, an event, a point), a picture kept with a country's notes, the data exported as GeoJSON and CSV and read back; square size, Natural Earth projection, 23.976 fps, transparency; the preview of that shot dragged with the mouse (carried while its meridian is held, laid out afresh at rest) |
+| `e2e/workflows.e2e.ts` | 29 steps | Precise shapes; occupation layer; hiding layers; alternative versions; annexation; deleting and undoing events; fades; a second world; a camera move at 2.39:1 and 25 fps with frame timing, history in the pixels and pass stacking checked; layers of lines, points and areas made with "+ Layer", drawn freehand, by a click and click by click, chosen by clicking, restyled, given a new shape from a date, ended and undone; a war added from a country's panel, read from both sides, resumed and ended; two dates compared across a dragged line and swapped; an event type made with a colour, a way of spreading and a length, used by a new event and a drawing, renamed, deleted and undone; a country split along a dragged line (the part clicked named by its side), a point of the new border moved from a date, today's states chosen by clicks and a box and given to a new country, and the two merged into a new country in a new event, undone and redone; search (a country, an event, a point), a picture kept with a country's notes, the data exported as GeoJSON and CSV and read back; square size, Natural Earth projection, 23.976 fps, transparency; the preview of that shot dragged with the mouse (carried while its meridian is held, laid out afresh at rest) |
 
 Checked by hand: 4K and 8K exports; the unzipped package starts and works; requests from other hosts are refused.
 
@@ -465,7 +470,7 @@ recompiling the 1,000-territory history took about 800 ms after every edit.
 
 1. The user tries the latest installer (from the newest "Windows build and tests" run) and reports back.
 2. Stage 4 is done (D71–D73). Next, in the approved order: the rest of Stages 2 and 3 (split and merge tools,
-   region picker; date comparison, event types, split and merge and dated border-point moves are done, D74–D77), Stage 6's remaining transitions
+   region picker; all done, D74–D78), Stage 6's remaining transitions
    (animated features: a front line or an arrow drawing itself, a zone growing), then Stage 7 (military: control
    and occupation display, front lines between countries at war, units, routes), which builds on Stage 4.
 4. Characters: icons or pictures for markers.

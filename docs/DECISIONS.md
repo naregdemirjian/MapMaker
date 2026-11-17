@@ -60,6 +60,24 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D78. The region picker: today's countries or states and provinces, chosen on the map (Stage 2)
+
+The plan's region picker ("click, box or lasso existing administrative regions and assign them; admin level to pick
+from") is the **Regions** tool. Levels: today's countries (Natural Earth 1:50m, the file "Add today's countries"
+uses) and today's states and provinces (Natural Earth admin-1 at 1:10m, 4,596 regions; new file
+`data/natural-earth/regions-10m.json`, 6.8 MB, 2.3 MB compressed, made by `scripts/fetch-regions.mjs`: coordinates
+rounded to 0.001°, coasts simplified to about 900 m, and every point a region shares with another kept, so neighbours
+meet exactly: Berlin given to one owner and Brandenburg around it to another leave no gap). The regions are a picking
+aid only, loaded when the tool is first used, not edges of the parcel map: a region's outline enters the parcel map
+when it is given to an owner (`commands.ts` addCountries with `into`, which handles holes; `into` may now be a new
+country made in the same step). A click toggles the region under the pointer (named while hovered); a box takes every
+region whose middle (`RegionIndex.anchors`, inside its largest polygon) lies in it; Enter asks who gets them (an
+existing country or a new one) and when (from the date viewed, as a correction, or in an event); Esc clears the
+choice. Finding the region under a point uses a 10° grid of polygon bounding boxes and a point-in-polygon test with
+holes (`src/domain/regions.ts`). Lasso selection is left out: the box and clicks cover it, and the brush draws any
+other shape. Sub-national boundaries as permanent parcel edges (geoBoundaries, GADM) are not added: picking
+regions puts their outlines in only where they are used.
+
 ### D77. A border point moved from a date on (Stage 3)
 
 Dragging a border point with the Border points tool now asks whether to correct the border's shape for all time (as

@@ -20,7 +20,7 @@ export type Mode = 'world' | 'present';
 /** One line of a right-click menu: an action, a heading, or a divider. */
 export type MenuItem = { label: string; run: () => void; danger?: boolean; testId?: string } | { heading: string } | 'divider';
 
-export type Tool = 'select' | 'lasso' | 'polygon' | 'pen' | 'vertex' | 'place' | 'erase' | 'feature' | 'split';
+export type Tool = 'select' | 'lasso' | 'polygon' | 'pen' | 'vertex' | 'place' | 'erase' | 'feature' | 'split' | 'regions';
 export type Selection =
   | { kind: 'entity'; id: string }
   | { kind: 'event'; id: string }
@@ -117,6 +117,9 @@ class AppStore {
   splitLine: Array<[number, number]> | null = null;
   /** The countries chosen for "Merge into one" (D76). */
   mergeIds: string[] = [];
+  /** The region picker (D78): which regions are offered, and those chosen (indices into them). */
+  regionLevel: 'regions' | 'countries' = 'regions';
+  regionPicks: number[] = [];
   toasts: Toast[] = [];
   busy: string | null = null;
   timeline = { start: 900, end: 2100 };

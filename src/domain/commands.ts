@@ -608,10 +608,10 @@ export interface CountryToAdd {
  * With `into`, their land is given to that existing country instead (Greece's borders added to a
  * country of the user's own, say), and no countries are created.
  */
-export function addCountries(world: World, engine: Engine, o: { spaceId: string; layerId: string; countries: CountryToAdd[]; mode: EditMode; snap?: number; newEvent?: EventInput; into?: string }): CommandResult<{ entities: string[]; eventId: string | null }> {
-  checkTarget(world, { spaceId: o.spaceId, layerId: o.layerId, mode: o.newEvent ? undefined : o.mode, value: o.into });
+export function addCountries(world: World, engine: Engine, o: { spaceId: string; layerId: string; countries: CountryToAdd[]; mode: EditMode; snap?: number; newEvent?: EventInput; into?: NewOwner }): CommandResult<{ entities: string[]; eventId: string | null }> {
+  checkTarget(world, { spaceId: o.spaceId, layerId: o.layerId, mode: o.newEvent ? undefined : o.mode, value: typeof o.into === 'string' ? o.into : undefined });
   if (!o.countries.length) throw new Error('Choose at least one country.');
-  const intoName = o.into ? world.get('entity', o.into)!.name : '';
+  const intoName = o.into === undefined ? '' : typeof o.into === 'string' ? world.get('entity', o.into)!.name : o.into.name.trim();
   const label = o.into
     ? `Add ${o.countries.length === 1 ? o.countries[0].name : `${o.countries.length} countries`} to ${intoName}`
     : o.countries.length === 1 ? `Add ${o.countries[0].name}` : `Add ${o.countries.length} countries`;
@@ -619,6 +619,8 @@ export function addCountries(world: World, engine: Engine, o: { spaceId: string;
     // Optionally the event they belong to is created in the same step (one undo).
     const eventId = o.newEvent ? insertEventIn(tx, o.newEvent) : null;
     if (eventId) o = { ...o, mode: { kind: 'new', eventId } };
+    // Into a country made in the same step (the region picker's "a new country").
+    const into = o.into === undefined ? undefined : ownerIn(tx, o.into);
     const existing = new Map(world.all('entity').filter((e) => e.type_id === 'polity' || e.type_id === 'faction').map((e) => [e.name.toLowerCase(), e.id]));
     const entities: string[] = [];
     // Outlines: each polygon's outer ring and holes, oriented with the area they surround on the left.
@@ -642,7 +644,7 @@ export function addCountries(world: World, engine: Engine, o: { spaceId: string;
     const items: Array<{ leaves: Iterable<number>; value: string | null }> = [];
     o.countries.forEach((c, k) => {
       // Into an existing country: its territory grows; no country of this name is created.
-      let id = o.into ?? existing.get(c.name.toLowerCase());
+      let id = into ?? existing.get(c.name.toLowerCase());
       if (!id) {
         id = newId('ent');
         const style = c.fill?.asset ? JSON.stringify({ fill: c.fill }) : '{}';
