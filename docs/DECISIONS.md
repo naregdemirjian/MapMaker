@@ -60,6 +60,22 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D79. Animated areas, lines and points: a line draws itself, an area grows, a shape fades (Stage 6)
+
+A shape change of an area, line or point that belongs to an event with a length can **appear over the rest of the
+event** (from its own moment to the event's end): a line **draws itself** along its length with its arrowhead
+travelling at the drawn end (a front line or an arrow advancing), an area **grows** from its middle (revealed within a
+circle reaching its farthest point) or has its outline drawn while its fill fades in, a point grows, and any shape can
+**fade in**. When it replaces an earlier shape, the earlier one fades out meanwhile. The style is stored in the shape
+change's `transition` (`{"style": "draw" | "grow" | "fade"}`, no new table, file format unchanged); the engine gives
+`featuresAt` a progress (eased) and the shape before (`FeatureAt.progress`, `style`, `before`), and the moment the
+animation ends counts as a time of change (stepping, the timeline). Without an event, or in an event without an end,
+a shape appears at once. Features are drawn afresh on every frame over the kept territory picture, so the working
+view, playback and exports show the animation with no further work. The drawing prompt preselects it when the event
+has a length (a line draws itself, an area grows, a point fades in); each step of a feature's shapes in its panel can
+change it. Not done: a shape morphing into the next (it cross-fades instead), and front lines moving with a war's
+fronts on territory layers (Stage 7).
+
 ### D78. The region picker: today's countries or states and provinces, chosen on the map (Stage 2)
 
 The plan's region picker ("click, box or lasso existing administrative regions and assign them; admin level to pick

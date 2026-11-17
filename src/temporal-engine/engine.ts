@@ -1,7 +1,7 @@
 // The temporal engine: compiles events and their effects into per-property timelines and answers
 // "what is the world like at time t". Events are the authoritative record; everything here is a
 // disposable cache rebuilt from them whenever the world's revision changes.
-import { type Instant, compare, NEG_INF, fromStore, lerp, diffMs } from '../core-time/index.ts';
+import { type Instant, compare, NEG_INF, fromStore, lerp, diffMs, fraction } from '../core-time/index.ts';
 import type { World, HistoryStep } from '../world-model/world.ts';
 import { BASE_EVENT_ID, type EffectRow, type EventRow } from '../world-model/schema.ts';
 import { type Vec3, angle, e7ToVec, lonLatToVec } from '../geo-kernel/vec.ts';
@@ -69,10 +69,17 @@ export interface RelateStep { t: Instant; on: boolean; effectId: string; eventId
 export interface RelationPeriod { from: Instant; to: Instant | null; fromEffect: string; toEffect: string | null }
 
 /** One compiled step of a feature's history: its shape from a moment on (null: it does not exist). */
-export interface ShapeStep { t: Instant; parts: number[][] | null; effectId: string; eventId: string; precedence: number; eventSeq: number; ordinal: number }
+/** How a new shape of an area, line or point appears over its event's length (Stage 6, D79). */
+export type FeatureAnimStyle = 'draw' | 'grow' | 'fade';
+export const isFeatureAnim = (v: unknown): v is FeatureAnimStyle => v === 'draw' || v === 'grow' || v === 'fade';
+export interface ShapeStep { t: Instant; parts: number[][] | null; effectId: string; eventId: string; precedence: number; eventSeq: number; ordinal: number; anim: { style: FeatureAnimStyle; end: Instant } | null }
 
 /** A feature as it is at a moment: its shape, and the change that gave it. */
-export interface FeatureAt { feature: string; layer: string; parts: number[][]; effectId: string; since: Instant }
+export interface FeatureAt {
+  feature: string; layer: string; parts: number[][]; effectId: string; since: Instant;
+  /** While its shape is still appearing (D79): how far (0 to 1, eased), how, and the shape before (fading out). */
+  progress?: number; style?: FeatureAnimStyle; before?: number[][] | null;
+}
 
 /** One compiled waypoint of a character's track. */
 export interface Waypoint { t: Instant; lon: number; lat: number; off: boolean; arrive: 'travel' | 'jump'; effectId: string; eventId: string; precedence: number; eventSeq: number; ordinal: number }
@@ -201,6 +208,8 @@ export class Engine {
   private timeCount = new Map<string, { t: Instant; n: number }>();
   private changeTimes: Instant[] = [];
   private pointTimes: Instant[] = [];
+  /** When the shapes appearing over their events' length are complete (also times of change, for stepping; D79). */
+  private animEnds: Instant[] = [];
   /** Territory changes by the instants they take place and end at, in order (for finding what happens between two moments). */
   private timeIndex: Array<{ t: Instant; id: string }> = [];
   /** Problems found while compiling, by change; and the whole list with those found by comparing changes (null: to be worked out). */
@@ -295,6 +304,7 @@ export class Engine {
     this.originEffects.clear();
     this.timeCount.clear();
     this.pointTimes = [];
+    this.animEnds = [];
     this.timeIndex = [];
     this.broken.clear();
     this.conflictList = null;
@@ -429,6 +439,8 @@ export class Engine {
     const w = this.world;
     for (const t of this.pointTimes) this.countTime(t, -1, false);
     this.pointTimes = [];
+    for (const t of this.animEnds) this.countTime(t, -1, false);
+    this.animEnds = [];
     this.tracks.clear();
     this.names.clear();
     this.shapes.clear();
@@ -466,7 +478,14 @@ export class Engine {
         let steps = byLayer.get(f.id);
         if (!steps) byLayer.set(f.id, (steps = []));
         const t = effectTime(ef, ev);
-        steps.push({ t, parts, effectId: ef.id, eventId: ev.id, precedence: isUntracked(ef) ? UNTRACKED_PRECEDENCE : ev.precedence, eventSeq: ev.created_seq, ordinal: ef.ordinal });
+        // Appearing over the rest of its event (from its own moment to the event's end), if asked to.
+        let anim: ShapeStep['anim'] = null;
+        const tr = parts ? parseJSON<{ style?: unknown } | null>(ef.transition, null) : null;
+        if (tr && isFeatureAnim(tr.style) && !isUntracked(ef) && ev.end_day !== null) {
+          const end = fromStore(ev.end_day, ev.end_ms ?? 0);
+          if (compare(end, t) > 0) { anim = { style: tr.style, end }; this.animEnds.push(end); this.countTime(end, 1, false); }
+        }
+        steps.push({ t, parts, effectId: ef.id, eventId: ev.id, precedence: isUntracked(ef) ? UNTRACKED_PRECEDENCE : ev.precedence, eventSeq: ev.created_seq, ordinal: ef.ordinal, anim });
         count(t);
         continue;
       }
@@ -687,7 +706,15 @@ export class Engine {
       let lo = 0, hi = steps.length - 1, k = -1;
       while (lo <= hi) { const m = (lo + hi) >> 1; if (compare(steps[m].t, t) <= 0) { k = m; lo = m + 1; } else hi = m - 1; }
       const st = k >= 0 ? steps[k] : null;
-      if (st?.parts) out.push({ feature, layer: layerId, parts: st.parts, effectId: st.effectId, since: st.t });
+      if (!st?.parts) continue;
+      const fa: FeatureAt = { feature, layer: layerId, parts: st.parts, effectId: st.effectId, since: st.t };
+      if (st.anim && compare(t, st.anim.end) < 0) {
+        const f = Math.max(0, Math.min(1, fraction(st.t, st.anim.end, t)));
+        fa.progress = f * f * (3 - 2 * f);
+        fa.style = st.anim.style;
+        fa.before = k > 0 ? steps[k - 1].parts : null;
+      }
+      out.push(fa);
     }
     return out;
   }

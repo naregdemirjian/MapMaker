@@ -202,6 +202,7 @@ status. Last updated: 18 November 2026 (Stage 4; see DEVELOPMENT.md).
 | View a country's borders by how they changed over time, by day, month, year or several years | Tested | `history-view`, `e2e/workflows` 'Changes over time' (green on the map, the Union listed) | D36. A selection mode in the country's panel |
 | Presentation camera: reset for a clear shot; no start and end views | Tested | `sequence`, `e2e/workflows` (reset; still camera: identical backgrounds) | D34 |
 | Transitions: no wipe; "Advancing front" from the existing border; the old one renamed "Expansion" | Tested | `sequence`, `e2e/vertical-slice` (the side facing the conqueror changes first, in the pixels) | D33 |
+| Animated areas, lines and points: a line draws itself, an area grows, a shape fades in or out | Tested | `features` (progress, the shape before, at once without an event or a length; the line cut part way), `e2e/workflows` 'Animated features' | D79 |
 | Events box: wrap the box around the graphic | Tested | `e2e/workflows` (the exported box has the graphic's shape) | Chosen for new graphics |
 | Drag the date, title and events box freely | Tested | `sequence`, `e2e/workflows` (follows the pointer; undo) | |
 | Export: only "All" chosen at first, at the top, the others explained as separate | Tested | `sequence`, `e2e/workflows`, `e2e/vertical-slice` | D37. The choice is kept with the shot |

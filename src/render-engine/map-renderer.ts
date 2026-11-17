@@ -1773,59 +1773,102 @@ export class MapRenderer {
         const color = featureColor(kind, layer.style, row.style, entities.get(row.entity_id)?.color);
         const width = Math.max(0.5, (st.width ?? 2) * u);
         const dash = st.dash === 'dashed' ? [4 * width, 2.5 * width] : st.dash === 'dotted' ? [0.01, 2 * width] : [];
-        if (kind === 'point') {
-          const lon = fa.parts[0][0], lat = fa.parts[0][1];
-          for (const [x, y] of this.pointCopies(view, lon, lat)) {
-            const r = Math.max(2, ((st.size ?? 9) / 2) * kDot * u);
-            this.drawSymbol(ctx, st.symbol ?? 'circle', x, y, r, color, u);
-            if (st.showName && nameSize) this.featureName(ctx, row.name, x + r + 4 * u, y, 'left', 0, u, nameSize);
-            this.lastFeatures.push({ id: row.id, kind, path: null, place: [k, e, g], lines: [], x, y, r, width });
-          }
-          continue;
-        }
-        const sh = shapeOf(kind, fa.parts);
-        const screen = sh.lines.map(toScreen);
-        if (!screen.length && !sh.path) continue;
-        if (kind === 'area' && sh.path) {
-          ctx.save();
-          ctx.transform(k, 0, 0, k, e, g);
-          if ((st.fillOpacity ?? 0) > 0) { ctx.globalAlpha = Math.min(1, st.fillOpacity!); ctx.fillStyle = color; ctx.fill(sh.path, 'evenodd'); ctx.globalAlpha = 1; }
-          if (st.hatch && st.hatch !== 'none') {
-            const m = ctx.getTransform();
-            ctx.clip(sh.path, 'evenodd');
-            ctx.setTransform(m.a / k, m.b / k, m.c / k, m.d / k, m.e - (m.a * e + m.c * g) / k, m.f - (m.b * e + m.d * g) / k);
-            ctx.fillStyle = this.hatchPattern(ctx, st.hatch, color, u);
-            ctx.fillRect(-view.width, -view.height, 3 * view.width, 3 * view.height);
-          }
-          ctx.restore();
-        }
-        if (width > 0 && screen.length) {
-          ctx.save();
-          ctx.strokeStyle = color;
-          ctx.lineWidth = width;
-          ctx.lineJoin = 'round';
-          ctx.lineCap = st.dash === 'dotted' ? 'round' : 'butt';
-          ctx.setLineDash(dash);
-          for (const l of screen) { ctx.beginPath(); addLine(ctx, l); ctx.stroke(); }
-          ctx.setLineDash([]);
-          if (kind === 'line') {
-            ctx.fillStyle = color;
-            if (st.teeth && st.teeth !== 'none') for (const l of screen) this.drawTeeth(ctx, l, width, st.teeth === 'left' ? -1 : 1);
-            if (st.arrow && st.arrow !== 'none') for (const l of screen) {
-              this.drawArrowhead(ctx, l, width, true);
-              if (st.arrow === 'both') this.drawArrowhead(ctx, l, width, false);
-            }
-          }
-          ctx.restore();
-        }
-        if (st.showName && nameSize && screen.length) {
-          const at: [number, number, number] | null = kind === 'area' ? (() => { const m = areaMiddle(screen); return m ? [m[0], m[1], 0] as [number, number, number] : null; })() : lineMiddle(screen);
-          if (at) this.featureName(ctx, row.name, at[0], at[1], 'center', at[2], u, nameSize, kind === 'line' ? -(width / 2 + nameSize / 2 + 2 * u) : 0);
-        }
-        this.lastFeatures.push({ id: row.id, kind, path: sh.path, place: [k, e, g], lines: screen, x: 0, y: 0, r: 0, width });
+        // While a new shape appears (D79): the shape before fades out, the new one comes in as its event goes on.
+        const p = fa.progress;
+        const appearing = p !== undefined && fa.style ? fa.style : null;
+        if (appearing && fa.before) this.drawFeatureShape(ctx, view, kind, fa.before, row.name, st, color, width, dash, 1 - p!, null, null, shapeOf, toScreen, kDot, nameSize, u, null);
+        const hit = this.drawFeatureShape(ctx, view, kind, fa.parts, row.name, st, color, width, dash,
+          appearing === 'fade' || (appearing && kind === 'point') || (appearing === 'draw' && kind === 'area') ? p! : 1,
+          appearing === 'draw' || (appearing === 'grow' && kind === 'line') ? p! : null,
+          appearing === 'grow' && kind === 'area' ? p! : null,
+          shapeOf, toScreen, kDot, nameSize, u, appearing === 'grow' && kind === 'point' ? p! : null);
+        for (const h of hit) this.lastFeatures.push({ id: row.id, kind, place: [k, e, g], ...h });
       }
     }
     ctx.restore();
+  }
+
+  /**
+   * One shape of an area, line or point: whole, or appearing (D79): `alpha` to fade it, `cut` to draw
+   * its lines only that far along (0 to 1), `grow` to show an area only within a circle from its
+   * middle growing to its farthest point, `scale` to grow a point's symbol. Returns where it was drawn
+   * (for choosing it by clicking).
+   */
+  private drawFeatureShape(ctx: CanvasRenderingContext2D, view: View, kind: FeatureKind, parts: number[][], name: string, st: ReturnType<typeof featureStyle>, color: string, width: number, dash: number[],
+    alpha: number, cut: number | null, grow: number | null,
+    shapeOf: (kind: FeatureKind, parts: number[][]) => { path: Path2D | null; lines: Float32Array[] }, toScreen: (l: Float32Array) => Float32Array,
+    kDot: number, nameSize: number, u: number, scale: number | null): Array<{ path: Path2D | null; lines: Float32Array[]; x: number; y: number; r: number; width: number }> {
+    const [k, e, g] = this.place;
+    const out: Array<{ path: Path2D | null; lines: Float32Array[]; x: number; y: number; r: number; width: number }> = [];
+    if (alpha <= 0.001) return out;
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, alpha);
+    if (kind === 'point') {
+      const lon = parts[0][0], lat = parts[0][1];
+      for (const [x, y] of this.pointCopies(view, lon, lat)) {
+        const r = Math.max(2, ((st.size ?? 9) / 2) * kDot * u) * (scale ?? 1);
+        this.drawSymbol(ctx, st.symbol ?? 'circle', x, y, r, color, u);
+        if (st.showName && nameSize) this.featureName(ctx, name, x + r + 4 * u, y, 'left', 0, u, nameSize);
+        out.push({ path: null, lines: [], x, y, r, width });
+      }
+      ctx.restore();
+      return out;
+    }
+    const sh = shapeOf(kind, parts);
+    const screen = sh.lines.map(toScreen);
+    if (!screen.length && !sh.path) { ctx.restore(); return out; }
+    if (grow !== null && screen.length) {
+      // Growing from its middle: everything outside the circle is left out.
+      const m = areaMiddle(screen);
+      if (m) {
+        let far = 0;
+        for (const l of screen) for (let i = 0; i < l.length; i += 2) far = Math.max(far, Math.hypot(l[i] - m[0], l[i + 1] - m[1]));
+        const clip = new Path2D();
+        clip.arc(m[0], m[1], Math.max(0.5, grow * far), 0, Math.PI * 2);
+        ctx.clip(clip);
+      }
+    }
+    if (kind === 'area' && sh.path) {
+      ctx.save();
+      ctx.transform(k, 0, 0, k, e, g);
+      if ((st.fillOpacity ?? 0) > 0) { ctx.globalAlpha = Math.min(1, st.fillOpacity!) * Math.min(1, alpha); ctx.fillStyle = color; ctx.fill(sh.path, 'evenodd'); ctx.globalAlpha = Math.min(1, alpha); }
+      if (st.hatch && st.hatch !== 'none') {
+        const mt = ctx.getTransform();
+        ctx.clip(sh.path, 'evenodd');
+        ctx.setTransform(mt.a / k, mt.b / k, mt.c / k, mt.d / k, mt.e - (mt.a * e + mt.c * g) / k, mt.f - (mt.b * e + mt.d * g) / k);
+        ctx.fillStyle = this.hatchPattern(ctx, st.hatch, color, u);
+        ctx.fillRect(-view.width, -view.height, 3 * view.width, 3 * view.height);
+      }
+      ctx.restore();
+    }
+    // Drawn so far along: an arrow's head travels with the end of what is drawn.
+    const drawn = cut === null ? screen : screen.map((l) => cutLine(l, cut)).filter((l) => l.length >= 4);
+    if (width > 0 && drawn.length) {
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width;
+      ctx.lineJoin = 'round';
+      ctx.lineCap = st.dash === 'dotted' ? 'round' : 'butt';
+      ctx.setLineDash(dash);
+      for (const l of drawn) { ctx.beginPath(); addLine(ctx, l); ctx.stroke(); }
+      ctx.setLineDash([]);
+      if (kind === 'line') {
+        ctx.fillStyle = color;
+        if (st.teeth && st.teeth !== 'none') for (const l of drawn) this.drawTeeth(ctx, l, width, st.teeth === 'left' ? -1 : 1);
+        if (st.arrow && st.arrow !== 'none') for (const l of drawn) {
+          this.drawArrowhead(ctx, l, width, true);
+          if (st.arrow === 'both' && cut === null) this.drawArrowhead(ctx, l, width, false);
+        }
+      }
+      ctx.restore();
+    }
+    if (st.showName && nameSize && screen.length && (cut === null || cut > 0.5)) {
+      const at: [number, number, number] | null = kind === 'area' ? (() => { const m = areaMiddle(screen); return m ? [m[0], m[1], 0] as [number, number, number] : null; })() : lineMiddle(screen);
+      if (at) this.featureName(ctx, name, at[0], at[1], 'center', at[2], u, nameSize, kind === 'line' ? -(width / 2 + nameSize / 2 + 2 * u) : 0);
+    }
+    ctx.restore();
+    out.push({ path: sh.path, lines: screen, x: 0, y: 0, r: 0, width });
+    return out;
   }
 
   /** Where a place shows in the view (unturned): once, or once for each turn of a repeating map in view. */
@@ -3228,3 +3271,22 @@ function toLonLat(v: [number, number, number]): [number, number] {
   return [Math.atan2(v[1], v[0]) * 180 / Math.PI, Math.asin(Math.max(-1, Math.min(1, v[2] / len))) * 180 / Math.PI];
 }
 
+
+/** A line (screen points, x and y in turn) drawn only `f` of the way along its length (0 to 1). */
+export function cutLine(l: Float32Array, f: number): Float32Array {
+  if (f >= 1) return l;
+  const n = l.length >> 1;
+  if (n < 2 || f <= 0) return l.subarray(0, Math.min(l.length, 2));
+  let total = 0;
+  for (let i = 1; i < n; i++) total += Math.hypot(l[2 * i] - l[2 * i - 2], l[2 * i + 1] - l[2 * i - 1]);
+  let left = total * f;
+  const out: number[] = [l[0], l[1]];
+  for (let i = 1; i < n; i++) {
+    const x0 = l[2 * i - 2], y0 = l[2 * i - 1], x1 = l[2 * i], y1 = l[2 * i + 1];
+    const d = Math.hypot(x1 - x0, y1 - y0);
+    if (d >= left) { const r = d ? left / d : 0; out.push(x0 + (x1 - x0) * r, y0 + (y1 - y0) * r); break; }
+    out.push(x1, y1);
+    left -= d;
+  }
+  return Float32Array.from(out);
+}

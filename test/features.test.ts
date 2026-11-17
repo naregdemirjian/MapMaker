@@ -183,3 +183,53 @@ test('the engine follows feature edits one by one and agrees with a fresh compil
     Engine.verify = false;
   }
 });
+
+test('animated features (Stage 6, D79): a line draws itself over its event, a new shape fades the old one out; at once without an event', () => {
+  const s = setup();
+  Engine.verify = true;
+  Engine.verifyFailures = [];
+  try {
+    const war = cmd.createEvent(s.world, { name: 'Advance', start: Y(1700), end: Y(1710) }).result;
+    const arrow = cmd.createFeature(s.world, { layerId: s.lines, name: 'Thrust', parts: [[[0, 40], [10, 40]]], mode: { kind: 'new', eventId: war }, anim: 'draw' }).result;
+    const at = (t: ReturnType<typeof Y>) => s.engine.featuresAt(s.lines, t).find((f) => f.feature === arrow);
+    assert.equal(at(Y(1699)), undefined, 'not before its event');
+    const mid = at(Y(1705))!;
+    assert.equal(mid.style, 'draw');
+    assert.ok(mid.progress! > 0.45 && mid.progress! < 0.55, `half way (eased): ${mid.progress}`);
+    assert.equal(mid.before, null, 'nothing before it');
+    assert.ok(at(Y(1701))!.progress! < 0.05, 'eased: slow at first');
+    assert.equal(at(Y(1711))!.progress, undefined, 'complete after the event');
+    // The end of the animation is a time of change (stepping, timeline).
+    assert.ok(s.engine.changeInstants().some((t) => t.day === Y(1710).day));
+    // A later shape in another event, fading in: the old one fades out meanwhile.
+    const retreat = cmd.createEvent(s.world, { name: 'Retreat', start: Y(1720), end: Y(1730) }).result;
+    cmd.reshapeFeature(s.world, s.engine, { feature: arrow, parts: [[[0, 40], [4, 40]]], mode: { kind: 'new', eventId: retreat }, anim: 'fade' });
+    const fading = at(Y(1725))!;
+    assert.equal(fading.style, 'fade');
+    assert.deepEqual(fading.before, [[0, 40, 10, 40]]);
+    // Changed afterwards from its panel: at once, then grown; the event made instantaneous: at once.
+    const step = s.engine.featureHistory(arrow)[1];
+    cmd.setShapeAnimation(s.world, step.effectId, null);
+    assert.equal(at(Y(1725))!.progress, undefined);
+    cmd.setShapeAnimation(s.world, step.effectId, 'grow');
+    assert.equal(at(Y(1725))!.style, 'grow');
+    cmd.updateEvent(s.world, retreat, { end: null });
+    assert.equal(at(Y(1725))!.progress, undefined, 'an event without a length has nothing to animate over');
+    // Without an event (from a date): at once, whatever is asked.
+    const sign = cmd.createFeature(s.world, { layerId: s.points, name: 'Camp', parts: [[[3, 3]]], mode: { kind: 'change', t: Y(1800) }, anim: 'fade' }).result;
+    assert.equal(s.engine.featuresAt(s.points, Y(1800, 6)).find((f) => f.feature === sign)!.progress, undefined);
+    assert.throws(() => cmd.setShapeAnimation(s.world, 'nope', 'draw'), /no longer exists/);
+    assert.deepEqual(Engine.verifyFailures, []);
+  } finally {
+    Engine.verify = false;
+  }
+});
+
+test('a line drawn part of the way along its length (the renderer, D79)', async () => {
+  const { cutLine } = await import('../src/render-engine/map-renderer.ts');
+  const l = Float32Array.from([0, 0, 10, 0, 10, 10]); // 20 long
+  assert.deepEqual([...cutLine(l, 0.25)], [0, 0, 5, 0]);
+  assert.deepEqual([...cutLine(l, 0.75)], [0, 0, 10, 0, 10, 5]);
+  assert.equal(cutLine(l, 1), l);
+  assert.deepEqual([...cutLine(l, 0)], [0, 0]);
+});

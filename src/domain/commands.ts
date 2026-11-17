@@ -2,7 +2,7 @@
 // in-memory world and returns the exact row diffs to save (and to undo). Commands never draw anything.
 import { World, Tx, newId } from '../world-model/world.ts';
 import {
-  Engine, canonicalFaces, leafDescendants, hashFaces, parseJSON, type Resolution, type TransitionSpec, type AnnexIntent, type PlaceIntent, type RenameIntent, type ShapeIntent, type RelateIntent,
+  Engine, canonicalFaces, leafDescendants, hashFaces, parseJSON, type Resolution, type TransitionSpec, type AnnexIntent, type PlaceIntent, type RenameIntent, type ShapeIntent, type RelateIntent, type FeatureAnimStyle, isFeatureAnim,
 } from '../temporal-engine/engine.ts';
 import { type Instant, toStore, fromStore, NEG_INF, compare } from '../core-time/index.ts';
 import {
@@ -1107,7 +1107,7 @@ export function shapeParts(kind: FeatureKind, parts: Array<Array<[number, number
  * Draw a new area, line or point on a feature layer: it exists from the date the edit mode gives
  * ('correct' at the beginning of time: always), as part of an event (mode 'new') or not.
  */
-export function createFeature(world: World, o: { layerId: string; name: string; entity?: string; parts: Array<Array<[number, number]>>; mode: EditMode; style?: FeatureStyle }): CommandResult<string> {
+export function createFeature(world: World, o: { layerId: string; name: string; entity?: string; parts: Array<Array<[number, number]>>; mode: EditMode; style?: FeatureStyle; anim?: FeatureAnimStyle | null }): CommandResult<string> {
   const layer = world.get('layer', o.layerId);
   if (!layer || !isFeatureKind(layer.kind)) throw new Error('Choose a layer of areas, lines or points first.');
   if (o.entity && !world.get('entity', o.entity)) throw new Error('That country or faction no longer exists.');
@@ -1116,7 +1116,7 @@ export function createFeature(world: World, o: { layerId: string; name: string; 
   return run(world, `Draw "${name}"`, (tx) => {
     const id = newId('feat');
     tx.insert('feature', { id, layer_id: layer.id, name, entity_id: o.entity ?? '', style: o.style ? JSON.stringify(o.style) : '{}', notes: '', created_seq: world.nextSeq('feature') });
-    writeShape(tx, id, o.mode, { parts });
+    writeShape(tx, id, o.mode, { parts, anim: o.anim ?? null });
     return id;
   });
 }
@@ -1126,12 +1126,12 @@ export function createFeature(world: World, o: { layerId: string; name: string; 
  * until it is shaped again. Mode 'correct': the shape the feature has at that date is redrawn,
  * wherever it began (at the beginning of time when the feature does not exist yet).
  */
-export function reshapeFeature(world: World, engine: Engine, o: { feature: string; parts: Array<Array<[number, number]>>; mode: EditMode }): CommandResult<string> {
+export function reshapeFeature(world: World, engine: Engine, o: { feature: string; parts: Array<Array<[number, number]>>; mode: EditMode; anim?: FeatureAnimStyle | null }): CommandResult<string> {
   const f = world.get('feature', o.feature);
   const kind = f ? featureKind(world, f) : null;
   if (!f || !kind) throw new Error('That area, line or point no longer exists.');
   const parts = shapeParts(kind, o.parts);
-  return run(world, `Reshape "${f.name}"`, (tx) => correctOrWrite(tx, engine, f, o.mode, { parts }));
+  return run(world, `Reshape "${f.name}"`, (tx) => correctOrWrite(tx, engine, f, o.mode, { parts, anim: o.anim ?? null }));
 }
 
 /** A feature stops existing from a date on (until shaped again): a city wall torn down, a claim given up. */
@@ -1180,7 +1180,7 @@ export function shapeFromBeginning(world: World, effectId: string): CommandResul
 }
 
 /** 'correct': redraw the shape in force at the date; otherwise write a new step as the mode says. */
-function correctOrWrite(tx: Tx, engine: Engine, f: FeatureRow, mode: EditMode, what: { parts?: number[][]; off?: boolean }): string {
+function correctOrWrite(tx: Tx, engine: Engine, f: FeatureRow, mode: EditMode, what: { parts?: number[][]; off?: boolean; anim?: FeatureAnimStyle | null }): string {
   if (mode.kind === 'correct') {
     const steps = engine.featureHistory(f.id);
     let k = -1;
@@ -1198,7 +1198,7 @@ function correctOrWrite(tx: Tx, engine: Engine, f: FeatureRow, mode: EditMode, w
   return writeShape(tx, f.id, mode, what);
 }
 
-function writeShape(tx: Tx, feature: string, mode: EditMode, what: { parts?: number[][]; off?: boolean }): string {
+function writeShape(tx: Tx, feature: string, mode: EditMode, what: { parts?: number[][]; off?: boolean; anim?: FeatureAnimStyle | null }): string {
   const world = tx.world;
   const eventId = mode.kind === 'new' ? mode.eventId : BASE_EVENT_ID;
   if (mode.kind === 'new' && !world.get('event', eventId)) throw new Error('That event no longer exists.');
@@ -1208,14 +1208,23 @@ function writeShape(tx: Tx, feature: string, mode: EditMode, what: { parts?: num
   // The same feature, event and moment: that shape is replaced.
   const same = world.all('effect').find((f) => f.kind === 'shape' && f.event_id === eventId && f.at_day === (at ? at[0] : null) && f.at_ms === (at ? at[1] : null)
     && parseJSON<ShapeIntent | null>(f.intent, null)?.feature === feature);
-  if (same) { tx.patch('effect', same.id, { intent: JSON.stringify(intent) }); return same.id; }
+  const transition = what.anim && mode.kind === 'new' && !what.off ? JSON.stringify({ style: what.anim }) : '';
+  if (same) { tx.patch('effect', same.id, { intent: JSON.stringify(intent), ...(what.anim !== undefined ? { transition } : {}) }); return same.id; }
   const layer = world.get('layer', world.get('feature', feature)?.layer_id ?? '');
   const id = newId('eff');
   tx.insert('effect', {
     id, event_id: eventId, ordinal: nextOrdinal(world, eventId), kind: 'shape', space_id: layer?.space_id ?? null, layer_id: layer?.id ?? null,
-    at_day: at ? at[0] : null, at_ms: at ? at[1] : null, transition: '', intent: JSON.stringify(intent), resolution: JSON.stringify({ set: [] }), basis_hash: '',
+    at_day: at ? at[0] : null, at_ms: at ? at[1] : null, transition, intent: JSON.stringify(intent), resolution: JSON.stringify({ set: [] }), basis_hash: '',
   });
   return id;
+}
+
+/** How a shape change appears over the rest of its event (D79): drawn, grown, faded in; null: at once. */
+export function setShapeAnimation(world: World, effectId: string, style: FeatureAnimStyle | null): CommandResult {
+  const ef = world.get('effect', effectId);
+  if (!ef || ef.kind !== 'shape') throw new Error('That change of shape no longer exists.');
+  if (style && !isFeatureAnim(style)) throw new Error('Unknown way of appearing.');
+  return run(world, style ? 'Animate a shape' : 'Shape at once', (tx) => tx.patch('effect', effectId, { transition: style ? JSON.stringify({ style }) : '' }));
 }
 
 // ---------------------------------------------------------------- relationships between entities

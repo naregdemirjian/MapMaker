@@ -983,6 +983,55 @@ try {
     await page.getByTestId('tool-select').click();
   });
 
+  await h.step('Animated features: a line drawn in an event with a length draws itself over it, complete at its end', async () => {
+    await page.evaluate(([lon, lat]) => (window as any).__mapmaker.store.setCamera({ lon, lat, zoom: 1, rotation: 0, projection: 'equirectangular' }), P.b);
+    await h.setDate('1880');
+    await page.getByTestId('tool-feature').click();
+    const fronts = await page.evaluate(() => (window as any).__mapmaker.store.world.all('layer').find((l: any) => l.name === 'Front lines').id);
+    await page.getByTestId('feature-layer').selectOption(fronts);
+    const pb = await h.toPage(P.b);
+    const y = pb[1] + 150;
+    await page.mouse.move(pb[0] - 220, y);
+    await page.mouse.down();
+    for (let i = 1; i <= 16; i++) await page.mouse.move(pb[0] - 220 + (440 * i) / 16, y + 18 * Math.sin((i / 16) * Math.PI), { steps: 2 });
+    await page.mouse.up();
+    await page.getByTestId('feature-prompt').waitFor();
+    await page.getByTestId('feature-name').fill('Great advance');
+    await page.getByTestId('feature-choice-event').click();
+    await page.getByTestId('feature-event').selectOption('new-event');
+    await page.getByTestId('feature-event-name').fill('Summer offensive');
+    await page.getByTestId('feature-event-end').fill('1890');
+    // (Enter would apply the whole question: Tab leaves the date box.)
+    await page.getByTestId('feature-event-end').press('Tab');
+    assert.equal(await page.getByTestId('feature-anim').inputValue(), 'draw', 'a line draws itself unless told otherwise');
+    await page.getByTestId('confirm-feature').click();
+    await page.getByTestId('feature-panel').waitFor();
+    await page.getByTestId('tool-select').click();
+    // (Not chosen: the outline of a chosen feature would cover it.)
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
+    // Where it starts and ends, on the page.
+    const ends = await page.evaluate(() => { const s = (window as any).__mapmaker.store; const f = s.world.all('feature').find((x: any) => x.name === 'Great advance'); const p = s.engine.featureHistory(f.id)[0].parts[0]; return [[p[0], p[1]], [p[p.length - 2], p[p.length - 1]]] as Array<[number, number]>; });
+    const first = await h.toPage(ends[0]), last = await h.toPage(ends[1]);
+    const patch = (q: [number, number]) => page.evaluate(([x, yy]) => {
+      const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement, r = c.getBoundingClientRect(), k = c.width / r.width;
+      return Array.from(c.getContext('2d')!.getImageData(Math.round((x - r.left) * k) - 4, Math.round((yy - r.top) * k) - 4, 9, 9).data);
+    }, q);
+    const differ = (a: number[], b: number[]) => { let n = 0; for (let i = 0; i < a.length; i += 4) if (Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]) > 60) n++; return n; };
+    await h.setDate('1 June 1885');
+    const midStart = await patch(first), midEnd = await patch(last);
+    await h.screenshot('feature-drawing-itself');
+    await h.setDate('1891');
+    const doneStart = await patch(first), doneEnd = await patch(last);
+    assert.ok(differ(midStart, doneStart) <= 4, `half way through, its start is drawn already (${differ(midStart, doneStart)} pixels differ)`);
+    assert.ok(differ(midEnd, doneEnd) >= 6, `half way through, its end is not drawn yet (${differ(midEnd, doneEnd)} pixels differ)`);
+    // Changed in its panel to appear at once: drawn whole half way through too.
+    await page.getByTestId('feature-row').filter({ hasText: 'Great advance' }).click();
+    await page.getByTestId('feature-step-anim').selectOption('');
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
+    await h.setDate('1 June 1885');
+    assert.ok(differ(await patch(last), doneEnd) <= 4, 'at once: its end is there half way through');
+  });
+
   await h.step('Relationships: a war added from a country\'s panel, with an end date, read from both sides, ended again later', async () => {
     await h.setDate('1850');
     await page.locator('.left .row', { hasText: A }).first().click();

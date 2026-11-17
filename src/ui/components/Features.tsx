@@ -7,7 +7,7 @@ import * as cmd from '../../domain/commands.ts';
 import { type Instant, compare, fromStore, NEG_INF } from '../../core-time/index.ts';
 import { BASE_EVENT_ID } from '../../world-model/schema.ts';
 import { featureStyle, featureColor, isFeatureKind, DEFAULT_FEATURE_STYLE, type FeatureKind, type FeatureStyle } from '../../render-engine/feature-style.ts';
-import { parseJSON } from '../../temporal-engine/engine.ts';
+import { parseJSON, type FeatureAnimStyle } from '../../temporal-engine/engine.ts';
 import { DateField, fmt } from './Panels.tsx';
 import { PicturesSection } from './Pictures.tsx';
 
@@ -108,6 +108,8 @@ export function FeaturePrompt({ p }: { p: Extract<PendingEdit, { kind: 'feature'
   const [target, setTarget] = useState<string>(() => (s.lastPaintEvent && w.get('event', s.lastPaintEvent) ? s.lastPaintEvent : 'new-event'));
   const [evName, setEvName] = useState(feature ? `${feature.name} changes` : '');
   const [end, setEnd] = useState<Instant | null>(null);
+  // How it appears over its event's length (D79): a line draws itself, an area grows, a point fades in.
+  const [anim, setAnim] = useState<FeatureAnimStyle | ''>(kind === 'line' ? 'draw' : kind === 'area' ? 'grow' : 'fade');
   const events = w.all('event').filter((x) => x.id !== BASE_EVENT_ID).sort((a, b) => a.start_day - b.start_day || a.start_ms - b.start_ms);
   const owners = w.all('entity').filter((x) => x.type_id === 'polity' || x.type_id === 'faction').sort((a, b) => a.name.localeCompare(b.name));
   // The shape in force at the date viewed (for "correct"), and when it began.
@@ -133,10 +135,10 @@ export function FeaturePrompt({ p }: { p: Extract<PendingEdit, { kind: 'feature'
       s.set({ lastPaintEvent: target });
     }
     if (feature) {
-      s.execute((wd, en) => cmd.reshapeFeature(wd, en, { feature: feature.id, parts: p.parts, mode }));
+      s.execute((wd, en) => cmd.reshapeFeature(wd, en, { feature: feature.id, parts: p.parts, mode, anim: mode.kind === 'new' && anim ? anim : null }));
       s.set({ selection: { kind: 'feature', id: feature.id }, reshapeId: null });
     } else {
-      const id = s.execute((wd) => cmd.createFeature(wd, { layerId: p.layerId, name, entity: owner || undefined, parts: p.parts, mode }));
+      const id = s.execute((wd) => cmd.createFeature(wd, { layerId: p.layerId, name, entity: owner || undefined, parts: p.parts, mode, anim: mode.kind === 'new' && anim ? anim : null }));
       if (id) s.set({ selection: { kind: 'feature', id } });
     }
     close();
@@ -196,14 +198,31 @@ export function FeaturePrompt({ p }: { p: Extract<PendingEdit, { kind: 'feature'
               </label>
               {target === 'new-event' && <>
                 <label>Event name<input value={evName} placeholder={feature ? `${feature.name} changes` : `${name} appears`} onChange={(ev) => setEvName(ev.target.value)} data-testid="feature-event-name" /></label>
-                <label>Ends (optional)<DateField value={end} allowEmpty placeholder="(happens at once)" onChange={setEnd} /></label>
+                <label>Ends (optional)<DateField value={end} allowEmpty placeholder="(happens at once)" onChange={setEnd} testId="feature-event-end" /></label>
               </>}
+              {(target === 'new-event' ? !!end : w.get('event', target)?.end_day !== null) && (
+                <label>How it appears over the event
+                  <AnimSelect kind={kind} value={anim} onChange={setAnim} testId="feature-anim" />
+                </label>
+              )}
             </div>
           )}
         </div>
         <div className="modal-actions"><button onClick={close}>Cancel</button><button className="primary" onClick={confirm} data-testid="confirm-feature">Apply <span className="key">Enter</span></button></div>
       </div>
     </div>
+  );
+}
+
+/** How a shape appears over its event (D79). */
+function AnimSelect({ kind, value, onChange, testId }: { kind: FeatureKind; value: FeatureAnimStyle | ''; onChange: (v: FeatureAnimStyle | '') => void; testId?: string }) {
+  return (
+    <select value={value} onChange={(ev) => onChange(ev.target.value as FeatureAnimStyle | '')} data-testid={testId}>
+      <option value="">At once</option>
+      {kind !== 'point' && <option value="draw">{kind === 'line' ? 'Draws itself (an arrow\'s head travels)' : 'Its outline draws itself'}</option>}
+      <option value="grow">{kind === 'point' ? 'Grows' : 'Grows from its middle'}</option>
+      <option value="fade">Fades in</option>
+    </select>
   );
 }
 
@@ -225,6 +244,7 @@ export function FeaturePanel({ id }: { id: string }) {
   const color = featureColor(kind, layer.style, f.style, ownerColor);
   const look = (patch: FeatureStyle) => s.execute((wd) => cmd.updateFeature(wd, id, { style: patch }));
   const steps = e.featureHistory(id);
+  const animOf = (effectId: string): FeatureAnimStyle | '' => { const tr = parseJSON<{ style?: FeatureAnimStyle } | null>(w.get('effect', effectId)?.transition ?? '', null); return tr?.style ?? ''; };
   const now = e.featuresAt(f.layer_id, s.time).some((x) => x.feature === id);
   const owners = w.all('entity').filter((x) => x.type_id === 'polity' || x.type_id === 'faction').sort((a, b) => a.name.localeCompare(b.name));
   const sameKind = w.all('layer').filter((l) => l.space_id === layer.space_id && l.kind === layer.kind);
@@ -301,6 +321,12 @@ export function FeaturePanel({ id }: { id: string }) {
               {!inEvent && x.t.day !== -Infinity && x.parts && x === steps[0] && <button className="small" title="Shown from the beginning of time instead of from this date" onClick={() => s.execute((wd) => cmd.shapeFromBeginning(wd, x.effectId))}>From the beginning</button>}
               {steps.length > 1 && <button className="small danger" title="Remove this step" onClick={() => s.execute((wd) => cmd.deleteEffect(wd, x.effectId))}>×</button>}
             </span>
+            {/* In an event with a length, the shape can appear over it (D79). */}
+            {inEvent && x.parts && ev!.end_day !== null && kind && (
+              <label className="inline small-note">Appears
+                <AnimSelect kind={kind} value={animOf(x.effectId)} onChange={(v) => s.execute((wd) => cmd.setShapeAnimation(wd, x.effectId, v || null))} testId="feature-step-anim" />
+              </label>
+            )}
           </div>
         );
       })}
