@@ -62,8 +62,8 @@ Follows from D2. The test drives the real interface exactly as a person would.
 ### D38. No maps of cities (the user, 17 November 2026)
 
 The user dropped maps of cities ("forget about creating maps for cities and stuff"). Every map stays a sphere with its
-own radius, so the plane version of the kernel is no longer planned for city plans. Whether the solar system and the
-galaxy are still wanted is to be confirmed with the user; until then they stay in the long-term roadmap (space maps).
+own radius, so the plane version of the kernel is no longer planned for city plans. **Confirmed 17 November 2026:**
+space maps (the solar system, nearby stars, the galaxy) are still wanted; they stay in the roadmap.
 
 ### D37. Export: "All" alone by default; an estimated size
 

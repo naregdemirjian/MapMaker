@@ -247,8 +247,8 @@ Remaining bottlenecks:
 
 ## Next priorities (after the second feedback round)
 
-1. The user tries the second round (installer from the latest "Windows build and tests" run) and reports back; confirm
-   whether the solar system and galaxy maps are still wanted (D38).
+1. The user tries the second round (installer from the latest "Windows build and tests" run) and reports back. Space
+   maps are still wanted (D38); maps of cities are not.
 2. Characters: icons or pictures for markers, a visible trail in shots, characters following events automatically.
 3. Examine face assembly under firm snapping (Known bugs 10); then make face assembly incremental too.
 4. Reverse D1 (deck.gl renderer).

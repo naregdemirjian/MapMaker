@@ -201,5 +201,5 @@ status. Last updated: 17 November 2026 (after the user's second feedback round; 
 | Drag the date, title and events box freely | Tested | `sequence`, `e2e/workflows` (follows the pointer; undo) | |
 | Export: only "All" chosen at first, at the top, the others explained as separate | Tested | `sequence`, `e2e/workflows`, `e2e/vertical-slice` | D37. The choice is kept with the shot |
 | Estimated total export size | Tested | `e2e/workflows` (compared with a real export) | D37 |
-| No maps of cities | Done | | D38 |
+| No maps of cities (space maps still wanted) | Done | | D38 |
 
