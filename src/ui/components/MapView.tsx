@@ -111,8 +111,9 @@ export function MapView() {
     if (!shot || shot.graticule) passes.add('graticule');
     if (!shot || shot.labels) passes.add('labels');
     if (!shot || shot.characters !== false) passes.add('characters');
+    if (!shot || shot.cities !== false) passes.add('cities');
     try {
-      s.renderer.render(ctx, view, s.world, s.engine, s.spaceId, time, { passes, transparent: !!shot?.transparent, layerIds: layers, basemap, referenceBorders: !shot && s.referenceBorders, transitions: shot ? transitionOptions(shot, s.shotFrame) : undefined, mediaSeconds: shot ? s.shotFrame / shot.fps : 0 });
+      s.renderer.render(ctx, view, s.world, s.engine, s.spaceId, time, { passes, transparent: !!shot?.transparent, layerIds: layers, basemap, referenceBorders: !shot && s.referenceBorders, transitions: shot ? transitionOptions(shot, s.shotFrame) : undefined, mediaSeconds: shot ? s.shotFrame / shot.fps : 0, trails: !!shot?.trails });
     } catch (e) {
       console.error(e);
     }
@@ -314,7 +315,7 @@ export function MapView() {
     }
     // Select tool: a character's marker is picked up (dragged to move it, clicked to select it).
     if (!presentation && e.button === 0 && s.tool === 'select') {
-      const hit = s.renderer.lastCharacters.find((c) => { const q = lonLatToScreen(view, c.lon, c.lat); return !!q && Math.hypot(q[0] - p[0], q[1] - p[1]) <= 11; });
+      const hit = [...s.renderer.lastCharacters, ...s.renderer.lastCities].find((c) => { const q = lonLatToScreen(view, c.lon, c.lat); return !!q && Math.hypot(q[0] - p[0], q[1] - p[1]) <= 11; });
       if (hit) { drag.current = { kind: 'character', entity: hit.entity, moved: 0 }; setCursor(p); return; }
     }
     const wantsPan = e.button === 1 || e.button === 2 || presentation || s.tool === 'select' || (e as unknown as KeyboardEvent).shiftKey;

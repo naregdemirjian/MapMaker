@@ -474,15 +474,15 @@ try {
     // Only "All" is chosen at first; the separate layers are explained and chosen here.
     assert.ok(await page.getByTestId('pass-all').isChecked());
     assert.ok(!(await page.getByTestId('pass-fills').isChecked()));
-    for (const p of ['background', 'land', 'fills', 'borders', 'labels', 'characters', 'overlays']) await page.getByTestId(`pass-${p}`).check();
-    await page.waitForFunction(() => JSON.parse((window as any).__mapmaker.store.world.all('sequence')[0].settings).exportPasses?.length === 8);
+    for (const p of ['background', 'land', 'fills', 'borders', 'cities', 'labels', 'characters', 'overlays']) await page.getByTestId(`pass-${p}`).check();
+    await page.waitForFunction(() => JSON.parse((window as any).__mapmaker.store.world.all('sequence')[0].settings).exportPasses?.length === 9);
     const ex = await runExport('export-preview');
     first = ex;
     const m = ex.manifest;
     assert.deepEqual(m.resolution, [480, 270]);
     assert.deepEqual(m.frames, [0, 23]);
     const passes: string[] = m.passes.map((p: any) => p.name);
-    assert.deepEqual(passes.sort(), ['all', 'background', 'borders', 'characters', 'fills', 'labels', 'land', 'overlays']);
+    assert.deepEqual(passes.sort(), ['all', 'background', 'borders', 'characters', 'cities', 'fills', 'labels', 'land', 'overlays']);
     for (const pass of passes) {
       const files: string[] = readdirSync(join(ex.dir, pass)).filter((f) => f.endsWith('.png'));
       assert.equal(files.length, 24, `${pass}: 24 frames`);

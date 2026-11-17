@@ -59,6 +59,13 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D40. Cities are placements too
+
+Cities (entities of type "City or settlement") use the same dated placements as characters (D35), but never travel:
+a city is founded at a date (or "From the beginning", on the starting map), moved at once from a date, and abandoned.
+They have their own section ("+ City"), share the "Characters & cities" tool, and are drawn as a white dot with a
+serif name in their own layer under the country labels ("Cities", exported separately, hideable per shot).
+
 ### D39. Firm snapping: the real causes, fixed; a gentler retry instead of a refusal
 
 The "two separated regions with one label" seen under firm snapping (D26) was not face assembly. Found by turning the

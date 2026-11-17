@@ -33,7 +33,8 @@ while Map Maker is closed. Don't keep projects inside OneDrive or Dropbox while 
 - Record history as dated events, or change the map from a date on without an event; move through time and see the
   map exactly as it was on any date, from millennia down to milliseconds. See what a country gained and lost in any
   day, month, year or span of years.
-- Characters are points that travel between their places over time.
+- Characters are points that travel between their places over time (with their routes in shots, if you like); cities
+  are founded, moved and abandoned at dates.
 - Animate changes (an advancing front from the border, an expansion or a fade); style labels, fill countries with
   colours, flags, pictures or videos; add a current-events box to shots.
 - Make shots and export PNG image sequences with transparency, in separate layers for Premiere, at HD, 4K, 8K or any
@@ -42,7 +43,7 @@ while Map Maker is closed. Don't keep projects inside OneDrive or Dropbox while 
   end at the coast; today's borders can be shown as a drawing guide.
 - Undo and redo, named versions, automatic backups, and recovery of a damaged project from its latest healthy backup.
 
-Not there yet: terrain, rivers and cities, military fronts, routes, environmental events, space maps and more.
+Not there yet: terrain, rivers, military fronts, environmental events, space maps and more.
 See `docs/REQUIREMENTS.md`.
 
 ## For development

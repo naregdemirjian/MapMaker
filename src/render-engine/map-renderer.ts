@@ -8,7 +8,7 @@
 import { geoPath, geoGraticule10, geoCircle, geoCentroid, geoArea, type GeoPermissibleObjects } from 'd3-geo';
 import type { World } from '../world-model/world.ts';
 import type { Engine, FaceState, Assignment, CompiledTransition } from '../temporal-engine/engine.ts';
-import { parseJSON } from '../temporal-engine/engine.ts';
+import { parseJSON, slerpLonLat } from '../temporal-engine/engine.ts';
 import { type Instant, compare, diffMs } from '../core-time/index.ts';
 import { BASE_EVENT_ID } from '../world-model/schema.ts';
 import type { Vec3 } from '../geo-kernel/vec.ts';
@@ -20,11 +20,11 @@ import { planeShape, placeLabel, lineChoices, textWidthEm, blockHeightEm, LINE_H
 import { resolveLabelStyle, labelSize, labelFont, labelText, type LabelStyle, type CountryLabel } from './label-style.ts';
 import { imageNow, videoNow, drawImageFit, type MediaChannel } from './assets.ts';
 
-type LabelEntity = { name: string; style?: string; color?: string };
+type LabelEntity = { name: string; style?: string; color?: string; type_id?: string };
 
-export type PassName = 'background' | 'graticule' | 'land' | 'fills' | 'borders' | 'labels' | 'characters';
+export type PassName = 'background' | 'graticule' | 'land' | 'fills' | 'borders' | 'cities' | 'labels' | 'characters';
 /** Drawing order. The grid lies under the land, so stacked export passes match the full picture. */
-export const ALL_PASSES: PassName[] = ['background', 'graticule', 'land', 'fills', 'borders', 'labels', 'characters'];
+export const ALL_PASSES: PassName[] = ['background', 'graticule', 'land', 'fills', 'borders', 'cities', 'labels', 'characters'];
 
 export interface MapStyle {
   ocean: string;
@@ -58,6 +58,8 @@ export interface RenderOptions {
   mediaSeconds?: number;
   /** 'export' for exports (videos sought beforehand by prepareVideos); 'live' otherwise. */
   mediaChannel?: MediaChannel;
+  /** Draw each character's route so far (shots with trails on). */
+  trails?: boolean;
 }
 
 /** A picture or video fill (see domain/commands.ts CountryFill). */
@@ -147,6 +149,10 @@ export class MapRenderer {
   lastLabels: LabelInfo[] = [];
   /** The characters drawn in the last frame, where (screen) and on the map, for picking and tests. */
   lastCharacters: Array<{ entity: string; name: string; x: number; y: number; lon: number; lat: number; moving: boolean }> = [];
+  /** How many characters' trails the last frame drew. */
+  lastTrails = 0;
+  /** The cities drawn in the last frame (same form). */
+  lastCities: Array<{ entity: string; name: string; x: number; y: number; lon: number; lat: number; moving: boolean }> = [];
   /** The animated changes drawn in the last frame (style and eased progress), for checks and tests. */
   lastTransitions: Array<{ style: string; progress: number }> = [];
 
@@ -329,6 +335,9 @@ export class MapRenderer {
       ctx.restore();
     }
 
+    this.lastCities = [];
+    if (opts.passes.has('cities')) this.drawCities(ctx, view, engine, spaceId, t, entities);
+
     // One label per country: a country on several layers (its land, and its military control, say) is
     // labelled from the lowest layer it is on.
     if (opts.passes.has('labels')) for (const { states, clip } of prepared) {
@@ -338,7 +347,8 @@ export class MapRenderer {
     if (opts.passes.has('labels')) this.drawLabels(ctx, labels, style, u);
     this.lastLabels = labels;
     this.lastCharacters = [];
-    if (opts.passes.has('characters')) this.drawCharacters(ctx, view, engine, spaceId, t, entities);
+    this.lastTrails = 0;
+    if (opts.passes.has('characters')) this.drawCharacters(ctx, view, engine, spaceId, t, entities, !!opts.trails);
     ctx.restore();
   }
 
@@ -1033,16 +1043,81 @@ export class MapRenderer {
   /** The look of one country's label (null: hidden); set for each frame by render(). */
   private labelLook: (id: string, name: string) => { style: LabelStyle; text: string } | null = (_id, name) => ({ style: resolveLabelStyle(), text: name });
 
+  /** Cities (settlements): a small white dot and the name in a serif face, under the country labels. */
+  private drawCities(ctx: CanvasRenderingContext2D, view: View, engine: Engine, spaceId: string, t: Instant, entities: Map<string, LabelEntity>): void {
+    const u = view.unit;
+    const list = engine.charactersAt(spaceId, t).filter((c) => entities.get(c.entity)?.type_id === 'settlement');
+    if (!list.length) return;
+    ctx.save();
+    ctx.lineJoin = 'round';
+    for (const c of list) {
+      const e = entities.get(c.entity)!;
+      const p = view.projection([c.lon, c.lat]);
+      if (!p || p[0] < -50 || p[1] < -50 || p[0] > view.width + 50 || p[1] > view.height + 50) continue;
+      const r = 4.5 * u;
+      ctx.beginPath();
+      ctx.arc(p[0], p[1], r, 0, Math.PI * 2);
+      ctx.fillStyle = '#f4efe6';
+      ctx.fill();
+      ctx.lineWidth = 1.6 * u;
+      ctx.strokeStyle = '#0a1018';
+      ctx.stroke();
+      ctx.font = `500 ${(17 * u).toFixed(1)}px Georgia, "Times New Roman", serif`;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.lineWidth = 3.5 * u;
+      ctx.strokeStyle = 'rgba(10,16,24,0.8)';
+      ctx.strokeText(e.name, p[0] + r + 4 * u, p[1]);
+      ctx.fillStyle = '#f4efe6';
+      ctx.fillText(e.name, p[0] + r + 4 * u, p[1]);
+      this.lastCities.push({ entity: c.entity, name: e.name, x: p[0], y: p[1], lon: c.lon, lat: c.lat, moving: c.moving });
+    }
+    ctx.restore();
+  }
+
   /** Characters: a marker in the character's colour and its name beside it. Points, never territory. */
-  private drawCharacters(ctx: CanvasRenderingContext2D, view: View, engine: Engine, spaceId: string, t: Instant, entities: Map<string, LabelEntity>): void {
+  private drawCharacters(ctx: CanvasRenderingContext2D, view: View, engine: Engine, spaceId: string, t: Instant, entities: Map<string, LabelEntity>, trails = false): void {
     const u = view.unit;
     const list = engine.charactersAt(spaceId, t);
     if (!list.length) return;
     ctx.save();
     ctx.lineJoin = 'round';
+    // Trails: the route each character has travelled so far, in its colour, under the markers.
+    if (trails) for (const c of list) {
+      const e = entities.get(c.entity);
+      if (!e || e.type_id === 'settlement') continue;
+      const track = engine.characterTrack(spaceId, c.entity);
+      const path = new Path2D();
+      let any = false;
+      for (let i = 1; i < track.length; i++) {
+        const a = track[i - 1], b = track[i];
+        if (compare(a.t, t) > 0) break;
+        if (a.off || b.off || b.arrive !== 'travel' || a.t.day === -Infinity) continue;
+        // Up to where the character is now on the last leg.
+        const done = compare(b.t, t) <= 0 ? 1 : Math.max(0, Math.min(1, diffMs(a.t, t) / Math.max(1, diffMs(a.t, b.t))));
+        const n = Math.max(2, Math.ceil(24 * done));
+        for (let k = 0; k <= n; k++) {
+          const [lon, lat] = slerpLonLat(a.lon, a.lat, b.lon, b.lat, (done * k) / n);
+          const q = view.projection([lon, lat]);
+          if (!q) continue;
+          if (k === 0) path.moveTo(q[0], q[1]); else path.lineTo(q[0], q[1]);
+          any = true;
+        }
+      }
+      if (!any) continue;
+      this.lastTrails++;
+      ctx.lineWidth = 3 * u;
+      ctx.strokeStyle = 'rgba(10,16,24,0.6)';
+      ctx.stroke(path);
+      ctx.lineWidth = 1.8 * u;
+      ctx.strokeStyle = e.color ?? '#ffd166';
+      ctx.setLineDash([6 * u, 4 * u]);
+      ctx.stroke(path);
+      ctx.setLineDash([]);
+    }
     for (const c of list) {
       const e = entities.get(c.entity);
-      if (!e) continue;
+      if (!e || e.type_id === 'settlement') continue;
       const p = view.projection([c.lon, c.lat]);
       if (!p || p[0] < -50 || p[1] < -50 || p[0] > view.width + 50 || p[1] > view.height + 50) continue;
       const r = 8 * u;

@@ -27,6 +27,10 @@ export interface ShotSettings {
   labels: boolean;
   /** Characters' markers and names (absent: shown). */
   characters?: boolean;
+  /** Each character's route so far, drawn behind it. */
+  trails?: boolean;
+  /** Cities' dots and names (absent: shown). */
+  cities?: boolean;
   transparent: boolean;
   /** Folder to export into; empty or absent: the project's exports folder. */
   exportDir?: string | null;

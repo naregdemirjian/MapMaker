@@ -102,7 +102,7 @@ status. Last updated: 17 November 2026 (after the user's second feedback round; 
 | Layer styling | Partial | | Opacity and border width per layer, no editor; no hatching or outline styles (a control layer currently looks like a second fill) |
 | Exporting layers independently | Partial | `e2e/workflows` | Passes are separated by kind (fills, borders, labels…) across visible layers; a single layer is exported by hiding the others |
 | Countries and factions | Tested | `e2e/*` | |
-| Characters, cities, units as entities | Partial | | Can be created and described; no place on the map yet (Stages 4, 7) |
+| Characters, cities, units as entities | Partial | `characters`, `e2e/workflows` 'A character', 'A city' | Characters travel between dated places; cities are founded (at a date or from the beginning), moved at once and abandoned; both have their own export layers. Units have no place on the map yet (Stage 7); city renames over time not yet |
 | Relationships (part of, at war with, successor of…) | Not implemented | | Stage 4. Annexation (an intention tied to two countries) exists and is tested |
 
 ## Military, characters and movement

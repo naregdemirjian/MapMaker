@@ -91,3 +91,25 @@ test('positions on a track across the 180° line take the short way round', () =
   const mid = positionOnTrack(tr, Y(1001))!;
   assert.ok(Math.abs(Math.abs(mid.lon) - 180) < 0.2, `crosses 180°, not the long way: ${mid.lon}`);
 });
+
+test('cities: founded at a date or from the beginning, moved at once (never travelling), abandoned', () => {
+  const s = setup();
+  const city = cmd.createEntity(s.world, { type_id: 'settlement', name: 'Port Aster' }).result;
+  const at = (t: ReturnType<typeof Y>) => s.engine.charactersAt(s.space, t).find((c) => c.entity === city) ?? null;
+  const founded = cmd.placeCharacter(s.world, { spaceId: s.space, entity: city, lon: 12, lat: 41, mode: { kind: 'change', t: Y(1500) } });
+  cmd.placeCharacter(s.world, { spaceId: s.space, entity: city, lon: 14, lat: 40, mode: { kind: 'change', t: Y(1600) } });
+  assert.equal(at(Y(1499)), null, 'not yet founded');
+  assert.deepEqual(at(Y(1550)), { entity: city, lon: 12, lat: 41, moving: false }, 'stays put until it moves (cities do not travel)');
+  assert.equal(at(Y(1600))!.lon, 14);
+  cmd.characterLeaves(s.world, { spaceId: s.space, entity: city, mode: { kind: 'change', t: Y(1700) } });
+  assert.equal(at(Y(1701)), null, 'abandoned');
+  // From the beginning: on the starting map.
+  cmd.placementFromBeginning(s.world, founded.result);
+  assert.deepEqual(at(Y(-2000)), { entity: city, lon: 12, lat: 41, moving: false });
+  assert.deepEqual(s.engine.conflicts, []);
+  // A placement inside an event cannot be moved to the beginning that way.
+  const ev = cmd.createEvent(s.world, { name: 'Refounding', start: Y(1800) }).result;
+  const inEvent = cmd.placeCharacter(s.world, { spaceId: s.space, entity: city, lon: 13, lat: 42, mode: { kind: 'new', eventId: ev } });
+  assert.throws(() => cmd.placementFromBeginning(s.world, inEvent.result), /belongs to an event/);
+  assert.equal(at(Y(1850))!.lat, 42, 'refounded by the event');
+});

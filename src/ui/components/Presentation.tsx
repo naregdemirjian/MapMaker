@@ -259,7 +259,9 @@ export function ShotEditor() {
         <Group title="Look">
           <label className="check"><input type="checkbox" checked={shot.graticule} onChange={(e) => update({ graticule: e.target.checked })} /> Latitude and longitude grid</label>
           <label className="check"><input type="checkbox" checked={shot.labels} onChange={(e) => update({ labels: e.target.checked })} /> Country labels</label>
+          <label className="check"><input type="checkbox" checked={shot.cities !== false} onChange={(e) => update({ cities: e.target.checked })} data-testid="shot-cities" /> Cities</label>
           <label className="check"><input type="checkbox" checked={shot.characters !== false} onChange={(e) => update({ characters: e.target.checked })} data-testid="shot-characters" /> Characters</label>
+          {shot.characters !== false && <label className="check"><input type="checkbox" checked={!!shot.trails} onChange={(e) => update({ trails: e.target.checked })} data-testid="shot-trails" /> Their routes so far (trails)</label>}
         </Group>
         <Group title="Text">
           <p className="muted">Drag the date, the title or the events box on the preview to place them anywhere.</p>

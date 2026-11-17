@@ -96,7 +96,7 @@ const TOOLS: Array<{ id: Tool; name: string; hint: string }> = [
   { id: 'polygon', name: 'Precise shape', hint: 'Click points; double-click or Enter to finish; Esc to cancel.' },
   { id: 'pen', name: 'Border pen', hint: 'Draw a border at your own pace: drag or click, let go, pan and zoom, carry on later. Enter finishes; Backspace takes back the last piece. Drafts are kept with the project.' },
   { id: 'vertex', name: 'Border points', hint: 'Drag a border point to correct the border shape for all time. Double-click a border to add a point; Delete removes the point under the cursor.' },
-  { id: 'place', name: 'Characters', hint: 'Click the map to put the chosen character there from the date being viewed (a point, no borders). With Select, drag a character to move it.' },
+  { id: 'place', name: 'Characters & cities', hint: 'Click the map to put the chosen character or city there from the date being viewed (a point, no borders). With Select, drag one to move it.' },
 ];
 
 
@@ -160,13 +160,17 @@ export function ToolBar() {
     </div>
     {s.tool === 'place' && (
       <div className="toolbar sub">
-        <label className="inline">Character
+        <label className="inline">Place
           <select value={s.placeValue ?? ''} onChange={(e) => s.set({ placeValue: e.target.value || null })} data-testid="place-character">
             <option value="">Choose…</option>
-            {w.all('entity').filter((e) => e.type_id === 'character').sort((a, b) => a.name.localeCompare(b.name)).map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+            {[['character', 'Characters'], ['settlement', 'Cities']].map(([type, title]) => (
+              <optgroup key={type} label={title}>
+                {w.all('entity').filter((e) => e.type_id === type).sort((a, b) => a.name.localeCompare(b.name)).map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+              </optgroup>
+            ))}
           </select>
         </label>
-        <span className="muted">{s.placeValue ? `Click the map to put ${w.get('entity', s.placeValue)?.name ?? 'them'} there from ${fmt(s.time)} on.` : 'Choose a character, or make one under Characters (+ New).'}</span>
+        <span className="muted">{s.placeValue ? `Click the map to put ${w.get('entity', s.placeValue)?.name ?? 'them'} there from ${fmt(s.time)} on.` : 'Choose a character or a city, or make one (+ Character, + City).'}</span>
       </div>
     )}
     {rec && (
@@ -198,24 +202,26 @@ export function Outliner() {
   const currentSpace = w.get('map_space', s.spaceId);
   const political = w.all('entity').filter((e) => e.type_id === 'polity' || e.type_id === 'faction').sort((a, b) => a.name.localeCompare(b.name));
   const characters = w.all('entity').filter((e) => e.type_id === 'character').sort((a, b) => a.name.localeCompare(b.name));
-  const others = w.all('entity').filter((e) => e.type_id !== 'polity' && e.type_id !== 'faction' && e.type_id !== 'body' && e.type_id !== 'character').sort((a, b) => a.name.localeCompare(b.name));
+  const others = w.all('entity').filter((e) => e.type_id !== 'polity' && e.type_id !== 'faction' && e.type_id !== 'body' && e.type_id !== 'character').sort((a, b) => (a.type_id === 'settlement' ? 0 : 1) - (b.type_id === 'settlement' ? 0 : 1) || a.name.localeCompare(b.name));
   const events = w.all('event').filter((e) => e.id !== BASE_EVENT_ID).sort((a, b) => a.start_day - b.start_day || a.start_ms - b.start_ms);
   const createEntity = () => {
     if (!newEntity || !newEntity.name.trim()) return;
     const id = s.execute((wd) => cmd.createEntity(wd, { type_id: newEntity.type, name: newEntity.name }));
     if (id) {
-      if (newEntity.type === 'character') s.set({ selection: { kind: 'entity', id }, placeValue: id, tool: 'place' });
+      if (newEntity.type === 'character' || newEntity.type === 'settlement') s.set({ selection: { kind: 'entity', id }, placeValue: id, tool: 'place' });
       else s.set({ selection: { kind: 'entity', id }, paintValue: newEntity.type === 'polity' || newEntity.type === 'faction' ? id : s.paintValue });
     }
     setNewEntity(null);
   };
-  const newEntityForm = (forCharacters: boolean) => newEntity && (newEntity.type === 'character') === forCharacters && (
+  // The form for a new entity shows in the section it was asked for from.
+  const sectionOf = (type: string) => (type === 'character' ? 'characters' : type === 'settlement' ? 'cities' : 'countries');
+  const newEntityForm = (section: 'countries' | 'characters' | 'cities') => newEntity && sectionOf(newEntity.type) === section && (
     <div className="new-entity">
-      <input autoFocus placeholder="Name" value={newEntity.name} onChange={(e) => setNewEntity({ ...newEntity, name: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && createEntity()} data-testid={forCharacters ? 'new-character-name' : 'new-entity-name'} />
-      {!forCharacters && <select value={newEntity.type} onChange={(e) => setNewEntity({ ...newEntity, type: e.target.value })}>
-        {types.filter((t) => t.id !== 'body' && t.id !== 'character').map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+      <input autoFocus placeholder="Name" value={newEntity.name} onChange={(e) => setNewEntity({ ...newEntity, name: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && createEntity()} data-testid={section === 'characters' ? 'new-character-name' : section === 'cities' ? 'new-city-name' : 'new-entity-name'} />
+      {section === 'countries' && <select value={newEntity.type} onChange={(e) => setNewEntity({ ...newEntity, type: e.target.value })}>
+        {types.filter((t) => t.id !== 'body' && t.id !== 'character' && t.id !== 'settlement').map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
       </select>}
-      <button onClick={createEntity} data-testid={forCharacters ? 'new-character-create' : 'new-entity-create'}>Create</button>
+      <button onClick={createEntity} data-testid={section === 'characters' ? 'new-character-create' : section === 'cities' ? 'new-city-create' : 'new-entity-create'}>Create</button>
       <button onClick={() => setNewEntity(null)}>Cancel</button>
     </div>
   );
@@ -263,18 +269,22 @@ export function Outliner() {
         ))}
       </Section>
       <Section title="Countries and factions" onAdd={() => setNewEntity({ name: '', type: 'polity' })} addLabel="New">
-        {newEntityForm(false)}
+        {newEntityForm('countries')}
         {political.map(entityRow)}
         {political.length > 0 && <button className="link pad-link" onClick={() => s.set({ dialog: 'label-style' })} data-testid="open-label-style">Label style for all countries…</button>}
         {currentSpace && basemapSourceOf(currentSpace) === 'natural-earth' && <button className="link pad-link" onClick={() => s.set({ dialog: 'add-countries' })} data-testid="open-add-countries">Add today's countries…</button>}
         {!political.length && !newEntity && <div className="muted pad">None yet.</div>}
       </Section>
       <Section title="Characters" onAdd={() => setNewEntity({ name: '', type: 'character' })} addLabel="Character">
-        {newEntityForm(true)}
+        {newEntityForm('characters')}
         {characters.map(entityRow)}
         {!characters.length && !(newEntity?.type === 'character') && <div className="muted pad">None yet. Characters are points on the map that move over time.</div>}
       </Section>
-      {others.length > 0 && <Section title="Cities and others">{others.map(entityRow)}</Section>}
+      <Section title="Cities and others" onAdd={() => setNewEntity({ name: '', type: 'settlement' })} addLabel="City">
+        {newEntityForm('cities')}
+        {others.map(entityRow)}
+        {!others.length && newEntity?.type !== 'settlement' && <div className="muted pad">None yet. Cities are points on the map, founded and abandoned at dates.</div>}
+      </Section>
       <Section title="Events" onAdd={() => s.set({ dialog: 'new-event' })} addLabel="Event">
         {events.filter((e) => eventVisible(w, e.id)).map((e) => (
           <div key={e.id} className={`row ${s.selection?.kind === 'event' && s.selection.id === e.id ? 'sel' : ''} ${e.variant_group && !e.variant_active ? 'dim' : ''}`}
@@ -352,7 +362,7 @@ function EntityPanel({ id }: { id: string }) {
       ))}
       {!changes.length && e.type_id !== 'character' && <div className="muted">None yet.</div>}
       {(e.type_id === 'polity' || e.type_id === 'faction') && <><CountryHistorySection id={id} /><CountryFillSection id={id} /><CountryLabelSection id={id} /></>}
-      {e.type_id === 'character' && <CharacterSection id={id} />}
+      {(e.type_id === 'character' || e.type_id === 'settlement') && <CharacterSection id={id} />}
       <button className="danger" onClick={() => { if (confirm(`Delete ${e.name}? Events that refer to it will be flagged in History Health.`)) { s.execute((wd) => cmd.deleteEntity(wd, id)); s.set({ selection: null }); } }}>Delete</button>
     </div>
   );

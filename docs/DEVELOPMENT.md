@@ -73,7 +73,7 @@ For development (Linux or Windows, Node 22.18 or newer):
 | `xvfb-run -a node --disable-warning=ExperimentalWarning e2e/desktop.e2e.ts` | The 5-step desktop app test (build first) |
 | `node --disable-warning=ExperimentalWarning dist/server.mjs --port 4317 --projects <folder> [--open]` | Runs the app |
 | `sh scripts/check-all.sh` | Every check: type check, unit tests, build, the three interface tests |
-| `npm test` | 150 unit, randomised and scenario tests |
+| `npm test` | 151 unit, randomised and scenario tests |
 | `node --disable-warning=ExperimentalWarning test/geo-kernel.stress.ts <seeds> <rings>` | Long randomised kernel run |
 | `node --disable-warning=ExperimentalWarning e2e/vertical-slice.e2e.ts` | The 17-step interface test in Chrome (build first); screenshots in `e2e/output/` |
 | `node --disable-warning=ExperimentalWarning e2e/workflows.e2e.ts` | The 10-step workflow and export-inspection test; screenshots in `e2e/output/workflows/` |
@@ -138,7 +138,7 @@ The approved roadmap has 14 stages (0–13). Where each stands:
 
 ## Tests
 
-All pass as of 17 November 2026 (150 unit and randomised tests in 21 files, 22 + 17 + 5 interface steps).
+All pass as of 17 November 2026 (151 unit and randomised tests in 21 files, 22 + 18 + 5 interface steps).
 `sh scripts/check-all.sh` runs everything and prints ALL CHECKS PASSED only when every check passed.
 
 | Suite | Count | What it proves |
@@ -161,7 +161,7 @@ All pass as of 17 November 2026 (150 unit and randomised tests in 21 files, 22 +
 | `test/events-box.test.ts` | 2 | Current events: started and not ended, lingering, alternatives, groups, fades, limits |
 | `test/sequence.test.ts` | 6 | Screen seconds through even and eased pacing; transition settings and styles; the still camera and its reset; moving texts and the events box; export choices and sizes |
 | `test/label-place.test.ts` | 6 | Labels: every large country of today's 242 gets a place inside it in four projections; 24 countries labelled near their middle; across 180° and around the pole; lines for long names; all 242 placed quickly; the part on screen when zoomed in |
-| `test/characters.test.ts` | 4 | Characters: travelling between places along the shortest path, appearing, leaving the map, moving a placement, in events and from the start, undo, reload, deleted characters reported, across 180° |
+| `test/characters.test.ts` | 5 | Characters: travelling between places along the shortest path, appearing, leaving the map, moving a placement, in events and from the start, undo, reload, deleted characters reported, across 180°; cities founded, moved at once, abandoned, from the beginning |
 | `test/history-view.test.ts` | 2 | Periods (day, month, year, several years, before year 1), stepping; a country's gains and losses in a period and the changes that made them; lost and won back within a period |
 | `test/basemap.test.ts` | 16 | Natural Earth files decode correctly at both scales (land about 29% of the planet, no inside-out polygons, known places on land and at sea across 180° and the poles); dataset record; per-world setting and per-layer clipping setting with undo; culling never drops anything on screen (160 random views) |
 | `e2e/vertical-slice.e2e.ts` | 17 steps | The vertical slice in Chrome: projects, drawing, Earth's geography and data sources, border points, versions, events, dates, version restore and undo, full restart, animation, export with data credits, identical re-export, 1080p, coastline clipping |

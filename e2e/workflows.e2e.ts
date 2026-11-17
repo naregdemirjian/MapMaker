@@ -440,6 +440,38 @@ try {
     await h.screenshot('character-panel');
   });
 
+  await h.step('A city: founded at a date, moved at once (never travelling), abandoned; drawn as its own layer', async () => {
+    await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: -30, lat: 45, zoom: 1.6, rotation: 0, projection: 'equirectangular' }));
+    await h.setDate('1500');
+    const K1: LL = [-38, 58], K2: LL = [-25, 56];
+    await page.getByRole('button', { name: '+ City' }).click();
+    await page.getByTestId('new-city-name').fill('Port Aster');
+    await page.getByTestId('new-city-create').click();
+    await page.getByTestId('character-panel').waitFor();
+    let q = await h.toPage(K1); await page.mouse.click(q[0], q[1]);
+    const cities = () => page.evaluate(() => (window as any).__mapmaker.store.renderer.lastCities) as Promise<Array<{ name: string; lon: number; lat: number; moving: boolean }>>;
+    await h.setDate('1600');
+    await page.getByTestId('tool-select').click();
+    q = await h.toPage(K1); const q2 = await h.toPage(K2);
+    await page.mouse.move(q[0], q[1]); await page.mouse.down(); await page.mouse.move(q2[0], q2[1], { steps: 8 }); await page.mouse.up();
+    await h.saved();
+    await h.setDate('1550');
+    let c = (await cities()).find((x) => x.name === 'Port Aster')!;
+    assert.ok(c && !c.moving && Math.abs(c.lon - K1[0]) < 0.6, `in 1550 still at its first place (${c?.lon})`);
+    assert.ok(!(await page.evaluate(() => (window as any).__mapmaker.store.renderer.lastCharacters)).some((x: any) => x.name === 'Port Aster'), 'drawn as a city, not a character');
+    await h.setDate('1650');
+    c = (await cities()).find((x) => x.name === 'Port Aster')!;
+    assert.ok(Math.abs(c.lon - K2[0]) < 0.6, 'moved in 1600');
+    await page.getByTestId('character-leaves').click();
+    await h.setDate('1700');
+    assert.ok(!(await cities()).some((x) => x.name === 'Port Aster'), 'abandoned');
+    await h.setDate('1499');
+    assert.ok(!(await cities()).some((x) => x.name === 'Port Aster'), 'not yet founded');
+    await page.getByTestId('place-from-beginning').click();
+    assert.ok((await cities()).some((x) => x.name === 'Port Aster'), 'there from the beginning');
+    await h.screenshot('city');
+  });
+
   await h.step("Changes over time: a country shown lightly, the land it gained in a year, a decade, a century", async () => {
     await page.getByTestId('tool-select').click();
     await page.locator('.left .row', { hasText: A }).first().click();
@@ -515,9 +547,15 @@ try {
     await h.saved();
     await page.getByTestId('frame-slider').fill('12');
     await h.screenshot('presentation-still-camera');
+    // Characters' routes so far, when the shot asks for them.
+    const trails = () => page.evaluate(() => (window as any).__mapmaker.store.renderer.lastTrails) as Promise<number>;
+    assert.equal(await trails(), 0, 'no trails unless asked');
+    await page.getByTestId('shot-trails').check();
+    await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastTrails >= 1);
+    await page.getByTestId('shot-trails').uncheck();
 
     // What to export: only "All" at first, explained; then every separate layer too.
-    const separate = ['background', 'land', 'fills', 'borders', 'labels', 'characters', 'overlays'];
+    const separate = ['background', 'land', 'fills', 'borders', 'cities', 'labels', 'characters', 'overlays'];
     assert.ok(await page.getByTestId('pass-all').isChecked(), '"All" is chosen by default');
     for (const p of separate) assert.ok(!(await page.getByTestId(`pass-${p}`).isChecked()), `${p} is not chosen by default`);
     assert.match((await page.getByTestId('separate-passes-note').textContent()) ?? '', /exported separately/);

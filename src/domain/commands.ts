@@ -685,7 +685,9 @@ export function placeCharacter(world: World, o: { spaceId: string; entity: strin
   if (!world.get('map_space', o.spaceId)) throw new Error('That map no longer exists.');
   if (!Number.isFinite(o.lon) || !Number.isFinite(o.lat) || Math.abs(o.lat) > 90) throw new Error('That place is not on the map.');
   const lon = ((((o.lon + 180) % 360) + 360) % 360) - 180;
-  return run(world, `Place ${e.name}`, (tx) => writePlacement(tx, o.spaceId, o.entity, o.mode, { lon, lat: o.lat, arrive: o.arrive }));
+  // Characters travel between their places; cities and other places move (if at all) at once.
+  const arrive = o.arrive ?? (e.type_id === 'character' ? undefined : 'jump');
+  return run(world, `Place ${e.name}`, (tx) => writePlacement(tx, o.spaceId, o.entity, o.mode, { lon, lat: o.lat, arrive }));
 }
 
 /** A character leaves the map from a date on (until placed again). */
@@ -701,6 +703,14 @@ export function setPlacementArrival(world: World, effectId: string, arrive: 'tra
   if (!ef || ef.kind !== 'place') throw new Error('That placement no longer exists.');
   const it = parseJSON<PlaceIntent>(ef.intent, { op: 'place', entity: '' });
   return run(world, arrive === 'travel' ? 'Travels there' : 'Appears there', (tx) => tx.patch('effect', effectId, { intent: JSON.stringify({ ...it, arrive }) }));
+}
+
+/** A placement made without an event holds from the beginning instead of from its date (the starting map). */
+export function placementFromBeginning(world: World, effectId: string): CommandResult {
+  const ef = world.get('effect', effectId);
+  if (!ef || ef.kind !== 'place') throw new Error('That placement no longer exists.');
+  if (ef.event_id !== BASE_EVENT_ID) throw new Error('This place belongs to an event; change the event instead.');
+  return run(world, 'From the beginning', (tx) => tx.patch('effect', effectId, { at_day: null, at_ms: null }));
 }
 
 function writePlacement(tx: Tx, spaceId: string, entity: string, mode: EditMode, what: { lon?: number; lat?: number; off?: boolean; arrive?: 'travel' | 'jump' }): string {
