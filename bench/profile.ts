@@ -37,6 +37,8 @@ try {
     s.set({ time: Y(1950) }); s.setCamera(base);
     if (sc === 'play' || sc === 'playMoving') { const sh = s.world.all('sequence')[sc === 'play' ? 0 : 1]; s.set({ mode: 'present', shotId: sh.id, shotFrame: 0 }); }
     for (let i = 0; i < 3; i++) await raf();
+    // (At rest for a moment, as before any real movement: the app then draws the room around its kept pictures.)
+    await new Promise((r) => setTimeout(r, 500));
   }, scenario);
   const tracing = outFile.endsWith('.trace.json');
   if (tracing) await browser.startTracing(page, { categories: ['devtools.timeline', 'disabled-by-default-devtools.timeline', 'toplevel', 'blink', 'cc', 'viz', 'gpu'] });

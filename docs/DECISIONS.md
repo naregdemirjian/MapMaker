@@ -59,6 +59,21 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D63. Zooming: one picture at the new size, names in size steps, the room around the frame drawn at rest
+
+While zooming, the kept pictures are shown at the new size (D51). Three things made a frame of a zoom the dearest
+of all movements. (1) Each part's kept picture was drawn at the new size by itself, and drawing a picture at another
+size is by far the dearest way of copying it (about seven times a plain copy without a graphics card): the parts
+are now laid together once, for as long as they stay as they are, and that one picture is drawn at the new size
+(`MapRenderer.zoomTogether`). (2) Every name was measured and drawn at a size never seen before in every frame, and
+the browser keeps the letters it has drawn by size: widths are now measured once at one size and scaled, and while
+zooming names are drawn in size steps of a twelfth (exact again at rest). (3) Zooming out drew what lies around the
+shrunken picture in every frame: once the view has rested a quarter of a second after moving, the room around the
+kept pictures (D62) is drawn (`RenderOptions.fillAround`, asked for by the map view), so zooming out to about five
+sixths of the size needs nothing drawn, nor does the first movement after a rest; and a picture that has to be
+drawn afresh in the middle of a zoom-out is drawn with that room at once. Edits and steps in time do not cause the
+room to be drawn again (only a new view does), so nothing runs behind the user's back while they draw.
+
 ### D62. A carried picture has room around the frame and holds the repeating map (the working view)
 
 While the view moves, the kept pictures of the base map and of the territories (D51) used to be moved along and the

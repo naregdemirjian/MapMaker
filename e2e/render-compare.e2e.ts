@@ -236,6 +236,10 @@ try {
         }
         // Many small moves one way, then another, then back (the kept picture has room around the
         // frame and is drawn ahead of the move: see MapRenderer.slide), checked every few moves.
+        // First the room around the frame is drawn, as the working view does once the view rests.
+        carried.render(a, view, s.world, s.engine, s.spaceId, t, { ...opts, fillAround: true });
+        fresh.render(b, view, s.world, s.engine, s.spaceId, t, opts);
+        out.push({ name: `${c.name}, with the room around it drawn (room left: ${carried.roomToFill})`, parts: carried.roomToFill ? 'room left' : 'moved', approximate: carried.lastApproximate, ...compare(sidesOf(view)) });
         let n = 0;
         for (const [dx, dy0, times] of [[7, 3, 45], [-11, 5, 40], [0, -9, 30], [13, 0, 30], [-4, 4, 25]]) {
           const dy = Math.round(dy0 * tall);
