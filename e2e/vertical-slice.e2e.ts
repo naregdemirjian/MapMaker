@@ -583,11 +583,16 @@ try {
       const r = c.getBoundingClientRect(), k = c.width / r.width;
       return Array.from(c.getContext('2d')!.getImageData(Math.round((p[0] - r.left) * k), Math.round((p[1] - r.top) * k), 1, 1).data).slice(0, 3);
     }, ll);
+    // (Names off while colours are read: a country's name may lie over a sample point.)
+    const names = page.locator('label.check', { hasText: 'Country labels' }).locator('input');
+    await names.uncheck();
+    await page.waitForTimeout(150);
     const nearB: LL = [2 * P.conq[0] - P.conqEdge[0], 2 * P.conq[1] - P.conqEdge[1]];
     const colB = await previewPixel(P.eastB), colA = await previewPixel(P.westA);
     assert.ok(colourDiff(colA, colB) > 30, 'the two countries look different');
     assert.ok(colourDiff(await previewPixel(nearB), colB) < 12, `the side facing B has become B's (${await previewPixel(nearB)} vs ${colB})`);
     assert.ok(colourDiff(await previewPixel(P.conqEdge), colA) < 12, `the far side is still A's (${await previewPixel(P.conqEdge)} vs ${colA})`);
+    await names.check();
     await screenshot('shot-advancing-front');
     // Back to the recorded animation, so later steps see the shot as it was.
     await page.getByTestId('transition-mode').selectOption('recorded');
