@@ -31,8 +31,9 @@ import { TerrainPictures, terrainDrawable, type TerrainFrame, type TerrainImageK
 import type { ElevationGrid } from '../terrain/grid.ts';
 import type { TerrainCover } from '../terrain/cover.ts';
 import type { DetailGrid } from '../terrain/detail.ts';
-import { FieldPictures, edgePhases, type FieldInstance } from './fields-gl.ts';
-import { activeSources, fieldLayerStyleOf, sourceReach, sizeAt } from '../domain/fields.ts';
+import { FieldPictures, edgePhases, type FieldInstance, type FieldRaster } from './fields-gl.ts';
+import { spreadRaster, type SpreadRaster, type SpreadKind } from '../domain/spread.ts';
+import { activeSources, fieldLayerStyleOf, sourceReach, sizeAt, type FieldSource } from '../domain/fields.ts';
 import { PALETTES, rampAt, DEFAULT_TERRAIN_LOOK, type TerrainLook } from '../terrain/look.ts';
 
 type LabelEntity = { name: string; style?: string; color?: string; type_id?: string };
@@ -61,6 +62,18 @@ export interface TerrainShown {
   detail?: DetailGrid | null;
 }
 const rgbOf = ([r, g, b]: [number, number, number]) => `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
+/** Spreads worked out (D103), the last few hundred: each once for its source's settings, place and the heights. */
+const spreads = new Map<string, SpreadRaster>();
+function spreadFor(kind: SpreadKind, s: FieldSource, centre: [number, number], grid: ElevationGrid, gridKey: string, planetKm: number): SpreadRaster {
+  const key = `${kind}|${gridKey}|${centre[0]},${centre[1]}|${planetKm}|${s.radiusKm}|${s.grow}|${s.windDeg}|${s.windKmPerDay}|${s.seed}`;
+  let g = spreads.get(key);
+  if (!g) {
+    g = spreadRaster(kind, s, centre, grid, gridKey, planetKm);
+    spreads.set(key, g);
+    while (spreads.size > 300) spreads.delete(spreads.keys().next().value!);
+  }
+  return g;
+}
 /** A short name for the sources of a field picture: a hash of everything the shader is given (FNV-1a over the numbers). */
 function hashInstances(inst: FieldInstance[]): string {
   const f = new Float32Array(inst.length * 16);
@@ -2067,7 +2080,7 @@ export class MapRenderer {
     } else if (base) this.layered(base.name, ctx, base.key, at, base.draw, null, null, opens);
 
     // Fields (D102): radiation, fire, floods, heatmaps, over the territories and under the features.
-    if (opts.passes.has('fields')) this.drawFields(ctx, view, sheet, world, engine, spaceId, t, opts.layerIds);
+    if (opts.passes.has('fields')) this.drawFields(ctx, view, sheet, world, engine, spaceId, t, opts.layerIds, opts.terrain ?? null);
     else this.lastFields = [];
     // Areas, lines and points of the feature layers, over the territories and under the names.
     if (opts.passes.has('features')) this.drawFeatures(ctx, view, sheet, world, engine, spaceId, t, opts.layerIds, u, clipSphere ? sphere : null);
@@ -2138,7 +2151,7 @@ export class MapRenderer {
    * The field layers (D102), each a picture made on the graphics card from the sources in force at
    * `t`: every source drawn as a rectangle around its reach, in each copy of the planet the sheet shows.
    */
-  private drawFields(ctx: CanvasRenderingContext2D, view: View, sheet: Sheet, world: World, engine: Engine, spaceId: string, t: Instant, layerIds: string[]): void {
+  private drawFields(ctx: CanvasRenderingContext2D, view: View, sheet: Sheet, world: World, engine: Engine, spaceId: string, t: Instant, layerIds: string[], terrain: TerrainShown | null): void {
     this.lastFields = [];
     const space = world.get('map_space', spaceId);
     if (!space || space.kind !== 'sphere' || sheet.kind === 'flat') return;
@@ -2148,31 +2161,46 @@ export class MapRenderer {
     const W = ctx.canvas.width, H = ctx.canvas.height;
     const frame: TerrainFrame = { kind: sheet.kind, S: sheet.S, ox: sheet.ox, oy: sheet.oy, lonRef: sheet.lonRef, m, width: W, height: H };
     const maxLat = sheet.kind === 'mercator' ? 85.05 : 90;
+    /** The rectangles on the picture of a box of longitude and latitude, one for each copy of the planet shown (sampled across, as the projection curves the box). */
+    const rects = (box: [number, number, number, number]): Array<{ copy: number; rect: [number, number, number, number] }> => {
+      const out: Array<{ copy: number; rect: [number, number, number, number] }> = [];
+      for (const copy of sheet.copies(box)) {
+        let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+        for (let i = 0; i <= 6; i++) for (let j = 0; j <= 6; j++) {
+          const lon = box[0] + ((box[2] - box[0]) * i) / 6 + 360 * copy - sheet.lonRef, lat = Math.max(-maxLat, Math.min(maxLat, box[1] + ((box[3] - box[1]) * j) / 6));
+          const [px, py] = projectPoint(sheet.kind, lon, lat);
+          const sx = (px - sheet.ox) * sheet.S, sy = (py - sheet.oy) * sheet.S;
+          const X = m.a * sx + m.c * sy + m.e, Y = m.b * sx + m.d * sy + m.f;
+          if (X < x0) x0 = X; if (X > x1) x1 = X; if (Y < y0) y0 = Y; if (Y > y1) y1 = Y;
+        }
+        x0 = Math.max(0, Math.floor(x0) - 2); y0 = Math.max(0, Math.floor(y0) - 2); x1 = Math.min(W, Math.ceil(x1) + 2); y1 = Math.min(H, Math.ceil(y1) + 2);
+        if (x1 > x0 && y1 > y0) out.push({ copy, rect: [x0, y0, x1, y1] });
+      }
+      return out;
+    };
     for (const layerId of layerIds) {
       const layer = world.get('layer', layerId);
       if (!layer || layer.kind !== 'field' || layer.space_id !== spaceId) continue;
       const style = fieldLayerStyleOf(layer.style);
       const active = activeSources(world, engine, layerId, t, compare);
-      const inst: FieldInstance[] = [];
+      const inst: FieldInstance[] = [], spreads: FieldRaster[] = [];
       for (const a of active) {
+        // Spreading over the terrain (D103), where there is terrain; elsewhere a circle.
+        if (a.source.shape === 'spread' && terrain) {
+          const g = spreadFor(a.source.spread, a.source, [a.lon, a.lat], terrain.grid, terrain.key, radiusKm);
+          const box: [number, number, number, number] = [g.west, g.north - g.height * g.dLat, g.west + g.width * g.dLon, g.north];
+          for (const { rect } of rects(box)) {
+            spreads.push({ raster: g, rect, age: a.age, rise: a.source.rise, hold: a.source.hold, decay: a.source.decay, value: a.source.intensity, level: a.source.intensity * a.strength });
+          }
+          continue;
+        }
         const reach = sourceReach(a.source, a.age), rho = reach / radiusKm, rhoDeg = (rho * 180) / Math.PI;
         const south = Math.max(-maxLat, a.lat - rhoDeg), north = Math.min(maxLat, a.lat + rhoDeg);
         if (south >= north) continue;
         const half = Math.abs(a.lat) + rhoDeg >= 89.9 ? 180 : (Math.asin(Math.min(1, Math.sin(rho) / Math.cos((a.lat * Math.PI) / 180))) * 180) / Math.PI;
         const box: [number, number, number, number] = [a.lon - half, south, a.lon + half, north];
         const r = a.source.radiusKm * sizeAt(a.source, a.age);
-        for (const copy of sheet.copies(box)) {
-          // The rectangle of the box (sampled across, as the projection curves it) on the picture.
-          let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-          for (let i = 0; i <= 6; i++) for (let j = 0; j <= 6; j++) {
-            const lon = box[0] + ((box[2] - box[0]) * i) / 6 + 360 * copy - sheet.lonRef, lat = box[1] + ((box[3] - box[1]) * j) / 6;
-            const [px, py] = projectPoint(sheet.kind, lon, lat);
-            const sx = (px - sheet.ox) * sheet.S, sy = (py - sheet.oy) * sheet.S;
-            const X = m.a * sx + m.c * sy + m.e, Y = m.b * sx + m.d * sy + m.f;
-            if (X < x0) x0 = X; if (X > x1) x1 = X; if (Y < y0) y0 = Y; if (Y > y1) y1 = Y;
-          }
-          x0 = Math.max(0, Math.floor(x0) - 2); y0 = Math.max(0, Math.floor(y0) - 2); x1 = Math.min(W, Math.ceil(x1) + 2); y1 = Math.min(H, Math.ceil(y1) + 2);
-          if (!(x1 > x0 && y1 > y0)) continue;
+        for (const { copy, rect: [x0, y0, x1, y1] } of rects(box)) {
           inst.push({
             rect: [x0, y0, x1, y1], lon: ((a.lon + 360 * copy) * Math.PI) / 180, lat: (a.lat * Math.PI) / 180,
             radius: r, value: a.source.intensity * a.strength, noise: a.source.noise,
@@ -2181,11 +2209,12 @@ export class MapRenderer {
           });
         }
       }
-      this.lastFields.push({ layer: layerId, sources: active.length, drawn: inst.length });
-      if (!inst.length) continue;
+      this.lastFields.push({ layer: layerId, sources: active.length, drawn: inst.length + spreads.length });
+      if (!inst.length && !spreads.length) continue;
       // (What the picture shows: every rectangle and setting, and where the sheet lies on it.)
-      const key = `${hashInstances(inst)}|${style.type}|${style.opacity}|${sheet.kind}|${sheet.S}|${sheet.ox}|${sheet.oy}|${sheet.lonRef}|${m.a},${m.b},${m.c},${m.d},${m.e},${m.f}|${radiusKm}`;
-      const image = this.fieldPictures.image(layerId, key, style.type, style.opacity, inst, frame, radiusKm);
+      const spreadKey = spreads.map((r) => `${r.raster.key}@${r.rect.join(',')}:${r.age}:${r.value}:${r.level}`).join(';');
+      const key = `${hashInstances(inst)}|${spreadKey}|${style.type}|${style.opacity}|${sheet.kind}|${sheet.S}|${sheet.ox}|${sheet.oy}|${sheet.lonRef}|${m.a},${m.b},${m.c},${m.d},${m.e},${m.f}|${radiusKm}`;
+      const image = this.fieldPictures.image(layerId, key, style.type, style.opacity, inst, frame, radiusKm, spreads);
       if (!image) continue;
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);

@@ -288,7 +288,9 @@ export function MapView() {
     const seaPoints = seaLevelPoints(space), seaLevel = seaLevelAt(seaPoints, time);
     // Sculpting (D98): the strokes holding at the date viewed, applied to the heights.
     const strokes = stampsAt(sculptOf(space), time);
-    const needsGrid = terrainShown || seaPoints.length > 0 || !!planetOf(space) || strokes.length > 0;
+    // (Conditions spreading over the terrain need its heights too, D103.)
+    const fieldsHere = s.world.all('layer').some((l) => l.kind === 'field' && l.space_id === s.spaceId);
+    const needsGrid = terrainShown || seaPoints.length > 0 || !!planetOf(space) || strokes.length > 0 || fieldsHere;
     const ground = needsGrid ? s.terrainOf(space) : null;
     const carved = ground ? sculpted(ground.grid, ground.key, strokes, (space?.radius_m ?? 6371008.8) / 1000) : null;
     // A planet's rivers (D99), worked out a moment after its heights (drawn without them meanwhile).

@@ -31,6 +31,7 @@ export function FieldToolOptions() {
   const src = fieldSourceOf({ ...DEFAULT_SOURCES[type], ...s.fieldSource }, type);
   const set = (patch: Partial<FieldSource>) => s.set({ fieldSource: { ...s.fieldSource, ...patch } });
   const count = layer ? w.all('feature').filter((f) => f.layer_id === layer.id).length : 0;
+  const spreading = src.shape === 'spread', flood = spreading && src.spread === 'flood';
   const rec = s.recordEventId ? w.get('event', s.recordEventId) : null;
   const num = (label: string, key: keyof FieldSource, unit: string, title: string, min = 0, step = 1) => (
     <label className="inline" title={title}>{label}
@@ -51,25 +52,40 @@ export function FieldToolOptions() {
         <label className="inline" title="How opaque the layer is drawn">Opacity
           <input type="range" min={0.1} max={1} step={0.05} value={style.opacity} onChange={(e) => s.execute((wd) => cmd.setFieldLayerStyle(wd, layer.id, { opacity: Number(e.target.value) }))} data-testid="field-opacity" />
         </label>
-        <label className="inline" title="A circle spreading from where it is placed, or a plume carried downwind">Shape
+        <label className="inline" title="A circle spreading from where it is placed, a plume carried downwind, or something spreading over the terrain itself (where the map has terrain)">Shape
           <select value={src.shape} onChange={(e) => set({ shape: e.target.value as FieldSource['shape'] })} data-testid="field-shape">
             <option value="circle">Circle</option>
             <option value="plume">Plume (carried by the wind)</option>
+            <option value="spread">Spreading over the terrain</option>
           </select>
         </label>
-        {num('Strength', 'intensity', FIELD_TYPES[type].unit, `At its peak, in the middle (the colours are full at ${FIELD_TYPES[type].full} ${FIELD_TYPES[type].unit})`, 0, FIELD_TYPES[type].full / 20)}
-        {num('Size', 'radiusKm', 'km', 'How far it reaches from where it is placed', 0.01, 1)}
-        {src.shape === 'plume' && <>
+        {spreading && (
+          <label className="inline" title="A fire spreads over the land, faster uphill and downwind, never over water; lava flows downhill; a flood fills the low ground as the water rises">As
+            <select value={src.spread} onChange={(e) => set({ spread: e.target.value as FieldSource['spread'] })} data-testid="field-spread">
+              <option value="fire">a fire</option>
+              <option value="lava">lava</option>
+              <option value="flood">a flood</option>
+            </select>
+          </label>
+        )}
+        {flood
+          ? num('Water rises by', 'intensity', 'm', 'How high the water rises above the ground where it starts', 0, 0.5)
+          : num('Strength', 'intensity', FIELD_TYPES[type].unit, `At its peak, in the middle (the colours are full at ${FIELD_TYPES[type].full} ${FIELD_TYPES[type].unit})`, 0, FIELD_TYPES[type].full / 20)}
+        {num(spreading ? 'Reaches up to' : 'Size', 'radiusKm', 'km', spreading ? 'How far from where it starts it can spread' : 'How far it reaches from where it is placed', 0.01, 1)}
+        {spreading && !flood && num('at the pace of', 'grow', 'days', 'The days it takes to spread that far over flat ground (faster uphill and downwind for a fire, down steep slopes for lava)', 0, 0.5)}
+        {(src.shape === 'plume' || (spreading && src.spread === 'fire')) && <>
           {num('Wind towards', 'windDeg', '°', 'The direction the wind carries it: 0 north, 90 east, 180 south, 270 west', 0, 15)}
-          {num('at', 'windKmPerDay', 'km a day', 'How far the wind carries it in a day', 0, 10)}
+          {num('at', 'windKmPerDay', 'km a day', 'How strong the wind is: how far it carries things in a day', 0, 10)}
         </>}
-        {num('Rises over', 'rise', 'days', 'How long it takes to reach its peak', 0, 0.5)}
+        {num(flood ? 'Rises over' : 'Rises over', 'rise', 'days', flood ? 'How long the water takes to rise' : 'How long it takes to reach its peak (each place, from when it arrives)', 0, 0.5)}
         {num('Lasts', 'hold', 'days', 'How long it stays at its peak', 0, 1)}
-        {num('Halves every', 'decay', 'days', 'Then it fades, halving in strength every so many days (0: gone at once)', 0, 1)}
-        {num('Grows over', 'grow', 'days', 'How long its edge takes to reach its full size (0: at once)', 0, 0.5)}
-        <label className="inline" title="How uneven a circle's edge is">Uneven edge
-          <input type="range" min={0} max={1} step={0.05} value={src.noise} onChange={(e) => set({ noise: Number(e.target.value), seed: (src.seed % 9973) + 1 })} data-testid="field-noise" />
-        </label>
+        {num(flood ? 'Recedes, halving every' : 'Halves every', 'decay', 'days', 'Then it fades, halving every so many days (0: gone at once)', 0, 1)}
+        {!spreading && num('Grows over', 'grow', 'days', 'How long its edge takes to reach its full size (0: at once)', 0, 0.5)}
+        {!spreading && (
+          <label className="inline" title="How uneven a circle's edge is">Uneven edge
+            <input type="range" min={0} max={1} step={0.05} value={src.noise} onChange={(e) => set({ noise: Number(e.target.value), seed: (src.seed % 9973) + 1 })} data-testid="field-noise" />
+          </label>
+        )}
         <span className="muted" data-testid="field-hint">Click the map: {FIELD_TYPES[type].name.toLowerCase()} from {rec ? `"${rec.name}"` : fmt(s.time)}, gone after about {lengthText(lifespan(src))}.</span>
         {count > 0 && <button className="link" onClick={() => s.execute((wd) => cmd.deleteFeatures(wd, wd.all('feature').filter((f) => f.layer_id === layer.id).map((f) => f.id)))} data-testid="field-clear" title="Take every source on this layer away (one step, which can be undone)">Remove all {count} source{count === 1 ? '' : 's'}</button>}
       </>}

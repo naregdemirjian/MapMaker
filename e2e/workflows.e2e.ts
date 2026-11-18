@@ -2235,6 +2235,49 @@ try {
     await page.getByTestId('tool-select').click();
   });
 
+  await h.step('Conditions spreading over the terrain: a fire in the West Siberian Plain advances day by day; undone', async () => {
+    await page.getByTestId('mode-world').click();
+    const site: LL = [75, 61];
+    await page.evaluate((c) => (window as any).__mapmaker.store.setCamera({ lon: c[0], lat: c[1], zoom: 3.5, rotation: 0, projection: 'equirectangular' }), site);
+    await h.setDate('1450');
+    const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
+    const before = await steps();
+    assert.equal(await h.ownerAt(site, '1450'), null, 'nobody holds the place');
+    const patch = () => page.evaluate(([lon, lat]) => {
+      const p = (window as any).__mapmaker.lonLatToPage(lon, lat);
+      const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement;
+      const r = c.getBoundingClientRect(), k = c.width / r.width;
+      return Array.from(c.getContext('2d')!.getImageData(Math.round((p[0] - r.left) * k) - 120, Math.round((p[1] - r.top) * k) - 120, 240, 240).data);
+    }, site);
+    const plain = await patch();
+    const burnt = (px: number[]) => { let n = 0; for (let i = 0; i < px.length; i += 4) if (Math.max(Math.abs(px[i] - plain[i]), Math.abs(px[i + 1] - plain[i + 1]), Math.abs(px[i + 2] - plain[i + 2])) > 30) n++; return n; };
+    await page.getByRole('button', { name: '+ Layer' }).click();
+    await page.getByTestId('layer-kind-field').click();
+    await page.getByTestId('new-layer-field-type').selectOption('fire');
+    await page.getByTestId('create-layer').click();
+    await page.getByTestId('field-options').waitFor();
+    assert.equal(await page.getByTestId('field-shape').inputValue(), 'spread', 'a fire spreads over the terrain to begin with');
+    await page.getByTestId('field-radiusKm').fill('200');
+    await page.getByTestId('field-grow').fill('8');
+    await page.getByTestId('field-hold').fill('10');
+    const at = await h.toPage(site);
+    await page.mouse.click(at[0], at[1]);
+    await h.saved();
+    const on = async (date: string) => {
+      await h.setDate(date);
+      await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastFields.some((f: any) => f.drawn > 0), null, { timeout: 30000 });
+      await page.waitForTimeout(300);
+      return burnt(await patch());
+    };
+    const early = await on('3 January 1450'), later = await on('7 January 1450');
+    assert.ok(early > 50 && later > 1.5 * early, `the fire advances (${early} pixels burning on the 3rd, ${later} on the 7th)`);
+    await h.screenshot('conditions-fire');
+    for (let i = 0; i < 2; i++) await page.getByTestId('undo').click();
+    await h.saved();
+    assert.equal(await steps(), before, 'the fire and its layer, one step each');
+    await page.getByTestId('tool-select').click();
+  });
+
   await h.step('History Health lists the overlap, nothing else; no browser errors', async () => {
     await page.getByTestId('mode-world').click();
     await page.getByTestId('health').click();

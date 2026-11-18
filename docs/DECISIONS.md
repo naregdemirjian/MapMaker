@@ -61,6 +61,34 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D103. Conditions that spread over the terrain: fire, lava, floods (Stage 9)
+
+A source of conditions (D102) can now **spread over the terrain itself**, as a fire, lava or a flood, on any map
+with terrain (Earth, generated planets; sculpting included). Fire and flood layers start with it. Each spread is
+worked out once, on a grid of 160 × 160 cells around its source (its heights read from the world's terrain,
+`domain/spread.ts`, pure and tested), and drawn at any moment from that grid, so it animates by itself:
+
+- **A fire** spreads from its source over the land at its pace (its reach over the days it spreads, after which it
+  is held), faster uphill and downwind, in tongues and lobes (its pace varies smoothly from place to place), never
+  over water or bare high mountains. Each place burns from when the fire reaches it, with the source's life
+  counted from then: the front is brightest, the ground behind it cools to embers. (The fire colours now run from
+  dark embers to bright yellow where hottest.)
+- **Lava** runs downhill from its source along the steepest ways (to the three lowest cells around each, so it
+  flows in tongues), faster on steep ground, only a little way up to fill small hollows, and stops at the sea.
+- **A flood** raises the water at its source by its strength (metres) as the source rises, and fills the low ground
+  around: a place floods once the water stands above the lowest ridge between it and the source (its spill height,
+  a priority flood), as deep as the water stands over it; the water recedes as the source fades. Towards the edge
+  of its reach the ground counts as rising, so the water stops along the lie of the land. The sea is not drawn.
+- **On the graphics card**: each spread's grid (arrival times, or spill height and ground) is a texture; a second
+  pass of the field shader reads it, between the cells it reaches, with its edge fading out between cells, and
+  adds the value of the moment to the layer's sums. Where a map has no terrain a spreading source is a circle.
+- **Not done.** Spreads are worked out at about a 160th of their size (finer for small ones), from the bundled
+  heights (not the finer close-up tiles, D101), on the interface's thread (a fraction of a second each, once).
+- **Tests.** `spread.test.ts` (a fire's pace, around a lake, sooner downwind, held after its days, burning from when
+  it arrives; lava down a valley and not up to the summit; a flood filling a valley, held back by a ridge until the
+  water is higher, the sea not drawn, nothing before it rises, receding); `e2e/workflows` (a fire in the West
+  Siberian Plain burning more ground on the 7th than on the 3rd, undone).
+
 ### D102. Conditions: field layers of radiation, fire, smoke, floods, destruction and heat (Stage 9)
 
 A new kind of layer, **Conditions**, holds things that cover the map with a strength at every place and moment and

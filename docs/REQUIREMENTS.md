@@ -123,7 +123,7 @@ status. Last updated: 18 November 2026 (Stage 4; see DEVELOPMENT.md).
 
 | Requirement | Status | Evidence | Notes |
 | --- | --- | --- | --- |
-| Disasters: explosions, destruction zones, radiation, flooding, wildfire | Partial | `fields`, `e2e/workflows` | Conditions (D102): radiation, fire, smoke and ash, flood, destruction, from sources placed with a click, round with uneven edges or carried downwind as plumes, rising, lasting and fading. Spreading over the terrain and disaster templates: Stage 9, later steps |
+| Disasters: explosions, destruction zones, radiation, flooding, wildfire | Partial | `fields`, `spread`, `e2e/workflows` | Conditions (D102): radiation, fire, smoke and ash, flood, destruction, from sources placed with a click, round with uneven edges or carried downwind as plumes, rising, lasting and fading; wildfires, lava and floods spreading over the real terrain (D103). Disaster templates: Stage 9, a later step |
 | Expanding zones, intensity, duration | Tested | `fields`, `e2e/workflows` | A source's edge grows to its size over days; its strength rises, lasts and halves every so many days until it fades (D102) |
 | Permanent versus temporary change kept separate | Partial | `fields`, `sculpt`, `sea-level` | Temporary conditions are field layers that fade by themselves (D102); permanent changes are the terrain's: sculpting (D98) and the sea level (D96). Templates that make both at once: Stage 9, a later step |
 | Heatmaps | Partial | `fields` | A Heatmap kind of conditions layer, its sources placed by hand (D102). Heatmaps worked out from a layer of points: Stage 9, a later step |

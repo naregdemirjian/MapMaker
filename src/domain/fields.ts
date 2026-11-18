@@ -19,7 +19,7 @@ export type FieldRamp = Array<[number, number, number, number, number]>;
 
 export const FIELD_TYPES: Record<FieldType, { name: string; unit: string; full: number; ramp: FieldRamp; about: string }> = {
   radiation: { name: 'Radiation', unit: 'mSv/h', full: 1000, about: 'Fallout and contamination: yellow, red, then purple where it is deadly', ramp: [[0, 250, 230, 60, 0], [0.02, 250, 230, 60, 0.35], [0.15, 250, 160, 30, 0.55], [0.45, 225, 40, 30, 0.7], [1, 120, 20, 120, 0.8]] },
-  fire: { name: 'Fire', unit: 'intensity', full: 1, about: 'Burning ground: yellow at the edges, red and dark at the heart', ramp: [[0, 255, 230, 120, 0], [0.05, 255, 220, 90, 0.5], [0.35, 255, 140, 30, 0.8], [0.7, 220, 50, 20, 0.9], [1, 120, 20, 10, 0.95]] },
+  fire: { name: 'Fire', unit: 'intensity', full: 1, about: 'Burning ground and lava: bright yellow where hottest, through orange and red to dark embers', ramp: [[0, 90, 10, 5, 0], [0.05, 120, 20, 10, 0.55], [0.35, 200, 50, 15, 0.85], [0.7, 250, 140, 30, 0.95], [1, 255, 230, 120, 0.95]] },
   smoke: { name: 'Smoke and ash', unit: 'cm of ash', full: 50, about: 'Smoke, dust and ashfall: light grey to near black', ramp: [[0, 200, 200, 200, 0], [0.05, 190, 190, 190, 0.3], [0.4, 120, 118, 115, 0.6], [1, 40, 38, 36, 0.85]] },
   flood: { name: 'Flood', unit: 'm of water', full: 5, about: 'Floodwater: pale where shallow, deep blue where deep', ramp: [[0, 120, 180, 230, 0], [0.02, 120, 180, 230, 0.45], [0.3, 60, 120, 210, 0.7], [1, 20, 50, 140, 0.85]] },
   damage: { name: 'Destruction', unit: '% destroyed', full: 100, about: 'Ruin and burnt ground: brown to black', ramp: [[0, 120, 90, 60, 0], [0.05, 140, 100, 60, 0.35], [0.5, 80, 55, 35, 0.65], [1, 25, 20, 18, 0.85]] },
@@ -45,7 +45,9 @@ export function fieldLayerStyleOf(styleJson: string | undefined): FieldLayerStyl
  * `windDeg` (0 north, 90 east) at `windKmPerDay`, widening as it goes.
  */
 export interface FieldSource {
-  shape: 'circle' | 'plume';
+  /** A circle, a plume, or a spread over the terrain (`spread`: a fire, lava or a flood, D103). */
+  shape: 'circle' | 'plume' | 'spread';
+  spread: 'fire' | 'lava' | 'flood';
   intensity: number; radiusKm: number;
   rise: number; hold: number; decay: number; grow: number;
   noise: number; seed: number;
@@ -54,13 +56,13 @@ export interface FieldSource {
 
 /** Each kind's usual source (what a click places before anything is changed). */
 export const DEFAULT_SOURCES: Record<FieldType, FieldSource> = {
-  radiation: { shape: 'plume', intensity: 600, radiusKm: 15, rise: 0.05, hold: 0.5, decay: 8, grow: 0, noise: 0.3, seed: 1, windDeg: 90, windKmPerDay: 120 },
-  fire: { shape: 'circle', intensity: 0.9, radiusKm: 20, rise: 0.5, hold: 3, decay: 2, grow: 3, noise: 0.5, seed: 1, windDeg: 90, windKmPerDay: 0 },
-  smoke: { shape: 'plume', intensity: 20, radiusKm: 25, rise: 0.2, hold: 2, decay: 4, grow: 0, noise: 0.3, seed: 1, windDeg: 90, windKmPerDay: 300 },
-  flood: { shape: 'circle', intensity: 3, radiusKm: 30, rise: 2, hold: 5, decay: 6, grow: 2, noise: 0.6, seed: 1, windDeg: 0, windKmPerDay: 0 },
-  damage: { shape: 'circle', intensity: 90, radiusKm: 8, rise: 0, hold: 3650, decay: 3650, grow: 0, noise: 0.25, seed: 1, windDeg: 0, windKmPerDay: 0 },
-  heat: { shape: 'circle', intensity: 0.5, radiusKm: 300, rise: 0, hold: 36500, decay: 0, grow: 0, noise: 0, seed: 1, windDeg: 0, windKmPerDay: 0 },
-  custom: { shape: 'circle', intensity: 1, radiusKm: 100, rise: 1, hold: 10, decay: 10, grow: 1, noise: 0.3, seed: 1, windDeg: 0, windKmPerDay: 0 },
+  radiation: { shape: 'plume', spread: 'fire', intensity: 600, radiusKm: 15, rise: 0.05, hold: 0.5, decay: 8, grow: 0, noise: 0.3, seed: 1, windDeg: 90, windKmPerDay: 120 },
+  fire: { shape: 'spread', spread: 'fire', intensity: 0.9, radiusKm: 40, rise: 0.3, hold: 2, decay: 1.5, grow: 6, noise: 0.5, seed: 1, windDeg: 90, windKmPerDay: 0 },
+  smoke: { shape: 'plume', spread: 'fire', intensity: 20, radiusKm: 25, rise: 0.2, hold: 2, decay: 4, grow: 0, noise: 0.3, seed: 1, windDeg: 90, windKmPerDay: 300 },
+  flood: { shape: 'spread', spread: 'flood', intensity: 3, radiusKm: 60, rise: 2, hold: 5, decay: 6, grow: 2, noise: 0.6, seed: 1, windDeg: 0, windKmPerDay: 0 },
+  damage: { shape: 'circle', spread: 'fire', intensity: 90, radiusKm: 8, rise: 0, hold: 3650, decay: 3650, grow: 0, noise: 0.25, seed: 1, windDeg: 0, windKmPerDay: 0 },
+  heat: { shape: 'circle', spread: 'fire', intensity: 0.5, radiusKm: 300, rise: 0, hold: 36500, decay: 0, grow: 0, noise: 0, seed: 1, windDeg: 0, windKmPerDay: 0 },
+  custom: { shape: 'circle', spread: 'fire', intensity: 1, radiusKm: 100, rise: 1, hold: 10, decay: 10, grow: 1, noise: 0.3, seed: 1, windDeg: 0, windKmPerDay: 0 },
 };
 
 const num = (v: unknown, def: number, lo: number, hi: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : def);
@@ -68,7 +70,8 @@ const num = (v: unknown, def: number, lo: number, hi: number) => (typeof v === '
 export function fieldSourceOf(raw: unknown, type: FieldType = 'custom'): FieldSource {
   const d = DEFAULT_SOURCES[type], r = (raw && typeof raw === 'object' ? raw : {}) as Partial<Record<keyof FieldSource, unknown>>;
   return {
-    shape: r.shape === 'plume' || r.shape === 'circle' ? r.shape : d.shape,
+    shape: r.shape === 'plume' || r.shape === 'circle' || r.shape === 'spread' ? r.shape : d.shape,
+    spread: r.spread === 'fire' || r.spread === 'lava' || r.spread === 'flood' ? r.spread : d.spread,
     intensity: num(r.intensity, d.intensity, 0, 1e9), radiusKm: num(r.radiusKm, d.radiusKm, 0.01, 20000),
     rise: num(r.rise, d.rise, 0, 1e6), hold: num(r.hold, d.hold, 0, 1e7), decay: num(r.decay, d.decay, 0, 1e7), grow: num(r.grow, d.grow, 0, 1e6),
     noise: num(r.noise, d.noise, 0, 1), seed: Math.round(num(r.seed, d.seed, 0, 1e9)),

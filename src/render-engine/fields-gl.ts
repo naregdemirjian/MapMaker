@@ -7,6 +7,7 @@
 // like the terrain's pictures (TerrainFrame: the sheet's plane and where it lies on the picture).
 import { INVERT_PLANE, PROJ, type TerrainFrame } from './terrain-gl.ts';
 import { FIELD_TYPES, type FieldType } from '../domain/fields.ts';
+import type { SpreadRaster } from '../domain/spread.ts';
 
 /** One source as drawn: its rectangle on the picture and what the shader needs of it (see FieldGL). */
 export interface FieldInstance {
@@ -23,6 +24,87 @@ export interface FieldInstance {
 }
 
 const FLOATS = 16;
+
+/**
+ * A source spreading over the terrain (D103) as drawn: its grid, its rectangle on the picture, and
+ * its moment: its age and life (days), its value at the peak, and a flood's water level then (metres
+ * above the ground at the source).
+ */
+export interface FieldRaster {
+  raster: SpreadRaster; rect: [number, number, number, number];
+  age: number; rise: number; hold: number; decay: number; value: number; level: number;
+}
+
+const RASTER_VERTEX = `#version 300 es
+in vec2 a_corner;
+uniform vec4 u_rect;
+uniform vec2 u_size;
+uniform vec2 u_offset;
+void main() {
+  vec2 px = mix(u_rect.xy, u_rect.zw, a_corner) - u_offset;
+  vec2 clip = px / u_size * 2.0 - 1.0;
+  gl_Position = vec4(clip.x, -clip.y, 0.0, 1.0);
+}`;
+
+const RASTER = `#version 300 es
+precision highp float;
+precision highp int;
+uniform vec2 u_size;
+uniform vec2 u_offset;
+uniform mat3 u_inv;
+uniform float u_S;
+uniform vec2 u_origin;
+uniform float u_lonRef;
+uniform int u_proj;
+uniform float u_scale;
+uniform highp sampler2D u_r;
+uniform ivec2 u_rsize;
+uniform vec4 u_box;
+uniform int u_flood;
+uniform vec4 u_life;
+uniform float u_value;
+uniform float u_level;
+out vec4 outV;
+const float PI = 3.141592653589793;
+${INVERT_PLANE}
+// A source's strength at an age (domain/fields.ts strengthAt): rising, lasting, halving, gone once faded.
+float strengthAt(float age) {
+  if (age < 0.0) return 0.0;
+  if (age < u_life.x) { float x = age / u_life.x; return x * x * (3.0 - 2.0 * x); }
+  if (age <= u_life.x + u_life.y) return 1.0;
+  if (u_life.z <= 0.0) return 0.0;
+  float v = exp2(-(age - u_life.x - u_life.y) / u_life.z);
+  return v < 0.004 ? 0.0 : v;
+}
+vec2 cell(ivec2 p) { return texelFetch(u_r, clamp(p, ivec2(0), u_rsize - 1), 0).rg; }
+void main() {
+  vec2 dev = vec2(gl_FragCoord.x, u_size.y - gl_FragCoord.y) + u_offset;
+  vec2 sheet = (u_inv * vec3(dev, 1.0)).xy;
+  vec2 plane = sheet / u_S + u_origin;
+  vec2 ll;
+  if (!invertPlane(vec2(plane.x, -plane.y), ll)) discard;
+  float dc = ll.x + u_lonRef - (u_box.x + 0.5 * u_box.z);
+  dc -= 2.0 * PI * floor((dc + PI) / (2.0 * PI));
+  vec2 uv = vec2(dc / u_box.z + 0.5, (u_box.y - ll.y) / u_box.w);
+  if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) discard;
+  // Between the four nearest cells' middles, of those it reaches; its edge fades out between cells.
+  vec2 p = uv * vec2(u_rsize) - 0.5, f = p - floor(p);
+  ivec2 i0 = ivec2(floor(p));
+  vec2 c00 = cell(i0), c10 = cell(i0 + ivec2(1, 0)), c01 = cell(i0 + ivec2(0, 1)), c11 = cell(i0 + ivec2(1, 1));
+  vec4 w = vec4((1.0 - f.x) * (1.0 - f.y), f.x * (1.0 - f.y), (1.0 - f.x) * f.y, f.x * f.y);
+  w *= vec4(step(c00.x, 5.0e8), step(c10.x, 5.0e8), step(c01.x, 5.0e8), step(c11.x, 5.0e8));
+  float reach = w.x + w.y + w.z + w.w;
+  if (reach <= 0.0) discard;
+  vec2 v = (c00 * w.x + c10 * w.y + c01 * w.z + c11 * w.w) / reach;
+  float val = 0.0;
+  {
+    // A flood: as deep as the water stands above the ground, where it has spilled to; a fire or lava:
+    // the source's life counted from when it arrived.
+    if (u_flood == 1) val = v.x <= u_level ? max(0.0, u_level - v.y) : 0.0;
+    else val = u_value * strengthAt(u_life.w - v.x);
+  }
+  outV = vec4(val * smoothstep(0.2, 0.8, reach) * u_scale, 0.0, 0.0, 1.0);
+}`;
 
 const VERTEX = `#version 300 es
 in vec2 a_corner;
@@ -121,7 +203,10 @@ class FieldGL {
   readonly max: number;
   /** Whether sums are kept as floats (else as bytes, the value as a share of the field's full value). */
   readonly floats: boolean;
-  private acc: WebGLProgram; private colour: WebGLProgram;
+  private acc: WebGLProgram; private colour: WebGLProgram; private raster: WebGLProgram;
+  private vaoRaster: WebGLVertexArrayObject;
+  private ur: Record<string, WebGLUniformLocation | null> = {};
+  private rasterTextures = new WeakMap<SpreadRaster, WebGLTexture>();
   private quad: WebGLBuffer; private inst: WebGLBuffer; private tri: WebGLBuffer;
   private vaoAcc: WebGLVertexArrayObject; private vaoColour: WebGLVertexArrayObject;
   private fbo: WebGLFramebuffer; private tex: WebGLTexture; private size = [0, 0];
@@ -150,6 +235,8 @@ class FieldGL {
     };
     this.acc = program(VERTEX, ACCUMULATE);
     this.colour = program(COLOUR_VERTEX, COLOUR);
+    this.raster = program(RASTER_VERTEX, RASTER);
+    for (const n of ['u_rect', 'u_size', 'u_offset', 'u_inv', 'u_S', 'u_origin', 'u_lonRef', 'u_proj', 'u_scale', 'u_r', 'u_rsize', 'u_box', 'u_flood', 'u_life', 'u_value', 'u_level']) this.ur[n] = gl.getUniformLocation(this.raster, n);
     for (const n of ['u_size', 'u_offset', 'u_inv', 'u_S', 'u_origin', 'u_lonRef', 'u_proj', 'u_R', 'u_scale']) this.ua[n] = gl.getUniformLocation(this.acc, n);
     for (const n of ['u_acc', 'u_full', 'u_opacity', 'u_stopC', 'u_stopT', 'u_stops']) this.uc[n] = gl.getUniformLocation(this.colour, n);
     // The sources: a unit square, drawn once for each (its rectangle and settings per instance).
@@ -169,6 +256,13 @@ class FieldGL {
       gl.vertexAttribPointer(loc, 4, gl.FLOAT, false, FLOATS * 4, i * 16);
       gl.vertexAttribDivisor(loc, 1);
     });
+    // The spreads: the same unit square, its rectangle given for each.
+    this.vaoRaster = gl.createVertexArray()!;
+    gl.bindVertexArray(this.vaoRaster);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.quad);
+    const rc = gl.getAttribLocation(this.raster, 'a_corner');
+    gl.enableVertexAttribArray(rc);
+    gl.vertexAttribPointer(rc, 2, gl.FLOAT, false, 0, 0);
     // The colouring: one triangle over the whole picture.
     this.vaoColour = gl.createVertexArray()!;
     gl.bindVertexArray(this.vaoColour);
@@ -209,7 +303,24 @@ class FieldGL {
   }
 
   /** Draws a field layer's picture (or the part at `offset`, `w` × `h` pixels) on the context's canvas. */
-  draw(type: FieldType, opacity: number, sources: FieldInstance[], f: TerrainFrame, offset: [number, number], w: number, h: number, radiusKm: number): void {
+  /** A spread's grid as a texture (two floats a cell, read cell by cell). */
+  private rasterTexture(r: SpreadRaster): WebGLTexture {
+    let t = this.rasterTextures.get(r);
+    if (t) return t;
+    const gl = this.gl;
+    t = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, r.width, r.height, 0, gl.RG, gl.FLOAT, r.data);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    this.rasterTextures.set(r, t);
+    return t;
+  }
+
+  draw(type: FieldType, opacity: number, sources: FieldInstance[], f: TerrainFrame, offset: [number, number], w: number, h: number, radiusKm: number, rasters: FieldRaster[] = []): void {
     const gl = this.gl, def = FIELD_TYPES[type];
     if (this.canvas.width !== w || this.canvas.height !== h) { this.canvas.width = w; this.canvas.height = h; }
     this.target(w, h);
@@ -240,6 +351,35 @@ class FieldGL {
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE);
     if (sources.length) gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, sources.length);
+    // The spreads (D103), one at a time, each with its grid.
+    if (rasters.length) {
+      gl.useProgram(this.raster);
+      const u = this.ur, rad = Math.PI / 180;
+      gl.uniform2f(u.u_size, w, h);
+      gl.uniform2f(u.u_offset, offset[0], offset[1]);
+      gl.uniformMatrix3fv(u.u_inv, false, [ia, ib, 0, ic, id, 0, ie, iff, 1]);
+      gl.uniform1f(u.u_S, f.S);
+      gl.uniform2f(u.u_origin, f.ox, f.oy);
+      gl.uniform1f(u.u_lonRef, f.lonRef * rad);
+      gl.uniform1i(u.u_proj, PROJ[f.kind] ?? 0);
+      gl.uniform1f(u.u_scale, this.floats ? 1 : 1 / def.full);
+      gl.uniform1i(u.u_r, 1);
+      gl.bindVertexArray(this.vaoRaster);
+      gl.activeTexture(gl.TEXTURE1);
+      for (const r of rasters) {
+        const g = r.raster;
+        gl.bindTexture(gl.TEXTURE_2D, this.rasterTexture(g));
+        gl.uniform4f(u.u_rect, ...r.rect);
+        gl.uniform2i(u.u_rsize, g.width, g.height);
+        gl.uniform4f(u.u_box, g.west * rad, g.north * rad, g.width * g.dLon * rad, g.height * g.dLat * rad);
+        gl.uniform1i(u.u_flood, g.kind === 'flood' ? 1 : 0);
+        gl.uniform4f(u.u_life, r.rise, r.hold, r.decay, r.age);
+        gl.uniform1f(u.u_value, r.value);
+        gl.uniform1f(u.u_level, r.level);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+      }
+      gl.activeTexture(gl.TEXTURE0);
+    }
     gl.disable(gl.BLEND);
     // Coloured by the ramp.
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -286,7 +426,7 @@ export class FieldPictures {
   private kept = new Map<string, { key: string; image: ImageBitmap | OffscreenCanvas }>();
 
   /** The picture of a field layer for a frame (all of it), or null without WebGL2. `key`: what the picture shows. */
-  image(layerId: string, key: string, type: FieldType, opacity: number, sources: FieldInstance[], f: TerrainFrame, radiusKm: number): ImageBitmap | OffscreenCanvas | null {
+  image(layerId: string, key: string, type: FieldType, opacity: number, sources: FieldInstance[], f: TerrainFrame, radiusKm: number, rasters: FieldRaster[] = []): ImageBitmap | OffscreenCanvas | null {
     const W = Math.max(1, Math.round(f.width)), H = Math.max(1, Math.round(f.height));
     const k = this.kept.get(layerId);
     const full = `${key}|${W}x${H}`;
@@ -295,13 +435,13 @@ export class FieldPictures {
     if (!gl) return null;
     let image: ImageBitmap | OffscreenCanvas;
     if (W <= gl.max && H <= gl.max) {
-      gl.draw(type, opacity, sources, f, [0, 0], W, H, radiusKm);
+      gl.draw(type, opacity, sources, f, [0, 0], W, H, radiusKm, rasters);
       image = gl.canvas.transferToImageBitmap();
     } else {
       const out = new OffscreenCanvas(W, H), ctx = out.getContext('2d')!;
       for (let y = 0; y < H; y += gl.max) for (let x = 0; x < W; x += gl.max) {
         const tw = Math.min(gl.max, W - x), th = Math.min(gl.max, H - y);
-        gl.draw(type, opacity, sources, f, [x, y], tw, th, radiusKm);
+        gl.draw(type, opacity, sources, f, [x, y], tw, th, radiusKm, rasters);
         ctx.drawImage(gl.canvas, x, y);
       }
       image = out;

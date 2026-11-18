@@ -146,7 +146,9 @@ export async function terrainFor(world: World, spaceId: string): Promise<Ground 
   const planet = planetOf(space);
   if (planet) return { grid: await planetTerrain(planet), key: planetKey(planet) };
   const look = terrainLook(space), shownLook = !!look && shown(space, 'export', 'terrain');
-  if (!shownLook && !seaLevelPoints(space).length && !sculptOf(space).length) return null;
+  // (Conditions spreading over the terrain need its heights too, D103.)
+  const fields = world.all('layer').some((l) => l.kind === 'field' && l.space_id === spaceId);
+  if (!shownLook && !seaLevelPoints(space).length && !sculptOf(space).length && !fields) return null;
   return { grid: await loadEarthTerrain(), key: EARTH_TERRAIN_KEY, cover: shownLook && PALETTES[look.palette].cover ? await loadEarthCover() : null };
 }
 
@@ -177,7 +179,8 @@ export function renderFrame(ctx: CanvasRenderingContext2D, renderer: MapRenderer
   const seaPoints = seaLevelPoints(space);
   // Sculpting (D98): the strokes holding at the frame's moment, applied to the heights.
   const strokes = stampsAt(sculptOf(space), t);
-  const carved = ground && (terrainShown || seaPoints.length || planetOf(space) || strokes.length) ? sculpted(ground.grid, ground.key, strokes, (space?.radius_m ?? 6371008.8) / 1000) : null;
+  const fieldsHere = world.all('layer').some((l) => l.kind === 'field' && l.space_id === shot.spaceId);
+  const carved = ground && (terrainShown || seaPoints.length || planetOf(space) || strokes.length || fieldsHere) ? sculpted(ground.grid, ground.key, strokes, (space?.radius_m ?? 6371008.8) / 1000) : null;
   const rivers = carved && planetOf(space) && on('rivers') ? riversNow(carved.grid, carved.key) : null;
   // The land's colours in the satellite look (D100): Earth's land cover, or the planet's biomes.
   const planet = planetOf(space);
