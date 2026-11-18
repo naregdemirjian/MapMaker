@@ -277,6 +277,12 @@ export function FeaturePanel({ id }: { id: string }) {
               <option value="none">None</option><option value="diagonal">Diagonal lines</option><option value="cross">Cross-hatched</option><option value="dots">Dots</option>
             </select>
           </label>
+          <label className="inline" title="Claimed by another country or faction as well: drawn in stripes of both colours">Contested with
+            <select value={st.contested ?? ''} onChange={(ev) => look({ contested: ev.target.value })} data-testid="feature-contested">
+              <option value="">Nobody</option>
+              {owners.filter((o) => o.id !== f.entity_id).map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+            </select>
+          </label>
         </>}
         {kind !== 'point' && <>
           <label className="inline">Line width <input type="number" min={0} max={20} step={0.5} value={st.width ?? 2} onChange={(ev) => look({ width: Math.max(0, Number(ev.target.value)) })} style={{ width: '4.5em' }} /></label>

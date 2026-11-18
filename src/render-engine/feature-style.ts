@@ -17,6 +17,8 @@ export interface FeatureStyle {
   /** Areas: how opaque the fill is (0: outline only), and a pattern over it. */
   fillOpacity?: number;
   hatch?: 'none' | 'diagonal' | 'cross' | 'dots';
+  /** Areas: contested with another country or faction (its id, D93): striped in both colours. '' for none. */
+  contested?: string;
   /** Areas and lines: the width of the line (design pixels at 1920 wide) and its pattern. */
   width?: number;
   dash?: 'solid' | 'dashed' | 'dotted';
@@ -31,7 +33,7 @@ export interface FeatureStyle {
 }
 
 export const DEFAULT_FEATURE_STYLE: Record<FeatureKind, FeatureStyle> = {
-  area: { color: '#e0a030', fillOpacity: 0.25, hatch: 'none', width: 2, dash: 'dashed', showName: true },
+  area: { color: '#e0a030', fillOpacity: 0.25, hatch: 'none', contested: '', width: 2, dash: 'dashed', showName: true },
   line: { color: '#e04848', width: 3, dash: 'solid', teeth: 'none', arrow: 'none', showName: false },
   point: { color: '#f2d06b', symbol: 'circle', size: 9, showName: true },
 };

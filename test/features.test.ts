@@ -233,3 +233,20 @@ test('a line drawn part of the way along its length (the renderer, D79)', async 
   assert.equal(cutLine(l, 1), l);
   assert.deepEqual([...cutLine(l, 0)], [0, 0]);
 });
+
+test('a contested area (D93): the other claimant kept with its style, none by default, the layer can give it', () => {
+  assert.equal(featureStyle('area', undefined, undefined).contested, '', 'none by default');
+  assert.equal(featureStyle('area', '{}', '{"contested":"ent_b","hatch":"dots"}').contested, 'ent_b');
+  assert.equal(featureStyle('area', '{"contested":"ent_c"}', '{}').contested, 'ent_c', 'from the layer');
+  assert.equal(featureStyle('area', '{"contested":"ent_c"}', '{"contested":""}').contested, '', 'and taken away by its own');
+  // Stored with the feature's look (one undo step).
+  const world = new World();
+  const space = cmd.seedProject(world, 'Contested').result.spaceId;
+  const layer = cmd.createLayer(world, space, 'Claims', 'area').result;
+  const [a, b] = ['Aria', 'Bel'].map((name) => cmd.createEntity(world, { type_id: 'polity', name }).result);
+  const id = cmd.createFeature(world, { layerId: layer, name: 'Disputed', entity: a, parts: [[[0, 0], [10, 0], [10, 10], [0, 10]]], mode: { kind: 'correct', t: NEG_INF } }).result;
+  const r = cmd.updateFeature(world, id, { style: { contested: b } });
+  assert.equal(featureStyle('area', undefined, world.get('feature', id)!.style).contested, b);
+  world.applyDiffs(invertDiffs(r.diffs));
+  assert.equal(featureStyle('area', undefined, world.get('feature', id)!.style).contested, '');
+});

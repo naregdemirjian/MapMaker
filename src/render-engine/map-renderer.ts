@@ -1934,7 +1934,10 @@ export class MapRenderer {
    * in the order given. Their outlines are worked out once per sheet (like borders); what is drawn in
    * screen pixels (dashes, teeth, arrowheads, symbols, names) keeps its size at every zoom.
    */
+  /** The world whose features are being drawn (for the colours of contested areas' rivals, D93). */
+  private featureWorld: World | null = null;
   private drawFeatures(ctx: CanvasRenderingContext2D, view: View, sheet: Sheet, world: World, engine: Engine, spaceId: string, t: Instant, layerIds: string[], u: number, clip: Path2D | null): void {
+    this.featureWorld = world;
     this.lastFeatures = [];
     const [k, e, g] = this.place;
     const toScreen = (l: Float32Array) => { const o = new Float32Array(l.length); for (let i = 0; i < l.length; i += 2) { o[i] = l[i] * k + e; o[i + 1] = l[i + 1] * k + g; } return o; };
@@ -2035,7 +2038,19 @@ export class MapRenderer {
     if (kind === 'area' && sh.path) {
       ctx.save();
       ctx.transform(k, 0, 0, k, e, g);
-      if ((st.fillOpacity ?? 0) > 0) { ctx.globalAlpha = Math.min(1, st.fillOpacity!) * Math.min(1, alpha); ctx.fillStyle = color; ctx.fill(sh.path, 'evenodd'); ctx.globalAlpha = Math.min(1, alpha); }
+      // Contested (D93): stripes of its own colour and the other claimant's, instead of the plain fill.
+      const rival = st.contested ? this.featureWorld?.get('entity', st.contested)?.color : undefined;
+      if (rival) {
+        const mt = ctx.getTransform();
+        ctx.save();
+        ctx.clip(sh.path, 'evenodd');
+        ctx.setTransform(mt.a / k, mt.b / k, mt.c / k, mt.d / k, mt.e - (mt.a * e + mt.c * g) / k, mt.f - (mt.b * e + mt.d * g) / k);
+        ctx.globalAlpha = Math.max(0.45, Math.min(1, st.fillOpacity ?? 0)) * Math.min(1, alpha);
+        ctx.fillStyle = this.contestPattern(ctx, color, rival, u);
+        ctx.fillRect(-view.width, -view.height, 3 * view.width, 3 * view.height);
+        ctx.restore();
+        ctx.globalAlpha = Math.min(1, alpha);
+      } else if ((st.fillOpacity ?? 0) > 0) { ctx.globalAlpha = Math.min(1, st.fillOpacity!) * Math.min(1, alpha); ctx.fillStyle = color; ctx.fill(sh.path, 'evenodd'); ctx.globalAlpha = Math.min(1, alpha); }
       if (st.hatch && st.hatch !== 'none') {
         const mt = ctx.getTransform();
         ctx.clip(sh.path, 'evenodd');
@@ -2201,6 +2216,26 @@ export class MapRenderer {
   }
 
   private patterns = new Map<string, CanvasPattern>();
+  /** Wide stripes at 45° alternating two colours, for a contested area (D93). */
+  private contestPattern(ctx: CanvasRenderingContext2D, a: string, b: string, u: number): CanvasPattern {
+    const size = Math.max(8, Math.round(22 * u));
+    const key = `contest|${a}|${b}|${size}`;
+    let p = this.patterns.get(key);
+    if (p) return p;
+    const c = new OffscreenCanvas(size, size), x = c.getContext('2d') as unknown as CanvasRenderingContext2D;
+    x.fillStyle = a;
+    x.fillRect(0, 0, size, size);
+    x.strokeStyle = b;
+    x.lineWidth = size / (2 * Math.SQRT2);
+    x.beginPath();
+    for (const o of [-size, 0, size]) { x.moveTo(o, size); x.lineTo(o + size, 0); }
+    x.stroke();
+    p = ctx.createPattern(c as unknown as CanvasImageSource, 'repeat')!;
+    if (this.patterns.size > 64) this.patterns.clear();
+    this.patterns.set(key, p);
+    return p;
+  }
+
   private hatchPattern(ctx: CanvasRenderingContext2D, hatch: 'diagonal' | 'cross' | 'dots', color: string, u: number): CanvasPattern {
     const size = Math.max(4, Math.round(9 * u));
     const key = `${hatch}|${color}|${size}`;

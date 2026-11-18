@@ -1164,6 +1164,16 @@ try {
     await page.getByTestId('feature-panel').waitFor();
     assert.ok(await shown('Probian claim', '1000'), 'there from the beginning');
     await page.getByTestId('feature-hatch').selectOption('diagonal');
+    // Contested with the other country (D93): stripes of both colours; then back (the exports below check colours here).
+    const claimStyle = () => page.evaluate(() => (window as any).__mapmaker.store.world.all('feature').find((f: any) => f.name === 'Probian claim').style) as Promise<string>;
+    await page.getByTestId('feature-contested').selectOption({ label: A });
+    const idOfA = await page.evaluate((n) => (window as any).__mapmaker.store.world.all('entity').find((e: any) => e.name === n).id, A);
+    await page.waitForFunction(([id]) => (window as any).__mapmaker.store.world.all('feature').find((f: any) => f.name === 'Probian claim').style.includes(`"contested":"${id}"`), [idOfA]);
+    await page.waitForTimeout(200);
+    await h.screenshot('contested-claim');
+    await page.getByTestId('feature-contested').selectOption('');
+    await page.waitForFunction(() => /"contested":""/.test((window as any).__mapmaker.store.world.all('feature').find((f: any) => f.name === 'Probian claim').style));
+    assert.match(await claimStyle(), /"hatch":"diagonal"/, 'its pattern kept');
     // Three layers, three features, listed under "Areas, lines and points"; nobody's land changed.
     assert.equal(await page.getByTestId('feature-row').count(), 3);
     assert.equal(await h.ownerAt(P.b, '1900'), A, 'the land under them is untouched');

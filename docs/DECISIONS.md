@@ -60,6 +60,16 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D93. Contested areas (Stage 7)
+
+Claims and zones are areas on feature layers (D71), belonging to a country or faction. An area can now also be
+**contested with** another country or faction (in its panel, or for a whole layer in the layer's look): it is then
+drawn in wide stripes at 45° of the two claimants' colours instead of its plain fill (at least half opaque, so the
+dispute reads over the territories), with its outline and name as before; the stripes keep their spacing on screen
+at any zoom and export size. Stored with the area's look (`contested`: the other claimant's id; '' for none), so it
+can be set and undone like any other part of the look; an area contested with a country that is later deleted is
+drawn plainly again.
+
 ### D92. Events out of sync with the clock in presentations (Stage 6)
 
 A shot maps history onto screen time; an event that is short in history (a battle of one day) flashes past in a shot
