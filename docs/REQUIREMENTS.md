@@ -54,14 +54,14 @@ status. Last updated: 18 November 2026 (Stage 4; see DEVELOPMENT.md).
 | Overlapping geographical entities | Partial | `scenarios`, `features`, `e2e/workflows` | Territories overlap freely across layers. Within one territory layer each place has one owner at a time (by design). Areas, lines and points on feature layers overlap freely (D71) |
 | Geography-aware and terrain-aware drawing | Not implemented | | Needs terrain data; will not be claimed until tested on real data (Stage 12) |
 | Strategic and military drawing assistance | Not implemented | | Stage 12 |
-| Geographical modification (coasts, rivers, terrain changing over time) | Partial | `sea-level`, `e2e/workflows`, `e2e/render-compare` | Sea level over time (D96): the sea higher or lower than today's at chosen dates, steady between them, with an end-of-the-ice-age preset; the coasts follow the terrain, and so do land and territory that end at the coast. Rivers and other terrain changes over time: Stage 8, later steps |
+| Geographical modification (coasts, rivers, terrain changing over time) | Partial | `sea-level`, `sculpt`, `e2e/workflows`, `e2e/render-compare` | Sea level over time (D96): the sea higher or lower than today's at chosen dates, steady between them, with an end-of-the-ice-age preset; the coasts follow the terrain, and so do land and territory that end at the coast. The terrain sculpted with twelve brushes, in the base world or from a date on (D98). Rivers: Stage 8, a later step |
 
 ## Worlds
 
 | Requirement | Status | Evidence | Notes |
 | --- | --- | --- | --- |
 | Several independent worlds with their own maps, layers and territorial history | Tested | `geometry-worlds`, `e2e/workflows` step 6 | |
-| Fictional planet with custom geography, no real data needed | Partial | `geometry-worlds`, `planet`, `e2e/workflows` | Territories can be drawn on a blank world of any radius, or on a generated planet (D97): seven presets, a seed and sliders (sea, continents, mountains, roughness, ice caps), its own coasts, colours and relief; territory ends at its coast. Sculpting the terrain by hand comes next (Stage 8) |
+| Fictional planet with custom geography, no real data needed | Partial | `geometry-worlds`, `planet`, `sculpt`, `e2e/workflows` | Territories can be drawn on a blank world of any radius, or on a generated planet (D97): seven presets, a seed and sliders (sea, continents, mountains, roughness, ice caps), its own coasts, colours and relief; territory ends at its coast; its terrain sculpted by hand (D98). Rivers and biomes: Stage 8, a later step |
 | No Earth-specific assumptions | Tested | `geometry-worlds` (areas follow each world's radius) | |
 | Custom projections | Partial | `camera`, `e2e/workflows` step 8 | Four projections for shots. The world-building view has no projection choice; flat (non-spherical) coordinate systems are not implemented |
 | Separate timelines per world | Tested | `geometry-worlds`, `event-groups`, `e2e/workflows` step 7 | Territorial history is per world. Events belong to the project and are grouped by the user (D8): the timeline shows the chosen groups; an event can be in several |

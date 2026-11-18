@@ -434,19 +434,33 @@ export class BasemapPainter {
       ctx.restore();
     }
     o.afterFills?.();
+    if (o.coastline !== false) this.coastline(ctx, view, sheet, basemap, st);
+    ctx.save();
+    ctx.transform(k, 0, 0, k, e, f);
+    if (o.referenceBorders && paths.borders) {
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = st.reference;
+      ctx.lineWidth = 0.9 * px;
+      ctx.setLineDash([4 * px, 3 * px]);
+      paths.borders.paint(ctx, 0.45 * px + 1, stroke);
+    }
+    ctx.restore();
+  }
+
+  /** Strokes the coastline as the basemap shows it. */
+  coastline(ctx: CanvasRenderingContext2D, view: View, sheet: Sheet, basemap: Basemap, style?: BasemapStyle): void {
+    const paths = this.pathsFor(view, sheet, basemap);
+    const st = style ?? DEFAULT_BASEMAP_STYLE;
+    const [k, e, f] = sheet.placement(view);
+    const px = view.unit / k;
     ctx.save();
     ctx.transform(k, 0, 0, k, e, f);
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
     ctx.strokeStyle = st.coast;
     ctx.lineWidth = 0.8 * px;
-    if (o.coastline !== false) paths.coastline.paint(ctx, 0.4 * px + 1, stroke);
-    if (o.referenceBorders && paths.borders) {
-      ctx.strokeStyle = st.reference;
-      ctx.lineWidth = 0.9 * px;
-      ctx.setLineDash([4 * px, 3 * px]);
-      paths.borders.paint(ctx, 0.45 * px + 1, stroke);
-    }
+    paths.coastline.paint(ctx, 0.4 * px + 1, (p) => ctx.stroke(p));
     ctx.restore();
   }
 

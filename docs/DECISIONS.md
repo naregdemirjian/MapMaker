@@ -61,6 +61,35 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D98. Sculpting the terrain (Stage 8)
+
+On any map with terrain (Earth, or a generated planet), the **Terrain** tool sculpts it with twelve brushes: raise,
+lower, mountain range, valley, smooth, flatten, roughen, erode, crater, island, paint land and paint sea. A stroke
+is dragged across the map (a click for a crater or an island), with a size in kilometres and a strength in metres
+(for painted land its height, for painted sea its depth), and changes either **the base world** (every date) or
+holds **from the date viewed** on, a change in history: painting the sea over England from 1450 floods it then and
+leaves it land before.
+
+- **Kept as strokes.** A stroke is stored as its brush, its path (rounded to about a metre, at most 600 points), size,
+  strength, a seed for its noise and its date (`sculpt` in the map's settings), one undoable step each; "Remove all"
+  takes them away in one. The heights shown at a moment are the base heights with every stroke holding then applied
+  in the order drawn (`terrain/sculpt.ts`, pure and tested), kept for the last few sets of strokes, so scrubbing the
+  timeline across a dated stroke costs a recalculation once. Distances along a stroke are measured on the sphere
+  (to great-circle arcs between its points), across the 180th meridian too.
+- **What each brush does.** Raise and lower add a smooth bump along the stroke; a mountain range adds ridged peaks;
+  a valley cuts a sharper trough; roughen adds hills and hollows; a crater is a bowl with a raised rim; an island
+  raises land out of the sea; painted land and sea set the ground a little above or below the sea; flatten brings
+  the ground to the height where the stroke starts; smooth averages with the neighbours; erode lets ground slide
+  down slopes that are steep at map scales (thermal erosion), keeping the material.
+- **Coasts on Earth.** Sculpted places follow the terrain's own coast: the shader is given a mark for every cell a
+  stroke changed, and there it takes the terrain's height without the "inside Natural Earth's coastline" rule of
+  D96; Natural Earth's coastline line gives way there too. Elsewhere the coast is exactly as before. Territory that
+  ends at the coast follows. Earth's heights are loaded for a map with strokes even when its terrain is not shown.
+- **Tests.** `sculpt.test.ts` (each brush along a stroke and only within its reach, between its points too; across
+  the 180th meridian; the same strokes always the same heights; base and dated strokes; stored strokes checked; the
+  commands, a long path thinned, undone); `e2e/workflows` (land painted across the North Sea makes it land; the sea
+  painted over England from 1450 floods it then and not in 1400; both undone).
+
 ### D97. Generated planets (Stage 8)
 
 "New map" can now make **a planet of one's own**: a preset (Earth-like, desert, ocean, ice, volcanic, barren moon,

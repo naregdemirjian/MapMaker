@@ -27,7 +27,7 @@ import { parcelGeometry, type ParcelGeometry, type CycleGeom } from './parcel-ge
 import { featureStyle, featureColor, isFeatureKind, type FeatureKind, type FeatureStyle } from './feature-style.ts';
 import { shotProgress, eventScreenSeconds } from '../presentation/sequence.ts';
 import { iconById, iconOfStyle, unitOfStyle, drawIcon, type CharacterIcon, type RouteStyle } from './icons.ts';
-import { TerrainPictures, terrainDrawable, type TerrainFrame, type TerrainImageKind, type TerrainSea } from './terrain-gl.ts';
+import { TerrainPictures, terrainDrawable, type TerrainFrame, type TerrainImageKind, type TerrainSea, type TerrainOverride } from './terrain-gl.ts';
 import type { ElevationGrid } from '../terrain/grid.ts';
 import { PALETTES, rampAt, DEFAULT_TERRAIN_LOOK, type TerrainLook } from '../terrain/look.ts';
 
@@ -45,7 +45,11 @@ export const ALL_PASSES: PassName[] = ['background', 'terrain', 'graticule', 'la
  * drawn, but the sea level of the moment still decides the coasts); the sea level of the moment (D96,
  * metres above today's).
  */
-export interface TerrainShown { grid: ElevationGrid; key: string; look: TerrainLook | null; seaLevel?: number }
+export interface TerrainShown {
+  grid: ElevationGrid; key: string; look: TerrainLook | null; seaLevel?: number;
+  /** Where sculpting changed Earth's terrain (D98): there the terrain's own coast, not Natural Earth's. */
+  override?: TerrainOverride | null;
+}
 const rgbOf = ([r, g, b]: [number, number, number]) => `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
 
 export interface MapStyle {
@@ -1473,7 +1477,7 @@ export class MapRenderer {
       for (const [x, y, w, h] of this.region) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x + w); y1 = Math.max(y1, y + h); }
       part = [x0, y0, x1 - x0, y1 - y0];
     }
-    const out = this.terrainPictures.image(terrain.grid, terrain.key, terrain.look ?? DEFAULT_TERRAIN_LOOK, kind, frame, part, sea);
+    const out = this.terrainPictures.image(terrain.grid, terrain.key, terrain.look ?? DEFAULT_TERRAIN_LOOK, kind, frame, part, sea, terrain.override ?? null);
     if (!out) return;
     c.save();
     c.setTransform(1, 0, 0, 1, 0, 0);
@@ -1550,7 +1554,7 @@ export class MapRenderer {
     const seaLevel = terrain ? Math.round((terrain.seaLevel ?? 0) * 100) / 100 : 0, shifted = seaLevel !== 0;
     // Where the terrain decides what is land: at another sea level than today's, and on a world without
     // Natural Earth's coastline (a generated planet, D97).
-    const terrainLand = !!terrain && (shifted || !opts.basemap);
+    const terrainLand = !!terrain && (shifted || !opts.basemap || !!terrain.override);
     // The plain land the terrain decides (without terrain colours), in the land pass.
     const landByTerrain = terrainLand && !terrainColours && opts.passes.has('land');
     // Relief without colours lies over the plain land (in the land pass); with colours it is part of them.
@@ -1680,13 +1684,26 @@ export class MapRenderer {
           referenceBorders: !!opts.referenceBorders,
           // Lakes stay water whatever the sea does; with terrain colours (and today's sea) they take the sea's colours beneath.
           oceanColor: terrainColours ? rgbOf(rampAt(PALETTES[tLook!.palette].sea, -60)) : wantsBackground ? style.ocean : undefined,
-          // Natural Earth's coastline is the coast only at today's sea level.
-          coastline: opts.show?.coastline !== false && !shifted,
-          // With terrain colours, the land is those colours (in the terrain pass); at another sea level, the terrain's land.
-          fills: shifted ? 'lakes' : !terrainColours,
+          // Natural Earth's coastline is the coast only at today's sea level, and not where sculpting changed it (below).
+          coastline: opts.show?.coastline !== false && !terrainLand,
+          // With terrain colours, the land is those colours (in the terrain pass); where the terrain decides, the terrain's land.
+          fills: terrainLand ? 'lakes' : !terrainColours,
           afterFills: reliefOnLand ? () => this.layTerrain(c, view, sheet, terrain!, 'relief', undefined, shifted ? this.seaOf(c, view, sheet, opts.basemap!, seaLevel) : undefined) : undefined,
         });
         else if (reliefOnLand) this.layTerrain(c, view, sheet, terrain!, 'relief', undefined, this.seaOf(c, view, sheet, null, seaLevel));
+        // Sculpted Earth at today's sea level (D98): Natural Earth's coastline, except where sculpting changed the terrain.
+        if (wantsLand && terrain?.override && !shifted && opts.show?.coastline !== false) {
+          const lc = this.scratch(c);
+          this.basemapPainter.coastline(lc, view, sheet, opts.basemap!);
+          lc.save();
+          lc.globalCompositeOperation = 'destination-out';
+          this.layTerrain(lc, view, sheet, terrain, 'override', undefined, this.seaOf(c, view, sheet, opts.basemap!, seaLevel));
+          lc.restore();
+          c.save();
+          c.setTransform(1, 0, 0, 1, 0, 0);
+          c.drawImage(lc.canvas as CanvasImageSource, 0, 0);
+          c.restore();
+        }
         c.restore();
       } };
     }

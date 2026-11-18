@@ -13,7 +13,9 @@ import { eventShown, entityStyle } from '../domain/commands.ts';
 import { isFeatureKind } from '../render-engine/feature-style.ts';
 import { preloadImages, prepareVideos } from '../render-engine/assets.ts';
 import { basemapSourceOf, loadBasemap, loadBasemapDetail, loadDatasetRecords, type Basemap } from '../render-engine/basemap.ts';
-import { shown, minLakeKm2, terrainLook, seaLevelPoints, planetOf } from '../world-model/world-settings.ts';
+import { shown, minLakeKm2, terrainLook, seaLevelPoints, planetOf, sculptOf } from '../world-model/world-settings.ts';
+import { stampsAt } from '../terrain/sculpt.ts';
+import { sculpted } from '../terrain/sculpt-cache.ts';
 import { planetKey } from '../terrain/planet.ts';
 import { planetTerrain } from '../terrain/planet-cache.ts';
 import { seaLevelAt } from '../terrain/sea-level.ts';
@@ -135,7 +137,7 @@ export async function terrainFor(world: World, spaceId: string): Promise<Ground 
   const space = world.get('map_space', spaceId);
   const planet = planetOf(space);
   if (planet) return { grid: await planetTerrain(planet), key: planetKey(planet) };
-  return (terrainLook(space) && shown(space, 'export', 'terrain')) || seaLevelPoints(space).length ? { grid: await loadEarthTerrain(), key: EARTH_TERRAIN_KEY } : null;
+  return (terrainLook(space) && shown(space, 'export', 'terrain')) || seaLevelPoints(space).length || sculptOf(space).length ? { grid: await loadEarthTerrain(), key: EARTH_TERRAIN_KEY } : null;
 }
 
 /** Render one frame of one pass into a 2D context of the given size. */
@@ -148,7 +150,10 @@ export function renderFrame(ctx: CanvasRenderingContext2D, renderer: MapRenderer
   const labels = !!shot.labels && on('names'), cities = shot.cities !== false && on('cities');
   const look = terrainLook(space), terrainShown = !!look && on('terrain');
   const seaPoints = seaLevelPoints(space);
-  const terrain = ground && (terrainShown || seaPoints.length || planetOf(space)) ? { ...ground, look: terrainShown ? look : null, seaLevel: seaLevelAt(seaPoints, t) } : null;
+  // Sculpting (D98): the strokes holding at the frame's moment, applied to the heights.
+  const strokes = stampsAt(sculptOf(space), t);
+  const carved = ground && (terrainShown || seaPoints.length || planetOf(space) || strokes.length) ? sculpted(ground.grid, ground.key, strokes, (space?.radius_m ?? 6371008.8) / 1000) : null;
+  const terrain = carved ? { grid: carved.grid, key: carved.key, look: terrainShown ? look : null, seaLevel: seaLevelAt(seaPoints, t), override: carved.touched && basemap ? { data: carved.touched, key: carved.key } : null } : null;
   const passes = new Set<PassName>(def.passes.filter((p) => (p !== 'graticule' || (shot.graticule && on('graticule'))) && (p !== 'labels' || labels) && (p !== 'characters' || (shot.characters !== false && on('characters'))) && (p !== 'cities' || cities) && (p !== 'borders' || on('borders')) && (p !== 'features' || on('features')) && (p !== 'terrain' || !!terrain?.look)));
   ctx.clearRect(0, 0, width, height);
   if (passes.size) {
@@ -194,7 +199,7 @@ export async function runExport(o: {
   const iconPictures = o.world.all('entity').map((e) => entityStyle(e).icon?.asset);
   await preloadImages([eventsBoxOf(o.shot.eventsBox).image, ...fills.filter((f) => f.kind === 'image').map((f) => f.asset), ...iconPictures]);
   // Credit lines for the data drawn in these frames (written into the manifest and the guide).
-  const drawn = new Set([...(basemap ? ['natural-earth'] : []), ...(terrain?.key === EARTH_TERRAIN_KEY ? ['terrain-tiles', 'copernicus-dem'] : [])]);
+  const drawn = new Set([...(basemap ? ['natural-earth'] : []), ...(terrain?.key.startsWith(EARTH_TERRAIN_KEY) ? ['terrain-tiles', 'copernicus-dem'] : [])]);
   const credits = drawn.size ? (await loadDatasetRecords()).filter((d) => drawn.has(d.id)).map((d) => `${d.name} ${d.version} (${d.licence}): ${d.credit}`) : [];
   const job = await Api.startExport(o.projectId, {
     credits,

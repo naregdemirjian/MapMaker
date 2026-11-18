@@ -2069,6 +2069,60 @@ try {
     await page.evaluate((w) => (window as any).__mapmaker.store.set({ spaceId: w.spaceId, layerId: w.layerId, selection: null }), was);
   });
 
+  await h.step('Sculpting: land painted into the North Sea in the base world; a dated stroke floods England from a date only; undone', async () => {
+    await page.getByTestId('mode-world').click();
+    await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 2, lat: 54, zoom: 3, rotation: 0, projection: 'equirectangular' }));
+    await h.setDate('1450');
+    const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
+    const before = await steps();
+    const pixelAt = (ll: LL) => page.evaluate(([lon, lat]) => {
+      const p = (window as any).__mapmaker.lonLatToPage(lon, lat);
+      const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement;
+      const r = c.getBoundingClientRect(), k = c.width / r.width;
+      return Array.from(c.getContext('2d')!.getImageData(Math.round((p[0] - r.left) * k), Math.round((p[1] - r.top) * k), 1, 1).data).slice(0, 3);
+    }, ll);
+    const diff = (a: number[], b: number[]) => Math.max(...a.map((v, i) => Math.abs(v - b[i])));
+    const northSea: LL = [3, 55.5], england: LL = [-1, 52.7], germany: LL = [8, 52.4];
+    for (const ll of [northSea, england, germany]) for (const layer of ['Political', 'Military control']) assert.equal(await h.ownerOnLayer(ll, '1450', layer), null, `nobody holds ${ll} on ${layer}`);
+    const sea = await pixelAt(northSea), land = await pixelAt(germany);
+    assert.ok(diff(sea, land) > 20, 'the North Sea is sea to begin with');
+    const stroke = async (lls: LL[]) => {
+      const pts: Array<[number, number]> = [];
+      for (const ll of lls) pts.push(await h.toPage(ll));
+      await page.mouse.move(pts[0][0], pts[0][1]);
+      await page.mouse.down();
+      for (const q of pts.slice(1)) await page.mouse.move(q[0], q[1], { steps: 6 });
+      await page.mouse.up();
+    };
+    const waitColour = async (ll: LL, like: number[], what: string) => {
+      let d = 255;
+      for (let i = 0; i < 60 && (d = diff(await pixelAt(ll), like)) > 12; i++) await page.waitForTimeout(100);
+      assert.ok(d <= 12, `${what} (${await pixelAt(ll)} against ${like})`);
+    };
+    // Land painted across the North Sea, in the base world: land at every date.
+    await page.getByTestId('tool-sculpt').click();
+    await page.getByTestId('sculpt-brush').selectOption('land');
+    await page.getByTestId('sculpt-size').fill('120');
+    await stroke([[1.5, 55.5], [3, 55.5], [4.5, 55.5]]);
+    await waitColour(northSea, land, 'the North Sea is land now');
+    // The sea painted over England from the date viewed on: sea then, land before.
+    await page.getByTestId('sculpt-brush').selectOption('sea');
+    await page.getByTestId('sculpt-when').selectOption('dated');
+    await stroke([[-2, 52.7], [-1, 52.7], [0, 52.7]]);
+    await waitColour(england, sea, 'England is under the sea from 1450');
+    await h.screenshot('sculpted');
+    await h.setDate('1400');
+    await waitColour(england, land, 'and land before');
+    assert.equal(await page.evaluate(() => JSON.parse((window as any).__mapmaker.store.world.get('map_space', (window as any).__mapmaker.store.spaceId).settings).sculpt.length), 2);
+    // Undone, stroke by stroke.
+    for (let i = 0; i < 2; i++) await page.getByTestId('undo').click();
+    await h.saved();
+    assert.equal(await steps(), before, 'each stroke was one step');
+    await h.setDate('1450');
+    await waitColour(northSea, sea, 'the North Sea is sea again');
+    await page.getByTestId('tool-select').click();
+  });
+
   await h.step('History Health lists the overlap, nothing else; no browser errors', async () => {
     await page.getByTestId('mode-world').click();
     await page.getByTestId('health').click();

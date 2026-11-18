@@ -1,9 +1,10 @@
 import { useState, useEffect, memo } from 'react';
 import { useStore, useLive, store, type Tool } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
+import { SCULPT_TOOLS } from '../../terrain/sculpt.ts';
 import { type Instant, gregorian, fromStore, formatYear, compare, add, NEG_INF } from '../../core-time/index.ts';
 import { BASE_EVENT_ID, type EffectRow } from '../../world-model/schema.ts';
-import { basemapSourceOf, worldSettings, terrainSourceOf } from '../../world-model/world-settings.ts';
+import { basemapSourceOf, worldSettings, terrainSourceOf, sculptOf } from '../../world-model/world-settings.ts';
 import { parseJSON, leafDescendants, isUntracked, resolutionOf, type Resolution, type TransitionSpec } from '../../temporal-engine/engine.ts';
 import type { World } from '../../world-model/world.ts';
 import { lonLatToVec } from '../../geo-kernel/vec.ts';
@@ -169,6 +170,7 @@ const TOOLS: Array<{ id: Tool; name: string; hint: string }> = [
   { id: 'erase', name: 'Border eraser', hint: 'Drag across borders to erase them: the country where you start takes the land across each border you cross, from the date viewed (or in the event being recorded). Start outside any country to clear land.' },
   { id: 'feature', name: 'Areas, lines & points', hint: 'Draw on a layer of areas, lines or points: claims and zones, front lines, roads and arrows, battles and sites. They overlap freely and never change who holds the land.' },
   { id: 'place', name: 'Characters & cities', hint: 'Click the map to put the chosen character or city there from the date being viewed (a point, no borders). With Select, drag one to move it.' },
+  { id: 'sculpt', name: 'Terrain', hint: 'Sculpt the terrain: raise and lower ground, draw mountain ranges and valleys, make craters and islands, paint land and sea, smooth, flatten, roughen or erode. A stroke changes the base world or holds from the date viewed.' },
 ];
 
 
@@ -206,7 +208,7 @@ export function ToolBar() {
   return (
     <>
     <div className="toolbar">
-      {TOOLS.map((t) => (
+      {TOOLS.filter((t) => t.id !== 'sculpt' || terrainSourceOf(w.get('map_space', s.spaceId))).map((t) => (
         <button key={t.id} className={s.tool === t.id ? 'on' : ''} title={t.hint} onClick={() => s.set({ tool: t.id })} data-testid={`tool-${t.id}`}>{t.name}</button>
       ))}
     </div>
@@ -235,6 +237,7 @@ export function ToolBar() {
         </div>
       )}
     {s.tool === 'feature' && <FeatureToolOptions />}
+    {s.tool === 'sculpt' && <SculptToolOptions />}
     {s.tool === 'split' && <SplitToolOptions />}
     {s.tool === 'regions' && <RegionToolOptions />}
     {s.tool === 'place' && (
@@ -886,3 +889,40 @@ export function Toasts() {
 
 export function formatNegInf(t: Instant) { return compare(t, NEG_INF) === 0 ? 'the beginning' : fmt(t); }
 export { formatYear };
+
+/** The sculpting brush (D98): which brush, its size and strength, and what a stroke changes. */
+function SculptToolOptions() {
+  const s = useStore();
+  const w = s.world!;
+  const space = w.get('map_space', s.spaceId);
+  const b = s.sculpt;
+  const strokes = sculptOf(space);
+  const info = SCULPT_TOOLS.find((t) => t.id === b.tool)!;
+  const set = (patch: Partial<typeof b>) => s.set({ sculpt: { ...b, ...patch } });
+  const uses = info.strength > 0;
+  return (
+    <div className="toolbar sub sculpt-options" data-testid="sculpt-options">
+      <label className="inline">Brush
+        <select value={b.tool} onChange={(e) => { const t = SCULPT_TOOLS.find((x) => x.id === e.target.value)!; set({ tool: t.id, strength: t.strength || b.strength }); }} title={info.hint} data-testid="sculpt-brush">
+          {SCULPT_TOOLS.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </select>
+      </label>
+      <label className="inline" title="The brush's radius on the ground">Size
+        <input type="number" min={1} max={5000} step={10} value={b.radiusKm} onChange={(e) => Number(e.target.value) > 0 && set({ radiusKm: Math.min(5000, Number(e.target.value)) })} data-testid="sculpt-size" /> km
+      </label>
+      {uses && (
+        <label className="inline" title={b.tool === 'land' ? 'How high the new land stands' : b.tool === 'sea' ? 'How deep the new sea is' : 'How much the brush raises or lowers'}>{b.tool === 'land' ? 'Height' : b.tool === 'sea' ? 'Depth' : 'Strength'}
+          <input type="number" min={1} max={10000} step={50} value={b.strength} onChange={(e) => Number(e.target.value) > 0 && set({ strength: Math.min(10000, Number(e.target.value)) })} data-testid="sculpt-strength" /> m
+        </label>
+      )}
+      <label className="inline" title="A change to the base world holds at every date; a dated change holds from the date viewed on">Changes
+        <select value={b.dated ? 'dated' : 'base'} onChange={(e) => set({ dated: e.target.value === 'dated' })} data-testid="sculpt-when">
+          <option value="base">the base world</option>
+          <option value="dated">from {fmt(s.time)} on</option>
+        </select>
+      </label>
+      <span className="muted">{info.hint}.</span>
+      {strokes.length > 0 && <button className="link" onClick={() => s.execute((wd) => cmd.clearTerrainStamps(wd, s.spaceId))} data-testid="sculpt-clear" title="Take every stroke away (one step, which can be undone)">Remove all {strokes.length} stroke{strokes.length === 1 ? '' : 's'}</button>}
+    </div>
+  );
+}

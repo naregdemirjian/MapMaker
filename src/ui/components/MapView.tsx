@@ -17,7 +17,9 @@ import { cameraAt, timeAt, overlaysAt, drawOverlays, withStillCamera, moveOverla
 import { transitionOptions, drawShotOverlays } from '../../presentation/export-driver.ts';
 import { parseJSON, slerpLonLat } from '../../temporal-engine/engine.ts';
 import { compare, fromStore, gregorian } from '../../core-time/index.ts';
-import { basemapSourceOf, shown, minLakeKm2, terrainLook, seaLevelPoints, planetOf } from '../../world-model/world-settings.ts';
+import { basemapSourceOf, shown, minLakeKm2, terrainLook, seaLevelPoints, planetOf, sculptOf } from '../../world-model/world-settings.ts';
+import { stampsAt } from '../../terrain/sculpt.ts';
+import { sculpted } from '../../terrain/sculpt-cache.ts';
 import { seaLevelAt } from '../../terrain/sea-level.ts';
 import { recordTransition } from '../record-length.ts';
 import { loadBasemapDetail, pixelsPerDegree, visibleBounds, DETAIL_PIXELS_PER_DEGREE, type Basemap } from '../../render-engine/basemap.ts';
@@ -38,6 +40,8 @@ type Drag =
   | { kind: 'character'; entity: string; from: Pt; moved: number }
   // The border eraser's stroke (map positions).
   | { kind: 'erase'; points: Pt[] }
+  // A stroke of the sculpting brush (map positions; D98).
+  | { kind: 'sculpt'; points: Pt[] }
   // A freehand area or line on a feature layer (map positions).
   | { kind: 'feature'; points: Pt[] }
   // The line between two dates being compared, dragged across the map.
@@ -72,6 +76,16 @@ export function frameRect(shot: ShotSettings, w: number, h: number) {
  * the country where the stroke starts takes the land on the other side of each, from the date being
  * viewed (or in the event being recorded). One undo step.
  */
+/** A stroke of the sculpting brush (D98), kept in the base world or from the date viewed. */
+function sculptStroke(points: Pt[]): void {
+  const s = store, b = s.sculpt;
+  if (!points.length || !s.world) return;
+  s.execute((wd) => cmd.addTerrainStamp(wd, s.spaceId, {
+    tool: b.tool, path: points.map((q) => [q[0], q[1]] as [number, number]), radiusKm: b.radiusKm, strength: b.strength,
+    seed: 1 + Math.floor(Math.random() * 999_999), from: b.dated && Number.isFinite(s.time.day) ? { day: s.time.day, ms: s.time.ms } : null,
+  }));
+}
+
 function eraseBorders(stroke: Pt[], view: View): void {
   const s = store, w = s.world!, e = s.engine!;
   if (stroke.length < 2 || !s.layerId) return;
@@ -269,9 +283,12 @@ export function MapView() {
     // are their terrain's): Earth's heights loaded, a planet's made, on first use.
     const look = terrainLook(space), terrainShown = !!look && on('terrain');
     const seaPoints = seaLevelPoints(space), seaLevel = seaLevelAt(seaPoints, time);
-    const needsGrid = terrainShown || seaPoints.length > 0 || !!planetOf(space);
+    // Sculpting (D98): the strokes holding at the date viewed, applied to the heights.
+    const strokes = stampsAt(sculptOf(space), time);
+    const needsGrid = terrainShown || seaPoints.length > 0 || !!planetOf(space) || strokes.length > 0;
     const ground = needsGrid ? s.terrainOf(space) : null;
-    const terrain = ground ? { ...ground, look: terrainShown ? look : null, seaLevel } : null;
+    const carved = ground ? sculpted(ground.grid, ground.key, strokes, (space?.radius_m ?? 6371008.8) / 1000) : null;
+    const terrain = ground && carved ? { grid: carved.grid, key: carved.key, look: terrainShown ? look : null, seaLevel, override: carved.touched && basemapSourceOf(space) === 'natural-earth' ? { data: carved.touched, key: carved.key } : null } : null;
     if (terrain?.look) passes.add('terrain');
     if (on('borders')) passes.add('borders');
     if (on('features')) passes.add('features');
@@ -438,6 +455,19 @@ export function MapView() {
         if (q) { ctx.beginPath(); ctx.arc(q[0], q[1], 4, 0, Math.PI * 2); ctx.stroke(); }
       }
       ctx.restore();
+    }
+    // A stroke of the sculpting brush, as wide as the brush (D98).
+    if (drag.current.kind === 'sculpt') {
+      const pts = drag.current.points.map((q) => lonLatToScreen(v, q[0], q[1])).filter((q): q is Pt => !!q);
+      const sp = s.world?.get('map_space', s.spaceId);
+      const px = Math.max(2, (s.sculpt.radiusKm / ((sp?.radius_m ?? 6371008.8) / 1000)) / radiansPerPixel(v));
+      if (pts.length) {
+        ctx.save(); ctx.strokeStyle = 'rgba(255, 214, 102, 0.35)'; ctx.lineWidth = 2 * px; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        ctx.beginPath(); pts.forEach((q, i) => (i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]))); if (pts.length === 1) ctx.lineTo(pts[0][0] + 0.01, pts[0][1]); ctx.stroke();
+        const last = pts[pts.length - 1];
+        ctx.beginPath(); ctx.arc(last[0], last[1], px, 0, Math.PI * 2); ctx.strokeStyle = 'rgba(255, 214, 102, 0.9)'; ctx.lineWidth = 1.5; ctx.stroke();
+        ctx.restore();
+      }
     }
     // The border eraser's stroke.
     if (drag.current.kind === 'erase') {
@@ -640,6 +670,12 @@ export function MapView() {
       if (ll) store.execute((wd) => cmd.addTransitionOrigin(wd, id, [ll[0], ll[1]]));
       return;
     }
+    // Sculpting (D98): a stroke of the brush (a click for a crater or an island).
+    if (!presentation && e.button === 0 && s.tool === 'sculpt') {
+      const ll = screenToLonLat(view, p[0], p[1]);
+      if (ll) { drag.current = { kind: 'sculpt', points: [ll] }; force((n) => n + 1); }
+      return;
+    }
     // Border eraser: a stroke across borders.
     if (!presentation && e.button === 0 && s.tool === 'erase') {
       const ll = screenToLonLat(view, p[0], p[1]);
@@ -738,7 +774,7 @@ export function MapView() {
       if (r !== hoverRegion.current) { hoverRegion.current = r; force((n) => n + 1); }
     }
     if (d.kind === 'cut') d.moved = Math.max(d.moved, Math.hypot(p[0] - d.x, p[1] - d.y));
-    if (d.kind === 'erase' || d.kind === 'feature' || d.kind === 'cut') {
+    if (d.kind === 'erase' || d.kind === 'feature' || d.kind === 'cut' || d.kind === 'sculpt') {
       const ll = screenToLonLat(view, p[0], p[1]);
       const last = d.points[d.points.length - 1];
       const ls = lonLatToScreen(view, last[0], last[1]);
@@ -793,6 +829,7 @@ export function MapView() {
     // Framing the shot: the view dragged to becomes the shot's camera (still for the whole shot).
     if (presentation && d.kind === 'pan') { if (d.moved >= 1) commitShotCamera(); return; }
     if (d.kind === 'erase') { eraseBorders(d.points, view); force((n) => n + 1); return; }
+    if (d.kind === 'sculpt') { sculptStroke(d.points); force((n) => n + 1); return; }
     // A character dropped: it is there from the date being viewed (a click just selects it).
     if (d.kind === 'character') {
       setCursor(null);

@@ -28,10 +28,14 @@ export interface TerrainFrame {
  * land: the land colours everywhere (laid on inside the coastline);
  * both: each where the terrain has land or sea (with the sea level of the moment, D96);
  * relief: shadows and light alone, see-through;
- * landmask: the land alone, opaque (for ending territory at the coast of the moment).
+ * landmask: the land alone, opaque (for ending territory at the coast of the moment);
+ * override: where sculpting has changed the terrain, opaque (D98: where Natural Earth's coastline gives way).
  */
-export type TerrainImageKind = 'sea' | 'land' | 'both' | 'relief' | 'landmask';
-const MODES: Record<TerrainImageKind, number> = { sea: 0, land: 1, both: 2, relief: 3, landmask: 4 };
+export type TerrainImageKind = 'sea' | 'land' | 'both' | 'relief' | 'landmask' | 'override';
+const MODES: Record<TerrainImageKind, number> = { sea: 0, land: 1, both: 2, relief: 3, landmask: 4, override: 5 };
+
+/** Where sculpting has changed the terrain (D98): a mark for each cell of the grid, and a name for the marks. */
+export interface TerrainOverride { data: Uint8Array; key: string }
 
 /**
  * The sea of a moment (D96): its level (metres above today's) and, where Natural Earth's coastline is
@@ -70,6 +74,8 @@ uniform int u_landN;
 uniform float u_seaLevel;
 uniform sampler2D u_mask;
 uniform int u_useMask;
+uniform sampler2D u_override;
+uniform int u_useOverride;
 out vec4 outColor;
 const float PI = 3.141592653589793;
 
@@ -149,8 +155,10 @@ void main() {
   float eS = textureGrad(u_elev, uv + vec2(0.0, foot.y), gx, gy).r;
   // Height above the sea of the moment: where a coastline is drawn, never below 0.5 m on its land
   // and never above -0.5 m off it (see heightAboveSea in terrain/sea-level.ts).
+  // Where sculpting changed the terrain (D98), the terrain's own coast, whatever the coastline says.
+  float over = u_useOverride == 1 ? texture(u_override, uv).r : 0.0;
   float h = e;
-  if (u_useMask == 1) h = texelFetch(u_mask, ivec2(dev), 0).a > 0.5 ? max(e, 0.5) : min(e, -0.5);
+  if (u_useMask == 1) h = mix(texelFetch(u_mask, ivec2(dev), 0).a > 0.5 ? max(e, 0.5) : min(e, -0.5), e, over);
   float rel = h - u_seaLevel;
   // How much of the pixel is land: the coast is smoothed over about a pixel. (How fast the height
   // changes from pixel to pixel is worked out from the slope of the terrain, not from neighbouring
@@ -161,6 +169,7 @@ void main() {
   float landA = clamp(rel / max(perPixel, 1e-3) + 0.5, 0.0, 1.0);
   if (!ok) { outColor = vec4(0.0); return; }
   if (u_mode == 4) { outColor = vec4(landA); return; }
+  if (u_mode == 5) { outColor = vec4(over); return; }
   const float R = 6371008.8;
   float dxm = 2.0 * foot.x * 2.0 * PI * R * max(cos(lat), 0.05);
   float dym = 2.0 * foot.y * PI * R;
@@ -184,7 +193,7 @@ void main() {
   outColor = vec4(col, 1.0);
 }`;
 
-const UNIFORMS = ['u_elev', 'u_tex', 'u_size', 'u_offset', 'u_inv', 'u_S', 'u_origin', 'u_lonRef', 'u_proj', 'u_mode', 'u_shadeTint', 'u_exag', 'u_seaRelief', 'u_light', 'u_sea', 'u_seaN', 'u_land', 'u_landN', 'u_seaLevel', 'u_mask', 'u_useMask'] as const;
+const UNIFORMS = ['u_elev', 'u_tex', 'u_size', 'u_offset', 'u_inv', 'u_S', 'u_origin', 'u_lonRef', 'u_proj', 'u_mode', 'u_shadeTint', 'u_exag', 'u_seaRelief', 'u_light', 'u_sea', 'u_seaN', 'u_land', 'u_landN', 'u_seaLevel', 'u_mask', 'u_useMask', 'u_override', 'u_useOverride'] as const;
 type UniformName = (typeof UNIFORMS)[number];
 
 /** The relief's exaggeration at strength 1 (slopes ten kilometres across are gentle). */
@@ -193,6 +202,7 @@ const EXAGGERATION = 6;
 class TerrainGL {
   private textures = new WeakMap<ElevationGrid, WebGLTexture>();
   private maskTexture: WebGLTexture | null = null;
+  private overrides = new WeakMap<Uint8Array, WebGLTexture>();
   private u: Record<UniformName, WebGLUniformLocation | null>;
   readonly canvas: OffscreenCanvas;
   readonly gl: WebGL2RenderingContext;
@@ -286,12 +296,40 @@ class TerrainGL {
     gl.activeTexture(gl.TEXTURE0);
   }
 
+  /** Where sculpting changed the terrain, as a texture laid like the grid's (one byte a cell). */
+  private override(grid: ElevationGrid, marks: Uint8Array): void {
+    const gl = this.gl;
+    gl.activeTexture(gl.TEXTURE2);
+    let t = this.overrides.get(marks);
+    if (!t) {
+      t = gl.createTexture()!;
+      gl.bindTexture(gl.TEXTURE_2D, t);
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+      let w = grid.width, h = grid.height, data = new Uint8Array(marks.length);
+      for (let k = 0; k < data.length; k++) data[k] = marks[k] ? 255 : 0;
+      // (Halved like the heights when the grid is larger than the graphics card takes.)
+      while (w > this.max || h > this.max) {
+        const nw = w >> 1, nh = h >> 1, next = new Uint8Array(nw * nh);
+        for (let y = 0; y < nh; y++) for (let x = 0; x < nw; x++) next[y * nw + x] = Math.max(data[2 * y * w + 2 * x], data[2 * y * w + 2 * x + 1], data[(2 * y + 1) * w + 2 * x], data[(2 * y + 1) * w + 2 * x + 1]);
+        data = next; w = nw; h = nh;
+      }
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, w, h, 0, gl.RED, gl.UNSIGNED_BYTE, data);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      this.overrides.set(marks, t);
+    } else gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.activeTexture(gl.TEXTURE0);
+  }
+
   /** Draws a picture of the terrain (or the part of it at `offset`, `w` × `h` pixels) on the context's canvas. */
-  draw(grid: ElevationGrid, look: TerrainLook, kind: TerrainImageKind, f: TerrainFrame, offset: [number, number], w: number, h: number, sea: TerrainSea = TODAY): void {
+  draw(grid: ElevationGrid, look: TerrainLook, kind: TerrainImageKind, f: TerrainFrame, offset: [number, number], w: number, h: number, sea: TerrainSea = TODAY, over: TerrainOverride | null = null): void {
     const gl = this.gl, u = this.u;
     if (this.canvas.width !== w || this.canvas.height !== h) { this.canvas.width = w; this.canvas.height = h; }
     gl.viewport(0, 0, w, h);
     if (sea.mask) this.mask(sea.mask);
+    if (over) this.override(grid, over.data);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.texture(grid));
     const { a, b, c, d, e, f: ty } = f.m, det = a * d - b * c;
@@ -318,6 +356,8 @@ class TerrainGL {
     gl.uniform1f(u.u_seaLevel, sea.level);
     gl.uniform1i(u.u_mask, 1);
     gl.uniform1i(u.u_useMask, sea.mask ? 1 : 0);
+    gl.uniform1i(u.u_override, 2);
+    gl.uniform1i(u.u_useOverride, over ? 1 : 0);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -351,28 +391,28 @@ export class TerrainPictures {
    * A picture of the terrain for a frame (null when WebGL2 is not there): all of it, or the part
    * `part` ([x, y, width, height] in picture pixels). `gridKey` names the grid's content.
    */
-  image(grid: ElevationGrid, gridKey: string, look: TerrainLook, kind: TerrainImageKind, f: TerrainFrame, part?: [number, number, number, number], sea: TerrainSea = TODAY): TerrainImage | null {
+  image(grid: ElevationGrid, gridKey: string, look: TerrainLook, kind: TerrainImageKind, f: TerrainFrame, part?: [number, number, number, number], sea: TerrainSea = TODAY, over: TerrainOverride | null = null): TerrainImage | null {
     const W = Math.max(1, Math.round(f.width)), H = Math.max(1, Math.round(f.height));
     const x0 = Math.max(0, Math.floor(part?.[0] ?? 0)), y0 = Math.max(0, Math.floor(part?.[1] ?? 0));
     const x1 = Math.min(W, Math.ceil(part ? part[0] + part[2] : W)), y1 = Math.min(H, Math.ceil(part ? part[1] + part[3] : H));
     if (x1 <= x0 || y1 <= y0) return null;
     const w = x1 - x0, h = y1 - y0;
     const { a, b, c, d, e } = f.m;
-    const key = `${gridKey}|${JSON.stringify(look)}|${f.kind}|${f.S}|${f.ox}|${f.oy}|${f.lonRef}|${a},${b},${c},${d},${e},${f.m.f}|${W}x${H}|${x0},${y0},${w}x${h}|${sea.level}|${sea.maskKey}`;
+    const key = `${gridKey}|${JSON.stringify(look)}|${f.kind}|${f.S}|${f.ox}|${f.oy}|${f.lonRef}|${a},${b},${c},${d},${e},${f.m.f}|${W}x${H}|${x0},${y0},${w}x${h}|${sea.level}|${sea.maskKey}|${over?.key ?? ''}`;
     const k = this.kept.get(kind);
     if (k && k.key === key) return k.out;
     const gl = terrainGL();
     if (!gl) return null;
     let image: ImageBitmap | OffscreenCanvas;
     if (w <= gl.max && h <= gl.max) {
-      gl.draw(grid, look, kind, f, [x0, y0], w, h, sea);
+      gl.draw(grid, look, kind, f, [x0, y0], w, h, sea, over);
       image = gl.canvas.transferToImageBitmap();
     } else {
       // Larger than the graphics card draws at once: in tiles.
       const out = new OffscreenCanvas(w, h), ctx = out.getContext('2d')!;
       for (let y = 0; y < h; y += gl.max) for (let x = 0; x < w; x += gl.max) {
         const tw = Math.min(gl.max, w - x), th = Math.min(gl.max, h - y);
-        gl.draw(grid, look, kind, f, [x0 + x, y0 + y], tw, th, sea);
+        gl.draw(grid, look, kind, f, [x0 + x, y0 + y], tw, th, sea, over);
         ctx.drawImage(gl.canvas, x, y);
       }
       image = out;

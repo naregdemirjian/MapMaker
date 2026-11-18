@@ -15,6 +15,7 @@ import { loadBasemap, loadBasemapDetail, type Basemap } from '../render-engine/b
 import { loadEarthTerrain, EARTH_TERRAIN_KEY, type ElevationGrid } from '../terrain/grid.ts';
 import { planetKey, type PlanetParams } from '../terrain/planet.ts';
 import { planetTerrain } from '../terrain/planet-cache.ts';
+import type { SculptTool } from '../terrain/sculpt.ts';
 import { terrainSourceOf, planetOf } from '../world-model/world-settings.ts';
 import type { MapSpaceRow } from '../world-model/schema.ts';
 import { DEFAULT_PERIOD, type PeriodSpec } from '../domain/history-view.ts';
@@ -26,7 +27,7 @@ export type Mode = 'world' | 'present';
 /** One line of a right-click menu: an action, a heading, or a divider. */
 export type MenuItem = { label: string; run: () => void; danger?: boolean; testId?: string } | { heading: string } | 'divider';
 
-export type Tool = 'select' | 'lasso' | 'polygon' | 'pen' | 'vertex' | 'place' | 'erase' | 'feature' | 'split' | 'regions';
+export type Tool = 'select' | 'lasso' | 'polygon' | 'pen' | 'vertex' | 'place' | 'erase' | 'feature' | 'split' | 'regions' | 'sculpt';
 export type Selection =
   | { kind: 'entity'; id: string }
   | { kind: 'event'; id: string }
@@ -122,6 +123,8 @@ class AppStore {
   recordLength: RecordLength = loadRecordLength();
   cameras = new Map<string, Camera>();
   stroke: StrokeSettings = { smoothness: 1, irregularity: 0, precision: 1.2, seed: 1 };
+  /** The sculpting brush (D98): which, how large (km), how strong (m), and whether a stroke changes the base world or holds from the date viewed. */
+  sculpt: { tool: SculptTool; radiusKm: number; strength: number; dated: boolean } = { tool: 'raise', radiusKm: 300, strength: 500, dated: false };
   pending: PendingEdit | null = null;
   /** The Split tool's line, drawn and waiting for the part that changes hands to be clicked (D76). */
   splitLine: Array<[number, number]> | null = null;

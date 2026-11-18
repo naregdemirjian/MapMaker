@@ -3,6 +3,7 @@ import type { MapSpaceRow } from './schema.ts';
 import { terrainLookOf, type TerrainLook } from '../terrain/look.ts';
 import { cleanSeaLevel, type SeaLevelPoint } from '../terrain/sea-level.ts';
 import { planetParamsOf, type PlanetParams } from '../terrain/planet.ts';
+import { cleanStamps, type TerrainStamp } from '../terrain/sculpt.ts';
 
 /** The reference geography a world shows under its territories. */
 export type BasemapSource = 'natural-earth' | 'none';
@@ -31,6 +32,8 @@ export interface WorldSettings {
   seaLevel?: SeaLevelPoint[];
   /** A generated planet's settings (D97): its terrain is made from them whenever the map is opened. */
   planet?: PlanetParams;
+  /** Strokes of the sculpting brush (D98), in the order drawn. */
+  sculpt?: TerrainStamp[];
 }
 
 /** Whether something is shown, while working or in exports. */
@@ -84,4 +87,9 @@ export function terrainLook(space: Pick<MapSpaceRow, 'settings' | 'radius_m' | '
 /** A world's sea level over time (D96): its points, checked and in time order (none on worlds without terrain). */
 export function seaLevelPoints(space: Pick<MapSpaceRow, 'settings' | 'radius_m' | 'kind'> | null | undefined): SeaLevelPoint[] {
   return space && terrainSourceOf(space) ? cleanSeaLevel(worldSettings(space).seaLevel) : [];
+}
+
+/** A world's sculpting strokes (D98), checked, in the order drawn (none on worlds without terrain). */
+export function sculptOf(space: Pick<MapSpaceRow, 'settings' | 'radius_m' | 'kind'> | null | undefined): TerrainStamp[] {
+  return space && terrainSourceOf(space) ? cleanStamps(worldSettings(space).sculpt) : [];
 }

@@ -13,6 +13,7 @@ import { worldSettings, terrainSourceOf, type BasemapSource, type ShowSet, type 
 import { terrainLookOf, DEFAULT_TERRAIN_LOOK, type TerrainLook } from '../terrain/look.ts';
 import { cleanSeaLevel, type SeaLevelPoint } from '../terrain/sea-level.ts';
 import { planetParamsOf, PLANET_PRESETS, type PlanetParams } from '../terrain/planet.ts';
+import { cleanStamps, isSculptTool, SCULPT_TOOLS, type TerrainStamp } from '../terrain/sculpt.ts';
 import { resolvePointStyle, type LabelStyle, type CountryLabel, type PointStyle } from '../render-engine/label-style.ts';
 import { DEFAULT_FEATURE_STYLE, isFeatureKind, type FeatureKind, type FeatureStyle } from '../render-engine/feature-style.ts';
 import { relationKind, isRelationKind, type RelationKind } from './relations.ts';
@@ -137,6 +138,36 @@ export function setWorldPlanet(world: World, spaceId: string, params: PlanetPara
   const planet = planetParamsOf(params);
   if (!planet) throw new Error('Those are not settings for a planet.');
   return run(world, `Make "${space.name}" anew`, (tx) => { tx.update('map_space', { ...space, settings: JSON.stringify({ ...worldSettings(space), planet }) }); });
+}
+
+/**
+ * A stroke of the sculpting brush (D98), kept in the base world (`from` null) or from a date on: one
+ * undoable step. Its path is rounded to about a metre and kept to 600 points at most.
+ */
+export function addTerrainStamp(world: World, spaceId: string, stamp: Omit<TerrainStamp, 'id'>): CommandResult<string> {
+  const space = world.get('map_space', spaceId);
+  if (!space) throw new Error('That map no longer exists.');
+  if (!terrainSourceOf(space)) throw new Error('Only maps of the Earth and generated planets have terrain to sculpt.');
+  if (!isSculptTool(stamp.tool)) throw new Error(`Unknown sculpting brush: ${String(stamp.tool)}`);
+  let path = (stamp.path ?? []).filter((p) => Array.isArray(p) && Number.isFinite(p[0]) && Number.isFinite(p[1]) && Math.abs(p[1]) <= 90).map(([lon, lat]) => [Math.round(lon * 1e5) / 1e5, Math.round(lat * 1e5) / 1e5] as [number, number]);
+  if (!path.length) throw new Error('A stroke needs at least one place on the map.');
+  if (path.length > 600) { const step = path.length / 600; path = Array.from({ length: 600 }, (_, i) => path[Math.min(path.length - 1, Math.round(i * step))]); }
+  if (!(stamp.radiusKm > 0) || !Number.isFinite(stamp.strength)) throw new Error('A stroke needs a size and a strength.');
+  const settings = worldSettings(space);
+  return run(world, `Sculpt the terrain (${SCULPT_TOOLS.find((t) => t.id === stamp.tool)!.name.toLowerCase()})`, (tx) => {
+    const id = newId('stamp');
+    const next = [...cleanStamps(settings.sculpt), ...cleanStamps([{ ...stamp, id, path }])];
+    tx.update('map_space', { ...space, settings: JSON.stringify({ ...settings, sculpt: next }) });
+    return id;
+  });
+}
+
+/** Takes every sculpting stroke away (D98), in one undoable step. */
+export function clearTerrainStamps(world: World, spaceId: string): CommandResult {
+  const space = world.get('map_space', spaceId);
+  if (!space) throw new Error('That map no longer exists.');
+  const { sculpt: _old, ...rest } = worldSettings(space);
+  return run(world, `Remove the sculpting of "${space.name}"`, (tx) => { tx.update('map_space', { ...space, settings: JSON.stringify(rest) }); });
 }
 
 export function createWorld(world: World, name: string, radiusKm: number, basemap: BasemapSource = 'none'): CommandResult<string> {
