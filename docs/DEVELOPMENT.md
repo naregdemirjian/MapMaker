@@ -16,8 +16,8 @@ The approved architecture is the Claude Doc "Map Maker — Technical Architectur
   dates, the coasts, the land and territory that ends at the coast following it (D96); new maps can be generated
   planets, from a preset, a seed and a few sliders, with their own coasts (D97); the terrain can be sculpted with
   twelve brushes, in the base world or from a date on (D98); rivers are drawn, Natural Earth's on the Earth and worked
-  out from the heights on planets (D99). Next in Stage 8: biomes for a satellite-like look, and close-up detail
-  fetched on demand.
+  out from the heights on planets (D99); a satellite look colours the land by its cover, Natural Earth's on the
+  Earth and biomes worked out from climate on planets (D100). Next in Stage 8: close-up detail fetched on demand.
 - **Stages 6 and 7 mostly done**: events can take their own time on screen in presentations, out of sync with the
   clock (D92); an expansion can spread from several starting points at once, for pincers and encirclement (D91);
   each change in an event can have its own length, and recording can chain changes into a moving front (D86).
@@ -263,12 +263,12 @@ The approved roadmap has 14 stages (0–13). Where each stands (brought up to da
 | 5 First shots and export | Mostly done | Shots, time remap, still camera, date, title and current-events overlays, PNG sequences with passes and transparency up to 8K at every listed frame rate, preview, manifest, compositing guide, deterministic output | Multi-key camera, styles, version-pinned shots, the Premiere checklist on the user's PC |
 | 6 Transitions | Mostly done | Advancing front, expansion and fade; borders and labels follow the animation; shot-level transition settings; animated areas, lines and points (D79); lengths of each change (D86); expansions from several starting points, for pincers and encirclement (D91); events taking their own time on screen, out of sync with the clock (D92). Keyframed fronts: a front placed at dates is recorded as changes that each spread "until the next one" as an advancing front (D86) | Arrival-time fields that follow terrain (fronts slowed by mountains and water), with Stage 8 |
 | 7 Military and movement | Mostly done | Occupied territory drawn with stripes, crossed stripes or dots over the political map (D88); front lines between countries at war (D89); units of a country with trails or arrows of advance (D90); contested areas in both claimants' stripes (D93); characters with icons that face the way they travel (D85) | Bases and supply lines as their own kinds, if wanted (units that stay put and lines with arrows cover them today) |
-| 8 Terrain and fictional worlds | Under way | Earth's elevation with the sea floor and the ice sheets (D94); terrain colours and relief drawn by the graphics card, over the countries too, in the working view and exports (D95); sea level over time, with coasts, land and territory following it (D96); generated planets (D97); sculpting with twelve brushes, in the base world or dated (D98); rivers on the Earth and on planets (D99) | Biomes, close-up detail on demand |
+| 8 Terrain and fictional worlds | Under way | Earth's elevation with the sea floor and the ice sheets (D94); terrain colours and relief drawn by the graphics card, over the countries too, in the working view and exports (D95); sea level over time, with coasts, land and territory following it (D96); generated planets (D97); sculpting with twelve brushes, in the base world or dated (D98); rivers on the Earth and on planets (D99); the satellite look, with Earth's land cover and planets' biomes (D100) | Close-up detail on demand |
 | 9–13 | Not started | | Environment, presentation polish, space maps (nearby stars to 50 light-years), smart brushes, branches and calendars |
 
 ## Tests
 
-All pass as of 18 November 2026 (281 unit and randomised tests in 49 files, 23 + 40 + 6 + 5 interface steps). The
+All pass as of 18 November 2026 (288 unit and randomised tests in 50 files, 23 + 40 + 6 + 5 interface steps). The
 interface tests run with the verify mode on (D57): everything the app works out from what was there before is also
 worked out afresh, and any difference stops the test.
 `sh scripts/check-all.sh` runs everything and prints ALL CHECKS PASSED only when every check passed.
@@ -511,8 +511,7 @@ recompiling the 1,000-territory history took about 800 ms after every edit.
 
 ## Next priorities (18 November 2026, Stage 8 under way)
 
-1. Stage 8 continues (the user gave the go-ahead for Stages 8 and 9): biomes and a satellite-like look; close-up
-   terrain on demand. Arrival-time fields for fronts (slowed by mountains and water) come with it.
+1. Stage 8 continues (the user gave the go-ahead for Stages 8 and 9): close-up terrain on demand. Arrival-time fields for fronts (slowed by mountains and water) come with it.
 2. Stage 9 (environment and fields): field layers and conditions, disaster templates, a stress test.
 3. The user tries the latest installer (from the newest "Windows build and tests" run) and reports back.
 4. Space maps (still wanted, D38).

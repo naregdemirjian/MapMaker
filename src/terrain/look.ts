@@ -3,7 +3,7 @@
 // same arithmetic the terrain shader does (src/render-engine/terrain-gl.ts).
 import type { ProjectionName } from '../render-engine/camera.ts';
 
-export type TerrainPalette = 'natural' | 'atlas' | 'desert' | 'ice' | 'volcanic' | 'moon' | 'gas';
+export type TerrainPalette = 'natural' | 'atlas' | 'satellite' | 'desert' | 'ice' | 'volcanic' | 'moon' | 'gas';
 
 export interface TerrainLook {
   /** Land coloured by height (lowlands to peaks) and the sea by depth. Off: the map's plain land and sea. */
@@ -40,9 +40,11 @@ export type Stop = [number, string];
 /**
  * The palettes, each a ramp for the sea (deepest first) and one for land (lowest first). "Natural"
  * goes with the map's own dark style (its sea is the map's ocean colour at 3,000 m); "Atlas" is the
- * light green-to-brown of printed atlases.
+ * light green-to-brown of printed atlases; "Satellite" takes the land's colours from its land cover
+ * (`cover`, D100: Earth's from Natural Earth I, a planet's from its biomes), its ramp standing in
+ * until the cover is there.
  */
-export const PALETTES: Record<TerrainPalette, { name: string; sea: Stop[]; land: Stop[] }> = {
+export const PALETTES: Record<TerrainPalette, { name: string; sea: Stop[]; land: Stop[]; cover?: true }> = {
   natural: {
     name: 'Natural (goes with the dark map)',
     sea: [[-11000, '#071624'], [-6000, '#0c2335'], [-3000, '#14324a'], [-1000, '#1a3f5b'], [-200, '#22506f'], [0, '#2d6283']],
@@ -52,6 +54,12 @@ export const PALETTES: Record<TerrainPalette, { name: string; sea: Stop[]; land:
     name: 'Atlas (light, as in printed atlases)',
     sea: [[-11000, '#2f5f92'], [-6000, '#4a80b5'], [-3000, '#6ea2d0'], [-1000, '#8cbbe0'], [-200, '#a9d2ec'], [0, '#c8e6f6']],
     land: [[0, '#9fc58b'], [200, '#c3d99b'], [500, '#e6e0a8'], [1000, '#ddc58b'], [2000, '#c49c6e'], [3000, '#a7826a'], [4500, '#b9aea8'], [6500, '#f6f4f2']],
+  },
+  satellite: {
+    name: 'Satellite (forests, grassland, deserts and ice)',
+    sea: [[-11000, '#050c1c'], [-6000, '#08142a'], [-3000, '#0b1b36'], [-1000, '#102846'], [-200, '#183b5e'], [0, '#245074']],
+    land: [[0, '#5a6a3c'], [500, '#6c7146'], [1500, '#857a58'], [3000, '#76695e'], [4500, '#a9a39c'], [6000, '#e8eaec']],
+    cover: true,
   },
   desert: {
     name: 'Desert (sand and rock, turquoise shallows)',

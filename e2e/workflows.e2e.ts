@@ -1894,7 +1894,7 @@ try {
     assert.equal(await steps(), before, 'every step of this one undone');
   });
 
-  await h.step('Terrain: land coloured by height and the sea by depth, with relief; relief over the countries; hidden while working but kept in the presentation; undone', async () => {
+  await h.step('Terrain: land coloured by height and the sea by depth, with relief; the satellite look; relief over the countries; hidden while working but kept in the presentation; undone', async () => {
     await page.getByTestId('mode-world').click();
     // The whole world: the Himalaya, the plains of India, the Atlantic and the countries drawn over it.
     await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 20, lat: 20, zoom: 0.3, rotation: 0, projection: 'equirectangular' }));
@@ -1929,7 +1929,7 @@ try {
       await fn();
       await page.getByTestId('show-dialog').getByRole('button', { name: 'Close' }).last().click();
     };
-    const terrain = () => page.evaluate(() => (window as any).__mapmaker.store.renderer.lastTerrain) as Promise<{ colours: boolean; relief: boolean; overTerritories: boolean; seaLevel: number }>;
+    const terrain = () => page.evaluate(() => (window as any).__mapmaker.store.renderer.lastTerrain) as Promise<{ colours: boolean; relief: boolean; overTerritories: boolean; seaLevel: number; cover: boolean }>;
     await show(async () => {
       assert.equal(await page.getByTestId('show-working-terrain').count(), 0, 'no terrain row before there is terrain');
       await page.getByTestId('terrain-on').check();
@@ -1942,6 +1942,18 @@ try {
     assert.ok(d >= 80, `the Tibetan plateau lighter than the West Siberian Plain (${await pixelAt(tibet)} against ${await pixelAt(siberia)})`);
     assert.ok((await light(shelf)) > (await light(deep)) + 25, `the North Sea's shallows (${await pixelAt(shelf)}) lighter than the deep Pacific (${await pixelAt(deep)})`);
     await h.screenshot('terrain');
+    // The satellite look (D100): the land's colours from its land cover, a desert sand and a rainforest green.
+    // (Places nothing of this test covers: the Taklamakan desert and Borneo's rainforest.)
+    const sahara: LL = [83, 39], congo: LL = [114, 1];
+    for (const ll of [sahara, congo]) assert.equal(await h.ownerAt(ll, '1450'), null, `nobody holds ${ll}`);
+    await show(async () => { await page.getByTestId('terrain-palette').selectOption('satellite'); });
+    await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastTerrain.cover, null, { timeout: 30000 });
+    const mean = async (ll: LL) => { const px = await patch(ll, 5), c = [0, 0, 0]; for (let i = 0; i < px.length; i += 4) for (let q = 0; q < 3; q++) c[q] += px[i + q] / (px.length / 4); return c; };
+    let sand = await mean(sahara), forest = await mean(congo);
+    for (let i = 0; i < 40 && !(sand[0] > sand[2] + 40 && forest[1] > forest[0] && forest[1] > forest[2]); i++) { await page.waitForTimeout(100); sand = await mean(sahara); forest = await mean(congo); }
+    assert.ok(sand[0] > sand[2] + 40 && sand[0] > 150, `the desert at ${sahara} is sand (${sand.map(Math.round)})`);
+    assert.ok(forest[1] > forest[0] && forest[1] > forest[2] && forest[1] < 120, `the rainforest at ${congo} is green (${forest.map(Math.round)})`);
+    await h.screenshot('terrain-satellite');
     // Relief over the countries: the shading of the sea floor shows through the country drawn over the Atlantic.
     const plain = await patch(P.a, 24);
     await show(() => page.getByTestId('terrain-over-territories').check());
@@ -1956,9 +1968,9 @@ try {
     await page.getByTestId('mode-present').click();
     await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastTerrain.colours);
     await page.getByTestId('mode-world').click();
-    assert.deepEqual(await terrain(), { colours: false, relief: false, overTerritories: false, seaLevel: 0 });
+    assert.deepEqual(await terrain(), { colours: false, relief: false, overTerritories: false, seaLevel: 0, cover: false });
     // Undone, step by step, to no terrain.
-    for (let i = 0; i < 3; i++) await page.getByTestId('undo').click();
+    for (let i = 0; i < 4; i++) await page.getByTestId('undo').click();
     await h.saved();
     assert.equal(await steps(), before, 'each change was one step');
     assert.equal(await page.evaluate(() => JSON.parse((window as any).__mapmaker.store.world.get('map_space', (window as any).__mapmaker.store.spaceId).settings).terrain ?? null), null);
@@ -2039,6 +2051,8 @@ try {
     await h.screenshot('planet-dialog');
     await page.getByTestId('new-map-create').click();
     await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastTerrain.colours, null, { timeout: 60000 });
+    // An Earth-like planet takes the satellite look: its biomes worked out a moment after its heights (D100).
+    await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastTerrain.cover, null, { timeout: 30000 });
     // A place of land and a place of sea on the planet, read from its heights; they are drawn differently.
     const places = await page.evaluate(() => {
       const s = (window as any).__mapmaker.store, g = s.terrainOf(s.world.get('map_space', s.spaceId)).grid;

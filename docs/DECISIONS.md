@@ -61,6 +61,46 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D100. The satellite look: land cover on the Earth, biomes on planets (Stage 8)
+
+A third terrain palette, **Satellite**, colours the land as it looks from space (forests, grassland, steppe,
+deserts, tundra, ice and bare rock), with the relief over it and the sea in dark blues by depth. Earth-like and
+ocean planets are made with it (the other presets keep their own palettes); any map with terrain can choose it.
+
+- **Earth's land cover** is Natural Earth I (public domain, land cover only, 16,200 × 8,100 pixels;
+  `scripts/fetch-land-cover.mjs`, from Natural Earth's own download mirror). Its colours are light, made for printing
+  under other things, so each is matched to the colours of its kinds of cover (ice, rock, tundra, steppe, arid land,
+  desert, grass and crops, grass and woods, woods, forest) and given the colours those have from space, the same
+  colours a planet's biomes take; grass becomes savanna in the tropics, forest becomes rainforest in the tropics and
+  northern forest in the north, and the palest ground ice towards the poles. Averaged to 4096 × 2048 cells (the
+  heights' grid) and saved as WebP: `data/terrain/earth-cover-4096.webp`, 873 KB, loaded the first time a map shows
+  the satellite look. The sea takes the colour of the nearest land, so land the sea leaves at a lower sea level
+  (D96), or sculpted out of it (D98), has the colour of the coast beside it. A climate model was tried for the Earth
+  first and rejected: whatever its rules, it got whole regions wrong (southern China and the eastern United States as
+  steppe, the Congo as savanna), where the real land cover is right everywhere.
+- **A planet's biomes** are worked out from its heights (`terrain/biomes.ts`, about 0.4 s for 2048 × 1024 cells, a
+  moment after the heights, and again after sculpting). Warmth comes from latitude and height (28 °C at the equator,
+  6.5 °C less per kilometre up); moisture from the belts of rain by latitude (wet at the equator and in the middle
+  latitudes, dry around 25° and near the poles) and from the air that reaches a place: moist off the sea, drying as
+  it crosses land (about two thirds left after 1,000 km), losing its rain on the mountains it climbs (deserts in the
+  rain shadow of a range), taking up water again over seas, carried by the winds of each latitude (from the east in
+  the tropics and near the poles, from the west between 30° and 60°), with sea breezes near any coast. Warmth and
+  moisture give the biome; bare rock above about 3,000 m; borders blended. Each preset has a climate: a desert
+  world is dry and hot, an ice world 24 °C colder, its ice caps where the generator lays them (with a wandering
+  edge); a moon, a volcanic world and a gas giant have no life and keep their palettes' colours. The planet's
+  picture in New map shows its biomes.
+- **In the shader** the land cover is a texture laid like the heights (with copies halved for zoomed-out views),
+  read where the land's colour by height was read; everything else (the coast of the moment, relief, sculpting) is
+  as before. Rivers are drawn in a darker blue in this look.
+- **Not done.** The land cover does not change over time (deserts spreading, forests cleared: Stage 9's fields);
+  Earth's is today's, at about 10 km, so soft close in, like the heights. A planet's biomes are worked out on the
+  interface's thread (about 0.4 s after each sculpting stroke, with its rivers).
+- **Tests.** `biomes.test.ts` (warmth, belts and the biome rules; distance from the sea in every direction and
+  across the 180th meridian; rain shadows on both sides of the tropics' edge; rainforest, desert, ice and rock where
+  expected, the same every time; ice caps, a desert world and a moon; the satellite look for Earth-like planets and
+  their picture; the shipped WebP and its credit); `e2e/workflows` (the Sahara sand and the Congo forest in the
+  satellite look; a generated Earth-like planet drawn with its biomes).
+
 ### D99. Rivers (Stage 8)
 
 Maps of the Earth now show **rivers**, and so do generated planets. "Rivers" is an item of Show (beside lakes), on

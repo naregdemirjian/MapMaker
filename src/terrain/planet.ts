@@ -27,9 +27,9 @@ export interface PlanetParams {
 }
 
 export const PLANET_PRESETS: Record<PlanetPreset, { name: string; about: string; palette: TerrainPalette; relief: boolean; params: Omit<PlanetParams, 'seed' | 'preset'> }> = {
-  earthlike: { name: 'Earth-like', about: 'Continents and oceans, mountains where plates meet', palette: 'natural', relief: true, params: { sea: 0.68, continents: 5, mountains: 1, roughness: 0.5, ice: 0.15 } },
+  earthlike: { name: 'Earth-like', about: 'Continents and oceans, mountains where plates meet', palette: 'satellite', relief: true, params: { sea: 0.68, continents: 5, mountains: 1, roughness: 0.5, ice: 0.15 } },
   desert: { name: 'Desert', about: 'Mostly dry land with a few small seas', palette: 'desert', relief: true, params: { sea: 0.12, continents: 7, mountains: 0.8, roughness: 0.6, ice: 0 } },
-  ocean: { name: 'Ocean', about: 'Almost all sea, with island chains', palette: 'natural', relief: true, params: { sea: 0.95, continents: 3, mountains: 1.2, roughness: 0.6, ice: 0.1 } },
+  ocean: { name: 'Ocean', about: 'Almost all sea, with island chains', palette: 'satellite', relief: true, params: { sea: 0.95, continents: 3, mountains: 1.2, roughness: 0.6, ice: 0.1 } },
   ice: { name: 'Ice', about: 'A frozen world: ice far from the poles', palette: 'ice', relief: true, params: { sea: 0.55, continents: 5, mountains: 0.9, roughness: 0.5, ice: 0.85 } },
   volcanic: { name: 'Volcanic', about: 'Young, high and rough, with dark seas', palette: 'volcanic', relief: true, params: { sea: 0.35, continents: 8, mountains: 1.7, roughness: 0.85, ice: 0 } },
   moon: { name: 'Barren moon', about: 'No sea, grey plains and highlands, craters', palette: 'moon', relief: true, params: { sea: 0, continents: 4, mountains: 0.5, roughness: 0.7, ice: 0 } },

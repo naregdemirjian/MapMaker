@@ -29,6 +29,7 @@ import { shotProgress, eventScreenSeconds } from '../presentation/sequence.ts';
 import { iconById, iconOfStyle, unitOfStyle, drawIcon, type CharacterIcon, type RouteStyle } from './icons.ts';
 import { TerrainPictures, terrainDrawable, type TerrainFrame, type TerrainImageKind, type TerrainSea, type TerrainOverride } from './terrain-gl.ts';
 import type { ElevationGrid } from '../terrain/grid.ts';
+import type { TerrainCover } from '../terrain/cover.ts';
 import { PALETTES, rampAt, DEFAULT_TERRAIN_LOOK, type TerrainLook } from '../terrain/look.ts';
 
 type LabelEntity = { name: string; style?: string; color?: string; type_id?: string };
@@ -51,8 +52,12 @@ export interface TerrainShown {
   override?: TerrainOverride | null;
   /** A planet's rivers (D99; Earth's are the basemap's). */
   rivers?: RiverSet | null;
+  /** The land's colours for a look with land cover (the satellite look, D100); its ramp until it is there. */
+  cover?: TerrainCover | null;
 }
 const rgbOf = ([r, g, b]: [number, number, number]) => `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
+/** Rivers in a blue that suits the terrain's palette (D99). */
+const riverColour = (look: TerrainLook | null) => (look?.palette === 'atlas' ? '#4f8cc4' : look?.palette === 'satellite' ? '#2f5d86' : '#4f86ad');
 
 export interface MapStyle {
   ocean: string;
@@ -431,7 +436,7 @@ export class MapRenderer {
   /** The wars shown as front lines in the last frame (D89): on which layer, drawn from whose side, teeth toward whom. */
   lastFronts: Array<{ layerId: string; from: string; toward: string }> = [];
   /** What of the terrain the last frame drew (D95): its colours, relief over the plain land, relief over the territories; the sea level (D96). */
-  lastTerrain = { colours: false, relief: false, overTerritories: false, seaLevel: 0 };
+  lastTerrain = { colours: false, relief: false, overTerritories: false, seaLevel: 0, cover: false };
   /** For benchmarks and tests: how many sheets have been made, and snapshots of layers worked out. */
   stats = { sheets: 0, snaps: 0, snapsFollowed: 0 };
 
@@ -1479,7 +1484,9 @@ export class MapRenderer {
       for (const [x, y, w, h] of this.region) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x + w); y1 = Math.max(y1, y + h); }
       part = [x0, y0, x1 - x0, y1 - y0];
     }
-    const out = this.terrainPictures.image(terrain.grid, terrain.key, terrain.look ?? DEFAULT_TERRAIN_LOOK, kind, frame, part, sea, terrain.override ?? null);
+    const look = terrain.look ?? DEFAULT_TERRAIN_LOOK;
+    const cover = (kind === 'land' || kind === 'both') && PALETTES[look.palette].cover ? terrain.cover ?? null : null;
+    const out = this.terrainPictures.image(terrain.grid, terrain.key, look, kind, frame, part, sea, terrain.override ?? null, cover);
     if (!out) return;
     c.save();
     c.setTransform(1, 0, 0, 1, 0, 0);
@@ -1564,7 +1571,7 @@ export class MapRenderer {
     // A planet's own rivers (D99), in the land pass.
     const planetRivers = !opts.basemap && !!terrain?.rivers && opts.passes.has('land') && opts.show?.rivers !== false;
     const wantsBase = wantsBackground || opts.passes.has('graticule') || wantsLand || wantsTerrain || landByTerrain || planetRivers;
-    this.lastTerrain = { colours: wantsTerrain, relief: reliefOnLand, overTerritories: !!tLook?.overTerritories && opts.passes.has('fills'), seaLevel };
+    this.lastTerrain = { colours: wantsTerrain, relief: reliefOnLand, overTerritories: !!tLook?.overTerritories && opts.passes.has('fills'), seaLevel, cover: wantsTerrain && !!terrain?.cover && !!PALETTES[tLook!.palette].cover };
     // Where the frame fills the canvas and starts with the base map, the base map's kept picture
     // replaces what the canvas showed in one copy (see layered); otherwise the frame's area is cleared.
     const m0 = ctx.getTransform();
@@ -1621,7 +1628,7 @@ export class MapRenderer {
     if (wantsBase) {
       // (A flat map's grid changes its spacing with the zoom.)
       const gridStep = opts.passes.has('graticule') && view.camera.projection === 'flat' && space?.radius_m ? Math.floor(Math.log10(view.width / view.projection.scale()) * 3) : 0;
-      const terrainKey = terrain && (wantsTerrain || landByTerrain || planetRivers || (wantsLand && (terrainColours || reliefOnLand || shifted))) ? `|t:${terrain.key}|${JSON.stringify(tLook)}|${wantsTerrain ? 'c' : ''}|${landByTerrain ? 'l' : ''}|${planetRivers ? 'r' : ''}|${seaLevel}` : '';
+      const terrainKey = terrain && (wantsTerrain || landByTerrain || planetRivers || (wantsLand && (terrainColours || reliefOnLand || shifted))) ? `|t:${terrain.key}|${JSON.stringify(tLook)}|${wantsTerrain ? 'c' : ''}|${landByTerrain ? 'l' : ''}|${planetRivers ? 'r' : ''}|${seaLevel}|${terrain.cover?.key ?? ''}` : '';
       const baseKey = partKey(`${wantsBackground ? style.ocean : ''}|${opts.passes.has('graticule') ? style.graticule : ''}|${wantsLand ? `${opts.basemap!.scales.length}${opts.referenceBorders ? 'r' : ''}|${lakeKey}|${opts.show?.coastline === false ? 'nocoast' : ''}|${opts.show?.rivers === false ? 'norivers' : ''}` : ''}|${space?.radius_m ?? 0}${terrainKey}`, `${gridStep}`);
       // (One kept picture per combination of parts: an export draws several passes of each frame.)
       base = { name: `base:${wantsBackground ? 'o' : ''}${wantsTerrain ? 't' : ''}${opts.passes.has('graticule') ? 'g' : ''}${wantsLand ? 'l' : ''}`, key: baseKey, draw: (c) => {
@@ -1687,7 +1694,7 @@ export class MapRenderer {
         if (wantsLand) this.basemapPainter.draw(c, view, sheet, opts.basemap!, {
           referenceBorders: !!opts.referenceBorders,
           // Rivers (D99), in a water colour that shows on the plain land and on terrain colours.
-          rivers: opts.show?.rivers !== false ? (tLook?.palette === 'atlas' ? '#4f8cc4' : '#4f86ad') : null,
+          rivers: opts.show?.rivers !== false ? riverColour(tLook) : null,
           // Lakes stay water whatever the sea does; with terrain colours (and today's sea) they take the sea's colours beneath.
           oceanColor: terrainColours ? rgbOf(rampAt(PALETTES[tLook!.palette].sea, -60)) : wantsBackground ? style.ocean : undefined,
           // Natural Earth's coastline is the coast only at today's sea level, and not where sculpting changed it (below).
@@ -1697,7 +1704,7 @@ export class MapRenderer {
           afterFills: reliefOnLand ? () => this.layTerrain(c, view, sheet, terrain!, 'relief', undefined, shifted ? this.seaOf(c, view, sheet, opts.basemap!, seaLevel) : undefined) : undefined,
         });
         else if (reliefOnLand) this.layTerrain(c, view, sheet, terrain!, 'relief', undefined, this.seaOf(c, view, sheet, null, seaLevel));
-        if (planetRivers) drawRiverLines(c, view, sheet, terrain!.rivers!, tLook?.palette === 'atlas' ? '#4f8cc4' : '#4f86ad');
+        if (planetRivers) drawRiverLines(c, view, sheet, terrain!.rivers!, riverColour(tLook));
         // Sculpted Earth at today's sea level (D98): Natural Earth's coastline, except where sculpting changed the terrain.
         if (wantsLand && terrain?.override && !shifted && opts.show?.coastline !== false) {
           const lc = this.scratch(c);

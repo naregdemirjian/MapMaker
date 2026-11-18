@@ -15,6 +15,8 @@ import { loadBasemap, loadBasemapDetail, type Basemap } from '../render-engine/b
 import { loadEarthTerrain, EARTH_TERRAIN_KEY, type ElevationGrid } from '../terrain/grid.ts';
 import { planetKey, type PlanetParams } from '../terrain/planet.ts';
 import { planetTerrain } from '../terrain/planet-cache.ts';
+import { loadEarthCover, coverSoon, type TerrainCover } from '../terrain/cover.ts';
+import { climateOf } from '../terrain/biomes.ts';
 import type { SculptTool } from '../terrain/sculpt.ts';
 import { terrainSourceOf, planetOf } from '../world-model/world-settings.ts';
 import type { MapSpaceRow } from '../world-model/schema.ts';
@@ -179,6 +181,9 @@ class AppStore {
   /** Earth's elevation (D94), loaded the first time a map shows terrain. */
   earthTerrain: ElevationGrid | null = null;
   private terrainLoading = false;
+  /** Earth's land cover (D100), loaded the first time a map shows the satellite look. */
+  earthCover: TerrainCover | null = null;
+  private coverLoading = false;
   /** Show present-day country borders over the land while drawing (never exported). */
   referenceBorders = false;
   private queue: Promise<unknown> = Promise.resolve();
@@ -312,6 +317,23 @@ class AppStore {
       (g) => { this.planets.set(key, g); this.planetProgress = null; this.notify(); },
       (e: Error) => { this.planets.delete(key); this.planetProgress = null; this.toast(e.message, 'error'); },
     );
+  }
+
+  /**
+   * The land cover of a map with the satellite look (D100), if it is ready: Earth's (loaded on first
+   * use), or a planet's worked out from its heights `ground` (sculpted or not), a moment after them.
+   */
+  coverOf(space: Pick<MapSpaceRow, 'settings' | 'radius_m' | 'kind'> | null | undefined, ground: { grid: ElevationGrid; key: string }): TerrainCover | null {
+    const source = terrainSourceOf(space);
+    if (source === 'earth') {
+      if (!this.earthCover && !this.coverLoading) {
+        this.coverLoading = true;
+        loadEarthCover().then((c) => { this.coverLoading = false; this.set({ earthCover: c }); }, (e: Error) => { this.coverLoading = false; this.toast(e.message, 'error'); });
+      }
+      return this.earthCover;
+    }
+    const params = source === 'planet' ? planetOf(space) : null;
+    return params ? coverSoon(ground.grid, ground.key, (space?.radius_m ?? 6371008.8) / 1000, climateOf(params), () => this.notify()) : null;
   }
 
   /** Loads Earth's terrain unless it is there or on its way (everything is drawn again when it arrives). */

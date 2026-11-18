@@ -21,6 +21,9 @@ import { planetKey } from '../terrain/planet.ts';
 import { planetTerrain } from '../terrain/planet-cache.ts';
 import { seaLevelAt } from '../terrain/sea-level.ts';
 import { loadEarthTerrain, EARTH_TERRAIN_KEY, type ElevationGrid } from '../terrain/grid.ts';
+import { loadEarthCover, coverNow, type TerrainCover } from '../terrain/cover.ts';
+import { climateOf } from '../terrain/biomes.ts';
+import { PALETTES } from '../terrain/look.ts';
 
 export interface ExportPassDef { name: string; label: string; blend: string; passes: PassName[]; overlays: boolean; background: boolean; note?: string }
 
@@ -126,19 +129,21 @@ export async function basemapFor(world: World, spaceId: string): Promise<Basemap
   return basemapSourceOf(world.get('map_space', spaceId)) === 'natural-earth' ? loadBasemapDetail(await loadBasemap()) : null;
 }
 
-/** Terrain heights and a name for them (for what pictures of them are kept by). */
-export interface Ground { grid: ElevationGrid; key: string }
+/** Terrain heights and a name for them (for what pictures of them are kept by); Earth's land cover when the look needs it (D100). */
+export interface Ground { grid: ElevationGrid; key: string; cover?: TerrainCover | null }
 
 /**
  * The terrain a shot's world needs in exports, or null: a generated planet's always (D97, made on
  * first use); Earth's (loaded on first use) when its terrain is shown (D95) or its sea level changes
- * over time (D96).
+ * over time (D96), with its land cover in the satellite look (D100).
  */
 export async function terrainFor(world: World, spaceId: string): Promise<Ground | null> {
   const space = world.get('map_space', spaceId);
   const planet = planetOf(space);
   if (planet) return { grid: await planetTerrain(planet), key: planetKey(planet) };
-  return (terrainLook(space) && shown(space, 'export', 'terrain')) || seaLevelPoints(space).length || sculptOf(space).length ? { grid: await loadEarthTerrain(), key: EARTH_TERRAIN_KEY } : null;
+  const look = terrainLook(space), shownLook = !!look && shown(space, 'export', 'terrain');
+  if (!shownLook && !seaLevelPoints(space).length && !sculptOf(space).length) return null;
+  return { grid: await loadEarthTerrain(), key: EARTH_TERRAIN_KEY, cover: shownLook && PALETTES[look.palette].cover ? await loadEarthCover() : null };
 }
 
 /** Render one frame of one pass into a 2D context of the given size. */
@@ -155,7 +160,10 @@ export function renderFrame(ctx: CanvasRenderingContext2D, renderer: MapRenderer
   const strokes = stampsAt(sculptOf(space), t);
   const carved = ground && (terrainShown || seaPoints.length || planetOf(space) || strokes.length) ? sculpted(ground.grid, ground.key, strokes, (space?.radius_m ?? 6371008.8) / 1000) : null;
   const rivers = carved && planetOf(space) && on('rivers') ? riversNow(carved.grid, carved.key) : null;
-  const terrain = carved ? { grid: carved.grid, key: carved.key, look: terrainShown ? look : null, seaLevel: seaLevelAt(seaPoints, t), override: carved.touched && basemap ? { data: carved.touched, key: carved.key } : null, rivers } : null;
+  // The land's colours in the satellite look (D100): Earth's land cover, or the planet's biomes.
+  const planet = planetOf(space);
+  const cover = carved && terrainShown && PALETTES[look.palette].cover ? (planet ? coverNow(carved.grid, carved.key, (space?.radius_m ?? 6371008.8) / 1000, climateOf(planet)) : ground?.cover ?? null) : null;
+  const terrain = carved ? { grid: carved.grid, key: carved.key, look: terrainShown ? look : null, seaLevel: seaLevelAt(seaPoints, t), override: carved.touched && basemap ? { data: carved.touched, key: carved.key } : null, rivers, cover } : null;
   const passes = new Set<PassName>(def.passes.filter((p) => (p !== 'graticule' || (shot.graticule && on('graticule'))) && (p !== 'labels' || labels) && (p !== 'characters' || (shot.characters !== false && on('characters'))) && (p !== 'cities' || cities) && (p !== 'borders' || on('borders')) && (p !== 'features' || on('features')) && (p !== 'terrain' || !!terrain?.look)));
   ctx.clearRect(0, 0, width, height);
   if (passes.size) {
@@ -201,7 +209,7 @@ export async function runExport(o: {
   const iconPictures = o.world.all('entity').map((e) => entityStyle(e).icon?.asset);
   await preloadImages([eventsBoxOf(o.shot.eventsBox).image, ...fills.filter((f) => f.kind === 'image').map((f) => f.asset), ...iconPictures]);
   // Credit lines for the data drawn in these frames (written into the manifest and the guide).
-  const drawn = new Set([...(basemap ? ['natural-earth'] : []), ...(terrain?.key.startsWith(EARTH_TERRAIN_KEY) ? ['terrain-tiles', 'copernicus-dem'] : [])]);
+  const drawn = new Set([...(basemap || terrain?.cover ? ['natural-earth'] : []), ...(terrain?.key.startsWith(EARTH_TERRAIN_KEY) ? ['terrain-tiles', 'copernicus-dem'] : [])]);
   const credits = drawn.size ? (await loadDatasetRecords()).filter((d) => drawn.has(d.id)).map((d) => `${d.name} ${d.version} (${d.licence}): ${d.credit}`) : [];
   const job = await Api.startExport(o.projectId, {
     credits,

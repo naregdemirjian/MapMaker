@@ -69,7 +69,11 @@ test('basemap: the dataset record names its source, version and licence', () => 
   const ne = records.find((r) => r.id === 'natural-earth')!;
   assert.equal(ne.licence, 'Public domain');
   assert.equal(ne.version, 'v5.1.2');
-  assert.equal((ne.sources as unknown[]).length, 13);
+  // Land, lakes, coastlines and borders at three scales, rivers at two, today's countries, the land cover (D100).
+  const files = (ne.sources as Array<{ file: string; sha256: string }>);
+  assert.equal(files.length, 16);
+  assert.ok(files.every((f) => /^[0-9a-f]{64}$/.test(f.sha256)), 'each with its checksum');
+  assert.ok(['ne_50m_rivers_lake_centerlines.geojson', 'ne_10m_rivers_lake_centerlines.geojson', 'NE1_LR_LC.zip'].every((n) => files.some((f) => f.file === n)));
 });
 
 test('world basemap setting: Earth starts with it, new worlds do not unless asked, and changes undo', () => {
