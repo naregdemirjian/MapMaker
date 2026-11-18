@@ -13,7 +13,7 @@ import { loadViewSettings, saveViewSettings, DETAIL_TOLERANCE, type ViewSettings
 import { loadBasemap, loadBasemapDetail, type Basemap } from '../render-engine/basemap.ts';
 import { DEFAULT_PERIOD, type PeriodSpec } from '../domain/history-view.ts';
 import { setAssetBase } from '../render-engine/assets.ts';
-import type { Vec3 } from '../geo-kernel/vec.ts';
+import { lonLatToVec, type Vec3 } from '../geo-kernel/vec.ts';
 import type { StrokeSettings } from '../render-engine/stroke.ts';
 
 export type Mode = 'world' | 'present';
@@ -246,6 +246,15 @@ class AppStore {
   set(patch: Partial<AppStore>) {
     // Selecting one thing (on the map, from a panel) ends a choice of several, unless it is part of it.
     if ('selection' in patch && !('multi' in patch)) patch = { ...patch, multi: null };
+    // The territory brush gives land to the country selected: a country or faction chosen in a list or
+    // a panel, or the one holding the place clicked on the map (never "nobody" from a click on the sea).
+    if (patch.selection && !('paintValue' in patch)) {
+      const sel = patch.selection;
+      let owner: string | null = null;
+      if (sel.kind === 'entity') { const e = this.world?.get('entity', sel.id); if (e && (e.type_id === 'polity' || e.type_id === 'faction')) owner = e.id; }
+      else if (sel.kind === 'point' && this.engine && this.layerId) owner = this.engine.valueAtPoint(this.spaceId, this.layerId, lonLatToVec(sel.lon, sel.lat), this.time);
+      if (owner) patch = { ...patch, paintValue: owner };
+    }
     Object.assign(this, patch);
     this.notify();
   }

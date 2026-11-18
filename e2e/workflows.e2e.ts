@@ -818,6 +818,11 @@ try {
   await h.step("Region picker: today's states chosen by clicking (and left out again) and by a box, given to a new country from a date", async () => {
     await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 11, lat: 51, zoom: 4, rotation: 0, projection: 'equirectangular' }));
     await h.setDate('2000');
+    // Choosing a country in the list makes it the territory brush's owner.
+    await page.getByTestId('entity-row-Zoomland').click();
+    await page.getByTestId('tool-lasso').click();
+    const zoomland = await page.evaluate(() => (window as any).__mapmaker.store.world.all('entity').find((e: any) => e.name === 'Zoomland').id);
+    assert.equal(await page.getByTestId('paint-owner').inputValue(), zoomland, 'the brush gives land to the country selected');
     await page.getByTestId('tool-regions').click();
     await page.getByTestId('region-level').selectOption('regions');
     await page.getByText('Click regions to choose them').waitFor({ timeout: 20000 });

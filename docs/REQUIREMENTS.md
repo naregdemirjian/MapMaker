@@ -268,3 +268,9 @@ the same three benchmark projects, against the build before this stage, the two 
 | A slower computer | Done | `bench/stress.ts --throttle 4` on the heavy project: a session of 150 random steps 113 s to 62 s; a stroke 344 to 159 ms, moving the map 148 to 56 ms a frame, dragging the timeline 150 to 77 ms a frame, undo 312 to 182 ms | D65: the sharp redraw waits for the frame, so a slow computer no longer draws twice |
 | Long sessions on massive projects | Done | `bench/stress.ts`: memory level after the first hundred steps on all three projects; `kept` test | D59 |
 | Stress testing | Done | `bench/stress.ts`: thirteen sessions of 160–300 random steps on the three projects (three at twice the pixel density, one in Equal Earth), and four times slower in both presets; every tenth frame compared with a fresh drawing; the verify mode checks history, snapshots and borders against a full recomputation | D57, D69. Six defects found and fixed (DEVELOPMENT.md, status) |
+
+## The user's fifth feedback round (18 November 2026)
+
+| Request | Status | Evidence | Notes |
+| --- | --- | --- | --- |
+| The territory brush gives land to the country selected | Tested | `e2e/workflows` 'Region picker' (a country chosen in the list is the brush's owner) | Choosing a country or faction in a list or panel, or a place on the map that a country holds, makes it the brush's owner (a click on the sea leaves the owner as it was) |
