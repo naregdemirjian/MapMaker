@@ -25,7 +25,7 @@ import { BlockPath, setPaintRegion, type DeviceRect } from './blocks.ts';
 import { Kept as Weighed } from './kept.ts';
 import { parcelGeometry, type ParcelGeometry, type CycleGeom } from './parcel-geometry.ts';
 import { featureStyle, featureColor, isFeatureKind, type FeatureKind, type FeatureStyle } from './feature-style.ts';
-import { iconById, iconOfStyle, drawIcon, type CharacterIcon } from './icons.ts';
+import { iconById, iconOfStyle, unitOfStyle, drawIcon, type CharacterIcon, type RouteStyle } from './icons.ts';
 
 type LabelEntity = { name: string; style?: string; color?: string; type_id?: string };
 
@@ -368,7 +368,16 @@ export class MapRenderer {
   lastLabels: LabelInfo[] = [];
   /** The characters drawn in the last frame, where (screen) and on the map, for picking and tests. */
   /** (r: how far the marker or icon reaches from its middle, in design pixels; icon: its icon, 'picture' or 'marker'.) */
-  lastCharacters: Array<{ entity: string; name: string; x: number; y: number; lon: number; lat: number; moving: boolean; r: number; icon: string; angle: number; mirror: boolean }> = [];
+  lastCharacters: Array<{ entity: string; name: string; x: number; y: number; lon: number; lat: number; moving: boolean; r: number; icon: string; angle: number; mirror: boolean; color: string }> = [];
+  /** How many units' arrows of advance the last frame drew (D90). */
+  lastAdvances = 0;
+  private unitStyles = new Map<string, { side: string | null; route: RouteStyle | null }>();
+  private unitOf(style: string | undefined): { side: string | null; route: RouteStyle | null } {
+    if (!style) return { side: null, route: null };
+    let u = this.unitStyles.get(style);
+    if (!u) { if (this.unitStyles.size > 2000) this.unitStyles.clear(); u = unitOfStyle(style); this.unitStyles.set(style, u); }
+    return u;
+  }
   /** Characters' icons by their stored style (parsed once per style). */
   private iconStyles = new Map<string, CharacterIcon | null>();
   /** The areas, lines and points drawn in the last frame, topmost last (for finding what is under the pointer: see featureAt). */
@@ -3390,11 +3399,19 @@ export class MapRenderer {
     if (!list.length) return;
     ctx.save();
     ctx.lineJoin = 'round';
-    // Trails: the route each character has travelled so far, in its colour, under the markers.
-    if (trails) for (const c of list) {
+    // A unit (D90) is drawn in the colour of the country it belongs to.
+    const colorOf = (e: LabelEntity) => { const side = this.unitOf(e.style).side; return (side && entities.get(side)?.color) || e.color || '#ffd166'; };
+    const k = pointScale(view, 0.6, 1.3) * this.pointSizes.character;
+    this.lastAdvances = 0;
+    // Routes, under the markers: a trail of the way each character has travelled so far (all of them in a
+    // shot showing trails, or one set to show its trail), or a unit's arrow of advance along its leg under way.
+    for (const c of list) {
       const e = entities.get(c.entity);
       if (!e || e.type_id === 'settlement') continue;
+      const route = this.unitOf(e.style).route ?? (trails ? 'trail' : null);
+      if (!route) continue;
       const track = engine.characterTrack(spaceId, c.entity);
+      if (route === 'arrow') { if (this.drawAdvance(ctx, view, track, t, colorOf(e), k)) this.lastAdvances++; continue; }
       const path = new Path2D();
       let any = false;
       for (let i = 1; i < track.length; i++) {
@@ -3418,7 +3435,7 @@ export class MapRenderer {
       ctx.strokeStyle = 'rgba(10,16,24,0.6)';
       ctx.stroke(path);
       ctx.lineWidth = 1.8 * u;
-      ctx.strokeStyle = e.color ?? '#ffd166';
+      ctx.strokeStyle = colorOf(e);
       ctx.setLineDash([6 * u, 4 * u]);
       ctx.stroke(path);
       ctx.setLineDash([]);
@@ -3428,8 +3445,7 @@ export class MapRenderer {
       if (!e || e.type_id === 'settlement') continue;
       const p = view.projection([c.lon, c.lat]);
       if (!p || p[0] < -80 || p[1] < -80 || p[0] > view.width + 80 || p[1] > view.height + 80) continue;
-      const k = pointScale(view, 0.6, 1.3) * this.pointSizes.character;
-      const color = e.color ?? '#ffd166';
+      const color = colorOf(e);
       const drawn = this.drawCharacterIcon(ctx, view, c, p, k, color, e.style);
       const r = drawn ? drawn.r : 8 * k * u;
       if (!drawn) {
@@ -3452,9 +3468,56 @@ export class MapRenderer {
       ctx.strokeText(e.name, p[0] + r + 5 * k * u, p[1]);
       ctx.fillStyle = '#ffffff';
       ctx.fillText(e.name, p[0] + r + 5 * k * u, p[1]);
-      this.lastCharacters.push({ entity: c.entity, name: e.name, x: p[0], y: p[1], lon: c.lon, lat: c.lat, moving: c.moving, r: r / u, icon: drawn?.icon ?? 'marker', angle: drawn?.angle ?? 0, mirror: drawn?.mirror ?? false });
+      this.lastCharacters.push({ entity: c.entity, name: e.name, x: p[0], y: p[1], lon: c.lon, lat: c.lat, moving: c.moving, r: r / u, icon: drawn?.icon ?? 'marker', angle: drawn?.angle ?? 0, mirror: drawn?.mirror ?? false, color });
     }
     ctx.restore();
+  }
+
+  /**
+   * A unit's arrow of advance (D90): along the leg it is travelling, from where the leg began to just
+   * behind where it is now, in its colour on a dark edge, with a head pointing on. Nothing when it is not
+   * travelling. `k`: the size of characters at this zoom.
+   */
+  private drawAdvance(ctx: CanvasRenderingContext2D, view: View, track: ReturnType<Engine['characterTrack']>, t: Instant, color: string, k: number): boolean {
+    let at = -1;
+    for (let i = 0; i < track.length && compare(track[i].t, t) <= 0; i++) at = i;
+    const a = track[at], b = track[at + 1];
+    if (!a || !b || a.off || b.off || b.arrive !== 'travel' || a.t.day === -Infinity) return false;
+    const done = Math.max(0, Math.min(1, diffMs(a.t, t) / Math.max(1, diffMs(a.t, b.t))));
+    if (!(done > 0)) return false;
+    const n = Math.max(2, Math.ceil(40 * done)), pts: number[] = [];
+    for (let i = 0; i <= n; i++) {
+      const [lon, lat] = slerpLonLat(a.lon, a.lat, b.lon, b.lat, (done * i) / n);
+      const q = view.projection([lon, lat]);
+      if (q) pts.push(q[0], q[1]);
+    }
+    // Stopped short of the unit, so the head shows in front of its icon's back.
+    const u = view.unit, back = 16 * k * u, width = 7 * k * u;
+    let cut = pts.length;
+    for (let left = back; cut >= 4 && left > 0; cut -= 2) {
+      const d = Math.hypot(pts[cut - 2] - pts[cut - 4], pts[cut - 1] - pts[cut - 3]);
+      if (d > left) { const f = (d - left) / d; pts[cut - 2] = pts[cut - 4] + (pts[cut - 2] - pts[cut - 4]) * f; pts[cut - 1] = pts[cut - 3] + (pts[cut - 1] - pts[cut - 3]) * f; break; }
+      left -= d;
+    }
+    if (cut < 4) return false;
+    const line = Float32Array.from(pts.slice(0, cut));
+    const path = new Path2D();
+    addLine(path, line);
+    ctx.save();
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = 'rgba(10,16,24,0.7)';
+    ctx.lineWidth = width + 3 * u;
+    ctx.stroke(path);
+    ctx.fillStyle = 'rgba(10,16,24,0.7)';
+    this.drawArrowhead(ctx, line, width + 1.2 * u, true);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.stroke(path);
+    ctx.fillStyle = color;
+    this.drawArrowhead(ctx, line, width, true);
+    ctx.restore();
+    return true;
   }
 
   /**

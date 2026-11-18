@@ -535,6 +535,29 @@ try {
     assert.equal(await page.getByTestId('character-place').count(), 2, 'its two places as before');
   });
 
+  await h.step('A unit: a character belonging to a country takes its colour; an arrow of advance while it travels, none when it stands', async () => {
+    const id = await page.evaluate(() => (window as any).__mapmaker.store.world.all('entity').find((e: any) => e.name === 'Ilse the Wanderer').id);
+    await page.evaluate((id) => (window as any).__mapmaker.store.set({ tool: 'select', selection: { kind: 'entity', id } }), id);
+    await page.getByTestId('character-unit').waitFor();
+    const colB = await page.evaluate((n) => (window as any).__mapmaker.store.world.all('entity').find((e: any) => e.name === n).color, B);
+    const ilse = () => page.evaluate(() => (window as any).__mapmaker.store.renderer.lastCharacters.find((c: any) => c.name === 'Ilse the Wanderer')) as Promise<{ color: string }>;
+    await h.setDate('1550');
+    await page.getByTestId('character-side').selectOption({ label: B });
+    await page.waitForFunction((c) => (window as any).__mapmaker.store.renderer.lastCharacters.find((x: any) => x.name === 'Ilse the Wanderer')?.color === c, colB);
+    await page.getByTestId('character-route').selectOption('arrow');
+    await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastAdvances === 1);
+    await h.screenshot('unit-advancing');
+    // Standing still after arriving in 1600: no arrow.
+    await h.setDate('1650');
+    await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastAdvances === 0);
+    assert.equal((await ilse()).color, colB);
+    // Back as it was.
+    await page.getByTestId('character-route').selectOption('');
+    await page.getByTestId('character-side').selectOption('');
+    await h.saved();
+    await page.waitForFunction((c) => (window as any).__mapmaker.store.renderer.lastCharacters.find((x: any) => x.name === 'Ilse the Wanderer')?.color !== c, colB);
+  });
+
   await h.step('A city: founded at a date, moved at once (never travelling), abandoned; drawn as its own layer', async () => {
     await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: -30, lat: 45, zoom: 1.6, rotation: 0, projection: 'equirectangular' }));
     await h.setDate('1500');

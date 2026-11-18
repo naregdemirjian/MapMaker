@@ -60,6 +60,17 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D90. Units: characters belonging to a country, with arrows of advance (Stage 7)
+
+Armies, fleets and other units are characters (D35, with icons, D85) that can **belong to a country or faction**
+("As a unit" in the character's panel). A unit is drawn in its country's colour, which it follows if the country's
+colour changes, on the map and in the lists. Its **route** can be shown as a **trail** of where it has been (the
+dashed line a shot can show for every character), or as an **arrow of advance**: while the unit travels, a bold arrow
+in its colour on a dark edge runs along the leg under way, from where the leg began to just behind the unit, its head
+pointing on; standing still, it has none. Both are drawn in the characters' export pass. Stored in the character's
+`style` (`side`, `route`), checked when saved (a unit belongs only to a country or a faction). Bases (a character
+that stays put, with the fort or naval base icon) need nothing more; contested areas are the next step.
+
 ### D89. Front lines between countries at war (Stage 7)
 
 Wars are recorded as dated relationships (D72: "at war with", begun and ended at dates or by events). A territory

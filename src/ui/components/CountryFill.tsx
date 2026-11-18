@@ -1,6 +1,6 @@
 // How a country's territory is filled: its colour, a picture (a flag or your own), or a video.
 import { useEffect, useState } from 'react';
-import { useStore } from '../store.ts';
+import { useStore, store } from '../store.ts';
 import { Api } from '../api.ts';
 import { IconPicture } from './CharacterIcons.tsx';
 import { iconById } from '../../render-engine/icons.ts';
@@ -17,10 +17,12 @@ const kmToSlider = (km: number) => Math.round((Math.log10(Math.max(10, Math.min(
 const sliderToKm = (v: number) => { const km = 10 ** (1 + (v / 100) * (Math.log10(20000) - 1)); const step = km < 100 ? 5 : km < 1000 ? 25 : 250; return Math.round(km / step) * step; };
 
 export function FillSwatch({ entity }: { entity: { color: string; style?: string } }) {
-  const { fill, icon } = cmd.entityStyle(entity);
-  // A character with an icon: the icon (D85).
+  const { fill, icon, side } = cmd.entityStyle(entity);
+  // A character with an icon: the icon (D85), in the colour of the country it belongs to if it is a unit (D90).
   const def = iconById(icon?.set);
-  if (def) return <span className="swatch-icon"><IconPicture icon={def} color={entity.color} look={icon?.look} size={16} /></span>;
+  const color = (side && store.world?.get('entity', side)?.color) || entity.color;
+  if (def) return <span className="swatch-icon"><IconPicture icon={def} color={color} look={icon?.look} size={16} /></span>;
+  if (side) return <span className="swatch round" style={{ background: color }} />;
   if (icon?.asset) return <span className="swatch picture" style={{ backgroundImage: `url("${assetUrl(icon.asset)}")` }} />;
   if (fill?.off) return <span className="swatch" style={{ background: entity.color }} />;
   if (fill?.kind === 'image' && fill.asset) return <span className="swatch picture" style={{ backgroundImage: `url("${assetUrl(fill.asset)}")` }} />;

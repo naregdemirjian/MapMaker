@@ -110,3 +110,31 @@ export function CharacterIconSection({ id }: { id: string }) {
     </div>
   );
 }
+
+/** A character as a unit (Stage 7, D90): the country or faction it belongs to (it is drawn in its colour), and how its route shows. */
+export function UnitSection({ id }: { id: string }) {
+  const s = useStore();
+  const w = s.world!;
+  const e = w.get('entity', id);
+  if (!e) return null;
+  const st = cmd.entityStyle(e);
+  const sides = w.all('entity').filter((x) => x.type_id === 'polity' || x.type_id === 'faction').sort((a, b) => a.name.localeCompare(b.name));
+  return (
+    <div className="character-unit" data-testid="character-unit">
+      <h4>As a unit</h4>
+      <label title="A unit belonging to a country or faction is drawn in its colour">Belongs to
+        <select value={st.side ?? ''} onChange={(ev) => s.execute((wd) => cmd.setEntityStyle(wd, id, { side: ev.target.value || null }))} data-testid="character-side">
+          <option value="">Nobody (its own colour)</option>
+          {sides.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+        </select>
+      </label>
+      <label title="An arrow of advance runs from where its current journey began to where it is now">Its route
+        <select value={st.route ?? ''} onChange={(ev) => s.execute((wd) => cmd.setEntityStyle(wd, id, { route: (ev.target.value || null) as 'trail' | 'arrow' | null }))} data-testid="character-route">
+          <option value="">Not shown (a shot can show every trail)</option>
+          <option value="trail">A trail of where it has been</option>
+          <option value="arrow">An arrow of advance while it travels</option>
+        </select>
+      </label>
+    </div>
+  );
+}

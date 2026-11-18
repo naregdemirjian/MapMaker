@@ -5,7 +5,7 @@ import { useStore, store } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
 import { fromStore, compare } from '../../core-time/index.ts';
 import { fmt } from './Panels.tsx';
-import { CharacterIconSection } from './CharacterIcons.tsx';
+import { CharacterIconSection, UnitSection } from './CharacterIcons.tsx';
 
 /** How a character placement is recorded: into the event being recorded, or as a change without an event. */
 export function placementMode(): cmd.EditMode {
@@ -59,6 +59,7 @@ export function CharacterSection({ id }: { id: string }) {
       })}
       {!track.length && <div className="muted">Not placed on this map yet.</div>}
       {!city && <CharacterIconSection id={id} />}
+      {!city && <UnitSection id={id} />}
     </div>
   );
 }

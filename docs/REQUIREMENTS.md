@@ -115,7 +115,7 @@ status. Last updated: 18 November 2026 (Stage 4; see DEVELOPMENT.md).
 | --- | --- | --- | --- |
 | Occupied territory independent of political borders | Tested | `scenarios`, `e2e/workflows` step 2 (the occupation drawn with stripes: the occupier's colour and the owner's both in the pixels) | Recorded on a separate territory layer ("Military control"); tested to leave ownership untouched. The layer can be drawn with stripes, crossed stripes or dots in each owner's colour, the map showing through (D88) |
 | Frontlines (several, advancing and retreating) | Tested | `e2e/workflows` 'Relationships' (a front line on the border of two countries at war in 1855, none in peace in 1865, in the pixels) | Any number of wars, each a front line along the shared border on a chosen layer while the war holds, with teeth toward either side or none, in a colour of one's own (D89); on a control layer it moves with control, animated by the advancing front. Arrows and contested zones: Stage 7 |
-| Contested areas, troop routes, bases, units | Not implemented | | Stage 7 |
+| Contested areas, troop routes, bases, units | Partial | `units`, `e2e/workflows` 'A unit' (in its country's colour; an arrow of advance while it travels, none when it stands) | Units are characters belonging to a country, drawn in its colour, with an icon (tank, army, warship…) and a trail or an arrow of advance (D90); bases are units that stay put (fort, naval base icons). Contested areas: Stage 7 |
 | Character locations, movements, journeys | Not implemented | | Stage 7 |
 | Civilian migration and other custom routes | Not implemented | | Stage 7 |
 

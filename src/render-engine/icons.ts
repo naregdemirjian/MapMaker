@@ -334,6 +334,17 @@ export function cleanIcon(icon: CharacterIcon | null | undefined): CharacterIcon
 }
 
 
+/** How a character's route is shown (D90): a trail of where it has been, or an arrow of advance along the way it is going. */
+export type RouteStyle = 'trail' | 'arrow';
+
+/** A character as a unit (D90): the country it belongs to (it takes that country's colour), and how its route is shown. */
+export function unitOfStyle(style: string | null | undefined): { side: string | null; route: RouteStyle | null } {
+  try {
+    const st = style ? (JSON.parse(style) as { side?: unknown; route?: unknown } | null) : null;
+    return { side: typeof st?.side === 'string' && st.side ? st.side : null, route: st?.route === 'trail' || st?.route === 'arrow' ? st.route : null };
+  } catch { return { side: null, route: null }; }
+}
+
 /** A character's icon from its stored style (JSON): null for the round marker. */
 export function iconOfStyle(style: string | null | undefined): CharacterIcon | null {
   if (!style) return null;

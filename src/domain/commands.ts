@@ -13,7 +13,7 @@ import { worldSettings, type BasemapSource, type ShowSet, type ShowSettings } fr
 import { resolvePointStyle, type LabelStyle, type CountryLabel, type PointStyle } from '../render-engine/label-style.ts';
 import { DEFAULT_FEATURE_STYLE, isFeatureKind, type FeatureKind, type FeatureStyle } from '../render-engine/feature-style.ts';
 import { relationKind, isRelationKind, type RelationKind } from './relations.ts';
-import { cleanIcon, type CharacterIcon } from '../render-engine/icons.ts';
+import { cleanIcon, type CharacterIcon, type RouteStyle } from '../render-engine/icons.ts';
 import type { TerritoryFill, FrontTeeth } from '../render-engine/map-renderer.ts';
 export type { CharacterIcon } from '../render-engine/icons.ts';
 export { FEATURE_KINDS, DEFAULT_FEATURE_STYLE, isFeatureKind, featureStyle, type FeatureKind, type FeatureStyle } from '../render-engine/feature-style.ts';
@@ -214,7 +214,13 @@ export interface CountryFill {
 }
 
 /** What is stored in entity.style (JSON). */
-export interface EntityStyle { label?: CountryLabel; fill?: CountryFill; pictures?: string[]; icon?: CharacterIcon; /** Locked (D87): its land and borders stay as they are. */ locked?: boolean }
+export interface EntityStyle {
+  label?: CountryLabel; fill?: CountryFill; pictures?: string[]; icon?: CharacterIcon;
+  /** Locked (D87): its land and borders stay as they are. */
+  locked?: boolean;
+  /** A character as a unit (D90): the country or faction it belongs to (drawn in its colour), and how its route is shown. */
+  side?: string; route?: RouteStyle;
+}
 
 export function entityStyle(e: { style?: string } | null | undefined): EntityStyle {
   return parseJSON<EntityStyle>(e?.style ?? '{}', {}) ?? {};
@@ -248,7 +254,7 @@ export function setGeneralLabelStyle(world: World, patch: Partial<Record<keyof L
 }
 
 /** Change parts of an entity's look. `label: null` returns its label to the general style. */
-export function setEntityStyle(world: World, id: string, patch: { label?: CountryLabel | null; fill?: CountryFill | null; icon?: CharacterIcon | null }): CommandResult {
+export function setEntityStyle(world: World, id: string, patch: { label?: CountryLabel | null; fill?: CountryFill | null; icon?: CharacterIcon | null; side?: string | null; route?: RouteStyle | null }): CommandResult {
   const e = world.get('entity', id);
   if (!e) throw new Error('That country no longer exists.');
   const next: EntityStyle = { ...entityStyle(e) };
@@ -266,6 +272,15 @@ export function setEntityStyle(world: World, id: string, patch: { label?: Countr
     const icon = cleanIcon(patch.icon);
     if (patch.icon && !icon) throw new Error('That icon is not known.');
     if (icon) next.icon = icon; else delete next.icon;
+  }
+  if (patch.side !== undefined) {
+    const side = patch.side ? world.get('entity', patch.side) : null;
+    if (patch.side && (!side || (side.type_id !== 'polity' && side.type_id !== 'faction'))) throw new Error('A unit belongs to a country or a faction.');
+    if (side) next.side = side.id; else delete next.side;
+  }
+  if (patch.route !== undefined) {
+    if (patch.route !== null && patch.route !== 'trail' && patch.route !== 'arrow') throw new Error('Unknown route.');
+    if (patch.route) next.route = patch.route; else delete next.route;
   }
   return run(world, `Change the look of "${e.name}"`, (tx) => { tx.patch('entity', id, { style: JSON.stringify(next) }); });
 }
