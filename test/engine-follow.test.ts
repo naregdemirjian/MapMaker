@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { World } from '../src/world-model/world.ts';
 import { Engine, type FaceState, type Assignment } from '../src/temporal-engine/engine.ts';
 import * as cmd from '../src/domain/commands.ts';
-import { gregorian, NEG_INF, type Instant } from '../src/core-time/index.ts';
+import { gregorian, NEG_INF, toStore, type Instant } from '../src/core-time/index.ts';
 import { BASE_EVENT_ID } from '../src/world-model/schema.ts';
 import { lonLatToVec } from '../src/geo-kernel/vec.ts';
 import type { RowDiff } from '../src/world-model/schema.ts';
@@ -36,7 +36,12 @@ function run(seed: number, steps: number) {
   const events = () => world.all('event').filter((e) => e.id !== BASE_EVENT_ID);
   const assigns = () => world.all('effect').filter((e) => e.kind === 'assign' || e.kind === 'annex');
   const somewhere = () => ring(square(r.float(-25, 25), r.float(-25, 25), r.float(2, 12)));
-  const spec = () => r.pick([null, { style: 'fade' as const }, { style: 'border' as const }, { style: 'advance' as const, origin: [r.float(-25, 25), r.float(-25, 25)] as [number, number] }]);
+  const spec = () => {
+    const base = r.pick([null, { style: 'fade' as const }, { style: 'border' as const }, { style: 'advance' as const, origin: [r.float(-25, 25), r.float(-25, 25)] as [number, number] }]);
+    if (!base) return null;
+    // How long it takes (D86): the event's length, a date of its own, a while from its own time, or until the next change recorded.
+    return r.pick([base, { ...base, until: toStore(D(year())) }, { ...base, for: { n: r.int(1, 30), unit: r.pick(['day', 'month', 'year'] as const) } }, { ...base, next: true }]);
+  };
   done(cmd.paintTerritory(world, engine, { spaceId: space, layerId: layers[0], ring: ring(square(0, 0, 30)), value: owners[0], snap: 1e-7, mode: { kind: 'correct', t: NEG_INF } }));
   const kinds = new Map<string, number>();
   let checks = 0;
@@ -67,6 +72,21 @@ function run(seed: number, steps: number) {
     ['an event deleted', 2, () => { const ev = r.pick(events()); if (ev) done(cmd.deleteEvent(world, ev.id)); }],
     ['a change deleted', 2, () => { const ef = r.pick(assigns()); if (ef) done(cmd.deleteEffect(world, ef.id)); }],
     ['an animation set or taken away', 2, () => { const ef = r.pick(assigns()); if (ef) done(cmd.setEffectTransition(world, ef.id, spec())); }],
+    ['how long a change takes', 2, () => {
+      const ef = r.pick(assigns().filter((f) => f.transition && !/instant/.test(f.transition)));
+      if (!ef) return;
+      done(cmd.setEffectLength(world, ef.id, r.pick([null, { until: D(year()) }, { for: { n: r.int(1, 20), unit: 'year' as const } }])));
+    }],
+    ['changes recorded one after another, each until the next', 2, () => {
+      const ev = r.pick(events());
+      if (!ev) return;
+      const start = gregorian.toCivil({ day: ev.start_day, ms: 0 } as Instant).year;
+      const layer = r.pick(layers);
+      for (let k = 0; k < 3; k++) {
+        const at = r.bool(0.2) ? null : D(start + r.int(0, 25));
+        done(cmd.paintTerritory(world, engine, { spaceId: space, layerId: layer, ring: somewhere(), value: r.pick([...owners, null]), snap: 1e-7, mode: { kind: 'new', eventId: ev.id, at }, transition: { style: r.pick(['border', 'fade'] as const), next: true } }));
+      }
+    }],
     ['an annexation', 2, () => {
       const ev = r.pick(events());
       if (!ev) return;

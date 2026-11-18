@@ -2,7 +2,7 @@
 // in-memory world and returns the exact row diffs to save (and to undo). Commands never draw anything.
 import { World, Tx, newId } from '../world-model/world.ts';
 import {
-  Engine, canonicalFaces, leafDescendants, hashFaces, parseJSON, type Resolution, type TransitionSpec, type AnnexIntent, type PlaceIntent, type RenameIntent, type ShapeIntent, type RelateIntent, type FeatureAnimStyle, isFeatureAnim,
+  Engine, canonicalFaces, leafDescendants, hashFaces, parseJSON, effectTime, type Resolution, type TransitionSpec, type AnnexIntent, type PlaceIntent, type RenameIntent, type ShapeIntent, type RelateIntent, type FeatureAnimStyle, isFeatureAnim,
 } from '../temporal-engine/engine.ts';
 import { type Instant, toStore, fromStore, NEG_INF, compare } from '../core-time/index.ts';
 import {
@@ -635,7 +635,7 @@ export interface CountryToAdd {
  * With `into`, their land is given to that existing country instead (Greece's borders added to a
  * country of the user's own, say), and no countries are created.
  */
-export function addCountries(world: World, engine: Engine, o: { spaceId: string; layerId: string; countries: CountryToAdd[]; mode: EditMode; snap?: number; newEvent?: EventInput; into?: NewOwner }): CommandResult<{ entities: string[]; eventId: string | null }> {
+export function addCountries(world: World, engine: Engine, o: { spaceId: string; layerId: string; countries: CountryToAdd[]; mode: EditMode; snap?: number; newEvent?: EventInput; into?: NewOwner; transition?: TransitionSpec | null }): CommandResult<{ entities: string[]; eventId: string | null }> {
   checkTarget(world, { spaceId: o.spaceId, layerId: o.layerId, mode: o.newEvent ? undefined : o.mode, value: typeof o.into === 'string' ? o.into : undefined });
   if (!o.countries.length) throw new Error('Choose at least one country.');
   const intoName = o.into === undefined ? '' : typeof o.into === 'string' ? world.get('entity', o.into)!.name : o.into.name.trim();
@@ -686,7 +686,7 @@ export function addCountries(world: World, engine: Engine, o: { spaceId: string;
         for (const f of leafDescendants(arr, insideOf(p.outer))) if (!holes.has(f)) faces.add(f);
       }
       if (!faces.size) return;
-      if (o.mode.kind === 'new') insertAssignEffect(tx, { eventId: o.mode.eventId, spaceId: o.spaceId, layerId: o.layerId, faces: canonicalFaces(arr, [...faces]), value: id, at: o.mode.at ?? null, intent: { op: 'paint', value: id } });
+      if (o.mode.kind === 'new') chainRecorded(tx, insertAssignEffect(tx, { eventId: o.mode.eventId, spaceId: o.spaceId, layerId: o.layerId, faces: canonicalFaces(arr, [...faces]), value: id, at: o.mode.at ?? null, transition: o.transition ?? null, intent: { op: 'paint', value: id } }));
       else items.push({ leaves: faces, value: id });
     });
     if (o.mode.kind !== 'new' && items.length) writeAssignments(tx, engine, o.spaceId, o.layerId, o.mode, items);
@@ -717,6 +717,60 @@ function writeAssignments(tx: Tx, engine: Engine, spaceId: string, layerId: stri
     ? insertAssignEffect(tx, { eventId: mode.eventId, spaceId, layerId, faces: nonEmpty[0][0], value: nonEmpty[0][1], at: mode.at ?? null, transition: extra.transition ?? null, intent: extra.intent })
     : insertAssignEffect(tx, { eventId: BASE_EVENT_ID, spaceId, layerId, faces: nonEmpty[0][0], value: nonEmpty[0][1], at: mode.t, intent: extra.intent });
   if (nonEmpty.length > 1) tx.patch('effect', id, { resolution: JSON.stringify({ set: nonEmpty } satisfies Resolution) });
+  if (mode.kind === 'new') chainRecorded(tx, id);
+}
+
+/**
+ * Changes recorded to last "until the next change recorded into the event" (D86): a change put into
+ * an event ends the one just before it on the same layer, if that one was recorded so; and one so
+ * recorded itself lasts until the change just after it, if there is one (else until the event ends).
+ */
+function chainRecorded(tx: Tx, effectId: string): void {
+  const world = tx.world;
+  const ef = world.get('effect', effectId);
+  const ev = ef ? world.get('event', ef.event_id) : undefined;
+  if (!ef || !ev || ev.id === BASE_EVENT_ID || ef.kind !== 'assign') return;
+  const t = effectTime(ef, ev);
+  let before: Instant | null = null, after: Instant | null = null;
+  const others = world.all('effect').filter((f) => f.id !== ef.id && f.event_id === ev.id && f.kind === 'assign' && f.layer_id === ef.layer_id);
+  for (const f of others) {
+    const ft = effectTime(f, ev);
+    const c = compare(ft, t);
+    if (c < 0 && (!before || compare(ft, before) > 0)) before = ft;
+    if (c > 0 && (!after || compare(ft, after) < 0)) after = ft;
+  }
+  if (before) {
+    for (const f of others) {
+      const spec = parseJSON<TransitionSpec | null>(f.transition, null);
+      if (spec?.next && compare(effectTime(f, ev), before) === 0) tx.patch('effect', f.id, { transition: JSON.stringify({ ...spec, until: toStore(t) }) });
+    }
+  }
+  const own = parseJSON<TransitionSpec | null>(ef.transition, null);
+  if (own?.next) {
+    const { until: _old, ...rest } = own;
+    tx.patch('effect', ef.id, { transition: JSON.stringify(after ? { ...rest, until: toStore(after) } : rest) });
+  }
+}
+
+/**
+ * How long a change in an event takes (D86): until a moment, for a while from its own time, or (null)
+ * until its event ends. It keeps how it spreads; it is no longer tied to the next change recorded.
+ */
+export function setEffectLength(world: World, effectId: string, length: { until: Instant } | { for: { n: number; unit: 'day' | 'month' | 'year' } } | null): CommandResult {
+  const ef = world.get('effect', effectId);
+  if (!ef) throw new Error('That change no longer exists.');
+  const spec = parseJSON<TransitionSpec | null>(ef.transition, null);
+  if (!spec || spec.style === 'instant') throw new Error('This change happens at once: choose how it spreads first.');
+  const { until: _u, for: _f, next: _n, ...rest } = spec;
+  let next: TransitionSpec = rest;
+  if (length && 'until' in length) next = { ...rest, until: toStore(length.until) };
+  else if (length && 'for' in length) {
+    const n = Math.round(length.for.n);
+    if (!(n >= 1)) throw new Error('A change takes at least one day, month or year.');
+    if (!['day', 'month', 'year'].includes(length.for.unit)) throw new Error('Unknown unit of time.');
+    next = { ...rest, for: { n, unit: length.for.unit } };
+  }
+  return run(world, 'Change how long a change takes', (tx) => tx.patch('effect', effectId, { transition: JSON.stringify(next) }));
 }
 
 function nextOrdinal(world: World, eventId: string): number {

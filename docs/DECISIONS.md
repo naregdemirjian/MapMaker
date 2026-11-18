@@ -60,6 +60,30 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D86. How long each change takes; recording "until the next change" (fifth feedback round)
+
+A territory change in an event used to spread (as an advancing front, an expansion or a fade) from its own date
+until its **event's end**, and changes drawn while recording into an event happened at once. Each change can now
+have its own length, stored with its animation (`effect.transition`): **until a date**, or **for a while** (days,
+months or years) from its own date; without either, until the event ends, as before. The engine takes the change's
+own end first (`transitionEnd`), so a change can spread in an event without an end, or end before or after it.
+
+The recording bar chooses what each change recorded does: **happens at once**, **spreads until the next one I
+record**, **spreads until the event ends**, or **spreads over** a set time; and how it spreads (an advancing front,
+an expansion from where the drawing began, a fade). The choice is kept on this computer. "Until the next one": a
+change recorded so lasts until the change just after it in the same event and layer, if there is one, else until
+the event ends; and any change put into the event ends the one just before it, if that one was recorded so. This is
+worked out when a change is recorded, in the same step (undone together), and written as the earlier change's own
+end, so recording out of order (a change between two others) keeps the chain in order, and the engine follows it
+like any other end. Regions given while recording take the same length. In the event's panel each change shows when
+it spreads ("1 January 1961 to 1 January 1964 (until the next change recorded)") and how long it takes (until the
+event ends, until a date, for a time); choosing one takes it out of the chain. Changing its animation keeps its
+length; in an event without an end, a change that starts to spread takes a year until chosen otherwise.
+
+Checking this against history compiled afresh (the follow test, now with lengths and chained recording among its
+random edits) found that a layer whose last change was deleted kept an empty list of timelines; the engine now drops
+it, as a fresh compile has none.
+
 ### D85. Character icons: a set of 46 drawn as shapes, a picture of one's own; facing the way of travel (fifth feedback round)
 
 A character can be shown by an **icon** instead of the round marker: one of a set of 46 designed for the project

@@ -18,6 +18,7 @@ import { transitionOptions, drawShotOverlays } from '../../presentation/export-d
 import { parseJSON, slerpLonLat } from '../../temporal-engine/engine.ts';
 import { compare, fromStore, gregorian } from '../../core-time/index.ts';
 import { basemapSourceOf, shown, minLakeKm2 } from '../../world-model/world-settings.ts';
+import { recordTransition } from '../record-length.ts';
 import { loadBasemapDetail, pixelsPerDegree, visibleBounds, DETAIL_PIXELS_PER_DEGREE, type Basemap } from '../../render-engine/basemap.ts';
 import * as cmd from '../../domain/commands.ts';
 
@@ -598,8 +599,10 @@ export function MapView() {
       if (!ev) return;
       const start = fromStore(ev.start_day, ev.start_ms);
       const at = compare(store.time, start) > 0 ? store.time : null;
+      // As long as the recording bar says (D86); an expansion spreads from where the drawing began.
+      const transition = recordTransition(store.recordLength, origin);
       store.execute((world, engine) => cmd.paintTerritory(world, engine, {
-        spaceId: store.spaceId, layerId, rings, value: store.paintValue, snap: snapRadians(), mode: { kind: 'new', eventId: ev.id, at },
+        spaceId: store.spaceId, layerId, rings, value: store.paintValue, snap: snapRadians(), mode: { kind: 'new', eventId: ev.id, at }, transition,
       }));
       return;
     }

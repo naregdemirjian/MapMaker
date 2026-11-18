@@ -836,6 +836,61 @@ try {
     await h.setDate('1930');
   });
 
+  await h.step('Recording into an event: each change spreads until the next one recorded; the last then given two years of its own in the event\'s panel', async () => {
+    await page.getByTestId('mode-world').click();
+    await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: -30, lat: 45, zoom: 1.6, rotation: 0, projection: 'equirectangular' }));
+    await h.setDate('1960');
+    await page.getByRole('button', { name: '+ Event' }).click();
+    await page.getByTestId('event-name').fill('Western campaign');
+    await page.getByTestId('event-start').fill('1960');
+    await page.getByTestId('event-start').press('Enter');
+    await page.getByTestId('event-end').fill('1970');
+    await page.getByTestId('event-end').press('Enter');
+    await page.getByRole('checkbox', { name: 'Record what I draw next into' }).check();
+    await page.getByTestId('event-create').click();
+    await page.getByTestId('recording').waitFor();
+    const evId = await page.evaluate(() => (window as any).__mapmaker.store.world.all('event').find((e: any) => e.name === 'Western campaign').id);
+    // Each change spreads, fading in, until the next one recorded.
+    await page.getByTestId('record-when').selectOption('next');
+    await page.getByTestId('record-style').selectOption('fade');
+    const owner = await page.evaluate(() => (window as any).__mapmaker.store.world.all('entity').find((e: any) => e.name === 'Aster Republic').id);
+    await page.evaluate((id) => (window as any).__mapmaker.store.set({ tool: 'lasso', paintValue: id }), owner);
+    const { cx, cy } = await h.centre();
+    for (const [date, dx] of [['1961', -160], ['1964', 0], ['1966', 160]] as const) {
+      await h.setDate(date);
+      await h.drawLasso(blob(cx + dx, cy - 170, 28, 22));
+      await h.saved();
+    }
+    const specs = await page.evaluate((id) => (window as any).__mapmaker.store.world.all('effect').filter((f: any) => f.event_id === id).sort((a: any, b: any) => a.ordinal - b.ordinal).map((f: any) => JSON.parse(f.transition || 'null')), evId);
+    const day = (y: number) => gregorian.fromCivil({ year: y, month: 1, day: 1 }).day;
+    assert.equal(specs.length, 3, 'three changes recorded');
+    assert.ok(specs.every((sp: any) => sp?.style === 'fade' && sp.next), 'each recorded to last until the next');
+    assert.deepEqual(specs.map((sp: any) => sp.until?.[0] ?? null), [day(1964), day(1966), null], 'the first two end where the next begins; the last at the end of the event');
+    // Half-way through the second, its land is half faded in.
+    await h.setDate('1965');
+    await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastTransitions.some((t: any) => t.style === 'fade' && Math.abs(t.progress - 0.5) < 0.05));
+    // The event's panel lists how long each takes; the last is given two years of its own.
+    await page.evaluate((id) => (window as any).__mapmaker.store.set({ tool: 'select', selection: { kind: 'event', id } }), evId);
+    await page.getByTestId('event-panel').waitFor();
+    assert.deepEqual(await page.getByTestId('change-span').allInnerTexts(), [
+      '1 January 1961 to 1 January 1964 (until the next change recorded)',
+      '1 January 1964 to 1 January 1966 (until the next change recorded)',
+      '1 January 1966 to 1 January 1970 (until the next change recorded)',
+    ]);
+    await page.getByTestId('change-length').nth(2).selectOption('for');
+    await page.getByTestId('change-for-n').fill('2');
+    await page.getByTestId('change-for-n').press('Enter');
+    await page.waitForFunction(() => document.querySelectorAll('[data-testid=change-span]')[2]?.textContent === '1 January 1966 to 1 January 1968');
+    await h.screenshot('record-lengths');
+    // Back as it was: changes happen at once when recorded; the event deleted.
+    await page.getByTestId('record-when').selectOption('instant');
+    await page.getByTestId('recording').getByRole('button', { name: 'Stop' }).click();
+    page.once('dialog', (d) => void d.accept());
+    await page.getByRole('button', { name: 'Delete event' }).click();
+    await h.saved();
+    assert.equal(await page.evaluate((id) => (window as any).__mapmaker.store.world.get('event', id) ?? null, evId), null);
+  });
+
   await h.step('Split and merge: a line drawn across a country, the part clicked becomes a new country; two countries merged into a new one in an event; undone', async () => {
     await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: -150, lat: -30, zoom: 3, rotation: 0, projection: 'equirectangular' }));
     await h.setDate('1930');

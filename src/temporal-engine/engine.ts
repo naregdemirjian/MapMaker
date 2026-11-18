@@ -1,7 +1,7 @@
 // The temporal engine: compiles events and their effects into per-property timelines and answers
 // "what is the world like at time t". Events are the authoritative record; everything here is a
 // disposable cache rebuilt from them whenever the world's revision changes.
-import { type Instant, compare, NEG_INF, fromStore, lerp, diffMs, fraction } from '../core-time/index.ts';
+import { type Instant, compare, NEG_INF, fromStore, lerp, diffMs, fraction, stepDate } from '../core-time/index.ts';
 import type { World, HistoryStep } from '../world-model/world.ts';
 import { BASE_EVENT_ID, type EffectRow, type EventRow } from '../world-model/schema.ts';
 import { type Vec3, angle, e7ToVec, lonLatToVec } from '../geo-kernel/vec.ts';
@@ -12,7 +12,17 @@ import type { Arrangement } from '../geo-kernel/arrangement.ts';
  * land; advance ("Expansion"): a circle from an origin; fade; wipe: a straight sweep (old shots only).
  */
 export type TransitionStyle = 'instant' | 'border' | 'advance' | 'fade' | 'wipe';
-export interface TransitionSpec { style: TransitionStyle; origin?: [number, number]; easing?: 'linear' | 'smooth' }
+export interface TransitionSpec {
+  style: TransitionStyle; origin?: [number, number]; easing?: 'linear' | 'smooth';
+  /**
+   * How long the change takes (D86): until this moment (stored day and milliseconds), or for this
+   * long from its own time; without either, until its event ends.
+   */
+  until?: [number, number];
+  for?: { n: number; unit: 'day' | 'month' | 'year' };
+  /** Recorded to last until the next change recorded into its event: `until` is set when one is. */
+  next?: boolean;
+}
 export interface Resolution { set: Array<[number[], string | null]> }
 export interface AnnexIntent { op: 'annex'; from: string; to: string }
 
@@ -103,6 +113,12 @@ export function eventStart(e: EventRow): Instant {
 }
 export function eventEnd(e: EventRow): Instant | null {
   return e.end_day === null || e.end_ms === null ? null : fromStore(e.end_day, e.end_ms);
+}
+/** When a change starting at t with this transition has finished: at its own end if it has one, else at its event's end. */
+export function transitionEnd(spec: TransitionSpec | null, t: Instant, ev: EventRow): Instant | null {
+  if (spec?.until && Number.isFinite(spec.until[0])) return fromStore(spec.until[0], spec.until[1] ?? 0);
+  if (spec?.for && spec.for.n > 0 && Number.isFinite(t.day)) return stepDate(t, spec.for.unit, spec.for.n);
+  return eventEnd(ev);
 }
 export function effectTime(ef: EffectRow, ev: EventRow): Instant {
   // The starting map's changes are from the beginning, except changes made without an event, which
@@ -363,15 +379,15 @@ export class Engine {
     if (!layer || !arr) { problems.push({ kind: 'broken', effectId: ef.id, eventId: ev.id, message: 'This change refers to a layer or map that no longer exists.' }); return done(); }
     const t = effectTime(ef, ev);
     const spec = parseJSON<TransitionSpec | null>(ef.transition, null);
-    const end = eventEnd(ev);
+    const end = transitionEnd(spec, t, ev);
     const hasTransition = spec && spec.style !== 'instant' && end && compare(end, t) > 0;
     const compiled: CompiledTransition | null = hasTransition
       ? { style: spec.style, origin: spec.origin ? lonLatToVec(spec.origin[0], spec.origin[1]) : null, maxDist: 0, easing: spec.easing ?? 'smooth' }
       : null;
     const res = resolutionOf(ef);
     const list: Assignment[] = [];
+    // (A layer's timelines exist while some parcel of it has a change: made with its first, dropped with its last.)
     let lm = this.timelines.get(layer.id);
-    if (!lm) this.timelines.set(layer.id, (lm = new Map()));
     res.set.forEach(([faces, given], entry) => {
       let value = given;
       // Land given to a country that no longer exists is nobody's (and reported): it is never drawn
@@ -383,8 +399,9 @@ export class Engine {
           t, end: compiled ? end! : t, value, effectId: ef.id, eventId: ev.id, precedence: isUntracked(ef) ? UNTRACKED_PRECEDENCE : ev.precedence,
           eventSeq: ev.created_seq, ordinal: ef.ordinal, entry, face, transition: compiled,
         };
-        let tl = lm!.get(face);
-        if (!tl) lm!.set(face, (tl = []));
+        if (!lm) this.timelines.set(layer.id, (lm = new Map()));
+        let tl = lm.get(face);
+        if (!tl) lm.set(face, (tl = []));
         if (ordered) {
           let lo = 0, hi = tl.length;
           while (lo < hi) { const mid = (lo + hi) >> 1; if (orderCmp(tl[mid], a) <= 0) lo = mid + 1; else hi = mid; }
@@ -427,6 +444,7 @@ export class Engine {
       if (tl) { const i = tl.indexOf(a); if (i >= 0) tl.splice(i, 1); if (!tl.length) lm!.delete(a.face); }
       this.stateLog.push({ rev: this.world.historyRevision, layer: layerId, face: a.face });
     }
+    if (lm && !lm.size) this.timelines.delete(layerId);
     for (const x of this.effectTimes.get(id) ?? []) {
       this.countTime(x, -1, true);
       for (let i = this.firstIndexAfter(x) - 1; i >= 0 && compare(this.timeIndex[i].t, x) === 0; i--) if (this.timeIndex[i].id === id) { this.timeIndex.splice(i, 1); break; }

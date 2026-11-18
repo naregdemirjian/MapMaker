@@ -12,6 +12,7 @@ import { GroupChecks, eventVisible } from './EventGroups.tsx';
 import { CountryLabelSection } from './LabelStyles.tsx';
 import { CountryFillSection, FillSwatch } from './CountryFill.tsx';
 import { CharacterSection } from './Characters.tsx';
+import { RecordLengthControls, ChangeLength } from './RecordLength.tsx';
 import { openMenu, entityMenu, groupMenu, eventMenu } from './ContextMenu.tsx';
 import { CountryHistorySection } from './CountryHistory.tsx';
 import { NamesSection } from './Names.tsx';
@@ -254,6 +255,7 @@ export function ToolBar() {
       <div className="record-banner" data-testid="recording">
         <span className="rec-text">● Recording into “{rec.name}”</span>
         <span className="muted-red">Everything you draw is added to this event{compare(s.time, fromStore(rec.start_day, rec.start_ms)) > 0 ? `, as a change on ${fmt(s.time)}` : ''}.</span>
+        <RecordLengthControls />
         <button onClick={() => s.set({ recordEventId: null })}>Stop</button>
       </div>
     )}
@@ -684,12 +686,18 @@ function EventPanel({ id }: { id: string }) {
   const variants = e.variant_group ? w.all('event').filter((x) => x.variant_group === e.variant_group) : [];
   const owners = w.all('entity').filter((x) => x.type_id === 'polity' || x.type_id === 'faction');
   const setTransition = (f: EffectRow, style: string) => {
+    const old = parseJSON<TransitionSpec | null>(f.transition, null);
     let spec: TransitionSpec | null = null;
-    if (style === 'advance') {
-      const old = parseJSON<TransitionSpec | null>(f.transition, null);
-      spec = { style: 'advance', origin: old?.origin ?? regionCentre(s, f), easing: 'smooth' };
-    } else if (style === 'border') spec = { style: 'border', easing: 'smooth' };
+    if (style === 'advance') spec = { style: 'advance', origin: old?.origin ?? regionCentre(s, f), easing: 'smooth' };
+    else if (style === 'border') spec = { style: 'border', easing: 'smooth' };
     else if (style === 'fade') spec = { style: 'fade' };
+    // How long it takes is kept (D86); in an event without an end, a change that starts to spread takes a year until chosen otherwise.
+    if (spec) {
+      if (old?.until) spec.until = old.until;
+      else if (old?.for) spec.for = old.for;
+      else if (!end) spec.for = { n: 1, unit: 'year' };
+      if (old?.next) spec.next = true;
+    }
     s.execute((wd) => cmd.setEffectTransition(wd, f.id, spec));
   };
   return (
@@ -721,7 +729,7 @@ function EventPanel({ id }: { id: string }) {
           {!base && f.layer_id && f.kind !== 'shape' && (
             <div className="effect-tools">
               <label className="inline">Animation
-                <select value={parseJSON<TransitionSpec | null>(f.transition, null)?.style ?? 'instant'} onChange={(ev) => setTransition(f, ev.target.value)} disabled={!end} title={end ? '' : 'Give the event an end date to animate its changes'} data-testid="transition-style">
+                <select value={parseJSON<TransitionSpec | null>(f.transition, null)?.style ?? 'instant'} onChange={(ev) => setTransition(f, ev.target.value)} data-testid="transition-style">
                   <option value="instant">Instant</option>
                   <option value="border">Advancing front (from the border)</option>
                   <option value="advance">Expansion (a circle)</option>
@@ -729,6 +737,7 @@ function EventPanel({ id }: { id: string }) {
                 </select>
               </label>
               <button className="small danger" onClick={() => s.execute((wd) => cmd.deleteEffect(wd, f.id))}>Remove</button>
+              <ChangeLength f={f} ev={e} />
             </div>
           )}
         </div>

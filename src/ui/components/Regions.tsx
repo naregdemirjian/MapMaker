@@ -3,6 +3,7 @@
 // owner, existing or new, from the date viewed, as a correction or in an event.
 import { useEffect, useState } from 'react';
 import { useStore, store } from '../store.ts';
+import { recordTransition } from '../record-length.ts';
 import * as cmd from '../../domain/commands.ts';
 import { decodeRegions, RegionIndex, countriesAsRegions, type RegionsFile } from '../../domain/regions.ts';
 import { loadCountries } from './AddCountries.tsx';
@@ -73,7 +74,9 @@ export function GiveRegionsDialog() {
     if (!ix || !picks.length || !s.layerId) { close(); return; }
     const { mode, newEvent } = modeOf(when, s.time, w);
     const countries = picks.map((i) => ({ name: ix.regions[i].name, polygons: ix.regions[i].polygons }));
-    const r = s.execute((wd, en) => cmd.addCountries(wd, en, { spaceId: s.spaceId, layerId: s.layerId!, countries, into: to === 'new' ? { name: newName } : to, mode, newEvent }));
+    // Into the event being recorded: as long as the recording bar says (D86); an expansion spreads from the first region.
+    const transition = mode.kind === 'new' && mode.eventId === s.recordEventId ? recordTransition(s.recordLength, ix.anchors[picks[0]] ?? null) : null;
+    const r = s.execute((wd, en) => cmd.addCountries(wd, en, { spaceId: s.spaceId, layerId: s.layerId!, countries, into: to === 'new' ? { name: newName } : to, mode, newEvent, transition }));
     if (r) {
       s.set({ dialog: null, regionPicks: [], selection: r.entities[0] ? { kind: 'entity', id: r.entities[0] } : s.selection });
       s.toast(`${picks.length === 1 ? first!.name : `${picks.length} regions`} given to ${w.get('entity', r.entities[0])?.name ?? 'their owner'}.`);

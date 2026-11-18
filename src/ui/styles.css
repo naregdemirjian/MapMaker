@@ -65,7 +65,7 @@ a { color: var(--accent); cursor: pointer; }
 .tool-options-anchor { position: relative; height: 0; z-index: 6; }
 .tool-options { position: absolute; left: 0; right: 0; top: 0; }
 .tool-options .toolbar.sub { background: rgba(21, 29, 37, 0.94); }
-.record-banner { display: flex; align-items: center; gap: 10px; padding: 4px 10px; background: #3a1d24; border-bottom: 1px solid #6b2b37; color: #ffb3bd; }
+.record-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 4px 10px; background: #3a1d24; border-bottom: 1px solid #6b2b37; color: #ffb3bd; }
 .record-banner .rec-text { font-weight: 600; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .record-banner .muted-red { color: #d99aa5; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .record-banner button { padding: 2px 10px; }
@@ -90,7 +90,7 @@ a { color: var(--accent); cursor: pointer; }
 .stat { margin: 10px 0; padding: 8px; background: var(--panel2); border-radius: 6px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .buttons { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
 .effect { background: var(--panel2); border-radius: 6px; padding: 7px 9px; margin: 6px 0; }
-.effect-tools { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
+.effect-tools { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px; margin-top: 6px; }
 .effect-tools label.inline { margin: 0; }
 .effect-tools .danger { margin: 0; }
 .annex select { width: 100%; margin: 3px 0; }
@@ -314,3 +314,10 @@ img.icon-own { width: 30px; height: 30px; object-fit: contain; }
 .icon-option.on { border-color: var(--accent, #4aa3df); background: rgba(74,163,223,0.15); }
 .icon-option:hover { border-color: var(--line); }
 .swatch-icon { display: inline-flex; width: 16px; height: 16px; flex: none; }
+/* How long changes take (D86) */
+.record-length { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.record-length select, .change-length select { padding: 2px 4px; }
+input.count { width: 56px; padding: 2px 4px; }
+.change-length { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; flex-basis: 100%; }
+.effect-tools label.inline > select { max-width: 160px; }
+.change-length .date-field, .change-length input[type=text] { width: 150px; }

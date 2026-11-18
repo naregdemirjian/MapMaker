@@ -10,6 +10,7 @@ import { type Instant, gregorian, toJSONValue, fromJSONValue } from '../core-tim
 import { type Camera, defaultCamera, flatCamera, PROJECTIONS } from '../render-engine/camera.ts';
 import { MapRenderer, VIEW_QUALITY } from '../render-engine/map-renderer.ts';
 import { loadViewSettings, saveViewSettings, DETAIL_TOLERANCE, type ViewSettings } from './view-settings.ts';
+import { loadRecordLength, type RecordLength } from './record-length.ts';
 import { loadBasemap, loadBasemapDetail, type Basemap } from '../render-engine/basemap.ts';
 import { DEFAULT_PERIOD, type PeriodSpec } from '../domain/history-view.ts';
 import { setAssetBase } from '../render-engine/assets.ts';
@@ -110,6 +111,8 @@ class AppStore {
    */
   historyView: { on: boolean; period: PeriodSpec } = { on: false, period: DEFAULT_PERIOD };
   recordEventId: string | null = null;
+  /** What each change recorded into an event does: at once, or spreading for how long, and how (D86; kept on this computer). */
+  recordLength: RecordLength = loadRecordLength();
   cameras = new Map<string, Camera>();
   stroke: StrokeSettings = { smoothness: 1, irregularity: 0, precision: 1.2, seed: 1 };
   pending: PendingEdit | null = null;
