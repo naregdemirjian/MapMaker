@@ -641,7 +641,7 @@ try {
     assert.ok(r.seam <= 6, `no seam behind the front: the land along the old border is the new owner's colour (${r.seam} levels off ${r.own})`);
   });
 
-  await h.step('The globe: every place where the flat map has it, lit; nothing beyond its edge or from its far side; a pole and the 180° meridian without a seam; the flat picture kept while it turns', async () => {
+  await h.step('The globe: every place where the flat map has it, lit; nothing beyond its edge or from its far side; a pole and the 180° meridian without a seam; the flat picture kept while it turns, and the whole frame between changes', async () => {
     const W = 1100, H = 640;
     const r = await page.evaluate(({ W, H }) => {
       const m = (window as any).__mapmaker, s = m.store, B = m.bench;
@@ -700,9 +700,22 @@ try {
       const moving = { reused: globe.lastGlobe.reused, approximate: globe.lastApproximate, ms: Math.round(globe.lastGlobe.ms) };
       globe.render(a, mv(46), s.world, s.engine, s.spaceId, t, opaque);
       const rest = { approximate: globe.lastApproximate };
-      return { worst, beyond, n, names, outside, farSide, polePx, round, seam, moving, rest, first };
+      // 6. Months later, between the same two changes and nothing moving: the frame drawn last serves again
+      //    (names too), and it is the frame drawn afresh (as kept pictures are: within a level or few, D57).
+      const all = { ...opaque, passes: new Set(['background', 'graticule', 'land', 'fills', 'borders', 'labels']) };
+      const later = { day: t.day + 60, ms: t.ms };
+      globe.render(a, mv(46), s.world, s.engine, s.spaceId, t, all);
+      globe.render(a, mv(46), s.world, s.engine, s.spaceId, { day: t.day + 30, ms: t.ms }, all);
+      globe.render(a, mv(46), s.world, s.engine, s.spaceId, later, all);
+      const again = { reused: globe.lastGlobe.reused, ms: Math.round(globe.lastGlobe.ms * 10) / 10, names: globe.lastLabels.filter((l: any) => l.drawn).length };
+      const afresh = new B.MapRenderer();
+      afresh.render(b, mv(46), s.world, s.engine, s.spaceId, later, all);
+      const da = a.getImageData(0, 0, W, H).data, db = b.getImageData(0, 0, W, H).data;
+      let differ = 0, most = 0;
+      for (let i = 0; i < da.length; i += 4) { const d = Math.max(Math.abs(da[i] - db[i]), Math.abs(da[i + 1] - db[i + 1]), Math.abs(da[i + 2] - db[i + 2]), Math.abs(da[i + 3] - db[i + 3])); if (d > 2) differ++; most = Math.max(most, d); }
+      return { worst, beyond, n, names, outside, farSide, polePx, round, seam, moving, rest, first, again, differ, most };
     }, { W, H });
-    console.log(`    places off their lit colour by at most ${Math.max(...r.worst).toFixed(1)} levels; ${r.beyond}/${r.n} points beyond the edge drawn; ${r.names.length} names (${r.outside} off the globe); pole ${JSON.stringify(r.polePx)} (all round: ${r.round}); across 180° ${r.seam}; turning: ${JSON.stringify(r.moving)}, at rest ${JSON.stringify(r.rest)}; first picture ${JSON.stringify(r.first)}`);
+    console.log(`    places off their lit colour by at most ${Math.max(...r.worst).toFixed(1)} levels; ${r.beyond}/${r.n} points beyond the edge drawn; ${r.names.length} names (${r.outside} off the globe); pole ${JSON.stringify(r.polePx)} (all round: ${r.round}); across 180° ${r.seam}; turning: ${JSON.stringify(r.moving)}, at rest ${JSON.stringify(r.rest)}; first picture ${JSON.stringify(r.first)}; months later ${JSON.stringify(r.again)}, ${r.differ} pixels off a fresh frame by at most ${r.most}`);
     assert.ok(Math.max(...r.worst) <= 8, `each place has the flat map's colour, lit (${r.worst.map((w: number) => w.toFixed(1)).join(', ')})`);
     assert.equal(r.beyond, 0, 'nothing beyond the globe in a picture without a background');
     assert.ok(r.names.includes('France') && r.names.includes('Egypt') && !r.names.includes('Australia') && r.outside === 0, `names of the near side only, on the globe (${r.names.length})`);
@@ -710,6 +723,8 @@ try {
     assert.ok(r.round && r.polePx[3] === 255 && r.polePx[0] + r.polePx[1] + r.polePx[2] > 30, `the pole drawn (${r.polePx})`);
     assert.ok(r.seam <= 6, `no seam along 180° (${r.seam})`);
     assert.ok(r.moving.reused && r.moving.approximate && !r.rest.approximate, 'the flat picture kept while turning, drawn afresh at rest');
+    assert.ok(r.again.reused && r.again.names > 10, `between two changes, the frame drawn last serves again (${JSON.stringify(r.again)})`);
+    assert.ok(r.differ < 0.0005 * W * H && r.most <= 16, `and it is the frame drawn afresh (${r.differ} pixels off, by at most ${r.most})`);
   });
 
   await h.step('In a shot animating every change, a change whose land changes hands again soon after is over by then: the next starts from all of it, nothing jumps', async () => {

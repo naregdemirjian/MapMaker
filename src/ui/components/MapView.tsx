@@ -13,7 +13,7 @@ import { periodChangesNow, GAINED_COLOR, LOST_COLOR } from './CountryHistory.tsx
 import { processLasso, densify, orientInteriorLeft, signedArea, splitLoops, simplify, smooth, type Pt, dedupe, ringFromMapPoints } from '../../render-engine/stroke.ts';
 import { geoCentroid } from 'd3-geo';
 import { lonLatToVec, E7 } from '../../geo-kernel/vec.ts';
-import { cameraAt, timeAt, overlaysAt, drawOverlays, withStillCamera, moveOverlay, type ShotSettings, type OverlayRect } from '../../presentation/sequence.ts';
+import { cameraAt, timeAt, overlaysAt, drawOverlays, withStillCamera, unspun, moveOverlay, type ShotSettings, type OverlayRect } from '../../presentation/sequence.ts';
 import { transitionOptions, drawShotOverlays, lookStyles } from '../../presentation/export-driver.ts';
 import { finishLook } from '../../presentation/looks.ts';
 import { parseJSON, slerpLonLat } from '../../temporal-engine/engine.ts';
@@ -159,7 +159,7 @@ function segSegDist(a: Pt, b: Pt, c: Pt, d: Pt): number {
 function commitShotCamera(): void {
   const sh = currentShot(), cam = store.presentCamera, id = store.shotId;
   if (!sh || !cam || !id) return;
-  store.execute((w) => cmd.updateSequence(w, id, { settings: withStillCamera(sh, cam) }));
+  store.execute((w) => cmd.updateSequence(w, id, { settings: withStillCamera(sh, unspun(sh, cam, store.shotFrame)) }));
   store.set({ presentCamera: null });
 }
 

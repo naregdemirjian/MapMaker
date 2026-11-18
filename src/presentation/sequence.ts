@@ -125,6 +125,11 @@ export interface ShotSettings {
   format?: ExportFormat;
   /** A video's quality (D121; absent: good). */
   videoQuality?: import('../export/video-codecs.ts').VideoQuality;
+  /**
+   * A globe turning on its own (D127): degrees a second, as the Earth turns (west to east: the middle of the
+   * view moves west); negative the other way. Absent or 0: still. Only for the globe.
+   */
+  spin?: number;
 }
 
 export type ExportFormat = 'png' | 'tiff' | 'tiff-zip' | 'mp4' | 'webm';
@@ -278,7 +283,18 @@ export function resetCamera(shot: ShotSettings): Camera {
 
 export function cameraAt(shot: ShotSettings, frame: number): Camera {
   const { a, b, f } = segment(shot.camera, frame);
-  return interpolateCamera(a.camera, b.camera, f);
+  const cam = interpolateCamera(a.camera, b.camera, f);
+  if (shot.spin && cam.projection === 'globe') cam.lon = wrapLon(cam.lon - spinAt(shot, frame));
+  return cam;
+}
+
+const wrapLon = (lon: number) => ((((lon + 180) % 360) + 360) % 360) - 180;
+/** How far a turning globe (see ShotSettings.spin) has turned by a frame (degrees). */
+const spinAt = (shot: ShotSettings, frame: number) => ((shot.spin ?? 0) * frame) / shot.fps;
+
+/** A camera framed at a frame of a turning globe, as the shot keeps it (before its turn up to that frame). */
+export function unspun(shot: ShotSettings, cam: Camera, frame: number): Camera {
+  return shot.spin && cam.projection === 'globe' ? { ...cam, lon: wrapLon(cam.lon + spinAt(shot, frame)) } : cam;
 }
 
 /** An overlay to draw at a frame; a text box with how far it has come in and is from leaving (see textBoxState). */

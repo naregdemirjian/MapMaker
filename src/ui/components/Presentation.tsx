@@ -3,7 +3,7 @@ import { useStore, useLive, store } from '../store.ts';
 import { Api } from '../api.ts';
 import * as cmd from '../../domain/commands.ts';
 import { type Instant, add, fromJSONValue, toJSONValue, fromStore, compare, gregorian, type Precision } from '../../core-time/index.ts';
-import { defaultShot, timeAt, cameraAt, RESOLUTIONS, FRAME_RATES, shotTransitions, withStillCamera, cameraMoves, resetCamera, newTextBox, textBoxOf, EXPORT_FORMATS, isVideoFormat, type ExportFormat, type ShotSettings, type Ease, type ShotTransitions, type Overlay, type TextBox, type TextEnter, type TextExit } from '../../presentation/sequence.ts';
+import { defaultShot, timeAt, cameraAt, RESOLUTIONS, FRAME_RATES, shotTransitions, withStillCamera, unspun, cameraMoves, resetCamera, newTextBox, textBoxOf, EXPORT_FORMATS, isVideoFormat, type ExportFormat, type ShotSettings, type Ease, type ShotTransitions, type Overlay, type TextBox, type TextEnter, type TextExit } from '../../presentation/sequence.ts';
 import { PASS_DEFS, runExport, exportPassesOf, estimateExportBytes, scaledBytes, formatBytes, layerPassDefs, passDefsFor } from '../../presentation/export-driver.ts';
 import { svgFrame } from '../../presentation/svg-frame.ts';
 import { planVideo } from '../../presentation/video-encoder.ts';
@@ -101,7 +101,7 @@ export function ShotEditor() {
   };
   const liveCamera = s.presentCamera ?? cameraAt(shot, s.shotFrame);
   // The camera stays still for the whole shot: framing the preview sets it, a reset clears it.
-  const setCamera = (cam: typeof liveCamera) => { saveShot(row.id, withStillCamera(shot, cam)); s.set({ presentCamera: null }); };
+  const setCamera = (cam: typeof liveCamera) => { saveShot(row.id, withStillCamera(shot, unspun(shot, cam, s.shotFrame))); s.set({ presentCamera: null }); };
   const setTimeKey = (which: 'start' | 'end', t: Instant | null) => {
     if (!t) return;
     const keys = [...shot.time];
@@ -217,6 +217,10 @@ export function ShotEditor() {
             {shot.camera[0].camera.projection === 'flat' ? <option value="flat">Flat map (plan)</option> : PROJECTIONS.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select></label>}
           <label>Rotation (degrees)<NumberField min={-360} max={360} step={1} value={Math.round(liveCamera.rotation)} onCommit={(n) => setCamera({ ...liveCamera, rotation: n })} testId="camera-rotation" /></label>
+          {shot.camera[0].camera.projection === 'globe' && <>
+            <label>Turn the globe (degrees a second)<NumberField min={-120} max={120} step={1} value={shot.spin ?? 0} onCommit={(n) => update({ spin: n })} testId="globe-spin" /></label>
+            <p className="muted">The planet turns through the shot as the Earth does (west to east) at this speed; negative turns it the other way, 0 holds it still. 15 is one turn in 24 seconds.</p>
+          </>}
         </Group>
         <Group title="Transitions">
           <label>Border changes<select value={tr.mode} onChange={(e) => setTr({ mode: e.target.value as ShotTransitions['mode'] })} data-testid="transition-mode">

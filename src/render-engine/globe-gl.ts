@@ -92,6 +92,8 @@ class GlobeGL {
   private loc: Record<string, WebGLUniformLocation | null> = {};
   private aniso: { ext: { TEXTURE_MAX_ANISOTROPY_EXT: number }; max: number } | null = null;
   readonly maxTexture: number;
+  /** The picture the graphics card holds (shared by every renderer: one asking not to send its picture again gets it sent when another's is there). */
+  private holding: OffscreenCanvas | null = null;
 
   constructor() {
     this.canvas = new OffscreenCanvas(1, 1);
@@ -144,7 +146,8 @@ class GlobeGL {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.tex);
     // (Colours times their opacity, as the frame is: edges blend correctly.)
-    if (upload) {
+    if (upload || this.holding !== pic.image) {
+      this.holding = pic.image;
       gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
       gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, pic.image);

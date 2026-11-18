@@ -473,6 +473,9 @@ export class MapRenderer {
   /** The last globe drawn (D127): its flat picture's size, pixels to a radian, whether it went all the way round, and the time it took (ms). */
   lastGlobe: { picture: [number, number]; perRad: number; round: boolean; ms: number; reused: boolean } | null = null;
   private globeFlat: MapRenderer | null = null;
+  /** The last globe frame when nothing on it was moving (see renderGlobe), and what the graphics card holds. */
+  private globeFrame: { key: string; canvas: OffscreenCanvas; labels: LabelInfo[]; cities: MapRenderer['lastCities'] } | null = null;
+  private globeUploaded: string | null = null;
   /** The flat picture last laid on the globe: where it lies, what it shows (see renderGlobe). */
   private globeLast: { content: string; west: number; east: number; south: number; north: number; round: boolean; pw: number; ph: number; lonMid: number; latMid: number; perRad: number } | null = null;
   private globePicture: { canvas: OffscreenCanvas; ctx: CanvasRenderingContext2D } | null = null;
@@ -2999,7 +3002,9 @@ export class MapRenderer {
     const area = globeInView(W, H, cx, cy, R, lon0, lat0, roll);
     if (!area) { this.lastGlobe = null; return; }
     // What the flat picture shows (it is drawn again when any of this changes).
-    const content = `${engine.revision}|${world.revision}|${spaceId}|${t.day}|${t.ms}|${[...opts.passes].join(',')}|${opts.layerIds.join(',')}|${opts.transparent ? 1 : 0}|${opts.basemap ? `${opts.basemap.version}|${opts.basemap.scales.length}` : '-'}|${JSON.stringify(opts.style ?? null)}|${JSON.stringify(opts.basemapStyle ?? null)}|${JSON.stringify(opts.show ?? null)}|${opts.terrain ? `${JSON.stringify(opts.terrain.look)}|${opts.terrain.detail?.key ?? ''}|${opts.terrain.seaLevel ?? 0}` : '-'}|${JSON.stringify(opts.transitions ?? null)}|${opts.mediaSeconds ?? 0}|${opts.trails ? 1 : 0}|${JSON.stringify(opts.layout ?? null)}|${opts.hurried ? 1 : 0}|${assetEpoch()}|${view.unit * k}`;
+    const steady = `${engine.revision}|${world.revision}|${spaceId}|${[...opts.passes].join(',')}|${opts.layerIds.join(',')}|${opts.transparent ? 1 : 0}|${opts.basemap ? `${opts.basemap.version}|${opts.basemap.scales.length}` : '-'}|${JSON.stringify(opts.style ?? null)}|${JSON.stringify(opts.basemapStyle ?? null)}|${JSON.stringify(opts.show ?? null)}|${opts.terrain ? `${JSON.stringify(opts.terrain.look)}|${opts.terrain.detail?.key ?? ''}|${opts.terrain.seaLevel ?? 0}` : '-'}|${JSON.stringify(opts.transitions ?? null)}|${opts.trails ? 1 : 0}|${JSON.stringify(opts.layout ?? null)}|${opts.hurried ? 1 : 0}|${assetEpoch()}|${view.unit * k}`;
+    // (Video fills follow the shot's clock: a moment of their own, see timeMoves.)
+    const content = `${steady}|${t.day}|${t.ms}|${opts.mediaSeconds ?? 0}`;
     // The flat picture: around the middle of what is in view (on a grid of 2 degrees, and its pixels to a
     // radian on steps of an eighth of a doubling, so that the same picture serves while the globe turns a
     // little), within what the graphics card takes.
@@ -3053,6 +3058,26 @@ export class MapRenderer {
     const textsWanted = opts.passes.has('labels') || opts.passes.has('cities');
     this.lastTransitions = inner.lastTransitions;
     this.lastFronts = inner.lastFronts;
+    // Between two changes, with nothing on the flat picture moving (no change animating, no character on
+    // its way, no areas, lines or points, which may animate, no conditions, no video fills, every part of
+    // it kept), the picture is the one drawn last: it is not sent to the graphics card again, and for the
+    // same view of it the whole frame, names included, is the one drawn last.
+    const still = !reuse && inner.lastTransitions.length === 0 && !inner.lastCharacters.some((c) => c.moving) && inner.lastFeatures.length === 0
+      && Object.values(inner.lastParts).every((v) => v === 'kept') && !this.timeMoves(world, spaceId);
+    const pictureKey = `${steady}|${engine.stretchOf(t)}|${pw}x${ph}|${lonMid}|${latMid}|${perRad}`;
+    const frameKey = `${pictureKey}|${W}x${H}|${cx}|${cy}|${R}|${lon0}|${lat0}|${roll}`;
+    const keptFrame = this.globeFrame;
+    if (still && keptFrame && keptFrame.key === frameKey) {
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.drawImage(keptFrame.canvas as unknown as CanvasImageSource, 0, 0);
+      ctx.restore();
+      this.lastLabels = keptFrame.labels;
+      this.lastCities = keptFrame.cities;
+      this.lastGlobe = { picture: [pw, ph], perRad, round: area.round, ms: performance.now() - started, reused: true };
+      return;
+    }
+    const upload = !reuse && !(still && this.globeUploaded === pictureKey);
     // The sphere: lit, and in a picture with a background, with the air's glow and space around it.
     const background = opts.passes.has('background') && !opts.transparent;
     const ocean = parseCss(style.ocean) ?? [20, 50, 74];
@@ -3064,8 +3089,9 @@ export class MapRenderer {
         air: background ? { rgb: air, width: Math.max(4, 0.06 * R) } : null,
         space: background ? [(ocean[0] / 255) * 0.22, (ocean[1] / 255) * 0.22, (ocean[2] / 255) * 0.26, 1] : null,
       },
-      !reuse,
+      upload,
     );
+    if (upload) this.globeUploaded = still ? pictureKey : null;
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.drawImage(out as unknown as CanvasImageSource, 0, 0);
@@ -3105,7 +3131,29 @@ export class MapRenderer {
       this.lastLabels = labels;
       this.lastCities = cities.map((c) => ({ entity: c.entity, name: c.name, x: c.x, y: c.y, lon: c.lon, lat: c.lat, moving: false, named: c.drawn, box: c.box }));
     }
-    this.lastGlobe = { picture: [pw, ph], perRad, round: reuse && last ? last.round : area.round, ms: performance.now() - started, reused: reuse };
+    if (still) {
+      let fc = this.globeFrame?.canvas ?? null;
+      if (!fc || fc.width !== W || fc.height !== H) fc = new OffscreenCanvas(W, H);
+      const fx = fc.getContext('2d') as unknown as CanvasRenderingContext2D;
+      fx.setTransform(1, 0, 0, 1, 0, 0);
+      fx.clearRect(0, 0, W, H);
+      fx.drawImage(ctx.canvas as CanvasImageSource, 0, 0);
+      this.globeFrame = { key: frameKey, canvas: fc, labels: this.lastLabels, cities: this.lastCities };
+    } else this.globeFrame = null;
+    this.lastGlobe = { picture: [pw, ph], perRad, round: reuse && last ? last.round : area.round, ms: performance.now() - started, reused: reuse || !upload };
+  }
+
+  private timeMovesKey = '';
+  private timeMovesValue = false;
+  /** Whether anything of a map changes from moment to moment apart from its changes: conditions, or video fills. */
+  private timeMoves(world: World, spaceId: string): boolean {
+    const key = `${world.revision}|${spaceId}`;
+    if (key !== this.timeMovesKey) {
+      this.timeMovesKey = key;
+      this.timeMovesValue = world.all('layer').some((l) => l.kind === 'field' && l.space_id === spaceId)
+        || world.all('entity').some((e) => typeof e.style === 'string' && e.style.includes('"video"'));
+    }
+    return this.timeMovesValue;
   }
 
   private ownLandCache = new Map<string, number[]>();

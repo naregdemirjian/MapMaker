@@ -1,7 +1,7 @@
 // Shots: screen-time arithmetic used by transitions timed in screen seconds.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { defaultShot, screenSecondsSince, timeAt, shotTransitions, DEFAULT_TRANSITIONS, shotProgress, eventScreenSeconds } from '../src/presentation/sequence.ts';
+import { defaultShot, screenSecondsSince, timeAt, shotTransitions, DEFAULT_TRANSITIONS, shotProgress, eventScreenSeconds, cameraAt, withStillCamera, unspun } from '../src/presentation/sequence.ts';
 import { World } from '../src/world-model/world.ts';
 import * as cmd from '../src/domain/commands.ts';
 import { invertDiffs } from '../src/world-model/schema.ts';
@@ -131,4 +131,23 @@ test('an event out of sync with the clock (D92): its changes take its own screen
   assert.ok(r.diffs.length > 0);
   assert.equal(eventScreenSeconds('not json'), null);
   assert.equal(eventScreenSeconds('{"screen":{"seconds":-1}}'), null);
+});
+
+test('a globe turning on its own (D127): its middle moves west at the speed set, a view framed at a frame is kept as it was before the turn, flat maps never turn', () => {
+  const t = gregorian.fromCivil({ year: 1900 });
+  const shot = defaultShot('space', { lon: 170, lat: 30, zoom: 0, rotation: 0, projection: 'globe' }, t, t, 24, 10);
+  assert.equal(cameraAt(shot, 48).lon, 170, 'still without a spin');
+  shot.spin = 15;
+  assert.ok(Math.abs(cameraAt(shot, 0).lon - 170) < 1e-9);
+  assert.ok(Math.abs(cameraAt(shot, 48).lon - 140) < 1e-9, `two seconds at 15° a second (${cameraAt(shot, 48).lon})`);
+  // Across 180°: on round the other side.
+  shot.spin = -30;
+  assert.ok(Math.abs(cameraAt(shot, 48).lon - -130) < 1e-9, `the other way, across 180° (${cameraAt(shot, 48).lon})`);
+  // Framed at frame 48 and kept: at that frame the view is the one framed, and it turns on from there.
+  const framed = { ...cameraAt(shot, 48), lon: 10 };
+  const kept = withStillCamera(shot, unspun(shot, framed, 48));
+  assert.ok(Math.abs(cameraAt(kept, 48).lon - 10) < 1e-9 && Math.abs(cameraAt(kept, 72).lon - 40) < 1e-9, `${cameraAt(kept, 48).lon}, then ${cameraAt(kept, 72).lon} a second later (turning east at 30° a second)`);
+  // A flat map's camera never turns.
+  const flatShot = { ...shot, camera: shot.camera.map((k) => ({ ...k, camera: { ...k.camera, projection: 'equirectangular' as const } })) };
+  assert.equal(cameraAt(flatShot, 48).lon, 170);
 });

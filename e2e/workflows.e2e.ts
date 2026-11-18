@@ -2925,7 +2925,7 @@ try {
     assert.deepEqual(clips, setup.clips, 'each layer ends at the coast as before');
   });
 
-  await h.step('A shot on the globe (D127): the projection chosen, the preview dragged to turn the planet, exported as frames and as an SVG frame; undone', async () => {
+  await h.step('A shot on the globe (D127): the projection chosen, the preview dragged to turn the planet, set turning on its own, exported as frames and as an SVG frame; undone', async () => {
     await page.getByTestId('mode-world').click();
     const shotId = await page.evaluate(([a]) => {
       const m = (window as any).__mapmaker, s = m.store, B = m.bench;
@@ -2953,6 +2953,15 @@ try {
       const s = (window as any).__mapmaker.store, c = s.presentCamera ?? JSON.parse(s.world.get('sequence', id).settings).camera[0].camera;
       return ((c.lon - lon + 540) % 360) - 180 > 5;
     }, [shotId, before.lon] as const);
+    // Turning on its own, 30 degrees a second as the Earth turns: a second in, the middle 30 degrees further west.
+    await page.getByTestId('globe-spin').fill('30');
+    await page.getByTestId('globe-spin').press('Enter');
+    const turned = await page.evaluate((id) => {
+      const m = (window as any).__mapmaker, s = m.store, st = JSON.parse(s.world.get('sequence', id).settings);
+      return { spin: st.spin, fps: st.fps, lon0: m.bench.cameraAt(st, 0).lon, lon1: m.bench.cameraAt(st, st.fps).lon };
+    }, shotId);
+    assert.equal(turned.spin, 30);
+    assert.ok(Math.abs(((turned.lon0 - turned.lon1 - 30 + 540) % 360) - 180) < 1e-6, `a second in, 30 degrees further west (${turned.lon0} then ${turned.lon1})`);
     // Frames: the globe in the middle, space round it.
     const r = await exportShot('export-preview');
     const img = readPNG(r.frames('all')[0]);
