@@ -250,8 +250,8 @@ export function drawSpaceFrame(ctx: CanvasRenderingContext2D, world: World, engi
   if (all || back || (names && shot.labels) || realms || lanes) {
     spaceRenderer ??= new SpaceRenderer();
     spaceRenderer.render(ctx, view, scene.cat, {
-      rings: scene.rings, axisLabel: scene.axisLabel, orbits: scene.orbits, realmReach: scene.realmReach,
-      transparent: all ? shot.transparent : !def.background, grid: shot.graticule && (all || back), dropLines: all, names: shot.labels && (all || names) ? 'auto' : 'none',
+      rings: scene.rings, axisLabel: scene.axisLabel, orbits: scene.orbits, realmReach: scene.realmReach, dust: scene.dust, armNames: scene.armNames,
+      transparent: all ? shot.transparent : !def.background, grid: shot.graticule && (all || back), dropLines: all && scene.dropLines !== false, names: shot.labels && (all || names) ? 'auto' : 'none',
       only: all ? undefined : back ? 'background' : realms ? 'realms' : lanes ? 'lanes' : 'names',
       holdings: holdingsAt(world, engine, shot.spaceId, t, (t0) => screenSecondsSince(shot, frame, t0)), lanes: lanesFor(world, engine, shot.spaceId, t),
     });

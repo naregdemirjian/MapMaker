@@ -61,6 +61,52 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D117. The large moons on the solar system map (Stage 11)
+
+- **Which.** Fourteen: the Moon; Phobos and Deimos; Io, Europa, Ganymede and Callisto; Enceladus, Rhea and Titan;
+  Titania and Oberon; Triton; Charon. Each goes round its planet at its true period (Triton the other way round).
+- **Where.** At true scale a moon sits on its planet, so moons are drawn round it far wider than they are, each a step
+  further out than the one inside it, on the plane of the planets' orbits, with a faint ring for its orbit. They show
+  once the view sets them apart from their planet (closing in on Jupiter shows its four); until then they and their
+  rings are left out, and a click on a planet is the planet's. The Moon's place is its mean longitude for the date,
+  and Jupiter's four large moons' their mean longitudes (Meeus, Astronomical Algorithms, chapter 44, lower accuracy):
+  each where it is, roughly. The others' places along their orbits are not their true ones, and their panels say so.
+- **Like the planets.** Moons are found by the search box, have a panel (whose moon, how long it takes to go round),
+  and are given to countries and factions with the Star systems tool and joined by lanes, as planets are (the
+  Expanse's Ganymede or Titan, say). Their numbers (31, 41, 42, 51–54, 61–63, 71, 72, 81, 91) never change.
+- **Tests.** `solar.test.ts` (each moon round its planet, back where it was after its period, Io to Callisto outward,
+  the Moon at its mean longitude at J2000, Io's period).
+
+### D116. Galaxy maps: the Milky Way, and galaxies of one's own (Stage 11)
+
+- **The Milky Way.** "+ Map", "The Milky Way": the whole galaxy seen from outside, turned and zoomed as star maps are.
+  Its arms are logarithmic spirals with the reference radii, angles and pitches of Reid et al. 2014 (radio
+  astronomy of star-forming regions), scaled to the Sun's distance from the middle (26,670 light-years, GRAVITY 2019)
+  and carried on round the far side, where they are less well known: Scutum–Centaurus, Perseus, Sagittarius–Carina,
+  Norma–Outer and the Orion–Cygnus arm the Sun is in; a bar 27° from the line to the Sun and a bulge. 33 places are
+  where they are seen from the Sun (galactic longitude, latitude and rounded distances from the literature): the Sun,
+  the black hole at the middle, nebulae (Orion, Eagle, Carina, Crab…), clusters, remnants of supernovae, notable stars,
+  and the Sagittarius dwarf galaxy and the Magellanic Clouds outside the disc.
+- **Star systems to hold.** Along the arms and in the disc, so many star systems of the map's own (600 by default, up
+  to 5,000), from a seed, with names of their own, shown by name only close in (or when held or chosen). Countries and
+  factions hold them with the Star systems tool and a box (D111), lanes join them (D112), realms glow round them as far
+  as about half way to their neighbours. "Other star systems" makes them again from the next seed; their numbers stay,
+  so what is held stays held.
+- **A galaxy of one's own.** "+ Map", "A galaxy of your own": a spiral from a seed with so many arms (1 to 8), wound so
+  tightly, so large, with or without a bar; its arms named from syllables, a home system half way out on the first arm.
+  "Another galaxy" makes it again from the next seed.
+- **Drawing.** The glow is 18,000 faint points sampled as the galaxy's stars lie (bar and bulge, arms, disc, the pink
+  of star-forming clouds), each a soft square as large as the part it stands for, added up on a layer of its own and
+  kept while the view stays put; the arms' names lie on the arms. Shots, exports (the glow in the background layer,
+  realms, lanes and names in theirs) and SVG frames (the glow a picture) work as for star maps.
+- **Tests.** `galaxy.test.ts` (the Sun 26,670 light-years out and in the Orion–Cygnus arm, the black hole at the middle,
+  places where they are seen from the Sun, the Magellanic Clouds outside; the arms trailing spirals of their pitch;
+  systems numbered from 1000, named, out of the middle, the same for the same seed; the glow; a galaxy of one's own and
+  its scene; the maps made, made again and undone, systems held, wrong settings refused); `e2e/workflows` 'The Milky
+  Way' (made from "+ Map": its middle bright and the sky dark; the Orion Nebula found by search, its kind and distance;
+  systems held in a box; a frame with the galaxy and the realm; a galaxy of one's own made again from the next seed;
+  undone).
+
 ### D115. SVG frames (Stage 10)
 
 - **What it is.** In a shot's Export section, "Save frame N as SVG" writes the frame shown in the preview as an SVG
@@ -129,7 +175,7 @@ Follows from D2. The test drives the real interface exactly as a person would.
 - **Held and joined like stars**: the Star systems tool gives planets to countries and factions over time (their
   realms move with them), the Lanes tool joins them (a lane between moving planets follows them), as on a star map
   (D111, D112). A planet's panel gives its distance from the Sun on the date viewed and how long it takes to go round.
-- **Not yet**: moons, asteroids and comets.
+- **Not yet**: asteroids and comets (the large moons since: D117).
 - **Tests.** `solar.test.ts` (the 2003 opposition; the Earth nearest the Sun in January; every planet within its
   orbit's reach from 1800 to 2300; a year once round, Jupiter about 30° a year; Pluto above the plane; orbits closed
   and through their planets; compressed and true distances; the catalogue drawn; the map made, its scale chosen and

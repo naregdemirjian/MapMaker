@@ -101,8 +101,10 @@ export function sculptOf(space: Pick<MapSpaceRow, 'settings' | 'radius_m' | 'kin
  * its distances are drawn, or stars of the user's own (D114) made from a seed.
  */
 export interface SpaceSettings {
-  catalogue: 'nearby' | 'solar' | 'invented'; radiusLy: number; scale?: 'true' | 'compressed';
+  catalogue: 'nearby' | 'solar' | 'invented' | 'galaxy'; radiusLy: number; scale?: 'true' | 'compressed';
   invented?: { seed: number; count: number; radiusLy: number; shape: 'sphere' | 'disc' };
+  /** A galaxy map (D116): the Milky Way or one's own, its star systems and shape. */
+  galaxy?: { kind: 'milkyway' | 'invented'; seed: number; systems: number; arms: number; pitch: number; radiusLy: number; bar: boolean };
 }
 
 /** Whether a map is a map of the stars (D110). */
@@ -118,6 +120,12 @@ export function spaceSettingsOf(space: MapSpaceRow | null | undefined): SpaceSet
     const num = (v: unknown, lo: number, hi: number, d: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, Math.round(v))) : d);
     const inv = { seed: num(i.seed, 1, 1e9, 1), count: num(i.count, 2, 3000, 300), radiusLy: num(i.radiusLy, 5, 5000, 50), shape: i.shape === 'disc' ? 'disc' as const : 'sphere' as const };
     return { catalogue: 'invented', radiusLy: inv.radiusLy, invented: inv };
+  }
+  if (o.catalogue === 'galaxy') {
+    const g = (o.galaxy ?? {}) as Partial<NonNullable<SpaceSettings['galaxy']>>;
+    const num = (v: unknown, lo: number, hi: number, d: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);
+    const gal = { kind: g.kind === 'invented' ? 'invented' as const : 'milkyway' as const, seed: Math.round(num(g.seed, 1, 1e9, 1)), systems: Math.round(num(g.systems, 0, 5000, 600)), arms: Math.round(num(g.arms, 1, 8, 4)), pitch: num(g.pitch, 4, 40, 14), radiusLy: Math.round(num(g.radiusLy, 1000, 500000, 50000)), bar: g.bar !== false };
+    return { catalogue: 'galaxy', radiusLy: gal.kind === 'milkyway' ? 60000 : Math.round(gal.radiusLy * 1.2), galaxy: gal };
   }
   return { catalogue: 'nearby', radiusLy: typeof o.radiusLy === 'number' && o.radiusLy > 0 ? o.radiusLy : 50 };
 }

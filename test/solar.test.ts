@@ -1,7 +1,7 @@
 // The solar system map (Stage 11, D113): the planets where they are on a date, their orbits, the scale.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { BODIES, bodyAt, orbitAt, centuriesSinceJ2000, scalePoint, solarCatalogue, solarOrbits, orbitalYears } from '../src/space/solar.ts';
+import { BODIES, MOONS, bodyAt, moonAt, orbitAt, centuriesSinceJ2000, scalePoint, solarCatalogue, solarOrbits, orbitalYears } from '../src/space/solar.ts';
 import { gregorian } from '../src/core-time/index.ts';
 import { World } from '../src/world-model/world.ts';
 import * as cmd from '../src/domain/commands.ts';
@@ -49,11 +49,37 @@ test('orbits closed and through the planets; distances true or compressed; the c
   assert.ok(scalePoint([30, 0, 0], 'compressed')[0] > scalePoint([20, 0, 0], 'compressed')[0], 'order kept');
   const when = gregorian.fromCivil({ year: 2024 });
   const cat = solarCatalogue(when, 'compressed');
-  assert.deepEqual(cat.stars.map((s) => s.id), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  assert.deepEqual(cat.stars.slice(0, 10).map((s) => s.id), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
   assert.equal(cat.byId.get(0)!.name, 'Sun');
   assert.ok(Math.abs(cat.byId.get(3)!.dist - 1) < 0.02, 'distances kept true for the panel');
   assert.ok(cat.stars.every((s) => s.color && s.size));
-  assert.equal(solarOrbits(when, 'true').length, 9);
+  assert.equal(solarOrbits(when, 'true').length, 9 + MOONS.length);
+});
+
+test('the large moons: round their planets, at their periods; the Moon and Jupiter\'s four where they are', () => {
+  assert.equal(new Set(MOONS.map((m) => m.id)).size, MOONS.length);
+  assert.ok(MOONS.every((m) => m.id > 9 && BODIES.some((b) => b.id === m.planet)));
+  const t0 = gregorian.fromCivil({ year: 2024, month: 3, day: 1 });
+  const T0 = centuriesSinceJ2000(t0);
+  const cat = solarCatalogue(t0, 'compressed');
+  for (const m of MOONS) {
+    const s = cat.byId.get(m.id)!, p = cat.byId.get(m.planet)!;
+    assert.equal(s.kind, 'moon');
+    assert.equal(s.alt, `a moon of ${p.name}`);
+    const d = Math.hypot(s.x - p.x, s.y - p.y, s.z - p.z);
+    assert.ok(d > 0.3 && d < 1.6, `${m.name} drawn round ${p.name} (${d.toFixed(2)} au as drawn)`);
+    // Once round in its period.
+    const later = moonAt(m, T0 + m.days / 36525, [p.x, p.y, p.z], 'compressed');
+    assert.ok(Math.hypot(later[0] - s.x, later[1] - s.y) < 1e-6, `${m.name} back after ${m.days.toFixed(2)} days`);
+  }
+  // Inner moons drawn nearer their planet.
+  const r = (id: number) => { const s = cat.byId.get(id)!, p = cat.byId.get(5)!; return Math.hypot(s.x - p.x, s.y - p.y); };
+  assert.ok(r(51) < r(52) && r(52) < r(53) && r(53) < r(54), 'Io, Europa, Ganymede, Callisto outward');
+  // The Moon at J2000: its mean longitude 218.3 degrees from the vernal equinox.
+  const moon = moonAt(MOONS[0], 0, [0, 0, 0], 'true');
+  assert.ok(Math.abs(((Math.atan2(moon[1], moon[0]) * 180) / Math.PI + 360) % 360 - 218.3165) < 1e-6);
+  // Io goes round in 1.769 days.
+  assert.ok(Math.abs(MOONS.find((m) => m.name === 'Io')!.days - 1.769) < 0.001);
 });
 
 test('a solar system map: made, its scale chosen and undone; planets held like stars', async () => {

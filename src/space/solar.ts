@@ -86,19 +86,67 @@ export function scalePoint(p: [number, number, number], scale: SolarScale): [num
   return [p[0] * k, p[1] * k, p[2] * k];
 }
 
-/** The Sun and the planets as a catalogue the space renderer draws (positions as drawn), at an instant. */
+/**
+ * The large moons (D117), going round their planets at their true periods. They are drawn round their
+ * planet far wider than they are (at true scale they would sit on it), on the plane of the planets' orbits.
+ * The Moon's place is its mean longitude for the date, and Jupiter's four large moons' their mean
+ * longitudes (J. Meeus, Astronomical Algorithms, ch. 44, lower accuracy): each where it is, roughly;
+ * the others go round at their periods from a starting place of no meaning (`placed`: false).
+ */
+export interface Moon { id: number; name: string; planet: number; days: number; L0: number; placed: boolean; color: string; retrograde?: boolean }
+export const MOONS: Moon[] = [
+  { id: 31, name: 'Moon', planet: 3, days: 27.321661, L0: 218.3165, placed: true, color: '#d8d4cc' },
+  { id: 41, name: 'Phobos', planet: 4, days: 0.31891, L0: 0, placed: false, color: '#a89a8c' },
+  { id: 42, name: 'Deimos', planet: 4, days: 1.26244, L0: 120, placed: false, color: '#b8ab9c' },
+  { id: 51, name: 'Io', planet: 5, days: 360 / 203.48895579, L0: 106.07719, placed: true, color: '#f2dc7a' },
+  { id: 52, name: 'Europa', planet: 5, days: 360 / 101.374724735, L0: 175.73161, placed: true, color: '#e6d9c2' },
+  { id: 53, name: 'Ganymede', planet: 5, days: 360 / 50.317609207, L0: 120.55883, placed: true, color: '#b9ad9e' },
+  { id: 54, name: 'Callisto', planet: 5, days: 360 / 21.571071177, L0: 84.44459, placed: true, color: '#8f8578' },
+  { id: 62, name: 'Enceladus', planet: 6, days: 1.370218, L0: 40, placed: false, color: '#f4f7fb' },
+  { id: 63, name: 'Rhea', planet: 6, days: 4.518212, L0: 200, placed: false, color: '#d6d1c9' },
+  { id: 61, name: 'Titan', planet: 6, days: 15.945421, L0: 300, placed: false, color: '#e3b46a' },
+  { id: 71, name: 'Titania', planet: 7, days: 8.706234, L0: 60, placed: false, color: '#c9c3bd' },
+  { id: 72, name: 'Oberon', planet: 7, days: 13.463234, L0: 250, placed: false, color: '#b8b0a8' },
+  { id: 81, name: 'Triton', planet: 8, days: 5.876854, L0: 90, placed: false, color: '#d9e3e8', retrograde: true },
+  { id: 91, name: 'Charon', planet: 9, days: 6.38723, L0: 30, placed: false, color: '#b5ada6' },
+];
+
+/** How far from its planet a moon is drawn (au as drawn): the inner moons nearer, each a step further out. */
+function moonRadius(m: Moon, scale: SolarScale): number {
+  const rank = MOONS.filter((x) => x.planet === m.planet && x.days < m.days).length;
+  return (scale === 'true' ? 0.11 : 0.38) * (1 + 0.55 * rank);
+}
+
+/** Where a moon is drawn (au, ecliptic, as drawn) at T centuries from J2000, given its planet's place as drawn. */
+export function moonAt(m: Moon, T: number, planet: [number, number, number], scale: SolarScale): [number, number, number] {
+  const days = T * 36525, a = ((m.L0 + (m.retrograde ? -1 : 1) * (360 * days) / m.days) % 360) * (Math.PI / 180), r = moonRadius(m, scale);
+  return [planet[0] + r * Math.cos(a), planet[1] + r * Math.sin(a), planet[2]];
+}
+
+/** The Sun, the planets and their large moons as a catalogue the space renderer draws (positions as drawn), at an instant. */
 export function solarCatalogue(t: Instant, scale: SolarScale): StarCatalogue {
   const T = centuriesSinceJ2000(t);
   const stars: Star[] = [{ id: 0, name: 'Sun', alt: '', x: 0, y: 0, z: 0, dist: 0, absmag: 4.83, spect: 'G2V', system: 0, color: '#ffd76a', size: 9 }];
+  const drawn = new Map<number, [number, number, number]>();
   for (const b of BODIES) {
     const p = bodyAt(b, T), q = scalePoint(p, scale);
+    drawn.set(b.id, q);
     stars.push({ id: b.id, name: b.name, alt: '', x: q[0], y: q[1], z: q[2], dist: Math.hypot(p[0], p[1], p[2]), absmag: 0, spect: '', system: 0, color: b.color, size: b.size });
+  }
+  for (const m of MOONS) {
+    const q = moonAt(m, T, drawn.get(m.planet)!, scale), planet = stars[m.planet];
+    stars.push({ id: m.id, name: m.name, alt: `a moon of ${planet.name}`, x: q[0], y: q[1], z: q[2], dist: planet.dist, absmag: 0, spect: '', system: 0, color: m.color, size: 2.3, kind: 'moon', minor: true, around: m.planet });
   }
   return { radiusLy: SOLAR_RADIUS_AU, stars, byId: new Map(stars.map((s) => [s.id, s])) };
 }
 
-/** The planets' orbits as drawn, at an instant. */
-export function solarOrbits(t: Instant, scale: SolarScale): Array<{ id: number; color: string; points: Array<[number, number, number]> }> {
+/** The planets' orbits as drawn, at an instant, and the circles the moons are drawn on round their planets. */
+export function solarOrbits(t: Instant, scale: SolarScale): Array<{ id: number; color: string; points: Array<[number, number, number]>; small?: boolean }> {
   const T = centuriesSinceJ2000(t);
-  return BODIES.map((b) => ({ id: b.id, color: b.color, points: orbitAt(b, T, b.id >= 5 ? 240 : 160).map((p) => scalePoint(p, scale)) }));
+  const planets = BODIES.map((b) => ({ id: b.id, color: b.color, points: orbitAt(b, T, b.id >= 5 ? 240 : 160).map((p) => scalePoint(p, scale)) }));
+  const moons = MOONS.map((m) => {
+    const c = scalePoint(bodyAt(BODIES.find((b) => b.id === m.planet)!, T), scale), r = moonRadius(m, scale);
+    return { id: m.id, color: 'rgba(200,210,230,0.35)', points: Array.from({ length: 49 }, (_, i) => [c[0] + r * Math.cos((i / 48) * Math.PI * 2), c[1] + r * Math.sin((i / 48) * Math.PI * 2), c[2]] as [number, number, number]), small: true };
+  });
+  return [...planets, ...moons];
 }

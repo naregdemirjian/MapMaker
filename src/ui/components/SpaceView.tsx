@@ -25,6 +25,12 @@ let overlayRects: OverlayRect[] = [];
 /** Where the stars were last drawn (page-independent: canvas pixels of the frame), for tests. */
 export function shownSpace() { return shown; }
 
+/** What a galaxy map shows (D116), for the note on the map. */
+function galaxyNote(g: NonNullable<ReturnType<typeof spaceSettingsOf>>['galaxy'] & object, cat: { stars: Array<{ minor?: boolean }> }, ring: string): string {
+  const systems = cat.stars.filter((s) => s.minor).length;
+  return `${g.kind === 'milkyway' ? 'The Milky Way' : 'A galaxy of your own'} · ${systems.toLocaleString('en-GB')} star systems${g.kind === 'milkyway' ? ` and ${cat.stars.length - systems} places` : ''} · rings every ${ring}`;
+}
+
 export function SpaceView() {
   const s = useLive();
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -72,9 +78,9 @@ export function SpaceView() {
     ctx.save();
     ctx.beginPath(); ctx.rect(0, 0, frame.w, frame.h); ctx.clip();
     renderer.current.render(ctx, view, cat, {
-      transparent: !!shot?.transparent, grid: shot ? shot.graticule : true, dropLines: true,
+      transparent: !!shot?.transparent, grid: shot ? shot.graticule : true, dropLines: scene.dropLines !== false,
       names: shot && !shot.labels ? 'none' : 'auto', selected: shot ? null : laneFrom ?? (s.selection?.kind === 'star' ? s.selection.id : null), holdings, lanes,
-      rings: scene.rings, axisLabel: scene.axisLabel, orbits: scene.orbits, realmReach: scene.realmReach,
+      rings: scene.rings, axisLabel: scene.axisLabel, orbits: scene.orbits, realmReach: scene.realmReach, dust: scene.dust, armNames: scene.armNames,
     });
     // The box being drawn with the Star systems tool.
     const d = drag.current;
@@ -212,7 +218,8 @@ export function SpaceView() {
       <canvas ref={canvasRef} className="map-canvas" style={{ width: size.w, height: size.h, cursor: "grab" }} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onDoubleClick={onDoubleClick} onContextMenu={(e) => e.preventDefault()} data-testid="map-canvas" data-space="stars" />
       {!presentation && (
         <div className="map-hud">
-          <div className="scalebar space-note" data-testid="space-note">{settings?.catalogue === 'invented' && cat ? `${cat.stars.length} invented stars within ${cat.radiusLy} light-years · seed ${settings.invented?.seed}` : scene.unit === 'au' ? `The Sun and the planets on ${fmt(time)} · ${settings?.scale === 'true' ? 'distances true to scale' : 'distances compressed'}` : cat ? `${cat.stars.length} stars within ${cat.radiusLy} light-years · rings every 10 ly` : 'Loading the stars…'}</div>
+          <div className="scalebar space-note" data-testid="space-note">{settings?.catalogue === 'galaxy' && settings.galaxy && cat ? galaxyNote(settings.galaxy, cat, scene.rings?.[0]?.label ?? '') : settings?.catalogue === 'invented' && cat ? `${cat.stars.length} invented stars within ${cat.radiusLy} light-years · seed ${settings.invented?.seed}` : scene.unit === 'au' ? `The Sun and the planets on ${fmt(time)} · ${settings?.scale === 'true' ? 'distances true to scale' : 'distances compressed'}` : cat ? `${cat.stars.length} stars within ${cat.radiusLy} light-years · rings every 10 ly` : 'Loading the stars…'}</div>
+          {settings?.catalogue === 'galaxy' && settings.galaxy && space && <button className="small space-scale" onClick={() => store.execute((w) => cmd.setGalaxy(w, space.id, { ...settings.galaxy!, seed: settings.galaxy!.seed + 1 }))} data-testid="galaxy-again" title={settings.galaxy.kind === 'milkyway' ? 'Star systems elsewhere along the arms, from the next seed (held systems and lanes keep their numbers)' : 'Another galaxy from the next seed (held systems and lanes keep their numbers)'}>{settings.galaxy.kind === 'milkyway' ? 'Other star systems' : 'Another galaxy'} (seed {settings.galaxy.seed + 1})</button>}
           {settings?.catalogue === 'invented' && settings.invented && space && <button className="small space-scale" onClick={() => store.execute((w) => cmd.setInventedStars(w, space.id, { ...settings.invented!, seed: settings.invented!.seed + 1 }))} data-testid="invented-again" title="Other stars from the next seed (held stars and lanes keep their numbers)">Other stars (seed {settings.invented.seed + 1})</button>}
           {scene.unit === 'au' && space && <button className="small space-scale" onClick={() => store.execute((w) => cmd.setSolarScale(w, space.id, settings?.scale === 'true' ? 'compressed' : 'true'))} data-testid="solar-scale" title="True to scale, the inner planets crowd round the Sun; compressed, every orbit has room">{settings?.scale === 'true' ? 'Compress the distances' : 'Distances true to scale'}</button>}
           <div className="hud-buttons">

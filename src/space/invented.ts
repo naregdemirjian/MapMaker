@@ -24,18 +24,30 @@ const START = ['Ka', 'Ve', 'Tor', 'Al', 'Ser', 'Mi', 'Dra', 'Ory', 'Zen', 'Lu', 
 const MIDDLE = ['ra', 'li', 'ne', 'to', 'va', 'ri', 'do', 'sa', 'mi', 'the', 'lo', 'na', 'ce', 'ru', 'ma', 'di'];
 const END = ['n', 's', 'x', 'th', 'ra', 'ia', 'on', 'us', 'is', 'ar', 'el', 'or', 'ion', 'eth', 'a', 'e', 'ix', 'ane'];
 
-/** The invented stars of a seed: the home star (id 0) in the middle, then the others, nearest first. */
-export function inventedStars(o: InventedSettings): StarCatalogue {
-  const rnd = seeded(o.seed * 7919 + 17);
+/**
+ * Names made from syllables (D114), each its own, from a random source: `bright` ones that run out of
+ * syllables become "Star-1234", others "KX-1234".
+ */
+export function nameMaker(rnd: () => number): (bright: boolean) => string {
   const pick = <T,>(a: T[]) => a[Math.floor(rnd() * a.length)];
   const used = new Set<string>();
-  const name = (bright: boolean): string => {
+  return (bright: boolean): string => {
     for (let tries = 0; tries < 20; tries++) {
       const n = pick(START) + (rnd() < 0.55 ? pick(MIDDLE) : '') + pick(END);
       if (!used.has(n)) { used.add(n); return n; }
     }
-    return `${bright ? 'Star' : 'KX'}-${Math.floor(1000 + rnd() * 9000)}`;
+    for (;;) {
+      const n = `${bright ? 'Star' : 'KX'}-${Math.floor(1000 + rnd() * 9000)}`;
+      if (!used.has(n)) { used.add(n); return n; }
+    }
   };
+}
+
+/** The invented stars of a seed: the home star (id 0) in the middle, then the others, nearest first. */
+export function inventedStars(o: InventedSettings): StarCatalogue {
+  const rnd = seeded(o.seed * 7919 + 17);
+  const pick = <T,>(a: T[]) => a[Math.floor(rnd() * a.length)];
+  const name = nameMaker(rnd);
   const kindOf = () => {
     let x = rnd();
     for (const k of KINDS) { if (x < k.share) return k; x -= k.share; }

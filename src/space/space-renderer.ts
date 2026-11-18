@@ -5,6 +5,7 @@
 import type { SpaceView, Vec3 } from './space-view.ts';
 import { starColour, starSize, type StarCatalogue, type Star } from './catalogue.ts';
 import { seeded } from '../presentation/looks.ts';
+import type { GalaxyDust } from './galaxy.ts';
 
 /** Who holds a star at the moment shown (D111); `fresh` below 1 while it grows into the realm (shots). */
 export interface Holding { owner: string; name: string; color: string; fresh?: number }
@@ -31,10 +32,13 @@ export interface SpaceDrawOptions {
   rings?: Array<{ r: number; label: string }>;
   /** Written beyond the rings toward +x (null: nothing); absent: the way to the galactic centre. */
   axisLabel?: string | null;
-  /** Orbits to draw (the solar system, D113): closed rings of points as drawn. */
-  orbits?: Array<{ color: string; points: Vec3[] }>;
+  /** Orbits to draw (the solar system, D113): closed rings of points as drawn (`small`: a moon's, left out until the view makes it large enough to see). */
+  orbits?: Array<{ color: string; points: Vec3[]; small?: boolean }>;
   /** How far a held star's glow reaches (map units; absent: REALM_REACH_LY). */
   realmReach?: number;
+  /** A galaxy's glow, and its arms' names (D116). */
+  dust?: GalaxyDust;
+  armNames?: Array<{ name: string; at: Vec3 }>;
 }
 
 export interface DrawnStar { id: number; x: number; y: number; r: number }
@@ -74,14 +78,24 @@ export class SpaceRenderer {
       ctx.restore();
       return;
     }
-    if (!o.transparent) this.farStars(ctx, view);
+    if (!o.transparent && !o.dust) this.farStars(ctx, view);
+    if (o.dust && o.only !== 'names') this.dust(ctx, view, o.dust);
     if (o.grid && o.only !== 'names') this.grid(ctx, view, cat?.radiusLy ?? 50, o.rings, o.axisLabel);
+    if (o.armNames && o.names !== 'none' && (!o.only || o.only === 'names')) this.armNames(ctx, view, o.armNames);
     if (o.orbits && o.only !== 'names') this.orbits(ctx, view, o.orbits);
     if (!cat || o.only === 'background') { ctx.restore(); return; }
     const placed: Array<{ s: Star; x: number; y: number; k: number }> = [];
     for (const s of cat.stars) {
       const p = view.project([s.x, s.y, s.z]);
       if (p && p[0] > -60 && p[0] < W + 60 && p[1] > -60 && p[1] < H + 60) placed.push({ s, x: p[0], y: p[1], k: p[2] });
+    }
+    // Moons (D117) only where the view sets them apart from their planet.
+    if (placed.some((p) => p.s.around !== undefined)) {
+      const at = new Map(placed.map((p) => [p.s.id, p]));
+      for (let i = placed.length - 1; i >= 0; i--) {
+        const m = placed[i], body = m.s.around !== undefined ? at.get(m.s.around) : undefined;
+        if (body && Math.hypot(m.x - body.x, m.y - body.y) < ((body.s.size ?? 4) + 9) * u * Math.sqrt(body.k)) placed.splice(i, 1);
+      }
     }
     if (o.holdings?.size && !o.only) this.realms(ctx, view, cat, o.holdings, o.realmNames !== false, o.realmReach ?? REALM_REACH_LY);
     if (o.lanes?.length && !o.only) this.lanes(ctx, view, cat, o.lanes);
@@ -125,6 +139,63 @@ export class SpaceRenderer {
     ctx.restore();
   }
 
+  private dustLayer: OffscreenCanvas | null = null;
+  /**
+   * A galaxy's glow (D116): its many faint points, each a little soft square as large as the part of
+   * the galaxy it stands for, added up on a layer of their own (so that crowded parts glow), then laid
+   * on the sky.
+   */
+  private dust(ctx: CanvasRenderingContext2D, view: SpaceView, d: GalaxyDust): void {
+    const W = Math.max(1, Math.ceil(view.width)), H = Math.max(1, Math.ceil(view.height));
+    if (!this.dustLayer || this.dustLayer.width !== W || this.dustLayer.height !== H) { this.dustLayer = new OffscreenCanvas(W, H); this.dustKey = ''; }
+    // (The same view of the same galaxy: the glow drawn before, while the date or the realms change.)
+    const c = view.camera, key = `${c.lon}|${c.lat}|${c.zoom}|${c.rotation}|${c.target?.join(',') ?? ''}|${view.scale}`;
+    if (this.dustKey !== key || this.dustOf !== d) this.paintDust(view, d, W, H);
+    this.dustKey = key; this.dustOf = d;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(this.dustLayer, 0, 0);
+    ctx.restore();
+  }
+  private dustKey = '';
+  private dustOf: GalaxyDust | null = null;
+  private paintDust(view: SpaceView, d: GalaxyDust, W: number, H: number): void {
+    const g = this.dustLayer!.getContext('2d')!;
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.clearRect(0, 0, W, H);
+    g.globalCompositeOperation = 'lighter';
+    const base = d.size * view.scale, alpha = [0.07, 0.07, 0.045, 0.15];
+    for (let c = 0; c < d.colors.length; c++) {
+      g.fillStyle = d.colors[c];
+      for (let i = 0; i < d.count; i++) {
+        if (d.points[i * 4 + 3] !== c) continue;
+        const p = view.project([d.points[i * 4], d.points[i * 4 + 1], d.points[i * 4 + 2]]);
+        if (!p || p[0] < -20 || p[1] < -20 || p[0] > W + 20 || p[1] > H + 20) continue;
+        const r = Math.max(0.7, base * p[2]);
+        // (Smaller grains keep their brightness: what they stand for is as bright, only smaller.)
+        g.globalAlpha = Math.min(0.6, alpha[c] * Math.max(1, 2.2 / r));
+        g.fillRect(p[0] - r, p[1] - r, 2 * r, 2 * r);
+      }
+    }
+    g.globalCompositeOperation = 'source-over';
+    g.globalAlpha = 1;
+  }
+
+  /** The names of a galaxy's arms (D116), faint, along the arms. */
+  private armNames(ctx: CanvasRenderingContext2D, view: SpaceView, names: Array<{ name: string; at: Vec3 }>): void {
+    const u = view.unit, size = Math.max(9, 13 * u);
+    ctx.save();
+    ctx.font = `italic 500 ${size.toFixed(1)}px "Segoe UI", Arial, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = 'rgba(190,210,255,0.62)';
+    for (const a of names) {
+      const p = view.project(a.at);
+      if (p) ctx.fillText(a.name, p[0], p[1]);
+    }
+    ctx.restore();
+  }
+
   /** The star drawn nearest to (x, y), within a few pixels of its disc, or null. */
   starAt(x: number, y: number, slack = 6): number | null {
     let best: number | null = null, bestD = Infinity;
@@ -152,16 +223,22 @@ export class SpaceRenderer {
     }
   }
 
-  private orbits(ctx: CanvasRenderingContext2D, view: SpaceView, orbits: Array<{ color: string; points: Vec3[] }>): void {
+  private orbits(ctx: CanvasRenderingContext2D, view: SpaceView, orbits: Array<{ color: string; points: Vec3[]; small?: boolean }>): void {
     ctx.save();
     ctx.lineWidth = Math.max(0.7, 1.1 * view.unit);
     for (const o of orbits) {
+      const pts = o.points.map((p) => view.project(p));
+      // (A moon's orbit only once it is wide enough to be seen round its planet.)
+      if (o.small) {
+        let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+        for (const q of pts) if (q) { x0 = Math.min(x0, q[0]); x1 = Math.max(x1, q[0]); y0 = Math.min(y0, q[1]); y1 = Math.max(y1, q[1]); }
+        if (!(Math.hypot(x1 - x0, y1 - y0) > 22 * view.unit)) continue;
+      }
       ctx.strokeStyle = o.color;
       ctx.globalAlpha = 0.45;
       ctx.beginPath();
       let on = false;
-      for (const p of o.points) {
-        const q = view.project(p);
+      for (const q of pts) {
         if (!q) { on = false; continue; }
         if (on) ctx.lineTo(q[0], q[1]); else { ctx.moveTo(q[0], q[1]); on = true; }
       }
@@ -305,7 +382,8 @@ export class SpaceRenderer {
     // Which are named: the Sun, the selected star, held stars and stars of their own names first, then the
     // brightest; companions only close in. Names that would overlap one already written are left out.
     const catalogueName = (n: string) => /^(Gl|GJ|HD|HIP|HYG|NN|Wo) /.test(n);
-    const want = (s: Star) => o.names === 'all' || s.id === 0 || s.id === o.selected || !!o.holdings?.has(s.id) || (!s.system && (!catalogueName(s.name) || zoom > 1.2 || s.absmag < 9)) || zoom > 2.2;
+    // (A galaxy's many star systems, D116: named only close in.)
+    const want = (s: Star) => o.names === 'all' || s.id === 0 || s.id === o.selected || !!o.holdings?.has(s.id) || (s.minor ? zoom > 1.6 : (!s.system && (!catalogueName(s.name) || zoom > 1.2 || s.absmag < 9)) || zoom > 2.2);
     const order = placed.filter((p) => want(p.s)).sort((a, b) => rank(a.s) - rank(b.s));
     function rank(s: Star): number { return s.id === o.selected ? -1e9 : s.id === 0 ? -1e8 : o.holdings?.has(s.id) ? -1e7 + s.absmag : s.size ? -s.size : catalogueName(s.name) ? s.absmag + 100 : s.absmag; }
     const boxes: Array<[number, number, number, number]> = [];

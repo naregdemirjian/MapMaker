@@ -6,15 +6,16 @@ import { fmt } from './Panels.tsx';
 import { placementMode } from './Characters.tsx';
 import { starColour, starKind, galacticOf, systemOf } from '../../space/catalogue.ts';
 import { spaceScene } from '../../space/scene.ts';
-import { BODIES, orbitalYears } from '../../space/solar.ts';
+import { BODIES, MOONS, orbitalYears } from '../../space/solar.ts';
 import { spaceSettingsOf } from '../../world-model/world-settings.ts';
 
 export function StarPanel({ id }: { id: number }) {
   const s = useStore();
   const scene = spaceScene(spaceSettingsOf(s.world?.get('map_space', s.spaceId)), s.time, () => s.notify());
-  const cat = scene.cat, solar = scene.unit === 'au';
+  const cat = scene.cat, solar = scene.unit === 'au', galaxy = !!scene.middle;
   const st = cat?.byId.get(id);
   const body = solar ? BODIES.find((b) => b.id === id) : undefined;
+  const moon = solar ? MOONS.find((m) => m.id === id) : undefined;
   if (!cat || !st) return <div className="panel"><p className="muted">Loading the stars…</p></div>;
   const system = systemOf(cat, id).map((x) => cat.byId.get(x)!);
   const g = galacticOf(st.x, st.y, st.z);
@@ -26,10 +27,16 @@ export function StarPanel({ id }: { id: number }) {
     <div className="panel" data-testid="star-panel">
       <h3><span className="swatch big" style={{ background: st.color ?? (st.id === 0 ? '#fff1c9' : starColour(st.spect)) }} /> <span data-testid="star-name">{st.name}</span></h3>
       {st.alt && <div className="muted">{st.alt}</div>}
-      {solar ? <table className="facts"><tbody>
-        <tr><td>Kind</td><td>{st.id === 0 ? 'Our star' : body?.id === 9 ? 'Dwarf planet' : 'Planet'}</td></tr>
-        {body && <tr><td>From the Sun</td><td data-testid="star-distance">{st.dist.toFixed(2)} au ({Math.round(st.dist * 149.598).toLocaleString()} million km) on {fmt(s.time)}</td></tr>}
+      {galaxy ? <table className="facts"><tbody>
+        <tr><td>Kind</td><td data-testid="star-kind">{st.kind ? st.kind[0].toUpperCase() + st.kind.slice(1) : 'Star system'}</td></tr>
+        {st.id !== 0 && <tr><td>{spaceSettingsOf(s.world?.get('map_space', s.spaceId))?.galaxy?.kind === 'invented' ? 'From home' : 'From the Sun'}</td><td data-testid="star-distance">{Math.round(st.dist).toLocaleString('en-GB')} light-years</td></tr>}
+        <tr><td>From the middle</td><td>{Math.round(Math.hypot(st.x, st.y, st.z)).toLocaleString('en-GB')} light-years</td></tr>
+      </tbody></table> : solar ? <table className="facts"><tbody>
+        <tr><td>Kind</td><td data-testid="star-kind">{st.id === 0 ? 'Our star' : moon ? `Moon of ${BODIES.find((x) => x.id === moon.planet)?.name ?? 'a planet'}` : body?.id === 9 ? 'Dwarf planet' : 'Planet'}</td></tr>
+        {(body || moon) && <tr><td>From the Sun</td><td data-testid="star-distance">{st.dist.toFixed(2)} au ({Math.round(st.dist * 149.598).toLocaleString()} million km) on {fmt(s.time)}</td></tr>}
         {body && <tr><td>Goes round in</td><td>{orbitalYears(body) < 2 ? `${Math.round(orbitalYears(body) * 365.25)} days` : `${orbitalYears(body).toFixed(1)} years`}</td></tr>}
+        {moon && <tr><td>Goes round in</td><td>{moon.days < 2 ? `${(moon.days * 24).toFixed(1)} hours` : `${moon.days.toFixed(1)} days`}{moon.retrograde ? ' (the other way round)' : ''}</td></tr>}
+        {moon && <tr><td colSpan={2} className="muted">Drawn round its planet far wider than it is.{moon.placed ? ' Where it is on this date, roughly.' : ' Where it is along its orbit is not its true place.'}</td></tr>}
       </tbody></table> : <table className="facts"><tbody>
         <tr><td>Distance</td><td data-testid="star-distance">{st.id === 0 ? 'Here: the Sun' : `${st.dist.toFixed(2)} light-years`}</td></tr>
         <tr><td>Kind</td><td>{st.id === 0 ? 'Sun-like star' : starKind(st.spect)} ({st.spect || 'type unknown'})</td></tr>
@@ -66,7 +73,7 @@ export function StarPanel({ id }: { id: number }) {
       <div className="buttons">
         <button onClick={() => s.setCamera({ ...s.camera, target: [st.x, st.y, st.z] })} data-testid="star-centre" title="The view turns around this star (⌂ goes back to the Sun)">Turn the view around it</button>
       </div>
-      <p className="muted">{solar ? 'Positions from JPL\'s orbital elements of the planets (Standish), for the date viewed.' : 'Positions from the HYG database v4.1 (CC BY-SA 4.0).'}</p>
+      <p className="muted">{galaxy ? (st.minor || spaceSettingsOf(s.world?.get('map_space', s.spaceId))?.galaxy?.kind === 'invented' ? 'A star system of this map\'s own, made from its seed.' : 'Placed from where it is seen from the Sun (rounded distances from the literature); the arms after Reid et al. (2014).') : solar ? 'Positions from JPL\'s orbital elements of the planets (Standish), for the date viewed.' : 'Positions from the HYG database v4.1 (CC BY-SA 4.0).'}</p>
     </div>
   );
 }

@@ -2975,6 +2975,15 @@ try {
     await page.getByTestId('star-panel').waitFor();
     assert.equal(await page.getByTestId('star-name').textContent(), 'Mars');
     assert.match((await page.getByTestId('star-distance').textContent()) ?? '', /^1\.\d\d au \([\d,]+ million km\) on 1 July 2030$/);
+    // The large moons (D117): not shown from afar; found by search, and round Jupiter close in.
+    assert.ok(!(await page.evaluate(() => (window as any).__mapmaker.spaceNames() as string[])).includes('Io'), 'no moons from afar');
+    await page.getByTestId('search').fill('ganymede');
+    await page.getByTestId('search-result').filter({ hasText: 'Ganymede' }).first().click();
+    await page.getByTestId('star-panel').waitFor();
+    assert.equal(await page.getByTestId('star-kind').textContent(), 'Moon of Jupiter');
+    await page.evaluate(() => { const s = (window as any).__mapmaker.store; s.setCamera({ ...s.camera, zoom: 4.2 }); });
+    await page.waitForFunction(() => ['Io', 'Europa', 'Callisto'].every((n) => ((window as any).__mapmaker.spaceNames() as string[]).includes(n)));
+    await h.screenshot('jupiter-moons');
     // Undone; back to Earth.
     await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
     await page.locator('header select').first().selectOption({ label: 'Earth' });
@@ -3012,6 +3021,82 @@ try {
     await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
     await page.locator('header select').first().selectOption({ label: 'Earth' });
     for (let i = 0; i < 6 && (await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.kind === 'space'))); i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.kind === 'space')), false);
+  });
+
+  await h.step('The Milky Way: the whole galaxy, its arms and places; the Orion Nebula found and its panel; star systems held in a box by a country; a frame of it; another galaxy of one\'s own; undone', async () => {
+    await page.getByTestId('mode-world').click();
+    await page.getByRole('button', { name: '+ Map' }).click();
+    await page.getByTestId('new-map-milkyway').check();
+    assert.match((await page.getByTestId('new-map-galaxy-note').textContent()) ?? '', /33 places/);
+    await page.getByTestId('new-map-galaxy-systems').fill('400');
+    await page.getByRole('button', { name: 'Create map' }).click();
+    await page.waitForFunction(() => /The Milky Way · 400 star systems and 33 places · rings every 10,000 ly/.test(document.querySelector('[data-testid=space-note]')?.textContent ?? ''));
+    // The galaxy's glow: its middle bright, the dark sky beyond its edge.
+    await page.waitForFunction(() => !!(window as any).__mapmaker.starToPage(1));
+    const mid = (await page.evaluate(() => (window as any).__mapmaker.starToPage(1))) as [number, number];
+    const glow = await page.evaluate(([x, y]) => {
+      const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement, r = c.getBoundingClientRect(), k = c.width / r.width;
+      const at = (px: number, py: number) => { const d = c.getContext('2d')!.getImageData(Math.round((px - r.left) * k), Math.round((py - r.top) * k), 1, 1).data; return d[0] + d[1] + d[2]; };
+      return { middle: at(x + 6, y + 6), sky: at(r.left + 12, r.top + 12) };
+    }, mid);
+    assert.ok(glow.middle > 300 && glow.sky < 60, `bright in the middle, dark sky (${glow.middle}, ${glow.sky})`);
+    await h.screenshot('milky-way');
+    // A place found by search: its kind and distances.
+    await page.getByTestId('search').fill('orion nebula');
+    await page.getByTestId('search-result').filter({ hasText: 'Orion Nebula' }).first().click();
+    await page.getByTestId('star-panel').waitFor();
+    assert.equal(await page.getByTestId('star-kind').textContent(), 'Nebula');
+    assert.match((await page.getByTestId('star-distance').textContent()) ?? '', /1,344 light-years/);
+    // Star systems given to a country with the Star systems tool and a box.
+    await page.getByTestId('space-home').click();
+    const empire = await page.evaluate(() => { const s = (window as any).__mapmaker.store; return s.execute((w: any) => (window as any).__mapmaker.bench.commands.createEntity(w, { type_id: 'polity', name: 'Galactic Empire', color: '#c0392b' })); });
+    await page.getByTestId('tool-systems').click();
+    await page.getByTestId('systems-owner').selectOption(empire);
+    const sun = (await page.evaluate(() => (window as any).__mapmaker.starToPage(0))) as [number, number];
+    await page.keyboard.down('Control');
+    await page.mouse.move(sun[0] - 70, sun[1] - 70);
+    await page.mouse.down();
+    await page.mouse.move(sun[0] + 70, sun[1] + 70, { steps: 5 });
+    await page.mouse.up();
+    await page.keyboard.up('Control');
+    await page.waitForFunction(() => { const s = (window as any).__mapmaker.store; return s.engine.systemsAt(s.spaceId, s.time).size >= 3; });
+    const held = await page.evaluate(() => { const s = (window as any).__mapmaker.store; return s.engine.systemsAt(s.spaceId, s.time).size as number; });
+    assert.ok(held < 433 / 2, `the systems in the box, not all of them (${held} of 433)`);
+    await page.getByTestId('tool-select').click();
+    await h.screenshot('milky-way-realm');
+    // A frame of it: the glow and the realm in their layers.
+    const frame = await page.evaluate(() => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const settings = B.defaultShot(s.spaceId, s.camera, s.time, s.time, 24, 2);
+      const id = s.execute((w: any) => B.commands.createSequence(w, 'Galaxy', settings));
+      const shot = JSON.parse(s.world.get('sequence', id).settings);
+      const c = document.createElement('canvas'); c.width = 640; c.height = 360;
+      const ctx = c.getContext('2d', { willReadFrequently: true })!;
+      const painted = (pass: string) => {
+        B.renderFrame(ctx, new B.MapRenderer(), s.world, s.engine, shot, shot.frames - 1, B.PASS_DEFS.find((d: any) => d.name === pass), 640, 360, null, null);
+        const px = ctx.getImageData(0, 0, 640, 360).data;
+        let n = 0;
+        for (let i = 0; i < px.length; i += 4) if (px[i + 3] > 30 && px[i] + px[i + 1] + px[i + 2] > 120) n++;
+        return n;
+      };
+      return { all: painted('all'), realms: painted('fills') };
+    });
+    assert.ok(frame.all > 3000 && frame.realms > 50, `the galaxy and its realm in the frame (${frame.all}, ${frame.realms})`);
+    // A galaxy of one's own: two arms.
+    await page.getByRole('button', { name: '+ Map' }).click();
+    await page.getByTestId('new-map-galaxy').check();
+    await page.getByTestId('new-map-galaxy-arms').fill('2');
+    await page.getByTestId('new-map-galaxy-seed').fill('3');
+    await page.getByRole('button', { name: 'Create map' }).click();
+    await page.waitForFunction(() => /A galaxy of your own · 600 star systems/.test(document.querySelector('[data-testid=space-note]')?.textContent ?? ''));
+    await page.getByTestId('galaxy-again').click();
+    await page.waitForFunction(() => { const s = (window as any).__mapmaker.store; return JSON.parse(s.world.get('map_space', s.spaceId).settings).space.galaxy.seed === 4; });
+    await h.screenshot('galaxy-own');
+    // Undone; back to Earth.
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
+    await page.locator('header select').first().selectOption({ label: 'Earth' });
+    for (let i = 0; i < 10 && (await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.kind === 'space'))); i++) { await page.getByTestId('undo').click(); await h.saved(); }
     assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.kind === 'space')), false);
   });
 

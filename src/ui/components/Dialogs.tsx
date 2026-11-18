@@ -208,14 +208,17 @@ export function NewWorldDialog() {
   const [name, setName] = useState('');
   const [km, setKm] = useState('6371');
   const [earth, setEarth] = useState(false);
-  const [kind, setKind] = useState<'round' | 'planet' | 'flat' | 'stars' | 'solar' | 'invented'>('round');
+  const [kind, setKind] = useState<'round' | 'planet' | 'flat' | 'stars' | 'solar' | 'invented' | 'milkyway' | 'galaxy'>('round');
   const [inv, setInv] = useState({ seed: newSeed(), count: 300, radiusLy: 50, shape: 'sphere' as 'sphere' | 'disc' });
+  const [gal, setGal] = useState({ seed: newSeed(), systems: 600, arms: 4, pitch: 14, radiusLy: 50000, bar: true });
   const flat = kind === 'flat';
   const [widthKm, setWidthKm] = useState('20');
   const [planet, setPlanet] = useState<PlanetParams>(() => planetParamsOf({ seed: newSeed(), preset: 'earthlike' })!);
   const close = () => s.set({ dialog: null });
   const create = () => {
-    const id = kind === 'stars' || kind === 'solar' || kind === 'invented'
+    const id = kind === 'milkyway' || kind === 'galaxy'
+      ? s.execute((w) => cmd.createSpaceMap(w, name.trim() || (kind === 'milkyway' ? 'The Milky Way' : 'A galaxy'), 'galaxy', undefined, { ...gal, kind: kind === 'milkyway' ? 'milkyway' : 'invented', seed: kind === 'milkyway' ? 1 : gal.seed }))
+      : kind === 'stars' || kind === 'solar' || kind === 'invented'
       ? s.execute((w) => cmd.createSpaceMap(w, name.trim() || (kind === 'solar' ? 'The solar system' : kind === 'invented' ? 'Invented stars' : 'Nearby stars'), kind === 'stars' ? 'nearby' : kind, kind === 'invented' ? inv : undefined))
       : flat
       ? s.execute((w) => cmd.createFlatMap(w, name.trim() || 'New flat map', Number(widthKm)))
@@ -223,7 +226,7 @@ export function NewWorldDialog() {
         ? s.execute((w) => cmd.createPlanet(w, name.trim() || 'New planet', Number(km), planet))
         : s.execute((w) => cmd.createWorld(w, name.trim() || 'New map', Number(km), earth ? 'natural-earth' : 'none'));
     if (id) {
-      const space = kind === 'stars' || kind === 'solar' || kind === 'invented';
+      const space = kind === 'stars' || kind === 'solar' || kind === 'invented' || kind === 'milkyway' || kind === 'galaxy';
       s.set({ spaceId: id, layerId: s.world!.all('layer').find((l) => l.space_id === id)?.id ?? '', selection: null, ...(space ? { tool: 'select' as const } : {}) });
       // A map of space opens looking down at its plane at an angle, all of it in view.
       if (space) s.setCamera(spaceCamera());
@@ -240,9 +243,25 @@ export function NewWorldDialog() {
         <label className="check"><input type="radio" name="map-kind" checked={kind === 'stars'} onChange={() => setKind('stars')} data-testid="new-map-stars" /> The stars around the Sun: every known star within 50 light-years, in three dimensions</label>
         <label className="check"><input type="radio" name="map-kind" checked={kind === 'solar'} onChange={() => setKind('solar')} data-testid="new-map-solar" /> The solar system: the Sun and the planets where they are on the date viewed</label>
         <label className="check"><input type="radio" name="map-kind" checked={kind === 'invented'} onChange={() => setKind('invented')} data-testid="new-map-invented" /> Stars of your own: an invented star map, made from a seed</label>
+        <label className="check"><input type="radio" name="map-kind" checked={kind === 'milkyway'} onChange={() => setKind('milkyway')} data-testid="new-map-milkyway" /> The Milky Way: the whole galaxy, its arms and best-known places, with star systems to hold</label>
+        <label className="check"><input type="radio" name="map-kind" checked={kind === 'galaxy'} onChange={() => setKind('galaxy')} data-testid="new-map-galaxy" /> A galaxy of your own: spiral arms and star systems, made from a seed</label>
       </div>
-      <label>Name<input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={flat ? 'e.g. Old Town' : kind === 'stars' ? 'e.g. Nearby stars' : kind === 'solar' ? 'e.g. The solar system' : kind === 'invented' ? 'e.g. The Veyran Reach' : 'e.g. Aster Prime'} data-testid="new-map-name" /></label>
-      {kind === 'invented' ? <>
+      <label>Name<input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={flat ? 'e.g. Old Town' : kind === 'stars' ? 'e.g. Nearby stars' : kind === 'solar' ? 'e.g. The solar system' : kind === 'invented' ? 'e.g. The Veyran Reach' : kind === 'milkyway' ? 'e.g. The Milky Way' : kind === 'galaxy' ? 'e.g. The Far Spiral' : 'e.g. Aster Prime'} data-testid="new-map-name" /></label>
+      {kind === 'milkyway' || kind === 'galaxy' ? <>
+        <div className="two">
+          <label>Star systems<input type="number" min={0} max={5000} value={gal.systems} onChange={(e) => setGal({ ...gal, systems: Math.max(0, Math.min(5000, Number(e.target.value) || 0)) })} data-testid="new-map-galaxy-systems" /></label>
+          {kind === 'galaxy' && <>
+            <label>Arms<input type="number" min={1} max={8} value={gal.arms} onChange={(e) => setGal({ ...gal, arms: Math.max(1, Math.min(8, Number(e.target.value) || 1)) })} data-testid="new-map-galaxy-arms" /></label>
+            <label>Winding (degrees)<input type="number" min={4} max={40} value={gal.pitch} onChange={(e) => setGal({ ...gal, pitch: Math.max(4, Math.min(40, Number(e.target.value) || 4)) })} title="How far the arms open out: small, tightly wound; large, open" /></label>
+            <label>Radius (light-years)<input type="number" min={1000} max={500000} step={1000} value={gal.radiusLy} onChange={(e) => setGal({ ...gal, radiusLy: Math.max(1000, Math.min(500000, Number(e.target.value) || 1000)) })} /></label>
+            <label>Seed<input type="number" min={1} value={gal.seed} onChange={(e) => setGal({ ...gal, seed: Math.max(1, Math.round(Number(e.target.value) || 1)) })} data-testid="new-map-galaxy-seed" /></label>
+            <label className="check"><input type="checkbox" checked={gal.bar} onChange={(e) => setGal({ ...gal, bar: e.target.checked })} /> A bar across the middle</label>
+          </>}
+        </div>
+        <p className="muted" data-testid="new-map-galaxy-note">{kind === 'milkyway'
+          ? 'Its arms as mapped by radio astronomers, the Sun where it is, and 33 places (nebulae, clusters, remnants, notable stars, the black hole at the middle, the Magellanic Clouds), with star systems of your own along the arms to give to countries and factions and join with lanes.'
+          : 'A spiral galaxy made from the seed, with a home system half way out and star systems along its arms to give to countries and factions and join with lanes.'}</p>
+      </> : kind === 'invented' ? <>
         <div className="two">
           <label>Stars<input type="number" min={2} max={3000} value={inv.count} onChange={(e) => setInv({ ...inv, count: Math.max(2, Math.min(3000, Number(e.target.value) || 2)) })} data-testid="new-map-invented-count" /></label>
           <label>Reaching (light-years)<input type="number" min={5} max={5000} value={inv.radiusLy} onChange={(e) => setInv({ ...inv, radiusLy: Math.max(5, Math.min(5000, Number(e.target.value) || 5)) })} data-testid="new-map-invented-radius" /></label>

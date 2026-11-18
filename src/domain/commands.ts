@@ -176,17 +176,38 @@ export function clearTerrainStamps(world: World, spaceId: string): CommandResult
  * A map of the stars around the Sun (D110): the HYG database's stars within 50 light-years, seen in
  * three dimensions. It keeps an empty parcel map, like every map, so that what asks for one finds it.
  */
-export function createSpaceMap(world: World, name: string, catalogue: 'nearby' | 'solar' | 'invented' = 'nearby', invented?: { seed: number; count: number; radiusLy: number; shape: 'sphere' | 'disc' }): CommandResult<string> {
+export function createSpaceMap(world: World, name: string, catalogue: 'nearby' | 'solar' | 'invented' | 'galaxy' = 'nearby', invented?: { seed: number; count: number; radiusLy: number; shape: 'sphere' | 'disc' }, galaxy?: GalaxyChoice): CommandResult<string> {
   if (catalogue === 'invented' && (!invented || !(invented.count >= 2 && invented.count <= 3000) || !(invented.radiusLy >= 5 && invented.radiusLy <= 5000))) throw new Error('An invented star map has between 2 and 3,000 stars, within 5 to 5,000 light-years.');
-  return run(world, catalogue === 'solar' ? `Create solar system map "${name}"` : `Create star map "${name}"`, (tx) => {
+  if (catalogue === 'galaxy') checkGalaxy(galaxy);
+  return run(world, catalogue === 'solar' ? `Create solar system map "${name}"` : catalogue === 'galaxy' ? `Create galaxy map "${name}"` : `Create star map "${name}"`, (tx) => {
     const id = createWorldIn(tx, name, 6371.0088, 'none');
     const space = tx.world.get('map_space', id)!;
     const sp = catalogue === 'solar' ? { catalogue: 'solar', radiusLy: 50, scale: 'compressed' }
       : catalogue === 'invented' ? { catalogue: 'invented', radiusLy: invented!.radiusLy, invented: { ...invented, seed: Math.round(invented!.seed), count: Math.round(invented!.count) } }
+      : catalogue === 'galaxy' ? { catalogue: 'galaxy', radiusLy: galaxy!.kind === 'milkyway' ? 60000 : Math.round(galaxy!.radiusLy * 1.2), galaxy: { ...galaxy!, seed: Math.round(galaxy!.seed), systems: Math.round(galaxy!.systems), arms: Math.round(galaxy!.arms) } }
       : { catalogue: 'nearby', radiusLy: 50 };
     tx.update('map_space', { ...space, kind: 'space', settings: JSON.stringify({ projection: 'equirectangular', basemap: 'none', space: sp }) });
     return id;
   });
+}
+
+/** A galaxy map's settings (D116): the Milky Way or one's own, how many star systems, its arms, size and bar. */
+export interface GalaxyChoice { kind: 'milkyway' | 'invented'; seed: number; systems: number; arms: number; pitch: number; radiusLy: number; bar: boolean }
+function checkGalaxy(g: GalaxyChoice | undefined): void {
+  if (!g || !(g.systems >= 0 && g.systems <= 5000)) throw new Error('A galaxy map has up to 5,000 star systems.');
+  if (g.kind === 'invented' && (!(g.arms >= 1 && g.arms <= 8) || !(g.pitch >= 4 && g.pitch <= 40) || !(g.radiusLy >= 1000 && g.radiusLy <= 500000))) throw new Error('A galaxy of your own has 1 to 8 arms wound at 4° to 40°, and a radius of 1,000 to 500,000 light-years.');
+}
+
+/**
+ * A galaxy map made again from other settings (D116): other star systems, or for one's own another
+ * shape. Systems keep their numbers, so what is held and the lanes stay with the same numbers.
+ */
+export function setGalaxy(world: World, spaceId: string, galaxy: GalaxyChoice): CommandResult {
+  const space = world.get('map_space', spaceId);
+  const o = space ? (worldSettings(space) as { space?: Record<string, unknown> }) : null;
+  if (!space || space.kind !== 'space' || o?.space?.catalogue !== 'galaxy') throw new Error('Only a galaxy map can be made again.');
+  checkGalaxy(galaxy);
+  return run(world, 'Make the galaxy again', (tx) => tx.update('map_space', { ...space, settings: JSON.stringify({ ...o, space: { ...o.space, radiusLy: galaxy.kind === 'milkyway' ? 60000 : Math.round(galaxy.radiusLy * 1.2), galaxy: { ...galaxy, seed: Math.round(galaxy.seed), systems: Math.round(galaxy.systems), arms: Math.round(galaxy.arms) } } }) }));
 }
 
 /**

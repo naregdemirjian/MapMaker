@@ -19,6 +19,12 @@ export interface Star {
   system: number;
   /** Drawn in this colour and at this size (design pixels) instead of by its type (the planets, D113). */
   color?: string; size?: number;
+  /** What it is, where it is not a star of a kind its spectrum says (a galaxy map's nebulae and clusters, D116). */
+  kind?: string;
+  /** Named on the map only close in, or when held or chosen (a galaxy's many star systems, D116). */
+  minor?: boolean;
+  /** The body it goes round (a moon's planet, D117): shown only once the view sets it apart from that body. */
+  around?: number;
 }
 
 export interface StarCatalogue { radiusLy: number; stars: Star[]; byId: Map<number, Star> }
