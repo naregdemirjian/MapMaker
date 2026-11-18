@@ -88,6 +88,32 @@ try {
     assert.equal(await h.ownerOnLayer(P.a, '1750', 'Political'), A, 'ownership is untouched by occupation');
     await h.setDate('1750');
     await h.screenshot('occupation-layer-1750');
+    // Hatched (D88): the occupier's stripes over the owner's colour, which shows between them (a strip below the name).
+    const [colA, colB] = await page.evaluate(([a, b]) => { const w = (window as any).__mapmaker.store.world; const c = (n: string) => w.all('entity').find((e: any) => e.name === n).color; return [c(a), c(b)]; }, [A, B] as const);
+    const across = (want: 'mixed' | 'occupier') => page.waitForFunction(([x, y, ca, cb, w]) => {
+      const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement;
+      const r = c.getBoundingClientRect();
+      const d = c.getContext('2d')!.getImageData(Math.round((x - r.left) * (c.width / r.width)) - 30, Math.round((y - r.top) * (c.height / r.height)), 60, 1).data;
+      const rgb = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+      const pa = rgb(ca), pb = rgb(cb);
+      const dist = (p: number[], q: number[]) => Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+      let nearA = 0, nearB = 0;
+      for (let i = 0; i < 60; i++) { const px = [d[i * 4], d[i * 4 + 1], d[i * 4 + 2]]; if (dist(px, pa) < dist(px, pb)) nearA++; else nearB++; }
+      return w === 'mixed' ? nearA >= 10 && nearB >= 10 : nearA <= 3;
+    }, [ap[0], ap[1] + 24, colA, colB, want] as const, { timeout: 8000 });
+    // (The occupation lies at sea: the layer is let cover the sea for this, and set back after.)
+    await page.getByTestId('clip-to-land').uncheck();
+    await h.saved();
+    await across('occupier');
+    await page.getByTestId('layer-fill').selectOption('hatch');
+    await h.saved();
+    await across('mixed');
+    await h.screenshot('occupation-hatched');
+    await page.getByTestId('layer-fill').selectOption('solid');
+    await h.saved();
+    await across('occupier');
+    await page.getByTestId('clip-to-land').check();
+    await h.saved();
     // Hide the political layer: only military control is drawn.
     await page.locator('.left .row', { hasText: 'Political' }).locator('input[type=checkbox]').uncheck();
     await h.saved();

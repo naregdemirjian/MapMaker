@@ -29,6 +29,9 @@ import { iconById, iconOfStyle, drawIcon, type CharacterIcon } from './icons.ts'
 
 type LabelEntity = { name: string; style?: string; color?: string; type_id?: string };
 
+/** How a territory layer is filled (D88): solid, or see-through stripes, crossed stripes or dots in each owner's colour. */
+export type TerritoryFill = 'solid' | 'hatch' | 'cross' | 'dots';
+
 export type PassName = 'background' | 'graticule' | 'land' | 'fills' | 'borders' | 'features' | 'cities' | 'labels' | 'characters';
 /** Drawing order. The grid lies under the land, so stacked export passes match the full picture. */
 export const ALL_PASSES: PassName[] = ['background', 'graticule', 'land', 'fills', 'borders', 'features', 'cities', 'labels', 'characters'];
@@ -448,9 +451,48 @@ export class MapRenderer {
     const [k, e, f] = this.place;
     c.save();
     c.transform(k, 0, 0, k, e, f);
+    this.fitHatch(c.fillStyle, k);
     if (s.path instanceof BlockPath) s.path.paint(c, 1, (p) => c.fill(p, rule));
     else c.fill(s.path, rule);
     c.restore();
+  }
+
+  /**
+   * See-through fills for a territory layer (D88): stripes, crossed stripes or dots in the owner's
+   * colour, so a layer of occupation or control shows the map under it. Made once per colour and size.
+   */
+  private hatchPatterns = new Map<string, CanvasPattern | null>();
+  private hatches = new WeakSet<CanvasPattern>();
+  private hatch(c: CanvasRenderingContext2D, color: string, kind: TerritoryFill, unit: number): CanvasPattern | null {
+    if (kind === 'solid' || typeof OffscreenCanvas === 'undefined') return null;
+    const size = Math.max(4, Math.round(11 * unit));
+    const key = `${kind}|${color}|${size}`;
+    let p = this.hatchPatterns.get(key);
+    if (p === undefined) {
+      const tile = new OffscreenCanvas(size, size);
+      const t = tile.getContext('2d')!;
+      t.fillStyle = color;
+      t.strokeStyle = color;
+      t.lineWidth = Math.max(1, size * 0.26);
+      t.lineCap = 'square';
+      if (kind === 'dots') { t.beginPath(); t.arc(size / 2, size / 2, size * 0.2, 0, Math.PI * 2); t.fill(); }
+      else {
+        // Stripes at 45°, drawn across the tile and its corners so that tiles join without seams.
+        const line = (x0: number, y0: number, x1: number, y1: number) => { t.beginPath(); t.moveTo(x0, y0); t.lineTo(x1, y1); t.stroke(); };
+        for (const d of [-size, 0, size]) line(d, size, d + size, 0);
+        if (kind === 'cross') for (const d of [-size, 0, size]) line(d, 0, d + size, size);
+      }
+      p = c.createPattern(tile as unknown as CanvasImageSource, 'repeat');
+      if (p) this.hatches.add(p);
+      if (this.hatchPatterns.size > 300) this.hatchPatterns.clear();
+      this.hatchPatterns.set(key, p);
+    }
+    return p;
+  }
+
+  /** A hatch keeps its spacing on screen when drawn on a sheet scaled by k (and moves with the map). */
+  private fitHatch(style: string | CanvasGradient | CanvasPattern, k: number): void {
+    if (style instanceof CanvasPattern && this.hatches.has(style)) style.setTransform(new DOMMatrix([1 / k, 0, 0, 1 / k, 0, 0]));
   }
 
   private clip(c: CanvasRenderingContext2D, s: Shape, rule: CanvasFillRule = 'evenodd'): void {
@@ -466,6 +508,7 @@ export class MapRenderer {
     const [k, e, f] = this.place;
     c.save();
     c.transform(k, 0, 0, k, e, f);
+    this.fitHatch(c.strokeStyle, k);
     c.lineWidth = width / k;
     if (path instanceof BlockPath) path.paint(c, width / k / 2 + 1, (p) => c.stroke(p));
     else c.stroke(path);
@@ -1521,7 +1564,7 @@ export class MapRenderer {
     const layout = opts.layout ?? { labels: opts.passes.has('labels'), cities: opts.passes.has('cities') };
     const placesText = opts.passes.has('labels') || opts.passes.has('cities');
     const drawsLayers = opts.passes.has('fills') || opts.passes.has('borders') || (placesText && layout.labels);
-    type LayerStyle = { fillOpacity?: number; borderWidth?: number; clipToLand?: boolean };
+    type LayerStyle = { fillOpacity?: number; borderWidth?: number; clipToLand?: boolean; fill?: TerritoryFill };
     const prepared: Array<{ ls: LayerStyle; states: Map<number, FaceState>; snap: LayerSnap; tg: { groups: Map<string, TransitionGroup>; of: Map<number, TransitionGroup> }; clip: boolean }> = [];
     let landKey = '', layerSig = '', animated = false;
     for (const layerId of drawsLayers ? opts.layerIds : []) {
@@ -1645,9 +1688,11 @@ export class MapRenderer {
             }
             return b;
           };
+          // (A hatched layer, D88: its owners' colours as stripes or dots.)
+          const look = (pc: CanvasRenderingContext2D, col: string) => (ls.fill && ls.fill !== 'solid' ? this.hatch(pc, col, ls.fill, view.unit) ?? col : col);
           const plain = (pc: CanvasRenderingContext2D, v: string | null, shape: Shape) => {
             const col = colorOf(v);
-            if (col) { pc.fillStyle = col; this.fill(pc, shape); }
+            if (col) { pc.fillStyle = look(pc, col); this.fill(pc, shape); }
             else { pc.save(); pc.globalCompositeOperation = 'destination-out'; pc.fillStyle = '#000'; this.fill(pc, shape); pc.restore(); }
           };
           const paint = (pc: CanvasRenderingContext2D, v: string | null, shape: Shape) => {
@@ -1668,7 +1713,7 @@ export class MapRenderer {
             // (Each owner's borders against nobody: its coasts, kept as paths for its border lines.)
             for (const [owner, path] of this.borderPaths(sp, sheet, arr, snap, snap.states).openBy) {
               const media = fillOf(owner);
-              let style: string | CanvasPattern = colorOf(owner) ?? '#888';
+              let style: string | CanvasPattern = look(rc, colorOf(owner) ?? '#888');
               if (media) {
                 const set = snap.byOwner.get(owner);
                 const main = set ? this.fillClusters(arr, set, media)[0] : null;
@@ -1716,7 +1761,7 @@ export class MapRenderer {
               continue;
             }
             const col = colorOf(owner);
-            if (col) { lc.fillStyle = col; this.fill(lc, shape); }
+            if (col) { lc.fillStyle = look(lc, col); this.fill(lc, shape); }
           }
           for (const g of tg.groups.values()) this.drawTransition(lc, g, paint);
           if (clip) this.maskLand(lc, view, sheet, opts.basemap!, frameKey, true);

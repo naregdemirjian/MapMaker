@@ -60,6 +60,18 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D88. Hatching for occupied territory (Stage 7)
+
+Occupation and control are recorded on territory layers of their own ("Military control"), which leave ownership
+untouched. Drawn solid, such a layer hides the political map under it. A territory layer's **Fill** (under the layer
+in the list) can now be solid, **stripes**, **crossed stripes** or **dots** in each owner's colour, see-through
+between them: occupied land shows the occupier's stripes over the owner's colour. Stripes are about 11 design
+pixels apart at 45°, the same on screen at any zoom and in any export size, and they move with the map (placed on
+the kept picture's sheet, so panning carries them along); the layer's opacity still applies, as do coastline
+clipping (the coastal band, D83, takes the stripes too), changes under way (an advancing front reveals stripes) and
+pictures (an owner filled with a picture keeps it). Stored in the layer's style (`fill`); the kept territory picture
+is keyed by the layer's style, so switching redraws it once.
+
 ### D87. Locking countries: their land and borders stay as they are (fifth feedback round)
 
 The request was to lock or disable countries that do not change while working on a large project, so that the

@@ -14,6 +14,7 @@ import { resolvePointStyle, type LabelStyle, type CountryLabel, type PointStyle 
 import { DEFAULT_FEATURE_STYLE, isFeatureKind, type FeatureKind, type FeatureStyle } from '../render-engine/feature-style.ts';
 import { relationKind, isRelationKind, type RelationKind } from './relations.ts';
 import { cleanIcon, type CharacterIcon } from '../render-engine/icons.ts';
+import type { TerritoryFill } from '../render-engine/map-renderer.ts';
 export type { CharacterIcon } from '../render-engine/icons.ts';
 export { FEATURE_KINDS, DEFAULT_FEATURE_STYLE, isFeatureKind, featureStyle, type FeatureKind, type FeatureStyle } from '../render-engine/feature-style.ts';
 import { ringFromMapPoints } from '../render-engine/stroke.ts';
@@ -155,6 +156,19 @@ export function setLayerClipToLand(world: World, id: string, clip: boolean): Com
   if (!layer) throw new Error('That layer no longer exists.');
   const style = { ...parseJSON<Record<string, unknown>>(layer.style, {}), clipToLand: clip };
   return run(world, clip ? `End "${layer.name}" at the coast` : `Let "${layer.name}" cover the sea`, (tx) => tx.patch('layer', id, { style: JSON.stringify(style) }));
+}
+
+/**
+ * How a territory layer is filled (D88): solid, or see-through stripes, crossed stripes or dots in each
+ * owner's colour (occupation and control over the political map).
+ */
+export function setLayerFill(world: World, id: string, fill: TerritoryFill): CommandResult {
+  const layer = world.get('layer', id);
+  if (!layer) throw new Error('That layer no longer exists.');
+  if (!['solid', 'hatch', 'cross', 'dots'].includes(fill)) throw new Error('Unknown fill.');
+  const style = parseJSON<Record<string, unknown>>(layer.style, {});
+  if (fill === 'solid') delete style.fill; else style.fill = fill;
+  return run(world, `Fill "${layer.name}" ${fill === 'solid' ? 'solid' : fill === 'dots' ? 'with dots' : 'with stripes'}`, (tx) => tx.patch('layer', id, { style: JSON.stringify(style) }));
 }
 
 // ---------------------------------------------------------------- looks: label styles, entity styles

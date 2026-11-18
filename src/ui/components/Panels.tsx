@@ -508,6 +508,16 @@ export function Outliner() {
             </div>
           );
         })}
+        {layers.filter((l) => l.id === s.layerId).map((l) => (
+          <label key={`fill-${l.id}`} className="inline layer-option" title="Stripes or dots let the layers under this one show through: for occupation, control or influence over the political map">Fill
+            <select value={parseJSON<{ fill?: string }>(l.style, {}).fill ?? 'solid'} onChange={(e) => s.execute((wd) => cmd.setLayerFill(wd, l.id, e.target.value as 'solid' | 'hatch' | 'cross' | 'dots'))} data-testid="layer-fill">
+              <option value="solid">Solid</option>
+              <option value="hatch">Stripes</option>
+              <option value="cross">Crossed stripes</option>
+              <option value="dots">Dots</option>
+            </select>
+          </label>
+        ))}
         {layers.filter((l) => l.id === s.layerId && currentSpace && basemapSourceOf(currentSpace) === 'natural-earth').map((l) => (
           <label key={`clip-${l.id}`} className="check layer-option" title="Territory painted over the sea or lakes is not shown there. Untick for sea claims or maritime zones.">
             <input type="checkbox" data-testid="clip-to-land" checked={parseJSON<{ clipToLand?: boolean }>(l.style, {}).clipToLand !== false}
