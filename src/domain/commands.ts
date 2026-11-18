@@ -9,6 +9,7 @@ import {
   BASE_EVENT_ID, MAIN_BRANCH, SCHEMA_VERSION, type RowDiff, type EffectRow, type EventRow, type EntityRow, type LayerKind, type FeatureRow, type RelationRow,
 } from '../world-model/schema.ts';
 import { type Vec3, vecToLonLat, normalize } from '../geo-kernel/vec.ts';
+import { TopologyError, type PathStep } from '../geo-kernel/arrangement.ts';
 import { worldSettings, terrainSourceOf, type BasemapSource, type ShowSet, type ShowSettings } from '../world-model/world-settings.ts';
 import { terrainLookOf, DEFAULT_TERRAIN_LOOK, type TerrainLook } from '../terrain/look.ts';
 import { cleanSeaLevel, type SeaLevelPoint } from '../terrain/sea-level.ts';
@@ -912,11 +913,15 @@ export function addCountries(world: World, engine: Engine, o: { spaceId: string;
  * `replace`, land of the layer that the map does not show becomes nobody's at that date, so that a series of
  * maps, each of its year, plays as the history between them. One undo step.
  */
-export function importTerritories(world: World, engine: Engine, o: { spaceId: string; layerId: string; t: Instant; countries: CountryToAdd[]; replace: boolean; label?: string; snap?: number }): CommandResult<{ entities: string[]; created: number; cleared: number }> {
+export function importTerritories(world: World, engine: Engine, o: { spaceId: string; layerId: string; t: Instant; countries: CountryToAdd[]; replace: boolean; label?: string; snap?: number; matchKm?: number }): CommandResult<{ entities: string[]; created: number; cleared: number; skipped: string[] }> {
   const start = o.t.day === -Infinity;
   const mode: EditMode = start ? { kind: 'correct', t: NEG_INF } : { kind: 'change', t: o.t };
   checkTarget(world, { spaceId: o.spaceId, layerId: o.layerId, mode });
   if (!o.countries.length) throw new Error('The map holds no countries to import.');
+  // Borders this close to ones already on the map are the same borders, drawn again (two datasets digitise a
+  // border a few kilometres apart): the new ones follow them, so no slivers of parcels are left between.
+  const radiusKm = (world.get('map_space', o.spaceId)?.radius_m ?? 6371008.8) / 1000;
+  const tol = Math.max(0, o.matchKm ?? 3) / radiusKm;
   return run(world, o.label ?? `Import ${o.countries.length} ${o.countries.length === 1 ? 'country' : 'countries'}`, (tx) => {
     // Who holds what at that date, before the new outlines cut the parcels.
     const before = o.replace ? engine.partitionState(o.spaceId, o.layerId, o.t) : null;
@@ -934,20 +939,60 @@ export function importTerritories(world: World, engine: Engine, o: { spaceId: st
       }
       parts.push(polys);
     }
-    const paths = rings.length ? tx.kernel(o.spaceId, (arr) => arr.insertPaths(rings, { closed: true, snap: o.snap ?? 1e-8 })) : [];
     const arr = world.arrangement(o.spaceId);
-    const lefts = paths.length ? arr.facesLeftOfMany(paths) : [];
-    const insideOf = (i: number) => (arr.isSimpleCycle(paths[i]) && arr.separatesFaces(paths[i]) ? lefts[i] : arr.facesWoundBy(paths[i]));
+    // Each outline along the borders already there (kept as drawn where that leaves too few points for an area).
+    const use = rings.map((r) => { if (!tol) return r; const f = arr.followBorders(r, tol, true); return f.length >= 3 ? f : r; });
+    const snap = o.snap ?? 1e-8;
+    let paths: Array<PathStep[] | null> = rings.map(() => null);
+    const tryInsert = (idx: number[]): boolean => {
+      try {
+        const ps = tx.kernel(o.spaceId, (a) => a.insertPaths(idx.map((i) => use[i]), { closed: true, snap }));
+        idx.forEach((i, k) => { paths[i] = ps[k]; });
+        return true;
+      } catch (e) {
+        if (!(e instanceof TopologyError)) throw e;
+        return false;
+      }
+    };
+    const all = rings.map((_, i) => i), failed = new Set<number>();
+    if (all.length && !tryInsert(all)) {
+      // An outline that cannot be joined to the borders around it: found by halves (tried as drawn, too) and left
+      // out, the rest go in; then every outline's path through the segments as they are at the end.
+      const halves = (idx: number[]): void => {
+        if (!idx.length || tryInsert(idx)) return;
+        if (idx.length === 1) {
+          const i = idx[0];
+          if (use[i] !== rings[i]) { use[i] = rings[i]; if (tryInsert(idx)) return; }
+          failed.add(i);
+          return;
+        }
+        halves(idx.slice(0, idx.length >> 1));
+        halves(idx.slice(idx.length >> 1));
+      };
+      halves(all);
+      const good = all.filter((i) => !failed.has(i));
+      paths = rings.map(() => null);
+      if (good.length) {
+        const ps = tx.kernel(o.spaceId, (a) => a.insertPaths(good.map((i) => use[i]), { closed: true, snap }));
+        good.forEach((i, k) => { paths[i] = ps[k]; });
+      }
+    }
+    const placed = all.filter((i) => paths[i]);
+    const leftOf = new Map<number, Set<number>>();
+    if (placed.length) arr.facesLeftOfMany(placed.map((i) => paths[i]!)).forEach((f, k) => leftOf.set(placed[k], f));
+    const insideOf = (i: number): Set<number> => { const p = paths[i]; if (!p) return new Set(); return arr.isSimpleCycle(p) && arr.separatesFaces(p) ? leftOf.get(i)! : arr.facesWoundBy(p); };
     const items: Array<{ leaves: Iterable<number>; value: string | null }> = [];
-    const entities: string[] = [], covered = new Set<number>();
+    const entities: string[] = [], covered = new Set<number>(), skipped: string[] = [];
     let created = 0;
     o.countries.forEach((c, k) => {
       const faces = new Set<number>();
       for (const p of parts[k]) {
+        if (failed.has(p.outer)) continue;
         const holes = new Set<number>();
         for (const h of p.holes) for (const f of leafDescendants(arr, insideOf(h))) holes.add(f);
         for (const f of leafDescendants(arr, insideOf(p.outer))) if (!holes.has(f) && !covered.has(f)) faces.add(f);
       }
+      if (parts[k].some((p) => failed.has(p.outer) || p.holes.some((h) => failed.has(h)))) skipped.push(c.name);
       if (!faces.size) return;
       let id = existing.get(c.name.toLowerCase());
       if (!id) {
@@ -968,7 +1013,7 @@ export function importTerritories(world: World, engine: Engine, o: { spaceId: st
       if (gone.size) { items.push({ leaves: gone, value: null }); cleared = gone.size; }
     }
     if (items.length) writeAssignments(tx, engine, o.spaceId, o.layerId, mode, items);
-    return { entities, created, cleared };
+    return { entities, created, cleared, skipped };
   });
 }
 

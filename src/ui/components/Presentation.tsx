@@ -26,6 +26,24 @@ export function ShotsPanel() {
   const s = useStore();
   const w = s.world!;
   const shots = w.all('sequence').sort((a, b) => a.created_seq - b.created_seq);
+  // A timelapse of the whole history (improvement pass): from the first change to the last, at an even pace
+  // (a second for every eight years, 10 s to 2 min), the date shown to the year, every change animated.
+  const wholeHistory = () => {
+    const times = (s.engine?.changeInstants() ?? []).filter((t) => Number.isFinite(t.day));
+    if (!times.length) { s.toast('There is no history to show yet: draw or import some changes first.', 'error'); return; }
+    const first = times[0], last = times[times.length - 1];
+    const span = Math.max(1, last.day - first.day), pad = Math.max(30, Math.round(span * 0.02));
+    const start = add(first, -pad), end = add(last, pad);
+    const years = (end.day - start.day) / 365.2425;
+    const seconds = Math.max(10, Math.min(120, years / 8));
+    const settings = defaultShot(s.spaceId, s.camera, start, end, 24, seconds);
+    settings.time = settings.time.map((k) => ({ ...k, ease: 'linear' as Ease }));
+    const precision: Precision = years > 30 ? 'year' : years > 2 ? 'month' : 'day';
+    settings.overlays = settings.overlays.map((o) => (o.kind === 'date' ? { ...o, datePrecision: precision } : o));
+    settings.transitions = { ...shotTransitions(settings), mode: 'all' };
+    const id = s.execute((wd) => cmd.createSequence(wd, 'Whole history', settings));
+    if (id) s.set({ shotId: id, shotFrame: 0, presentCamera: null });
+  };
   const create = () => {
     let start: Instant = s.time, end: Instant = add(s.time, 365);
     if (s.selection?.kind === 'event') {
@@ -42,7 +60,7 @@ export function ShotsPanel() {
   return (
     <aside className="left">
       <section className="section">
-        <div className="section-head"><span>Shots</span><button className="small" onClick={create} data-testid="new-shot">+ Shot</button></div>
+        <div className="section-head"><span>Shots</span><span><button className="small" onClick={wholeHistory} title="A shot of everything that happens: from the first change to the last, at an even pace, the year counting up, every change animated" data-testid="new-shot-history">+ Whole history</button> <button className="small" onClick={create} data-testid="new-shot">+ Shot</button></span></div>
         <div className="section-body">
           {shots.map((sh) => (
             <div key={sh.id} className={`row ${s.shotId === sh.id ? 'sel' : ''}`} onClick={() => s.set({ shotId: sh.id, shotFrame: 0, presentCamera: null, spaceId: parseJSON<ShotSettings | null>(sh.settings, null)?.spaceId ?? s.spaceId })}>{sh.name}</div>

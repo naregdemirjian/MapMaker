@@ -536,6 +536,70 @@ export class Arrangement {
     return out;
   }
 
+  // ---------------------------------------------------------------- following borders already there
+
+  /**
+   * A line drawn again along borders already on the map (D120's imports: two datasets digitise the same border a
+   * few kilometres apart). Each point within `tol` radians of a border vertex becomes that vertex, and between
+   * two such points the line follows the border's own vertices, when a border runs between them no longer than
+   * twice their distance (plus `tol` at each end). Elsewhere the line is kept as it is. A line that follows a
+   * border so adds no sliver of parcels beside it, and crosses nothing.
+   */
+  followBorders(points: Vec3[], tol: number, closed: boolean): Vec3[] {
+    if (!(tol > 0) || points.length < 2) return points;
+    const ids = points.map((p) => this.nearestVertex(p, tol));
+    const out: Vec3[] = [];
+    let prev: number | null = null;
+    const n = points.length;
+    for (let i = 0; i < n; i++) {
+      const id = ids[i];
+      if (id === null) { out.push(points[i]); prev = null; continue; }
+      if (prev !== null && id !== prev) for (const k of this.borderBetween(prev, id, tol)) out.push(this.v(k));
+      if (id !== prev) out.push(this.v(id));
+      prev = id;
+    }
+    // (A ring closes from its last point to its first: along the border too.)
+    if (closed && prev !== null && ids[0] !== null && ids[0] !== prev) for (const k of this.borderBetween(prev, ids[0], tol)) out.push(this.v(k));
+    return out;
+  }
+
+  /**
+   * The vertices strictly between `a` and `b` along the shortest run of borders joining them, if it is no
+   * longer than twice their distance plus 2 `tol`; none otherwise (or when a segment joins them).
+   */
+  private borderBetween(a: number, b: number, tol: number): number[] {
+    if (this.segmentBetween(a, b) !== undefined) return [];
+    const pa = this.v(a), pb = this.v(b);
+    const limit = 2 * angle(pa, pb) + 2 * tol;
+    // Dijkstra from a, within the limit (few vertices: a short stretch of border).
+    const dist = new Map<number, number>([[a, 0]]), from = new Map<number, number>();
+    const open: number[] = [a];
+    while (open.length) {
+      let bi = 0;
+      for (let i = 1; i < open.length; i++) if (dist.get(open[i])! < dist.get(open[bi])!) bi = i;
+      const u = open[bi];
+      open[bi] = open[open.length - 1];
+      open.pop();
+      if (u === b) break;
+      const du = dist.get(u)!, pu = this.v(u);
+      for (const sid of this.incident.get(u) ?? []) {
+        const sg = this.segments.get(sid);
+        if (!sg) continue;
+        const w = sg.a === u ? sg.b : sg.a;
+        const dw = du + angle(pu, this.v(w));
+        if (dw > limit || dw >= (dist.get(w) ?? Infinity)) continue;
+        if (!dist.has(w)) open.push(w);
+        dist.set(w, dw);
+        from.set(w, u);
+      }
+      if (open.length > 4000) return [];
+    }
+    if (!from.has(b)) return [];
+    const path: number[] = [];
+    for (let k = from.get(b)!; k !== a; k = from.get(k)!) path.push(k);
+    return path.reverse();
+  }
+
   // ---------------------------------------------------------------- insertion with noding
 
   /**

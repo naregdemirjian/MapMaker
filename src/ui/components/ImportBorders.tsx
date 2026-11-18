@@ -18,6 +18,9 @@ export function ImportBordersDialog({ onClose }: { onClose: () => void }) {
   const [colorKey, setColorKey] = useState<string>('');
   const [firstAsStart, setFirstAsStart] = useState(true);
   const [replace, setReplace] = useState(true);
+  // Borders within this distance of borders already on the map are taken as the same border (two datasets
+  // draw a border a few kilometres apart; following the one there leaves no slivers between them).
+  const [matchKm, setMatchKm] = useState(3);
   const [progress, setProgress] = useState<string | null>(null);
   const keys = [...new Set(files.flatMap((f) => f.file.keys))].sort();
 
@@ -43,6 +46,7 @@ export function ImportBordersDialog({ onClose }: { onClose: () => void }) {
     if (!nameKey) { s.toast('Choose the property that holds the names.', 'error'); return; }
     const todo = files.map((f, i) => ({ ...f, t: i === 0 && firstAsStart ? NEG_INF : f.t ?? s.time }));
     let made = 0, countries = 0;
+    const skipped: string[] = [];
     for (const [i, f] of todo.entries()) {
       setProgress(`Importing ${f.name} (${i + 1} of ${todo.length})…`);
       // (Let the message show before the work starts.)
@@ -50,14 +54,17 @@ export function ImportBordersDialog({ onClose }: { onClose: () => void }) {
       const list = countriesOf(f.file, nameKey, colorKey || null).countries;
       if (!list.length) continue;
       const r = s.execute((wd, en) => cmd.importTerritories(wd, en, {
-        spaceId: s.spaceId, layerId, t: f.t, countries: list, replace,
+        spaceId: s.spaceId, layerId, t: f.t, countries: list, replace, matchKm,
         label: `Import ${f.name} (${f.t.day === -Infinity ? 'the starting map' : fmt(f.t)})`,
       }));
       if (!r) { setProgress(null); return; }
       made += r.created; countries += list.length;
+      for (const n of r.skipped) if (!skipped.includes(n)) skipped.push(n);
     }
     setProgress(null);
     s.toast(`Imported ${todo.length} ${todo.length === 1 ? 'map' : 'maps'}: ${countries} countries, ${made} of them new.`);
+    // (Shapes that could not be joined to the borders around them, by country.)
+    if (skipped.length) s.toast(`Some shapes could not be joined to the borders around them and were left out, of: ${skipped.slice(0, 12).join(', ')}${skipped.length > 12 ? ` and ${skipped.length - 12} more` : ''}. Try them again with a larger or smaller matching distance.`, 'error');
     // The timeline shows the whole history imported (widened to the maps' dates, never narrowed).
     const years = todo.filter((f) => f.t.day !== -Infinity).map((f) => f.t.day / 365.2425 + 1970);
     if (years.length) {
@@ -94,6 +101,7 @@ export function ImportBordersDialog({ onClose }: { onClose: () => void }) {
           {nameKey && <p className="muted" data-testid="import-borders-summary">{files.map((f) => { const c = countriesOf(f.file, nameKey); return `${f.name}: ${c.countries.length} countries${c.unnamed ? ` (${c.unnamed} shapes without a name left out)` : ''}`; }).join(' · ')}</p>}
           <label className="check"><input type="checkbox" checked={firstAsStart} onChange={(e) => setFirstAsStart(e.target.checked)} data-testid="import-borders-first-start" /> The first map is the starting map (the countries exist from the beginning)</label>
           <label className="check"><input type="checkbox" checked={replace} onChange={(e) => setReplace(e.target.checked)} data-testid="import-borders-replace" /> Land a map does not show becomes nobody's at its date</label>
+          <label title="Two maps rarely draw a border along exactly the same line. A border this close to one already on the map is taken as the same border and follows it, so no slivers of land are left between the two. 0 keeps every line as the file draws it.">Borders within<input type="number" min={0} max={50} step={0.5} value={matchKm} onChange={(e) => setMatchKm(Math.max(0, Math.min(50, Number(e.target.value) || 0)))} data-testid="import-borders-match" style={{ width: '5em', margin: '0 0.4em' }} />km of one already on the map are the same border</label>
           <p className="muted">On the political layer of this map, one undo step for each file. Files without a date take the date viewed ({fmt(s.time)}).</p>
         </>}
         {progress && <p className="muted" data-testid="import-borders-progress">{progress}</p>}

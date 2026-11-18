@@ -61,6 +61,17 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D122. A shot of the whole history in one click (improvement pass)
+
+- **What.** "+ Whole history" beside "+ Shot" makes a timelapse of everything that happens on the map: from the first
+  change to the last (a little either side: 2% of the span, at least a month), at an even pace (a second of screen
+  time for every eight years, between 10 seconds and 2 minutes), the date shown to the year (to the month for spans
+  under 30 years, to the day under 2), every change animated (the shot's "Animate every change"), framed as the
+  working view is. Imported maps (D120) carry no animations of their own: this makes them play as moving history.
+  Everything can then be changed as in any shot.
+- **Tests.** `e2e/workflows` 'Importing borders' (the shot's dates against the first and last change, linear
+  pacing, every change animated, years, its length).
+
 ### D121. Videos: MP4 (H.264) and WebM (VP9) files from a shot (improvement pass)
 
 - **What.** Two more file formats for a shot's export: "Video, MP4 (H.264)" and "Video, WebM (VP9)". One file of the
@@ -110,11 +121,23 @@ Follows from D2. The test drives the real interface exactly as a person would.
 - **Steps.** Each file is one command (`commands.ts` importTerritories, one undo step): its outlines go into the parcel
   map as "add today's countries" puts them, every country is given its land from the date as one change, and land
   held then but not on the map is cleared in the same change. The timeline widens to show the maps' dates.
+- **The same border drawn again.** Two maps rarely draw a border along the same line: datasets digitised apart put
+  it a few kilometres away. Measured with today's 242 countries and a second map whose borders lie up to 3 km from
+  them (`bench/import.bench.ts`), the second map multiplied the parcels by ten (1,623 to 16,240, 13 s) with slivers
+  between each border and its twin, and a third was refused (its borders could not be joined without crossing). Now
+  a border within a distance of one already on the map (3 km unless changed in the dialog; 0 keeps every line) is
+  taken as that border: each of its points within the distance becomes the border's own vertex, and between two
+  such points it follows the border's vertices (`Arrangement.followBorders`, the shortest run of borders no longer
+  than twice their distance). The same maps now add 11, 19 and 6 parcels, take 1.1, 2.4 and 0.9 s, and none is
+  refused. A shape that still cannot be joined to the borders around it is found by halves (the rest of the file goes
+  in), tried as drawn, and otherwise left out and named, instead of the whole file failing.
 - **Tests.** `geojson-import.test.ts` (polygons, multipolygons and holes read, the closing point dropped; the name
   property guessed; colours; shapes without an area left out; files that are not GeoJSON refused; years from file
   names, BC included; three maps of three dates making the history between them: countries going on by name without
   regard to case, land changing hands, a country dropping out leaving nobody's land, a new one appearing, one undo
-  step each); `e2e/workflows` 'Importing borders' (two files chosen in the dialog, sorted by the years in their names,
+  step each; ten of today's countries drawn again up to 2 km apart with two joined: under 15% more parcels, against
+  over three times as many without following, the capitals' holders right, Liechtenstein kept; a shape too small to
+  be an area left out and named); `e2e/workflows` 'Importing borders' (two files chosen in the dialog, sorted by the years in their names,
   the first the starting map, names from NAME; who holds what before and after the second date; one country going on;
   undone a file at a time).
 

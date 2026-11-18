@@ -184,6 +184,7 @@ For development (Linux or Windows, Node 22.18 or newer):
 | `node --disable-warning=ExperimentalWarning bench/make-fixtures.ts <folder> [massive]` | Makes the benchmark projects: "Bench Earth 242", "Bench Heavy", "Bench Random 1000" (minutes); with `massive`, one with 3,000 border changes as well. The benchmarks and tools below work on throwaway copies of them |
 | `node --disable-warning=ExperimentalWarning bench/render.bench.ts <folder> ["<project>"...] [--only a,b] [--label x] [--out file]` | Frame times in Chrome for each scenario (idle, pans at five zooms, zoom, scrub, stroke, play, exports); build first |
 | `node --disable-warning=ExperimentalWarning bench/edit.bench.ts <folder>` | Kernel and engine times for edits, without a browser |
+| `node --disable-warning=ExperimentalWarning bench/import.bench.ts [maps] [km]` | Importing borders (D120): today's 242 countries, then maps of later years with the same borders drawn again up to `km` apart and countries joined; times, parcels and who holds a few capitals |
 | `node --disable-warning=ExperimentalWarning bench/profile.ts <folder> "<project>" <scenario> out.cpuprofile`, then `node bench/top.mjs out.cpuprofile` | Where the script's time goes in one scenario (idle, select, panWorld, panRegion, panDeep, zoomIn, zoomOut, scrub, scrubSmall, stroke, play, playMoving) |
 | the same with an output name ending in `.trace.json`, then `node bench/trace.mjs out.trace.json 25` | What the browser does around the script (painting canvases, layers, presenting), per thread: what a script profile does not show (D61) |
 | `node --disable-warning=ExperimentalWarning bench/open.ts <folder> "<project>" out.cpuprofile` | How long opening a project takes, and a profile of it |
@@ -287,7 +288,7 @@ The approved roadmap has 14 stages (0–13). Where each stands (brought up to da
 
 ## Tests
 
-All pass as of 18 November 2026 (353 unit and randomised tests in 68 files, 23 + 57 + 6 + 6 interface steps). The
+All pass as of 18 November 2026 (354 unit and randomised tests in 68 files, 23 + 57 + 6 + 6 interface steps). The
 interface tests run with the verify mode on (D57): everything the app works out from what was there before is also
 worked out afresh, and any difference stops the test.
 `sh scripts/check-all.sh` runs everything and prints ALL CHECKS PASSED only when every check passed.
@@ -483,7 +484,8 @@ recompiling the 1,000-territory history took about 800 ms after every edit.
 6. **Event groups are made by hand** (D8). Automatic groups, such as "every event that changes this world", are not
    built; tell me if they would help.
 7. **A control or occupation layer looks like a second fill** over the political layer; hatching and outline styles are needed.
-8. **New layers and alternative versions are named in the browser's own small prompt box**, which is plain but works.
+8. **(Fixed) New layers and alternative versions are named in the app's own dialog** (the desktop app has no browser
+   prompt); deleting still asks with the system's own small confirmation box.
 9. **View memory is per browser** and is lost if the app's port changes.
 10. **(Fixed 17 November 2026) Outlines under firm snapping.** Thought to be a face-assembly fault; it was two others
    (D39): `netPath` kept cancelled back-and-forth steps (the far side of a border could count as inside), and firm
@@ -491,8 +493,9 @@ recompiling the 1,000-territory history took about 800 ms after every edit.
    cleanly is retried with gentler snapping, and only refused if even the finest fails.
 11. **Uploaded pictures and videos, and border drafts, are not in automatic backups** (which copy the project file
    only). Copying the whole project folder keeps them.
-12. **Characters have one look** (a dot in their colour and their name); no pictures or icons yet, and shots show where
-   they are, not the trail they took. Placements made inside an event are removed from the character's panel.
+12. **(Mostly fixed) Characters' looks**: icons (a ship, an airliner and others, turned the way they travel) or
+   pictures, units in their country's colour with arrows of advance, and trails in shots. Placements made inside an
+   event are removed from the character's panel.
 13. **"Changes over time" reads one layer** (the one being drawn on) and compares the start and the end of the period.
 14. **The export size is an estimate** from one frame of each chosen layer, drawn small and worked up (D69; checked
    to be within a factor of 2.5 of a real export; usually much closer).

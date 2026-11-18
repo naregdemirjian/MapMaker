@@ -3232,7 +3232,7 @@ try {
     await page.evaluate((t) => (window as any).__mapmaker.store.setTime(t), was);
   });
 
-  await h.step('Importing borders: two GeoJSON maps of their years; their dates from the names; the first the starting map, the second the changes at its date; countries going on by name; undone', async () => {
+  await h.step('Importing borders: two GeoJSON maps of their years; their dates from the names; the first the starting map, the second the changes at its date; countries going on by name; a shot of the whole history in one click; undone', async () => {
     await page.getByTestId('mode-world').click();
     const box = (w: number, so: number, e: number, n: number) => [[w, so], [e, so], [e, n], [w, n], [w, so]];
     const map = (features: Array<[string, number[][]]>) => JSON.stringify({ type: 'FeatureCollection', features: features.map(([name, ring]) => ({ type: 'Feature', properties: { NAME: name, POP: 1 }, geometry: { type: 'Polygon', coordinates: [ring] } })) });
@@ -3261,6 +3261,26 @@ try {
     assert.deepEqual(await owners(-135, -45, [1600, 1760]), ['Easter Isles', 'Easter Isles']);
     assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('entity').filter((e: any) => e.name === 'Kingdom of Wester').length), 1, 'one country going on');
     await h.screenshot('import-borders');
+    // A shot of the whole history in one click: from the first change to the last (a little either side), at an
+    // even pace, the year counting up, every change animated; then taken away again.
+    await page.getByTestId('mode-present').click();
+    await page.getByTestId('new-shot-history').click();
+    await page.getByTestId('shot-editor').waitFor();
+    const whole = await page.evaluate(() => {
+      const s = (window as any).__mapmaker.store;
+      const row = s.world.get('sequence', s.shotId), st = JSON.parse(row.settings);
+      const times = s.engine.changeInstants().filter((t: any) => Number.isFinite(t.day));
+      return { name: row.name, from: st.time[0].at[0], to: st.time[st.time.length - 1].at[0], ease: [...new Set(st.time.map((k: any) => k.ease))], mode: st.transitions.mode, frames: st.frames, fps: st.fps, precision: st.overlays.find((o: any) => o.kind === 'date').datePrecision, first: times[0].day, last: times[times.length - 1].day };
+    });
+    assert.equal(whole.name, 'Whole history');
+    assert.ok(whole.from < whole.first && whole.first - whole.from <= Math.max(30, (whole.last - whole.first) * 0.02) + 1, 'from just before the first change');
+    assert.ok(whole.to > whole.last && whole.to - whole.last <= Math.max(30, (whole.last - whole.first) * 0.02) + 1, 'to just after the last');
+    assert.deepEqual([whole.ease, whole.mode, whole.precision, whole.fps], [['linear'], 'all', 'year', 24]);
+    const years = (whole.to - whole.from) / 365.2425;
+    assert.equal(whole.frames, Math.max(2, Math.round(24 * Math.max(10, Math.min(120, years / 8)))), `a second for every eight years (${years.toFixed(0)} years in ${whole.frames} frames)`);
+    await page.getByTestId('undo').click();
+    await h.saved();
+    await page.getByTestId('mode-world').click();
     // Undone: one step for each map.
     for (let i = 0; i < 2; i++) { await page.getByTestId('undo').click(); await h.saved(); }
     assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('entity').some((e: any) => e.name === 'Kingdom of Wester')), false);

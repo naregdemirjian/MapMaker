@@ -80,3 +80,50 @@ test('maps of several dates become the history between them: countries go on by 
   assert.deepEqual(at(17, 45), ['Eastmark', 'Eastmark', 'Eastmark']);
   assert.throws(() => cmd.importTerritories(world, engine, { spaceId: space, layerId: layer, t: Y(1800), replace: true, countries: [] }), /no countries/);
 });
+
+test('the same borders drawn again a few kilometres apart follow those already on the map: no slivers; countries joined; a shape that cannot be joined left out and named', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { decodeCountries } = await import('../src/domain/countries.ts');
+  const all = decodeCountries(JSON.parse(readFileSync(join(import.meta.dirname, '..', 'data', 'natural-earth', 'countries-50m.json'), 'utf8')));
+  const names = ['France', 'Spain', 'Andorra', 'Belgium', 'Luxembourg', 'Germany', 'Switzerland', 'Italy', 'Austria', 'Liechtenstein'];
+  const base = names.map((n) => { const c = all.find((x) => x.name === n)!; return { name: n, polygons: c.polygons }; });
+  // Every point moved by up to about 2 km, smoothly (neighbours' shared borders move together, as in another dataset).
+  const moved = (km: number) => base.map((c) => ({ name: c.name, polygons: c.polygons.map((p) => p.map((r) => r.map(([lon, lat]) => [lon + (km / 111) * Math.sin(lat * 0.9 + lon * 0.4) / Math.cos((lat * Math.PI) / 180), lat + (km / 111) * Math.cos(lon * 0.7 - lat * 0.3)] as [number, number]))) }));
+  const run = (matchKm: number) => {
+    const world = new World();
+    const space = cmd.seedProject(world, 'Again').result.spaceId;
+    const layer = world.all('layer')[0].id;
+    const engine = new Engine(world);
+    const arr = world.arrangement(space);
+    cmd.importTerritories(world, engine, { spaceId: space, layerId: layer, t: NEG_INF, replace: true, countries: base, matchKm });
+    const first = arr.leafFaces().length;
+    const second = moved(2);
+    const joined = second.filter((c) => c.name === 'Germany' || c.name === 'Austria');
+    const map2 = [...second.filter((c) => !joined.includes(c)), { name: 'Greater Germany', polygons: joined.flatMap((c) => c.polygons) }];
+    const r = cmd.importTerritories(world, engine, { spaceId: space, layerId: layer, t: Y(1850), replace: true, countries: map2, matchKm });
+    const owner = (lon: number, lat: number, t: ReturnType<typeof Y>) => { const id = engine.valueAtPoint(space, layer, lonLatToVec(lon, lat), t); return id ? world.get('entity', id)!.name : null; };
+    return { first, second: arr.leafFaces().length, r, owner, valid: arr.validate(), world };
+  };
+  const a = run(3);
+  assert.deepEqual(a.valid, []);
+  assert.ok(a.second < a.first * 1.15 + 20, `few new parcels (${a.first} then ${a.second})`);
+  assert.equal(a.r.result.created, 1, 'only Greater Germany is new');
+  assert.deepEqual(a.r.result.skipped, []);
+  assert.deepEqual([a.owner(2.35, 48.86, Y(1800)), a.owner(2.35, 48.86, Y(1900))], ['France', 'France'], 'Paris');
+  assert.deepEqual([a.owner(13.4, 52.52, Y(1800)), a.owner(13.4, 52.52, Y(1900))], ['Germany', 'Greater Germany'], 'Berlin');
+  assert.deepEqual([a.owner(16.37, 48.21, Y(1800)), a.owner(16.37, 48.21, Y(1900))], ['Austria', 'Greater Germany'], 'Vienna');
+  assert.equal(a.owner(9.52, 47.14, Y(1900)), 'Liechtenstein', 'a country of a few kilometres keeps its land');
+  // Without following them, each border drawn again leaves slivers between the two.
+  const b = run(0);
+  assert.ok(b.second > a.second * 3, `slivers without following (${b.second} parcels against ${a.second})`);
+  // A shape too small to be an area at all: left out and named; the rest of the file imported.
+  const world = new World();
+  const space = cmd.seedProject(world, 'Tiny').result.spaceId;
+  const layer = world.all('layer')[0].id;
+  const engine = new Engine(world);
+  const tiny = { name: 'Speck', polygons: [[[[10, 10], [10 + 1e-9, 10], [10, 10 + 1e-9]] as Array<[number, number]>]] };
+  const r = cmd.importTerritories(world, engine, { spaceId: space, layerId: layer, t: NEG_INF, replace: true, countries: [{ name: 'Westmark', polygons: [[box(0, 40, 10, 50).slice(0, 4) as Array<[number, number]>]] }, tiny] });
+  assert.deepEqual(r.result.skipped, ['Speck']);
+  assert.equal(engine.valueAtPoint(space, layer, lonLatToVec(5, 45), Y(1900)) !== null, true, 'the rest imported');
+});

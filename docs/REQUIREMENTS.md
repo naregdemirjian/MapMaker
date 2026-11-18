@@ -178,7 +178,8 @@ status. Last updated: 18 November 2026 (Stage 4; see DEVELOPMENT.md).
 | More detailed coasts | Tested | `basemap` (1:10m tiles keep the land area) | Natural Earth 1:10m (about 200 m) when zoomed in; loads in the background |
 | Maps, not worlds | Done | interface wording | Maps of cities dropped by the user (17 November, D38) |
 | Quickly add today's borders and countries | Tested | `countries`, `e2e/vertical-slice` | 242 countries, by search, continent or all; colours or flags; starting map or event; one undo step |
-| Import borders from files (maps of several dates) | Tested | `geojson-import`, `e2e/workflows` 'Importing borders' | D120. GeoJSON maps, one per date (years read from the file names): countries go on by name, land a map does not show becomes nobody's; one undo step a file |
+| A shot of the whole history in one click | Tested | `e2e/workflows` 'Importing borders' | D122. From the first change to the last at an even pace, the year shown, every change animated |
+| Import borders from files (maps of several dates) | Tested | `geojson-import`, `e2e/workflows` 'Importing borders' | D120. GeoJSON maps, one per date (years read from the file names): countries go on by name, land a map does not show becomes nobody's; borders drawn again within 3 km follow those already there (no slivers; 242 countries a map in 1–2 s); one undo step a file |
 | Label looks: for all countries, and per country | Tested | `label-style`, `e2e/vertical-slice` 'Label looks' | Font, weight, italic, capitals, spacing, colours, outline, size, opacity; per-country text, hiding, overrides |
 | A picture instead of a colour; flags of today's nations; own pictures | Tested | `fills`, `e2e/vertical-slice` 'filled with a flag' | 197 flags (flag-icons, MIT) |
 | A video instead of a colour, looping or playing once | Tested | `fills`, `e2e/workflows` 'filled with a video' (green then blue in the export) | Speed and start time too |
