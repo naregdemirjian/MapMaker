@@ -25,6 +25,7 @@ import { BlockPath, setPaintRegion, type DeviceRect } from './blocks.ts';
 import { Kept as Weighed } from './kept.ts';
 import { parcelGeometry, type ParcelGeometry, type CycleGeom } from './parcel-geometry.ts';
 import { featureStyle, featureColor, isFeatureKind, type FeatureKind, type FeatureStyle } from './feature-style.ts';
+import { campaignArrow, smoothLine, lineLength, arrowBodyLength, marksAlong, cutLineBetween, mixColor } from './routes.ts';
 import { shotProgress, eventScreenSeconds } from '../presentation/sequence.ts';
 import { iconById, iconOfStyle, unitOfStyle, drawIcon, type CharacterIcon, type RouteStyle } from './icons.ts';
 import { TerrainPictures, terrainDrawable, type TerrainFrame, type TerrainImageKind, type TerrainSea, type TerrainOverride } from './terrain-gl.ts';
@@ -2358,7 +2359,25 @@ export class MapRenderer {
     }
     // Drawn so far along: an arrow's head travels with the end of what is drawn.
     const drawn = cut === null ? screen : screen.map((l) => cutLine(l, cut)).filter((l) => l.length >= 4);
-    if (width > 0 && drawn.length) {
+    // A campaign arrow (D106): a broad body narrowing to its tail, its head at the end of what is drawn.
+    if (kind === 'line' && st.look === 'arrow' && width > 0 && drawn.length) {
+      ctx.save();
+      ctx.lineJoin = 'round';
+      for (const l of drawn) {
+        const ring = campaignArrow(l, width);
+        if (!ring) continue;
+        ctx.beginPath();
+        addLine(ctx, ring);
+        ctx.closePath();
+        ctx.fillStyle = color;
+        ctx.fill('nonzero');
+        ctx.strokeStyle = mixColor(color, '#000000', 0.55);
+        ctx.lineWidth = Math.max(1, width * 0.07);
+        ctx.stroke();
+      }
+      if (st.flow && st.flow !== 'none') this.drawFlow(ctx, drawn, st, color, width, u, true);
+      ctx.restore();
+    } else if (width > 0 && drawn.length) {
       ctx.save();
       ctx.strokeStyle = color;
       ctx.lineWidth = width;
@@ -2374,6 +2393,7 @@ export class MapRenderer {
           this.drawArrowhead(ctx, l, width, true);
           if (st.arrow === 'both' && cut === null) this.drawArrowhead(ctx, l, width, false);
         }
+        if (st.flow && st.flow !== 'none') this.drawFlow(ctx, drawn, st, color, width, u, false);
       }
       ctx.restore();
     }
@@ -2384,6 +2404,59 @@ export class MapRenderer {
     ctx.restore();
     out.push({ path: sh.path, lines: screen, x: 0, y: 0, r: 0, width });
     return out;
+  }
+
+  /**
+   * Marks flowing along lines in their direction (D106): dashes, chevrons or dots in a light tint of
+   * the line's colour, carried along at the line's flow speed by the shot's clock (still while
+   * world-building). On a campaign arrow they run down the middle of its body.
+   */
+  private drawFlow(ctx: CanvasRenderingContext2D, lines: Float32Array[], st: FeatureStyle, color: string, width: number, u: number, arrow: boolean): void {
+    const speed = Math.max(0, st.flowSpeed ?? 40) * u, moved = this.mediaSeconds * speed;
+    const light = mixColor(color, '#ffffff', 0.6);
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    for (const raw of lines) {
+      const l = arrow ? smoothLine(raw, 3) : raw;
+      const len = lineLength(l);
+      // (On an arrow, from a little past its tail to a little before its head.)
+      const from = arrow ? Math.min(len, width * 0.6) : 0, to = arrow ? arrowBodyLength(len, width) - width * 0.35 : len;
+      if (to <= from) continue;
+      if (st.flow === 'dashes') {
+        const dash = arrow ? width * 0.9 : Math.max(5 * u, 3 * width), gap = dash;
+        ctx.strokeStyle = arrow ? 'rgba(255,255,255,0.55)' : light;
+        ctx.lineWidth = arrow ? Math.max(1, width * 0.18) : Math.max(1, width * 0.55);
+        ctx.setLineDash([dash, gap]);
+        // (A falling offset carries the dashes toward the line's end.)
+        ctx.lineDashOffset = -(moved % (dash + gap)) - from;
+        ctx.beginPath();
+        addLine(ctx, arrow ? cutLineBetween(l, from, to) : l);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        continue;
+      }
+      const size = arrow ? width * 0.32 : Math.max(3 * u, 1.6 * width);
+      const spacing = arrow ? width * 0.95 : st.flow === 'dots' ? Math.max(9 * u, 3.5 * width) : Math.max(14 * u, 4.5 * width);
+      ctx.fillStyle = ctx.strokeStyle = arrow ? 'rgba(255,255,255,0.6)' : light;
+      for (const [x, y, a] of marksAlong(l, spacing, moved, from, to)) {
+        if (st.flow === 'dots') {
+          ctx.beginPath();
+          ctx.arc(x, y, arrow ? width * 0.11 : Math.max(1.2 * u, width * 0.55), 0, Math.PI * 2);
+          ctx.fill();
+          continue;
+        }
+        // A chevron pointing the way the line goes.
+        const c = Math.cos(a), s = Math.sin(a);
+        ctx.lineWidth = arrow ? Math.max(1, width * 0.12) : Math.max(1, width * 0.6);
+        ctx.beginPath();
+        ctx.moveTo(x - c * size - -s * size * 0.9, y - s * size - c * size * 0.9);
+        ctx.lineTo(x, y);
+        ctx.lineTo(x - c * size + -s * size * 0.9, y - s * size + c * size * 0.9);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
   }
 
   /** Where a place shows in the view (unturned): once, or once for each turn of a repeating map in view. */

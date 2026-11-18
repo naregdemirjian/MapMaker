@@ -100,7 +100,7 @@ status. Last updated: 18 November 2026 (Stage 4; see DEVELOPMENT.md).
 | --- | --- | --- | --- |
 | Unlimited custom layers, created, shown and hidden, historically changed | Tested | `scenarios`, `e2e/workflows` step 2 | Territory layers only |
 | Polygon (territory) layers | Tested | as above | |
-| Line, point, route, heatmap and raster/numerical layers | Partial | `features` | Area, line and point layers with lifespans and dated shapes (D71): claims, zones, roads, front lines with teeth, arrows, battles and other symbols; their own export pass. Drawn with their own tool, chosen on the map, listed and styled in their own panel (`e2e/workflows` 'Areas, lines and points'). Heatmaps: conditions layers, from points too (D102, D105). Routes and raster/numerical layers: later stages |
+| Line, point, route, heatmap and raster/numerical layers | Partial | `features` | Area, line and point layers with lifespans and dated shapes (D71): claims, zones, roads, front lines with teeth, arrows, battles and other symbols; their own export pass. Drawn with their own tool, chosen on the map, listed and styled in their own panel (`e2e/workflows` 'Areas, lines and points'). Heatmaps: conditions layers, from points too (D102, D105). Routes: lines with flowing marks and campaign arrows (D106). Raster/numerical layers: later stages |
 | Layer styling | Partial | `features`, `e2e/workflows` | Territory layers: opacity and border width, no editor. Areas, lines and points: colour (or their country's), fill opacity, hatching (diagonal, crossed, dotted), line width and dashes, front-line teeth, arrowheads, point symbols and sizes, names on the map; per layer and per feature (D71). Hatching for occupied territory on territory layers is still to come |
 | Exporting layers independently | Partial | `e2e/workflows` | Passes are separated by kind (fills, borders, labels…) across visible layers; a single layer is exported by hiding the others |
 | Countries and factions | Tested | `e2e/*` | |
@@ -117,7 +117,7 @@ status. Last updated: 18 November 2026 (Stage 4; see DEVELOPMENT.md).
 | Frontlines (several, advancing and retreating) | Tested | `e2e/workflows` 'Relationships' (a front line on the border of two countries at war in 1855, none in peace in 1865, in the pixels) | Any number of wars, each a front line along the shared border on a chosen layer while the war holds, with teeth toward either side or none, in a colour of one's own (D89); on a control layer it moves with control, animated by the advancing front. Arrows and contested zones: Stage 7 |
 | Contested areas, troop routes, bases, units | Tested | `units`, `e2e/workflows` 'A unit' (in its country's colour; an arrow of advance while it travels, none when it stands) | Units are characters belonging to a country, drawn in its colour, with an icon (tank, army, warship…) and a trail or an arrow of advance (D90); bases are units that stay put (fort, naval base icons). Contested areas: an area of a claim or zone contested with another country, in stripes of both colours (D93; `features`, `e2e/workflows` 'Areas, lines and points') |
 | Character locations, movements, journeys | Not implemented | | Stage 7 |
-| Civilian migration and other custom routes | Not implemented | | Stage 7 |
+| Civilian migration and other custom routes | Tested | `routes`, `e2e/workflows` 'Routes' | D106. Any line can have dashes, chevrons or dots flowing along it the way it was drawn as a shot plays (migrations, supply lines, trade), or be drawn as a broad campaign arrow that grows along its path as its event goes on |
 
 ## Environment and heatmaps
 
@@ -143,7 +143,7 @@ status. Last updated: 18 November 2026 (Stage 4; see DEVELOPMENT.md).
 | Camera movement | Partial | `e2e/workflows` step 7 | Start and end views with easing, checked frame by frame in the export. No multi-key camera or flights |
 | Text overlays | Partial | `e2e/workflows`, `events-box` | Date, title, and a fully styleable 'current events' box (with a graphic of the user's own). No free text boxes or animated text |
 | Shot playback | Needs testing | | Play button works by hand; not driven by an automated test |
-| Spreading phenomena, animated routes, environmental effects, heatmap changes | Partial | `fields`, `spread`, `disasters`, `e2e/workflows` | Conditions that rise, last and fade, plumes carried by the wind, fires, lava and floods spreading over the terrain, heatmaps following points over time (D102–D105). Animated routes: Stage 7 |
+| Spreading phenomena, animated routes, environmental effects, heatmap changes | Tested | `fields`, `spread`, `disasters`, `routes`, `e2e/workflows` | Conditions that rise, last and fade, plumes carried by the wind, fires, lava and floods spreading over the terrain, heatmaps following points over time (D102–D105). Animated routes: lines with marks flowing along them and campaign arrows growing along their path (D106) |
 
 ## Export
 

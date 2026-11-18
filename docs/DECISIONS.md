@@ -61,6 +61,29 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D106. Routes: campaign arrows and lines that flow (Stage 10)
+
+- **No camera paths.** Stage 10 was to include camera moves; the user never moves the camera during a video (D34),
+  so the stage is spent on what a still map shows instead: routes, texts, looks and export formats.
+- **Campaign arrows.** A line can be drawn as a campaign arrow ("Drawn as: a campaign arrow" in its panel): a broad
+  body along the line, `width` design pixels across where it meets its head and narrowing to about a third of that at
+  its tail, and a head twice as wide at the line's end, filled in the line's colour with a darker edge. The line is
+  smoothed first (corner cutting), so an arrow drawn with a few clicks curves. When the line draws itself in an event
+  with a length (D79), the arrow grows along its path with its head at the front: the classic drive or offensive.
+  Choosing the arrow sets a broad width (18) when the line was thin.
+- **Flow.** Any line, or arrow, can have marks flowing along it in the way it was drawn: dashes, chevrons or dots, in
+  a light tint of its colour (white down the middle of an arrow), at a speed in pixels a second of a 1920-wide frame.
+  They move with the shot's clock (frame / frames a second), so they move in the preview and in exports, are the
+  same in every export of a frame, and are still while world-building (where they show where they would be). For
+  migrations, supply lines, trade and campaigns.
+- **Kept in the style.** Both are part of the line's look (`look`, `flow`, `flowSpeed` in its style), not of
+  history: no file change, every change one undoable step.
+- **Tests.** `routes.test.ts` (smoothing keeps the ends; even resampling; an arrow's body, tail and head, round a
+  bend, grown half way; marks carried along as the offset grows, between two distances, round a corner; the style
+  kept; colours mixed); `e2e/workflows` 'Routes' (a line made a campaign arrow 40 wide with chevrons from its panel:
+  several times as broad as the line, narrower at its tail; still while world-building; in a shot the chevrons
+  move between frames and nothing else does; undone).
+
 ### D105. Heatmaps from points; thousands of strikes (Stage 9)
 
 - **Heatmaps from a layer of points.** A Heatmap layer of conditions can be worked out from a layer of points (in

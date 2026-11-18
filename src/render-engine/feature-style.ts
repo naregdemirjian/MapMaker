@@ -25,6 +25,14 @@ export interface FeatureStyle {
   /** Lines: teeth along the line (a front line: they point the way it faces), arrowheads. */
   teeth?: 'none' | 'left' | 'right';
   arrow?: 'none' | 'end' | 'both';
+  /**
+   * Lines (D106): drawn as a line, or as a broad campaign arrow (`width` across where it meets its
+   * head, narrowing to its tail, its head at the end; drawing itself in an event, it grows along its path).
+   */
+  look?: 'line' | 'arrow';
+  /** Lines (D106): marks flowing along the line in its direction as a shot plays, `flowSpeed` design pixels a second. */
+  flow?: 'none' | 'dashes' | 'chevrons' | 'dots';
+  flowSpeed?: number;
   /** Points: the symbol and its size (design pixels). */
   symbol?: 'circle' | 'square' | 'triangle' | 'diamond' | 'star' | 'cross' | 'battle';
   size?: number;
@@ -34,7 +42,7 @@ export interface FeatureStyle {
 
 export const DEFAULT_FEATURE_STYLE: Record<FeatureKind, FeatureStyle> = {
   area: { color: '#e0a030', fillOpacity: 0.25, hatch: 'none', contested: '', width: 2, dash: 'dashed', showName: true },
-  line: { color: '#e04848', width: 3, dash: 'solid', teeth: 'none', arrow: 'none', showName: false },
+  line: { color: '#e04848', width: 3, dash: 'solid', teeth: 'none', arrow: 'none', look: 'line', flow: 'none', flowSpeed: 40, showName: false },
   point: { color: '#f2d06b', symbol: 'circle', size: 9, showName: true },
 };
 

@@ -2421,6 +2421,85 @@ try {
     await page.getByTestId('tool-select').click();
   });
 
+  await h.step('Routes: a line drawn as a campaign arrow, broad along its path, chevrons flowing along it as a shot plays and still while world-building; undone', async () => {
+    await page.getByTestId('mode-world').click();
+    const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
+    const before = await steps();
+    const at: LL = [15, 46];
+    await page.evaluate((c) => (window as any).__mapmaker.store.setCamera({ lon: c[0], lat: c[1], zoom: 2.5, rotation: 0, projection: 'equirectangular' }), at);
+    /** The pixels of the map in a column across the line (61 tall) at a place along it. */
+    const column = (ll: LL) => page.evaluate(([lon, lat]) => {
+      const p = (window as any).__mapmaker.lonLatToPage(lon, lat);
+      const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement;
+      const r = c.getBoundingClientRect(), k = c.width / r.width;
+      return Array.from(c.getContext('2d')!.getImageData(Math.round((p[0] - r.left) * k), Math.round((p[1] - r.top) * k) - 30, 1, 61).data);
+    }, ll);
+    const changedIn = (a: number[], b: number[]) => { let n = 0; for (let i = 0; i < a.length; i += 4) if (Math.max(Math.abs(a[i] - b[i]), Math.abs(a[i + 1] - b[i + 1]), Math.abs(a[i + 2] - b[i + 2])) > 40) n++; return n; };
+    await page.waitForTimeout(300);
+    const plain = await column([13, 46]), plainTail = await column([4, 46]);
+    // A layer of lines and a straight line west to east from the date viewed (as the Lines tool makes them), in cyan.
+    const made = await page.evaluate(() => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const layer = s.execute((w: any) => B.commands.createLayer(w, s.spaceId, 'Campaigns', 'line'));
+      const id = s.execute((w: any) => B.commands.createFeature(w, { layerId: layer, name: 'Drive to the east', parts: [[[3, 46], [27, 46]]], mode: { kind: 'change', t: s.time }, style: { color: '#00e5ff' } }));
+      return { layer: layer as string, id: id as string };
+    });
+    let asLine = 0;
+    for (let i = 0; i < 30 && (asLine = changedIn(await column([13, 46]), plain)) < 1; i++) await page.waitForTimeout(100);
+    await page.evaluate((id) => (window as any).__mapmaker.store.set({ selection: { kind: 'feature', id } }), made.id);
+    await page.getByTestId('feature-panel').waitFor();
+    // Drawn as a campaign arrow 40 wide, with chevrons flowing along it.
+    await page.getByTestId('feature-look').selectOption('arrow');
+    await page.getByTestId('feature-width').fill('40');
+    await page.getByTestId('feature-flow').selectOption('chevrons');
+    await page.getByTestId('feature-flow-speed').fill('120');
+    await page.waitForFunction((id) => { const st = JSON.parse((window as any).__mapmaker.store.world.get('feature', id).style); return st.look === 'arrow' && st.width === 40 && st.flow === 'chevrons' && st.flowSpeed === 120; }, made.id);
+    let asArrow = 0;
+    for (let i = 0; i < 30 && (asArrow = changedIn(await column([13, 46]), plain)) < 10; i++) await page.waitForTimeout(100);
+    assert.ok(asLine >= 1 && asLine <= 6, `a line is thin (${asLine} pixels across)`);
+    assert.ok(asArrow >= 10 && asArrow >= 3 * asLine, `the arrow is broad along its path (${asArrow} pixels across, the line ${asLine})`);
+    // Narrower near its tail than near its head; its head beyond its body.
+    const nearTail = changedIn(await column([4, 46]), plainTail);
+    assert.ok(nearTail < asArrow, `narrowing to its tail (${nearTail} against ${asArrow})`);
+    await h.screenshot('route-campaign-arrow');
+    // Still while world-building: the same picture a moment later.
+    const still = await column([13, 46]);
+    await page.waitForTimeout(400);
+    assert.equal(changedIn(await column([13, 46]), still), 0, 'nothing moves while world-building');
+    // In a shot (still camera, one date): the chevrons move along between frames, nothing else does.
+    const shotId = await page.evaluate((c) => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const settings = B.defaultShot(s.spaceId, { lon: c[0], lat: c[1], zoom: 2.5, rotation: 0, projection: 'equirectangular' }, s.time, s.time, 24, 2);
+      settings.overlays = [];
+      const id = s.execute((w: any) => B.commands.createSequence(w, 'Routes', settings));
+      s.set({ shotId: id, shotFrame: 0, presentCamera: null, mode: 'present' });
+      return id as string;
+    }, at);
+    await page.waitForTimeout(500);
+    /** A band of the preview along the arrow's body, and a patch well away from it. */
+    const band = () => page.evaluate(() => {
+      const m = (window as any).__mapmaker, c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement;
+      const r = c.getBoundingClientRect(), k = c.width / r.width;
+      const a = m.previewToPage(8, 46), b = m.previewToPage(20, 46);
+      const x0 = Math.round((a[0] - r.left) * k), x1 = Math.round((b[0] - r.left) * k), y = Math.round((a[1] - r.top) * k);
+      const ctx = c.getContext('2d')!;
+      return { along: Array.from(ctx.getImageData(x0, y - 3, x1 - x0, 7).data), away: Array.from(ctx.getImageData(x0, y - 120, x1 - x0, 20).data) };
+    });
+    const f0 = await band();
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ shotFrame: 6, presentCamera: null }));
+    let f6 = await band();
+    for (let i = 0; i < 30 && changedIn(f6.along, f0.along) < 5; i++) { await page.waitForTimeout(100); f6 = await band(); }
+    assert.ok(changedIn(f6.along, f0.along) >= 5, `the chevrons moved along the arrow between frames 1 and 7 (${changedIn(f6.along, f0.along)} pixels changed)`);
+    assert.equal(changedIn(f6.away, f0.away), 0, 'nothing else moved');
+    await h.screenshot('route-flowing');
+    // Undone: the shot, the looks, the line and its layer (step by step, until the layer is gone).
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ mode: 'world', shotId: null }));
+    for (let i = 0; i < 15 && (await page.evaluate((l) => !!(window as any).__mapmaker.store.world.get('layer', l), made.layer)); i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await page.evaluate((l) => !!(window as any).__mapmaker.store.world.get('layer', l), made.layer), false, 'the layer of lines is gone');
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('sequence').some((q: any) => q.name === 'Routes')), false, 'and the shot');
+    assert.ok(shotId && (await steps()) >= 0 && before >= 0);
+  });
+
   await h.step('History Health lists the overlap, nothing else; no browser errors', async () => {
     await page.getByTestId('mode-world').click();
     await page.getByTestId('health').click();

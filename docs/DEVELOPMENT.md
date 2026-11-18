@@ -248,6 +248,7 @@ Terminology: the interface calls them **maps** (DECISIONS D24); the code and old
 | `src/render-engine/fill-clusters.ts` | Pictures over countries in pieces (D82) | Which pieces share a copy of a picture; how a picture is fitted. |
 | `src/domain/event-types.ts`, `ui/components/EventTypes.tsx` | Event types (D75) | A type's colour, usual way of spreading and usual length, kept in the `fields` of its row; the "Event types" dialog, the type chooser and its colour square. |
 | `src/domain/relations.ts`, `ui/components/Relations.tsx` | Relationships (D72) | Kinds and how each reads from either side; periods are changes of kind `relate` (`commands.ts` relate, endRelation, resumeRelation), compiled by the engine (`relationHolds`, `relationPeriods`). |
+| `src/render-engine/routes.ts` | Routes (D106) | A line as a campaign arrow (smoothed, tapered body, head at its end) and marks flowing along a line; drawn by `MapRenderer.drawFeatureShape` and `drawFlow` with the shot's clock. |
 | `src/render-engine/feature-style.ts` | Features (D71) | Areas, lines and points: their looks (kind defaults, layer, own). Shapes are changes of kind `shape` (`commands.ts` createFeature, reshapeFeature, endFeature), compiled by the engine (`featuresAt`, `featureHistory`), drawn in the `features` pass (`MapRenderer.drawFeatures`, `featureAt` for the pointer). |
 | Characters | Points over time | Placements are effects of kind `place` (`commands.ts` placeCharacter, characterLeaves); the engine compiles them into tracks (`charactersAt`, `characterTrack`); drawn in the `characters` pass; panel in `ui/components/Characters.tsx` (D35). |
 | `test/`, `e2e/` | Tests | See "Tests" below. |
@@ -272,11 +273,12 @@ The approved roadmap has 14 stages (0–13). Where each stands (brought up to da
 | 7 Military and movement | Mostly done | Occupied territory drawn with stripes, crossed stripes or dots over the political map (D88); front lines between countries at war (D89); units of a country with trails or arrows of advance (D90); contested areas in both claimants' stripes (D93); characters with icons that face the way they travel (D85) | Bases and supply lines as their own kinds, if wanted (units that stay put and lines with arrows cover them today) |
 | 8 Terrain and fictional worlds | Done | Earth's elevation with the sea floor and the ice sheets (D94); terrain colours and relief drawn by the graphics card, over the countries too, in the working view and exports (D95); sea level over time, with coasts, land and territory following it (D96); generated planets (D97); sculpting with twelve brushes, in the base world or dated (D98); rivers on the Earth and on planets (D99); the satellite look, with Earth's land cover and planets' biomes (D100); finer heights close in, downloaded as needed (D101) | Land cover finer than 10 km; terrain-aware drawing (Stage 12) |
 | 9 Environment and fields | Done | Conditions: field layers of radiation, fire, smoke, floods, destruction and heat, their sources rising, lasting and fading, circles and plumes, drawn by the graphics card (D102); fires, lava and floods spreading over the terrain (D103); disasters from templates in one click (D104); heatmaps from points, three thousand strikes at 4K (D105) | Raster and numerical layers from files; arrival-time fronts slowed by terrain |
-| 10–13 | Not started | | Presentation polish, space maps (nearby stars to 50 light-years), smart brushes, branches and calendars |
+| 10 Presentation polish | In progress | Routes: campaign arrows and lines that flow (D106) | Texts and callouts, looks for shots, TIFF and SVG (camera paths dropped: the camera stays still, D34) |
+| 11–13 | Not started | | Space maps (nearby stars to 50 light-years), smart brushes, branches and calendars |
 
 ## Tests
 
-All pass as of 18 November 2026 (304 unit and randomised tests in 55 files, 23 + 44 + 6 + 5 interface steps). The
+All pass as of 18 November 2026 (308 unit and randomised tests in 56 files, 23 + 45 + 6 + 5 interface steps). The
 interface tests run with the verify mode on (D57): everything the app works out from what was there before is also
 worked out afresh, and any difference stops the test.
 `sh scripts/check-all.sh` runs everything and prints ALL CHECKS PASSED only when every check passed.

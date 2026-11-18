@@ -245,6 +245,7 @@ export function FeaturePanel({ id }: { id: string }) {
   const ownerColor = f.entity_id ? w.get('entity', f.entity_id)?.color ?? null : null;
   const color = featureColor(kind, layer.style, f.style, ownerColor);
   const look = (patch: FeatureStyle) => s.execute((wd) => cmd.updateFeature(wd, id, { style: patch }));
+  const arrowLook = kind === 'line' && st.look === 'arrow';
   const steps = e.featureHistory(id);
   const animOf = (effectId: string): FeatureAnimStyle | '' => { const tr = parseJSON<{ style?: FeatureAnimStyle } | null>(w.get('effect', effectId)?.transition ?? '', null); return tr?.style ?? ''; };
   const now = e.featuresAt(f.layer_id, s.time).some((x) => x.feature === id);
@@ -286,15 +287,30 @@ export function FeaturePanel({ id }: { id: string }) {
             </select>
           </label>
         </>}
+        {kind === 'line' && (
+          <label className="inline" title="A campaign arrow is a broad arrow along the line, narrowing to its tail; drawn in an event with a length, it grows along its path">Drawn as
+            <select value={st.look ?? 'line'} onChange={(ev) => { const v = ev.target.value as FeatureStyle['look']; look(v === 'arrow' && (st.width ?? 3) < 8 ? { look: v, width: 18 } : v === 'line' && (st.width ?? 3) > 20 ? { look: v, width: 3 } : { look: v }); }} data-testid="feature-look">
+              <option value="line">A line</option><option value="arrow">A campaign arrow</option>
+            </select>
+          </label>
+        )}
         {kind !== 'point' && <>
-          <label className="inline">Line width <input type="number" min={0} max={20} step={0.5} value={st.width ?? 2} onChange={(ev) => look({ width: Math.max(0, Number(ev.target.value)) })} style={{ width: '4.5em' }} /></label>
-          <label className="inline">Line
+          <label className="inline">{arrowLook ? 'Arrow width' : 'Line width'} <input type="number" min={0} max={arrowLook ? 200 : 20} step={arrowLook ? 1 : 0.5} value={st.width ?? 2} onChange={(ev) => look({ width: Math.max(0, Number(ev.target.value)) })} style={{ width: '4.5em' }} data-testid="feature-width" /></label>
+          {!arrowLook && <label className="inline">Line
             <select value={st.dash ?? 'solid'} onChange={(ev) => look({ dash: ev.target.value as FeatureStyle['dash'] })} data-testid="feature-dash">
               <option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option>
             </select>
-          </label>
+          </label>}
         </>}
         {kind === 'line' && <>
+          <label className="inline" title="Marks moving along the line the way it was drawn, as a shot plays (still while world-building): for migrations, supply lines, trade and campaigns">Flowing
+            <select value={st.flow ?? 'none'} onChange={(ev) => look({ flow: ev.target.value as FeatureStyle['flow'] })} data-testid="feature-flow">
+              <option value="none">Nothing</option><option value="dashes">Dashes</option><option value="chevrons">Chevrons</option><option value="dots">Dots</option>
+            </select>
+          </label>
+          {st.flow && st.flow !== 'none' && <label className="inline" title="How fast the marks move (pixels a second in a 1920-wide frame)">at <input type="number" min={0} max={2000} step={5} value={st.flowSpeed ?? 40} onChange={(ev) => look({ flowSpeed: Math.max(0, Number(ev.target.value)) })} style={{ width: '4.5em' }} data-testid="feature-flow-speed" /> px/s</label>}
+        </>}
+        {kind === 'line' && !arrowLook && <>
           <label className="inline" title="Teeth along the line: a front line facing that way">Front teeth
             <select value={st.teeth ?? 'none'} onChange={(ev) => look({ teeth: ev.target.value as FeatureStyle['teeth'] })} data-testid="feature-teeth">
               <option value="none">None</option><option value="left">On the left</option><option value="right">On the right</option>
