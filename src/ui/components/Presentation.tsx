@@ -3,9 +3,11 @@ import { useStore, useLive, store } from '../store.ts';
 import { Api } from '../api.ts';
 import * as cmd from '../../domain/commands.ts';
 import { type Instant, add, fromJSONValue, toJSONValue, fromStore, compare, gregorian, type Precision } from '../../core-time/index.ts';
-import { defaultShot, timeAt, cameraAt, RESOLUTIONS, FRAME_RATES, shotTransitions, withStillCamera, cameraMoves, resetCamera, newTextBox, textBoxOf, EXPORT_FORMATS, type ExportFormat, type ShotSettings, type Ease, type ShotTransitions, type Overlay, type TextBox, type TextEnter, type TextExit } from '../../presentation/sequence.ts';
+import { defaultShot, timeAt, cameraAt, RESOLUTIONS, FRAME_RATES, shotTransitions, withStillCamera, cameraMoves, resetCamera, newTextBox, textBoxOf, EXPORT_FORMATS, isVideoFormat, type ExportFormat, type ShotSettings, type Ease, type ShotTransitions, type Overlay, type TextBox, type TextEnter, type TextExit } from '../../presentation/sequence.ts';
 import { PASS_DEFS, runExport, exportPassesOf, estimateExportBytes, scaledBytes, formatBytes } from '../../presentation/export-driver.ts';
 import { svgFrame } from '../../presentation/svg-frame.ts';
+import { planVideo } from '../../presentation/video-encoder.ts';
+import { VIDEO_QUALITIES, formatBitrate, type VideoQuality } from '../../export/video-codecs.ts';
 import { eventsBoxOf, type EventsBox } from '../../presentation/events-box.ts';
 import { LOOKS, LOOK_IDS, GRADES, resolveLook, type LookId, type GradeId, type ShotLook } from '../../presentation/looks.ts';
 import { isSpaceMap } from '../../world-model/world-settings.ts';
@@ -60,7 +62,9 @@ export function ShotEditor() {
   const [name, setName] = useState(row?.name ?? '');
   const [estimate, setEstimate] = useState<{ key: string; bytes: number } | null>(null);
   const [progress, setProgress] = useState<null | { done: number; total: number; label: string }>(null);
-  const [result, setResult] = useState<null | { dir: string; frames: number; seconds: number }>(null);
+  const [result, setResult] = useState<null | { dir: string; frames: number; seconds: number; file?: string }>(null);
+  // Whether this computer can encode the video chosen, and how (D121).
+  const [videoPlan, setVideoPlan] = useState<{ key: string; error?: string; codec?: string; bitrate?: number; size?: [number, number] } | null>(null);
   const [svgSaved, setSvgSaved] = useState<string | null>(null);
   const [svgBusy, setSvgBusy] = useState(false);
   const cancel = useRef(false);
@@ -101,7 +105,7 @@ export function ShotEditor() {
         onProgress: (done, total) => setProgress({ done, total, label: scale === 1 ? 'Exporting' : 'Exporting preview' }), isCancelled: () => cancel.current,
       });
       setResult(r);
-      s.toast(`Exported ${r.frames} frames to ${r.dir}`);
+      s.toast(r.file ? `Exported a video of ${r.frames} frames to ${r.file}` : `Exported ${r.frames} frames to ${r.dir}`);
     } catch (e) {
       s.toast((e as Error).message, 'error');
     }
@@ -131,6 +135,9 @@ export function ShotEditor() {
   };
   // Re-estimated when anything that changes the files changes (after a pause, in the background).
   const estimateKey = JSON.stringify([row.settings, passes, s.world?.revision]);
+  const video = isVideoFormat(shot.format);
+  const videoKey = videoKeyOf(shot);
+  const videoBlocked = video && (videoPlan?.key !== videoKey || !!videoPlan.error);
   const tr = shotTransitions(shot);
   const spaceMap = isSpaceMap(w.get('map_space', shot.spaceId));
   const look = resolveLook(shot.look);
@@ -160,11 +167,19 @@ export function ShotEditor() {
             <label>Height<NumberField min={16} max={16384} step={1} value={shot.height} onCommit={(n) => update({ height: Math.round(n) })} /></label>
           </div>
           <label>Frame rate<select value={shot.fps} onChange={(e) => setFrames(Number(e.target.value), seconds)}>{FRAME_RATES.map((f) => <option key={f} value={f}>{f} fps</option>)}</select></label>
-          <label className="check"><input type="checkbox" checked={shot.transparent} onChange={(e) => update({ transparent: e.target.checked })} /> Transparent background (in "All")</label>
+          <label className="check" title={video ? 'Videos have no transparency: the background is drawn' : ''}><input type="checkbox" checked={shot.transparent && !video} disabled={video} onChange={(e) => update({ transparent: e.target.checked })} /> Transparent background (in "All"{video ? '; not in videos' : ''})</label>
           <label>File format<select value={shot.format ?? 'png'} onChange={(e) => update({ format: e.target.value as ExportFormat })} data-testid="export-format">
-            {EXPORT_FORMATS.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+            <optgroup label="Image sequences (for editing)">{EXPORT_FORMATS.filter((f) => !f.video).map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}</optgroup>
+            <optgroup label="One video file (to play and share)">{EXPORT_FORMATS.filter((f) => f.video).map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}</optgroup>
           </select></label>
           <p className="muted" data-testid="export-format-note">{EXPORT_FORMATS.find((f) => f.id === (shot.format ?? 'png'))!.note}</p>
+          {video && <>
+            <label>Video quality<select value={shot.videoQuality ?? 'good'} onChange={(e) => update({ videoQuality: e.target.value as VideoQuality })} data-testid="export-video-quality">
+              {VIDEO_QUALITIES.map((q) => <option key={q.id} value={q.id}>{q.name}</option>)}
+            </select></label>
+            <VideoCheck shot={shot} onPlan={setVideoPlan} />
+            {videoPlan?.key === videoKey && <p className={videoPlan.error ? 'error' : 'muted'} data-testid="export-video-check">{videoPlan.error ?? `${videoPlan.size![0]} x ${videoPlan.size![1]}, ${formatBitrate(videoPlan.bitrate!)}, encoded by this computer (${videoPlan.codec}).`}</p>}
+          </>}
         </Group>
         <Group title="Timing">
           <label>History shown from<DateField value={startT} onChange={(t) => setTimeKey('start', t)} testId="shot-from" /></label>
@@ -329,6 +344,7 @@ export function ShotEditor() {
         </Group>
         <Group title="Export">
           <h4>What to export</h4>
+          {video ? <p className="muted" data-testid="video-passes-note">A video holds the whole picture ("All"). For layers to stack and adjust in Premiere, choose an image sequence format above.</p> : <>
           {PASS_DEFS.filter((d) => d.name === 'all').map((d) => (
             <label key={d.name} className="check" title={d.note ?? ''}><input type="checkbox" checked={passes.includes(d.name)} onChange={(e) => setPasses(e.target.checked ? [...passes, d.name] : passes.filter((p) => p !== d.name))} data-testid={`pass-${d.name}`} /> <b>{d.label}</b> <span className="muted">(everything in one image sequence)</span></label>
           ))}
@@ -338,24 +354,25 @@ export function ShotEditor() {
               <label key={d.name} className="check" title={d.note ?? ''}><input type="checkbox" checked={passes.includes(d.name)} onChange={(e) => setPasses(e.target.checked ? [...passes, d.name] : passes.filter((p) => p !== d.name))} data-testid={`pass-${d.name}`} /> {d.label}</label>
             ))}
           </div>
+          </>}
           <h4>Where</h4>
           <div className="folder-field">
             <input value={shot.exportDir ?? ''} placeholder="The project's exports folder" onChange={(e) => update({ exportDir: e.target.value || null })} data-testid="export-dir" title="A full folder path. Each export makes its own folder inside it." />
             <button className="small" onClick={chooseFolder} data-testid="choose-export-dir">Choose…</button>
             {shot.exportDir && <button className="small" onClick={() => update({ exportDir: null })} title="Back to the project's exports folder">Reset</button>}
           </div>
-          <p className="muted" data-testid="export-summary">{shot.frames} frames × {passes.length} {passes.length === 1 ? 'image sequence' : 'image sequences'} at {shot.width} x {shot.height}.
-            {' '}{estimate?.key === estimateKey ? <>Estimated size: <b data-testid="export-size">about {formatBytes(estimate.bytes)}</b> (a preview, ¼ size, about {formatBytes(scaledBytes(estimate.bytes, 0.25))}).</> : passes.length ? 'Estimating the size…' : ''}</p>
+          <p className="muted" data-testid="export-summary">{video ? <>A video of {shot.frames} frames ({seconds.toFixed(1)} s) at {shot.width} x {shot.height}.</> : <>{shot.frames} frames × {passes.length} {passes.length === 1 ? 'image sequence' : 'image sequences'} at {shot.width} x {shot.height}.</>}
+            {' '}{estimate?.key === estimateKey ? <>Estimated size: <b data-testid="export-size">{video ? 'at most ' : ''}about {formatBytes(estimate.bytes)}</b> (a preview, ¼ size, about {formatBytes(video ? estimate.bytes / 16 : scaledBytes(estimate.bytes, 0.25))}).</> : passes.length || video ? 'Estimating the size…' : ''}</p>
           {progress ? (
             <div className="progress"><div className="bar"><div style={{ width: `${(100 * progress.done) / progress.total}%` }} /></div>
               <span>{progress.label}: {progress.done} / {progress.total}</span><button onClick={() => (cancel.current = true)}>Cancel</button></div>
           ) : (
             <div className="buttons">
-              <button onClick={() => doExport(0.25)} data-testid="export-preview">Export preview (¼ size)</button>
-              <button className="primary" onClick={() => doExport(1)} data-testid="export-full">Export</button>
+              <button onClick={() => doExport(0.25)} disabled={videoBlocked} data-testid="export-preview">Export preview (¼ size)</button>
+              <button className="primary" onClick={() => doExport(1)} disabled={videoBlocked} data-testid="export-full">{video ? 'Export video' : 'Export'}</button>
             </div>
           )}
-          {result && <div className="ok-box" data-testid="export-result">Wrote {result.frames} frames in {result.seconds.toFixed(1)} s.<br /><span className="path">{result.dir}</span><br /><button onClick={() => Api.showFolder(s.projectId!, 'exports', shot.exportDir ?? undefined)}>Show the export folder</button></div>}
+          {result && <div className="ok-box" data-testid="export-result">{result.file ? <>Wrote a video of {result.frames} frames in {result.seconds.toFixed(1)} s.<br /><span className="path" data-testid="export-video-file">{result.file}</span></> : <>Wrote {result.frames} frames in {result.seconds.toFixed(1)} s.<br /><span className="path">{result.dir}</span></>}<br /><button onClick={() => Api.showFolder(s.projectId!, 'exports', shot.exportDir ?? undefined)}>Show the export folder</button></div>}
           <h4>One frame for print or a drawing program</h4>
           <div className="buttons">
             <button onClick={saveSvg} disabled={svgBusy} data-testid="export-svg" title="Territories, borders, areas, lines, cities, names and texts as shapes and text you can edit; the sea, land, terrain and conditions as pictures">{svgBusy ? 'Saving…' : `Save frame ${s.shotFrame + 1} as SVG`}</button>
@@ -454,7 +471,7 @@ function SizeEstimate({ shot, passes, estimateKey, onEstimate }: { shot: ShotSet
     // stopped changing and the page has nothing else to do, so it does not land in the middle of work.)
     let idle = 0;
     const run = () => {
-      if (stale || !passes.length || !s.world || !s.engine) return;
+      if (stale || (!passes.length && !isVideoFormat(shot.format)) || !s.world || !s.engine) return;
       estimateExportBytes(s.world, s.engine, shot, passes).then((bytes) => { if (!stale) onEstimate({ key: estimateKey, bytes }); }, () => undefined);
     };
     const timer = window.setTimeout(() => {
@@ -463,6 +480,24 @@ function SizeEstimate({ shot, passes, estimateKey, onEstimate }: { shot: ShotSet
     }, 700);
     return () => { stale = true; clearTimeout(timer); if (idle) window.cancelIdleCallback?.(idle); };
   }, [estimateKey]);
+  return null;
+}
+
+/** What decides how a shot's video is encoded (D121). */
+const videoKeyOf = (shot: ShotSettings) => JSON.stringify([shot.format, shot.width, shot.height, shot.fps, shot.videoQuality ?? 'good']);
+
+/** Asks the browser whether it can encode the shot's video, and how (the answer in `onPlan`). */
+function VideoCheck({ shot, onPlan }: { shot: ShotSettings; onPlan: (p: { key: string; error?: string; codec?: string; bitrate?: number; size?: [number, number] }) => void }) {
+  const key = videoKeyOf(shot);
+  useEffect(() => {
+    let stale = false;
+    if (!isVideoFormat(shot.format)) return;
+    planVideo(shot.format, shot.width, shot.height, shot.fps, shot.videoQuality ?? 'good').then((p) => {
+      if (stale) return;
+      onPlan('error' in p ? { key, error: p.error } : { key, codec: p.config.codec, bitrate: p.bitrate, size: [p.width, p.height] });
+    }, (e) => { if (!stale) onPlan({ key, error: (e as Error).message }); });
+    return () => { stale = true; };
+  }, [key]);
   return null;
 }
 

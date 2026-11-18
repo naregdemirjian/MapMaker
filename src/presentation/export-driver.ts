@@ -7,7 +7,9 @@ import type { Engine } from '../temporal-engine/engine.ts';
 import { MapRenderer, DEFAULT_STYLE, EXPORT_QUALITY, type PassName, type MapStyle, type RenderOptions } from '../render-engine/map-renderer.ts';
 import { resolveLook, isPlainLook, mapStyleOf, basemapStyleOf, finishLook, type Look } from './looks.ts';
 import { makeView, viewBounds, metresPerPixel, lonLatToScreen, type View } from '../render-engine/camera.ts';
-import { type ShotSettings, type OverlayRect, EVENTS_BOX_ID, timeAt, cameraAt, overlaysAt, drawOverlays, shotTransitions, screenSecondsSince } from './sequence.ts';
+import { type ShotSettings, type OverlayRect, EVENTS_BOX_ID, timeAt, cameraAt, overlaysAt, drawOverlays, shotTransitions, screenSecondsSince, isVideoFormat } from './sequence.ts';
+import { planVideo, VideoFileEncoder, UploadSink, type VideoPlan } from './video-encoder.ts';
+import { videoBytes } from '../export/video-codecs.ts';
 import { gregorian, type Instant } from '../core-time/index.ts';
 import { encodeTiff, deflateInBrowser } from '../export/tiff.ts';
 import { eventsBoxOf, currentEvents, drawEventsBox } from './events-box.ts';
@@ -84,6 +86,8 @@ export function scaledBytes(bytes: number, times: number): number { return bytes
  * twice as long, in the middle of work on the shot. Real frames vary, so this is an estimate.
  */
 export async function estimateExportBytes(world: World, engine: Engine, shot: ShotSettings, passNames: string[], scale = 1): Promise<number> {
+  // A video (D121): its bit rate over its length.
+  if (isVideoFormat(shot.format)) return videoBytes(Math.max(16, Math.round(shot.width * scale)), Math.max(16, Math.round(shot.height * scale)), shot.fps, shot.frames, shot.videoQuality);
   const defs = PASS_DEFS.filter((d) => passNames.includes(d.name));
   if (!defs.length) return 0;
   const W = Math.max(16, Math.round(shot.width * scale)), H = Math.max(16, Math.round(shot.height * scale));
@@ -274,7 +278,7 @@ export function pixelHash(rgba: Uint8ClampedArray): [number, number] {
   return [h1 >>> 0, h2 >>> 0];
 }
 
-export interface ExportResult { dir: string; checksums: Record<string, Record<number, string>>; frames: number; seconds: number }
+export interface ExportResult { dir: string; checksums: Record<string, Record<number, string>>; frames: number; seconds: number; file?: string; bytes?: number }
 
 export async function runExport(o: {
   projectId: string; world: World; engine: Engine; shot: ShotSettings; shotName: string; passNames: string[]; scale: number;
@@ -282,12 +286,16 @@ export async function runExport(o: {
 }): Promise<ExportResult> {
   const width = Math.max(16, Math.round(o.shot.width * o.scale));
   const height = Math.max(16, Math.round(o.shot.height * o.scale));
-  // Written in stacking order, bottom first (the compositing guide lists them so), the combined
-  // picture last.
-  const defs = [...PASS_DEFS.filter((d) => d.name !== 'all'), ...PASS_DEFS.filter((d) => d.name === 'all')].filter((d) => o.passNames.includes(d.name));
+  // A video (D121) is the whole picture; image sequences are written in stacking order, bottom first
+  // (the compositing guide lists them so), the combined picture last.
+  const video = isVideoFormat(o.shot.format);
+  const defs = video ? PASS_DEFS.filter((d) => d.name === 'all') : [...PASS_DEFS.filter((d) => d.name !== 'all'), ...PASS_DEFS.filter((d) => d.name === 'all')].filter((d) => o.passNames.includes(d.name));
   if (!defs.length) throw new Error('Choose at least one thing to export.');
   const [f0, f1] = o.frameRange ?? [0, o.shot.frames - 1];
   const started = performance.now();
+  // The video's encoder is found first: a video this computer cannot make stops before anything is written.
+  const plan = video ? await planVideo(o.shot.format as VideoPlan['format'], width, height, o.shot.fps, o.shot.videoQuality ?? 'good') : null;
+  if (plan && 'error' in plan) throw new Error(plan.error);
   // TIFF files (D109) are encoded here from the frame's pixels; PNG by the browser's own encoder.
   const tiff = o.shot.format === 'tiff' || o.shot.format === 'tiff-zip', zipped = o.shot.format === 'tiff-zip';
   // Loaded before the first frame, so every frame is drawn from the same complete data.
@@ -311,9 +319,10 @@ export async function runExport(o: {
   const job = await Api.startExport(o.projectId, {
     credits,
     exportDir: o.shot.exportDir ?? null,
-    shotName: o.scale === 1 ? o.shotName : `${o.shotName} (preview)`, width, height, fps: o.shot.fps, frameStart: f0, frameEnd: f1,
-    format: tiff ? 'tiff' : 'png',
-    passes: defs.map((d) => ({ name: d.name, label: d.label, blend: d.blend, note: d.note })), transparent: o.shot.transparent,
+    shotName: o.scale === 1 ? o.shotName : `${o.shotName} (preview)`, width: plan ? plan.width : width, height: plan ? plan.height : height, fps: o.shot.fps, frameStart: f0, frameEnd: f1,
+    format: plan ? plan.format : tiff ? 'tiff' : 'png',
+    ...(plan ? { video: { codec: plan.config.codec, bitrate: plan.bitrate, quality: plan.quality } } : {}),
+    passes: defs.map((d) => ({ name: d.name, label: d.label, blend: d.blend, note: d.note })), transparent: plan ? false : o.shot.transparent,
     historicalRange: [gregorian.format(timeAt(o.shot, f0), 'minute'), gregorian.format(timeAt(o.shot, f1), 'minute')],
   });
   // A fresh renderer per export: no state shared with the interface, so output never depends on it
@@ -321,6 +330,7 @@ export async function runExport(o: {
   const renderer = new MapRenderer();
   renderer.quality = { ...EXPORT_QUALITY };
   renderer.caching = 'always';
+  if (plan) return exportVideo(o, plan, job.jobId, renderer, { basemap, terrain, videoFills, f0, f1, started });
   const canvas = new OffscreenCanvas(width, height);
   const ctx = canvas.getContext('2d', { willReadFrequently: true }) as unknown as CanvasRenderingContext2D;
   const total = (f1 - f0 + 1) * defs.length;
@@ -376,4 +386,42 @@ export async function runExport(o: {
   if (failure) throw failure;
   const fin = await Api.finishExport(o.projectId, job.jobId);
   return { dir: fin.dir, checksums: fin.checksums, frames: f1 - f0 + 1, seconds: (performance.now() - started) / 1000 };
+}
+
+/**
+ * A shot as one video file (D121): each frame drawn as the "All" pass is (opaque: a video has no
+ * transparency), handed to the browser's encoder while the next is drawn, and the file's bytes sent to
+ * the data service as they come. The encoder sets the pace: drawing waits while it has several frames.
+ */
+async function exportVideo(
+  o: Parameters<typeof runExport>[0], plan: VideoPlan, jobId: string, renderer: MapRenderer,
+  p: { basemap: Basemap | null; terrain: Ground | null; videoFills: Parameters<typeof prepareVideos>[0]; f0: number; f1: number; started: number },
+): Promise<ExportResult> {
+  const { width, height } = plan;
+  const canvas = new OffscreenCanvas(width, height);
+  const ctx = canvas.getContext('2d', { willReadFrequently: true }) as unknown as CanvasRenderingContext2D;
+  const shot: ShotSettings = { ...o.shot, transparent: false };
+  const all = PASS_DEFS.find((d) => d.name === 'all')!;
+  const sink = new UploadSink((at, bytes) => Api.sendVideoBytes(o.projectId, jobId, at, bytes));
+  const encoder = new VideoFileEncoder(plan, sink.write);
+  const total = p.f1 - p.f0 + 1;
+  try {
+    for (let frame = p.f0; frame <= p.f1; frame++) {
+      if (o.isCancelled?.()) throw new Error('Export cancelled.');
+      const detail = await detailForFrame(o.world, shot, frame, width, height, p.terrain);
+      if (p.videoFills.length) await prepareVideos(p.videoFills, frame / shot.fps);
+      renderFrame(ctx, renderer, o.world, o.engine, shot, frame, all, width, height, p.basemap, p.terrain, detail);
+      await encoder.add(canvas);
+      await sink.room();
+      o.onProgress?.(frame - p.f0 + 1, total);
+    }
+    await encoder.finish();
+    await sink.done();
+  } catch (e) {
+    encoder.close();
+    await sink.done().catch(() => undefined);
+    throw e;
+  }
+  const fin = await Api.finishExport(o.projectId, jobId);
+  return { dir: fin.dir, checksums: {}, frames: total, seconds: (performance.now() - p.started) / 1000, file: fin.video, bytes: sink.sent };
 }

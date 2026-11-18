@@ -80,5 +80,8 @@ export const Api = {
   /** A frame that is the same picture as an earlier frame of the pass. */
   repeatFrame: (id: string, job: string, pass: string, frame: number, sameAs: number) =>
     call<{ file: string; sha256: string }>('POST', `${p(id)}/exports/${encodeURIComponent(job)}/frames?pass=${encodeURIComponent(pass)}&frame=${frame}&same=${sameAs}`),
-  finishExport: (id: string, job: string) => call<{ dir: string; manifest: string; guide: string; checksums: Record<string, Record<number, string>> }>('POST', `${p(id)}/exports/${encodeURIComponent(job)}/finish`),
+  /** Bytes of a video export's file at their place in it (D121). */
+  sendVideoBytes: (id: string, job: string, at: number, bytes: Blob) =>
+    call<{ bytes: number }>('POST', `${p(id)}/exports/${encodeURIComponent(job)}/video?at=${at}`, undefined, bytes),
+  finishExport: (id: string, job: string) => call<{ dir: string; manifest: string; guide: string; video?: string; checksums: Record<string, Record<number, string>> }>('POST', `${p(id)}/exports/${encodeURIComponent(job)}/finish`),
 };

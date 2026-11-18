@@ -2,6 +2,8 @@
 // exported files. Run after building: node --disable-warning=ExperimentalWarning e2e/workflows.e2e.ts
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, existsSync, rmSync, writeFileSync, statSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { encodePNG } from '../src/export/png.ts';
 import { gregorian } from '../src/core-time/index.ts';
 import { join } from 'node:path';
@@ -2791,6 +2793,87 @@ try {
     // Undone: the shot.
     await page.evaluate(() => (window as any).__mapmaker.store.set({ mode: 'world', shotId: null }));
     for (let i = 0; i < 5 && (await page.evaluate((id) => !!(window as any).__mapmaker.store.world.get('sequence', id), shotId)); i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await page.evaluate((id) => !!(window as any).__mapmaker.store.world.get('sequence', id), shotId), false);
+  });
+
+  await h.step('Videos: a shot exported as an MP4 (H.264) and a WebM (VP9) file; every frame there at the frame rate, the pictures of the PNG frames; a size beyond H.264 refused before it starts; undone', async () => {
+    await page.getByTestId('mode-world').click();
+    const shotId = await page.evaluate(() => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const settings = B.defaultShot(s.spaceId, { lon: 10, lat: 48, zoom: 2.2, rotation: 0, projection: 'equirectangular' }, B.gregorian.fromCivil({ year: 1450 }), B.gregorian.fromCivil({ year: 1950 }), 24, 1);
+      settings.transparent = true;
+      const id = s.execute((w: any) => B.commands.createSequence(w, 'Timelapse', settings));
+      s.set({ shotId: id, shotFrame: 0, presentCamera: null, mode: 'present' });
+      return id as string;
+    });
+    await page.getByTestId('shot-editor').waitFor();
+    // The PNG frames to compare with (opaque, as a video is).
+    await page.evaluate((id) => { const m = (window as any).__mapmaker, s = m.store; const st = JSON.parse(s.world.get('sequence', id).settings); s.execute((w: any) => m.bench.commands.updateSequence(w, id, { settings: { ...st, transparent: false } })); }, shotId);
+    const png = await exportShot('export-preview');
+    const frames = png.frames('all');
+    assert.equal(frames.length, 24);
+    const ffprobe = (() => { try { execFileSync('ffprobe', ['-version'], { stdio: 'ignore' }); return true; } catch { return false; } })();
+    for (const fmt of ['mp4', 'webm'] as const) {
+      await page.getByTestId('export-format').selectOption(fmt);
+      await page.getByTestId('video-passes-note').waitFor();
+      await page.getByTestId('export-video-quality').selectOption('best');
+      await page.getByTestId('export-video-check').waitFor();
+      const check = (await page.getByTestId('export-video-check').textContent()) ?? '';
+      assert.match(check, fmt === 'mp4' ? /1920 x 1080, 12 Mbit\/s, encoded by this computer \(avc1\.64/ : /1920 x 1080, 12 Mbit\/s, encoded by this computer \(vp09\.00\.40\.08\)/);
+      await page.getByTestId('export-preview').click();
+      await page.waitForFunction((ext) => (document.querySelector('[data-testid=export-video-file]')?.textContent ?? '').trim().endsWith(ext), `.${fmt}`, { timeout: 300000 });
+      const file = ((await page.getByTestId('export-video-file').textContent()) ?? '').trim();
+      assert.match(file, fmt === 'mp4' ? /Timelapse_preview\.mp4$/ : /Timelapse_preview\.webm$/);
+      const bytes = readFileSync(file);
+      const dir = join(file, '..');
+      const manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'));
+      assert.equal(manifest.video.bytes, bytes.length);
+      assert.equal(manifest.video.sha256, createHash('sha256').update(bytes).digest('hex'));
+      assert.match(manifest.video.codec, fmt === 'mp4' ? /^avc1\./ : /^vp09\./);
+      assert.deepEqual(manifest.resolution, [480, 270]);
+      assert.equal(manifest.transparentBackground, false, 'a video has no transparency');
+      assert.match(readFileSync(join(dir, 'README.txt'), 'utf8'), fmt === 'mp4' ? /480 x 270 at 24 fps, 24 frames \(1\.00 s\), H\.264 in MP4/ : /VP9 in WebM/);
+      // The browser plays it: its size and length, and frames at the start, middle and end are the PNG frames.
+      const pick = [0, 12, 23];
+      const r = await page.evaluate(async ({ b64, refs, type, pick }) => {
+        const toBlob = (t: string, kind: string) => new Blob([Uint8Array.from(atob(t), (c) => c.charCodeAt(0))], { type: kind });
+        const v = document.createElement('video'); v.muted = true; v.src = URL.createObjectURL(toBlob(b64, type));
+        await new Promise((ok, bad) => { v.onloadeddata = ok; v.onerror = () => bad(new Error(`the video does not play: ${v.error?.message}`)); });
+        const c = new OffscreenCanvas(v.videoWidth, v.videoHeight), x = c.getContext('2d', { willReadFrequently: true })!;
+        const diffs: Array<{ mean: number; far: number }> = [];
+        for (const [k, f] of pick.entries()) {
+          const shown = new Promise((ok) => { (v as any).requestVideoFrameCallback(() => ok(0)); setTimeout(ok, 1500); });
+          v.currentTime = (f + 0.5) / 24;
+          await new Promise((ok) => { v.onseeked = ok; });
+          await shown;
+          x.drawImage(v, 0, 0);
+          const a = x.getImageData(0, 0, c.width, c.height).data;
+          const img = await createImageBitmap(toBlob(refs[k], 'image/png'), { premultiplyAlpha: 'none', colorSpaceConversion: 'none' });
+          x.clearRect(0, 0, c.width, c.height); x.drawImage(img, 0, 0);
+          const b = x.getImageData(0, 0, c.width, c.height).data;
+          let sum = 0, far = 0;
+          for (let i = 0; i < a.length; i += 4) for (let q = 0; q < 3; q++) { const d = Math.abs(a[i + q] - b[i + q]); sum += d; if (d > 40) far++; }
+          diffs.push({ mean: sum / (a.length * 0.75), far: far / (a.length * 0.75) });
+        }
+        return { width: v.videoWidth, height: v.videoHeight, duration: v.duration, diffs };
+      }, { b64: bytes.toString('base64'), refs: pick.map((i) => readFileSync(frames[i]).toString('base64')), type: fmt === 'mp4' ? 'video/mp4' : 'video/webm', pick });
+      assert.deepEqual([r.width, r.height], [480, 270]);
+      assert.ok(Math.abs(r.duration - 1) < 1 / 24, `one second long (${r.duration})`);
+      for (const [k, d] of r.diffs.entries()) assert.ok(d.mean < 4 && d.far < 0.02, `frame ${pick[k]} is the PNG frame, as closely as a video keeps it (${d.mean.toFixed(2)} levels on average, ${(d.far * 100).toFixed(2)}% far apart)`);
+      // (Read by FFmpeg as well, where it is installed: every frame, at the frame rate.)
+      if (ffprobe) {
+        const p = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-count_frames', '-show_entries', 'stream=codec_name,nb_read_frames,r_frame_rate', '-of', 'json', file]).toString()).streams[0];
+        assert.deepEqual([p.codec_name, Number(p.nb_read_frames), p.r_frame_rate], [fmt === 'mp4' ? 'h264' : 'vp9', 24, '24/1']);
+      } else console.log('    (FFmpeg is not installed: the video was checked by the browser only)');
+    }
+    // Too large for H.264: refused before anything is written, with the way out.
+    await page.getByTestId('export-format').selectOption('mp4');
+    await page.evaluate((id) => { const m = (window as any).__mapmaker, s = m.store; const st = JSON.parse(s.world.get('sequence', id).settings); s.execute((w: any) => m.bench.commands.updateSequence(w, id, { settings: { ...st, width: 16384, height: 16384 } })); }, shotId);
+    await page.waitForFunction(() => /H\.264 does not go up to 16384 x 16384/.test(document.querySelector('[data-testid=export-video-check]')?.textContent ?? ''));
+    assert.equal(await page.getByTestId('export-full').isDisabled(), true);
+    // Undone: the shot.
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ mode: 'world', shotId: null }));
+    for (let i = 0; i < 12 && (await page.evaluate((id) => !!(window as any).__mapmaker.store.world.get('sequence', id), shotId)); i++) { await page.getByTestId('undo').click(); await h.saved(); }
     assert.equal(await page.evaluate((id) => !!(window as any).__mapmaker.store.world.get('sequence', id), shotId), false);
   });
 

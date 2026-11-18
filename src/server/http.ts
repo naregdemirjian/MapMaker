@@ -6,7 +6,7 @@ import { readFileSync, existsSync, mkdirSync, writeFileSync, renameSync } from '
 import { join, extname, dirname } from 'node:path';
 import { spawn } from 'node:child_process';
 import { ProjectRegistry } from './projects.ts';
-import { startJob, writeFrame, writeEncodedFrame, writeEncodedTiff, writeSvgFrame, repeatFrame, finishJob, type ExportJob, type ExportSettings } from '../export/writer.ts';
+import { startJob, writeFrame, writeEncodedFrame, writeEncodedTiff, writeSvgFrame, writeVideoBytes, repeatFrame, finishJob, type ExportJob, type ExportSettings } from '../export/writer.ts';
 import { saveAsset, serveAsset } from './assets.ts';
 import type { RowDiff } from '../world-model/schema.ts';
 
@@ -259,6 +259,11 @@ export function createAppServer(opts: ServerOptions): { server: Server; registry
         const body = await readBody(req);
         const out = writeFrame(job, pass, frame, w, h, new Uint8Array(body.buffer, body.byteOffset, body.byteLength));
         return send(res, 200, out);
+      }
+      // A video export's bytes at their place in the file (D121).
+      if (parts[5] === 'video' && method === 'POST') {
+        const body = await readBody(req);
+        return send(res, 200, writeVideoBytes(job, Number(url.searchParams.get('at')), new Uint8Array(body.buffer, body.byteOffset, body.byteLength)));
       }
       if (parts[5] === 'finish' && method === 'POST') {
         const out = finishJob(job);

@@ -61,6 +61,36 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D121. Videos: MP4 (H.264) and WebM (VP9) files from a shot (improvement pass)
+
+- **What.** Two more file formats for a shot's export: "Video, MP4 (H.264)" and "Video, WebM (VP9)". One file of the
+  whole picture ("All"), opaque and without sound, in a folder of its own with `manifest.json` and a `README.txt` (the
+  data credits as for image sequences). Quality: Best (a quarter of a bit a pixel, for editing), Good (a tenth, for
+  sharing) or Small; the bit rate is shown with the codec once the computer has said it can encode it. Image sequences
+  stay the way to export layers to composite.
+- **How.** Frames are drawn exactly as for image sequences and handed to the browser's own encoder (WebCodecs, which
+  Chromium and so the app have, using the graphics card's encoder where there is one), at the H.264 or VP9 level the
+  size, frame rate and bit rate need, with a frame to start from every two seconds. The encoded frames are put into
+  the file by writers of our own (`export/mp4-mux.ts`, `export/webm-mux.ts`; nothing installed) and sent to the data
+  service as they come, a few megabytes at a time, which writes them into the file at their places; at the end only
+  the sizes and tables are written. Drawing waits while the encoder has more than three frames in hand, and while
+  more than 64 MB are on their way to the disk, so a long 4K export holds little memory.
+- **Exact timing.** MP4 times frames in the rate's own units: 23.976, 29.97 and 59.94 fps as 1001/24000, 1001/30000
+  and 1001/60000 of a second, so editors read the rate exactly. WebM in milliseconds, its frames' length written
+  exactly. The colours the encoder coded (sRGB pictures as BT.709, full range) are written into the file.
+- **Refused before starting.** A size H.264 does not reach (beyond 8K), or one this computer's encoder declines, is
+  said in the export settings, with the way out (the other format, a smaller size or image sequences); the Export
+  button waits for the answer.
+- **Not done.** Transparency in videos (no encoder here has it; image sequences carry it), sound, ProRes.
+- **Tests.** `video-mux.test.ts` (frame rates and levels; MP4 frames where its tables say, the frames to start from,
+  the exact rate, the decoder configuration and colours, 64-bit places past 4 GB; WebM elements read back: the header
+  and its seek head, clusters from each frame to start from, cues to them, sizes and duration written at the end; real
+  H.264 and VP9 streams from FFmpeg written by the writers and read back by FFmpeg frame for frame, the same pictures,
+  where FFmpeg is installed); `e2e/workflows` 'Videos' (a shot as MP4 and WebM from the shot editor: played by the
+  browser at its size and length, frames at its start, middle and end within 4 levels on average of the PNG frames;
+  read by FFmpeg where installed: 24 frames at 24/1; 16384 x 16384 refused for H.264 with the Export button off);
+  `e2e/desktop` (the app itself encodes both and plays them back).
+
 ### D120. Importing borders from files at their dates (improvement pass)
 
 - **What.** "Import borders from files…" (under Countries and factions, on any round or flat map): GeoJSON maps of

@@ -4,7 +4,7 @@
 //   node scripts/build.mjs && node --disable-warning=ExperimentalWarning e2e/desktop.e2e.ts
 //   (on Linux without a screen: xvfb-run -a node ... e2e/desktop.e2e.ts)
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright';
-import { mkdirSync, rmSync, existsSync } from 'node:fs';
+import { mkdirSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -73,6 +73,31 @@ try {
     await capture(page, join(OUT, '01-desktop-window.png'));
   });
 
+  await step('The app makes videos itself: half a second of the map as MP4 (H.264) and as WebM (VP9), written to the exports and played back', async () => {
+    const made = await page.evaluate(async () => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const out: Array<{ format: string; file: string; frames: number }> = [];
+      for (const format of ['mp4', 'webm']) {
+        const shot = { ...B.defaultShot(s.spaceId, { ...s.camera }, s.time, s.time, 24, 0.5), width: 640, height: 360, format, transparent: false };
+        const r = await B.runExport({ projectId: s.projectId, world: s.world, engine: s.engine, shot, shotName: `Desktop ${format}`, passNames: ['all'], scale: 1 });
+        out.push({ format, file: r.file, frames: r.frames });
+      }
+      return out;
+    });
+    for (const v of made) {
+      assert.ok(v.file && existsSync(v.file), `${v.format} written (${v.file})`);
+      assert.equal(v.frames, 12);
+      const r = await page.evaluate(async ({ b64, type }) => {
+        const el = document.createElement('video'); el.muted = true;
+        el.src = URL.createObjectURL(new Blob([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], { type }));
+        await new Promise((ok, bad) => { el.onloadeddata = ok; el.onerror = () => bad(new Error(`the video does not play: ${el.error?.message}`)); });
+        return { width: el.videoWidth, height: el.videoHeight, duration: el.duration };
+      }, { b64: readFileSync(v.file).toString('base64'), type: v.format === 'mp4' ? 'video/mp4' : 'video/webm' });
+      assert.deepEqual([r.width, r.height], [640, 360]);
+      assert.ok(Math.abs(r.duration - 0.5) < 1 / 24, `half a second (${r.duration})`);
+    }
+  });
+
   await step('Only one copy runs: starting it again brings the open window forward', async () => {
     const second = spawn(electronPath, [...(process.platform === 'linux' ? ['--no-sandbox'] : []), ROOT], {
       env: { ...process.env, MAPMAKER_PROJECTS: PROJECTS, MAPMAKER_PORT: '4381' }, stdio: 'ignore',
@@ -100,4 +125,4 @@ try {
 } finally {
   await app.close().catch(() => undefined);
 }
-console.log(`\n${passed} of 5 steps passed. Screenshots: ${OUT}`);
+console.log(`\n${passed} of 6 steps passed. Screenshots: ${OUT}`);

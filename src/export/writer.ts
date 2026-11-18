@@ -1,7 +1,7 @@
 // Export jobs on the data-service side: frames rendered by the map engine arrive as raw RGBA pixels,
 // are encoded here and written as numbered image sequences with a manifest and a compositing guide.
-import { existsSync, mkdirSync, writeFileSync, copyFileSync } from 'node:fs';
-import { join, isAbsolute, resolve } from 'node:path';
+import { existsSync, mkdirSync, writeFileSync, copyFileSync, openSync, writeSync, readSync, closeSync, statSync } from 'node:fs';
+import { join, isAbsolute, resolve, basename } from 'node:path';
 import { createHash } from 'node:crypto';
 import { encodePNG, tagSRGB } from './png.ts';
 
@@ -24,8 +24,10 @@ export interface ExportSettings {
   credits?: string[];
   /** Folder to export into (absolute path); empty or absent: the project's own exports folder. */
   exportDir?: string | null;
-  /** The files written (D109): 'png' (absent) or 'tiff' (either compression; the browser encodes them). */
-  format?: 'png' | 'tiff';
+  /** The files written (D109): 'png' (absent) or 'tiff' (either compression; the browser encodes them); or one video file (D121). */
+  format?: 'png' | 'tiff' | 'mp4' | 'webm';
+  /** A video's codec (as the browser names it), bit rate and quality (D121). */
+  video?: { codec: string; bitrate: number; quality: string };
 }
 
 /** The folder a project's exports go into, unless a shot chooses another. */
@@ -41,7 +43,11 @@ export interface ExportJob {
   settings: ExportSettings;
   checksums: Record<string, Record<number, string>>;
   startedAt: string;
+  /** A video export's file (D121) and how many bytes it holds so far. */
+  video?: { file: string; bytes: number };
 }
+
+const isVideo = (s: ExportSettings) => s.format === 'mp4' || s.format === 'webm';
 
 const safe = (s: string) => s.replace(/[^\w\-]+/g, '_').replace(/^_+|_+$/g, '') || 'shot';
 
@@ -72,12 +78,47 @@ export function startJob(projectDir: string, settings: ExportSettings): ExportJo
   let id = `${safe(settings.shotName)}_${stamp}`;
   for (let n = 2; existsSync(join(root, id)); n++) id = `${safe(settings.shotName)}_${stamp}_${n}`;
   const dir = join(root, id);
+  let video: ExportJob['video'];
   try {
-    for (const p of settings.passes) mkdirSync(join(dir, safe(p.name)), { recursive: true });
+    if (isVideo(settings)) {
+      // One file: the video (D121), written as the browser encodes it.
+      mkdirSync(dir, { recursive: true });
+      video = { file: join(dir, `${safe(settings.shotName)}.${settings.format}`), bytes: 0 };
+      writeFileSync(video.file, new Uint8Array(0));
+    } else for (const p of settings.passes) mkdirSync(join(dir, safe(p.name)), { recursive: true });
   } catch (e) {
     throw Object.assign(new Error(`Map Maker cannot write to ${root} (${(e as Error).message.split(':')[0]}). Choose another folder.`), { status: 400 });
   }
-  return { id, dir, settings, checksums: {}, startedAt: new Date().toISOString() };
+  return { id, dir, settings, checksums: {}, startedAt: new Date().toISOString(), video };
+}
+
+/**
+ * Bytes of a video export's file at a place in it (D121): the encoded frames as they come, one after the
+ * other, and at the end the few bytes the file's header leaves to be written then.
+ */
+export function writeVideoBytes(job: ExportJob, at: number, bytes: Uint8Array): { bytes: number } {
+  const v = job.video;
+  if (!v) throw new Error('This export writes image sequences.');
+  if (!Number.isInteger(at) || at < 0 || at > v.bytes) throw new Error(`Cannot write at ${at}: the video has ${v.bytes} bytes`);
+  const fd = openSync(v.file, 'r+');
+  try {
+    for (let done = 0; done < bytes.length;) done += writeSync(fd, bytes, done, bytes.length - done, at + done);
+  } finally {
+    closeSync(fd);
+  }
+  v.bytes = Math.max(v.bytes, at + bytes.length);
+  return { bytes: v.bytes };
+}
+
+/** The SHA-256 of a file, read a piece at a time (videos can be large). */
+function fileChecksum(file: string): string {
+  const h = createHash('sha256'), buf = new Uint8Array(1 << 20), fd = openSync(file, 'r');
+  try {
+    for (let n; (n = readSync(fd, buf, 0, buf.length, null)) > 0;) h.update(buf.subarray(0, n));
+  } finally {
+    closeSync(fd);
+  }
+  return h.digest('hex');
 }
 
 export function frameFileName(job: ExportJob, pass: string, frame: number): string {
@@ -160,8 +201,9 @@ export function repeatFrame(job: ExportJob, pass: string, frame: number, sameAs:
   return { file, sha256 };
 }
 
-export function finishJob(job: ExportJob): { manifest: string; guide: string } {
+export function finishJob(job: ExportJob): { manifest: string; guide: string; video?: string } {
   const s = job.settings;
+  if (job.video) return finishVideo(job);
   const manifest = {
     format: 'map-maker-export/1',
     shot: s.shotName,
@@ -202,4 +244,50 @@ export function finishJob(job: ExportJob): { manifest: string; guide: string } {
   const guidePath = join(job.dir, 'COMPOSITING_GUIDE.txt');
   writeFileSync(guidePath, lines.join('\r\n'));
   return { manifest: manifestPath, guide: guidePath };
+}
+
+/** A video export's manifest and guide (D121): the file, its codec and checksum, the credits. */
+function finishVideo(job: ExportJob): { manifest: string; guide: string; video: string } {
+  const s = job.settings, v = job.video!;
+  if (!v.bytes) throw new Error('No video was written.');
+  const bytes = statSync(v.file).size;
+  const frames = s.frameEnd - s.frameStart + 1, seconds = frames / s.fps;
+  const container = s.format === 'mp4' ? 'MP4' : 'WebM', codec = s.format === 'mp4' ? 'H.264' : 'VP9';
+  const manifest = {
+    format: 'map-maker-export/1',
+    shot: s.shotName,
+    startedAt: job.startedAt,
+    finishedAt: new Date().toISOString(),
+    appVersion: s.appVersion,
+    projectVersion: s.projectHead,
+    resolution: [s.width, s.height],
+    fps: s.fps,
+    frames: [s.frameStart, s.frameEnd],
+    historicalRange: s.historicalRange ?? null,
+    transparentBackground: false,
+    alpha: 'none (a video: the whole picture, opaque)',
+    passes: s.passes,
+    video: { file: basename(v.file), container, codec: s.video?.codec ?? codec, bitrate: s.video?.bitrate ?? null, quality: s.video?.quality ?? null, bytes, seconds, sha256: fileChecksum(v.file) },
+    dataCredits: s.credits ?? [],
+    checksums: {},
+  };
+  const manifestPath = join(job.dir, 'manifest.json');
+  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+  const mbit = s.video?.bitrate ? `, about ${(s.video.bitrate / 1e6).toFixed(s.video.bitrate >= 1e7 ? 0 : 1)} Mbit/s` : '';
+  const lines = [
+    `VIDEO — ${s.shotName}`,
+    '',
+    `${basename(v.file)}: ${s.width} x ${s.height} at ${s.fps} fps, ${frames} frames (${seconds.toFixed(2)} s), ${codec} in ${container}${mbit}.`,
+    'The whole picture ("All"), without transparency and without sound. For layers to stack and adjust, export',
+    'image sequences (PNG or TIFF) instead.',
+    '',
+    'In Premiere Pro: File > Import and choose the file; it keeps its frame rate.',
+    s.format === 'webm' ? 'WebM plays in browsers, VLC and most players; editors that do not read it take the MP4 version.' : 'MP4 with H.264 plays on every computer, phone and website.',
+    '',
+    ...(s.credits?.length ? ['Map data (credit in your film where the licence asks for it):', ...s.credits.map((c) => `  ${c}`), ''] : []),
+    `Rendered from project version ${s.projectHead} with Map Maker ${s.appVersion}.`,
+  ];
+  const guidePath = join(job.dir, 'README.txt');
+  writeFileSync(guidePath, lines.join('\r\n'));
+  return { manifest: manifestPath, guide: guidePath, video: v.file };
 }

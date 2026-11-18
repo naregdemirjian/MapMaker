@@ -121,16 +121,23 @@ export interface ShotSettings {
   eventsBox?: Partial<import('./events-box.ts').EventsBox>;
   /** The map's look in this shot (D108; absent: classic, the colours of the working view). See looks.ts. */
   look?: import('./looks.ts').ShotLook;
-  /** The image files written (D109): PNG (absent), or TIFF uncompressed or ZIP-compressed. */
+  /** The files written (D109): PNG (absent), or TIFF uncompressed or ZIP-compressed; or one video file (D121). */
   format?: ExportFormat;
+  /** A video's quality (D121; absent: good). */
+  videoQuality?: import('../export/video-codecs.ts').VideoQuality;
 }
 
-export type ExportFormat = 'png' | 'tiff' | 'tiff-zip';
-export const EXPORT_FORMATS: Array<{ id: ExportFormat; name: string; note: string }> = [
+export type ExportFormat = 'png' | 'tiff' | 'tiff-zip' | 'mp4' | 'webm';
+export const EXPORT_FORMATS: Array<{ id: ExportFormat; name: string; note: string; video?: boolean }> = [
   { id: 'png', name: 'PNG', note: 'PNG image sequences, 8-bit with transparency: small, read by every editor.' },
   { id: 'tiff', name: 'TIFF, uncompressed', note: 'TIFF image sequences, 8-bit with straight alpha, uncompressed: large (4 bytes a pixel), read by everything, quick to play in an editor.' },
   { id: 'tiff-zip', name: 'TIFF, ZIP-compressed', note: 'TIFF image sequences, 8-bit with straight alpha, compressed with ZIP (Deflate, as Photoshop writes it): about as small as PNG.' },
+  { id: 'mp4', name: 'Video, MP4 (H.264)', video: true, note: 'One video file of the whole picture, ready to play and share: H.264 in MP4 plays on every computer, phone and website, and goes straight into Premiere. No transparency or layers.' },
+  { id: 'webm', name: 'Video, WebM (VP9)', video: true, note: 'One video file of the whole picture: VP9 in WebM, sharper than H.264 for its size, for the web and players such as VLC (not every editor reads it). No transparency or layers.' },
 ];
+
+/** Whether a shot exports a video file rather than image sequences (D121). */
+export const isVideoFormat = (f: ExportFormat | undefined): f is 'mp4' | 'webm' => f === 'mp4' || f === 'webm';
 
 export type TransitionEasing = 'linear' | 'smooth' | 'in' | 'out';
 
