@@ -562,6 +562,15 @@ export function Outliner() {
             </select>
           </label>
         ))}
+        {layers.filter((l) => l.id === s.layerId && l.kind === 'partition').map((l) => {
+          const st = parseJSON<{ fillOpacity?: number; borderWidth?: number }>(l.style, {});
+          return (
+            <div key={`look-${l.id}`} className="two layer-option">
+              <label title="How strongly the countries' colours cover the map under them, in shots and exports too">Opacity (%)<NumberField min={0} max={100} step={5} value={Math.round((st.fillOpacity ?? 0.78) * 100)} onCommit={(n) => s.execute((wd) => cmd.setLayerLook(wd, l.id, { fillOpacity: n / 100 }))} testId="layer-opacity" /></label>
+              <label title="The width of the borders between countries on this layer (pixels at 1920 wide)">Border width<NumberField min={0} max={20} step={0.25} value={st.borderWidth ?? 1.3} onCommit={(n) => s.execute((wd) => cmd.setLayerLook(wd, l.id, { borderWidth: n }))} testId="layer-border-width" /></label>
+            </div>
+          );
+        })}
         {layers.filter((l) => l.id === s.layerId).map((l) => {
           const st = parseJSON<{ fronts?: 'second' | 'first' | 'plain'; frontColor?: string }>(l.style, {});
           return (

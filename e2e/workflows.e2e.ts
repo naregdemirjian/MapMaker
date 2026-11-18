@@ -3286,6 +3286,40 @@ try {
     assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('entity').some((e: any) => e.name === 'Kingdom of Wester')), false);
   });
 
+  await h.step('Importing a dataset that dates each shape: its from and to properties found, the history at once (a country splitting, another only for a while), one undo step', async () => {
+    await page.getByTestId('mode-world').click();
+    const box = (w: number, so: number, e: number, n: number) => [[w, so], [e, so], [e, n], [w, n], [w, so]];
+    const shapes: Array<[string, string, string, number[][]]> = [
+      ['Old Wester', '1886-01-01', '1918-11-11', box(-150, -60, -130, -52)],
+      ['Old Wester', '1918-11-12', '', box(-150, -60, -140, -52)],
+      ['New Easter', '1918-11-12', '', box(-140, -60, -130, -52)],
+      ['Brief Norther', '1950', '1990', box(-150, -50, -130, -46)],
+    ];
+    const text = JSON.stringify({ type: 'FeatureCollection', features: shapes.map(([name, from, to, ring]) => ({ type: 'Feature', properties: { CNTRY_NAME: name, GWSDATE: from, GWEDATE: to }, geometry: { type: 'Polygon', coordinates: [ring] } })) });
+    await page.getByTestId('open-import-borders').click();
+    await page.getByTestId('import-borders').waitFor();
+    await page.getByTestId('import-borders-files').setInputFiles([{ name: 'cshapes-like.geojson', mimeType: 'application/geo+json', buffer: Buffer.from(text) }]);
+    await page.getByTestId('import-borders-dated').waitFor();
+    assert.equal(await page.getByTestId('import-borders-dated').isChecked(), true, 'its dates found and used');
+    assert.equal(await page.getByTestId('import-borders-from').inputValue(), 'GWSDATE');
+    assert.equal(await page.getByTestId('import-borders-to').inputValue(), 'GWEDATE');
+    assert.match((await page.getByTestId('import-borders-summary').textContent()) ?? '', /4 dated shapes of 3 countries, from 1 January 1886/);
+    await page.getByTestId('import-borders-go').click();
+    await page.getByTestId('import-borders').waitFor({ state: 'detached', timeout: 60000 });
+    const owners = (lon: number, lat: number, years: number[]) => page.evaluate(([lon, lat, years]) => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const f = s.world.arrangement(s.spaceId).locate(B.lonLatToVec(lon, lat));
+      return (years as number[]).map((y) => { const v = s.engine.partitionState(s.spaceId, s.layerId, B.gregorian.fromCivil({ year: y })).get(f)?.value; return v ? s.world.get('entity', v).name : null; });
+    }, [lon, lat, years] as const) as Promise<Array<string | null>>;
+    assert.deepEqual(await owners(-135, -56, [1800, 1910, 1930]), ['Old Wester', 'Old Wester', 'New Easter'], 'split in 1918; the earliest shapes the starting map');
+    assert.deepEqual(await owners(-145, -56, [1800, 2020]), ['Old Wester', 'Old Wester']);
+    assert.deepEqual(await owners(-140, -48, [1940, 1960, 1991]), [null, 'Brief Norther', null], 'there from 1950 to the end of 1990');
+    // One undo step for the whole dataset.
+    await page.getByTestId('undo').click();
+    await h.saved();
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('entity').some((e: any) => e.name === 'Old Wester' || e.name === 'New Easter')), false);
+  });
+
   await h.step('History Health lists the overlap, nothing else; no browser errors', async () => {
     await page.getByTestId('mode-world').click();
     await page.getByTestId('health').click();

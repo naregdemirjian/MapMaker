@@ -139,6 +139,16 @@ test('coastline clipping setting: on unless switched off, per layer, other style
   world.applyDiffs(invertDiffs(r.diffs));
   assert.equal(style().clipToLand, undefined);
   assert.throws(() => cmd.setLayerClipToLand(world, 'layer_missing', true), /no longer exists/);
+  // The layer's opacity and border width (kept within bounds), each change one undo step, the rest kept.
+  const width = style().borderWidth;
+  const a = cmd.setLayerLook(world, layer.id, { fillOpacity: 0.5 });
+  const b = cmd.setLayerLook(world, layer.id, { borderWidth: 2.5, fillOpacity: 1.7 });
+  assert.deepEqual([style().fillOpacity, style().borderWidth, style().clipToLand], [1, 2.5, undefined]);
+  world.applyDiffs(invertDiffs(b.diffs));
+  assert.deepEqual([style().fillOpacity, style().borderWidth], [0.5, width]);
+  world.applyDiffs(invertDiffs(a.diffs));
+  assert.equal(style().fillOpacity, 0.78);
+  assert.throws(() => cmd.setLayerLook(world, layer.id, { borderWidth: Number.NaN }), /must be a number/);
 });
 
 test('basemap 1:10m: cut into tiles, the land keeps its exact area and every piece fits in a 10° tile', () => {

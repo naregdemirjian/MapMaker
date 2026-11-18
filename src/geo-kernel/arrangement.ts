@@ -31,6 +31,24 @@ export interface PathStep { seg: number; fwd: boolean }
 /** Why an outline is refused when firm snapping cannot join it to the borders around it cleanly. */
 export const SNAP_REFUSAL = 'At this zoom level the outline could not be joined to the borders around it without borders crossing. Zoom in a little and draw it again.';
 
+/**
+ * The signed area (steradians) a ring encloses about its own middle: positive when it runs counterclockwise
+ * seen from outside the sphere (rings smaller than a hemisphere). Each edge with the middle makes a triangle
+ * (Eriksson's formula: tan(E/2) = c.(a x b) / (1 + c.a + a.b + b.c)).
+ */
+export function ringSignedArea(r: Vec3[]): number {
+  let c: Vec3 = [0, 0, 0];
+  for (const p of r) c = [c[0] + p[0], c[1] + p[1], c[2] + p[2]];
+  if (Math.hypot(c[0], c[1], c[2]) < 1e-12) return 0;
+  c = normalize(c);
+  let s = 0;
+  for (let i = 0; i < r.length; i++) {
+    const a = r[i], b = r[(i + 1) % r.length];
+    s += 2 * Math.atan2(dot(c, cross(a, b)), 1 + dot(c, a) + dot(a, b) + dot(b, c));
+  }
+  return s;
+}
+
 export class TopologyError extends Error {}
 /** Raised inside the local face rebuild when it meets something it does not handle (the full rebuild takes over). */
 class NeedFullRebuild extends Error {}
@@ -540,37 +558,124 @@ export class Arrangement {
 
   /**
    * A line drawn again along borders already on the map (D120's imports: two datasets digitise the same border a
-   * few kilometres apart). Each point within `tol` radians of a border vertex becomes that vertex, and between
-   * two such points the line follows the border's own vertices, when a border runs between them no longer than
+   * few kilometres apart). Each point within `tol` radians of a border goes onto it (onto its nearest vertex
+   * within reach, else onto the nearest point of a segment: long straight borders have few vertices), and
+   * between two such points the line follows the border itself, when a border runs between them no longer than
    * twice their distance (plus `tol` at each end). Elsewhere the line is kept as it is. A line that follows a
    * border so adds no sliver of parcels beside it, and crosses nothing.
    */
   followBorders(points: Vec3[], tol: number, closed: boolean): Vec3[] {
     if (!(tol > 0) || points.length < 2) return points;
-    const ids = points.map((p) => this.nearestVertex(p, tol));
+    // A ring hardly larger than the distance (an atoll, a small island): following borders point by point could
+    // put its points out of order, turning it inside out (found importing Kiribati). It is the island already
+    // there, its coast walked round the same way, when most of its points are on that island's coast; else it is
+    // followed point by point like any line, and kept as drawn if that turns it round (checked below).
+    if (closed) {
+      let c: Vec3 = [0, 0, 0];
+      for (const p of points) c = [c[0] + p[0], c[1] + p[1], c[2] + p[2]];
+      const mid = normalize(c);
+      if (points.every((p) => angle(p, mid) < 3 * tol)) { const island = this.islandThere(points, tol); if (island) return island; }
+    }
+    type Snap = { p: Vec3; v: number | null; seg: SegmentRow | null };
+    const snapOf = (p: Vec3): Snap | null => {
+      // (A vertex within reach is taken: it adds nothing to the map. Only away from vertices, on a long
+      // straight border, does the point go onto the segment, splitting it there.)
+      const v = this.nearestVertex(p, tol);
+      if (v !== null) return { p: this.v(v), v, seg: null };
+      const sg = this.nearestSegment(p, tol);
+      return sg ? { p: distanceToArc(p, this.v(sg.s.a), this.v(sg.s.b)).closest, v: null, seg: sg.s } : null;
+    };
+    const snaps = points.map(snapOf);
     const out: Vec3[] = [];
-    let prev: number | null = null;
-    const n = points.length;
-    for (let i = 0; i < n; i++) {
-      const id = ids[i];
-      if (id === null) { out.push(points[i]); prev = null; continue; }
-      if (prev !== null && id !== prev) for (const k of this.borderBetween(prev, id, tol)) out.push(this.v(k));
-      if (id !== prev) out.push(this.v(id));
-      prev = id;
+    let prev: Snap | null = null;
+    const same = (a: Snap, b: Snap) => (a.v !== null ? a.v === b.v : !!a.seg && a.seg.id === b.seg?.id && angle(a.p, b.p) < 1e-12);
+    for (let i = 0; i < points.length; i++) {
+      const sn = snaps[i];
+      if (!sn) { out.push(points[i]); prev = null; continue; }
+      if (prev && same(prev, sn)) continue;
+      if (prev) for (const k of this.alongBorders(prev, sn, tol)) out.push(this.v(k));
+      out.push(sn.p);
+      prev = sn;
     }
     // (A ring closes from its last point to its first: along the border too.)
-    if (closed && prev !== null && ids[0] !== null && ids[0] !== prev) for (const k of this.borderBetween(prev, ids[0], tol)) out.push(this.v(k));
+    if (closed && prev && snaps[0] && !same(prev, snaps[0])) for (const k of this.alongBorders(prev, snaps[0], tol)) out.push(this.v(k));
+    // A ring that following turned round or shrank or swelled out of measure is kept as drawn instead.
+    if (closed) {
+      const a0 = ringSignedArea(points), a1 = ringSignedArea(out);
+      if (Math.sign(a0) !== Math.sign(a1) || Math.abs(a1) < 0.5 * Math.abs(a0) || Math.abs(a1) > 2 * Math.abs(a0)) return points;
+    }
     return out;
   }
 
   /**
-   * The vertices strictly between `a` and `b` along the shortest run of borders joining them, if it is no
-   * longer than twice their distance plus 2 `tol`; none otherwise (or when a segment joins them).
+   * The coast of an island already on the map that a small ring is drawn again round: the island most of the
+   * ring's points are within `tol` of a vertex of (at least half of them; in an archipelago some are nearer a
+   * neighbouring island), its coast shared with no other border, walked round in the ring's own direction. Null
+   * when there is none, or when its area is not within a factor of four of the ring's.
    */
-  private borderBetween(a: number, b: number, tol: number): number[] {
-    if (this.segmentBetween(a, b) !== undefined) return [];
-    const pa = this.v(a), pb = this.v(b);
-    const limit = 2 * angle(pa, pb) + 2 * tol;
+  private islandThere(points: Vec3[], tol: number): Vec3[] | null {
+    // A coast walked round from a vertex, every vertex on it joining two segments (short: a small island's).
+    const limit = 10 * points.length + 500;
+    const walk = (start: number): number[] | null => {
+      const cycle = [start];
+      let cur = start, prevSeg = -1;
+      for (let steps = 0; steps <= limit; steps++) {
+        const inc = this.incident.get(cur);
+        if (!inc || inc.size !== 2) return null;
+        let next = -1, via = -1;
+        for (const sid of inc) if (sid !== prevSeg) { const sg = this.segments.get(sid); if (sg) { next = sg.a === cur ? sg.b : sg.a; via = sid; } break; }
+        if (next < 0) return null;
+        if (next === start) return cycle;
+        cycle.push(next);
+        prevSeg = via; cur = next;
+      }
+      return null;
+    };
+    const cycleOf = new Map<number, number[] | null>(), votes = new Map<number[], number>();
+    for (const p of points) {
+      const v = this.nearestVertex(p, tol);
+      if (v === null) continue;
+      let c = cycleOf.get(v);
+      if (c === undefined) { c = walk(v); if (c) for (const k of c) cycleOf.set(k, c); else cycleOf.set(v, null); }
+      if (c) votes.set(c, (votes.get(c) ?? 0) + 1);
+    }
+    let best: number[] | null = null, most = 0;
+    for (const [c, n] of votes) if (n > most) { most = n; best = c; }
+    if (!best || most < 0.5 * points.length || best.length < 3) return null;
+    let out = best.map((k) => this.v(k));
+    const a0 = ringSignedArea(points);
+    if (Math.sign(ringSignedArea(out)) !== Math.sign(a0)) out = out.reverse();
+    const a1 = Math.abs(ringSignedArea(out));
+    return a1 >= 0.25 * Math.abs(a0) && a1 <= 4 * Math.abs(a0) ? out : null;
+  }
+
+  /**
+   * The border vertices to pass between two points on borders (each a vertex, or a point on a segment), along
+   * the shortest run of borders joining them if it is no longer than twice their distance plus 2 `tol`; none
+   * when they are on the same segment, a segment joins them, or no such run exists.
+   */
+  private alongBorders(a: { p: Vec3; v: number | null; seg: SegmentRow | null }, b: { p: Vec3; v: number | null; seg: SegmentRow | null }, tol: number): number[] {
+    if (a.seg && b.seg && a.seg.id === b.seg.id) return [];
+    const ends = (x: typeof a): number[] => (x.v !== null ? [x.v] : [x.seg!.a, x.seg!.b]);
+    const limit = 2 * angle(a.p, b.p) + 2 * tol;
+    let best: { len: number; path: number[] } | null = null;
+    for (const ea of ends(a)) {
+      const da = angle(a.p, this.v(ea));
+      for (const eb of ends(b)) {
+        const db = angle(this.v(eb), b.p);
+        if (da + db > limit) continue;
+        const run = ea === eb ? { len: 0, path: [] as number[] } : this.borderRun(ea, eb, limit - da - db);
+        if (!run) continue;
+        const len = da + run.len + db;
+        if (!best || len < best.len) best = { len, path: [...(a.v === null ? [ea] : []), ...run.path, ...(b.v === null && eb !== ea ? [eb] : [])] };
+      }
+    }
+    return best?.path ?? [];
+  }
+
+  /** The shortest run of borders from vertex `a` to vertex `b` no longer than `limit`: its length and the vertices strictly between. */
+  private borderRun(a: number, b: number, limit: number): { len: number; path: number[] } | null {
+    if (this.segmentBetween(a, b) !== undefined) { const len = angle(this.v(a), this.v(b)); return len <= limit ? { len, path: [] } : null; }
     // Dijkstra from a, within the limit (few vertices: a short stretch of border).
     const dist = new Map<number, number>([[a, 0]]), from = new Map<number, number>();
     const open: number[] = [a];
@@ -592,12 +697,12 @@ export class Arrangement {
         dist.set(w, dw);
         from.set(w, u);
       }
-      if (open.length > 4000) return [];
+      if (open.length > 4000) return null;
     }
-    if (!from.has(b)) return [];
+    if (!from.has(b)) return null;
     const path: number[] = [];
     for (let k = from.get(b)!; k !== a; k = from.get(k)!) path.push(k);
-    return path.reverse();
+    return { len: dist.get(b)!, path: path.reverse() };
   }
 
   // ---------------------------------------------------------------- insertion with noding

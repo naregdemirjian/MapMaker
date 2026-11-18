@@ -2,6 +2,7 @@
 // longitude and latitude, one feature per country or several), read into countries to add at a date. A series of
 // files, each the map of its year (as historical border datasets come), becomes the history between them.
 import type { CountryToAdd } from './commands.ts';
+import { gregorian, NEG_INF, POS_INF, compare, add, type Instant } from '../core-time/index.ts';
 
 type Ring = Array<[number, number]>;
 export interface ImportedFeature { props: Record<string, unknown>; polygons: Ring[][] }
@@ -114,4 +115,97 @@ export function yearOfFileName(name: string): number | null {
   if (bc) return 1 - Number(bc[1]);
   const ad = /(?:^|\D)(\d{1,4})(?!\d)/.exec(base.replace(/\bad\b/ig, ''));
   return ad ? Number(ad[1]) : null;
+}
+
+// ---------------------------------------------------------------- shapes with dates of their own
+
+/** A shape of a dataset that dates each of its shapes (as CShapes does): its country, from when, until when (both inclusive). */
+export interface DatedShape extends CountryToAdd { from: Instant; to: Instant }
+
+const OPEN_WORDS = /^(present|now|today|current|ongoing|open|none|null|-|\.\.)$/i;
+
+/**
+ * A date as datasets write it, as the instant it starts: a year (negative ones BC: -500 is 500 BC), "1886-01-01",
+ * "1886/1/1", "1.1.1886", "1886-05", "1886"; with how precise it is. Open (null) for nothing, "present", 9999 and
+ * later; undefined when it is not a date.
+ */
+export function dateOfValue(v: unknown): { t: Instant; precision: 'year' | 'month' | 'day' } | null | undefined {
+  if (v === null || v === undefined || v === '') return null;
+  const civil = (year: number, month?: number, day?: number) => {
+    if (!Number.isInteger(year) || (month !== undefined && (month < 1 || month > 12)) || (day !== undefined && (day < 1 || day > 31))) return undefined;
+    if (year >= 9999) return null;
+    return { t: gregorian.fromCivil({ year, month: month ?? 1, day: day ?? 1 }), precision: day !== undefined ? 'day' as const : month !== undefined ? 'month' as const : 'year' as const };
+  };
+  // (Negative years are BC, as historical datasets write them: no year 0.)
+  const bcYear = (y: number) => (y < 0 ? y + 1 : y);
+  if (typeof v === 'number') return Number.isFinite(v) && Number.isInteger(v) ? civil(bcYear(v)) : undefined;
+  if (typeof v !== 'string') return undefined;
+  const s = v.trim();
+  if (OPEN_WORDS.test(s)) return null;
+  let m = /^(-?\d{1,6})$/.exec(s);
+  if (m) return civil(bcYear(Number(m[1])));
+  m = /^(-?\d{1,6})[-/](\d{1,2})(?:[-/](\d{1,2}))?(?:[T ].*)?$/.exec(s);
+  if (m) return civil(bcYear(Number(m[1])), Number(m[2]), m[3] ? Number(m[3]) : undefined);
+  m = /^(\d{1,2})[./](\d{1,2})[./](-?\d{1,6})$/.exec(s);
+  if (m) return civil(bcYear(Number(m[3])), Number(m[2]), Number(m[1]));
+  m = /^(\d{1,6})\s*(bce?|bc)$/i.exec(s);
+  if (m) return civil(1 - Number(m[1]));
+  return undefined;
+}
+
+/** The first moment after a date of that precision: the day, month or year after (an inclusive end's change). */
+export function afterDate(d: { t: Instant; precision: 'year' | 'month' | 'day' }): Instant {
+  const c = gregorian.toCivil(d.t);
+  if (d.precision === 'day') return add(d.t, 1);
+  if (d.precision === 'month') return gregorian.fromCivil({ year: c.month === 12 ? c.year + 1 : c.year, month: c.month === 12 ? 1 : c.month + 1, day: 1 });
+  return gregorian.fromCivil({ year: c.year + 1 });
+}
+
+const FROM_KEYS = ['from', 'start', 'begin', 'start_date', 'startdate', 'date_start', 'valid_from', 'validfrom', 'year_start', 'start_year', 'gwsdate', 'gwsyear', 'cowsdate', 'cowsyear', 'since', 'founded'];
+const TO_KEYS = ['to', 'end', 'until', 'end_date', 'enddate', 'date_end', 'valid_to', 'validto', 'year_end', 'end_year', 'gwedate', 'gweyear', 'cowedate', 'coweyear', 'dissolved'];
+
+/**
+ * The properties that most likely hold each shape's first and last dates: one of the usual names whose values are
+ * dates for most shapes (case ignored). Nulls when the file does not date its shapes.
+ */
+export function guessDateKeys(file: ImportedFile): { from: string | null; to: string | null } {
+  // (An end may be open for most shapes: countries still there. It counts, as long as some end is a date.)
+  const dated = (k: string, open: boolean) => {
+    let ok = 0, real = 0;
+    for (const f of file.features) { const d = dateOfValue(f.props[k]); if (d) { ok++; real++; } else if (d === null && open) ok++; }
+    return real ? ok : 0;
+  };
+  const pick = (names: string[], open: boolean) => {
+    for (const n of names) {
+      const k = file.keys.find((x) => x.toLowerCase() === n);
+      if (k && dated(k, open) >= file.features.length * 0.6) return k;
+    }
+    return null;
+  };
+  const from = pick(FROM_KEYS, false);
+  return { from, to: from ? pick(TO_KEYS, true) : null };
+}
+
+/**
+ * The dated shapes of a file: each feature a shape of the country its name says, from its first date to its last
+ * (both included). A feature without a first date is there from the beginning; without a last, to the end.
+ * Features without a name, or with dates that are not dates, are left out (counted).
+ */
+export function datedShapesOf(file: ImportedFile, nameKey: string, fromKey: string, toKey: string | null, colorKey?: string | null): { shapes: DatedShape[]; unnamed: number; undated: number } {
+  const shapes: DatedShape[] = [];
+  let unnamed = 0, undated = 0;
+  for (const f of file.features) {
+    const raw = f.props[nameKey];
+    const name = typeof raw === 'number' ? String(raw) : typeof raw === 'string' ? raw.trim().replace(/\s+/g, ' ') : '';
+    if (!name) { unnamed++; continue; }
+    const a = dateOfValue(f.props[fromKey]), b = toKey ? dateOfValue(f.props[toKey]) : null;
+    if (a === undefined || b === undefined) { undated++; continue; }
+    const from = a ? a.t : NEG_INF, to = b ? afterDate(b) : POS_INF;
+    if (compare(to, from) <= 0) { undated++; continue; }
+    const shape: DatedShape = { name, polygons: f.polygons, from, to };
+    const col = colorKey ? colourOf(f.props[colorKey]) : undefined;
+    if (col) shape.color = col;
+    shapes.push(shape);
+  }
+  return { shapes, unnamed, undated };
 }

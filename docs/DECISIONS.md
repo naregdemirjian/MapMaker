@@ -61,6 +61,26 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D123. Importing a dataset that dates each of its shapes (improvement pass)
+
+- **What.** Some border datasets are one file with dates on every shape instead of one map a year: CShapes (the
+  world's countries from 1886, each shape with its first and last day), and GIS layers with "from" and "to"
+  columns. "Import borders from files" finds such properties (from, start, begin, GWSDATE, valid_from… and to,
+  end, until, GWEDATE, valid_to…, with dates for most shapes; ends may be empty: still there) and then imports the
+  file as the history it holds: "Each shape has its own dates", with the two properties changeable.
+- **Dates.** Years (negative ones BC), "1886-01-01", "1886/1/1", "1.1.1886", "1886-05", "44 BC"; empty, "present"
+  and 9999 are open. A shape's last date is included: it ends the day, month or year after (CShapes' Austria-Hungary
+  to 11 November 1918, Austria from the 12th).
+- **How.** At every moment where shapes begin or end, in order: the beginning shapes' outlines are put in then
+  (following borders already there, D120), their land given to their countries (by name, created if new); the land
+  of the ending shapes that no shape of the time covers becomes nobody's. A shape's land is kept as the parcels it
+  had when put in, followed through later splits, so no outline is put in twice. The earliest shapes can be the
+  starting map. One command, one undo step; the timeline widens to the dates.
+- **Tests.** `geojson-import.test.ts` (dates in every form, BC, open ends, the day after an end, the properties
+  guessed, shapes with unreadable dates left out; a country splitting in 1918 and another there from 1950 to the end
+  of 1990, the earliest as the starting map, one undo step); `e2e/workflows` 'Importing a dataset that dates each
+  shape' (the properties found by the dialog, the history at once, undone in one step).
+
 ### D122. A shot of the whole history in one click (improvement pass)
 
 - **What.** "+ Whole history" beside "+ Shot" makes a timelapse of everything that happens on the map: from the first
@@ -125,19 +145,29 @@ Follows from D2. The test drives the real interface exactly as a person would.
   it a few kilometres away. Measured with today's 242 countries and a second map whose borders lie up to 3 km from
   them (`bench/import.bench.ts`), the second map multiplied the parcels by ten (1,623 to 16,240, 13 s) with slivers
   between each border and its twin, and a third was refused (its borders could not be joined without crossing). Now
-  a border within a distance of one already on the map (3 km unless changed in the dialog; 0 keeps every line) is
-  taken as that border: each of its points within the distance becomes the border's own vertex, and between two
-  such points it follows the border's vertices (`Arrangement.followBorders`, the shortest run of borders no longer
-  than twice their distance). The same maps now add 11, 19 and 6 parcels, take 1.1, 2.4 and 0.9 s, and none is
-  refused. A shape that still cannot be joined to the borders around it is found by halves (the rest of the file goes
-  in), tried as drawn, and otherwise left out and named, instead of the whole file failing.
+  a border within a distance of one already on the map (5 km unless changed in the dialog; 0 keeps every line) is
+  taken as that border: each of its points within the distance goes onto the border (its nearest vertex, or away
+  from vertices the nearest point of a segment: long straight borders have few vertices), and between two such
+  points it follows the border's vertices (`Arrangement.followBorders`, the shortest run of borders no longer than
+  twice their distance). A small island (hardly larger than the distance) is taken whole: the island already there
+  that most of its points are near, its coast walked round the same way; point by point, its points could fall out
+  of order and turn it inside out (three world maps put through the dialog: one of Kiribati's atolls became the
+  rest of the world). Any outline that following would turn round, or shrink or swell more than twofold, is kept
+  as drawn. The benchmark's maps now add 6, 4 and 4 parcels in under a second each; none is refused. Maps
+  differing more (up to 3.5 km, empires joined) add 279 and 217 parcels in about 2 s each, where 3 km would add
+  2,578 and 2,498: so 5 km is the default. A shape that still cannot be joined to the borders around it is found
+  by halves (the rest of the file goes in), tried as drawn, and otherwise left out and named, instead of the whole
+  file failing. Each outline's parcels are read as soon as it is in and followed through later splits (a last pass
+  putting every outline in again, to read them, could itself fail on such maps: the second of those three stopped
+  the dialog).
 - **Tests.** `geojson-import.test.ts` (polygons, multipolygons and holes read, the closing point dropped; the name
   property guessed; colours; shapes without an area left out; files that are not GeoJSON refused; years from file
   names, BC included; three maps of three dates making the history between them: countries going on by name without
   regard to case, land changing hands, a country dropping out leaving nobody's land, a new one appearing, one undo
   step each; ten of today's countries drawn again up to 2 km apart with two joined: under 15% more parcels, against
-  over three times as many without following, the capitals' holders right, Liechtenstein kept; a shape too small to
-  be an area left out and named); `e2e/workflows` 'Importing borders' (two files chosen in the dialog, sorted by the years in their names,
+  over three times as many without following, the capitals' holders right, Liechtenstein kept, the atolls of
+  Kiribati, the Marshall Islands and Tuvalu neither inside out nor lost; a shape too small to be an area left out and
+  named); `e2e/workflows` 'Importing borders' (two files chosen in the dialog, sorted by the years in their names,
   the first the starting map, names from NAME; who holds what before and after the second date; one country going on;
   undone a file at a time).
 

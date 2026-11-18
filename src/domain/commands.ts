@@ -2,7 +2,7 @@
 // in-memory world and returns the exact row diffs to save (and to undo). Commands never draw anything.
 import { World, Tx, newId } from '../world-model/world.ts';
 import {
-  Engine, canonicalFaces, leafDescendants, hashFaces, parseJSON, effectTime, eventStart, type Resolution, type TransitionSpec, type AnnexIntent, type PlaceIntent, type RenameIntent, type ShapeIntent, type RelateIntent, type SystemIntent, type LaneIntent, laneKey, type FeatureAnimStyle, isFeatureAnim,
+  Engine, canonicalFaces, leafDescendants, childrenMap, hashFaces, parseJSON, effectTime, eventStart, type Resolution, type TransitionSpec, type AnnexIntent, type PlaceIntent, type RenameIntent, type ShapeIntent, type RelateIntent, type SystemIntent, type LaneIntent, laneKey, type FeatureAnimStyle, isFeatureAnim,
 } from '../temporal-engine/engine.ts';
 import { type Instant, toStore, fromStore, NEG_INF, compare } from '../core-time/index.ts';
 import {
@@ -303,6 +303,19 @@ export function setLayerClipToLand(world: World, id: string, clip: boolean): Com
   if (!layer) throw new Error('That layer no longer exists.');
   const style = { ...parseJSON<Record<string, unknown>>(layer.style, {}), clipToLand: clip };
   return run(world, clip ? `End "${layer.name}" at the coast` : `Let "${layer.name}" cover the sea`, (tx) => tx.patch('layer', id, { style: JSON.stringify(style) }));
+}
+
+/**
+ * How strongly a territory layer's colours cover what is under them (0 to 1) and how wide its borders are (in
+ * pixels at 1920 wide); one undo step. (The renderer and exports always read them; now they can be changed.)
+ */
+export function setLayerLook(world: World, id: string, patch: { fillOpacity?: number; borderWidth?: number }): CommandResult {
+  const layer = world.get('layer', id);
+  if (!layer) throw new Error('That layer no longer exists.');
+  const style = parseJSON<Record<string, unknown>>(layer.style, {});
+  if (patch.fillOpacity !== undefined) { if (!Number.isFinite(patch.fillOpacity)) throw new Error('Opacity must be a number.'); style.fillOpacity = Math.round(Math.max(0, Math.min(1, patch.fillOpacity)) * 100) / 100; }
+  if (patch.borderWidth !== undefined) { if (!Number.isFinite(patch.borderWidth)) throw new Error('Border width must be a number.'); style.borderWidth = Math.round(Math.max(0, Math.min(20, patch.borderWidth)) * 100) / 100; }
+  return run(world, `Restyle "${layer.name}"`, (tx) => tx.patch('layer', id, { style: JSON.stringify(style) }));
 }
 
 /**
@@ -918,92 +931,24 @@ export function importTerritories(world: World, engine: Engine, o: { spaceId: st
   const mode: EditMode = start ? { kind: 'correct', t: NEG_INF } : { kind: 'change', t: o.t };
   checkTarget(world, { spaceId: o.spaceId, layerId: o.layerId, mode });
   if (!o.countries.length) throw new Error('The map holds no countries to import.');
-  // Borders this close to ones already on the map are the same borders, drawn again (two datasets digitise a
-  // border a few kilometres apart): the new ones follow them, so no slivers of parcels are left between.
-  const radiusKm = (world.get('map_space', o.spaceId)?.radius_m ?? 6371008.8) / 1000;
-  const tol = Math.max(0, o.matchKm ?? 3) / radiusKm;
+  const tol = matchTolerance(world, o.spaceId, o.matchKm);
   return run(world, o.label ?? `Import ${o.countries.length} ${o.countries.length === 1 ? 'country' : 'countries'}`, (tx) => {
     // Who holds what at that date, before the new outlines cut the parcels.
     const before = o.replace ? engine.partitionState(o.spaceId, o.layerId, o.t) : null;
-    const existing = new Map(world.all('entity').filter((e) => e.type_id === 'polity' || e.type_id === 'faction').map((e) => [e.name.toLowerCase(), e.id]));
-    const rings: Vec3[][] = [];
-    const parts: Array<Array<{ outer: number; holes: number[] }>> = [];
-    for (const c of o.countries) {
-      const polys: Array<{ outer: number; holes: number[] }> = [];
-      for (const poly of c.polygons) {
-        const outer = ringFromMapPoints(poly[0], 1);
-        if (!outer) continue;
-        const entry = { outer: rings.push(outer) - 1, holes: [] as number[] };
-        for (const h of poly.slice(1)) { const hr = ringFromMapPoints(h, 1); if (hr) entry.holes.push(rings.push(hr) - 1); }
-        polys.push(entry);
-      }
-      parts.push(polys);
-    }
+    const placed = placeOutlines(tx, o.spaceId, o.countries, tol, o.snap ?? 1e-8);
     const arr = world.arrangement(o.spaceId);
-    // Each outline along the borders already there (kept as drawn where that leaves too few points for an area).
-    const use = rings.map((r) => { if (!tol) return r; const f = arr.followBorders(r, tol, true); return f.length >= 3 ? f : r; });
-    const snap = o.snap ?? 1e-8;
-    let paths: Array<PathStep[] | null> = rings.map(() => null);
-    const tryInsert = (idx: number[]): boolean => {
-      try {
-        const ps = tx.kernel(o.spaceId, (a) => a.insertPaths(idx.map((i) => use[i]), { closed: true, snap }));
-        idx.forEach((i, k) => { paths[i] = ps[k]; });
-        return true;
-      } catch (e) {
-        if (!(e instanceof TopologyError)) throw e;
-        return false;
-      }
-    };
-    const all = rings.map((_, i) => i), failed = new Set<number>();
-    if (all.length && !tryInsert(all)) {
-      // An outline that cannot be joined to the borders around it: found by halves (tried as drawn, too) and left
-      // out, the rest go in; then every outline's path through the segments as they are at the end.
-      const halves = (idx: number[]): void => {
-        if (!idx.length || tryInsert(idx)) return;
-        if (idx.length === 1) {
-          const i = idx[0];
-          if (use[i] !== rings[i]) { use[i] = rings[i]; if (tryInsert(idx)) return; }
-          failed.add(i);
-          return;
-        }
-        halves(idx.slice(0, idx.length >> 1));
-        halves(idx.slice(idx.length >> 1));
-      };
-      halves(all);
-      const good = all.filter((i) => !failed.has(i));
-      paths = rings.map(() => null);
-      if (good.length) {
-        const ps = tx.kernel(o.spaceId, (a) => a.insertPaths(good.map((i) => use[i]), { closed: true, snap }));
-        good.forEach((i, k) => { paths[i] = ps[k]; });
-      }
-    }
-    const placed = all.filter((i) => paths[i]);
-    const leftOf = new Map<number, Set<number>>();
-    if (placed.length) arr.facesLeftOfMany(placed.map((i) => paths[i]!)).forEach((f, k) => leftOf.set(placed[k], f));
-    const insideOf = (i: number): Set<number> => { const p = paths[i]; if (!p) return new Set(); return arr.isSimpleCycle(p) && arr.separatesFaces(p) ? leftOf.get(i)! : arr.facesWoundBy(p); };
+    const owners = ownersByName(world);
     const items: Array<{ leaves: Iterable<number>; value: string | null }> = [];
-    const entities: string[] = [], covered = new Set<number>(), skipped: string[] = [];
+    const entities: string[] = [], covered = new Set<number>();
     let created = 0;
     o.countries.forEach((c, k) => {
-      const faces = new Set<number>();
-      for (const p of parts[k]) {
-        if (failed.has(p.outer)) continue;
-        const holes = new Set<number>();
-        for (const h of p.holes) for (const f of leafDescendants(arr, insideOf(h))) holes.add(f);
-        for (const f of leafDescendants(arr, insideOf(p.outer))) if (!holes.has(f) && !covered.has(f)) faces.add(f);
-      }
-      if (parts[k].some((p) => failed.has(p.outer) || p.holes.some((h) => failed.has(h)))) skipped.push(c.name);
-      if (!faces.size) return;
-      let id = existing.get(c.name.toLowerCase());
-      if (!id) {
-        id = newId('ent');
-        tx.insert('entity', { id, type_id: 'polity', branch_id: MAIN_BRANCH, name: c.name, color: c.color ?? suggestColor(world), notes: '', created_seq: world.nextSeq('entity'), style: '{}', group_id: '' });
-        existing.set(c.name.toLowerCase(), id);
-        created++;
-      }
-      if (!entities.includes(id)) entities.push(id);
+      const faces = [...placed.faces[k]].filter((f) => !covered.has(f));
+      if (!faces.length) return;
+      const r = owners.idFor(tx, c);
+      if (r.created) created++;
+      if (!entities.includes(r.id)) entities.push(r.id);
       for (const f of faces) covered.add(f);
-      items.push({ leaves: faces, value: id });
+      items.push({ leaves: faces, value: r.id });
     });
     // Land the map does not show: nobody's from that date.
     let cleared = 0;
@@ -1013,8 +958,158 @@ export function importTerritories(world: World, engine: Engine, o: { spaceId: st
       if (gone.size) { items.push({ leaves: gone, value: null }); cleared = gone.size; }
     }
     if (items.length) writeAssignments(tx, engine, o.spaceId, o.layerId, mode, items);
-    return { entities, created, cleared, skipped };
+    return { entities, created, cleared, skipped: placed.skipped };
   });
+}
+
+/**
+ * Territories from a dataset that dates each of its shapes (as CShapes does, D123): a shape is its country's
+ * land from its first date to its last. At every date where shapes begin or end, those beginning take their land
+ * (their outlines put in then, following the borders already there) and the land of those ending that no shape
+ * of the time covers becomes nobody's. The earliest shapes can be the starting map. One undo step for it all.
+ */
+export function importDatedTerritories(world: World, engine: Engine, o: { spaceId: string; layerId: string; shapes: Array<CountryToAdd & { from: Instant; to: Instant }>; earliestAsStart: boolean; label?: string; snap?: number; matchKm?: number }): CommandResult<{ entities: string[]; created: number; dates: number; skipped: string[]; from: Instant | null; to: Instant | null }> {
+  checkTarget(world, { spaceId: o.spaceId, layerId: o.layerId, mode: { kind: 'correct', t: NEG_INF } });
+  if (!o.shapes.length) throw new Error('The file holds no dated shapes to import.');
+  const tol = matchTolerance(world, o.spaceId, o.matchKm);
+  // Every moment where something begins or ends, in order.
+  const key = (t: Instant) => `${t.day}|${t.ms}`;
+  const moments = new Map<string, Instant>();
+  for (const sh of o.shapes) { moments.set(key(sh.from), sh.from); if (Number.isFinite(sh.to.day)) moments.set(key(sh.to), sh.to); }
+  const times = [...moments.values()].sort(compare);
+  const finite = times.filter((t) => Number.isFinite(t.day));
+  const earliest = finite[0] ?? null;
+  return run(world, o.label ?? `Import ${o.shapes.length} dated ${o.shapes.length === 1 ? 'shape' : 'shapes'}`, (tx) => {
+    const arr = world.arrangement(o.spaceId);
+    const owners = ownersByName(world);
+    const faces: Array<Set<number> | null> = o.shapes.map(() => null);
+    const entities: string[] = [], skipped: string[] = [];
+    let created = 0, dates = 0;
+    for (const t of times) {
+      const starting = o.shapes.map((sh, i) => [sh, i] as const).filter(([sh]) => compare(sh.from, t) === 0);
+      if (starting.length) {
+        const placed = placeOutlines(tx, o.spaceId, starting.map(([sh]) => sh), tol, o.snap ?? 1e-8);
+        starting.forEach(([, i], k) => { faces[i] = placed.faces[k]; });
+        for (const n of placed.skipped) if (!skipped.includes(n)) skipped.push(n);
+      }
+      const kids = childrenMap(arr);
+      const now = (i: number) => leafDescendants(arr, faces[i] ?? [], kids);
+      // The land of every shape of the time.
+      const covered = new Set<number>();
+      o.shapes.forEach((sh, i) => { if (faces[i] && compare(sh.from, t) <= 0 && compare(t, sh.to) < 0) for (const f of now(i)) covered.add(f); });
+      const items: Array<{ leaves: Iterable<number>; value: string | null }> = [], taken = new Set<number>();
+      for (const [sh, i] of starting) {
+        const land = [...now(i)].filter((f) => !taken.has(f));
+        if (!land.length) continue;
+        const r = owners.idFor(tx, sh);
+        if (r.created) created++;
+        if (!entities.includes(r.id)) entities.push(r.id);
+        for (const f of land) taken.add(f);
+        items.push({ leaves: land, value: r.id });
+      }
+      const gone = new Set<number>();
+      o.shapes.forEach((sh, i) => { if (faces[i] && compare(sh.to, t) === 0) for (const f of now(i)) if (!covered.has(f)) gone.add(f); });
+      if (gone.size) items.push({ leaves: gone, value: null });
+      if (!items.length) continue;
+      dates++;
+      const start = !Number.isFinite(t.day) || (o.earliestAsStart && earliest && compare(t, earliest) === 0 && !times.some((x) => !Number.isFinite(x.day)));
+      writeAssignments(tx, engine, o.spaceId, o.layerId, start ? { kind: 'correct', t: NEG_INF } : { kind: 'change', t }, items);
+    }
+    return { entities, created, dates, skipped, from: earliest, to: finite.length ? finite[finite.length - 1] : null };
+  });
+}
+
+/** How close (radians) a border must be to one already on the map to be taken as it (imports, D120): `km` on this map's planet, 5 km unless given. */
+function matchTolerance(world: World, spaceId: string, km?: number): number {
+  const radiusKm = (world.get('map_space', spaceId)?.radius_m ?? 6371008.8) / 1000;
+  return Math.max(0, km ?? 5) / radiusKm;
+}
+
+/** Countries and factions by name (case ignored), and a new country for a name not yet in the project. */
+function ownersByName(world: World): { idFor: (tx: Tx, c: { name: string; color?: string }) => { id: string; created: boolean } } {
+  const existing = new Map(world.all('entity').filter((e) => e.type_id === 'polity' || e.type_id === 'faction').map((e) => [e.name.toLowerCase(), e.id]));
+  return {
+    idFor(tx, c) {
+      const known = existing.get(c.name.toLowerCase());
+      if (known) return { id: known, created: false };
+      const id = newId('ent');
+      tx.insert('entity', { id, type_id: 'polity', branch_id: MAIN_BRANCH, name: c.name, color: c.color ?? suggestColor(world), notes: '', created_seq: world.nextSeq('entity'), style: '{}', group_id: '' });
+      existing.set(c.name.toLowerCase(), id);
+      return { id, created: true };
+    },
+  };
+}
+
+/**
+ * Puts the outlines of countries into the parcel map and gives each its leaf parcels (its pieces less their
+ * holes; a parcel goes to the first country covering it). Borders within `tol` of borders already there follow
+ * them (D120: no slivers between a border and the same border drawn again). An outline that cannot be joined to
+ * the borders around it is found by halves (the others go in), tried as drawn, and otherwise left out: its
+ * country is named in `skipped`.
+ */
+function placeOutlines(tx: Tx, spaceId: string, countries: CountryToAdd[], tol: number, snap: number): { faces: Array<Set<number>>; skipped: string[] } {
+  const world = tx.world;
+  const rings: Vec3[][] = [];
+  const parts: Array<Array<{ outer: number; holes: number[] }>> = [];
+  for (const c of countries) {
+    const polys: Array<{ outer: number; holes: number[] }> = [];
+    for (const poly of c.polygons) {
+      const outer = ringFromMapPoints(poly[0], 1);
+      if (!outer) continue;
+      const entry = { outer: rings.push(outer) - 1, holes: [] as number[] };
+      for (const h of poly.slice(1)) { const hr = ringFromMapPoints(h, 1); if (hr) entry.holes.push(rings.push(hr) - 1); }
+      polys.push(entry);
+    }
+    parts.push(polys);
+  }
+  const arr = world.arrangement(spaceId);
+  // Each outline along the borders already there (kept as drawn where that leaves too few points for an area).
+  const use = rings.map((r) => { if (!tol) return r; const f = arr.followBorders(r, tol, true); return f.length >= 3 ? f : r; });
+  // The parcels inside each outline, worked out as soon as it is in (and followed through later splits below):
+  // an outline put in by itself, when the whole set could not go in at once, is never put in again.
+  const inside: Array<Set<number> | null> = rings.map(() => null);
+  const tryInsert = (idx: number[]): boolean => {
+    try {
+      const ps = tx.kernel(spaceId, (a) => a.insertPaths(idx.map((i) => use[i]), { closed: true, snap }));
+      const lefts = arr.facesLeftOfMany(ps);
+      idx.forEach((i, k) => { const p = ps[k]; inside[i] = arr.isSimpleCycle(p) && arr.separatesFaces(p) ? lefts[k] : arr.facesWoundBy(p); });
+      return true;
+    } catch (e) {
+      if (!(e instanceof TopologyError)) throw e;
+      return false;
+    }
+  };
+  const all = rings.map((_, i) => i), failed = new Set<number>();
+  if (all.length && !tryInsert(all)) {
+    const halves = (idx: number[]): void => {
+      if (!idx.length || tryInsert(idx)) return;
+      if (idx.length === 1) {
+        const i = idx[0];
+        if (use[i] !== rings[i]) { use[i] = rings[i]; if (tryInsert(idx)) return; }
+        failed.add(i);
+        return;
+      }
+      halves(idx.slice(0, idx.length >> 1));
+      halves(idx.slice(idx.length >> 1));
+    };
+    halves(all);
+  }
+  const kids = childrenMap(arr);
+  const insideOf = (i: number): Set<number> => leafDescendants(arr, inside[i] ?? [], kids);
+  const covered = new Set<number>(), skipped: string[] = [];
+  const faces = countries.map((c, k) => {
+    const mine = new Set<number>();
+    for (const p of parts[k]) {
+      if (failed.has(p.outer)) continue;
+      const holes = new Set<number>();
+      for (const h of p.holes) for (const f of insideOf(h)) holes.add(f);
+      for (const f of insideOf(p.outer)) if (!holes.has(f) && !covered.has(f)) mine.add(f);
+    }
+    if (parts[k].some((p) => failed.has(p.outer) || p.holes.some((h) => failed.has(h)))) skipped.push(c.name);
+    for (const f of mine) covered.add(f);
+    return mine;
+  });
+  return { faces, skipped };
 }
 
 // ---------------------------------------------------------------- locked countries (D87)

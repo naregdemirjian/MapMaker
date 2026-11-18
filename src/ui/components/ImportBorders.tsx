@@ -1,10 +1,11 @@
 // "Import borders from files" (improvement B, D120): maps of borders as GeoJSON, each of its date, given to the
 // map's territory layer: the first as the starting map (or from its date), the others as the changes at theirs.
 // Countries go on from one map to the next by name; land a map does not show becomes nobody's at its date.
+// Or (D123) a dataset that dates each of its shapes (from and to properties, as CShapes does): the history at once.
 import { useState } from 'react';
 import { useStore } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
-import { readGeoJSON, guessNameKey, countriesOf, yearOfFileName, type ImportedFile } from '../../domain/geojson-import.ts';
+import { readGeoJSON, guessNameKey, countriesOf, yearOfFileName, guessDateKeys, datedShapesOf, type ImportedFile } from '../../domain/geojson-import.ts';
 import { gregorian, NEG_INF, type Instant } from '../../core-time/index.ts';
 import { DateField, fmt } from './Panels.tsx';
 
@@ -20,9 +21,14 @@ export function ImportBordersDialog({ onClose }: { onClose: () => void }) {
   const [replace, setReplace] = useState(true);
   // Borders within this distance of borders already on the map are taken as the same border (two datasets
   // draw a border a few kilometres apart; following the one there leaves no slivers between them).
-  const [matchKm, setMatchKm] = useState(3);
+  const [matchKm, setMatchKm] = useState(5);
   const [progress, setProgress] = useState<string | null>(null);
+  // Each shape's own dates (D123): the properties holding them, and whether to use them.
+  const [fromKey, setFromKey] = useState('');
+  const [toKey, setToKey] = useState('');
+  const [dated, setDated] = useState(false);
   const keys = [...new Set(files.flatMap((f) => f.file.keys))].sort();
+  const datedShapes = dated && nameKey && fromKey ? files.map((f) => datedShapesOf(f.file, nameKey, fromKey, toKey || null, colorKey || null)) : null;
 
   const read = async (list: FileList | null) => {
     if (!list?.length) return;
@@ -38,12 +44,34 @@ export function ImportBordersDialog({ onClose }: { onClose: () => void }) {
     out.sort((a, b) => (a.t?.day ?? Infinity) - (b.t?.day ?? Infinity));
     setFiles(out);
     if (!nameKey && out.length) setNameKey(guessNameKey(out[0].file) ?? '');
+    // A file that dates its shapes: their dates are used unless turned off.
+    if (!fromKey && out.length) { const d = guessDateKeys(out[0].file); if (d.from) { setFromKey(d.from); setToKey(d.to ?? ''); setDated(true); } }
+  };
+
+  // A dataset dating each shape: all of its shapes at once, one undo step.
+  const goDated = async () => {
+    const layerId = s.layerId!;
+    const shapes = (datedShapes ?? []).flatMap((d) => d.shapes);
+    if (!shapes.length) { s.toast('No shape of these files has dates that can be read.', 'error'); return; }
+    setProgress(`Importing ${shapes.length} dated shapes…`);
+    await new Promise((r) => setTimeout(r, 30));
+    const r = s.execute((wd, en) => cmd.importDatedTerritories(wd, en, { spaceId: s.spaceId, layerId, shapes, earliestAsStart: firstAsStart, matchKm, label: `Import ${files.map((f) => f.name).join(', ')} (dated shapes)` }));
+    setProgress(null);
+    if (!r) return;
+    s.toast(`Imported ${shapes.length} dated shapes: ${r.entities.length} countries (${r.created} new), ${r.dates} ${r.dates === 1 ? 'date' : 'dates'} of change.`);
+    if (r.skipped.length) s.toast(`Some shapes could not be joined to the borders around them and were left out, of: ${r.skipped.slice(0, 12).join(', ')}${r.skipped.length > 12 ? ` and ${r.skipped.length - 12} more` : ''}. Try them again with a larger or smaller matching distance.`, 'error');
+    if (r.from && r.to) {
+      const lo = r.from.day / 365.2425 + 1970, hi = r.to.day / 365.2425 + 1970, pad = Math.max(5, (hi - lo) * 0.1);
+      s.set({ timeline: { start: Math.min(s.timeline.start, lo - pad), end: Math.max(s.timeline.end, hi + pad) } });
+    }
+    onClose();
   };
 
   const go = async () => {
     const layerId = s.layerId;
     if (!layerId) { s.toast('This map has no territory layer to draw on.', 'error'); return; }
     if (!nameKey) { s.toast('Choose the property that holds the names.', 'error'); return; }
+    if (dated && fromKey) { await goDated(); return; }
     const todo = files.map((f, i) => ({ ...f, t: i === 0 && firstAsStart ? NEG_INF : f.t ?? s.time }));
     let made = 0, countries = 0;
     const skipped: string[] = [];
@@ -86,7 +114,7 @@ export function ImportBordersDialog({ onClose }: { onClose: () => void }) {
             {files.map((f, i) => (
               <tr key={`${f.name}-${i}`} data-testid="import-borders-file">
                 <td>{f.name}<div className="muted">{f.file.features.length} shapes{f.file.skipped ? `, ${f.file.skipped} without an area left out` : ''}</div></td>
-                <td>{i === 0 && firstAsStart ? <span className="muted">the starting map</span> : <DateField value={f.t} onChange={(t) => setFiles(files.map((x, k) => (k === i ? { ...x, t } : x)).sort((a, b) => (a.t?.day ?? Infinity) - (b.t?.day ?? Infinity)))} placeholder="Its date" testId={`import-borders-date-${i}`} />}</td>
+                <td>{dated && fromKey ? <span className="muted">dates of its own shapes</span> : i === 0 && firstAsStart ? <span className="muted">the starting map</span> : <DateField value={f.t} onChange={(t) => setFiles(files.map((x, k) => (k === i ? { ...x, t } : x)).sort((a, b) => (a.t?.day ?? Infinity) - (b.t?.day ?? Infinity)))} placeholder="Its date" testId={`import-borders-date-${i}`} />}</td>
                 <td><button className="small danger" onClick={() => setFiles(files.filter((_, k) => k !== i))} title="Leave this file out">×</button></td>
               </tr>))}
           </tbody></table>
@@ -98,16 +126,29 @@ export function ImportBordersDialog({ onClose }: { onClose: () => void }) {
               <option value="">(colours of their own)</option>{keys.map((k) => <option key={k} value={k}>{k}</option>)}
             </select></label>
           </div>
-          {nameKey && <p className="muted" data-testid="import-borders-summary">{files.map((f) => { const c = countriesOf(f.file, nameKey); return `${f.name}: ${c.countries.length} countries${c.unnamed ? ` (${c.unnamed} shapes without a name left out)` : ''}`; }).join(' · ')}</p>}
-          <label className="check"><input type="checkbox" checked={firstAsStart} onChange={(e) => setFirstAsStart(e.target.checked)} data-testid="import-borders-first-start" /> The first map is the starting map (the countries exist from the beginning)</label>
-          <label className="check"><input type="checkbox" checked={replace} onChange={(e) => setReplace(e.target.checked)} data-testid="import-borders-replace" /> Land a map does not show becomes nobody's at its date</label>
+          <label className="check"><input type="checkbox" checked={dated} onChange={(e) => { setDated(e.target.checked); if (e.target.checked && !fromKey) { const d = guessDateKeys(files[0].file); setFromKey(d.from ?? ''); setToKey(d.to ?? ''); } }} data-testid="import-borders-dated" /> Each shape has its own dates (a dataset of borders over time, such as CShapes)</label>
+          {dated && <div className="two">
+            <label>From (its first day or year)<select value={fromKey} onChange={(e) => setFromKey(e.target.value)} data-testid="import-borders-from">
+              <option value="">(choose)</option>{keys.map((k) => <option key={k} value={k}>{k}</option>)}
+            </select></label>
+            <label>To (its last; empty: still there)<select value={toKey} onChange={(e) => setToKey(e.target.value)} data-testid="import-borders-to">
+              <option value="">(none: to the end)</option>{keys.map((k) => <option key={k} value={k}>{k}</option>)}
+            </select></label>
+          </div>}
+          {nameKey && (datedShapes ? (() => {
+            const all = datedShapes.flatMap((d) => d.shapes), finite = all.flatMap((x) => [x.from, x.to]).filter((t) => Number.isFinite(t.day)).sort((a, b) => a.day - b.day);
+            const undated = datedShapes.reduce((n, d) => n + d.undated, 0), unnamed = datedShapes.reduce((n, d) => n + d.unnamed, 0);
+            return <p className="muted" data-testid="import-borders-summary">{all.length} dated shapes of {new Set(all.map((x) => x.name.toLowerCase())).size} countries{finite.length ? `, from ${fmt(finite[0])} to ${fmt(finite[finite.length - 1])}` : ''}{undated ? ` (${undated} with dates that cannot be read left out)` : ''}{unnamed ? ` (${unnamed} without a name left out)` : ''}.</p>;
+          })() : <p className="muted" data-testid="import-borders-summary">{files.map((f) => { const c = countriesOf(f.file, nameKey); return `${f.name}: ${c.countries.length} countries${c.unnamed ? ` (${c.unnamed} shapes without a name left out)` : ''}`; }).join(' · ')}</p>)}
+          <label className="check"><input type="checkbox" checked={firstAsStart} onChange={(e) => setFirstAsStart(e.target.checked)} data-testid="import-borders-first-start" /> {dated ? 'The earliest shapes are the starting map (their countries exist from the beginning)' : 'The first map is the starting map (the countries exist from the beginning)'}</label>
+          {!dated && <label className="check"><input type="checkbox" checked={replace} onChange={(e) => setReplace(e.target.checked)} data-testid="import-borders-replace" /> Land a map does not show becomes nobody's at its date</label>}
           <label title="Two maps rarely draw a border along exactly the same line. A border this close to one already on the map is taken as the same border and follows it, so no slivers of land are left between the two. 0 keeps every line as the file draws it.">Borders within<input type="number" min={0} max={50} step={0.5} value={matchKm} onChange={(e) => setMatchKm(Math.max(0, Math.min(50, Number(e.target.value) || 0)))} data-testid="import-borders-match" style={{ width: '5em', margin: '0 0.4em' }} />km of one already on the map are the same border</label>
-          <p className="muted">On the political layer of this map, one undo step for each file. Files without a date take the date viewed ({fmt(s.time)}).</p>
+          <p className="muted">{dated ? 'On the political layer of this map, one undo step for all of it: each shape is its country\'s land from its first date to its last, and land no shape of the time covers is nobody\'s.' : `On the political layer of this map, one undo step for each file. Files without a date take the date viewed (${fmt(s.time)}).`}</p>
         </>}
         {progress && <p className="muted" data-testid="import-borders-progress">{progress}</p>}
         <div className="modal-actions">
           <button onClick={onClose} disabled={!!progress}>Cancel</button>
-          <button className="primary" disabled={!files.length || !nameKey || !!progress} onClick={() => void go()} data-testid="import-borders-go">Import {files.length || ''} {files.length === 1 ? 'map' : 'maps'}</button>
+          <button className="primary" disabled={!files.length || !nameKey || !!progress || (dated && !fromKey)} onClick={() => void go()} data-testid="import-borders-go">{dated ? 'Import the dated shapes' : `Import ${files.length || ''} ${files.length === 1 ? 'map' : 'maps'}`}</button>
         </div>
       </div>
     </div>

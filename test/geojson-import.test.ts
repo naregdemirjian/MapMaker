@@ -86,7 +86,8 @@ test('the same borders drawn again a few kilometres apart follow those already o
   const { join } = await import('node:path');
   const { decodeCountries } = await import('../src/domain/countries.ts');
   const all = decodeCountries(JSON.parse(readFileSync(join(import.meta.dirname, '..', 'data', 'natural-earth', 'countries-50m.json'), 'utf8')));
-  const names = ['France', 'Spain', 'Andorra', 'Belgium', 'Luxembourg', 'Germany', 'Switzerland', 'Italy', 'Austria', 'Liechtenstein'];
+  // (With atolls of the Pacific: small rings whose points, followed one by one, could fall out of order.)
+  const names = ['France', 'Spain', 'Andorra', 'Belgium', 'Luxembourg', 'Germany', 'Switzerland', 'Italy', 'Austria', 'Liechtenstein', 'Kiribati', 'Marshall Islands', 'Tuvalu'];
   const base = names.map((n) => { const c = all.find((x) => x.name === n)!; return { name: n, polygons: c.polygons }; });
   // Every point moved by up to about 2 km, smoothly (neighbours' shared borders move together, as in another dataset).
   const moved = (km: number) => base.map((c) => ({ name: c.name, polygons: c.polygons.map((p) => p.map((r) => r.map(([lon, lat]) => [lon + (km / 111) * Math.sin(lat * 0.9 + lon * 0.4) / Math.cos((lat * Math.PI) / 180), lat + (km / 111) * Math.cos(lon * 0.7 - lat * 0.3)] as [number, number]))) }));
@@ -114,6 +115,15 @@ test('the same borders drawn again a few kilometres apart follow those already o
   assert.deepEqual([a.owner(13.4, 52.52, Y(1800)), a.owner(13.4, 52.52, Y(1900))], ['Germany', 'Greater Germany'], 'Berlin');
   assert.deepEqual([a.owner(16.37, 48.21, Y(1800)), a.owner(16.37, 48.21, Y(1900))], ['Austria', 'Greater Germany'], 'Vienna');
   assert.equal(a.owner(9.52, 47.14, Y(1900)), 'Liechtenstein', 'a country of a few kilometres keeps its land');
+  // No atoll turned inside out: the open sea is nobody's, and each atoll country keeps an island of its own.
+  assert.deepEqual([a.owner(-30, 0, Y(1900)), a.owner(160, -30, Y(1900))], [null, null], 'the open sea stays nobody\'s');
+  for (const n of ['Kiribati', 'Marshall Islands', 'Tuvalu']) {
+    const c = base.find((x) => x.name === n)!;
+    const ring = c.polygons.map((p) => p[0]).sort((x, y) => y.length - x.length)[0];
+    const [lon, lat] = ring.reduce(([x, y], [u, v]) => [x + u / ring.length, y + v / ring.length], [0, 0]);
+    const near = [0, 0.02, -0.02].flatMap((d) => [a.owner(lon + d, lat, Y(1900)), a.owner(lon, lat + d, Y(1900))]);
+    assert.ok(near.every((o) => o === null || o === n), `${n}: only itself or the sea around its largest atoll (${near.join(', ')})`);
+  }
   // Without following them, each border drawn again leaves slivers between the two.
   const b = run(0);
   assert.ok(b.second > a.second * 3, `slivers without following (${b.second} parcels against ${a.second})`);
@@ -126,4 +136,61 @@ test('the same borders drawn again a few kilometres apart follow those already o
   const r = cmd.importTerritories(world, engine, { spaceId: space, layerId: layer, t: NEG_INF, replace: true, countries: [{ name: 'Westmark', polygons: [[box(0, 40, 10, 50).slice(0, 4) as Array<[number, number]>]] }, tiny] });
   assert.deepEqual(r.result.skipped, ['Speck']);
   assert.equal(engine.valueAtPoint(space, layer, lonLatToVec(5, 45), Y(1900)) !== null, true, 'the rest imported');
+});
+
+test('dates as datasets write them: years (BC negative), ISO dates, day.month.year, open ends; the properties holding them guessed', async () => {
+  const { dateOfValue, afterDate, guessDateKeys, datedShapesOf } = await import('../src/domain/geojson-import.ts');
+  const ymd = (v: unknown) => { const d = dateOfValue(v); if (!d) return d; const c = gregorian.toCivil(d.t); return [c.year, c.month, c.day, d.precision]; };
+  assert.deepEqual(ymd(1886), [1886, 1, 1, 'year']);
+  assert.deepEqual(ymd(-500), [-499, 1, 1, 'year'], '500 BC');
+  assert.deepEqual(ymd('1918-11-12'), [1918, 11, 12, 'day']);
+  assert.deepEqual(ymd('1918/11'), [1918, 11, 1, 'month']);
+  assert.deepEqual(ymd('12.11.1918'), [1918, 11, 12, 'day']);
+  assert.deepEqual(ymd('1990-10-03T00:00:00Z'), [1990, 10, 3, 'day']);
+  assert.deepEqual(ymd('44 BC'), [-43, 1, 1, 'year']);
+  for (const open of [null, '', 'present', 9999, '9999-12-31']) assert.equal(dateOfValue(open), null, `${open} is open`);
+  for (const bad of ['soon', '1918-13-01', 1918.5, {}]) assert.equal(dateOfValue(bad), undefined, `${JSON.stringify(bad)} is not a date`);
+  // An end includes its day, month or year: the change comes after it.
+  const after = (v: unknown) => { const c = gregorian.toCivil(afterDate(dateOfValue(v)!)); return [c.year, c.month, c.day]; };
+  assert.deepEqual(after('1918-11-11'), [1918, 11, 12]);
+  assert.deepEqual(after('1918-12'), [1919, 1, 1]);
+  assert.deepEqual(after(1918), [1919, 1, 1]);
+  const file = readGeoJSON(fc([
+    { props: { CNTRY_NAME: 'Westmark', GWSDATE: '1886-01-01', GWEDATE: '1918-11-11' }, rings: [box(0, 40, 10, 50)] },
+    { props: { CNTRY_NAME: 'Westmark', GWSDATE: '1918-11-12', GWEDATE: '2019-12-31' }, rings: [box(0, 40, 6, 50)] },
+    { props: { CNTRY_NAME: 'Eastmark', GWSDATE: '1918-11-12', GWEDATE: '' }, rings: [box(6, 40, 10, 50)] },
+    { props: { CNTRY_NAME: 'Nowhere', GWSDATE: 'soon', GWEDATE: '' }, rings: [box(20, 40, 21, 41)] },
+  ]));
+  assert.deepEqual(guessDateKeys(file), { from: 'GWSDATE', to: 'GWEDATE' });
+  assert.deepEqual(guessDateKeys(readGeoJSON(fc([{ props: { NAME: 'A' }, rings: [box(0, 0, 1, 1)] }]))), { from: null, to: null });
+  const d = datedShapesOf(file, 'CNTRY_NAME', 'GWSDATE', 'GWEDATE');
+  assert.equal(d.shapes.length, 3);
+  assert.equal(d.undated, 1);
+  assert.equal(d.shapes[2].to.day, Infinity, 'still there');
+});
+
+test('a dataset dating each shape becomes the history: shapes begin and end at their dates, land no shape of the time covers becomes nobody\'s; the earliest as the starting map; one undo step', async () => {
+  const { datedShapesOf } = await import('../src/domain/geojson-import.ts');
+  const world = new World();
+  const space = cmd.seedProject(world, 'Dated').result.spaceId;
+  const layer = world.all('layer')[0].id;
+  const engine = new Engine(world);
+  const owner = (lon: number, lat: number, y: number) => { const id = engine.valueAtPoint(space, layer, lonLatToVec(lon, lat), Y(y)); return id ? world.get('entity', id)!.name : null; };
+  const file = readGeoJSON(fc([
+    // Westmark whole until 1918, then its east is Eastmark; Northmark from 1950 to 1990 only.
+    { props: { name: 'Westmark', from: '1886-01-01', to: '1918-11-11' }, rings: [box(0, 40, 10, 50)] },
+    { props: { name: 'Westmark', from: '1918-11-12', to: '' }, rings: [box(0, 40, 6, 50)] },
+    { props: { name: 'Eastmark', from: '1918-11-12', to: '' }, rings: [box(6, 40, 10, 50)] },
+    { props: { name: 'Northmark', from: 1950, to: 1990 }, rings: [box(0, 55, 10, 60)] },
+  ]));
+  const { shapes } = datedShapesOf(file, 'name', 'from', 'to');
+  const r = cmd.importDatedTerritories(world, engine, { spaceId: space, layerId: layer, shapes, earliestAsStart: true });
+  assert.equal(r.result.created, 3);
+  assert.equal(r.result.dates, 4, 'the starting map (1886), 12 November 1918, 1950 and the start of 1991');
+  assert.deepEqual([owner(8, 45, 1800), owner(8, 45, 1910), owner(8, 45, 1930)], ['Westmark', 'Westmark', 'Eastmark'], 'the starting map holds from the beginning');
+  assert.deepEqual([owner(3, 45, 1910), owner(3, 45, 2020)], ['Westmark', 'Westmark']);
+  assert.deepEqual([owner(5, 57, 1940), owner(5, 57, 1960), owner(5, 57, 1990), owner(5, 57, 1991)], [null, 'Northmark', 'Northmark', null], 'from 1950 to the end of 1990');
+  world.applyDiffs(invertDiffs(r.diffs));
+  assert.equal(owner(8, 45, 1930), null, 'one undo step');
+  assert.ok(!world.all('entity').some((e) => e.name === 'Westmark'));
 });

@@ -113,6 +113,14 @@ try {
         const r = await B.runExport({ projectId: s.projectId, world: s.world, engine: s.engine, shot, shotName: `bench ${key}`, passNames: ['all'], scale: 1, frameRange: [100, 123] });
         out[key] = { msPerFrame: +((performance.now() - t) / r.frames).toFixed(0), frames: r.frames };
       }
+      // Videos (D121): the same 24 frames encoded as MP4 (H.264) at 1080p and 4K, and as WebM (VP9) at 1080p.
+      for (const [key, w, h, format] of [['video1080', 1920, 1080, 'mp4'], ['video4k', 3840, 2160, 'mp4'], ['webm1080', 1920, 1080, 'webm']] as const) {
+        if (!shots[0] || !want(key)) continue;
+        const shot = { ...JSON.parse(shots[0].settings), width: w, height: h, format, videoQuality: 'best' };
+        const t = performance.now();
+        const r = await B.runExport({ projectId: s.projectId, world: s.world, engine: s.engine, shot, shotName: `bench ${key}`, passNames: ['all'], scale: 1, frameRange: [100, 123] });
+        out[key] = { msPerFrame: +((performance.now() - t) / r.frames).toFixed(0), frames: r.frames, bytes: r.bytes };
+      }
       if (shots[0] && want('exportPasses')) {
         const shot = { ...JSON.parse(shots[0].settings), width: 1920, height: 1080 };
         const t = performance.now();
