@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useStore, store } from './store.ts';
 import { TopBar, Outliner, ToolBar, Inspector, Toasts } from './components/Panels.tsx';
 import { ShowDialog } from './components/ShowDialog.tsx';
+import { SeaLevelDialog } from './components/SeaLevelDialog.tsx';
 import { MapView } from './components/MapView.tsx';
 import { Timeline } from './components/Timeline.tsx';
 import { EditPrompt, NewWorldDialog, NewEventDialog, VersionsDialog, HealthDialog, DataSourcesDialog, ProjectPicker, OfflineNotice, AskDialog } from './components/Dialogs.tsx';
@@ -58,6 +59,7 @@ export function App() {
       {s.dialog === 'data-export' && <DataExportDialog />}
       {s.dialog === 'event-types' && <EventTypesDialog />}
       {s.dialog === 'show' && <ShowDialog />}
+      {s.dialog === 'sea-level' && <SeaLevelDialog />}
       {s.dialog === 'merge' && <MergeDialog />}
       {s.dialog === 'give-regions' && <GiveRegionsDialog />}
       {s.dialog === 'versions' && <VersionsDialog />}

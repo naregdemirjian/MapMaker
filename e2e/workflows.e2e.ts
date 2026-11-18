@@ -1923,7 +1923,7 @@ try {
       await fn();
       await page.getByTestId('show-dialog').getByRole('button', { name: 'Close' }).last().click();
     };
-    const terrain = () => page.evaluate(() => (window as any).__mapmaker.store.renderer.lastTerrain) as Promise<{ colours: boolean; relief: boolean; overTerritories: boolean }>;
+    const terrain = () => page.evaluate(() => (window as any).__mapmaker.store.renderer.lastTerrain) as Promise<{ colours: boolean; relief: boolean; overTerritories: boolean; seaLevel: number }>;
     await show(async () => {
       assert.equal(await page.getByTestId('show-working-terrain').count(), 0, 'no terrain row before there is terrain');
       await page.getByTestId('terrain-on').check();
@@ -1950,12 +1950,71 @@ try {
     await page.getByTestId('mode-present').click();
     await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastTerrain.colours);
     await page.getByTestId('mode-world').click();
-    assert.deepEqual(await terrain(), { colours: false, relief: false, overTerritories: false });
+    assert.deepEqual(await terrain(), { colours: false, relief: false, overTerritories: false, seaLevel: 0 });
     // Undone, step by step, to no terrain.
     for (let i = 0; i < 3; i++) await page.getByTestId('undo').click();
     await h.saved();
     assert.equal(await steps(), before, 'each change was one step');
     assert.equal(await page.evaluate(() => JSON.parse((window as any).__mapmaker.store.world.get('map_space', (window as any).__mapmaker.store.spaceId).settings).terrain ?? null), null);
+  });
+
+  await h.step('Sea level over time: 120 m lower, the North Sea is land, and territory ending at the coast covers it; undone', async () => {
+    await page.getByTestId('mode-world').click();
+    await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 3, lat: 54, zoom: 3, rotation: 0, projection: 'equirectangular' }));
+    await h.setDate('1450');
+    const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
+    const before = await steps();
+    const pixelAt = (ll: LL) => page.evaluate(([lon, lat]) => {
+      const p = (window as any).__mapmaker.lonLatToPage(lon, lat);
+      const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement;
+      const r = c.getBoundingClientRect(), k = c.width / r.width;
+      return Array.from(c.getContext('2d')!.getImageData(Math.round((p[0] - r.left) * k), Math.round((p[1] - r.top) * k), 1, 1).data).slice(0, 3);
+    }, ll);
+    const diff = (a: number[], b: number[]) => Math.max(...a.map((v, i) => Math.abs(v - b[i])));
+    // A country on the military control layer, whose territory ends at the coast, over the North Sea and the land around it.
+    await page.locator('.left .row', { hasText: 'Military control' }).locator('span', { hasText: 'Military control' }).click();
+    assert.ok(await page.getByTestId('clip-to-land').isChecked(), 'territory on this layer ends at the coast');
+    const seaPlaces: LL[] = [[3, 55.5], [2, 56.6], [4.5, 56.6], [3.5, 54.4]], landPlaces: LL[] = [[-1, 52.7], [-2, 54.6], [8, 52.4], [6.6, 52.8]];
+    for (const ll of [...seaPlaces, ...landPlaces]) for (const layer of ['Political', 'Military control']) assert.equal(await h.ownerOnLayer(ll, '1450', layer), null, `nobody holds ${ll} on ${layer}`);
+    await h.setDate('1400');
+    await h.newCountry('Dogger Folk');
+    await page.getByTestId('tool-polygon').click();
+    const corners: LL[] = [[-3, 51], [9, 51], [9, 58], [-3, 58]];
+    for (const ll of corners) { const q = await h.toPage(ll); await page.mouse.click(q[0], q[1]); }
+    const end = await h.toPage(corners[3]);
+    await page.mouse.dblclick(end[0] + 1, end[1] + 1);
+    await page.getByTestId('choice-correct').click();
+    await page.getByTestId('confirm-edit').click();
+    await h.setDate('1450');
+    await page.waitForFunction(() => (window as any).__mapmaker.store.world.all('entity').some((e: any) => e.name === 'Dogger Folk'));
+    assert.equal(await h.ownerOnLayer(seaPlaces[0], '1450', 'Military control'), 'Dogger Folk');
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+    // Places away from the country's name.
+    const named = await page.evaluate(() => ((window as any).__mapmaker.store.renderer.lastLabels as Array<{ box?: number[] }>).map((l) => l.box ?? []));
+    const canvasBox = (await page.getByTestId('map-canvas').boundingBox())!;
+    const clear = async (ll: LL) => { const [x, y] = await h.toPage(ll); return !named.some((b) => x - canvasBox.x > b[0] - 10 && x - canvasBox.x < b[2] + 10 && y - canvasBox.y > b[1] - 10 && y - canvasBox.y < b[3] + 10); };
+    const pick = async (list: LL[]) => { for (const ll of list) if (await clear(ll)) return ll; throw new Error(`every place is under a name: ${list}`); };
+    const sea = await pick(seaPlaces), land = await pick(landPlaces);
+    // Today's sea: the territory stops at the coast, so the North Sea shows the sea.
+    assert.ok(diff(await pixelAt(sea), await pixelAt(land)) > 20, `the North Sea (${await pixelAt(sea)}) is not the land held (${await pixelAt(land)})`);
+    // The sea 120 m lower from the date viewed: the North Sea is land, held by the country.
+    await page.getByTestId('open-sea-level').click();
+    await page.getByTestId('sea-add').click();
+    await page.getByTestId('sea-metres-0').fill('-120');
+    await page.getByTestId('sea-metres-0').press('Enter');
+    await page.getByTestId('sea-level-now').getByText("120 m below today's").waitFor();
+    await page.getByTestId('sea-level-dialog').getByRole('button', { name: 'Close' }).last().click();
+    await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastTerrain.seaLevel === -120, null, { timeout: 30000 });
+    let d = 255;
+    for (let i = 0; i < 40 && (d = diff(await pixelAt(sea), await pixelAt(land))) > 12; i++) await page.waitForTimeout(100);
+    assert.ok(d <= 12, `the North Sea, now land, is held like the land (${await pixelAt(sea)} against ${await pixelAt(land)})`);
+    await h.screenshot('sea-level-lower');
+    // Undone: the sea level, the drawing and the country.
+    for (let i = 0; i < 4; i++) await page.getByTestId('undo').click();
+    await h.saved();
+    assert.equal(await steps(), before, 'each change was one step');
+    await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastTerrain.seaLevel === 0);
   });
 
   await h.step('History Health lists the overlap, nothing else; no browser errors', async () => {

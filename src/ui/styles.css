@@ -328,3 +328,8 @@ input.count { width: 56px; padding: 2px 4px; }
 .terrain-section { margin-top: 14px; padding-top: 8px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
 .terrain-section h3 { margin: 0; font-size: 13px; }
 .terrain-options { display: flex; flex-direction: column; gap: 6px; padding-left: 22px; }
+.sea-level-table { width: 100%; border-collapse: collapse; margin: 8px 0; }
+.sea-level-table th { font-size: 11px; font-weight: normal; color: var(--muted, #8a97a6); text-transform: uppercase; letter-spacing: 0.04em; text-align: left; padding: 2px 4px; }
+.sea-level-table td { padding: 3px 4px; border-top: 1px solid var(--line); }
+.sea-level-table input[type=number] { width: 90px; }
+.sea-level-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }

@@ -406,13 +406,22 @@ export class BasemapPainter {
    * Draws the land and lakes (unless `fills` is false: terrain colours stand for them), then whatever
    * `afterFills` lays over them (relief), then the coastline and the reference borders.
    */
-  draw(ctx: CanvasRenderingContext2D, view: View, sheet: Sheet, basemap: Basemap, o: { referenceBorders: boolean; style?: BasemapStyle; oceanColor?: string; coastline?: boolean; fills?: boolean; afterFills?: () => void }): void {
+  draw(ctx: CanvasRenderingContext2D, view: View, sheet: Sheet, basemap: Basemap, o: { referenceBorders: boolean; style?: BasemapStyle; oceanColor?: string; coastline?: boolean; fills?: boolean | 'lakes'; afterFills?: () => void }): void {
     const paths = this.pathsFor(view, sheet, basemap, o.referenceBorders);
     const st = o.style ?? DEFAULT_BASEMAP_STYLE;
     const [k, e, f] = sheet.placement(view);
     const px = view.unit / k; // a design pixel, in sheet units
     const fill = (p: Path2D) => ctx.fill(p, 'evenodd'), stroke = (p: Path2D) => ctx.stroke(p);
-    if (o.fills !== false) {
+    if (o.fills === 'lakes') {
+      // The lakes alone, in the colour given (the land is drawn otherwise).
+      if (o.oceanColor) {
+        ctx.save();
+        ctx.transform(k, 0, 0, k, e, f);
+        ctx.fillStyle = o.oceanColor;
+        paths.lakes.paint(ctx, 1, fill);
+        ctx.restore();
+      }
+    } else if (o.fills !== false) {
       ctx.save();
       ctx.transform(k, 0, 0, k, e, f);
       ctx.fillStyle = st.land;

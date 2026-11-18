@@ -54,7 +54,7 @@ status. Last updated: 18 November 2026 (Stage 4; see DEVELOPMENT.md).
 | Overlapping geographical entities | Partial | `scenarios`, `features`, `e2e/workflows` | Territories overlap freely across layers. Within one territory layer each place has one owner at a time (by design). Areas, lines and points on feature layers overlap freely (D71) |
 | Geography-aware and terrain-aware drawing | Not implemented | | Needs terrain data; will not be claimed until tested on real data (Stage 12) |
 | Strategic and military drawing assistance | Not implemented | | Stage 12 |
-| Geographical modification (coasts, rivers, terrain changing over time) | Not implemented | | Stage 8 |
+| Geographical modification (coasts, rivers, terrain changing over time) | Partial | `sea-level`, `e2e/workflows`, `e2e/render-compare` | Sea level over time (D96): the sea higher or lower than today's at chosen dates, steady between them, with an end-of-the-ice-age preset; the coasts follow the terrain, and so do land and territory that end at the coast. Rivers and other terrain changes over time: Stage 8, later steps |
 
 ## Worlds
 

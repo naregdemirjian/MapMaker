@@ -227,8 +227,10 @@ try {
         // Terrain (D95), drawn by the graphics card for the kept picture and its room as for a fresh one.
         { name: 'terrain with relief over the countries', zoom: 2.6, lon: 85, lat: 32, basemap: true, terrain: true },
         { name: 'Equal Earth terrain, its meridian held', zoom: 0.3, lon: 10, lat: 15, basemap: true, projection: 'equalEarth', held: true, tall: 0.3, terrain: true },
+        // The sea 120 m lower (D96): the land and the territory that ends at the coast follow the terrain's coast.
+        { name: 'the sea 120 m lower, territory to its coast', zoom: 3, lon: 5, lat: 54, basemap: true, sea: -120 },
       ];
-      if (cases.some((c) => (c as { terrain?: boolean }).terrain) && !s.earthTerrain) {
+      if (cases.some((c) => (c as { terrain?: boolean; sea?: number }).terrain || (c as { sea?: number }).sea) && !s.earthTerrain) {
         s.needEarthTerrain();
         while (!s.earthTerrain) await new Promise((r) => setTimeout(r, 50));
       }
@@ -241,7 +243,8 @@ try {
         const withTerrain = !!(c as { terrain?: boolean }).terrain;
         const opts = {
           passes: new Set(['background', 'graticule', 'land', 'fills', 'borders', ...(withTerrain ? ['terrain'] : [])]), transparent: false, layerIds: layers, basemap: c.basemap ? s.basemap : null,
-          terrain: withTerrain ? { grid: s.earthTerrain, key: 'earth-4096', look: { colours: true, relief: true, overTerritories: true, seaFloor: true, strength: 1, palette: 'natural' } } : null,
+          terrain: withTerrain ? { grid: s.earthTerrain, key: 'earth-4096', look: { colours: true, relief: true, overTerritories: true, seaFloor: true, strength: 1, palette: 'natural' } }
+            : (c as { sea?: number }).sea ? { grid: s.earthTerrain, key: 'earth-4096', look: null, seaLevel: (c as { sea?: number }).sea } : null,
         };
         const held = !!(c as { held?: boolean }).held;
         const cam = { lon: c.lon, lat: c.lat, zoom: c.zoom, rotation: 0, projection: (c as { projection?: string }).projection ?? 'equirectangular', ...(held ? { meridian: c.lon } : {}) };

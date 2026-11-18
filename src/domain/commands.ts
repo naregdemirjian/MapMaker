@@ -11,6 +11,7 @@ import {
 import { type Vec3, vecToLonLat, normalize } from '../geo-kernel/vec.ts';
 import { worldSettings, terrainSourceOf, type BasemapSource, type ShowSet, type ShowSettings } from '../world-model/world-settings.ts';
 import { terrainLookOf, DEFAULT_TERRAIN_LOOK, type TerrainLook } from '../terrain/look.ts';
+import { cleanSeaLevel, type SeaLevelPoint } from '../terrain/sea-level.ts';
 import { resolvePointStyle, type LabelStyle, type CountryLabel, type PointStyle } from '../render-engine/label-style.ts';
 import { DEFAULT_FEATURE_STYLE, isFeatureKind, type FeatureKind, type FeatureStyle } from '../render-engine/feature-style.ts';
 import { relationKind, isRelationKind, type RelationKind } from './relations.ts';
@@ -148,6 +149,17 @@ export function setWorldTerrain(world: World, spaceId: string, patch: Partial<Te
   const { terrain: _old, ...rest } = settings;
   const label = !patch ? `Hide the terrain of "${space.name}"` : cur ? `Change the terrain of "${space.name}"` : `Show the terrain of "${space.name}"`;
   return run(world, label, (tx) => { tx.update('map_space', { ...space, settings: JSON.stringify(next ? { ...rest, terrain: next } : rest) }); });
+}
+
+/** Sets a world's sea level over time (D96): the whole list of dated levels, in one step; none for today's. */
+export function setWorldSeaLevel(world: World, spaceId: string, points: SeaLevelPoint[]): CommandResult {
+  const space = world.get('map_space', spaceId);
+  if (!space) throw new Error('That map no longer exists.');
+  if (!terrainSourceOf(space)) throw new Error('Only maps of the Earth have a sea level so far.');
+  const clean = cleanSeaLevel(points);
+  if (clean.length !== points.length && points.some((p) => !Number.isFinite(p?.day) || !Number.isFinite(p?.m))) throw new Error('A sea level needs a date and a height in metres.');
+  const { seaLevel: _old, ...rest } = worldSettings(space);
+  return run(world, `Change the sea level of "${space.name}"`, (tx) => { tx.update('map_space', { ...space, settings: JSON.stringify(clean.length ? { ...rest, seaLevel: clean } : rest) }); });
 }
 
 export function createLayer(world: World, spaceId: string, name: string, kind: LayerKind = 'partition'): CommandResult<string> {

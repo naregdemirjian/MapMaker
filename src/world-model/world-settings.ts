@@ -1,6 +1,7 @@
 // Settings stored with each world (map_space.settings, JSON).
 import type { MapSpaceRow } from './schema.ts';
 import { terrainLookOf, type TerrainLook } from '../terrain/look.ts';
+import { cleanSeaLevel, type SeaLevelPoint } from '../terrain/sea-level.ts';
 
 /** The reference geography a world shows under its territories. */
 export type BasemapSource = 'natural-earth' | 'none';
@@ -25,6 +26,8 @@ export interface WorldSettings {
   projection?: string; basemap?: BasemapSource; show?: ShowSettings;
   /** How the world's terrain is drawn (D95); absent: no terrain. */
   terrain?: TerrainLook;
+  /** The sea level at dates (D96), in time order; absent: today's, always. */
+  seaLevel?: SeaLevelPoint[];
 }
 
 /** Whether something is shown, while working or in exports. */
@@ -66,4 +69,9 @@ export function terrainSourceOf(space: Pick<MapSpaceRow, 'settings' | 'radius_m'
 /** How a world's terrain is drawn, or null when it shows none. */
 export function terrainLook(space: Pick<MapSpaceRow, 'settings' | 'radius_m' | 'kind'> | null | undefined): TerrainLook | null {
   return space && terrainSourceOf(space) ? terrainLookOf(worldSettings(space).terrain) : null;
+}
+
+/** A world's sea level over time (D96): its points, checked and in time order (none on worlds without terrain). */
+export function seaLevelPoints(space: Pick<MapSpaceRow, 'settings' | 'radius_m' | 'kind'> | null | undefined): SeaLevelPoint[] {
+  return space && terrainSourceOf(space) ? cleanSeaLevel(worldSettings(space).seaLevel) : [];
 }

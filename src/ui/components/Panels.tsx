@@ -490,7 +490,10 @@ export function Outliner() {
                 <input type="checkbox" data-testid="reference-borders-toggle" checked={s.referenceBorders} onChange={(e) => s.set({ referenceBorders: e.target.checked })} /> Present-day borders (guide)
               </label>
             )}
-            <button className="link" onClick={() => s.set({ dialog: 'show' })} data-testid="open-show-lakes" title="Which lakes are shown (from what size), coastlines, and the rest">Lakes and what is shown…</button>
+            <button className="link" onClick={() => s.set({ dialog: 'show' })} data-testid="open-show-lakes" title="Terrain, which lakes are shown (from what size), coastlines, and the rest">Terrain, lakes and what is shown…</button>
+            {basemapSourceOf(currentSpace) === 'natural-earth' && (
+              <button className="link" onClick={() => s.set({ dialog: 'sea-level' })} data-testid="open-sea-level" title="The sea higher or lower than today's at dates you choose; the coasts follow it">Sea level over time…</button>
+            )}
             <button className="link" onClick={() => s.set({ dialog: 'data-sources' })} data-testid="data-sources">Data sources and credits</button>
           </div>
         )}

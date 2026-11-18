@@ -61,6 +61,33 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D96. Sea level over time (Stage 8)
+
+A map of the Earth can have its sea stand higher or lower than today's at dates of one's choosing ("Sea level over
+time…" beside Earth's geography): a list of dates and heights, the sea rising or falling steadily between them and
+staying as it is before the first and after the last. One button sets the end of the last ice age (about 130 m lower
+21,000 years ago, near today's from about 4000 BCE, a usual reconstruction rounded); Britain then joins Europe across
+Doggerland, Asia joins America across Beringia, and Sundaland and Sahul appear. The levels are stored with the map
+(`seaLevel` in its settings) and changed in one undoable step; they are history, so the same in the working view
+and exports.
+
+- **Coasts at another level.** Natural Earth's coastline is today's. At any other level the coast is where the
+  terrain (D94) meets the sea, worked out for every pixel by the terrain shader. So that the coast does not jump when
+  the sea first moves, a place inside today's coastline counts as at least 0.5 m high and a place outside as at least
+  0.5 m deep (`heightAboveSea`; the shader reads today's land from a picture of it): at today's level land is exactly
+  today's, and as the sea rises land goes under from its lowest places, as it falls the sea floor comes up from its
+  highest, the coast moving steadily. The terrain is about 10 km a cell, so such coasts are drawn at that detail.
+- **What follows the coast.** The land (plain or in terrain colours), and territory on layers that end at the coast,
+  with their borders: both are trimmed by the terrain's land of the moment instead of Natural Earth's. Lakes stay
+  water. Today's coastline line is not drawn at another level. Labels are still placed by today's land.
+- **Needs the terrain.** Earth's heights are loaded for a map with a sea level, whether or not its terrain is shown;
+  exports then credit them.
+- **Tests.** `sea-level.test.ts` (levels between and beyond the dates; the stored points checked; the height above
+  the sea: today's coast exactly at today's level, and a place once under a rising sea stays under; the command,
+  undone, refused off Earth); `e2e/workflows` (with the sea 120 m lower, the North Sea is land and the territory of a
+  country that ends at the coast covers it; undone); `e2e/render-compare` (a carried picture with the sea 120 m lower
+  and territory to its coast matches one drawn afresh).
+
 ### D95. Terrain drawn by the graphics card (Stage 8)
 
 A map of the Earth can now show its terrain ("What is shown", Terrain): the land coloured by height and the sea by

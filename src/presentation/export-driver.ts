@@ -13,7 +13,8 @@ import { eventShown, entityStyle } from '../domain/commands.ts';
 import { isFeatureKind } from '../render-engine/feature-style.ts';
 import { preloadImages, prepareVideos } from '../render-engine/assets.ts';
 import { basemapSourceOf, loadBasemap, loadBasemapDetail, loadDatasetRecords, type Basemap } from '../render-engine/basemap.ts';
-import { shown, minLakeKm2, terrainLook } from '../world-model/world-settings.ts';
+import { shown, minLakeKm2, terrainLook, seaLevelPoints } from '../world-model/world-settings.ts';
+import { seaLevelAt } from '../terrain/sea-level.ts';
 import { loadEarthTerrain, EARTH_TERRAIN_KEY, type ElevationGrid } from '../terrain/grid.ts';
 
 export interface ExportPassDef { name: string; label: string; blend: string; passes: PassName[]; overlays: boolean; background: boolean; note?: string }
@@ -120,10 +121,13 @@ export async function basemapFor(world: World, spaceId: string): Promise<Basemap
   return basemapSourceOf(world.get('map_space', spaceId)) === 'natural-earth' ? loadBasemapDetail(await loadBasemap()) : null;
 }
 
-/** The terrain a shot's world shows in exports (D95: Earth's, loaded on first use), or null. */
+/**
+ * The terrain a shot's world needs in exports, or null: Earth's (loaded on first use) when its terrain
+ * is shown (D95) or its sea level changes over time (D96).
+ */
 export async function terrainFor(world: World, spaceId: string): Promise<ElevationGrid | null> {
   const space = world.get('map_space', spaceId);
-  return terrainLook(space) && shown(space, 'export', 'terrain') ? loadEarthTerrain() : null;
+  return (terrainLook(space) && shown(space, 'export', 'terrain')) || seaLevelPoints(space).length ? loadEarthTerrain() : null;
 }
 
 /** Render one frame of one pass into a 2D context of the given size. */
@@ -134,9 +138,10 @@ export function renderFrame(ctx: CanvasRenderingContext2D, renderer: MapRenderer
   const space = world.get('map_space', shot.spaceId);
   const on = (k: Parameters<typeof shown>[2]) => shown(space, 'export', k);
   const labels = !!shot.labels && on('names'), cities = shot.cities !== false && on('cities');
-  const look = terrainLook(space);
-  const terrain = look && terrainGrid && on('terrain') ? { grid: terrainGrid, key: EARTH_TERRAIN_KEY, look } : null;
-  const passes = new Set<PassName>(def.passes.filter((p) => (p !== 'graticule' || (shot.graticule && on('graticule'))) && (p !== 'labels' || labels) && (p !== 'characters' || (shot.characters !== false && on('characters'))) && (p !== 'cities' || cities) && (p !== 'borders' || on('borders')) && (p !== 'features' || on('features')) && (p !== 'terrain' || !!terrain)));
+  const look = terrainLook(space), terrainShown = !!look && on('terrain');
+  const seaPoints = seaLevelPoints(space);
+  const terrain = terrainGrid && (terrainShown || seaPoints.length) ? { grid: terrainGrid, key: EARTH_TERRAIN_KEY, look: terrainShown ? look : null, seaLevel: seaLevelAt(seaPoints, t) } : null;
+  const passes = new Set<PassName>(def.passes.filter((p) => (p !== 'graticule' || (shot.graticule && on('graticule'))) && (p !== 'labels' || labels) && (p !== 'characters' || (shot.characters !== false && on('characters'))) && (p !== 'cities' || cities) && (p !== 'borders' || on('borders')) && (p !== 'features' || on('features')) && (p !== 'terrain' || !!terrain?.look)));
   ctx.clearRect(0, 0, width, height);
   if (passes.size) {
     const transparent = def.name === 'all' ? shot.transparent : !def.background;
