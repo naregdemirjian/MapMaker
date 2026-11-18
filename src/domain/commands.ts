@@ -905,6 +905,73 @@ export function addCountries(world: World, engine: Engine, o: { spaceId: string;
   });
 }
 
+/**
+ * Territories from a map of a date (improvement B, D120; read from GeoJSON by domain/geojson-import.ts): each
+ * country given the land the map shows from date `t` (or, at the beginning of time, as the starting map). A
+ * country of the same name already in the project goes on, its land changing; others are created. With
+ * `replace`, land of the layer that the map does not show becomes nobody's at that date, so that a series of
+ * maps, each of its year, plays as the history between them. One undo step.
+ */
+export function importTerritories(world: World, engine: Engine, o: { spaceId: string; layerId: string; t: Instant; countries: CountryToAdd[]; replace: boolean; label?: string; snap?: number }): CommandResult<{ entities: string[]; created: number; cleared: number }> {
+  const start = o.t.day === -Infinity;
+  const mode: EditMode = start ? { kind: 'correct', t: NEG_INF } : { kind: 'change', t: o.t };
+  checkTarget(world, { spaceId: o.spaceId, layerId: o.layerId, mode });
+  if (!o.countries.length) throw new Error('The map holds no countries to import.');
+  return run(world, o.label ?? `Import ${o.countries.length} ${o.countries.length === 1 ? 'country' : 'countries'}`, (tx) => {
+    // Who holds what at that date, before the new outlines cut the parcels.
+    const before = o.replace ? engine.partitionState(o.spaceId, o.layerId, o.t) : null;
+    const existing = new Map(world.all('entity').filter((e) => e.type_id === 'polity' || e.type_id === 'faction').map((e) => [e.name.toLowerCase(), e.id]));
+    const rings: Vec3[][] = [];
+    const parts: Array<Array<{ outer: number; holes: number[] }>> = [];
+    for (const c of o.countries) {
+      const polys: Array<{ outer: number; holes: number[] }> = [];
+      for (const poly of c.polygons) {
+        const outer = ringFromMapPoints(poly[0], 1);
+        if (!outer) continue;
+        const entry = { outer: rings.push(outer) - 1, holes: [] as number[] };
+        for (const h of poly.slice(1)) { const hr = ringFromMapPoints(h, 1); if (hr) entry.holes.push(rings.push(hr) - 1); }
+        polys.push(entry);
+      }
+      parts.push(polys);
+    }
+    const paths = rings.length ? tx.kernel(o.spaceId, (arr) => arr.insertPaths(rings, { closed: true, snap: o.snap ?? 1e-8 })) : [];
+    const arr = world.arrangement(o.spaceId);
+    const lefts = paths.length ? arr.facesLeftOfMany(paths) : [];
+    const insideOf = (i: number) => (arr.isSimpleCycle(paths[i]) && arr.separatesFaces(paths[i]) ? lefts[i] : arr.facesWoundBy(paths[i]));
+    const items: Array<{ leaves: Iterable<number>; value: string | null }> = [];
+    const entities: string[] = [], covered = new Set<number>();
+    let created = 0;
+    o.countries.forEach((c, k) => {
+      const faces = new Set<number>();
+      for (const p of parts[k]) {
+        const holes = new Set<number>();
+        for (const h of p.holes) for (const f of leafDescendants(arr, insideOf(h))) holes.add(f);
+        for (const f of leafDescendants(arr, insideOf(p.outer))) if (!holes.has(f) && !covered.has(f)) faces.add(f);
+      }
+      if (!faces.size) return;
+      let id = existing.get(c.name.toLowerCase());
+      if (!id) {
+        id = newId('ent');
+        tx.insert('entity', { id, type_id: 'polity', branch_id: MAIN_BRANCH, name: c.name, color: c.color ?? suggestColor(world), notes: '', created_seq: world.nextSeq('entity'), style: '{}', group_id: '' });
+        existing.set(c.name.toLowerCase(), id);
+        created++;
+      }
+      if (!entities.includes(id)) entities.push(id);
+      for (const f of faces) covered.add(f);
+      items.push({ leaves: faces, value: id });
+    });
+    // Land the map does not show: nobody's from that date.
+    let cleared = 0;
+    if (before) {
+      const gone = new Set<number>();
+      for (const [face, st] of before) if (st.value) for (const leaf of leafDescendants(arr, [face])) if (!covered.has(leaf)) gone.add(leaf);
+      if (gone.size) { items.push({ leaves: gone, value: null }); cleared = gone.size; }
+    }
+    if (items.length) writeAssignments(tx, engine, o.spaceId, o.layerId, mode, items);
+    return { entities, created, cleared };
+  });
+}
+
 // ---------------------------------------------------------------- locked countries (D87)
 
 /** Whether a country is locked: its land and borders stay as they are until it is unlocked. */

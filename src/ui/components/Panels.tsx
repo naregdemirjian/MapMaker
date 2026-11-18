@@ -131,7 +131,7 @@ export function TopBar() {
       <div className="project-name" title={s.projectDir}>{s.projectId}</div>
       <div className="seg">
         <button className={s.mode === 'world' ? 'on' : ''} onClick={() => s.set({ mode: 'world', presentCamera: null, playing: false })} data-testid="mode-world">World-building</button>
-        <button className={s.mode === 'present' ? 'on' : ''} onClick={() => s.set({ mode: 'present' })} data-testid="mode-present">Presentation</button>
+        <button className={s.mode === 'present' ? 'on' : ''} onClick={() => s.set({ mode: 'present', historyPlay: { ...s.historyPlay, on: false } })} data-testid="mode-present">Presentation</button>
       </div>
       <select value={s.spaceId} onChange={(e) => switchSpace(e.target.value)} title="Which map you are looking at">
         {spaces.map((sp) => <option key={sp.id} value={sp.id}>{sp.name}</option>)}
@@ -590,6 +590,7 @@ export function Outliner() {
         <button className="link pad-link" onClick={async () => { const name = await s.askText('New group', 'Name of the group (for example "My nations" or "Europe")', '', 'Create group'); if (name) s.execute((wd) => cmd.createEntityGroup(wd, name, s.chosen('entity'))); }} data-testid="new-entity-group">New group{s.chosen('entity').length > 1 ? ` of the ${s.chosen('entity').length} chosen` : ''}…</button>
         {political.length > 0 && <button className="link pad-link" onClick={() => s.set({ dialog: 'label-style' })} data-testid="open-label-style">Label style for all countries…</button>}
         {currentSpace && basemapSourceOf(currentSpace) === 'natural-earth' && <button className="link pad-link" onClick={() => s.set({ dialog: 'add-countries' })} data-testid="open-add-countries">Add today's countries…</button>}
+        {currentSpace && !isSpaceMap(currentSpace) && <button className="link pad-link" onClick={() => s.set({ dialog: 'import-borders' })} data-testid="open-import-borders" title="GeoJSON maps of borders, one for each date: their countries and how their land changed between them">Import borders from files…</button>}
         {!political.length && !newEntity && <div className="muted pad">None yet.</div>}
       </Section>
       <Section title="Characters" onAdd={() => setNewEntity({ name: '', type: 'character' })} addLabel="Character">

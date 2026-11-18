@@ -158,6 +158,11 @@ class AppStore {
   /** A text or the current-events box being dragged on the shot preview (fractions of the frame). */
   presentOverlay: { id: string; dx: number; dy: number; from?: { x: number; y: number } } | null = null;
   playing = false;
+  /**
+   * Playing history in the world-building view: on or off, how fast (years of history a second) and whether it
+   * goes round again from the start of the timeline at its end.
+   */
+  historyPlay = { on: false, yearsPerSecond: 10, loop: false };
   dialog: string | null = null;
   /** The event the last drawing went into, offered first for the next one (several border changes, one event). */
   lastPaintEvent: string | null = null;

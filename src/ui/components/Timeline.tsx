@@ -86,6 +86,7 @@ function ticks(start: number, end: number, u: Unit): Array<{ t: number; label: s
 
 export function Timeline() {
   const s = useLive();
+  useHistoryPlayer();
   const ref = useRef<HTMLCanvasElement | null>(null);
   const wrap = useRef<HTMLDivElement | null>(null);
   const [w, setW] = useState(800);
@@ -271,8 +272,74 @@ export function Timeline() {
         onContextMenu={(e) => e.preventDefault()}
         data-testid="timeline"
       />
+      <div className="history-play"><HistoryPlayControls /></div>
       <GroupFilter />
     </div>
+  );
+}
+
+/** Speeds history can be played at, in years a second, with how they are written. */
+export const HISTORY_SPEEDS: Array<{ yps: number; label: string }> = [
+  { yps: 1 / 12, label: '1 month/s' }, { yps: 0.25, label: '3 months/s' }, { yps: 1, label: '1 year/s' },
+  { yps: 2, label: '2 years/s' }, { yps: 5, label: '5 years/s' }, { yps: 10, label: '10 years/s' },
+  { yps: 25, label: '25 years/s' }, { yps: 50, label: '50 years/s' }, { yps: 100, label: '100 years/s' },
+  { yps: 250, label: '250 years/s' }, { yps: 1000, label: '1,000 years/s' },
+];
+
+/**
+ * Plays history in the world-building view while it is on (improvement A, D119): the date viewed moves on at the speed
+ * chosen, frame by frame, as fast as the map draws; dragging the playhead meanwhile carries on from there. At the end
+ * of the timeline it stops (or, going round, starts again from its beginning). Whole days only, unless played
+ * slower than a month a second.
+ */
+export function useHistoryPlayer(): void {
+  const s = useLive();
+  useEffect(() => {
+    if (!s.historyPlay.on) return;
+    // (Leaving world-building stops it: the Presentation button turns it off; this is for any other way.)
+    if (s.mode !== 'world') { store.set({ historyPlay: { ...store.historyPlay, on: false } }); return; }
+    let y = toApproxYear(store.time), prev = performance.now(), mine: Instant | null = null, raf = 0;
+    // (From the beginning of the timeline when playing at its end.)
+    if (y >= store.timeline.end - 1e-9) y = store.timeline.start;
+    const tick = () => {
+      const p = store.historyPlay;
+      if (!p.on || store.mode !== 'world') return;
+      const now = performance.now(), dt = Math.min(0.25, (now - prev) / 1000);
+      prev = now;
+      // The playhead moved by hand: carried on from there.
+      if (mine && compare(store.time, mine) !== 0) y = toApproxYear(store.time);
+      y += dt * p.yearsPerSecond;
+      const { start, end } = store.timeline;
+      if (y >= end) {
+        if (!p.loop) { store.set({ historyPlay: { ...p, on: false } }); store.setTime(dayOf(fromApproxYear(end))); return; }
+        y = start;
+      }
+      const t = fromApproxYear(y);
+      mine = p.yearsPerSecond >= 1 / 12 ? dayOf(t) : t;
+      store.setTime(mine, true);
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => { cancelAnimationFrame(raf); };
+  }, [s.historyPlay.on, s.mode]);
+}
+
+/** An instant at the nearest midnight. */
+const dayOf = (t: Instant): Instant => instant(Math.round(t.day + t.ms / MS_PER_DAY));
+
+/** Playing history: on and off (Space), and how fast. */
+export function HistoryPlayControls() {
+  const s = useStore();
+  const p = s.historyPlay;
+  const toggle = () => { s.set({ historyPlay: { ...p, on: !p.on } }); if (p.on) s.setTime(s.time); };
+  return (
+    <>
+      <button className={p.on ? 'on small' : 'small'} onClick={toggle} title={p.on ? 'Pause (Space)' : 'Play history from the date viewed (Space)'} data-testid="history-play">{p.on ? '⏸ Pause' : '⏵ Play'}</button>
+      <select value={p.yearsPerSecond} onChange={(e) => s.set({ historyPlay: { ...p, yearsPerSecond: Number(e.target.value) } })} title="How fast history plays (years of history a second)" data-testid="history-speed">
+        {HISTORY_SPEEDS.map((x) => <option key={x.yps} value={x.yps}>{x.label}</option>)}
+      </select>
+      <button className={p.loop ? 'on small' : 'small'} onClick={() => s.set({ historyPlay: { ...p, loop: !p.loop } })} title="At the end of the timeline, start again from its beginning" data-testid="history-loop">⟳</button>
+    </>
   );
 }
 

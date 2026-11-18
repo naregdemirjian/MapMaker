@@ -11,6 +11,7 @@ import { EditPrompt, NewWorldDialog, NewEventDialog, VersionsDialog, HealthDialo
 import { ShotsPanel, ShotEditor, ShotTimeline } from './components/Presentation.tsx';
 import { LabelStyleDialog } from './components/LabelStyles.tsx';
 import { AddCountriesDialog } from './components/AddCountries.tsx';
+import { ImportBordersDialog } from './components/ImportBorders.tsx';
 import { SettingsDialog } from './components/Settings.tsx';
 import { NewLayerDialog } from './components/Features.tsx';
 import { DataExportDialog } from './components/Search.tsx';
@@ -30,6 +31,12 @@ export function App() {
       const pen = store.tool === 'pen' && store.mode !== 'present';
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); if (pen) store.penUndoPiece(); else store.undo(); }
       if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) { e.preventDefault(); if (pen) store.penRedoPiece(); else store.redo(); }
+      // Space: history plays or pauses (world-building), or the shot (presentation).
+      if (e.key === ' ' && !e.ctrlKey && !e.metaKey && !e.altKey && !store.pending && !(e.target as HTMLElement)?.isContentEditable && tag !== 'BUTTON') {
+        e.preventDefault();
+        if (store.mode === 'world') { const p = store.historyPlay; store.set({ historyPlay: { ...p, on: !p.on } }); if (p.on) store.setTime(store.time); }
+        else if (store.shotId) store.set({ playing: !store.playing });
+      }
       // Delete: everything chosen in the lists (the Border points tool uses Delete for points).
       if (e.key === 'Delete' && store.tool !== 'vertex' && store.mode !== 'present' && !store.pending) {
         const ents = store.chosen('entity'), evs = store.chosen('event');
@@ -70,6 +77,7 @@ export function App() {
       {s.dialog === 'settings' && <SettingsDialog />}
       {s.dialog === 'label-style' && <LabelStyleDialog onClose={() => s.set({ dialog: null })} />}
       {s.dialog === 'add-countries' && <AddCountriesDialog onClose={() => s.set({ dialog: null })} />}
+      {s.dialog === 'import-borders' && <ImportBordersDialog onClose={() => s.set({ dialog: null })} />}
       <OfflineNotice />
       <Toasts />
       {s.busy && <div className="busy">{s.busy}</div>}

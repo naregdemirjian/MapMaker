@@ -61,6 +61,47 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D120. Importing borders from files at their dates (improvement pass)
+
+- **What.** "Import borders from files…" (under Countries and factions, on any round or flat map): GeoJSON maps of
+  borders (a FeatureCollection of polygons and multipolygons in longitude and latitude), one for each date, given to the
+  map's political layer. Historical border datasets come as one map per year ("world_1492.geojson",
+  "world_bc1000.geojson"), and maps drawn in a GIS export so; the user brings the files (none are bundled: the open
+  historical datasets carry licences, such as GPL or non-commercial ones, that are the user's to accept).
+- **Dates.** Read from each file's name (a year, "bc1000" or "500 BC" in astronomical years), changeable in the dialog;
+  a file without one takes the date viewed. The first map can be the starting map (the countries exist from the
+  beginning).
+- **Countries.** The property holding names is guessed (NAME, name, ADMIN… or the one with most different words) and
+  can be chosen, as can one holding colours (#rrggbb). Shapes of the same name are one country; a country goes on from
+  one map to the next by its name (and joins one of the same name already in the project), so its land changes
+  between them instead of a new country appearing each time. Land a map does not show becomes nobody's at its date
+  (it can be turned off), so that a series of maps plays as the history between them, with transitions in shots as
+  for any change.
+- **Steps.** Each file is one command (`commands.ts` importTerritories, one undo step): its outlines go into the parcel
+  map as "add today's countries" puts them, every country is given its land from the date as one change, and land
+  held then but not on the map is cleared in the same change. The timeline widens to show the maps' dates.
+- **Tests.** `geojson-import.test.ts` (polygons, multipolygons and holes read, the closing point dropped; the name
+  property guessed; colours; shapes without an area left out; files that are not GeoJSON refused; years from file
+  names, BC included; three maps of three dates making the history between them: countries going on by name without
+  regard to case, land changing hands, a country dropping out leaving nobody's land, a new one appearing, one undo
+  step each); `e2e/workflows` 'Importing borders' (two files chosen in the dialog, sorted by the years in their names,
+  the first the starting map, names from NAME; who holds what before and after the second date; one country going on;
+  undone a file at a time).
+
+### D119. Playing history in the world-building view (improvement pass)
+
+- **What.** "⏵ Play" at the left of the timeline (or Space, when not typing) plays history from the date viewed: the
+  date moves on at the speed chosen, from a month to a thousand years a second, as fast as the map draws, and the map,
+  the timeline's playhead and every panel follow. Dragging the playhead meanwhile carries on from there. At the end of
+  the timeline it stops, or with ⟳ starts again from its beginning; Pause (or Space) stops where it is. Leaving
+  world-building stops it; in presentation, Space plays and pauses the shot.
+- **How.** Each frame the date is moved on by the time since the frame before (at most a quarter of a second, so a
+  pause of the window does not jump), kept as a fraction of a year and shown as whole days (unless slower than a month
+  a second). The view takes it as it takes dragging along the timeline (the live updates of D58), then settles to a
+  full drawing when it stops.
+- **Tests.** `e2e/workflows` 'Playing history' (at 100 years a second the date moves on; paused it stays; Space plays
+  and pauses; going round from the end to the beginning; leaving world-building stops it).
+
 ### D118. Planets of other stars (Stage 11)
 
 - **Which.** The confirmed planets of the stars on the nearby star map, from the Open Exoplanet Catalogue (Hanno Rein

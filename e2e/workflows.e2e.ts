@@ -3109,6 +3109,80 @@ try {
     assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.kind === 'space')), false);
   });
 
+  await h.step('Playing history: the date moves on at the speed chosen, pauses where it is, Space plays and pauses, going round at the end', async () => {
+    await page.getByTestId('mode-world').click();
+    const year = () => page.evaluate(() => { const s = (window as any).__mapmaker.store; return s.time.day / 365.2425 + 1970; }) as Promise<number>;
+    const was = await page.evaluate(() => (window as any).__mapmaker.store.time);
+    await h.setDate('1 January 1800');
+    await page.getByTestId('history-speed').selectOption('100');
+    await page.getByTestId('history-play').click();
+    await page.waitForTimeout(600);
+    const a = await year();
+    await page.waitForTimeout(400);
+    const b = await year();
+    assert.ok(a > 1820 && b > a + 15, `history plays on at 100 years a second (${a.toFixed(1)}, then ${b.toFixed(1)})`);
+    await page.getByTestId('history-play').click();
+    const c = await year();
+    await page.waitForTimeout(300);
+    assert.equal(await year(), c, 'paused where it was');
+    // Space plays and pauses (not while typing).
+    await page.locator('body').press('Space');
+    await page.waitForTimeout(300);
+    assert.ok((await year()) > c + 10, 'Space plays');
+    await page.locator('body').press('Space');
+    const d = await year();
+    await page.waitForTimeout(250);
+    assert.equal(await year(), d, 'and pauses');
+    // Going round: from near the end of the timeline back to its beginning.
+    const span = await page.evaluate(() => (window as any).__mapmaker.store.timeline) as { start: number; end: number };
+    await page.evaluate((y) => { const s = (window as any).__mapmaker.store; s.setTime({ day: Math.round((y - 1970) * 365.2425), ms: 0 }); }, span.end - 5);
+    await page.getByTestId('history-loop').click();
+    await page.getByTestId('history-play').click();
+    await page.waitForFunction((st) => { const s = (window as any).__mapmaker.store; const y = s.time.day / 365.2425 + 1970; return y < st + 60; }, span.start, { timeout: 5000 });
+    await page.getByTestId('history-play').click();
+    await page.getByTestId('history-loop').click();
+    // Leaving world-building stops it.
+    await page.getByTestId('history-play').click();
+    await page.getByTestId('mode-present').click();
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.historyPlay.on), false);
+    await page.getByTestId('mode-world').click();
+    await page.evaluate((t) => (window as any).__mapmaker.store.setTime(t), was);
+  });
+
+  await h.step('Importing borders: two GeoJSON maps of their years; their dates from the names; the first the starting map, the second the changes at its date; countries going on by name; undone', async () => {
+    await page.getByTestId('mode-world').click();
+    const box = (w: number, so: number, e: number, n: number) => [[w, so], [e, so], [e, n], [w, n], [w, so]];
+    const map = (features: Array<[string, number[][]]>) => JSON.stringify({ type: 'FeatureCollection', features: features.map(([name, ring]) => ({ type: 'Feature', properties: { NAME: name, POP: 1 }, geometry: { type: 'Polygon', coordinates: [ring] } })) });
+    await page.getByTestId('open-import-borders').click();
+    await page.getByTestId('import-borders').waitFor();
+    await page.getByTestId('import-borders-files').setInputFiles([
+      { name: 'isles_1750.geojson', mimeType: 'application/geo+json', buffer: Buffer.from(map([['Kingdom of Wester', box(-150, -50, -140, -40)], ['Easter Isles', box(-140, -50, -130, -40)]])) },
+      { name: 'isles_1720.geojson', mimeType: 'application/geo+json', buffer: Buffer.from(map([['Kingdom of Wester', box(-150, -50, -145, -40)], ['Easter Isles', box(-145, -50, -130, -40)]])) },
+    ]);
+    await page.waitForFunction(() => document.querySelectorAll('[data-testid=import-borders-file]').length === 2);
+    // Sorted by their years (from the names), the first the starting map; names from NAME.
+    const rows = await page.getByTestId('import-borders-file').allTextContents();
+    assert.match(rows[0], /isles_1720\.geojson.*the starting map/);
+    assert.match(rows[1], /isles_1750\.geojson/);
+    assert.equal(await page.getByTestId('import-borders-name').inputValue(), 'NAME');
+    assert.match((await page.getByTestId('import-borders-summary').textContent()) ?? '', /isles_1720\.geojson: 2 countries/);
+    await page.getByTestId('import-borders-go').click();
+    await page.getByTestId('import-borders').waitFor({ state: 'detached', timeout: 60000 });
+    const owners = (lon: number, lat: number, years: number[]) => page.evaluate(([lon, lat, years]) => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const f = s.world.arrangement(s.spaceId).locate(B.lonLatToVec(lon, lat));
+      return (years as number[]).map((y) => { const v = s.engine.partitionState(s.spaceId, s.layerId, B.gregorian.fromCivil({ year: y })).get(f)?.value; return v ? s.world.get('entity', v).name : null; });
+    }, [lon, lat, years] as const) as Promise<Array<string | null>>;
+    assert.deepEqual(await owners(-142, -45, [1600, 1760]), ['Easter Isles', 'Kingdom of Wester'], 'Wester takes the middle from 1750');
+    assert.deepEqual(await owners(-148, -45, [1600, 1760]), ['Kingdom of Wester', 'Kingdom of Wester']);
+    assert.deepEqual(await owners(-135, -45, [1600, 1760]), ['Easter Isles', 'Easter Isles']);
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('entity').filter((e: any) => e.name === 'Kingdom of Wester').length), 1, 'one country going on');
+    await h.screenshot('import-borders');
+    // Undone: one step for each map.
+    for (let i = 0; i < 2; i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('entity').some((e: any) => e.name === 'Kingdom of Wester')), false);
+  });
+
   await h.step('History Health lists the overlap, nothing else; no browser errors', async () => {
     await page.getByTestId('mode-world').click();
     await page.getByTestId('health').click();
