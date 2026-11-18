@@ -19,6 +19,7 @@ import { shown, minLakeKm2, terrainLook, seaLevelPoints, planetOf, sculptOf, ter
 import { makeSpaceView } from '../space/space-view.ts';
 import { SpaceRenderer } from '../space/space-renderer.ts';
 import { loadNearbyStars } from '../space/catalogue.ts';
+import { loadExoplanets } from '../space/exoplanets.ts';
 import { spaceScene } from '../space/scene.ts';
 import { holdingsAt, lanesFor } from '../space/realms.ts';
 import { stampsAt } from '../terrain/sculpt.ts';
@@ -88,7 +89,7 @@ export async function estimateExportBytes(world: World, engine: Engine, shot: Sh
   const W = Math.max(16, Math.round(shot.width * scale)), H = Math.max(16, Math.round(shot.height * scale));
   const k = Math.min(1, 960 / W);
   const w = Math.max(16, Math.round(W * k)), h = Math.max(16, Math.round(H * k));
-  if (isSpaceMap(world.get('map_space', shot.spaceId))) await loadNearbyStars();
+  if (spaceSettingsOf(world.get('map_space', shot.spaceId))?.catalogue === 'nearby') await loadNearbyStars();
   const basemap = await basemapFor(world, shot.spaceId);
   const terrain = await terrainFor(world, shot.spaceId);
   const canvas = new OffscreenCanvas(w, h);
@@ -250,7 +251,7 @@ export function drawSpaceFrame(ctx: CanvasRenderingContext2D, world: World, engi
   if (all || back || (names && shot.labels) || realms || lanes) {
     spaceRenderer ??= new SpaceRenderer();
     spaceRenderer.render(ctx, view, scene.cat, {
-      rings: scene.rings, axisLabel: scene.axisLabel, orbits: scene.orbits, realmReach: scene.realmReach, dust: scene.dust, armNames: scene.armNames,
+      rings: scene.rings, axisLabel: scene.axisLabel, orbits: scene.orbits, realmReach: scene.realmReach, dust: scene.dust, armNames: scene.armNames, planets: all ? scene.planets : undefined,
       transparent: all ? shot.transparent : !def.background, grid: shot.graticule && (all || back), dropLines: all && scene.dropLines !== false, names: shot.labels && (all || names) ? 'auto' : 'none',
       only: all ? undefined : back ? 'background' : realms ? 'realms' : lanes ? 'lanes' : 'names',
       holdings: holdingsAt(world, engine, shot.spaceId, t, (t0) => screenSecondsSince(shot, frame, t0)), lanes: lanesFor(world, engine, shot.spaceId, t),
@@ -291,8 +292,9 @@ export async function runExport(o: {
   const tiff = o.shot.format === 'tiff' || o.shot.format === 'tiff-zip', zipped = o.shot.format === 'tiff-zip';
   // Loaded before the first frame, so every frame is drawn from the same complete data.
   const spaceMap = isSpaceMap(o.world.get('map_space', o.shot.spaceId));
-  const nearbyStars = spaceMap && spaceSettingsOf(o.world.get('map_space', o.shot.spaceId))?.catalogue !== 'solar';
-  if (nearbyStars) await loadNearbyStars();
+  // (Only the map of the stars around the Sun draws the HYG catalogue: invented stars, galaxies and the solar system are made here.)
+  const nearbyStars = spaceMap && spaceSettingsOf(o.world.get('map_space', o.shot.spaceId))?.catalogue === 'nearby';
+  if (nearbyStars) { await loadNearbyStars(); await loadExoplanets(); }
   const basemap = await basemapFor(o.world, o.shot.spaceId);
   const terrain = await terrainFor(o.world, o.shot.spaceId);
   // Pictures and videos: every picture loaded, and every video sought to its frame before drawing.
@@ -304,7 +306,7 @@ export async function runExport(o: {
   // Credit lines for the data drawn in these frames (written into the manifest and the guide).
   // (Close-up tiles credited whenever the map may use them: the Earth with finer heights close in, D101.)
   const closeUp = !!terrain?.key.startsWith(EARTH_TERRAIN_KEY) && !!terrainLook(o.world.get('map_space', o.shot.spaceId))?.detail;
-  const drawn = new Set([...(basemap || terrain?.cover ? ['natural-earth'] : []), ...(terrain?.key.startsWith(EARTH_TERRAIN_KEY) ? ['terrain-tiles', 'copernicus-dem'] : []), ...(closeUp ? ['terrain-tiles-close'] : []), ...(nearbyStars ? ['hyg'] : [])]);
+  const drawn = new Set([...(basemap || terrain?.cover ? ['natural-earth'] : []), ...(terrain?.key.startsWith(EARTH_TERRAIN_KEY) ? ['terrain-tiles', 'copernicus-dem'] : []), ...(closeUp ? ['terrain-tiles-close'] : []), ...(nearbyStars ? ['hyg', 'oec'] : [])]);
   const credits = drawn.size ? (await loadDatasetRecords()).filter((d) => drawn.has(d.id)).map((d) => `${d.name} ${d.version} (${d.licence}): ${d.credit}`) : [];
   const job = await Api.startExport(o.projectId, {
     credits,

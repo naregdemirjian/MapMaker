@@ -6,6 +6,11 @@ import { nearbyStarsNow, type StarCatalogue } from './catalogue.ts';
 import { solarCatalogue, solarOrbits, scalePoint, SOLAR_RADIUS_AU } from './solar.ts';
 import { inventedStarsCached } from './invented.ts';
 import { galaxyCached, type GalaxyDust } from './galaxy.ts';
+import { exoplanetsNow, type ExoplanetList } from './exoplanets.ts';
+
+/** The stars that have known planets (kept with the list). */
+const hosts = new WeakMap<ExoplanetList, ReadonlySet<number>>();
+const hostsOf = (l: ExoplanetList) => { let h = hosts.get(l); if (!h) hosts.set(l, (h = new Set(l.byStar.keys()))); return h; };
 import type { Vec3 } from './space-view.ts';
 
 export interface SpaceScene {
@@ -25,6 +30,8 @@ export interface SpaceScene {
   dropLines?: boolean;
   /** Where the middle of the galaxy is, for the panel (D116). */
   middle?: Vec3;
+  /** Stars with known planets (D118). */
+  planets?: ReadonlySet<number>;
 }
 
 /** The scene of a space map at instant t (`onLoad`: called once the nearby stars have loaded). */
@@ -48,5 +55,6 @@ export function spaceScene(settings: SpaceSettings | null, t: Instant, onLoad?: 
     const systems = Math.max(1, g.cat.stars.filter((s) => s.minor).length);
     return { cat: g.cat, radius: R, rings, axisLabel: null, unit: 'ly', dust: g.dust, armNames: g.arms, dropLines: false, realmReach: Math.max(R / 200, (0.9 * R) / Math.sqrt(systems)), middle: [0, 0, 0] };
   }
-  return { cat: nearbyStarsNow(onLoad), radius: settings?.radiusLy ?? 50, unit: 'ly' };
+  const planets = exoplanetsNow(onLoad);
+  return { cat: nearbyStarsNow(onLoad), radius: settings?.radiusLy ?? 50, unit: 'ly', planets: planets ? hostsOf(planets) : undefined };
 }

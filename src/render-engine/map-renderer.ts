@@ -2601,26 +2601,7 @@ export class MapRenderer {
     c.restore();
   }
 
-  private drawTeeth(ctx: CanvasRenderingContext2D, l: Float32Array, width: number, side: number): void {
-    const step = 6 * width, size = 2.4 * width;
-    let carry = step / 2;
-    ctx.beginPath();
-    for (let i = 2; i + 1 < l.length; i += 2) {
-      const ax = l[i - 2], ay = l[i - 1], bx = l[i], by = l[i + 1];
-      const len = Math.hypot(bx - ax, by - ay);
-      if (!len) continue;
-      const dx = (bx - ax) / len, dy = (by - ay) / len, nx = -dy * side, ny = dx * side;
-      let d = carry;
-      for (; d + size / 2 <= len; d += step) {
-        const cx = ax + dx * d, cy = ay + dy * d;
-        ctx.moveTo(cx - dx * size / 2, cy - dy * size / 2);
-        ctx.lineTo(cx + nx * size, cy + ny * size);
-        ctx.lineTo(cx + dx * size / 2, cy + dy * size / 2);
-      }
-      carry = Math.max(0, d - len);
-    }
-    ctx.fill();
-  }
+  private drawTeeth(ctx: CanvasRenderingContext2D, l: Float32Array, width: number, side: number): void { drawTeeth(ctx, l, width, side); }
 
   /** An arrowhead at the end of a line (or at its start). */
   private drawArrowhead(ctx: CanvasRenderingContext2D, l: Float32Array, width: number, atEnd: boolean): void {
@@ -4162,12 +4143,34 @@ export function mediaBox(src: CanvasImageSource & { width: number; height: numbe
 
 /** Which way a front line's teeth face (D89): toward the second country of the war (as entered), the first, or none. */
 export type FrontTeeth = 'second' | 'first' | 'plain';
-const FRONT_COLOR = '#d62828';
+export const FRONT_COLOR = '#d62828';
 /** The side of an owner's outline (as drawn on a sheet) that faces away from its land. */
-const FRONT_SIDE = 1;
+export const FRONT_SIDE = 1;
+
+/** Teeth along a line (of features and front lines), on one side of it, filled in the context's colour. */
+export function drawTeeth(ctx: CanvasRenderingContext2D, l: Float32Array, width: number, side: number): void {
+  const step = 6 * width, size = 2.4 * width;
+  let carry = step / 2;
+  ctx.beginPath();
+  for (let i = 2; i + 1 < l.length; i += 2) {
+    const ax = l[i - 2], ay = l[i - 1], bx = l[i], by = l[i + 1];
+    const len = Math.hypot(bx - ax, by - ay);
+    if (!len) continue;
+    const dx = (bx - ax) / len, dy = (by - ay) / len, nx = -dy * side, ny = dx * side;
+    let d = carry;
+    for (; d + size / 2 <= len; d += step) {
+      const cx = ax + dx * d, cy = ay + dy * d;
+      ctx.moveTo(cx - dx * size / 2, cy - dy * size / 2);
+      ctx.lineTo(cx + nx * size, cy + ny * size);
+      ctx.lineTo(cx + dx * size / 2, cy + dy * size / 2);
+    }
+    carry = Math.max(0, d - len);
+  }
+  ctx.fill();
+}
 
 /** The wars holding at t (relationships "at war" between two that exist), as [drawn from, teeth toward]. */
-function warsAt(world: World, engine: Engine, t: Instant, teeth: FrontTeeth): Array<[string, string]> {
+export function warsAt(world: World, engine: Engine, t: Instant, teeth: FrontTeeth): Array<[string, string]> {
   const out: Array<[string, string]> = [];
   for (const id of engine.relationsAt(t)) {
     const r = world.get('relation', id);

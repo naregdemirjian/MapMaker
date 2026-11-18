@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore, store } from '../store.ts';
 import { Api } from '../api.ts';
-import { search, type SearchResult } from '../../domain/search.ts';
+import { search, fold, type SearchResult } from '../../domain/search.ts';
 import { mapGeoJSON, eventsCSV, entitiesCSV, relationsCSV, featuresCSV, isoDate } from '../../domain/data-export.ts';
 import { type Instant, compare, fromStore } from '../../core-time/index.ts';
 import { isFeatureKind } from '../../render-engine/feature-style.ts';
@@ -10,6 +10,7 @@ import { DateField, fmt } from './Panels.tsx';
 import { spaceSettingsOf } from '../../world-model/world-settings.ts';
 import { spaceScene } from '../../space/scene.ts';
 import { findStars, type Star } from '../../space/catalogue.ts';
+import { exoplanetsNow, planetSize } from '../../space/exoplanets.ts';
 
 /** Go to what was found: choose it, and bring the date and the view to where it can be seen. */
 export function goToResult(r: SearchResult): void {
@@ -77,9 +78,26 @@ export function SearchBox() {
   const stars = useMemo(() => {
     if (!settings || !q.trim()) return [];
     const scene = spaceScene(settings, s.time);
-    return scene.cat ? findStars(scene.cat, q, 8).map((st) => ({ star: st, what: scene.unit === 'au' ? (st.id === 0 ? 'The Sun' : st.id === 9 ? 'Dwarf planet' : 'Planet') : st.id === 0 ? 'The Sun' : `Star, ${st.dist.toFixed(1)} light-years`, context: st.alt })) : [];
+    if (!scene.cat) return [];
+    const cat = scene.cat;
+    const kind = (st: Star) => (st.kind ? st.kind[0].toUpperCase() + st.kind.slice(1) : '');
+    const what = (st: Star) => scene.unit === 'au'
+      ? (st.id === 0 ? 'The Sun' : st.kind === 'moon' ? kind(st) : st.id === 9 ? 'Dwarf planet' : 'Planet')
+      : scene.middle ? `${kind(st) || 'Star system'}${st.id ? `, ${Math.round(st.dist).toLocaleString('en-GB')} light-years away` : ''}`
+      : st.id === 0 ? 'The Sun' : `Star, ${st.dist.toFixed(1)} light-years`;
+    const out: Array<{ star: Star; title?: string; what: string; context: string }> = findStars(cat, q, 8).map((st) => ({ star: st, what: what(st), context: st.alt }));
+    // Planets of other stars (D118), by name: choosing one chooses its star.
+    if (settings.catalogue === 'nearby') {
+      // (Every word asked for begins a word of the name: "proxima b" finds Proxima Centauri b.)
+      const want = fold(q.trim()).split(/\s+/).filter(Boolean);
+      for (const p of exoplanetsNow()?.planets ?? []) {
+        const host = cat.byId.get(p.star), words = fold(p.name).split(/[\s-]+/);
+        if (host && want.every((w) => words.some((x) => x.startsWith(w))) && out.length < 14) out.push({ star: host, title: p.name, what: `Planet of ${host.name}`, context: planetSize(p) });
+      }
+    }
+    return out;
   }, [q, s.spaceId, settings?.catalogue, s.time.day]);
-  const results: Array<{ r: SearchResult } | { star: Star; what: string; context: string }> = [...found.map((r) => ({ r })), ...stars];
+  const results: Array<{ r: SearchResult } | { star: Star; title?: string; what: string; context: string }> = [...found.map((r) => ({ r })), ...stars];
   useEffect(() => setAt(0), [q]);
   useEffect(() => {
     const away = (e: PointerEvent) => { if (box.current && !box.current.contains(e.target as Node)) setOpen(false); };
@@ -116,8 +134,8 @@ export function SearchBox() {
       {open && q.trim() && (
         <div className="search-results" data-testid="search-results">
           {results.map((item, i) => {
-            const key = 'r' in item ? `${item.r.kind}:${item.r.id}` : `star:${item.star.id}`;
-            const title = 'r' in item ? item.r.title : item.star.name, what = 'r' in item ? item.r.what : item.what, context = 'r' in item ? item.r.context : item.context;
+            const key = 'r' in item ? `${item.r.kind}:${item.r.id}` : `star:${item.star.id}:${item.title ?? ''}`;
+            const title = 'r' in item ? item.r.title : item.title ?? item.star.name, what = 'r' in item ? item.r.what : item.what, context = 'r' in item ? item.r.context : item.context;
             return (
               <div key={key} className={`search-result ${i === at ? 'on' : ''}`} onPointerDown={(e) => { e.preventDefault(); pick(item); }} onPointerMove={() => i !== at && setAt(i)} data-testid="search-result">
                 <div><b>{title}</b> <span className="muted">· {what}</span></div>

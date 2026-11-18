@@ -2810,6 +2810,15 @@ try {
     assert.match((await page.getByTestId('space-note').textContent()) ?? '', /\d{3} stars within 50 light-years/);
     const names = await page.evaluate(() => (window as any).__mapmaker.spaceNames() as string[]);
     assert.ok(names.includes('Sirius') && names.includes('Sol'), `named stars written (${names.slice(0, 8).join(', ')}…)`);
+    // Planets of other stars (D118): counted on the map, found by name, listed in their star's panel.
+    await page.waitForFunction(() => /\d+ with known planets/.test(document.querySelector('[data-testid=space-note]')?.textContent ?? ''));
+    await page.getByTestId('search').fill('proxima b');
+    await page.getByTestId('search-result').filter({ hasText: 'Proxima Centauri b' }).first().click();
+    await page.getByTestId('star-panel').waitFor();
+    assert.equal(await page.getByTestId('star-name').textContent(), 'Proxima Centauri');
+    assert.match((await page.getByTestId('star-planets').textContent()) ?? '', /Proxima Centauri b · round its star in 11\.2 days/);
+    await page.getByTestId('space-home').click();
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
     // A click on a star: its panel.
     const acen = await hook<[number, number]>('starToPage', 71456);
     await page.mouse.click(acen[0], acen[1]);

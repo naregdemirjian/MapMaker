@@ -5,6 +5,7 @@ import { BASE_EVENT_ID } from '../../world-model/schema.ts';
 import { fmt } from './Panels.tsx';
 import { placementMode } from './Characters.tsx';
 import { starColour, starKind, galacticOf, systemOf } from '../../space/catalogue.ts';
+import { exoplanetsNow, foundBy, planetSize } from '../../space/exoplanets.ts';
 import { spaceScene } from '../../space/scene.ts';
 import { BODIES, MOONS, orbitalYears } from '../../space/solar.ts';
 import { spaceSettingsOf } from '../../world-model/world-settings.ts';
@@ -18,6 +19,8 @@ export function StarPanel({ id }: { id: number }) {
   const moon = solar ? MOONS.find((m) => m.id === id) : undefined;
   if (!cat || !st) return <div className="panel"><p className="muted">Loading the stars…</p></div>;
   const system = systemOf(cat, id).map((x) => cat.byId.get(x)!);
+  // (Planets of other stars, D118: the nearby star map only.)
+  const known = !solar && !galaxy && spaceSettingsOf(s.world?.get('map_space', s.spaceId))?.catalogue === 'nearby' ? exoplanetsNow(() => s.notify())?.byStar.get(id) ?? [] : [];
   const g = galacticOf(st.x, st.y, st.z);
   const holderId = s.engine?.systemsAt(s.spaceId, s.time).get(id);
   const holder = holderId ? s.world!.get('entity', holderId) ?? null : null;
@@ -43,6 +46,14 @@ export function StarPanel({ id }: { id: number }) {
         <tr><td>Brightness</td><td>absolute magnitude {Number.isFinite(st.absmag) ? st.absmag.toFixed(2) : '?'} <span className="muted">(the Sun: 4.85; higher is fainter)</span></td></tr>
         {st.id !== 0 && <tr><td>Direction</td><td>galactic longitude {g.l.toFixed(1)}°, latitude {g.b.toFixed(1)}°</td></tr>}
       </tbody></table>}
+      {known.length > 0 && <>
+        <h4>Known planets</h4>
+        <div data-testid="star-planets">{known.map((p) => (
+          <div key={p.name} className="row" data-testid="star-planet" title={p.year ? `Found in ${p.year}${p.method ? ` ${foundBy(p.method)}` : ''}` : ''}>
+            <b>{p.name}</b> <span className="muted">· {p.days !== null ? (p.days < 2 ? `round its star in ${(p.days * 24).toFixed(1)} hours` : p.days < 1000 ? `round its star in ${p.days < 20 ? p.days.toFixed(1) : Math.round(p.days)} days` : `round its star in ${(p.days / 365.25).toFixed(1)} years`) : 'its year not known'}{p.au !== null ? `, ${p.au < 0.1 ? p.au.toFixed(3) : p.au.toFixed(2)} au out` : ''} · {planetSize(p)}{p.year ? ` · found ${p.year}` : ''}</span>
+          </div>))}</div>
+        <p className="muted">From the Open Exoplanet Catalogue (MIT licence).</p>
+      </>}
       {system.length > 1 && <>
         <h4>Its system</h4>
         {system.map((x) => <div key={x.id} className={`row ${x.id === id ? 'sel' : ''}`} onClick={() => s.set({ selection: { kind: 'star', id: x.id } })}><span className="swatch" style={{ background: starColour(x.spect) }} />{x.name} <span className="muted">· {starKind(x.spect).toLowerCase()}</span></div>)}

@@ -61,6 +61,26 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D118. Planets of other stars (Stage 11)
+
+- **Which.** The confirmed planets of the stars on the nearby star map, from the Open Exoplanet Catalogue (Hanno Rein
+  and contributors, MIT licence; its notice is kept beside the data): 163 planets of 92 stars, made by
+  `scripts/fetch-exoplanets.mjs` into `data/stars/exoplanets-50ly.json`. Each planet goes to the star the catalogue
+  names as its host (Gliese, GJ and Gl numbers alike), seen within 3° of the planet's system; failing a name, to the
+  star seen within 0.3° at a distance within 8% of its own (the star catalogue's distances of faint stars can be some
+  light-years out, and some stars go by other names: Gamma Cephei's planet goes to Errai). Hosts too faint for the star
+  catalogues (TRAPPIST-1, LHS 3844, L 98-59 and fifteen more) and two just beyond 50 light-years there (51 Pegasi,
+  Mu Arae) are left out; the script lists them.
+- **Shown.** A star with known planets has a faint dotted ring on the map, and the note under the map says how many
+  stars have them. Its panel lists them, nearest first: how long each takes to go round, how far out, its size (from
+  its radius, or its mass, "at least" where only its star's wobble shows it) and the year it was found. The search
+  box finds planets by name ("proxima b"): choosing one chooses its star. Exports and SVG frames of the star map
+  draw the rings and credit the catalogue.
+- **Tests.** `exoplanets.test.ts` (every planet on a star of the map, none on the Sun, each once; the licence beside
+  the data; Proxima b's year, mass and period; Tau Ceti's, 55 Cancri's and Gamma Cephei's planets on their stars;
+  nearest first); `e2e/workflows` 'A star map' (the note counts stars with planets; "proxima b" found by search, its
+  star chosen and its planets listed).
+
 ### D117. The large moons on the solar system map (Stage 11)
 
 - **Which.** Fourteen: the Moon; Phobos and Deimos; Io, Europa, Ganymede and Callisto; Enceladus, Rhea and Titan;
@@ -131,14 +151,14 @@ Follows from D2. The test drives the real interface exactly as a person would.
   place them (D82); hatching is a pattern. A look's grade is an SVG filter over the map (its CSS filter by the
   standard's equivalents), its darker edges a gradient and its paper a picture, over the map and under the texts.
 - **What differs.** A frame in the middle of an animated change shows the map as it is at that moment without the
-  animation (no advancing front, no fading borders); front lines along wars are left out of the borders; a dashed or
-  flowing line keeps its pattern. Drawn by a browser, a frame's SVG differs from its PNG in fewer than one pixel in a
+  animation (no advancing front, no fading borders). Front lines along wars (D89) are drawn in the borders' layers,
+  their teeth by the renderer's own code, a named shape each. Drawn by a browser, a frame's SVG differs from its PNG in fewer than one pixel in a
   hundred (anti-aliasing of text and coasts), checked by the tests.
 - **Tests.** `svg-pen.test.ts` (numbers, text and colours written for SVG; arcs on their circle and swept as the canvas
   sweeps them; shapes through the transform of their moment with their styles; Path2D standing for the pen's paths,
   clipping, erasing left out; text placed, aligned and styled with its halo; gradients and patterns as definitions);
   `svg-frame.test.ts` (the grades as SVG filters; border lines once from one side, against nobody apart; an owner
-  with an enclave one polygon with a hole; the file numbered by its frame, never over another, refused when it is not
+  with an enclave one polygon with a hole; a front line all along the border with the enemy; the file numbered by its frame, never over another, refused when it is not
   SVG); `e2e/workflows` 'SVG frames' (a frame of a turned view with a text box saved from the button: its layers in
   order, countries as named shapes, names and the text box as text, and drawn by the browser within 2% of the PNG of
   the same frame; undone).

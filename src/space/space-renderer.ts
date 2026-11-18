@@ -36,6 +36,8 @@ export interface SpaceDrawOptions {
   orbits?: Array<{ color: string; points: Vec3[]; small?: boolean }>;
   /** How far a held star's glow reaches (map units; absent: REALM_REACH_LY). */
   realmReach?: number;
+  /** Stars with known planets (D118): a faint ring round each. */
+  planets?: ReadonlySet<number>;
   /** A galaxy's glow, and its arms' names (D116). */
   dust?: GalaxyDust;
   armNames?: Array<{ name: string; at: Vec3 }>;
@@ -130,6 +132,7 @@ export class SpaceRenderer {
       }
       ctx.fillStyle = colour;
       ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+      if (o.planets?.has(s.id)) { ctx.strokeStyle = 'rgba(120,220,200,0.7)'; ctx.lineWidth = Math.max(0.8, 1.1 * u); ctx.setLineDash([2 * u, 2 * u]); ctx.beginPath(); ctx.arc(x, y, r + 4.5 * u, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); }
       const held = o.holdings?.get(s.id);
       if (held) { ctx.strokeStyle = held.color; ctx.lineWidth = Math.max(1, 1.6 * u); ctx.beginPath(); ctx.arc(x, y, r + 3 * u, 0, Math.PI * 2); ctx.stroke(); }
       if (o.selected === s.id) { ctx.strokeStyle = '#ffe9a6'; ctx.lineWidth = Math.max(1, 2 * u); ctx.beginPath(); ctx.arc(x, y, r + 7 * u, 0, Math.PI * 2); ctx.stroke(); }

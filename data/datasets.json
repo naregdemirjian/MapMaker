@@ -135,5 +135,22 @@
         "sha256": "d9f69fd86bbf90a4e4d52b4c5c53eacfa6dfc0bfdef85bfd94f095e0bebe4ebd"
       }
     ]
+  },
+  {
+    "id": "oec",
+    "name": "Open Exoplanet Catalogue",
+    "version": "systems.xml of 18 November 2026",
+    "source": "https://github.com/OpenExoplanetCatalogue/open_exoplanet_catalogue (file from https://github.com/OpenExoplanetCatalogue/oec_gzip)",
+    "licence": "MIT",
+    "credit": "Planets of other stars: the Open Exoplanet Catalogue, Hanno Rein and contributors, MIT licence.",
+    "usedFor": "Known planets of the stars on the nearby star map, in a star's panel and marked on the map (data/stars/exoplanets-50ly.json)",
+    "retrieved": "2026-11-18",
+    "converted": "Confirmed planets of systems within 50 light-years whose host star is on the nearby star map (by name, or by its place in the sky and distance); for each its name, period, distance from its star, mass and radius in Earth's, year and way of discovery; nothing else changed. The licence's notice is kept beside the file (data/stars/LICENSE-open-exoplanet-catalogue.txt).",
+    "sources": [
+      {
+        "file": "systems.xml.gz",
+        "sha256": "1d3a0ec64f00f269fffe6be43a080d45bddcd05ef156c3012780c29f38b3b701"
+      }
+    ]
   }
 ]

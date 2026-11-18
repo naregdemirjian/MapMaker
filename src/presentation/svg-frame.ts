@@ -7,14 +7,14 @@
 // shows what the frame shows. Territories and borders are made from the parcels' outlines here (the
 // renderer draws them through kept pictures and masks): ending at the coast through masks of the
 // land made by the renderer, borders against nobody left out along the coast as the renderer does.
-// What a frame is in the middle of (a change being animated, a front line's teeth) is shown as the
-// map is at that moment, without the animation; the look's grade is an SVG filter over the map.
+// What a frame is in the middle of (a change being animated) is shown as the map is at that moment,
+// without the animation; front lines along wars keep their teeth; the look's grade is an SVG filter.
 import { geoPath, type GeoProjection } from 'd3-geo';
 import type { World } from '../world-model/world.ts';
 import type { Engine } from '../temporal-engine/engine.ts';
 import type { Instant } from '../core-time/index.ts';
 import { gregorian } from '../core-time/index.ts';
-import { MapRenderer, DEFAULT_STYLE, EXPORT_QUALITY, mediaBox, type PassName, type TerritoryFill, type RenderOptions } from '../render-engine/map-renderer.ts';
+import { MapRenderer, DEFAULT_STYLE, EXPORT_QUALITY, FRONT_COLOR, FRONT_SIDE, mediaBox, drawTeeth, warsAt, type PassName, type TerritoryFill, type RenderOptions, type FrontTeeth } from '../render-engine/map-renderer.ts';
 import { SvgPen, SvgPath, withSvgPaths, esc, num } from '../export/svg-pen.ts';
 import { frameSetup, basemapFor, terrainFor, detailForFrame, drawShotOverlays, drawSpaceFrame, lookStyles, PASS_DEFS, type ExportPassDef } from './export-driver.ts';
 import { territoryPolygons, facesPolygons } from '../domain/data-export.ts';
@@ -27,6 +27,7 @@ import { timeAt, type ShotSettings } from './sequence.ts';
 import { GRADES, drawPaper, vignetteOf } from './looks.ts';
 import { isSpaceMap, spaceSettingsOf } from '../world-model/world-settings.ts';
 import { loadNearbyStars } from '../space/catalogue.ts';
+import { loadExoplanets } from '../space/exoplanets.ts';
 import { parseJSON } from '../temporal-engine/engine.ts';
 import type { View } from '../render-engine/camera.ts';
 
@@ -84,6 +85,40 @@ export function borderLines(arr: Arrangement, states: ReadonlyMap<number, { valu
   return { shared, open };
 }
 
+/**
+ * The front line an owner at war draws (D89): its border chains facing the enemy, in longitude and
+ * latitude, each the way the owner's outline runs (its land on one side: the teeth go to the other).
+ */
+export function frontLines(arr: Arrangement, states: ReadonlyMap<number, { value: string | null }>, from: string, toward: string, faces: number[]): Position[][] {
+  const geom = parcelGeometry(arr), t = arr.topology();
+  const gr = geom.graph(faces, t);
+  const out: Position[][] = [];
+  for (let q = 0; q < gr.n; q++) {
+    if (gr.across[q] >= 0) continue;
+    const c = gr.cycle[q], i = gr.index[q];
+    if (states.get(arr.halfEdgeFace(c.heads[i] ^ 1))?.value !== toward) continue;
+    const last = i === c.starts.length - 1, line: Position[] = [];
+    for (let k = c.starts[i]; k < (last ? c.lon.length : c.starts[i + 1] + 1); k++) line.push([c.lon[k], c.lat[k]]);
+    if (last) line.push([c.lon[0] + 360 * c.wind, c.lat[0]]);
+    if (line.length >= 2) out.push(line);
+  }
+  return out;
+}
+
+/** Lines in longitude and latitude as the view projects them (resampled, cut where the view cuts them): screen polylines. */
+function projectLines(projection: GeoProjection, lines: Position[][]): Float32Array[] {
+  const out: number[][] = [];
+  let cur: number[] | null = null;
+  const sink = {
+    moveTo(x: number, y: number) { cur = [x, y]; out.push(cur); },
+    lineTo(x: number, y: number) { (cur ??= (out.push([]), out[out.length - 1])).push(x, y); },
+    closePath() { /* lines are open */ },
+    arc() { /* (points have none) */ },
+  };
+  geoPath(projection, sink as unknown as CanvasRenderingContext2D)({ type: 'MultiLineString', coordinates: lines });
+  return out.filter((l) => l.length >= 4).map((l) => Float32Array.from(l));
+}
+
 /** GeoJSON polygons (outer rings anticlockwise) as d3 reads them (outer rings clockwise). */
 const forD3 = (polys: Position[][][]): GeoJSON.MultiPolygon => ({ type: 'MultiPolygon', coordinates: polys.map((p) => p.map((r) => r.slice().reverse())) });
 
@@ -132,7 +167,7 @@ export async function svgFrame(o: SvgFrameOptions): Promise<SvgFrame> {
 
   if (isSpaceMap(space)) {
     // A space map (D110): the stars, realms, lanes and names through the pen (realms come as a picture: they are joined offscreen).
-    if (spaceSettingsOf(space)?.catalogue !== 'solar') await loadNearbyStars();
+    if (spaceSettingsOf(space)?.catalogue === 'nearby') { await loadNearbyStars(); await loadExoplanets(); }
     const pen = new SvgPen(W, H, 's');
     withSvgPaths(() => drawSpaceFrame(pen.asContext(), world, engine, shot, frame, { ...all, overlays: false }, W, H, false));
     note(pen);
@@ -188,7 +223,7 @@ export async function svgFrame(o: SvgFrameOptions): Promise<SvgFrame> {
       const row = world.get('layer', layerId);
       if (!row || row.kind !== 'partition' || row.space_id !== shot.spaceId) continue;
       n++;
-      const lst = parseJSON<{ fillOpacity?: number; borderWidth?: number; clipToLand?: boolean; fill?: TerritoryFill }>(row.style, {});
+      const lst = parseJSON<{ fillOpacity?: number; borderWidth?: number; clipToLand?: boolean; fill?: TerritoryFill; fronts?: FrontTeeth; frontColor?: string }>(row.style, {});
       const clip = !!masks && lst.clipToLand !== false;
       // (A view all sea shows none of a layer ending at the coast.)
       if (clip && masks!.coast === 'sea') continue;
@@ -296,7 +331,26 @@ export async function svgFrame(o: SvgFrameOptions): Promise<SvgFrame> {
         const body = clip && masks!.coast === 'mixed' && masked?.outside
           ? [stroke(`bs${n}`, 'shared'), `<g mask="url(#outside-coast-band)">\n${stroke(`bo${n}`, 'open')}\n</g>`].join('\n')
           : stroke(`b${n}`, 'both');
-        borderLayers.push(layer(`borders-${n}`, `Borders: ${row.name}`, body, clip && masked?.borders ? ' mask="url(#land-borders)"' : ''));
+        // Front lines along the wars of the moment (D89): a dark edge, the line, and teeth toward the enemy.
+        let fronts = '';
+        const wars = lst.fronts && arr ? warsAt(world, engine, t, lst.fronts) : [];
+        if (wars.length) {
+          const pen = new SvgPen(W, H, `fr${n}`), c = pen.asContext(), fw = Math.max(2.5, 4 * u), colour = lst.frontColor ?? FRONT_COLOR;
+          turned(pen);
+          c.lineJoin = 'round'; c.lineCap = 'round';
+          for (const [from, toward] of wars) {
+            const lines = projectLines(view.projection as GeoProjection, frontLines(arr!, states, from, toward, byOwner.get(from) ?? []));
+            if (!lines.length) continue;
+            const stroke = (style: string, width: number) => { c.strokeStyle = style; c.lineWidth = width; for (const l of lines) { c.beginPath(); c.moveTo(l[0], l[1]); for (let i = 2; i + 1 < l.length; i += 2) c.lineTo(l[i], l[i + 1]); c.stroke(); } };
+            pen.name(`front-${from}-${toward}`, `Front: ${nameOf(from)} against ${nameOf(toward)}`);
+            stroke('rgba(10,16,24,0.75)', fw * 2);
+            stroke(colour, fw);
+            if (lst.fronts !== 'plain') { c.fillStyle = colour; for (const l of lines) drawTeeth(c, l, fw * 2, FRONT_SIDE); }
+          }
+          defs.push(pen.defs());
+          fronts = pen.body();
+        }
+        borderLayers.push(layer(`borders-${n}`, `Borders: ${row.name}`, [body, fronts].filter(Boolean).join('\n'), clip && masked?.borders ? ' mask="url(#land-borders)"' : ''));
       }
     }
     mapLayers.push(...fillLayers, ...borderLayers);

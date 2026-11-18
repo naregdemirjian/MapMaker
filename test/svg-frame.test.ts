@@ -10,7 +10,7 @@ import { World } from '../src/world-model/world.ts';
 import { Engine } from '../src/temporal-engine/engine.ts';
 import * as cmd from '../src/domain/commands.ts';
 import { NEG_INF } from '../src/core-time/index.ts';
-import { gradeFilter, borderLines } from '../src/presentation/svg-frame.ts';
+import { gradeFilter, borderLines, frontLines } from '../src/presentation/svg-frame.ts';
 import { facesPolygons } from '../src/domain/data-export.ts';
 import { writeSvgFrame } from '../src/export/writer.ts';
 import { ring, square } from './helpers.ts';
@@ -57,6 +57,10 @@ test('border lines: a border between two owners once, from one side; borders aga
   const polys = facesPolygons(arr, faces(a));
   assert.equal(polys.length, 1);
   assert.equal(polys[0].length, 2, 'an outer ring and a hole');
+  // A front line (D89): the outer owner's border facing the enclave, all of it; none against nobody.
+  const front = frontLines(arr, states, a, b, faces(a));
+  assert.ok(Math.abs(len(front) - inner) < inner * 0.01, `the front all along the enclave (${len(front)} of ${inner})`);
+  assert.deepEqual(frontLines(arr, states, b, 'nobody', faces(b)), []);
 });
 
 test('an SVG frame is written into the export folder, numbered by its frame, never over another', () => {
