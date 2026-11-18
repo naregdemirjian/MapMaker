@@ -2159,6 +2159,82 @@ try {
     await page.getByTestId('tool-select').click();
   });
 
+  await h.step('Conditions: a radiation layer; a source placed with a click from the date viewed, there while it lasts and not before or after; a plume carried east; hidden while working but presented; undone', async () => {
+    await page.getByTestId('mode-world').click();
+    await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 70, lat: 56, zoom: 2, rotation: 0, projection: 'equirectangular' }));
+    await h.setDate('1450');
+    const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
+    const before = await steps();
+    const site: LL = [75, 61], plumeAt: LL = [60, 52], east: LL = [64.5, 52], west: LL = [55.5, 52];
+    for (const ll of [site, plumeAt, east, west]) assert.equal(await h.ownerAt(ll, '1450'), null, `nobody holds ${ll}`);
+    const pixelAt = (ll: LL) => page.evaluate(([lon, lat]) => {
+      const p = (window as any).__mapmaker.lonLatToPage(lon, lat);
+      const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement;
+      const r = c.getBoundingClientRect(), k = c.width / r.width;
+      return Array.from(c.getContext('2d')!.getImageData(Math.round((p[0] - r.left) * k), Math.round((p[1] - r.top) * k), 1, 1).data).slice(0, 3);
+    }, ll);
+    const diff = (a: number[], b: number[]) => Math.max(...a.map((v, i) => Math.abs(v - b[i])));
+    const fields = () => page.evaluate(() => (window as any).__mapmaker.store.renderer.lastFields) as Promise<Array<{ layer: string; sources: number; drawn: number }>>;
+    const plain = await pixelAt(site), plainEast = await pixelAt(east);
+    // A field layer of radiation, from + Layer; the Conditions tool is then ready to place sources on it.
+    await page.getByRole('button', { name: '+ Layer' }).click();
+    await page.getByTestId('layer-kind-field').click();
+    await page.getByTestId('new-layer-field-type').selectOption('radiation');
+    await page.getByTestId('new-layer-name').fill('Fallout');
+    await page.getByTestId('create-layer').click();
+    await page.getByTestId('field-options').waitFor();
+    await page.getByTestId('field-shape').selectOption('circle');
+    await page.getByTestId('field-radiusKm').fill('400');
+    await page.getByTestId('field-intensity').fill('800');
+    const at = await h.toPage(site);
+    await page.mouse.click(at[0], at[1]);
+    await h.saved();
+    // Two days on: strong (red) where it was placed.
+    await h.setDate('3 January 1450');
+    await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastFields.some((f: any) => f.drawn === 1));
+    let px = await pixelAt(site);
+    for (let i = 0; i < 30 && !(px[0] > px[1] + 60); i++) { await page.waitForTimeout(100); px = await pixelAt(site); }
+    assert.ok(px[0] > px[1] + 60 && diff(px, plain) > 60, `red where it struck (${px} against ${plain})`);
+    await h.screenshot('conditions-radiation');
+    // Not the day before; gone a year on.
+    await h.setDate('1449');
+    await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastFields.every((f: any) => f.drawn === 0));
+    await h.setDate('1451');
+    await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastFields.every((f: any) => f.drawn === 0));
+    // A plume, carried east at 150 km a day: four days on it reaches 300 km east of where it began, not west.
+    await h.setDate('1450');
+    await page.getByTestId('field-shape').selectOption('plume');
+    await page.getByTestId('field-radiusKm').fill('15');
+    await page.getByTestId('field-windDeg').fill('90');
+    await page.getByTestId('field-windKmPerDay').fill('150');
+    const pa = await h.toPage(plumeAt);
+    await page.mouse.click(pa[0], pa[1]);
+    await h.saved();
+    await h.setDate('5 January 1450');
+    await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastFields.some((f: any) => f.drawn === 2));
+    let ePx = await pixelAt(east);
+    for (let i = 0; i < 30 && diff(ePx, plainEast) <= 25; i++) { await page.waitForTimeout(100); ePx = await pixelAt(east); }
+    assert.ok(diff(ePx, plainEast) > 25, `the plume downwind (${ePx} against ${plainEast})`);
+    assert.ok(diff(await pixelAt(west), plainEast) <= 12, `nothing upwind (${await pixelAt(west)})`);
+    await h.screenshot('conditions-plume');
+    // Hidden while working, still in the presentation (and exports).
+    await page.getByTestId('open-show').click();
+    await page.getByTestId('show-dialog').waitFor();
+    await page.getByTestId('show-working-fields').uncheck();
+    await page.getByTestId('show-dialog').getByRole('button', { name: 'Close' }).last().click();
+    await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastFields.length === 0);
+    await page.getByTestId('mode-present').click();
+    await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastFields.length > 0);
+    await page.getByTestId('mode-world').click();
+    // Undone, step by step: the switch, the plume, the circle and the layer.
+    assert.equal(await fields().then((f) => f.length), 0);
+    for (let i = 0; i < 4; i++) await page.getByTestId('undo').click();
+    await h.saved();
+    assert.equal(await steps(), before, 'each change was one step');
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('layer').some((l: any) => l.kind === 'field')), false);
+    await page.getByTestId('tool-select').click();
+  });
+
   await h.step('History Health lists the overlap, nothing else; no browser errors', async () => {
     await page.getByTestId('mode-world').click();
     await page.getByTestId('health').click();

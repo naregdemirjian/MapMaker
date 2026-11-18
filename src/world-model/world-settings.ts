@@ -9,13 +9,14 @@ import { cleanStamps, type TerrainStamp } from '../terrain/sculpt.ts';
 export type BasemapSource = 'natural-earth' | 'none';
 
 /** What is shown on a map (D84): each true unless set false. */
-export interface ShowSet { lakes?: boolean; coastline?: boolean; rivers?: boolean; graticule?: boolean; borders?: boolean; names?: boolean; cities?: boolean; characters?: boolean; features?: boolean; terrain?: boolean }
+export interface ShowSet { lakes?: boolean; coastline?: boolean; rivers?: boolean; graticule?: boolean; borders?: boolean; names?: boolean; cities?: boolean; characters?: boolean; features?: boolean; fields?: boolean; terrain?: boolean }
 export const SHOW_ITEMS: Array<{ key: keyof ShowSet; name: string }> = [
   { key: 'borders', name: 'Borders' },
   { key: 'names', name: 'Country names' },
   { key: 'cities', name: 'Cities' },
   { key: 'characters', name: 'Characters' },
   { key: 'features', name: 'Areas, lines and points' },
+  { key: 'fields', name: 'Conditions (radiation, fire, floods, heatmaps)' },
   { key: 'lakes', name: 'Lakes' },
   { key: 'rivers', name: 'Rivers' },
   { key: 'coastline', name: 'Coastlines' },

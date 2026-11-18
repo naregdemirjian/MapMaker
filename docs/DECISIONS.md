@@ -61,6 +61,38 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D102. Conditions: field layers of radiation, fire, smoke, floods, destruction and heat (Stage 9)
+
+A new kind of layer, **Conditions**, holds things that cover the map with a strength at every place and moment and
+then pass: radiation, fire, smoke and ash, floodwater, destruction, a heatmap, or a custom one. Each kind has its
+own colours (a ramp from see-through where there is little, to its full colour where it is strongest) and its unit.
+
+- **Sources.** A layer holds sources: a strike, a fire, a release. The **Conditions** tool places one with a click,
+  from the date viewed (or in the event being recorded), with the settings in its options: a strength (in the
+  kind's unit), a size (km), a shape (a circle with an uneven edge, or a **plume** carried by the wind towards a
+  direction at so many km a day, widening and thinning as it goes, its front thinning out), and a life: rising to
+  its peak over so many days, lasting, then halving every so many days until it has faded; its edge can grow to
+  its full size over days. The layer's value at a place is the sum of its sources there. Sources are kept as
+  areas, lines and points are (D71): a feature on the field layer whose place is a dated change, so an event can
+  hold them, moving one does not start it again, and undo, search and deletion work as for features; its settings
+  are kept with it, and its life is counted from when it first appeared (`domain/fields.ts`, pure and tested).
+- **Drawn on the graphics card** (`render-engine/fields-gl.ts`). Each source in force is drawn as a rectangle
+  around its reach (in every copy of the planet the view shows), thousands in one call; for every pixel the shader
+  undoes the projection (the terrain shader's inverses, now shared), measures the distance and bearing from the
+  source on the sphere, and adds the source's value there into a picture of numbers (half floats; bytes where the
+  graphics card cannot keep floats). That picture is then coloured by the kind's ramp and laid over the territories,
+  under the areas, lines and points. The picture is kept until what it shows changes. Fields are an item of Show
+  ("Conditions"), hidden while working or in exports like the others, and a separate export pass ("Conditions").
+- **Temporary and permanent, kept apart.** Conditions pass by themselves; what changes the land for good is the
+  terrain's (sculpting, D98; the sea level, D96).
+- **Not done yet.** Spreading over the terrain (floods filling low ground, fires and lava), disaster templates,
+  heatmaps worked out from points, and editing a placed source's settings (undo and "Remove all" for now); flat maps.
+- **Tests.** `fields.test.ts` (rising, lasting, halving and fading; growing; a ragged circle and its reach; a plume
+  downwind, widening, not upwind; distances and bearings on the sphere; stored settings checked; ramps; a field
+  layer's sources placed from a date in an event, in force while they last, changed, undone, deleted);
+  `e2e/workflows` (a radiation layer from + Layer; a source placed with a click, red two days on, not the day
+  before nor a year on; a plume carried east, not west; hidden while working but presented; undone).
+
 ### D101. Finer heights close in, downloaded as needed (Stage 8)
 
 Earth's bundled heights have cells of about 10 km, soft close in. Now, when a view's pixels are much smaller than

@@ -9,6 +9,8 @@ import { BASE_EVENT_ID } from '../../world-model/schema.ts';
 import { featureStyle, featureColor, isFeatureKind, DEFAULT_FEATURE_STYLE, type FeatureKind, type FeatureStyle } from '../../render-engine/feature-style.ts';
 import { parseJSON, type FeatureAnimStyle } from '../../temporal-engine/engine.ts';
 import { DateField, fmt } from './Panels.tsx';
+import { FieldTypeChoice } from './Fields.tsx';
+import { FIELD_TYPES, type FieldType } from '../../domain/fields.ts';
 import { PicturesSection } from './Pictures.tsx';
 
 const KIND_NAME: Record<FeatureKind, { one: string; many: string; example: string }> = {
@@ -379,13 +381,22 @@ export function FeatureRows() {
   );
 }
 
-/** A new layer of any kind: territory, areas, lines or points. */
+/** A new layer of any kind: territory, areas, lines, points, or conditions (fields, D102). */
 export function NewLayerDialog() {
   const s = useStore();
   const [name, setName] = useState('');
-  const [kind, setKind] = useState<'partition' | FeatureKind>('partition');
-  const close = () => s.set({ dialog: null });
+  const [kind, setKind] = useState<'partition' | FeatureKind | 'field'>(s.newLayerKind ?? 'partition');
+  const [fieldType, setFieldType] = useState<FieldType>('radiation');
+  const round = s.world?.get('map_space', s.spaceId)?.kind === 'sphere';
+  const close = () => s.set({ dialog: null, newLayerKind: null });
   const create = () => {
+    if (kind === 'field') {
+      const id = s.execute((wd) => cmd.createFieldLayer(wd, s.spaceId, name, fieldType));
+      if (!id) return;
+      s.set({ fieldLayerId: id, fieldSource: {}, tool: 'field' });
+      close();
+      return;
+    }
     const n = name.trim() || (kind === 'partition' ? 'Territory' : KIND_NAME[kind].many);
     const id = s.execute((wd) => cmd.createLayer(wd, s.spaceId, n, kind));
     if (!id) return;
@@ -393,11 +404,12 @@ export function NewLayerDialog() {
     else s.set({ featureLayerId: id, tool: 'feature', reshapeId: null });
     close();
   };
-  const kinds: Array<{ id: 'partition' | FeatureKind; name: string; hint: string }> = [
+  const kinds: Array<{ id: 'partition' | FeatureKind | 'field'; name: string; hint: string }> = [
     { id: 'partition', name: 'Territory', hint: 'Each place has one holder at a time, with borders between them: religion, military control, language.' },
     { id: 'area', name: 'Areas', hint: `Shapes that may overlap: ${KIND_NAME.area.example}.` },
     { id: 'line', name: 'Lines', hint: `${KIND_NAME.line.example[0].toUpperCase()}${KIND_NAME.line.example.slice(1)}.` },
     { id: 'point', name: 'Points', hint: `${KIND_NAME.point.example[0].toUpperCase()}${KIND_NAME.point.example.slice(1)}.` },
+    ...(round ? [{ id: 'field' as const, name: 'Conditions', hint: 'Radiation, fire, smoke and ash, floods, destruction or a heatmap: sources that rise, last and fade by themselves, coloured by strength.' }] : []),
   ];
   return (
     <div className="modal-back" onPointerDown={(ev) => ev.target === ev.currentTarget && close()}>
@@ -409,7 +421,8 @@ export function NewLayerDialog() {
             <div className="muted">{k.hint}</div>
           </div>
         ))}
-        <label>Name<input autoFocus value={name} placeholder={kind === 'partition' ? 'for example "Military control"' : `for example "${kind === 'area' ? 'Claims' : kind === 'line' ? 'Front lines' : 'Battles'}"`} onChange={(ev) => setName(ev.target.value)} onKeyDown={(ev) => ev.key === 'Enter' && create()} data-testid="new-layer-name" /></label>
+        {kind === 'field' && <FieldTypeChoice value={fieldType} onChange={setFieldType} />}
+        <label>Name<input autoFocus value={name} placeholder={kind === 'partition' ? 'for example "Military control"' : kind === 'field' ? `for example "${FIELD_TYPES[fieldType].name}"` : `for example "${kind === 'area' ? 'Claims' : kind === 'line' ? 'Front lines' : 'Battles'}"`} onChange={(ev) => setName(ev.target.value)} onKeyDown={(ev) => ev.key === 'Enter' && create()} data-testid="new-layer-name" /></label>
         <div className="modal-actions"><button onClick={close}>Cancel</button><button className="primary" onClick={create} data-testid="create-layer">Create layer</button></div>
       </div>
     </div>

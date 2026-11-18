@@ -70,6 +70,10 @@ a { color: var(--accent); cursor: pointer; }
 .record-banner .muted-red { color: #d99aa5; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .record-banner button { padding: 2px 10px; }
 .toolbar select { max-width: 170px; }
+/* Numbers in a tool's options are short: they keep the row to one line where they can. (As specific
+   as the rule above that makes inputs in labels full width.) */
+.toolbar.sub label.inline > input[type=number]:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]):not([type=file]) { width: 72px; display: inline-block; margin-top: 0; }
+.field-options .muted { flex-basis: 100%; }
 .brush-settings { position: relative; }
 .brush-settings summary { cursor: pointer; list-style: none; padding: 5px 10px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel2); white-space: nowrap; }
 .brush-settings summary::-webkit-details-marker { display: none; }

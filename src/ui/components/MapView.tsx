@@ -275,7 +275,7 @@ export function MapView() {
     // (The renderer clears or replaces the frame itself; only a shot's frame leaves canvas around it.)
     if (shot) ctx.clearRect(0, 0, c.width, c.height);
     ctx.setTransform(dpr, 0, 0, dpr, frame.x * dpr, frame.y * dpr);
-    const layers = s.world.all('layer').filter((l) => l.space_id === s.spaceId && (l.kind === 'partition' || isFeatureKind(l.kind)) && (shot ? (shot.layers.length ? shot.layers.includes(l.id) : l.visible) : l.visible)).sort((a, b) => a.sort_order - b.sort_order).map((l) => l.id);
+    const layers = s.world.all('layer').filter((l) => l.space_id === s.spaceId && (l.kind === 'partition' || l.kind === 'field' || isFeatureKind(l.kind)) && (shot ? (shot.layers.length ? shot.layers.includes(l.id) : l.visible) : l.visible)).sort((a, b) => a.sort_order - b.sort_order).map((l) => l.id);
     // What the map shows (D84): while working, or (the shot's preview) in exports.
     const space = s.world.get('map_space', s.spaceId);
     const where = shot ? 'export' as const : 'working' as const;
@@ -299,6 +299,7 @@ export function MapView() {
     if (terrain?.look) passes.add('terrain');
     if (on('borders')) passes.add('borders');
     if (on('features')) passes.add('features');
+    if (on('fields')) passes.add('fields');
     const full = basemapSourceOf(s.world.get('map_space', s.spaceId)) === 'natural-earth' ? s.basemap : null;
     const basemap = full && vs.coast === 'medium' ? withoutDetail(full) : full;
     // Close up, load the detailed coastlines (once) and redraw when they arrive.
@@ -720,6 +721,15 @@ export function MapView() {
       return;
     }
     // Characters tool: a click puts the chosen character here, from the date being viewed.
+    // The Conditions tool (D102): a click places a source on the chosen field layer, from the date viewed.
+    if (!presentation && e.button === 0 && s.tool === 'field') {
+      const ll = screenToLonLat(view, p[0], p[1]);
+      if (!ll) return;
+      const layer = s.world.get('layer', s.fieldLayerId);
+      if (!layer || layer.kind !== 'field' || layer.space_id !== s.spaceId) { store.toast('Choose or make a field layer first (+ Layer, Conditions).', 'error'); return; }
+      store.execute((wd) => cmd.addFieldSource(wd, { layerId: layer.id, name: '', at: ll, mode: placementMode(), source: s.fieldSource }));
+      return;
+    }
     if (!presentation && e.button === 0 && s.tool === 'place') {
       const ll = screenToLonLat(view, p[0], p[1]);
       if (!ll) return;

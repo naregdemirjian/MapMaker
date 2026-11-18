@@ -31,6 +31,8 @@ import { TerrainPictures, terrainDrawable, type TerrainFrame, type TerrainImageK
 import type { ElevationGrid } from '../terrain/grid.ts';
 import type { TerrainCover } from '../terrain/cover.ts';
 import type { DetailGrid } from '../terrain/detail.ts';
+import { FieldPictures, edgePhases, type FieldInstance } from './fields-gl.ts';
+import { activeSources, fieldLayerStyleOf, sourceReach, sizeAt } from '../domain/fields.ts';
 import { PALETTES, rampAt, DEFAULT_TERRAIN_LOOK, type TerrainLook } from '../terrain/look.ts';
 
 type LabelEntity = { name: string; style?: string; color?: string; type_id?: string };
@@ -38,9 +40,9 @@ type LabelEntity = { name: string; style?: string; color?: string; type_id?: str
 /** How a territory layer is filled (D88): solid, or see-through stripes, crossed stripes or dots in each owner's colour. */
 export type TerritoryFill = 'solid' | 'hatch' | 'cross' | 'dots';
 
-export type PassName = 'background' | 'terrain' | 'graticule' | 'land' | 'fills' | 'borders' | 'features' | 'cities' | 'labels' | 'characters';
+export type PassName = 'background' | 'terrain' | 'graticule' | 'land' | 'fills' | 'borders' | 'fields' | 'features' | 'cities' | 'labels' | 'characters';
 /** Drawing order. The grid lies under the land, so stacked export passes match the full picture. */
-export const ALL_PASSES: PassName[] = ['background', 'terrain', 'graticule', 'land', 'fills', 'borders', 'features', 'cities', 'labels', 'characters'];
+export const ALL_PASSES: PassName[] = ['background', 'terrain', 'graticule', 'land', 'fills', 'borders', 'fields', 'features', 'cities', 'labels', 'characters'];
 
 /**
  * The terrain a picture shows (D95): the grid, a name for its content, and how it is drawn (null: not
@@ -59,6 +61,15 @@ export interface TerrainShown {
   detail?: DetailGrid | null;
 }
 const rgbOf = ([r, g, b]: [number, number, number]) => `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
+/** A short name for the sources of a field picture: a hash of everything the shader is given (FNV-1a over the numbers). */
+function hashInstances(inst: FieldInstance[]): string {
+  const f = new Float32Array(inst.length * 16);
+  inst.forEach((s, i) => f.set([...s.rect, s.lon, s.lat, s.radius, s.value, s.noise, s.plume ? 1 : 0, s.plume?.dir ?? 0, s.plume?.length ?? 0, ...s.phases, 0], i * 16));
+  const u = new Uint32Array(f.buffer);
+  let h = 0x811c9dc5;
+  for (let i = 0; i < u.length; i++) { h ^= u[i]; h = Math.imul(h, 0x01000193) >>> 0; }
+  return `${inst.length}:${h.toString(36)}`;
+}
 /** Whether territories' pictures depend on the finer grid close in (D101): relief over them, or their coast of the moment. */
 const reliefKeyNeedsDetail = (look: TerrainLook | null, fills: boolean, terrainLand: boolean) => (!!look?.overTerritories && fills) || terrainLand;
 /** Rivers in a blue that suits the terrain's palette (D99). */
@@ -413,6 +424,9 @@ export class MapRenderer {
   quality: RenderQuality = { ...VIEW_QUALITY };
   private basemapPainter = new BasemapPainter();
   private terrainPictures = new TerrainPictures();
+  private fieldPictures = new FieldPictures();
+  /** The field layers drawn last (D102): how many sources each had in force, and how many rectangles were drawn (for the tests). */
+  lastFields: Array<{ layer: string; sources: number; drawn: number }> = [];
   lastLabels: LabelInfo[] = [];
   /** The characters drawn in the last frame, where (screen) and on the map, for picking and tests. */
   /** (r: how far the marker or icon reaches from its middle, in design pixels; icon: its icon, 'picture' or 'marker'.) */
@@ -2052,6 +2066,9 @@ export class MapRenderer {
       }
     } else if (base) this.layered(base.name, ctx, base.key, at, base.draw, null, null, opens);
 
+    // Fields (D102): radiation, fire, floods, heatmaps, over the territories and under the features.
+    if (opts.passes.has('fields')) this.drawFields(ctx, view, sheet, world, engine, spaceId, t, opts.layerIds);
+    else this.lastFields = [];
     // Areas, lines and points of the feature layers, over the territories and under the names.
     if (opts.passes.has('features')) this.drawFeatures(ctx, view, sheet, world, engine, spaceId, t, opts.layerIds, u, clipSphere ? sphere : null);
     else this.lastFeatures = [];
@@ -2117,6 +2134,66 @@ export class MapRenderer {
    */
   /** The world whose features are being drawn (for the colours of contested areas' rivals, D93). */
   private featureWorld: World | null = null;
+  /**
+   * The field layers (D102), each a picture made on the graphics card from the sources in force at
+   * `t`: every source drawn as a rectangle around its reach, in each copy of the planet the sheet shows.
+   */
+  private drawFields(ctx: CanvasRenderingContext2D, view: View, sheet: Sheet, world: World, engine: Engine, spaceId: string, t: Instant, layerIds: string[]): void {
+    this.lastFields = [];
+    const space = world.get('map_space', spaceId);
+    if (!space || space.kind !== 'sphere' || sheet.kind === 'flat') return;
+    const radiusKm = (space.radius_m ?? 6371008.8) / 1000;
+    const [k, e, f] = sheet.placement(view);
+    const m = ctx.getTransform().multiply(new DOMMatrix([k, 0, 0, k, e, f]));
+    const W = ctx.canvas.width, H = ctx.canvas.height;
+    const frame: TerrainFrame = { kind: sheet.kind, S: sheet.S, ox: sheet.ox, oy: sheet.oy, lonRef: sheet.lonRef, m, width: W, height: H };
+    const maxLat = sheet.kind === 'mercator' ? 85.05 : 90;
+    for (const layerId of layerIds) {
+      const layer = world.get('layer', layerId);
+      if (!layer || layer.kind !== 'field' || layer.space_id !== spaceId) continue;
+      const style = fieldLayerStyleOf(layer.style);
+      const active = activeSources(world, engine, layerId, t, compare);
+      const inst: FieldInstance[] = [];
+      for (const a of active) {
+        const reach = sourceReach(a.source, a.age), rho = reach / radiusKm, rhoDeg = (rho * 180) / Math.PI;
+        const south = Math.max(-maxLat, a.lat - rhoDeg), north = Math.min(maxLat, a.lat + rhoDeg);
+        if (south >= north) continue;
+        const half = Math.abs(a.lat) + rhoDeg >= 89.9 ? 180 : (Math.asin(Math.min(1, Math.sin(rho) / Math.cos((a.lat * Math.PI) / 180))) * 180) / Math.PI;
+        const box: [number, number, number, number] = [a.lon - half, south, a.lon + half, north];
+        const r = a.source.radiusKm * sizeAt(a.source, a.age);
+        for (const copy of sheet.copies(box)) {
+          // The rectangle of the box (sampled across, as the projection curves it) on the picture.
+          let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+          for (let i = 0; i <= 6; i++) for (let j = 0; j <= 6; j++) {
+            const lon = box[0] + ((box[2] - box[0]) * i) / 6 + 360 * copy - sheet.lonRef, lat = box[1] + ((box[3] - box[1]) * j) / 6;
+            const [px, py] = projectPoint(sheet.kind, lon, lat);
+            const sx = (px - sheet.ox) * sheet.S, sy = (py - sheet.oy) * sheet.S;
+            const X = m.a * sx + m.c * sy + m.e, Y = m.b * sx + m.d * sy + m.f;
+            if (X < x0) x0 = X; if (X > x1) x1 = X; if (Y < y0) y0 = Y; if (Y > y1) y1 = Y;
+          }
+          x0 = Math.max(0, Math.floor(x0) - 2); y0 = Math.max(0, Math.floor(y0) - 2); x1 = Math.min(W, Math.ceil(x1) + 2); y1 = Math.min(H, Math.ceil(y1) + 2);
+          if (!(x1 > x0 && y1 > y0)) continue;
+          inst.push({
+            rect: [x0, y0, x1, y1], lon: ((a.lon + 360 * copy) * Math.PI) / 180, lat: (a.lat * Math.PI) / 180,
+            radius: r, value: a.source.intensity * a.strength, noise: a.source.noise,
+            plume: a.source.shape === 'plume' && a.source.windKmPerDay > 0 ? { dir: (a.source.windDeg * Math.PI) / 180, length: a.source.windKmPerDay * a.age } : null,
+            phases: edgePhases(a.source.seed),
+          });
+        }
+      }
+      this.lastFields.push({ layer: layerId, sources: active.length, drawn: inst.length });
+      if (!inst.length) continue;
+      // (What the picture shows: every rectangle and setting, and where the sheet lies on it.)
+      const key = `${hashInstances(inst)}|${style.type}|${style.opacity}|${sheet.kind}|${sheet.S}|${sheet.ox}|${sheet.oy}|${sheet.lonRef}|${m.a},${m.b},${m.c},${m.d},${m.e},${m.f}|${radiusKm}`;
+      const image = this.fieldPictures.image(layerId, key, style.type, style.opacity, inst, frame, radiusKm);
+      if (!image) continue;
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.drawImage(image, 0, 0);
+      ctx.restore();
+    }
+  }
+
   private drawFeatures(ctx: CanvasRenderingContext2D, view: View, sheet: Sheet, world: World, engine: Engine, spaceId: string, t: Instant, layerIds: string[], u: number, clip: Path2D | null): void {
     this.featureWorld = world;
     this.lastFeatures = [];

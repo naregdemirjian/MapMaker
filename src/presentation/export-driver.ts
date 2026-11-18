@@ -30,11 +30,12 @@ import { PALETTES } from '../terrain/look.ts';
 export interface ExportPassDef { name: string; label: string; blend: string; passes: PassName[]; overlays: boolean; background: boolean; note?: string }
 
 export const PASS_DEFS: ExportPassDef[] = [
-  { name: 'all', label: 'All', blend: 'Normal', passes: ['background', 'terrain', 'graticule', 'land', 'fills', 'borders', 'features', 'cities', 'labels', 'characters'], overlays: true, background: true, note: 'everything combined in one image sequence' },
+  { name: 'all', label: 'All', blend: 'Normal', passes: ['background', 'terrain', 'graticule', 'land', 'fills', 'borders', 'fields', 'features', 'cities', 'labels', 'characters'], overlays: true, background: true, note: 'everything combined in one image sequence' },
   { name: 'background', label: 'Background', blend: 'Normal', passes: ['background', 'terrain', 'graticule'], overlays: false, background: true, note: 'ocean, terrain colours and grid' },
   { name: 'land', label: 'Land (Natural Earth)', blend: 'Normal', passes: ['land'], overlays: false, background: false, note: 'land, lakes and coastlines (with terrain colours, only the coastlines; relief without colours lies here); empty for worlds without the Earth basemap' },
   { name: 'fills', label: 'Territory fills', blend: 'Normal', passes: ['fills'], overlays: false, background: false, note: 'lower the opacity in Premiere to taste' },
   { name: 'borders', label: 'Borders', blend: 'Normal', passes: ['borders'], overlays: false, background: false },
+  { name: 'fields', label: 'Conditions', blend: 'Normal', passes: ['fields'], overlays: false, background: false, note: 'radiation, fire, smoke and ash, floods, destruction, heatmaps' },
   { name: 'features', label: 'Areas, lines and points', blend: 'Normal', passes: ['features'], overlays: false, background: false, note: 'claims, zones, routes, front lines, battles' },
   { name: 'cities', label: 'Cities', blend: 'Normal', passes: ['cities'], overlays: false, background: false, note: 'city dots and names' },
   { name: 'labels', label: 'Labels', blend: 'Normal', passes: ['labels'], overlays: false, background: false },
@@ -104,7 +105,7 @@ let estimator: MapRenderer | null = null;
 
 export function visibleLayers(world: World, shot: ShotSettings): string[] {
   return world.all('layer')
-    .filter((l) => l.space_id === shot.spaceId && (l.kind === 'partition' || isFeatureKind(l.kind)) && (shot.layers.length ? shot.layers.includes(l.id) : !!l.visible))
+    .filter((l) => l.space_id === shot.spaceId && (l.kind === 'partition' || l.kind === 'field' || isFeatureKind(l.kind)) && (shot.layers.length ? shot.layers.includes(l.id) : !!l.visible))
     .sort((a, b) => a.sort_order - b.sort_order)
     .map((l) => l.id);
 }
@@ -182,7 +183,7 @@ export function renderFrame(ctx: CanvasRenderingContext2D, renderer: MapRenderer
   const planet = planetOf(space);
   const cover = carved && terrainShown && PALETTES[look.palette].cover ? (planet ? coverNow(carved.grid, carved.key, (space?.radius_m ?? 6371008.8) / 1000, climateOf(planet)) : ground?.cover ?? null) : null;
   const terrain = carved ? { grid: carved.grid, key: carved.key, look: terrainShown ? look : null, seaLevel: seaLevelAt(seaPoints, t), override: carved.touched && basemap ? { data: carved.touched, key: carved.key } : null, rivers, cover, detail } : null;
-  const passes = new Set<PassName>(def.passes.filter((p) => (p !== 'graticule' || (shot.graticule && on('graticule'))) && (p !== 'labels' || labels) && (p !== 'characters' || (shot.characters !== false && on('characters'))) && (p !== 'cities' || cities) && (p !== 'borders' || on('borders')) && (p !== 'features' || on('features')) && (p !== 'terrain' || !!terrain?.look)));
+  const passes = new Set<PassName>(def.passes.filter((p) => (p !== 'graticule' || (shot.graticule && on('graticule'))) && (p !== 'labels' || labels) && (p !== 'characters' || (shot.characters !== false && on('characters'))) && (p !== 'cities' || cities) && (p !== 'borders' || on('borders')) && (p !== 'features' || on('features')) && (p !== 'fields' || on('fields')) && (p !== 'terrain' || !!terrain?.look)));
   ctx.clearRect(0, 0, width, height);
   if (passes.size) {
     const transparent = def.name === 'all' ? shot.transparent : !def.background;

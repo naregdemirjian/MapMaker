@@ -46,7 +46,47 @@ export interface TerrainOverride { data: Uint8Array; key: string }
  */
 export interface TerrainSea { level: number; mask: TexImageSource | null; maskKey: string }
 const TODAY: TerrainSea = { level: 0, mask: null, maskKey: '' };
-const PROJ: Partial<Record<ProjectionName, number>> = { equirectangular: 0, mercator: 1, equalEarth: 2, naturalEarth: 3 };
+export const PROJ: Partial<Record<ProjectionName, number>> = { equirectangular: 0, mercator: 1, equalEarth: 2, naturalEarth: 3 };
+
+/**
+ * Undoing the projection on the graphics card: a plane point (x, and y up) to [longitude, latitude]
+ * relative to the sheet's meridian (radians), as d3-geo's inverses (see terrain/look.ts invertPlane);
+ * false where the point is off the planet. Needs `u_proj` (PROJ's codes) and `PI` declared before it.
+ */
+export const INVERT_PLANE = `bool invertPlane(vec2 p, out vec2 ll) {
+  float lam = p.x, phi = p.y;
+  bool ok = true;
+  if (u_proj == 1) {
+    phi = 2.0 * atan(exp(p.y)) - PI / 2.0;
+  } else if (u_proj == 2) {
+    const float A1 = 1.340264, A2 = -0.081106, A3 = 0.000893, A4 = 0.003796;
+    float M = sqrt(3.0) / 2.0;
+    float l = p.y, l2 = l * l, l6 = l2 * l2 * l2;
+    for (int i = 0; i < 12; i++) {
+      float fy = l * (A1 + A2 * l2 + l6 * (A3 + A4 * l2)) - p.y;
+      float fpy = A1 + 3.0 * A2 * l2 + l6 * (7.0 * A3 + 9.0 * A4 * l2);
+      l -= fy / fpy; l2 = l * l; l6 = l2 * l2 * l2;
+    }
+    float s = sin(l) / M;
+    ok = abs(s) <= 1.0;
+    lam = M * p.x * (A1 + 3.0 * A2 * l2 + l6 * (7.0 * A3 + 9.0 * A4 * l2)) / cos(l);
+    phi = asin(clamp(s, -1.0, 1.0));
+  } else if (u_proj == 3) {
+    phi = p.y;
+    for (int i = 0; i < 25; i++) {
+      float p2 = phi * phi, p4 = p2 * p2;
+      phi -= (phi * (1.007226 + p2 * (0.015085 + p4 * (-0.044475 + 0.028874 * p2 - 0.005916 * p4))) - p.y)
+        / (1.007226 + p2 * (0.015085 * 3.0 + p4 * (-0.044475 * 7.0 + 0.028874 * 9.0 * p2 - 0.005916 * 11.0 * p4)));
+    }
+    float q2 = phi * phi;
+    lam = p.x / (0.8707 + q2 * (-0.131979 + q2 * (-0.013791 + q2 * q2 * q2 * (0.003971 - 0.001529 * q2))));
+  }
+  ll = vec2(lam, phi);
+  if (abs(phi) > PI / 2.0 + 1e-6) ok = false;
+  if (u_proj >= 2 && abs(lam) > PI + 1e-4) ok = false;
+  return ok;
+}
+`;
 
 const VERTEX = `#version 300 es
 in vec2 a_pos;
@@ -87,40 +127,7 @@ uniform vec2 u_detailTex;
 out vec4 outColor;
 const float PI = 3.141592653589793;
 
-bool invertPlane(vec2 p, out vec2 ll) {
-  float lam = p.x, phi = p.y;
-  bool ok = true;
-  if (u_proj == 1) {
-    phi = 2.0 * atan(exp(p.y)) - PI / 2.0;
-  } else if (u_proj == 2) {
-    const float A1 = 1.340264, A2 = -0.081106, A3 = 0.000893, A4 = 0.003796;
-    float M = sqrt(3.0) / 2.0;
-    float l = p.y, l2 = l * l, l6 = l2 * l2 * l2;
-    for (int i = 0; i < 12; i++) {
-      float fy = l * (A1 + A2 * l2 + l6 * (A3 + A4 * l2)) - p.y;
-      float fpy = A1 + 3.0 * A2 * l2 + l6 * (7.0 * A3 + 9.0 * A4 * l2);
-      l -= fy / fpy; l2 = l * l; l6 = l2 * l2 * l2;
-    }
-    float s = sin(l) / M;
-    ok = abs(s) <= 1.0;
-    lam = M * p.x * (A1 + 3.0 * A2 * l2 + l6 * (7.0 * A3 + 9.0 * A4 * l2)) / cos(l);
-    phi = asin(clamp(s, -1.0, 1.0));
-  } else if (u_proj == 3) {
-    phi = p.y;
-    for (int i = 0; i < 25; i++) {
-      float p2 = phi * phi, p4 = p2 * p2;
-      phi -= (phi * (1.007226 + p2 * (0.015085 + p4 * (-0.044475 + 0.028874 * p2 - 0.005916 * p4))) - p.y)
-        / (1.007226 + p2 * (0.015085 * 3.0 + p4 * (-0.044475 * 7.0 + 0.028874 * 9.0 * p2 - 0.005916 * 11.0 * p4)));
-    }
-    float q2 = phi * phi;
-    lam = p.x / (0.8707 + q2 * (-0.131979 + q2 * (-0.013791 + q2 * q2 * q2 * (0.003971 - 0.001529 * q2))));
-  }
-  ll = vec2(lam, phi);
-  if (abs(phi) > PI / 2.0 + 1e-6) ok = false;
-  if (u_proj >= 2 && abs(lam) > PI + 1e-4) ok = false;
-  return ok;
-}
-
+${INVERT_PLANE}
 vec3 rampSea(float e) {
   vec3 c = u_sea[0].yzw;
   if (e <= u_sea[0].x) return c;

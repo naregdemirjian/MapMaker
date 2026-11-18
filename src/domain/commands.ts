@@ -17,6 +17,7 @@ import { cleanStamps, isSculptTool, SCULPT_TOOLS, type TerrainStamp } from '../t
 import { resolvePointStyle, type LabelStyle, type CountryLabel, type PointStyle } from '../render-engine/label-style.ts';
 import { DEFAULT_FEATURE_STYLE, isFeatureKind, type FeatureKind, type FeatureStyle } from '../render-engine/feature-style.ts';
 import { relationKind, isRelationKind, type RelationKind } from './relations.ts';
+import { DEFAULT_SOURCES, fieldLayerStyleOf, fieldSourceOf, isFieldType, FIELD_TYPES, type FieldSource, type FieldType } from './fields.ts';
 import { cleanIcon, type CharacterIcon, type RouteStyle } from '../render-engine/icons.ts';
 import type { TerritoryFill, FrontTeeth } from '../render-engine/map-renderer.ts';
 export type { CharacterIcon } from '../render-engine/icons.ts';
@@ -1456,6 +1457,62 @@ export function updateFeature(world: World, id: string, patch: Partial<{ name: s
   if (patch.layer_id !== undefined) row.layer_id = patch.layer_id;
   if (patch.style !== undefined) row.style = patch.style ? JSON.stringify({ ...parseJSON<object>(f.style, {}), ...patch.style }) : '{}';
   return run(world, `Change "${f.name}"`, (tx) => tx.patch('feature', id, row));
+}
+
+/** A new field layer (D102): radiation, fire, smoke and ash, flood, destruction, a heatmap or a custom one. */
+export function createFieldLayer(world: World, spaceId: string, name: string, type: FieldType): CommandResult<string> {
+  if (!world.get('map_space', spaceId)) throw new Error('That map no longer exists.');
+  if (!isFieldType(type)) throw new Error('Unknown kind of field.');
+  const n = name.trim() || FIELD_TYPES[type].name;
+  return run(world, `Create layer "${n}"`, (tx) => {
+    const id = newId('layer');
+    const order = world.all('layer').filter((l) => l.space_id === spaceId).length;
+    tx.insert('layer', { id, space_id: spaceId, kind: 'field', name: n, sort_order: order, visible: 1, style: JSON.stringify({ field: { type, opacity: 1 } }), export_pass: n.toLowerCase().replace(/\W+/g, '-') });
+    return id;
+  });
+}
+
+/** A field layer's kind and opacity (not dated: how it is drawn). */
+export function setFieldLayerStyle(world: World, layerId: string, patch: Partial<{ type: FieldType; opacity: number }>): CommandResult {
+  const layer = world.get('layer', layerId);
+  if (!layer || layer.kind !== 'field') throw new Error('That field layer no longer exists.');
+  if (patch.type !== undefined && !isFieldType(patch.type)) throw new Error('Unknown kind of field.');
+  let o: Record<string, unknown> = {};
+  try { o = JSON.parse(layer.style || '{}') ?? {}; } catch { o = {}; }
+  const next = { ...fieldLayerStyleOf(layer.style), ...patch };
+  next.opacity = Math.max(0, Math.min(1, Number.isFinite(next.opacity) ? next.opacity : 1));
+  return run(world, `Change "${layer.name}"`, (tx) => tx.patch('layer', layerId, { style: JSON.stringify({ ...o, field: next }) }));
+}
+
+/**
+ * A source of a field at a place (a strike, a fire, a release), starting at the moment the edit mode
+ * gives (in an event, or not); its strength, size, shape and life are the field's usual ones unless given.
+ */
+export function addFieldSource(world: World, o: { layerId: string; name: string; at: [number, number]; mode: EditMode; source?: Partial<FieldSource> }): CommandResult<string> {
+  const layer = world.get('layer', o.layerId);
+  if (!layer || layer.kind !== 'field') throw new Error('Choose a field layer first.');
+  const [lon, lat] = o.at;
+  if (!Number.isFinite(lon) || !Number.isFinite(lat) || Math.abs(lat) > 90) throw new Error('That place is not on the map.');
+  const type = fieldLayerStyleOf(layer.style).type;
+  const source = fieldSourceOf({ ...DEFAULT_SOURCES[type], ...o.source }, type);
+  const name = o.name.trim() || FIELD_TYPES[type].name;
+  return run(world, `Add "${name}"`, (tx) => {
+    const id = newId('feat');
+    tx.insert('feature', { id, layer_id: layer.id, name, entity_id: '', style: JSON.stringify({ source }), notes: '', created_seq: world.nextSeq('feature') });
+    writeShape(tx, id, o.mode, { parts: [[((lon + 540) % 360) - 180, lat]], anim: null });
+    return id;
+  });
+}
+
+/** A source's strength, size, shape or life (not dated: they are told from when it starts). */
+export function updateFieldSource(world: World, id: string, patch: Partial<FieldSource>): CommandResult {
+  const f = world.get('feature', id), layer = f ? world.get('layer', f.layer_id) : undefined;
+  if (!f || !layer || layer.kind !== 'field') throw new Error('That source no longer exists.');
+  const type = fieldLayerStyleOf(layer.style).type;
+  let own: Record<string, unknown> = {};
+  try { own = JSON.parse(f.style || '{}') ?? {}; } catch { own = {}; }
+  const source = fieldSourceOf({ ...fieldSourceOf(own.source, type), ...patch }, type);
+  return run(world, `Change "${f.name}"`, (tx) => tx.patch('feature', id, { style: JSON.stringify({ ...own, source }) }));
 }
 
 /** Delete features and all their shapes over time (one undo step). */

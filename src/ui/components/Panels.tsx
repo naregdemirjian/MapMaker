@@ -19,6 +19,7 @@ import { openMenu, entityMenu, groupMenu, eventMenu } from './ContextMenu.tsx';
 import { CountryHistorySection } from './CountryHistory.tsx';
 import { NamesSection } from './Names.tsx';
 import { FeatureToolOptions, FeaturePanel, FeatureRows, featureLayers } from './Features.tsx';
+import { FieldToolOptions } from './Fields.tsx';
 import { RelationsSection } from './Relations.tsx';
 import { SearchBox } from './Search.tsx';
 import { PicturesSection } from './Pictures.tsx';
@@ -171,6 +172,7 @@ const TOOLS: Array<{ id: Tool; name: string; hint: string }> = [
   { id: 'feature', name: 'Areas, lines & points', hint: 'Draw on a layer of areas, lines or points: claims and zones, front lines, roads and arrows, battles and sites. They overlap freely and never change who holds the land.' },
   { id: 'place', name: 'Characters & cities', hint: 'Click the map to put the chosen character or city there from the date being viewed (a point, no borders). With Select, drag one to move it.' },
   { id: 'sculpt', name: 'Terrain', hint: 'Sculpt the terrain: raise and lower ground, draw mountain ranges and valleys, make craters and islands, paint land and sea, smooth, flatten, roughen or erode. A stroke changes the base world or holds from the date viewed.' },
+  { id: 'field', name: 'Conditions', hint: 'Radiation, fire, smoke and ash, floods, destruction and heatmaps: click the map to place a source on a field layer from the date viewed (or in the event being recorded). It rises, lasts and fades by itself.' },
 ];
 
 
@@ -208,7 +210,7 @@ export function ToolBar() {
   return (
     <>
     <div className="toolbar">
-      {TOOLS.filter((t) => t.id !== 'sculpt' || terrainSourceOf(w.get('map_space', s.spaceId))).map((t) => (
+      {TOOLS.filter((t) => (t.id !== 'sculpt' || terrainSourceOf(w.get('map_space', s.spaceId))) && (t.id !== 'field' || w.get('map_space', s.spaceId)?.kind === 'sphere')).map((t) => (
         <button key={t.id} className={s.tool === t.id ? 'on' : ''} title={t.hint} onClick={() => s.set({ tool: t.id })} data-testid={`tool-${t.id}`}>{t.name}</button>
       ))}
     </div>
@@ -238,6 +240,7 @@ export function ToolBar() {
       )}
     {s.tool === 'feature' && <FeatureToolOptions />}
     {s.tool === 'sculpt' && <SculptToolOptions />}
+    {s.tool === 'field' && <FieldToolOptions />}
     {s.tool === 'split' && <SplitToolOptions />}
     {s.tool === 'regions' && <RegionToolOptions />}
     {s.tool === 'place' && (
@@ -504,13 +507,14 @@ export function Outliner() {
       </Section>
       <Section title="Layers" onAdd={() => s.set({ dialog: 'new-layer' })} addLabel="Layer">
         {layers.map((l) => {
-          const feat = isFeatureKind(l.kind);
-          const here = feat ? s.tool === 'feature' && s.featureLayerId === l.id : l.id === s.layerId;
+          const feat = isFeatureKind(l.kind), field = l.kind === 'field';
+          const here = field ? s.tool === 'field' && s.fieldLayerId === l.id : feat ? s.tool === 'feature' && s.featureLayerId === l.id : l.id === s.layerId;
           return (
             <div key={l.id} className={`row ${here ? 'sel' : ''}`} data-testid="layer-row">
               <input type="checkbox" checked={!!l.visible} title="Show or hide" onChange={(e) => s.execute((wd) => cmd.updateLayer(wd, l.id, { visible: e.target.checked ? 1 : 0 }))} />
-              <span onClick={() => (feat ? s.set({ featureLayerId: l.id, tool: 'feature', reshapeId: null }) : s.set({ layerId: l.id, tool: s.tool === 'feature' ? 'lasso' : s.tool }))} title="Draw on this layer">{l.name}</span>
+              <span onClick={() => (field ? s.set({ fieldLayerId: l.id, fieldSource: s.fieldLayerId === l.id ? s.fieldSource : {}, tool: 'field' }) : feat ? s.set({ featureLayerId: l.id, tool: 'feature', reshapeId: null }) : s.set({ layerId: l.id, tool: s.tool === 'feature' || s.tool === 'field' ? 'lasso' : s.tool }))} title="Draw on this layer">{l.name}</span>
               {feat && <span className="muted"> · {l.kind === 'area' ? 'areas' : l.kind === 'line' ? 'lines' : 'points'}</span>}
+              {field && <span className="muted"> · conditions</span>}
               {here && <span className="muted"> · drawing here</span>}
             </div>
           );

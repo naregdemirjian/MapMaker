@@ -60,7 +60,7 @@ export function search(world: World, engine: Engine | null, text: string, limit 
   const layerName = new Map(world.all('layer').map((l) => [l.id, l]));
   for (const f of world.all('feature')) {
     const l = layerName.get(f.layer_id);
-    const what = `${l?.kind === 'area' ? 'Area' : l?.kind === 'line' ? 'Line' : 'Point'} on ${l?.name ?? 'a layer'}`;
+    const what = `${l?.kind === 'area' ? 'Area' : l?.kind === 'line' ? 'Line' : l?.kind === 'field' ? 'Source' : 'Point'} on ${l?.name ?? 'a layer'}`;
     let score = nameScore(f.name, q) * 10, context = '';
     if (!score) { const s = snippet(f.notes, q); if (s) { score = 2; context = s; } }
     add({ kind: 'feature', id: f.id, title: f.name, what, context }, score);

@@ -17,6 +17,7 @@ import { planetKey, type PlanetParams } from '../terrain/planet.ts';
 import { planetTerrain } from '../terrain/planet-cache.ts';
 import { loadEarthCover, coverSoon, type TerrainCover } from '../terrain/cover.ts';
 import { climateOf } from '../terrain/biomes.ts';
+import type { FieldSource } from '../domain/fields.ts';
 import type { SculptTool } from '../terrain/sculpt.ts';
 import { terrainSourceOf, planetOf } from '../world-model/world-settings.ts';
 import type { MapSpaceRow } from '../world-model/schema.ts';
@@ -29,7 +30,7 @@ export type Mode = 'world' | 'present';
 /** One line of a right-click menu: an action, a heading, or a divider. */
 export type MenuItem = { label: string; run: () => void; danger?: boolean; testId?: string } | { heading: string } | 'divider';
 
-export type Tool = 'select' | 'lasso' | 'polygon' | 'pen' | 'vertex' | 'place' | 'erase' | 'feature' | 'split' | 'regions' | 'sculpt';
+export type Tool = 'select' | 'lasso' | 'polygon' | 'pen' | 'vertex' | 'place' | 'erase' | 'feature' | 'split' | 'regions' | 'sculpt' | 'field';
 export type Selection =
   | { kind: 'entity'; id: string }
   | { kind: 'event'; id: string }
@@ -111,6 +112,11 @@ class AppStore {
   placeValue: string | null = null;
   /** The layer of areas, lines or points the features tool draws on; how areas and lines are drawn; the feature being given a new shape (null: a new one). */
   featureLayerId = '';
+  /** The Conditions tool (D102): the field layer it places sources on, and the settings of the next source (the layer's usual ones, changed). */
+  fieldLayerId = '';
+  fieldSource: Partial<FieldSource> = {};
+  /** The kind the New layer dialog starts with (null: territory). */
+  newLayerKind: 'partition' | 'area' | 'line' | 'point' | 'field' | null = null;
   featureDraw: 'freehand' | 'clicks' = 'freehand';
   reshapeId: string | null = null;
   /**
