@@ -115,6 +115,33 @@ export function radiansPerPixel(v: View): number {
   return 1 / v.projection.scale();
 }
 
+/**
+ * The longitudes and latitudes a view shows, with `margin` of its size around it on each side: read
+ * at points across it (longitudes run on from the camera's, so `east` may pass 180). Null when none
+ * of it is on the planet.
+ */
+export function viewBounds(v: View, margin = 0): { west: number; south: number; east: number; north: number } | null {
+  let west = Infinity, east = -Infinity, south = Infinity, north = -Infinity;
+  const N = 10, lon0 = v.camera.lon;
+  for (let a = 0; a <= N; a++) for (let b = 0; b <= N; b++) {
+    const x = (a / N - 0.5) * v.width * (1 + 2 * margin) + v.width / 2, y = (b / N - 0.5) * v.height * (1 + 2 * margin) + v.height / 2;
+    const ll = screenToLonLat(v, x, y);
+    if (!ll) continue;
+    const lon = lon0 + ((((ll[0] - lon0 + 180) % 360) + 360) % 360) - 180;
+    west = Math.min(west, lon); east = Math.max(east, lon); south = Math.min(south, ll[1]); north = Math.max(north, ll[1]);
+  }
+  return west <= east ? { west, south, east, north } : null;
+}
+
+/** Metres on the ground a pixel covers at the middle of a view (on a planet of `radiusKm`). */
+export function metresPerPixel(v: View, radiusKm: number): number {
+  const a = screenToLonLat(v, v.width / 2 - 5, v.height / 2), b = screenToLonLat(v, v.width / 2 + 5, v.height / 2);
+  if (!a || !b) return Infinity;
+  const r = Math.PI / 180, dLat = (b[1] - a[1]) * r, dLon = (b[0] - a[0]) * r;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a[1] * r) * Math.cos(b[1] * r) * Math.sin(dLon / 2) ** 2;
+  return (2 * radiusKm * 1000 * Math.asin(Math.min(1, Math.sqrt(h)))) / 10;
+}
+
 export function panCamera(cam: Camera, v: View, dx: number, dy: number): Camera {
   // A map shaped by its middle meridian is not moved by so many degrees a pixel: the place that
   // comes to the middle of the view is read off the map as it is shown (which, while the view

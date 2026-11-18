@@ -3,7 +3,7 @@
 // behind Electron's internal messaging; nothing else changes.
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
 import { readFileSync, existsSync, mkdirSync, writeFileSync, renameSync } from 'node:fs';
-import { join, extname } from 'node:path';
+import { join, extname, dirname } from 'node:path';
 import { spawn } from 'node:child_process';
 import { ProjectRegistry } from './projects.ts';
 import { startJob, writeFrame, writeEncodedFrame, repeatFrame, finishJob, type ExportJob, type ExportSettings } from '../export/writer.ts';
@@ -12,6 +12,11 @@ import type { RowDiff } from '../world-model/schema.ts';
 
 export interface ServerOptions {
   projectsDir: string; staticDir: string; appVersion: string;
+  /**
+   * Close-up terrain (D101): where downloaded Terrain Tiles are kept (default: a hidden folder in the
+   * projects folder), and where they come from ('none': only those kept are served, for the tests).
+   */
+  tileCacheDir?: string; tileSource?: string;
   /** Show the system's folder picker (the desktop app provides Electron's); returns the chosen path or null. */
   chooseFolder?: (start?: string) => Promise<string | null>;
 }
@@ -78,9 +83,31 @@ export function openInFileBrowser(path: string): void {
   try { spawn(cmd, [path], { detached: true, stdio: 'ignore' }).unref(); } catch { /* best effort */ }
 }
 
+/** The Terrain Tiles on AWS Open Data, "terrarium" encoding (the source of Earth's bundled heights, D94). */
+export const TERRAIN_TILES = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium';
+
 export function createAppServer(opts: ServerOptions): { server: Server; registry: ProjectRegistry } {
   const registry = new ProjectRegistry(opts.projectsDir);
   const jobs = new Map<string, ExportJob>();
+  const tileDir = opts.tileCacheDir ?? join(opts.projectsDir, '.terrain-tiles');
+  const tileSource = opts.tileSource ?? TERRAIN_TILES;
+
+  /** A Terrain Tile (PNG): the one kept on this computer, else downloaded and kept; null when it cannot be had. */
+  const terrainTile = async (z: number, x: number, y: number): Promise<Buffer | null> => {
+    const file = join(tileDir, String(z), String(x), `${y}.png`);
+    if (existsSync(file)) return readFileSync(file);
+    if (tileSource === 'none') return null;
+    try {
+      const r = await fetch(`${tileSource}/${z}/${x}/${y}.png`, { signal: AbortSignal.timeout(20000) });
+      if (!r.ok) return null;
+      const bytes = Buffer.from(await r.arrayBuffer());
+      mkdirSync(dirname(file), { recursive: true });
+      const part = `${file}.${process.pid}.part`;
+      writeFileSync(part, bytes);
+      renameSync(part, file);
+      return bytes;
+    } catch { return null; }
+  };
 
   const handle = async (req: IncomingMessage, res: ServerResponse) => {
     // Only this computer may talk to the service (guards against DNS-rebinding web pages).
@@ -101,6 +128,15 @@ export function createAppServer(opts: ServerOptions): { server: Server; registry
     }
 
     if (parts[1] === 'app' && method === 'GET') return send(res, 200, { version: opts.appVersion, projectsDir: registry.root, platform: process.platform });
+    if (parts[1] === 'terrain-tile' && method === 'GET') {
+      const [z, x, y] = parts.slice(2, 5).map((p) => (/^\d+$/.test(p ?? '') ? Number(p) : NaN));
+      if (!Number.isInteger(z) || !Number.isInteger(x) || !Number.isInteger(y) || z > 15 || x >= 2 ** z || y >= 2 ** z) throw new HttpError(400, 'No such terrain tile.');
+      const png = await terrainTile(z, x, y);
+      if (!png) throw new HttpError(404, 'The terrain tile could not be had (offline?).');
+      res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'max-age=604800' });
+      res.end(png);
+      return;
+    }
     if (parts[1] === 'choose-folder' && method === 'POST') {
       const body = await json<{ start?: string }>(req);
       const pick = opts.chooseFolder ? opts.chooseFolder(body.start) : systemFolderPicker(body.start);

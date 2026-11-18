@@ -5,7 +5,7 @@ import { Api } from '../ui/api.ts';
 import type { World } from '../world-model/world.ts';
 import type { Engine } from '../temporal-engine/engine.ts';
 import { MapRenderer, DEFAULT_STYLE, EXPORT_QUALITY, type PassName } from '../render-engine/map-renderer.ts';
-import { makeView } from '../render-engine/camera.ts';
+import { makeView, viewBounds, metresPerPixel } from '../render-engine/camera.ts';
 import { type ShotSettings, type OverlayRect, EVENTS_BOX_ID, timeAt, cameraAt, overlaysAt, drawOverlays, shotTransitions, screenSecondsSince } from './sequence.ts';
 import { gregorian, type Instant } from '../core-time/index.ts';
 import { eventsBoxOf, currentEvents, drawEventsBox } from './events-box.ts';
@@ -13,7 +13,7 @@ import { eventShown, entityStyle } from '../domain/commands.ts';
 import { isFeatureKind } from '../render-engine/feature-style.ts';
 import { preloadImages, prepareVideos } from '../render-engine/assets.ts';
 import { basemapSourceOf, loadBasemap, loadBasemapDetail, loadDatasetRecords, type Basemap } from '../render-engine/basemap.ts';
-import { shown, minLakeKm2, terrainLook, seaLevelPoints, planetOf, sculptOf } from '../world-model/world-settings.ts';
+import { shown, minLakeKm2, terrainLook, seaLevelPoints, planetOf, sculptOf, terrainSourceOf } from '../world-model/world-settings.ts';
 import { stampsAt } from '../terrain/sculpt.ts';
 import { sculpted } from '../terrain/sculpt-cache.ts';
 import { riversNow } from '../terrain/river-cache.ts';
@@ -22,6 +22,8 @@ import { planetTerrain } from '../terrain/planet-cache.ts';
 import { seaLevelAt } from '../terrain/sea-level.ts';
 import { loadEarthTerrain, EARTH_TERRAIN_KEY, type ElevationGrid } from '../terrain/grid.ts';
 import { loadEarthCover, coverNow, type TerrainCover } from '../terrain/cover.ts';
+import { detailNeed, type DetailGrid } from '../terrain/detail.ts';
+import { detailNow } from '../terrain/detail-cache.ts';
 import { climateOf } from '../terrain/biomes.ts';
 import { PALETTES } from '../terrain/look.ts';
 
@@ -88,9 +90,10 @@ export async function estimateExportBytes(world: World, engine: Engine, shot: Sh
   renderer.quality = { ...EXPORT_QUALITY };
   renderer.caching = 'off';
   const frame = Math.floor(shot.frames / 2);
+  const detail = await detailForFrame(world, shot, frame, w, h, terrain);
   let perFrame = 0;
   for (const def of defs) {
-    renderFrame(ctx, renderer, world, engine, shot, frame, def, w, h, basemap, terrain);
+    renderFrame(ctx, renderer, world, engine, shot, frame, def, w, h, basemap, terrain, detail);
     const blob = await canvas.convertToBlob({ type: 'image/png' });
     perFrame += blob.size;
   }
@@ -146,8 +149,23 @@ export async function terrainFor(world: World, spaceId: string): Promise<Ground 
   return { grid: await loadEarthTerrain(), key: EARTH_TERRAIN_KEY, cover: shownLook && PALETTES[look.palette].cover ? await loadEarthCover() : null };
 }
 
-/** Render one frame of one pass into a 2D context of the given size. */
-export function renderFrame(ctx: CanvasRenderingContext2D, renderer: MapRenderer, world: World, engine: Engine, shot: ShotSettings, frame: number, def: ExportPassDef, width: number, height: number, basemap: Basemap | null = null, ground: Ground | null = null): void {
+/**
+ * Close in on the Earth (D101): the finer heights for a frame's view, once their tiles are in (null
+ * where they are not wanted: another world, the look's detail turned off, or zoomed out).
+ */
+export async function detailForFrame(world: World, shot: ShotSettings, frame: number, width: number, height: number, ground: Ground | null): Promise<DetailGrid | null> {
+  const space = world.get('map_space', shot.spaceId);
+  if (!ground || !terrainLook(space)?.detail || terrainSourceOf(space) !== 'earth') return null;
+  const radius = (space?.radius_m ?? 6371008.8) / 1000;
+  const carved = sculpted(ground.grid, ground.key, stampsAt(sculptOf(space), timeAt(shot, frame)), radius);
+  const view = makeView(cameraAt(shot, frame), width, height);
+  const shows = viewBounds(view), around = shows && viewBounds(view, 0.25);
+  const need = around ? detailNeed(around, metresPerPixel(view, radius)) : null;
+  return need && shows ? detailNow(shows, need, carved) : null;
+}
+
+/** Render one frame of one pass into a 2D context of the given size (`detail`: from detailForFrame). */
+export function renderFrame(ctx: CanvasRenderingContext2D, renderer: MapRenderer, world: World, engine: Engine, shot: ShotSettings, frame: number, def: ExportPassDef, width: number, height: number, basemap: Basemap | null = null, ground: Ground | null = null, detail: DetailGrid | null = null): void {
   const t = timeAt(shot, frame);
   const view = makeView(cameraAt(shot, frame), width, height);
   // What the map shows in exports (D84), on top of the shot's own choices.
@@ -163,7 +181,7 @@ export function renderFrame(ctx: CanvasRenderingContext2D, renderer: MapRenderer
   // The land's colours in the satellite look (D100): Earth's land cover, or the planet's biomes.
   const planet = planetOf(space);
   const cover = carved && terrainShown && PALETTES[look.palette].cover ? (planet ? coverNow(carved.grid, carved.key, (space?.radius_m ?? 6371008.8) / 1000, climateOf(planet)) : ground?.cover ?? null) : null;
-  const terrain = carved ? { grid: carved.grid, key: carved.key, look: terrainShown ? look : null, seaLevel: seaLevelAt(seaPoints, t), override: carved.touched && basemap ? { data: carved.touched, key: carved.key } : null, rivers, cover } : null;
+  const terrain = carved ? { grid: carved.grid, key: carved.key, look: terrainShown ? look : null, seaLevel: seaLevelAt(seaPoints, t), override: carved.touched && basemap ? { data: carved.touched, key: carved.key } : null, rivers, cover, detail } : null;
   const passes = new Set<PassName>(def.passes.filter((p) => (p !== 'graticule' || (shot.graticule && on('graticule'))) && (p !== 'labels' || labels) && (p !== 'characters' || (shot.characters !== false && on('characters'))) && (p !== 'cities' || cities) && (p !== 'borders' || on('borders')) && (p !== 'features' || on('features')) && (p !== 'terrain' || !!terrain?.look)));
   ctx.clearRect(0, 0, width, height);
   if (passes.size) {
@@ -209,7 +227,9 @@ export async function runExport(o: {
   const iconPictures = o.world.all('entity').map((e) => entityStyle(e).icon?.asset);
   await preloadImages([eventsBoxOf(o.shot.eventsBox).image, ...fills.filter((f) => f.kind === 'image').map((f) => f.asset), ...iconPictures]);
   // Credit lines for the data drawn in these frames (written into the manifest and the guide).
-  const drawn = new Set([...(basemap || terrain?.cover ? ['natural-earth'] : []), ...(terrain?.key.startsWith(EARTH_TERRAIN_KEY) ? ['terrain-tiles', 'copernicus-dem'] : [])]);
+  // (Close-up tiles credited whenever the map may use them: the Earth with finer heights close in, D101.)
+  const closeUp = !!terrain?.key.startsWith(EARTH_TERRAIN_KEY) && !!terrainLook(o.world.get('map_space', o.shot.spaceId))?.detail;
+  const drawn = new Set([...(basemap || terrain?.cover ? ['natural-earth'] : []), ...(terrain?.key.startsWith(EARTH_TERRAIN_KEY) ? ['terrain-tiles', 'copernicus-dem'] : []), ...(closeUp ? ['terrain-tiles-close'] : [])]);
   const credits = drawn.size ? (await loadDatasetRecords()).filter((d) => drawn.has(d.id)).map((d) => `${d.name} ${d.version} (${d.licence}): ${d.credit}`) : [];
   const job = await Api.startExport(o.projectId, {
     credits,
@@ -247,11 +267,13 @@ export async function runExport(o: {
     void p.finally(() => pending.delete(p));
   };
   for (let frame = f0; frame <= f1; frame++) {
+    // Close in on the Earth, the frame's finer heights (D101), waited for.
+    const detail = await detailForFrame(o.world, o.shot, frame, width, height, terrain);
     for (const def of defs) {
       if (failure) throw failure;
       if (o.isCancelled?.()) { await Promise.allSettled(pending); throw new Error('Export cancelled.'); }
       if (videoFills.length) await prepareVideos(videoFills, frame / o.shot.fps);
-      renderFrame(ctx, renderer, o.world, o.engine, o.shot, frame, def, width, height, basemap, terrain);
+      renderFrame(ctx, renderer, o.world, o.engine, o.shot, frame, def, width, height, basemap, terrain, detail);
       const [a, b] = pixelHash(ctx.getImageData(0, 0, width, height).data);
       const before = last.get(def.name);
       if (before && before.a === a && before.b === b) {

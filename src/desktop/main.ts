@@ -29,7 +29,8 @@ if (!app.requestSingleInstanceLock()) {
       : await dialog.showOpenDialog({ title: 'Where should Map Maker export?', defaultPath: start, properties: ['openDirectory', 'createDirectory'] });
     return r.canceled ? null : r.filePaths[0] ?? null;
   };
-  const { server, registry } = createAppServer({ projectsDir, staticDir, appVersion: version, chooseFolder });
+  // Downloaded terrain tiles (D101) are kept with the app's own data, not among the projects.
+  const { server, registry } = createAppServer({ projectsDir, staticDir, appVersion: version, chooseFolder, tileCacheDir: join(app.getPath('userData'), 'terrain-tiles') });
 
   const listen = (port: number, attempts = 20): Promise<string> => new Promise((resolve, reject) => {
     const onError = (e: NodeJS.ErrnoException) => {

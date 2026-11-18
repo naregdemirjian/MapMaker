@@ -5,7 +5,7 @@ import { readFileSync, readdirSync, existsSync, rmSync, writeFileSync, statSync 
 import { encodePNG } from '../src/export/png.ts';
 import { gregorian } from '../src/core-time/index.ts';
 import { join } from 'node:path';
-import { Harness, ROOT, blob, readPNG, pixel, hexRGB, near, compositeOver, type LL } from './harness.ts';
+import { Harness, ROOT, blob, readPNG, pixel, hexRGB, near, compositeOver, writeTerrainTiles, type LL } from './harness.ts';
 
 const h = new Harness('workflows', 4395);
 const P: Record<string, LL> = {};
@@ -1894,7 +1894,7 @@ try {
     assert.equal(await steps(), before, 'every step of this one undone');
   });
 
-  await h.step('Terrain: land coloured by height and the sea by depth, with relief; the satellite look; relief over the countries; hidden while working but kept in the presentation; undone', async () => {
+  await h.step('Terrain: land coloured by height and the sea by depth, with relief; the satellite look; finer heights close in; relief over the countries; hidden while working but kept in the presentation; undone', async () => {
     await page.getByTestId('mode-world').click();
     // The whole world: the Himalaya, the plains of India, the Atlantic and the countries drawn over it.
     await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 20, lat: 20, zoom: 0.3, rotation: 0, projection: 'equirectangular' }));
@@ -1954,6 +1954,22 @@ try {
     assert.ok(sand[0] > sand[2] + 40 && sand[0] > 150, `the desert at ${sahara} is sand (${sand.map(Math.round)})`);
     assert.ok(forest[1] > forest[0] && forest[1] > forest[2] && forest[1] < 120, `the rainforest at ${congo} is green (${forest.map(Math.round)})`);
     await h.screenshot('terrain-satellite');
+    // Close in (D101): finer heights from Terrain Tiles kept on this computer (made here: ridges about
+    // 8 km apart, which the bundled 10 km grid cannot hold), turned off again for the bundled heights.
+    const tiles = [6, 7, 8].reduce((n, z) => n + writeTerrainTiles(h.projects, z, [5, 46, 15, 54], (lon) => 600 + 500 * Math.sin((2 * Math.PI * lon) / 0.11)), 0);
+    assert.ok(tiles > 40);
+    const rugged = async () => { const px = await patch([10, 50], 30), l: number[] = []; for (let i = 0; i < px.length; i += 4) l.push(px[i] + px[i + 1] + px[i + 2]); const m = l.reduce((a, b) => a + b, 0) / l.length; return Math.sqrt(l.reduce((a, b) => a + (b - m) ** 2, 0) / l.length); };
+    await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 10, lat: 50, zoom: 6.5, rotation: 0, projection: 'equirectangular' }));
+    await page.waitForFunction(() => /^detail:/.test((window as any).__mapmaker.store.renderer.lastTerrain.detail), null, { timeout: 30000 });
+    await page.waitForTimeout(300);
+    const fine = await rugged();
+    await h.screenshot('terrain-close-up');
+    await show(() => page.getByTestId('terrain-detail').uncheck());
+    await page.waitForFunction(() => !(window as any).__mapmaker.store.renderer.lastTerrain.detail);
+    await page.waitForTimeout(300);
+    const coarse = await rugged();
+    assert.ok(fine > 8 && fine > 2 * coarse, `the ridges show close in (spread of lightness ${fine.toFixed(1)}, and ${coarse.toFixed(1)} with the bundled heights)`);
+    await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 20, lat: 20, zoom: 0.3, rotation: 0, projection: 'equirectangular' }));
     // Relief over the countries: the shading of the sea floor shows through the country drawn over the Atlantic.
     const plain = await patch(P.a, 24);
     await show(() => page.getByTestId('terrain-over-territories').check());
@@ -1968,9 +1984,9 @@ try {
     await page.getByTestId('mode-present').click();
     await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastTerrain.colours);
     await page.getByTestId('mode-world').click();
-    assert.deepEqual(await terrain(), { colours: false, relief: false, overTerritories: false, seaLevel: 0, cover: false });
+    assert.deepEqual(await terrain(), { colours: false, relief: false, overTerritories: false, seaLevel: 0, cover: false, detail: '' });
     // Undone, step by step, to no terrain.
-    for (let i = 0; i < 4; i++) await page.getByTestId('undo').click();
+    for (let i = 0; i < 5; i++) await page.getByTestId('undo').click();
     await h.saved();
     assert.equal(await steps(), before, 'each change was one step');
     assert.equal(await page.evaluate(() => JSON.parse((window as any).__mapmaker.store.world.get('map_space', (window as any).__mapmaker.store.spaceId).settings).terrain ?? null), null);

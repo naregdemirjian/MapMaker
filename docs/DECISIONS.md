@@ -61,6 +61,39 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D101. Finer heights close in, downloaded as needed (Stage 8)
+
+Earth's bundled heights have cells of about 10 km, soft close in. Now, when a view's pixels are much smaller than
+that (under about 4 km), the heights of the place in view come from the **Terrain Tiles** on AWS Open Data (the
+source of the bundled grid, at finer zooms: 2.4 km to about 40 m a pixel), downloaded when needed and kept on this
+computer. Valleys, ridges and lake shores appear at the scale of a region or a city.
+
+- **Fetched through the local data service** (`/api/terrain-tile/z/x/y`), which keeps each tile it downloads
+  (the desktop app with its own data, the browser version in a hidden folder of the projects folder) and serves
+  kept tiles with no network. A tile that cannot be had is asked for again after a minute; offline, with none kept,
+  the bundled heights are drawn as before. The tests' service serves only kept tiles (`--tile-source none`).
+- **Which tiles.** The zoom whose pixels are about a screen pixel or finer, coarser when the region in view and
+  around it (half the view's size on each side, for moving the map) would take more than 48 tiles; none while the
+  bundled grid is fine enough (`terrain/detail.ts`, pure and tested).
+- **A grid of the region.** The tiles (Web Mercator) are laid onto a longitude/latitude grid of the region, about
+  as fine as the tiles and at most 2048 cells a side, in the bundled grid's own form, across the 180th meridian too.
+  Under the ice sheets the bundled grid's ice surface is kept (the tiles have the rock beneath, as in D94), and so
+  are sculpted places (D98) and places whose tile could not be had. The shader reads this grid inside the region
+  and the bundled grid outside it; slopes are measured on whichever it reads, and relief is exaggerated less on
+  the finer heights (they are nearer their true steepness).
+- **When.** The working view asks for a region when the map comes to rest; while it moves, and while tiles arrive,
+  it draws with the last region (or the bundled heights), and keeps a region while it still covers the view. An
+  export waits for each frame's region (reused while it covers the frames). Exports of maps that may use them
+  credit the tiles' sources (a new record, "Terrain Tiles, close up", with the attribution their makers ask for).
+- **Per map**, on by default: "Finer heights close in" in the Terrain section of Show. The Earth only.
+- **Not done.** The land cover of the satellite look stays at about 10 km. The region's grid is built on the
+  interface's thread (up to about 0.2 s when a new region arrives).
+- **Tests.** `detail.test.ts` (tile places and back; heights from a tile's colours; the tiles a view needs at each
+  zoom, across the 180th meridian; the region's grid from synthetic tiles, a 5 km ridge kept, a missing tile, a
+  sculpted place and the ice of Greenland taking the bundled heights); `terrain-tiles-server.test.ts` (a tile
+  downloaded once and kept, served with the network gone; refused requests); `e2e/workflows` (tiles made by the
+  test and kept: their ridges 8 km apart show close in, and not with the switch off).
+
 ### D100. The satellite look: land cover on the Earth, biomes on planets (Stage 8)
 
 A third terrain palette, **Satellite**, colours the land as it looks from space (forests, grassland, steppe,

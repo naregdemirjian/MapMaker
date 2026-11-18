@@ -30,6 +30,7 @@ import { iconById, iconOfStyle, unitOfStyle, drawIcon, type CharacterIcon, type 
 import { TerrainPictures, terrainDrawable, type TerrainFrame, type TerrainImageKind, type TerrainSea, type TerrainOverride } from './terrain-gl.ts';
 import type { ElevationGrid } from '../terrain/grid.ts';
 import type { TerrainCover } from '../terrain/cover.ts';
+import type { DetailGrid } from '../terrain/detail.ts';
 import { PALETTES, rampAt, DEFAULT_TERRAIN_LOOK, type TerrainLook } from '../terrain/look.ts';
 
 type LabelEntity = { name: string; style?: string; color?: string; type_id?: string };
@@ -54,8 +55,12 @@ export interface TerrainShown {
   rivers?: RiverSet | null;
   /** The land's colours for a look with land cover (the satellite look, D100); its ramp until it is there. */
   cover?: TerrainCover | null;
+  /** Close in on the Earth, finer heights over the region in view (D101); the grid's own elsewhere. */
+  detail?: DetailGrid | null;
 }
 const rgbOf = ([r, g, b]: [number, number, number]) => `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
+/** Whether territories' pictures depend on the finer grid close in (D101): relief over them, or their coast of the moment. */
+const reliefKeyNeedsDetail = (look: TerrainLook | null, fills: boolean, terrainLand: boolean) => (!!look?.overTerritories && fills) || terrainLand;
 /** Rivers in a blue that suits the terrain's palette (D99). */
 const riverColour = (look: TerrainLook | null) => (look?.palette === 'atlas' ? '#4f8cc4' : look?.palette === 'satellite' ? '#2f5d86' : '#4f86ad');
 
@@ -436,7 +441,7 @@ export class MapRenderer {
   /** The wars shown as front lines in the last frame (D89): on which layer, drawn from whose side, teeth toward whom. */
   lastFronts: Array<{ layerId: string; from: string; toward: string }> = [];
   /** What of the terrain the last frame drew (D95): its colours, relief over the plain land, relief over the territories; the sea level (D96). */
-  lastTerrain = { colours: false, relief: false, overTerritories: false, seaLevel: 0, cover: false };
+  lastTerrain = { colours: false, relief: false, overTerritories: false, seaLevel: 0, cover: false, detail: '' };
   /** For benchmarks and tests: how many sheets have been made, and snapshots of layers worked out. */
   stats = { sheets: 0, snaps: 0, snapsFollowed: 0 };
 
@@ -1486,7 +1491,7 @@ export class MapRenderer {
     }
     const look = terrain.look ?? DEFAULT_TERRAIN_LOOK;
     const cover = (kind === 'land' || kind === 'both') && PALETTES[look.palette].cover ? terrain.cover ?? null : null;
-    const out = this.terrainPictures.image(terrain.grid, terrain.key, look, kind, frame, part, sea, terrain.override ?? null, cover);
+    const out = this.terrainPictures.image(terrain.grid, terrain.key, look, kind, frame, part, sea, terrain.override ?? null, cover, kind === 'override' ? null : terrain.detail ?? null);
     if (!out) return;
     c.save();
     c.setTransform(1, 0, 0, 1, 0, 0);
@@ -1571,7 +1576,7 @@ export class MapRenderer {
     // A planet's own rivers (D99), in the land pass.
     const planetRivers = !opts.basemap && !!terrain?.rivers && opts.passes.has('land') && opts.show?.rivers !== false;
     const wantsBase = wantsBackground || opts.passes.has('graticule') || wantsLand || wantsTerrain || landByTerrain || planetRivers;
-    this.lastTerrain = { colours: wantsTerrain, relief: reliefOnLand, overTerritories: !!tLook?.overTerritories && opts.passes.has('fills'), seaLevel, cover: wantsTerrain && !!terrain?.cover && !!PALETTES[tLook!.palette].cover };
+    this.lastTerrain = { colours: wantsTerrain, relief: reliefOnLand, overTerritories: !!tLook?.overTerritories && opts.passes.has('fills'), seaLevel, cover: wantsTerrain && !!terrain?.cover && !!PALETTES[tLook!.palette].cover, detail: terrain?.detail?.key ?? '' };
     // Where the frame fills the canvas and starts with the base map, the base map's kept picture
     // replaces what the canvas showed in one copy (see layered); otherwise the frame's area is cleared.
     const m0 = ctx.getTransform();
@@ -1628,7 +1633,7 @@ export class MapRenderer {
     if (wantsBase) {
       // (A flat map's grid changes its spacing with the zoom.)
       const gridStep = opts.passes.has('graticule') && view.camera.projection === 'flat' && space?.radius_m ? Math.floor(Math.log10(view.width / view.projection.scale()) * 3) : 0;
-      const terrainKey = terrain && (wantsTerrain || landByTerrain || planetRivers || (wantsLand && (terrainColours || reliefOnLand || shifted))) ? `|t:${terrain.key}|${JSON.stringify(tLook)}|${wantsTerrain ? 'c' : ''}|${landByTerrain ? 'l' : ''}|${planetRivers ? 'r' : ''}|${seaLevel}|${terrain.cover?.key ?? ''}` : '';
+      const terrainKey = terrain && (wantsTerrain || landByTerrain || planetRivers || (wantsLand && (terrainColours || reliefOnLand || shifted))) ? `|t:${terrain.key}|${JSON.stringify(tLook)}|${wantsTerrain ? 'c' : ''}|${landByTerrain ? 'l' : ''}|${planetRivers ? 'r' : ''}|${seaLevel}|${terrain.cover?.key ?? ''}|${terrain.detail?.key ?? ''}` : '';
       const baseKey = partKey(`${wantsBackground ? style.ocean : ''}|${opts.passes.has('graticule') ? style.graticule : ''}|${wantsLand ? `${opts.basemap!.scales.length}${opts.referenceBorders ? 'r' : ''}|${lakeKey}|${opts.show?.coastline === false ? 'nocoast' : ''}|${opts.show?.rivers === false ? 'norivers' : ''}` : ''}|${space?.radius_m ?? 0}${terrainKey}`, `${gridStep}`);
       // (One kept picture per combination of parts: an export draws several passes of each frame.)
       base = { name: `base:${wantsBackground ? 'o' : ''}${wantsTerrain ? 't' : ''}${opts.passes.has('graticule') ? 'g' : ''}${wantsLand ? 'l' : ''}`, key: baseKey, draw: (c) => {
@@ -1827,7 +1832,7 @@ export class MapRenderer {
         }
         if (this.renewRects.rects) renew = { rects: this.renewRects.rects, moment };
       }
-      const reliefKey = (tLook?.overTerritories && wantsFills ? `|r:${terrain!.key}|${JSON.stringify(tLook)}` : '') + (terrainLand && prepared.some((p) => p.clip) ? `|sea:${terrain!.key}|${seaLevel}` : '');
+      const reliefKey = (tLook?.overTerritories && wantsFills ? `|r:${terrain!.key}|${JSON.stringify(tLook)}` : '') + (terrainLand && prepared.some((p) => p.clip) ? `|sea:${terrain!.key}|${seaLevel}` : '') + (reliefKeyNeedsDetail(tLook, wantsFills, terrainLand) ? `|d:${terrain?.detail?.key ?? ''}` : '');
       const key = animated && !renew && opts.transitions ? null : partKey(`${animated && !renew ? `${t.day}:${t.ms}|` : ''}${renew ? 'animated|' : ''}${wantsFills ? 'f' : ''}${wantsBorders ? 'b' : ''}|${world.revision}|${style.border}|${style.borderWidth}|${opts.basemap ? `${opts.basemap.scales.length}|${lakeKey}` : ''}${landKey}${reliefKey}${anyMedia ? `|${assetEpoch()}|${this.mediaSeconds}|${this.mediaChannel}` : ''}`);
       // The working view, after an edit or a step in time that changed few parcels: only where they lie is drawn again.
       // A change under way looks different at every moment, and different again once it is over: where

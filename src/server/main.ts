@@ -15,7 +15,8 @@ const port = Number(arg('--port') ?? process.env.MAPMAKER_PORT ?? 4317);
 const projectsDir = arg('--projects') ?? process.env.MAPMAKER_PROJECTS ?? join(homedir(), 'Documents', 'Map Maker Projects');
 const staticDir = arg('--static') ?? join(dirname(fileURLToPath(import.meta.url)), 'ui');
 
-const { server, registry } = createAppServer({ projectsDir, staticDir, appVersion: version });
+// Close-up terrain (D101): where downloaded tiles are kept and where they come from ("none" for the tests).
+const { server, registry } = createAppServer({ projectsDir, staticDir, appVersion: version, tileCacheDir: arg('--tile-cache'), tileSource: arg('--tile-source') });
 
 function openBrowser(url: string) {
   const [cmd, cmdArgs] = process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]] : process.platform === 'darwin' ? ['open', [url]] : ['xdg-open', [url]];

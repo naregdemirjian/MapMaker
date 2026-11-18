@@ -1,14 +1,48 @@
 // Shared helpers for the interface tests: the local service, test steps, map/page conversions, PNG reading.
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdirSync, rmSync, readFileSync } from 'node:fs';
+import { mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { inflateSync } from 'node:zlib';
+import { inflateSync, deflateSync } from 'node:zlib';
 import assert from 'node:assert/strict';
+import { tileXY, tileLonLat, TILE } from '../src/terrain/detail.ts';
 
 export type LL = [number, number];
 export type Pt = [number, number];
 export const ROOT = resolve(import.meta.dirname, '..');
+
+const CRC = new Uint32Array(256).map((_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+/** A PNG of RGB pixels (row by row). */
+export function encodePng(width: number, height: number, rgb: Uint8Array): Buffer {
+  const crc = (b: Buffer) => { let c = ~0; for (const x of b) c = CRC[(c ^ x) & 255] ^ (c >>> 8); return ~c >>> 0; };
+  const chunk = (type: string, data: Buffer) => { const len = Buffer.alloc(4); len.writeUInt32BE(data.length); const td = Buffer.concat([Buffer.from(type, 'latin1'), data]); const c = Buffer.alloc(4); c.writeUInt32BE(crc(td)); return Buffer.concat([len, td, c]); };
+  const raw = Buffer.alloc(height * (width * 3 + 1));
+  for (let y = 0; y < height; y++) Buffer.from(rgb.buffer, rgb.byteOffset + y * width * 3, width * 3).copy(raw, y * (width * 3 + 1) + 1);
+  const head = Buffer.alloc(13); head.writeUInt32BE(width, 0); head.writeUInt32BE(height, 4); head[8] = 8; head[9] = 2;
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', head), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+}
+
+/**
+ * Terrain Tiles of heights `f(lon, lat)` at zoom `z` over a box [west, south, east, north], kept where
+ * the data service looks for them (D101: the tests' service serves only kept tiles). Returns how many.
+ */
+export function writeTerrainTiles(projects: string, z: number, box: [number, number, number, number], f: (lon: number, lat: number) => number): number {
+  const [x0, y0] = tileXY(box[0], box[3], z).map(Math.floor), [x1, y1] = tileXY(box[2], box[1], z).map(Math.floor);
+  let n = 0;
+  for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) {
+    const rgb = new Uint8Array(TILE * TILE * 3);
+    for (let py = 0; py < TILE; py++) for (let px = 0; px < TILE; px++) {
+      const [lon, lat] = tileLonLat(x + (px + 0.5) / TILE, y + (py + 0.5) / TILE, z);
+      const v = Math.max(0, Math.min(65535.99, f(lon, lat) + 32768)), o = (py * TILE + px) * 3;
+      rgb[o] = Math.floor(v / 256); rgb[o + 1] = Math.floor(v) % 256; rgb[o + 2] = Math.floor((v % 1) * 256);
+    }
+    const dir = join(projects, '.terrain-tiles', String(z), String(x));
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, `${y}.png`), encodePng(TILE, TILE, rgb));
+    n++;
+  }
+  return n;
+}
 
 /**
  * A picture of the page for the record. The browser now and then cannot give one at that instant
@@ -53,7 +87,7 @@ export class Harness {
   }
 
   async startServer(): Promise<void> {
-    const p = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', join(ROOT, 'dist', 'server.mjs'), '--port', String(this.port), '--projects', this.projects], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const p = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', join(ROOT, 'dist', 'server.mjs'), '--port', String(this.port), '--projects', this.projects, ...(process.env.MAPMAKER_TILES_ONLINE ? [] : ['--tile-source', 'none'])], { stdio: ['ignore', 'pipe', 'pipe'] });
     this.server = p;
     this.baseUrl = await new Promise<string>((res, rej) => {
       let out = '';

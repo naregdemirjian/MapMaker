@@ -17,9 +17,11 @@ export interface TerrainLook {
   /** How strongly relief shows: 1 is the usual; 0.25 to 4. */
   strength: number;
   palette: TerrainPalette;
+  /** Close in on the Earth, finer heights downloaded as needed (D101: Terrain Tiles, kept on this computer). */
+  detail: boolean;
 }
 
-export const DEFAULT_TERRAIN_LOOK: TerrainLook = { colours: true, relief: true, overTerritories: false, seaFloor: true, strength: 1, palette: 'natural' };
+export const DEFAULT_TERRAIN_LOOK: TerrainLook = { colours: true, relief: true, overTerritories: false, seaFloor: true, strength: 1, palette: 'natural', detail: true };
 export const STRENGTH_MIN = 0.25, STRENGTH_MAX = 4;
 
 /** A stored look, completed and checked (anything unknown takes its default); null when there is none. */
@@ -31,6 +33,7 @@ export function terrainLookOf(raw: unknown): TerrainLook | null {
   return {
     colours: bool(r.colours, d.colours), relief: bool(r.relief, d.relief), overTerritories: bool(r.overTerritories, d.overTerritories),
     seaFloor: bool(r.seaFloor, d.seaFloor), strength, palette: typeof r.palette === 'string' && r.palette in PALETTES ? (r.palette as TerrainPalette) : d.palette,
+    detail: bool(r.detail, d.detail),
   };
 }
 

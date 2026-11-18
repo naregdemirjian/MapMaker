@@ -68,7 +68,7 @@ export function ShowDialog() {
             <span className="muted">{counts ? `${counts.shown.toLocaleString()} of ${counts.total.toLocaleString()} lakes shown. ` : ''}For scale: Lake Geneva is about 580 km², Lake Titicaca 8,400 km², Lake Superior 82,000 km².</span>
           </label>
         )}
-        {terrainSourceOf(space) && <TerrainSection spaceId={space.id} look={look} />}
+        {terrainSourceOf(space) && <TerrainSection spaceId={space.id} look={look} earth={terrainSourceOf(space) === 'earth'} />}
         <div className="modal-actions"><button className="primary" onClick={close}>Close</button></div>
       </div>
     </div>
@@ -76,7 +76,7 @@ export function ShowDialog() {
 }
 
 /** The terrain of an Earth map (D95): on or off, and how it is drawn. */
-function TerrainSection({ spaceId, look }: { spaceId: string; look: TerrainLook | null }) {
+function TerrainSection({ spaceId, look, earth }: { spaceId: string; look: TerrainLook | null; earth: boolean }) {
   const s = useStore();
   const [drag, setDrag] = useState<number | null>(null);
   const change = (patch: Partial<TerrainLook> | null) => s.execute((wd) => cmd.setWorldTerrain(wd, spaceId, patch));
@@ -86,7 +86,7 @@ function TerrainSection({ spaceId, look }: { spaceId: string; look: TerrainLook 
     setDrag(null);
     if (look && v !== look.strength) change({ strength: v });
   };
-  const box = (key: 'colours' | 'relief' | 'overTerritories' | 'seaFloor', label: string, testid: string) => look && (
+  const box = (key: 'colours' | 'relief' | 'overTerritories' | 'seaFloor' | 'detail', label: string, testid: string) => look && (
     <label className="check"><input type="checkbox" checked={look[key]} onChange={(e) => change({ [key]: e.target.checked })} data-testid={testid} /> {label}</label>
   );
   return (
@@ -108,7 +108,8 @@ function TerrainSection({ spaceId, look }: { spaceId: string; look: TerrainLook 
               {(Object.keys(PALETTES) as TerrainPalette[]).map((p) => <option key={p} value={p}>{PALETTES[p].name}</option>)}
             </select>
           </label>
-          <p className="muted">Earth's heights and depths, about 10 km apart (Mapzen terrain tiles; Greenland and Antarctica from the Copernicus DEM): see Data sources and credits.</p>
+          {earth && box('detail', 'Finer heights close in, downloaded as needed (Terrain Tiles on AWS Open Data; kept on this computer)', 'terrain-detail')}
+          {earth && <p className="muted">Earth's heights and depths, about 10 km apart (Mapzen terrain tiles; Greenland and Antarctica from the Copernicus DEM){look.detail ? ', and close in finer ones, to about 40 m, where they can be had (offline: the 10 km heights)' : ''}: see Data sources and credits.</p>}
         </div>
       )}
     </section>

@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLive, store } from '../store.ts';
 import {
-  makeView, screenToLonLat, lonLatToScreen, panCamera, zoomCameraAt, radiansPerPixel, cameraKey, shapedByMeridian, rotatePoint, type View, type Camera,
+  makeView, screenToLonLat, lonLatToScreen, panCamera, zoomCameraAt, radiansPerPixel, cameraKey, shapedByMeridian, rotatePoint, viewBounds, metresPerPixel, type View, type Camera,
 } from '../../render-engine/camera.ts';
 import { DEFAULT_STYLE, type PassName } from '../../render-engine/map-renderer.ts';
 import { isFeatureKind } from '../../render-engine/feature-style.ts';
@@ -17,10 +17,12 @@ import { cameraAt, timeAt, overlaysAt, drawOverlays, withStillCamera, moveOverla
 import { transitionOptions, drawShotOverlays } from '../../presentation/export-driver.ts';
 import { parseJSON, slerpLonLat } from '../../temporal-engine/engine.ts';
 import { compare, fromStore, gregorian } from '../../core-time/index.ts';
-import { basemapSourceOf, shown, minLakeKm2, terrainLook, seaLevelPoints, planetOf, sculptOf } from '../../world-model/world-settings.ts';
+import { basemapSourceOf, shown, minLakeKm2, terrainLook, seaLevelPoints, planetOf, sculptOf, terrainSourceOf } from '../../world-model/world-settings.ts';
 import { stampsAt } from '../../terrain/sculpt.ts';
 import { sculpted } from '../../terrain/sculpt-cache.ts';
 import { riversSoon } from '../../terrain/river-cache.ts';
+import { detailNeed, type DetailGrid } from '../../terrain/detail.ts';
+import { detailSoon } from '../../terrain/detail-cache.ts';
 import { PALETTES } from '../../terrain/look.ts';
 import { seaLevelAt } from '../../terrain/sea-level.ts';
 import { recordTransition } from '../record-length.ts';
@@ -293,7 +295,7 @@ export function MapView() {
     const rivers = carved && planetOf(space) && on('rivers') ? riversSoon(carved.grid, carved.key, () => store.notify()) : null;
     // The land's colours in the satellite look (D100): Earth's land cover, or a planet's biomes.
     const cover = carved && terrainShown && look && PALETTES[look.palette].cover ? s.coverOf(space, carved) : null;
-    const terrain = ground && carved ? { grid: carved.grid, key: carved.key, look: terrainShown ? look : null, seaLevel, override: carved.touched && basemapSourceOf(space) === 'natural-earth' ? { data: carved.touched, key: carved.key } : null, rivers, cover } : null;
+    const terrain = ground && carved ? { grid: carved.grid, key: carved.key, look: terrainShown ? look : null, seaLevel, override: carved.touched && basemapSourceOf(space) === 'natural-earth' ? { data: carved.touched, key: carved.key } : null, rivers, cover, detail: null as DetailGrid | null } : null;
     if (terrain?.look) passes.add('terrain');
     if (on('borders')) passes.add('borders');
     if (on('features')) passes.add('features');
@@ -312,6 +314,13 @@ export function MapView() {
     shownView = { view, preview: !!shot };
     if (sig !== mo.sig) { mo.at = mo.sig ? started : -Infinity; mo.sig = sig; }
     const moving = started - mo.at < SETTLE_MS;
+    // Close in on the Earth (D101): finer heights for the region in view and around it, downloaded
+    // when the map rests (meanwhile the last region's, where it reaches).
+    if (terrain && carved && look?.detail && terrainSourceOf(space) === 'earth') {
+      const shows = viewBounds(view), around = shows && viewBounds(view, 0.5);
+      const need = around ? detailNeed(around, metresPerPixel(view, (space?.radius_m ?? 6371008.8) / 1000)) : null;
+      terrain.detail = need && shows ? detailSoon(shows, need, carved, () => store.notify(), !moving) : null;
+    }
     // The moment shown is being dragged along the timeline: names are placed less finely until it rests.
     const hurried = !shot && started - s.timeDraggedAt < SETTLE_MS;
     const fl = filling.current;

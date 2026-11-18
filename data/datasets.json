@@ -98,6 +98,17 @@
     "converted": "Resampled from Web Mercator onto a 4096 × 2048 longitude/latitude grid (0.0879° cells, about 9.8 km at the equator) by area-weighted means; rounded to 1 m. Beyond 85.05° the nearest row, smoothed towards the pole."
   },
   {
+    "id": "terrain-tiles-close",
+    "name": "Terrain Tiles, close up (Tilezen, formerly Mapzen)",
+    "version": "terrarium encoding, zooms 6 to 12, downloaded as needed",
+    "source": "https://registry.opendata.aws/terrain-tiles/ (made with https://github.com/tilezen/joerd)",
+    "licence": "Open data; each source keeps its own terms (https://github.com/tilezen/joerd/blob/master/docs/attribution.md): public domain (USGS, NOAA) and open licences with credit (Copernicus EU-DEM, Geoscience Australia, Land Information New Zealand, Kartverket, Natural Resources Canada, INEGI, the UK Environment Agency, Austria's open data, ArcticDEM).",
+    "credit": "ArcticDEM terrain data DEM(s) were created from DigitalGlobe, Inc., imagery and funded under National Science Foundation awards 1043681, 1559691, and 1542736; Australia terrain data © Commonwealth of Australia (Geoscience Australia) 2017; Austria terrain data © offene Daten Österreichs – Digitales Geländemodell (DGM) Österreich; Canada terrain data contains information licensed under the Open Government Licence – Canada; Europe terrain data produced using Copernicus data and information funded by the European Union - EU-DEM layers; Global ETOPO1 terrain data U.S. National Oceanic and Atmospheric Administration; Mexico terrain data source: INEGI, Continental relief, 2016; New Zealand terrain data Copyright 2011 Crown copyright (c) Land Information New Zealand and the New Zealand Government (All rights reserved); Norway terrain data © Kartverket; United Kingdom terrain data © Environment Agency copyright and/or database right 2015. All rights reserved; United States 3DEP (formerly NED) and global GMTED2010 and SRTM terrain data courtesy of the U.S. Geological Survey.",
+    "usedFor": "Close in on maps of the Earth with terrain, finer heights (about 40 m to 2.4 km) for the region in view, downloaded when needed through the local data service and kept on this computer (not under the ice sheets, where the bundled grid's ice surface stays); can be turned off per map",
+    "retrieved": "as needed",
+    "converted": "Each tile's heights (red × 256 + green + blue / 256 − 32,768 m) laid onto a longitude/latitude grid of the region in view, about as fine as the tiles, by bilinear interpolation (src/terrain/detail.ts)."
+  },
+  {
     "id": "copernicus-dem",
     "name": "Copernicus DEM GLO-90",
     "version": "GLO-90 (2021 release), smallest overview of each tile",
