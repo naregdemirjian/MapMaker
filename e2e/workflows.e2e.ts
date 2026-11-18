@@ -2881,7 +2881,8 @@ try {
     await page.getByTestId('mode-world').click();
     const setup = await page.evaluate(([a, b, out]) => {
       const m = (window as any).__mapmaker, s = m.store, B = m.bench;
-      const layers = s.world.all('layer').filter((l: any) => l.space_id === s.spaceId && l.kind === 'partition' && l.visible).map((l: any) => ({ id: l.id, name: l.name }));
+      // (In their order, bottom first, as the passes are written.)
+      const layers = s.world.all('layer').filter((l: any) => l.space_id === s.spaceId && l.kind === 'partition' && l.visible).sort((a: any, b: any) => a.sort_order - b.sort_order).map((l: any) => ({ id: l.id, name: l.name }));
       const t = B.gregorian.fromCivil({ year: 1760 });
       const owner = (id: string, p: number[]) => { const f = s.world.arrangement(s.spaceId).locate(B.lonLatToVec(p[0], p[1])); return s.engine.partitionState(s.spaceId, id, t).get(f)?.value ?? null; };
       const cam = { lon: (a[0] + b[0]) / 2, lat: (a[1] + b[1]) / 2, zoom: 2.2, rotation: 0, projection: 'equirectangular' };
