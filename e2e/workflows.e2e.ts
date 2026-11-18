@@ -2343,14 +2343,22 @@ try {
     assert.ok(found, 'a layer of points with points in it');
     await h.setDate(String(found.year));
     await page.evaluate((c) => (window as any).__mapmaker.store.setCamera({ lon: c[0], lat: c[1], zoom: 2, rotation: 0, projection: 'equirectangular' }), found.at);
-    const pixelAt = (ll: LL) => page.evaluate(([lon, lat]) => {
+    // A patch of the map around the battle, 41 pixels square. (Not one pixel: the claim drawn there
+    // earlier is striped over everything under it, and where its stripes fall depends on the layout.)
+    const patchAt = (ll: LL) => page.evaluate(([lon, lat]) => {
       const p = (window as any).__mapmaker.lonLatToPage(lon, lat);
       const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement;
       const r = c.getBoundingClientRect(), k = c.width / r.width;
-      return Array.from(c.getContext('2d')!.getImageData(Math.round((p[0] - r.left) * k) + 30, Math.round((p[1] - r.top) * k), 1, 1).data).slice(0, 3);
+      return Array.from(c.getContext('2d')!.getImageData(Math.round((p[0] - r.left) * k) - 20, Math.round((p[1] - r.top) * k) - 20, 41, 41).data);
     }, ll);
+    /** The share of the patch's pixels changed by more than 20 in a colour. */
+    const changed = (a: number[], b: number[]) => {
+      let n = 0;
+      for (let i = 0; i < a.length; i += 4) if (Math.max(Math.abs(a[i] - b[i]), Math.abs(a[i + 1] - b[i + 1]), Math.abs(a[i + 2] - b[i + 2])) > 20) n++;
+      return n / (a.length / 4);
+    };
     await page.waitForTimeout(300);
-    const plain = await pixelAt(found.at);
+    const plain = await patchAt(found.at);
     const before = await steps();
     await page.getByRole('button', { name: '+ Layer' }).click();
     await page.getByTestId('layer-kind-field').click();
@@ -2359,10 +2367,11 @@ try {
     await page.getByTestId('create-layer').click();
     await page.getByTestId('field-from').selectOption(found.layer);
     await page.getByTestId('field-kernel').fill('500');
+    await page.waitForFunction((from) => (window as any).__mapmaker.store.world.all('layer').some((l: any) => l.kind === 'field' && JSON.parse(l.style).field.from === from && JSON.parse(l.style).field.kernelKm === 500), found.layer);
     await page.waitForFunction((n) => (window as any).__mapmaker.store.renderer.lastFields.some((f: any) => f.sources === n && f.drawn >= n), found.n);
-    let px = await pixelAt(found.at);
-    for (let i = 0; i < 30 && Math.max(...px.map((v, k) => Math.abs(v - plain[k]))) <= 20; i++) { await page.waitForTimeout(100); px = await pixelAt(found.at); }
-    assert.ok(Math.max(...px.map((v, k) => Math.abs(v - plain[k]))) > 20, `warm where the battles were (${px} against ${plain})`);
+    let share = changed(await patchAt(found.at), plain);
+    for (let i = 0; i < 30 && share < 0.3; i++) { await page.waitForTimeout(100); share = changed(await patchAt(found.at), plain); }
+    assert.ok(share >= 0.3, `warm where the battles were (${Math.round(share * 100)}% of the pixels around the battle changed)`);
     await h.screenshot('heatmap-from-points');
     // Stress: three thousand strikes in one step, then a 4K export frame of the conditions alone, and the working view.
     const r = await page.evaluate(async () => {
