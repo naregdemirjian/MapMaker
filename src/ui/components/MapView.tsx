@@ -950,7 +950,7 @@ export function MapView() {
       if ((e.key === 'Delete' || e.key === 'Backspace') && store.tool === 'vertex' && hoverVertex !== null && !presentation) {
         const vid = hoverVertex;
         setHoverVertex(null);
-        store.execute((w) => cmd.removeBorderVertex(w, { spaceId: store.spaceId, vertexId: vid }));
+        store.execute((w, en) => cmd.removeBorderVertex(w, { spaceId: store.spaceId, vertexId: vid, guard: store.layerId ? { engine: en, layerId: store.layerId, t: store.time } : undefined }));
       }
     };
     window.addEventListener('keydown', key);

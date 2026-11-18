@@ -321,3 +321,5 @@ input.count { width: 56px; padding: 2px 4px; }
 .change-length { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; flex-basis: 100%; }
 .effect-tools label.inline > select { max-width: 160px; }
 .change-length .date-field, .change-length input[type=text] { width: 150px; }
+/* Locked countries (D87) */
+.lock-mark { display: inline-flex; align-items: center; margin-left: 6px; color: var(--muted, #8a97a6); }

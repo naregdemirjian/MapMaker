@@ -217,7 +217,7 @@ export function ToolBar() {
           <label className="inline">Give to
             <select value={s.paintValue ?? ''} onChange={(e) => { s.set({ paintValue: e.target.value || null }); if (s.tool === 'pen' && s.draft) s.setDraftOwner(s.draft.id, e.target.value || null); }} data-testid="paint-owner">
               <option value="">Nobody (clear territory)</option>
-              {owners.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+              {owners.map((o) => { const locked = cmd.isLocked(w, o.id); return <option key={o.id} value={o.id} disabled={locked}>{o.name}{locked ? ' (locked)' : ''}</option>; })}
             </select>
           </label>
           {s.tool === 'pen' && <PenControls />}
@@ -371,6 +371,15 @@ function buildOutlinerLists(w: World, cityIn: Map<string, string>, collapsed: st
  * The rows of one of the lists of countries, characters or cities. Drawn again only when `sig`
  * changes (what the lists show, and what is chosen in them): not for every stroke on the map.
  */
+/** A locked country or group (D87). */
+function LockMark({ testId }: { testId?: string }) {
+  return (
+    <span className="lock-mark" title="Locked: its land and borders stay as they are" data-testid={testId}>
+      <svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><path d="M4 7V5a4 4 0 0 1 8 0v2h1v8H3V7Zm2 0h4V5a2 2 0 0 0-4 0Z" fill="currentColor" /></svg>
+    </span>
+  );
+}
+
 const EntityRows = memo(function EntityRows({ section }: { sig: string; section: 'countries' | 'characters' | 'cities' }) {
   const s = store, w = s.world!;
   const items = outlinerLists(s).items[section];
@@ -383,6 +392,7 @@ const EntityRows = memo(function EntityRows({ section }: { sig: string; section:
         <div key={`g-${it.g.id}`} className="row group-head" onClick={() => s.toggleCollapsed(`grp:${it.g.id}`)} data-testid={`entity-group-${it.g.name}`}
           onContextMenu={(ev) => openMenu(ev, groupMenu(w, it.g.id, it.members), it.g.name)}>
           <span className="twisty">{folded ? '▸' : '▾'}</span><span className="swatch" style={{ background: it.g.color }} /><b>{it.g.name}</b><span className="muted"> · {it.members.length}</span>
+          {it.members.length > 0 && it.members.every((m) => cmd.isLocked(w, m)) && <LockMark testId={`locked-group-${it.g.name}`} />}
         </div>
       );
     }
@@ -399,6 +409,7 @@ const EntityRows = memo(function EntityRows({ section }: { sig: string; section:
         }}>
         {it.cities > 0 && <span className="twisty" title={open ? 'Hide its cities' : 'Show its cities'} onClick={(ev) => { ev.stopPropagation(); s.toggleCollapsed(`open:${e.id}`); }} data-testid={`cities-of-${e.name}`}>{open ? '▾' : '▸'}</span>}
         <FillSwatch entity={e} />{e.name}{it.cities > 0 && <span className="muted"> · {it.cities} {it.cities === 1 ? 'city' : 'cities'}</span>}
+        {cmd.isLocked(w, e.id) && <LockMark testId={`locked-${e.name}`} />}
       </div>
     );
   })}</>;
@@ -591,6 +602,11 @@ function EntityPanel({ id }: { id: string }) {
       <label>Name<input value={name} onChange={(ev) => setName(ev.target.value)} onBlur={() => name.trim() && name !== e.name && s.execute((wd) => cmd.updateEntity(wd, id, { name: name.trim() }))} /></label>
       <label>Colour<input type="color" value={e.color} onChange={(ev) => s.execute((wd) => cmd.updateEntity(wd, id, { color: ev.target.value }))} /></label>
       <label>Type<select value={e.type_id} onChange={(ev) => s.execute((wd) => cmd.updateEntity(wd, id, { type_id: ev.target.value }))}>{w.all('entity_type').map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
+      {(e.type_id === 'polity' || e.type_id === 'faction') && (
+        <label className="check" title="While locked, drawing over it leaves its land out, it is given no land, and it cannot be split, merged or annexed, nor its border points moved">
+          <input type="checkbox" checked={cmd.isLocked(w, id)} onChange={(ev) => s.execute((wd) => cmd.setLocked(wd, [id], ev.target.checked))} data-testid="entity-locked" /> Locked: its land and borders stay as they are
+        </label>
+      )}
       <label>Notes<textarea rows={5} value={notes} onChange={(ev) => setNotes(ev.target.value)} onBlur={() => notes !== e.notes && s.execute((wd) => cmd.updateEntity(wd, id, { notes }))} /></label>
       <PicturesSection holder={{ kind: 'entity', id }} />
       {e.type_id !== 'character' && e.type_id !== 'settlement' && <div className="stat">On {fmt(s.time)}: {parcels ? `${Math.round(areaSr * (radius / 1000) ** 2).toLocaleString()} km²` : 'no territory'} </div>}

@@ -5,7 +5,7 @@ import { useSyncExternalStore } from 'react';
 import { Api, ApiError, type JournalState, type ProjectInfo, type BorderDraft } from './api.ts';
 import { World } from '../world-model/world.ts';
 import { Engine } from '../temporal-engine/engine.ts';
-import type { CommandResult } from '../domain/commands.ts';
+import { takeLockedSkipped, type CommandResult } from '../domain/commands.ts';
 import { type Instant, gregorian, toJSONValue, fromJSONValue } from '../core-time/index.ts';
 import { type Camera, defaultCamera, flatCamera, PROJECTIONS } from '../render-engine/camera.ts';
 import { MapRenderer, VIEW_QUALITY } from '../render-engine/map-renderer.ts';
@@ -455,13 +455,18 @@ class AppStore {
     // An undo or redo on its way changes the map when it arrives: a change made meanwhile would be built on what is about to go.
     if (this.stepping) { this.toast('One moment: the undo is still being applied.'); return undefined; }
     let r: CommandResult<T>;
+    takeLockedSkipped();
     try {
       r = fn(this.world, this.engine);
     } catch (e) {
+      takeLockedSkipped();
       this.toast((e as Error).message, 'error');
       this.notify();
       return undefined;
     }
+    // Land of locked countries that the edit left as it was (D87).
+    const kept = takeLockedSkipped();
+    if (kept.length) this.toast(`Locked, so left as ${kept.length === 1 ? 'it was' : 'they were'}: ${kept.length > 4 ? `${kept.slice(0, 4).join(', ')} and ${kept.length - 4} more` : kept.join(', ')}.`);
     this.notify();
     if (r.diffs.length) {
       const projectId = this.projectId;

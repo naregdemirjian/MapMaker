@@ -2,7 +2,7 @@
 // in-memory world and returns the exact row diffs to save (and to undo). Commands never draw anything.
 import { World, Tx, newId } from '../world-model/world.ts';
 import {
-  Engine, canonicalFaces, leafDescendants, hashFaces, parseJSON, effectTime, type Resolution, type TransitionSpec, type AnnexIntent, type PlaceIntent, type RenameIntent, type ShapeIntent, type RelateIntent, type FeatureAnimStyle, isFeatureAnim,
+  Engine, canonicalFaces, leafDescendants, hashFaces, parseJSON, effectTime, eventStart, type Resolution, type TransitionSpec, type AnnexIntent, type PlaceIntent, type RenameIntent, type ShapeIntent, type RelateIntent, type FeatureAnimStyle, isFeatureAnim,
 } from '../temporal-engine/engine.ts';
 import { type Instant, toStore, fromStore, NEG_INF, compare } from '../core-time/index.ts';
 import {
@@ -184,7 +184,7 @@ export interface CountryFill {
 }
 
 /** What is stored in entity.style (JSON). */
-export interface EntityStyle { label?: CountryLabel; fill?: CountryFill; pictures?: string[]; icon?: CharacterIcon }
+export interface EntityStyle { label?: CountryLabel; fill?: CountryFill; pictures?: string[]; icon?: CharacterIcon; /** Locked (D87): its land and borders stay as they are. */ locked?: boolean }
 
 export function entityStyle(e: { style?: string } | null | undefined): EntityStyle {
   return parseJSON<EntityStyle>(e?.style ?? '{}', {}) ?? {};
@@ -686,12 +686,81 @@ export function addCountries(world: World, engine: Engine, o: { spaceId: string;
         for (const f of leafDescendants(arr, insideOf(p.outer))) if (!holes.has(f)) faces.add(f);
       }
       if (!faces.size) return;
+      if (o.mode.kind === 'new') {
+        const [kept] = withoutLocked(world, engine, o.spaceId, o.layerId, o.mode, [{ leaves: faces, value: id }]);
+        faces.clear();
+        for (const f of kept.leaves) faces.add(f);
+        if (!faces.size) return;
+      }
       if (o.mode.kind === 'new') chainRecorded(tx, insertAssignEffect(tx, { eventId: o.mode.eventId, spaceId: o.spaceId, layerId: o.layerId, faces: canonicalFaces(arr, [...faces]), value: id, at: o.mode.at ?? null, transition: o.transition ?? null, intent: { op: 'paint', value: id } }));
       else items.push({ leaves: faces, value: id });
     });
     if (o.mode.kind !== 'new' && items.length) writeAssignments(tx, engine, o.spaceId, o.layerId, o.mode, items);
     return { entities, eventId };
   });
+}
+
+// ---------------------------------------------------------------- locked countries (D87)
+
+/** Whether a country is locked: its land and borders stay as they are until it is unlocked. */
+export function isLocked(world: World, id: string | null | undefined): boolean {
+  if (!id) return false;
+  const e = world.get('entity', id);
+  return !!e && e.style.includes('"locked"') && entityStyle(e).locked === true;
+}
+
+/** Lock or unlock countries (one undo step); the rest of their look is kept. */
+export function setLocked(world: World, ids: string[], locked: boolean): CommandResult {
+  for (const id of ids) if (!world.get('entity', id)) throw new Error('One of them no longer exists.');
+  const what = ids.length === 1 ? `"${world.get('entity', ids[0])!.name}"` : `${ids.length} countries`;
+  return run(world, `${locked ? 'Lock' : 'Unlock'} ${what}`, (tx) => {
+    for (const id of ids) {
+      if (isLocked(world, id) === locked) continue;
+      const st = entityStyle(world.get('entity', id));
+      if (locked) st.locked = true; else delete st.locked;
+      tx.patch('entity', id, { style: JSON.stringify(st) });
+    }
+  });
+}
+
+/** The locked countries whose land edits left out since this was last asked (their names). */
+let lockedLeftOut = new Set<string>();
+export function takeLockedSkipped(): string[] {
+  const out = [...lockedLeftOut];
+  lockedLeftOut = new Set();
+  return out;
+}
+
+/** Refuse an edit that would change a locked country. */
+function refuseLocked(world: World, ids: Iterable<string | null | undefined>): void {
+  for (const id of ids) if (id && isLocked(world, id)) throw new Error(`"${world.get('entity', id)!.name}" is locked: unlock it to change its land.`);
+}
+
+/** The moment an edit takes effect: who holds the land then is what a lock keeps. */
+function editMoment(world: World, mode: EditMode): Instant {
+  if (mode.kind !== 'new') return mode.t;
+  if (mode.at) return mode.at;
+  const ev = world.get('event', mode.eventId);
+  return ev ? eventStart(ev) : NEG_INF;
+}
+
+/**
+ * An edit's land without what locked countries hold at the edit's moment (named for takeLockedSkipped);
+ * land is never given to a locked country (refused). Nothing to do when no country is locked.
+ */
+function withoutLocked<T extends { leaves: Iterable<number>; value: string | null }>(world: World, engine: Engine, spaceId: string, layerId: string, mode: EditMode, items: T[]): Array<{ leaves: number[]; value: string | null }> {
+  if (!world.all('entity').some((e) => e.style.includes('"locked"') && isLocked(world, e.id))) return items.map((x) => ({ leaves: [...x.leaves], value: x.value }));
+  refuseLocked(world, items.map((x) => x.value));
+  const t = editMoment(world, mode);
+  return items.map((x) => ({
+    value: x.value,
+    leaves: [...x.leaves].filter((leaf) => {
+      const held = engine.latest(spaceId, layerId, leaf, t)?.value ?? null;
+      if (!held || !isLocked(world, held)) return true;
+      lockedLeftOut.add(world.get('entity', held)!.name);
+      return false;
+    }),
+  }));
 }
 
 // ---------------------------------------------------------------- territory
@@ -705,6 +774,7 @@ export type EditMode =
 
 /** Write territory changes as the edit mode says (one change for all the items). */
 function writeAssignments(tx: Tx, engine: Engine, spaceId: string, layerId: string, mode: EditMode, items: Array<{ leaves: Iterable<number>; value: string | null }>, extra: { transition?: TransitionSpec | null; intent?: unknown } = {}): void {
+  items = withoutLocked(tx.world, engine, spaceId, layerId, mode, items);
   const arr = tx.world.arrangement(spaceId);
   if (mode.kind === 'correct' || (mode.kind === 'change' && mode.t.day === -Infinity)) {
     correctPeriods(tx, engine, spaceId, layerId, items, mode.t);
@@ -974,6 +1044,7 @@ export function splitTerritory(world: World, engine: Engine, o: { spaceId: strin
   const states = engine.partitionState(o.spaceId, o.layerId, o.t);
   const country = engine.valueAtPoint(o.spaceId, o.layerId, o.pick, o.t);
   if (!country) throw new Error('Click the part of a country that changes hands.');
+  refuseLocked(world, [country, typeof o.to === 'string' ? o.to : null]);
   const name = world.get('entity', country)?.name ?? 'the country';
   if (typeof o.to === 'string' && o.to === country) throw new Error(`That part already belongs to ${name}.`);
   return run(world, `Split ${name}`, (tx) => {
@@ -1020,6 +1091,7 @@ export function splitTerritory(world: World, engine: Engine, o: { spaceId: strin
 export function mergeTerritory(world: World, engine: Engine, o: { spaceId: string; layerId: string; ids: string[]; into: NewOwner; t: Instant; mode: EditMode; newEvent?: EventInput; transition?: TransitionSpec | null }): CommandResult<{ owner: string; faces: number[]; eventId?: string }> {
   checkTarget(world, { spaceId: o.spaceId, layerId: o.layerId, mode: o.newEvent ? undefined : o.mode });
   for (const id of o.ids) if (!world.get('entity', id)) throw new Error('One of them no longer exists.');
+  refuseLocked(world, [...o.ids, typeof o.into === 'string' ? o.into : null]);
   // (Into one of them, another country, or a new one: at least one country's land moves.)
   const moving = new Set(o.ids.filter((id) => id !== o.into));
   if (!moving.size) throw new Error('Choose at least two countries to merge.');
@@ -1042,6 +1114,7 @@ export function annex(world: World, engine: Engine, o: { spaceId: string; layerI
   return run(world, `${b} annexes ${a}`, (tx) => {
     checkTarget(world, { spaceId: o.spaceId, layerId: o.layerId, value: o.to, eventId: o.eventId });
     if (!world.get('entity', o.from)) throw new Error('That owner no longer exists.');
+    refuseLocked(world, [o.from, o.to]);
     const id = newId('eff');
     const at = o.at ? toStore(o.at) : null;
     const row: EffectRow = {
@@ -1440,8 +1513,22 @@ export function setEffectTransition(world: World, effectId: string, spec: Transi
 
 // ---------------------------------------------------------------- border geometry ("correct for all time")
 
-export function moveVertex(world: World, o: { spaceId: string; vertexId: number; to: Vec3; snap: number }): CommandResult {
+export function moveVertex(world: World, o: { spaceId: string; vertexId: number; to: Vec3; snap: number; guard?: LockGuard }): CommandResult {
+  if (o.guard) refuseLockedAround(world, o.spaceId, o.vertexId, o.guard);
   return run(world, 'Move border point (all time)', (tx) => tx.kernel(o.spaceId, (arr) => arr.moveVertex(o.vertexId, o.to, o.snap)));
+}
+
+/** For border points moved or taken away for all time: whose land around the point is read, on which layer and date (D87). */
+export interface LockGuard { engine: Engine; layerId: string; t: Instant }
+
+/** Refuse to reshape a border for all time where a locked country holds land around the point (on the date viewed). */
+function refuseLockedAround(world: World, spaceId: string, vertexId: number, g: LockGuard): void {
+  if (!world.all('entity').some((e) => e.style.includes('"locked"') && isLocked(world, e.id))) return;
+  const arr = world.arrangement(spaceId);
+  const ownerOf = ownerReader(arr, g.engine.partitionState(spaceId, g.layerId, g.t));
+  const around = new Set<string | null>();
+  for (const sg of arr.segments.values()) if (sg.a === vertexId || sg.b === vertexId) { around.add(ownerOf(sg.left_face)); around.add(ownerOf(sg.right_face)); }
+  refuseLocked(world, around);
 }
 
 /**
@@ -1468,6 +1555,7 @@ export function moveBorderFrom(world: World, engine: Engine, o: { spaceId: strin
   const pair = new Set(borders.flatMap((b) => b.sides.map((x) => x ?? '')));
   if (pair.size !== 2) throw new Error('This point joins borders of more than two countries: use the Territory brush here.');
   const [x, y] = [...pair].map((v) => v || null);
+  refuseLocked(world, [x, y]);
   const v = arr.v(o.vertexId);
   // The land between the old line (P, V, N) and the new one (P, V', N); its owner now loses it.
   const pts = [arr.v(borders[0].other), o.to, arr.v(borders[1].other), v].map((q) => vecToLonLat(q));
@@ -1488,7 +1576,8 @@ export function insertBorderVertex(world: World, o: { spaceId: string; segmentId
   return run(world, 'Add border point', (tx) => tx.kernel(o.spaceId, (arr) => arr.insertVertexOnSegment(o.segmentId, o.at)));
 }
 
-export function removeBorderVertex(world: World, o: { spaceId: string; vertexId: number }): CommandResult {
+export function removeBorderVertex(world: World, o: { spaceId: string; vertexId: number; guard?: LockGuard }): CommandResult {
+  if (o.guard) refuseLockedAround(world, o.spaceId, o.vertexId, o.guard);
   return run(world, 'Remove border point', (tx) => tx.kernel(o.spaceId, (arr) => arr.removeVertex(o.vertexId)));
 }
 

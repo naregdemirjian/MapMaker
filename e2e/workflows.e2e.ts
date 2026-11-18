@@ -1712,6 +1712,51 @@ try {
     assert.ok(after.lakes.show && after.lakes.minKm2 === 0 && after.settings.working?.names !== false && after.settings.working?.lakes !== false && !after.settings.minLakeKm2, `names and lakes back (${JSON.stringify(after)})`);
   });
 
+  await h.step('Locked countries: one locked from its menu keeps its land when drawn over and is given none; unlocked from its panel; all the others locked at once; undone', async () => {
+    await page.getByTestId('mode-world').click();
+    await page.evaluate((c) => (window as any).__mapmaker.store.setCamera({ lon: c[0], lat: c[1], zoom: 2, rotation: 0, projection: 'equirectangular' }), P.a);
+    await h.setDate('1450');
+    const held = (await h.ownerAt(P.a, '1450'))!;
+    assert.ok(held, 'someone holds the place');
+    const other = [A, B, C].find((n) => n !== held)!;
+    const ids = await page.evaluate(([h1, o1]) => { const w = (window as any).__mapmaker.store.world; const id = (n: string) => w.all('entity').find((e: any) => e.name === n).id; return [id(h1), id(o1)]; }, [held, other] as const);
+    const lockedCount = () => page.evaluate(() => (window as any).__mapmaker.store.world.all('entity').filter((e: any) => /"locked":true/.test(e.style)).length) as Promise<number>;
+    const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
+    const before = await steps();
+    // Locked from its row's menu: marked in the list.
+    await page.getByTestId(`entity-row-${held}`).click({ button: 'right' });
+    await page.getByTestId('menu-lock').click();
+    await page.getByTestId(`locked-${held}`).waitFor();
+    // Drawn over for another country from 1450 on: its land stays as it was, and the message says so.
+    await page.evaluate((id) => (window as any).__mapmaker.store.set({ tool: 'lasso', paintValue: id, selection: null }), ids[1]);
+    const at = await h.toPage(P.a);
+    await h.drawLasso(blob(at[0], at[1], 60, 45));
+    await page.getByTestId('choice-correct').click();
+    await page.getByTestId('confirm-edit').click();
+    await page.getByText(`Locked, so left as it was: ${held}.`).waitFor();
+    await h.saved();
+    assert.equal(await h.ownerAt(P.a, '1450'), held, 'the locked country keeps its land');
+    // It is given no land: shown as locked, and not to be chosen, in the brush's list.
+    assert.equal(await page.getByTestId('paint-owner').locator('option', { hasText: `${held} (locked)` }).evaluate((o) => (o as HTMLOptionElement).disabled), true);
+    // Unlocked from its panel.
+    await page.evaluate((id) => (window as any).__mapmaker.store.set({ tool: 'select', selection: { kind: 'entity', id } }), ids[0]);
+    await page.getByTestId('entity-locked').uncheck();
+    await page.getByTestId(`locked-${held}`).waitFor({ state: 'detached' });
+    assert.equal(await lockedCount(), 0);
+    // All the others locked at once from its menu (one step), and undone.
+    await page.getByTestId(`entity-row-${held}`).click({ button: 'right' });
+    await page.getByTestId('menu-lock-others').click();
+    const total = await page.evaluate(() => (window as any).__mapmaker.store.world.all('entity').filter((e: any) => e.type_id === 'polity' || e.type_id === 'faction').length) as number;
+    await page.waitForFunction((n) => (window as any).__mapmaker.store.world.all('entity').filter((e: any) => /"locked":true/.test(e.style)).length === n, total - 1);
+    await h.screenshot('locked-countries');
+    await page.getByTestId('undo').click();
+    await page.waitForFunction(() => !(window as any).__mapmaker.store.world.all('entity').some((e: any) => /"locked":true/.test(e.style)));
+    // Back as it was: the unlock, the drawing and the lock undone.
+    for (let i = 0; i < 3; i++) await page.getByTestId('undo').click();
+    await h.saved();
+    assert.equal(await steps(), before, 'every step of this one undone');
+  });
+
   await h.step('History Health lists the overlap, nothing else; no browser errors', async () => {
     await page.getByTestId('mode-world').click();
     await page.getByTestId('health').click();

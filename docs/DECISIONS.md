@@ -60,6 +60,31 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D87. Locking countries: their land and borders stay as they are (fifth feedback round)
+
+The request was to lock or disable countries that do not change while working on a large project, so that the
+program would work as if they were not there. Measured first on the whole-world benchmark (242 countries, 78,726
+border segments, 1,623 parcels): a brush stroke takes about 27 ms in the parcel map, bringing history up to date 0.1 ms
+and the state at a date 0.2 ms, and redrawing about 20 ms; all of it in proportion to the land the stroke touches,
+not to the number of countries (the two optimisation stages, D48–D70, made it so). Leaving locked countries out of
+that work would save nothing measurable, so a lock is a **protection**, as in drawing programs: a locked country keeps
+what it holds while one works elsewhere.
+
+- **Lock and unlock** from a country's right-click menu ("Lock", "Unlock", and "Lock all the others", one step to
+  undo), for a whole group from its menu, or with the "Locked" box in its panel. Lists show a lock beside it, and a
+  group whose countries are all locked; stored in the country's `style` (`locked`).
+- **What a lock does.** Any edit that gives land (brush, precise shape, border pen, regions, the border eraser,
+  corrections and changes in events, today's countries added) leaves out the land a locked country holds at the
+  moment of the edit, and says so ("Locked, so left as it was: France"). Land is never given to a locked country
+  (it is shown as locked, and cannot be chosen, in the brush's list); splitting, merging and annexing it are
+  refused, and so is moving one of its border points from a date. Moving or taking away a border point for all
+  time is refused where a locked country holds land around it on the date viewed.
+- The 1:50m coasts and borders of a locked country are still snapped to (new borders still meet them exactly), and
+  it is drawn and exported as before. Deleting a locked country is still possible (it is asked for explicitly).
+
+The first stroke after opening a large project takes longer (about 0.45 s on the whole-world benchmark): the parcel
+map works out its faces on first use. That is unrelated to locking and left for later.
+
 ### D86. How long each change takes; recording "until the next change" (fifth feedback round)
 
 A territory change in an event used to spread (as an advancing front, an expansion or a fade) from its own date

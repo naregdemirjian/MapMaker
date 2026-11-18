@@ -169,7 +169,7 @@ function VertexPrompt({ p }: { p: Extract<PendingEdit, { kind: 'vertex' }> }) {
   const confirm = () => {
     if (choice === 'all') {
       if (p.blocked) { s.toast(p.blocked, 'error'); return; }
-      s.execute((w) => cmd.moveVertex(w, { spaceId: p.spaceId, vertexId: p.vertexId, to: p.to, snap: 1e-9 }));
+      s.execute((w, en) => cmd.moveVertex(w, { spaceId: p.spaceId, vertexId: p.vertexId, to: p.to, snap: 1e-9, guard: p.layerId ? { engine: en, layerId: p.layerId, t: s.time } : undefined }));
     } else {
       if (!p.layerId) { s.toast('This map has no political layer.', 'error'); return; }
       const r = s.execute((w, e) => cmd.moveBorderFrom(w, e, { spaceId: p.spaceId, layerId: p.layerId!, vertexId: p.vertexId, to: p.to, t: s.time, mode: placementMode(), snap: 1e-9 }));

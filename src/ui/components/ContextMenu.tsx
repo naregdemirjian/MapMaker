@@ -58,6 +58,12 @@ export function entityMenu(w: World, ids: string[]): MenuItem[] {
     const off = pictured.filter((e) => cmd.entityStyle(e).fill?.off).length;
     if (pictured.length && off < pictured.length) items.push({ label: 'Use colours (pictures off)', run: () => store.execute((wd) => cmd.setFillsShown(wd, pids, false)), testId: 'menu-pictures-off' });
     if (off > 0) items.push({ label: 'Show their pictures again', run: () => store.execute((wd) => cmd.setFillsShown(wd, pids, true)), testId: 'menu-pictures-on' });
+    // Locking (D87): their land and borders stay as they are until unlocked.
+    const locked = political.filter((e) => cmd.isLocked(w, e.id)).length;
+    if (locked < political.length) items.push({ label: 'Lock (land and borders stay as they are)', run: () => store.execute((wd) => cmd.setLocked(wd, pids, true)), testId: 'menu-lock' });
+    if (locked > 0) items.push({ label: 'Unlock', run: () => store.execute((wd) => cmd.setLocked(wd, pids, false)), testId: 'menu-unlock' });
+    const others = w.all('entity').filter((e) => (e.type_id === 'polity' || e.type_id === 'faction') && !pids.includes(e.id) && !cmd.isLocked(w, e.id)).map((e) => e.id);
+    if (others.length) items.push({ label: `Lock all the others (${others.length})`, run: () => store.execute((wd) => cmd.setLocked(wd, others, true)), testId: 'menu-lock-others' });
   }
   const countries = ents.filter((e) => e.type_id === 'polity' || e.type_id === 'faction');
   if (countries.length >= 2) items.push({ label: `Merge into one…`, testId: 'menu-merge', run: () => store.set({ dialog: 'merge', mergeIds: countries.map((e) => e.id) }) });
