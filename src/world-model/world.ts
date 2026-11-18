@@ -75,8 +75,8 @@ export class World {
       for (const row of (s[t] ?? []) as AnyRow[]) w.tables.get(t)!.set(rowKey(t, row), { ...withDefaults(t, row) });
     }
     for (const t of ['vertex', 'segment', 'face'] as const) for (const r of s[t] ?? []) w.counters[t] = Math.max(w.counters[t], r.id);
+    // (Every map has its parcel map: round maps and flat maps alike.)
     for (const sp of w.all('map_space')) {
-      if (sp.kind !== 'sphere') continue;
       const by = <T extends { space_id: string }>(rows: T[] | undefined) => (rows ?? []).filter((r) => r.space_id === sp.id);
       w.arrangements.set(sp.id, Arrangement.fromRows(sp.id, sp.root_face, by(s.vertex), by(s.segment), by(s.face), w.ids, own));
     }
@@ -148,7 +148,7 @@ export class World {
     if (d.table === 'map_space') {
       const sp = (d.after ?? d.before) as MapSpaceRow;
       if (!d.after) this.arrangements.delete(sp.id);
-      else if (sp.kind === 'sphere') {
+      else {
         const arr = this.arrangements.get(sp.id);
         if (arr) arr.rootFace = sp.root_face;
         else this.arrangements.set(sp.id, Arrangement.fromRows(sp.id, sp.root_face, [], [], [], this.ids));

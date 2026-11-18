@@ -7,6 +7,7 @@ import * as cmd from '../src/domain/commands.ts';
 import { NEG_INF } from '../src/core-time/index.ts';
 import { makeView, screenToLonLat, lonLatToScreen, panCamera, flatCamera, flatRadiusKm, FLAT_EXTENT_DEG } from '../src/render-engine/camera.ts';
 import { ringFromMapPoints } from '../src/render-engine/stroke.ts';
+import { lonLatToVec } from '../src/geo-kernel/vec.ts';
 
 test('a flat map of a given width: its sphere, its plan view, and the whole width on screen at zoom 0', () => {
   const world = new World();
@@ -60,6 +61,25 @@ test('a flat map is true to scale: a 1 km square drawn on a 10 km map covers 1 k
     assert.ok(Math.abs(km2 - 1) < 0.01, `at ${cx},${cy} km: ${km2.toFixed(4)} km²`);
   }
   assert.throws(() => cmd.createFlatMap(world, 'Too big', 0), /between/);
+});
+
+test('a flat map keeps its parcel map, and what was drawn on it, when the project is opened again', () => {
+  const world = new World();
+  cmd.seedProject(world, 'Flat');
+  const id = cmd.createFlatMap(world, 'Old Town', 10).result;
+  const layer = world.all('layer').find((l) => l.space_id === id)!.id;
+  const engine = new Engine(world);
+  const owner = cmd.createEntity(world, { type_id: 'polity', name: 'Guild Quarter' }).result;
+  const d = (km: number) => (km / flatRadiusKm(10)) * 180 / Math.PI;
+  const sq: Array<[number, number]> = [[d(0), d(0)], [d(1), d(0)], [d(1), d(1)], [d(0), d(1)]];
+  cmd.paintTerritory(world, engine, { spaceId: id, layerId: layer, ring: ringFromMapPoints(sq, 0.01)!, value: owner, snap: 1e-9, mode: { kind: 'correct', t: NEG_INF } });
+  const faces = world.arrangement(id).leafFaces().length;
+  // Opened again (as the interface loads a project): the flat map's parcels are all there.
+  const again = World.fromSnapshot(world.snapshot());
+  const arr = again.arrangement(id);
+  assert.equal(arr.leafFaces().length, faces);
+  const at = new Engine(again).valueAtPoint(id, layer, lonLatToVec(d(0.5), d(0.5)), NEG_INF);
+  assert.equal(at, owner, 'the territory drawn before is still there');
 });
 
 test('labels on a flat map are placed in the middle of a territory', async () => {

@@ -489,6 +489,10 @@ recompiling the 1,000-territory history took about 800 ms after every edit.
    to be within a factor of 2.5 of a real export; usually much closer).
 15. **A shot in Equal Earth or Natural Earth, while its camera is framed by hand**, keeps the middle meridian it had
    and straightens a little when the pointer rests or lets go (D67): what is shown at rest is what is exported.
+16. **(Fixed 18 November 2026) Flat maps after reopening a project.** A project opened again rebuilt the parcel
+   maps of round maps only, so working on a flat (city) map after restarting the app failed with "No parcel map for
+   map space…". Every map's parcel map is now rebuilt (`flat-maps` test: a flat map and what was drawn on it, after
+   reopening).
 
 ## Defects found and fixed in the testing stage (0.2.0)
 
