@@ -4,7 +4,7 @@ import { Api } from '../api.ts';
 import * as cmd from '../../domain/commands.ts';
 import { type Instant, add, fromJSONValue, toJSONValue, fromStore, compare, gregorian, type Precision } from '../../core-time/index.ts';
 import { defaultShot, timeAt, cameraAt, RESOLUTIONS, FRAME_RATES, shotTransitions, withStillCamera, cameraMoves, resetCamera, newTextBox, textBoxOf, EXPORT_FORMATS, isVideoFormat, type ExportFormat, type ShotSettings, type Ease, type ShotTransitions, type Overlay, type TextBox, type TextEnter, type TextExit } from '../../presentation/sequence.ts';
-import { PASS_DEFS, runExport, exportPassesOf, estimateExportBytes, scaledBytes, formatBytes } from '../../presentation/export-driver.ts';
+import { PASS_DEFS, runExport, exportPassesOf, estimateExportBytes, scaledBytes, formatBytes, layerPassDefs, passDefsFor } from '../../presentation/export-driver.ts';
 import { svgFrame } from '../../presentation/svg-frame.ts';
 import { planVideo } from '../../presentation/video-encoder.ts';
 import { VIDEO_QUALITIES, formatBitrate, type VideoQuality } from '../../export/video-codecs.ts';
@@ -90,7 +90,7 @@ export function ShotEditor() {
   if (!shot || !row) return <aside className="right"><div className="panel"><h3>Presentation</h3><p className="muted">Create or pick a shot on the left. Its preview appears in the middle; drag and scroll there to frame the view.</p></div></aside>;
   const seconds = shot.frames / shot.fps;
   const passes = exportPassesOf(shot);
-  const setPasses = (next: string[]) => update({ exportPasses: PASS_DEFS.map((d) => d.name).filter((n) => next.includes(n)) });
+  const setPasses = (next: string[]) => update({ exportPasses: passDefsFor(w, shot).map((d) => d.name).filter((n) => next.includes(n)) });
   const startT = fromJSONValue(shot.time[0].at), endT = fromJSONValue(shot.time[shot.time.length - 1].at);
   const update = (patch: Partial<ShotSettings>) => saveShot(row.id, { ...shot, ...patch });
   const setFrames = (fps: number, secs: number) => {
@@ -371,6 +371,12 @@ export function ShotEditor() {
             {PASS_DEFS.filter((d) => d.name !== 'all').map((d) => (
               <label key={d.name} className="check" title={d.note ?? ''}><input type="checkbox" checked={passes.includes(d.name)} onChange={(e) => setPasses(e.target.checked ? [...passes, d.name] : passes.filter((p) => p !== d.name))} data-testid={`pass-${d.name}`} /> {d.label}</label>
             ))}
+            {!spaceMap && layerPassDefs(w, shot).length > 1 && <>
+              <p className="muted">Or each layer on its own (its fills and borders, areas and lines, or conditions), to fade or colour a layer apart:</p>
+              {layerPassDefs(w, shot).map((d) => (
+                <label key={d.name} className="check" title={d.note ?? ''}><input type="checkbox" checked={passes.includes(d.name)} onChange={(e) => setPasses(e.target.checked ? [...passes, d.name] : passes.filter((p) => p !== d.name))} data-testid={`pass-layer-${d.label.slice(7)}`} /> {d.label}</label>
+              ))}
+            </>}
           </div>
           </>}
           <h4>Where</h4>

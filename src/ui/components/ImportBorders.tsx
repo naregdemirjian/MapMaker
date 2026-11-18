@@ -58,7 +58,7 @@ export function ImportBordersDialog({ onClose }: { onClose: () => void }) {
     const r = s.execute((wd, en) => cmd.importDatedTerritories(wd, en, { spaceId: s.spaceId, layerId, shapes, earliestAsStart: firstAsStart, matchKm, label: `Import ${files.map((f) => f.name).join(', ')} (dated shapes)` }));
     setProgress(null);
     if (!r) return;
-    s.toast(`Imported ${shapes.length} dated shapes: ${r.entities.length} countries (${r.created} new), ${r.dates} ${r.dates === 1 ? 'date' : 'dates'} of change.`);
+    s.toast(`Imported ${shapes.length} dated shapes: ${r.entities.length} countries (${r.created} new), ${r.dates} ${r.dates === 1 ? 'date' : 'dates'} of change. "+ Whole history" in Presentation makes a timelapse of it.`);
     if (r.skipped.length) s.toast(`Some shapes could not be joined to the borders around them and were left out, of: ${r.skipped.slice(0, 12).join(', ')}${r.skipped.length > 12 ? ` and ${r.skipped.length - 12} more` : ''}. Try them again with a larger or smaller matching distance.`, 'error');
     if (r.from && r.to) {
       const lo = r.from.day / 365.2425 + 1970, hi = r.to.day / 365.2425 + 1970, pad = Math.max(5, (hi - lo) * 0.1);
@@ -90,7 +90,7 @@ export function ImportBordersDialog({ onClose }: { onClose: () => void }) {
       for (const n of r.skipped) if (!skipped.includes(n)) skipped.push(n);
     }
     setProgress(null);
-    s.toast(`Imported ${todo.length} ${todo.length === 1 ? 'map' : 'maps'}: ${countries} countries, ${made} of them new.`);
+    s.toast(`Imported ${todo.length} ${todo.length === 1 ? 'map' : 'maps'}: ${countries} countries, ${made} of them new.${todo.length > 1 ? ' "+ Whole history" in Presentation makes a timelapse of them.' : ''}`);
     // (Shapes that could not be joined to the borders around them, by country.)
     if (skipped.length) s.toast(`Some shapes could not be joined to the borders around them and were left out, of: ${skipped.slice(0, 12).join(', ')}${skipped.length > 12 ? ` and ${skipped.length - 12} more` : ''}. Try them again with a larger or smaller matching distance.`, 'error');
     // The timeline shows the whole history imported (widened to the maps' dates, never narrowed).

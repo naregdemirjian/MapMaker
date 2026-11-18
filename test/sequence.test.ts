@@ -78,6 +78,30 @@ test('export choices: "All" alone unless chosen otherwise; sizes written for peo
   assert.equal(formatBytes(2.4 * 1024 ** 3), '2.4 GB');
 });
 
+test('each layer on its own (D124): a pass per layer the shot shows, after the land, drawing that layer only', async () => {
+  const { layerPassDefs, passDefsFor, exportPassesOf, frameSetup } = await import('../src/presentation/export-driver.ts');
+  const world = new World();
+  const space = cmd.seedProject(world, 'Layers').result.spaceId;
+  const political = world.all('layer')[0].id;
+  const occupation = cmd.createLayer(world, space, 'Occupation').result;
+  const roads = cmd.createLayer(world, space, 'Roads', 'line').result;
+  const shot = defaultShot(space, cam, Y(1900), Y(2000), 25, 4);
+  const defs = layerPassDefs(world, shot);
+  assert.deepEqual(defs.map((d) => [d.label, d.passes.join('+'), d.layerId]), [['Layer: ' + world.get('layer', political)!.name, 'fills+borders', political], ['Layer: Occupation', 'fills+borders', occupation], ['Layer: Roads', 'features', roads]]);
+  const order = passDefsFor(world, shot).map((d) => d.name);
+  assert.deepEqual(order.slice(0, 3), ['all', 'background', 'land'], 'after the land');
+  assert.equal(order[3], `layer-${political}`);
+  assert.ok(order.indexOf('fills') > order.indexOf(`layer-${roads}`), 'before the kinds of everything');
+  // Kept as chosen; only that layer drawn in its frames.
+  assert.deepEqual(exportPassesOf({ ...shot, exportPasses: [`layer-${occupation}`, 'all'] }), [`layer-${occupation}`, 'all']);
+  const def = defs[1];
+  assert.deepEqual(frameSetup(world, shot, 0, def, 640, 360).options.layerIds, [occupation]);
+  // A hidden layer has no pass; a shot naming its layers has theirs only.
+  cmd.updateLayer(world, occupation, { visible: 0 });
+  assert.deepEqual(layerPassDefs(world, shot).map((d) => d.layerId), [political, roads]);
+  assert.deepEqual(layerPassDefs(world, { ...shot, layers: [political] }).map((d) => d.layerId), [political]);
+});
+
 test('an event out of sync with the clock (D92): its changes take its own screen seconds, whatever the shot\'s pace', () => {
   const D = (y: number) => gregorian.fromCivil({ year: y, month: 1, day: 1 });
   // A shot where a year passes in a hundredth of a second: a change at 1900 is over at once by the clock.

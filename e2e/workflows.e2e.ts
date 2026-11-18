@@ -2877,6 +2877,42 @@ try {
     assert.equal(await page.evaluate((id) => !!(window as any).__mapmaker.store.world.get('sequence', id), shotId), false);
   });
 
+  await h.step('Each layer on its own: a shot exported as one pass per layer; each painted exactly where its layer holds land, clear elsewhere', async () => {
+    await page.getByTestId('mode-world').click();
+    const setup = await page.evaluate(([a, b, out]) => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const layers = s.world.all('layer').filter((l: any) => l.space_id === s.spaceId && l.kind === 'partition' && l.visible).map((l: any) => ({ id: l.id, name: l.name }));
+      const t = B.gregorian.fromCivil({ year: 1760 });
+      const owner = (id: string, p: number[]) => { const f = s.world.arrangement(s.spaceId).locate(B.lonLatToVec(p[0], p[1])); return s.engine.partitionState(s.spaceId, id, t).get(f)?.value ?? null; };
+      const cam = { lon: (a[0] + b[0]) / 2, lat: (a[1] + b[1]) / 2, zoom: 2.2, rotation: 0, projection: 'equirectangular' };
+      const settings = B.defaultShot(s.spaceId, cam, t, t, 24, 0.25);
+      settings.width = 960; settings.height = 540; settings.labels = false; settings.cities = false; settings.graticule = false;
+      settings.overlays = [];
+      const id = s.execute((w: any) => B.commands.createSequence(w, 'Layers apart', settings));
+      s.set({ shotId: id, shotFrame: 0, presentCamera: null, mode: 'present' });
+      const v = B.makeView(cam, 960, 540);
+      return { shotId: id, layers: layers.map((l: any) => ({ ...l, held: [a, b, out].map((p) => !!owner(l.id, p)) })), px: [a, b, out].map((p) => v.projection(p)) };
+    }, [P.a, P.b, P.out] as const) as { shotId: string; layers: Array<{ id: string; name: string; held: boolean[] }>; px: Array<[number, number]> };
+    assert.ok(setup.layers.length >= 2, `two territory layers or more (${setup.layers.map((l) => l.name).join(', ')})`);
+    await page.getByTestId('shot-editor').waitFor();
+    await page.getByTestId('pass-all').uncheck();
+    for (const l of setup.layers) await page.getByTestId(`pass-layer-${l.name}`).check();
+    const r = await exportShot('export-full');
+    assert.deepEqual(r.manifest.passes.map((p: any) => p.label), setup.layers.map((l) => `Layer: ${l.name}`), 'one pass per layer, bottom first');
+    // (The most opaque pixel around each place: a layer drawn with stripes leaves gaps between them.)
+    const inFrame = setup.px.map(([x, y]) => x >= 6 && y >= 6 && x < 954 && y < 534);
+    assert.ok(inFrame[0] && inFrame[1], 'both countries in the frame');
+    for (const l of setup.layers) {
+      const img = readPNG(r.frames(`layer-${l.id}`)[0]);
+      const alpha = setup.px.map(([x, y], k) => { if (!inFrame[k]) return null; let m = 0; for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) m = Math.max(m, pixel(img, x + dx, y + dy)[3]); return m; });
+      assert.deepEqual(alpha.map((a, k) => (a === null ? null : a > 0)), l.held.map((h, k) => (inFrame[k] ? h : null)), `${l.name}: painted where it holds land (${alpha.join(', ')})`);
+    }
+    // Undone: the choice of passes and the shot.
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ mode: 'world', shotId: null }));
+    for (let i = 0; i < 12 && (await page.evaluate((id) => !!(window as any).__mapmaker.store.world.get('sequence', id), setup.shotId)); i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await page.evaluate((id) => !!(window as any).__mapmaker.store.world.get('sequence', id), setup.shotId), false);
+  });
+
   await h.step('A star map: the stars within 50 light-years in three dimensions; a star chosen and its panel; turned, zoomed and centred; star systems held by a country from a date; a lane between two stars; a shot of it exported; back to Earth', async () => {
     await page.getByTestId('mode-world').click();
     await page.getByRole('button', { name: '+ Map' }).click();

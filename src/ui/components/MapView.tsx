@@ -325,8 +325,9 @@ export function MapView() {
       const need = around ? detailNeed(around, metresPerPixel(view, (space?.radius_m ?? 6371008.8) / 1000)) : null;
       terrain.detail = need && shows ? detailSoon(shows, need, carved, () => store.notify(), !moving) : null;
     }
-    // The moment shown is being dragged along the timeline: names are placed less finely until it rests.
-    const hurried = !shot && started - s.timeDraggedAt < SETTLE_MS;
+    // The moment shown is being dragged along the timeline, or a shot is playing: names are placed less finely
+    // until it rests (then finely again; exports always place them finely).
+    const hurried = started - s.timeDraggedAt < SETTLE_MS;
     const fl = filling.current;
     const fillAround = fl.due && !moving && !shot;
     fl.due = false;

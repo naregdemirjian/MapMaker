@@ -61,6 +61,35 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D125. Shots playing: names placed quickly; where the time goes (improvement pass)
+
+- **What.** While a shot plays in the preview (or its frames are dragged), country names are placed the quick way,
+  as they already were while the date was dragged in the working view (D58): a coarser search for the place, kept
+  where the fine one is already known. When it stops, the frame is drawn again with names placed finely; exports
+  always place them finely. A shot's frame moved live (`store.setLive`, as playing and the frame slider do) counts
+  as the moment being dragged.
+- **Measured** (`bench/render.bench.ts`, Chrome in software, the benchmark projects rebuilt): playing the heavy
+  project's still shot four frames a step, 86 ms a frame before and 82 after, the slowest tenth 162 and 125 ms;
+  Earth 242 unchanged (10 ms). Names were not most of it. A profile puts a quarter of the time in laying whole
+  pictures on each other (each territory layer is painted in a buffer, trimmed to the land, laid on at its
+  opacity; the coast's band and the borders the same) and a third in the browser's own drawing: the next thing
+  to make faster, for frames that cross many changes at once (the heavy project changes fifty times a second of
+  that shot). Exports of the same frames: 1080p 139 ms as PNG, 73 ms as MP4 (H.264), 90 ms as WebM; 4K MP4 192 ms.
+
+### D124. Each layer on its own, as export passes (improvement pass)
+
+- **What.** Besides the passes by kind (fills, borders, labels…), a shot's Export section offers each layer it
+  shows on its own: a territory layer's fills and borders, a layer of areas, lines and points, a layer of
+  conditions, each as an image sequence of its own, stacked after the land in the layers' order (bottom first).
+  For compositing one layer apart: an occupation faded in its own time over the political map, a layer recoloured.
+  The manifest and the compositing guide list them as they list the others; the size estimate counts them.
+- **How.** A layer's pass is drawn as the passes by kind are, with the frame's layers being that layer only.
+  Requirements row "Exporting layers independently" (it said: hide the others).
+- **Tests.** `sequence.test.ts` (a pass per layer shown, in order after the land, kinds after them; kept as chosen;
+  only that layer drawn; hidden layers left out, a shot's own choice of layers followed); `e2e/workflows` 'Each
+  layer on its own' (every territory layer's pass painted exactly where its layer holds land at the date, clear
+  elsewhere; one pass per layer in the manifest, bottom first).
+
 ### D123. Importing a dataset that dates each of its shapes (improvement pass)
 
 - **What.** Some border datasets are one file with dates on every shape instead of one map a year: CShapes (the

@@ -245,6 +245,8 @@ class AppStore {
 
   /** Change view state (camera in a shot, shot frame, an overlay being dragged) as the view moves: see notifyLive. */
   setLive(patch: Partial<AppStore>) {
+    // (A shot's frame moving on, as playing or dragging along its frames does: like the date dragged, D58.)
+    if (patch.shotFrame !== undefined && patch.shotFrame !== this.shotFrame) this.timeDraggedAt = performance.now();
     Object.assign(this, patch);
     this.notifyLive();
   }

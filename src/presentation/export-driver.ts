@@ -37,7 +37,7 @@ import { detailNow } from '../terrain/detail-cache.ts';
 import { climateOf } from '../terrain/biomes.ts';
 import { PALETTES } from '../terrain/look.ts';
 
-export interface ExportPassDef { name: string; label: string; blend: string; passes: PassName[]; overlays: boolean; background: boolean; note?: string }
+export interface ExportPassDef { name: string; label: string; blend: string; passes: PassName[]; overlays: boolean; background: boolean; note?: string; /** A layer pass (D124): only this layer is drawn. */ layerId?: string }
 
 export const PASS_DEFS: ExportPassDef[] = [
   { name: 'all', label: 'All', blend: 'Normal', passes: ['background', 'terrain', 'graticule', 'land', 'fills', 'borders', 'fields', 'features', 'cities', 'labels', 'characters'], overlays: true, background: true, note: 'everything combined in one image sequence' },
@@ -53,10 +53,30 @@ export const PASS_DEFS: ExportPassDef[] = [
   { name: 'overlays', label: 'Text overlays', blend: 'Normal', passes: [], overlays: true, background: false, note: 'dates and titles' },
 ];
 
+/**
+ * Each layer on its own (D124): a pass for every layer the shot shows, in their order, bottom first: a territory
+ * layer's fills and borders, a layer of areas, lines and points, a layer of conditions. For compositing a layer
+ * apart (an occupation over the political map, faded in its own time).
+ */
+export function layerPassDefs(world: World, shot: ShotSettings): ExportPassDef[] {
+  return visibleLayers(world, shot).map((id) => {
+    const l = world.get('layer', id)!;
+    const passes: PassName[] = l.kind === 'partition' ? ['fills', 'borders'] : l.kind === 'field' ? ['fields'] : ['features'];
+    return { name: `layer-${id}`, label: `Layer: ${l.name}`, blend: 'Normal', passes, overlays: false, background: false, layerId: id, note: l.kind === 'partition' ? 'its fills and borders' : l.kind === 'field' ? 'its conditions' : 'its areas, lines and points' };
+  });
+}
+
+/** Every pass a shot can export, in stacking order (bottom first; "All" first, as the list shows it): the kinds, with each layer's own after the land. */
+export function passDefsFor(world: World, shot: ShotSettings): ExportPassDef[] {
+  const at = PASS_DEFS.findIndex((d) => d.name === 'land') + 1;
+  return [...PASS_DEFS.slice(0, at), ...layerPassDefs(world, shot), ...PASS_DEFS.slice(at)];
+}
+
 /** What a shot exports: its own choice, or everything combined ('all') when it has none. */
 export function exportPassesOf(shot: ShotSettings): string[] {
   const known = new Set(PASS_DEFS.map((d) => d.name));
-  const chosen = (shot.exportPasses ?? ['all']).filter((p) => known.has(p));
+  // (Layer passes are checked against the map's layers when exporting.)
+  const chosen = (shot.exportPasses ?? ['all']).filter((p) => known.has(p) || p.startsWith('layer-'));
   return chosen;
 }
 
@@ -88,7 +108,7 @@ export function scaledBytes(bytes: number, times: number): number { return bytes
 export async function estimateExportBytes(world: World, engine: Engine, shot: ShotSettings, passNames: string[], scale = 1): Promise<number> {
   // A video (D121): its bit rate over its length.
   if (isVideoFormat(shot.format)) return videoBytes(Math.max(16, Math.round(shot.width * scale)), Math.max(16, Math.round(shot.height * scale)), shot.fps, shot.frames, shot.videoQuality);
-  const defs = PASS_DEFS.filter((d) => passNames.includes(d.name));
+  const defs = passDefsFor(world, shot).filter((d) => passNames.includes(d.name));
   if (!defs.length) return 0;
   const W = Math.max(16, Math.round(shot.width * scale)), H = Math.max(16, Math.round(shot.height * scale));
   const k = Math.min(1, 960 / W);
@@ -233,7 +253,7 @@ export function frameSetup(world: World, shot: ShotSettings, frame: number, def:
   const passes = new Set<PassName>(def.passes.filter((p) => (p !== 'graticule' || (shot.graticule && on('graticule'))) && (p !== 'labels' || labels) && (p !== 'characters' || (shot.characters !== false && on('characters'))) && (p !== 'cities' || cities) && (p !== 'borders' || on('borders')) && (p !== 'features' || on('features')) && (p !== 'fields' || on('fields')) && (p !== 'terrain' || !!terrain?.look)));
   const transparent = def.name === 'all' ? shot.transparent : !def.background;
   const ls = lookStyles(shot);
-  return { view, t, ls, options: { passes, transparent, layerIds: visibleLayers(world, shot), basemap, transitions: transitionOptions(shot, frame), mediaSeconds: frame / shot.fps, mediaChannel: 'export', trails: !!shot.trails, layout: { labels, cities }, show: { lakes: on('lakes'), coastline: on('coastline'), rivers: on('rivers'), minLakeKm2: minLakeKm2(space) }, terrain, style: ls?.style, basemapStyle: ls?.basemap } };
+  return { view, t, ls, options: { passes, transparent, layerIds: def.layerId ? [def.layerId] : visibleLayers(world, shot), basemap, transitions: transitionOptions(shot, frame), mediaSeconds: frame / shot.fps, mediaChannel: 'export', trails: !!shot.trails, layout: { labels, cities }, show: { lakes: on('lakes'), coastline: on('coastline'), rivers: on('rivers'), minLakeKm2: minLakeKm2(space) }, terrain, style: ls?.style, basemapStyle: ls?.basemap } };
 }
 
 /** One space renderer for exports (it keeps nothing between frames but where it drew). */
@@ -289,7 +309,8 @@ export async function runExport(o: {
   // A video (D121) is the whole picture; image sequences are written in stacking order, bottom first
   // (the compositing guide lists them so), the combined picture last.
   const video = isVideoFormat(o.shot.format);
-  const defs = video ? PASS_DEFS.filter((d) => d.name === 'all') : [...PASS_DEFS.filter((d) => d.name !== 'all'), ...PASS_DEFS.filter((d) => d.name === 'all')].filter((d) => o.passNames.includes(d.name));
+  const known = passDefsFor(o.world, o.shot);
+  const defs = video ? PASS_DEFS.filter((d) => d.name === 'all') : [...known.filter((d) => d.name !== 'all'), ...known.filter((d) => d.name === 'all')].filter((d) => o.passNames.includes(d.name));
   if (!defs.length) throw new Error('Choose at least one thing to export.');
   const [f0, f1] = o.frameRange ?? [0, o.shot.frames - 1];
   const started = performance.now();
