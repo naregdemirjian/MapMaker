@@ -18,6 +18,11 @@ const staticDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'ui');
 // A stable address keeps the interface's remembered views (they are stored per address).
 const PREFERRED_PORT = Number(process.env.MAPMAKER_PORT || 4317);
 
+// The terrain, conditions and the globe are drawn with WebGL2. Where the graphics card cannot be used
+// (no driver, a blocked one, a machine without one), Chromium draws WebGL in software only when allowed
+// to: allowed here, as the window shows nothing but Map Maker's own pages.
+app.commandLine.appendSwitch('enable-unsafe-swiftshader');
+
 if (!app.requestSingleInstanceLock()) {
   // Map Maker is already open: that window is brought forward instead (see 'second-instance').
   app.quit();

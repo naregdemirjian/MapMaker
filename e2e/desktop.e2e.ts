@@ -98,6 +98,21 @@ try {
     }
   });
 
+  await step('The app draws the globe (D127) on the graphics card: a frame of a globe shot, the planet in the middle and space round it', async () => {
+    const r = await page.evaluate(() => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const shot = { ...B.defaultShot(s.spaceId, { lon: 10, lat: 30, zoom: 0, rotation: 0, projection: 'globe' }, s.time, s.time, 24, 0.5), width: 640, height: 360, transparent: false };
+      const renderer = new B.MapRenderer();
+      const c = new OffscreenCanvas(640, 360).getContext('2d') as OffscreenCanvasRenderingContext2D;
+      B.renderFrame(c, renderer, s.world, s.engine, shot, 0, B.PASS_DEFS.find((d: any) => d.name === 'all'), 640, 360, s.basemap);
+      const px = (x: number, y: number) => Array.from(c.getImageData(x, y, 1, 1).data);
+      return { globe: renderer.lastGlobe, middle: px(320, 180), corner: px(3, 3) };
+    });
+    assert.ok(r.globe && r.globe.picture[0] > 100, `drawn as a globe, not the flat map that stands in without WebGL2 (${JSON.stringify(r.globe)})`);
+    assert.equal(r.middle[3], 255, 'the planet in the middle');
+    assert.ok(r.corner[3] === 255 && r.corner[0] + r.corner[1] + r.corner[2] < 80, `space round it (${r.corner})`);
+  });
+
   await step('Only one copy runs: starting it again brings the open window forward', async () => {
     const second = spawn(electronPath, [...(process.platform === 'linux' ? ['--no-sandbox'] : []), ROOT], {
       env: { ...process.env, MAPMAKER_PROJECTS: PROJECTS, MAPMAKER_PORT: '4381' }, stdio: 'ignore',
@@ -125,4 +140,4 @@ try {
 } finally {
   await app.close().catch(() => undefined);
 }
-console.log(`\n${passed} of 6 steps passed. Screenshots: ${OUT}`);
+console.log(`\n${passed} of 7 steps passed. Screenshots: ${OUT}`);

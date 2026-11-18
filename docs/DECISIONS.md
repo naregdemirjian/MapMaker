@@ -104,6 +104,11 @@ Follows from D2. The test drives the real interface exactly as a person would.
   again: playing a globe shot through 26 years of history took 161 ms a frame here (median), and now 2 ms
   (frames during an animation still take about 200 ms in software). The graphics card's picture is shared by
   every renderer: one is sent again whenever another's is there.
+- **Without a usable graphics card.** The desktop app lets Chromium draw WebGL in software where the graphics card
+  cannot be used (no driver, a blocked one, a machine without one: the switch `enable-unsafe-swiftshader`, safe here
+  as the window shows only Map Maker's own pages), so the globe, the terrain and conditions are drawn there too,
+  more slowly, instead of not at all. (Found by the desktop test, run without a graphics card: the globe stood in
+  as the flat map.)
 - **Not done.** The working view stays flat (the drawing tools work in a flat map's terms). An SVG frame of a globe
   holds the globe as pictures (the texts over the frame stay editable): it cannot keep flat shapes.
 - **Tested.** camera: screen and map positions round-trip at every zoom, and zooming keeps the point under the
@@ -115,7 +120,7 @@ Follows from D2. The test drives the real interface exactly as a person would.
   drawn afresh (within the few levels kept pictures allow). sequence: a turning globe's middle moves west at the speed set (across 180° too), a view framed
   at a frame is kept as it was before the turn, flat maps never turn. workflows: chosen in the shot editor, dragged
   to turn, set turning at 30 degrees a second, exported as frames (the globe in the middle, space round it) and as
-  an SVG frame.
+  an SVG frame. desktop: the app itself draws a globe frame on the graphics card (in software where there is none).
 
 ### D126. Borders while fronts move; two changes meeting (improvement pass)
 
