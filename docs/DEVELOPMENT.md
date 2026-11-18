@@ -7,9 +7,12 @@ Companion files: [REQUIREMENTS.md](REQUIREMENTS.md) (checklist against the maste
 The approved architecture is the Claude Doc "Map Maker — Technical Architecture & Development Plan"
 (https://claude.ai/artifact/2JShAV3AWt6iECtNgBTsJN). All twelve of its decisions were approved on 15 November 2026.
 
-## Status at a glance (18 November 2026, Stages 2, 3 and 4 done; Stages 6 and 7 under way)
+## Status at a glance (18 November 2026, Stages 2, 3 and 4 done; Stages 6 and 7 mostly done)
 
-- **Stage 7 (military and movement) started**: a territory layer of occupation or control can be drawn with
+- **Stages 6 and 7 mostly done**: events can take their own time on screen in presentations, out of sync with the
+  clock (D92); an expansion can spread from several starting points at once, for pincers and encirclement (D91);
+  each change in an event can have its own length, and recording can chain changes into a moving front (D86).
+  Stage 7 (military and movement): a territory layer of occupation or control can be drawn with
   stripes, crossed stripes or dots in each owner's colour, the political map showing through (D88); countries at
   war get a front line with teeth along their shared border while the war lasts (D89); characters can be units of
   a country, in its colour, with a trail or an arrow of advance (D90); an area can be contested between two
@@ -249,13 +252,13 @@ The approved roadmap has 14 stages (0–13). Where each stands (brought up to da
 | 3 Time and event engine | Done | Instants, Gregorian calendar, events, effects with intention, compiler followed change by change, any-date reconstruction, zoomable timeline, edit prompt, record mode, History Health, precedence and overlap rules, alternative versions, names over time, changes over time, comparing two dates, event types as templates, dated border-point moves (D77) | Fictional calendars (Stage 13) |
 | 4 Layers, entities, lore | Done | Territory layers; area, line and point layers with lifespans and dated shapes, their tool, list and panel (D71); dated relationships (D72); search, GeoJSON and CSV export, notes with pictures (D73); cities with lifespans, characters, alternative versions of events | Layer families across maps |
 | 5 First shots and export | Mostly done | Shots, time remap, still camera, date, title and current-events overlays, PNG sequences with passes and transparency up to 8K at every listed frame rate, preview, manifest, compositing guide, deterministic output | Multi-key camera, styles, version-pinned shots, the Premiere checklist on the user's PC |
-| 6 Transitions | Started | Advancing front, expansion and fade; borders and labels follow the animation; shot-level transition settings; animated areas, lines and points (D79); lengths of each change (D86); expansions from several starting points, for pincers and encirclement (D91); events taking their own time on screen, out of sync with the clock (D92) | Arrival-time fields, keyframed fronts, more styles |
-| 7 Military and movement | Started | Occupied territory drawn with stripes, crossed stripes or dots over the political map (D88); front lines between countries at war (D89); units of a country with trails or arrows of advance (D90); contested areas in both claimants' stripes (D93); characters with icons that face the way they travel (D85) | Bases and supply lines as their own kinds, if wanted (units that stay put and lines with arrows cover them today) |
+| 6 Transitions | Mostly done | Advancing front, expansion and fade; borders and labels follow the animation; shot-level transition settings; animated areas, lines and points (D79); lengths of each change (D86); expansions from several starting points, for pincers and encirclement (D91); events taking their own time on screen, out of sync with the clock (D92). Keyframed fronts: a front placed at dates is recorded as changes that each spread "until the next one" as an advancing front (D86) | Arrival-time fields that follow terrain (fronts slowed by mountains and water), with Stage 8 |
+| 7 Military and movement | Mostly done | Occupied territory drawn with stripes, crossed stripes or dots over the political map (D88); front lines between countries at war (D89); units of a country with trails or arrows of advance (D90); contested areas in both claimants' stripes (D93); characters with icons that face the way they travel (D85) | Bases and supply lines as their own kinds, if wanted (units that stay put and lines with arrows cover them today) |
 | 8–13 | Not started | | Terrain, environment, presentation polish, space maps (nearby stars to 50 light-years), smart brushes, branches and calendars |
 
 ## Tests
 
-All pass as of 18 November 2026 (235 unit and randomised tests in 38 files, 23 + 31 + 6 + 5 interface steps). The
+All pass as of 18 November 2026 (250 unit and randomised tests in 43 files, 23 + 36 + 6 + 5 interface steps). The
 interface tests run with the verify mode on (D57): everything the app works out from what was there before is also
 worked out afresh, and any difference stops the test.
 `sh scripts/check-all.sh` runs everything and prints ALL CHECKS PASSED only when every check passed.
@@ -496,15 +499,13 @@ recompiling the 1,000-territory history took about 800 ms after every edit.
 | 17 Nov 2026 (2nd) | Firm-snapping kernel defects (D39), cities (D40), trails; the third feedback round: grey borders and "+ Layer" fixed, choosing several, right-click menus, groups, bulk delete, cities under countries, labels apart, border eraser, flat maps (D41–D44) | `ed163e3` → latest |
 | 16 Nov 2026 (2nd) | Package installs work; Natural Earth basemap (land, lakes, coastlines, present-day borders guide), land export pass, data sources dialog and export credits; coastline clipping with land-aware labels; real React types (D4 reversed); desktop app, Windows installer and Windows test run (D2 reversed); Windows fix; event groups and the first file-format upgrade | `071deac` → `9004a90` |
 
-## Next priorities (18 November 2026)
+## Next priorities (18 November 2026, after the fifth feedback round and Stages 6 and 7)
 
-1. The user tries the latest installer (from the newest "Windows build and tests" run) and reports back.
-2. Stage 4 is done (D71–D73). Next, in the approved order: the rest of Stages 2 and 3 (split and merge tools,
-   region picker; all done, D74–D78), Stage 6's remaining transitions
-   (animated features are done, D79; arrival-time fields and front keyframes), then Stage 7 (military: control
-   and occupation display, front lines between countries at war, units, routes), which builds on Stage 4.
-4. Characters: icons or pictures for markers.
-5. Space maps (still wanted, D38).
+1. The user tries the latest installer (from the newest "Windows build and tests" run) and reports back on the fifth
+   round's fixes and on Stages 6 and 7.
+2. Stage 8 (terrain) and Stage 9 (environment and fields) are next in the approved order; they wait for the user's
+   go-ahead. Arrival-time fields for fronts (slowed by mountains and water) come with Stage 8.
+3. Space maps (still wanted, D38).
 
 (D1, reversing to the deck.gl renderer, is moved to when terrain and fields arrive (Stages 8 and 9), which need the
 graphics card: for territories, features and names the Canvas renderer is now fast enough (D48–D70).)
