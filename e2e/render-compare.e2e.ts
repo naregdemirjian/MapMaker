@@ -712,6 +712,43 @@ try {
     assert.ok(r.moving.reused && r.moving.approximate && !r.rest.approximate, 'the flat picture kept while turning, drawn afresh at rest');
   });
 
+  await h.step('In a shot animating every change, a change whose land changes hands again soon after is over by then: the next starts from all of it, nothing jumps', async () => {
+    const r = await page.evaluate(() => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const Y = (y: number) => B.gregorian.fromCivil({ year: y });
+      const V = (lon: number, lat: number) => B.lonLatToVec(lon, lat);
+      const box = (w: number, so: number, e: number, n: number) => [V(w, so), V(e, so), V(e, n), V(w, n)];
+      for (const [name, color] of [['Quick A', '#8e44ad'], ['Quick B', '#16a085'], ['Quick C', '#d35400']]) s.execute((w: any) => B.commands.createEntity(w, { type_id: 'polity', name, color }));
+      const id = (name: string) => s.world.all('entity').find((e: any) => e.name === name).id;
+      // In the open Pacific: A's land; B takes part of it in 2030 and C the same part in 2031, each at once
+      // (as imported maps of those years do).
+      s.execute((w: any, e: any) => B.commands.paintTerritory(w, e, { spaceId: s.spaceId, layerId: s.layerId, ring: box(-150, -10, -140, 0), value: id('Quick A'), snap: 1e-7, mode: { kind: 'correct', t: { day: -Infinity, ms: 0 } } }));
+      const change = (name: string, year: number, owner: string) => s.execute((w: any, e: any) => {
+        const ev = B.commands.createEvent(w, { name, start: Y(year), end: null });
+        const p = B.commands.paintTerritory(w, e, { spaceId: s.spaceId, layerId: s.layerId, ring: box(-148, -8, -142, -2), value: id(owner), snap: 1e-7, mode: { kind: 'new', eventId: ev.result } });
+        return { label: p.label, diffs: [...ev.diffs, ...p.diffs], result: null };
+      });
+      change('B takes it', 2030, 'Quick B');
+      change('C takes it', 2031, 'Quick C');
+      // Ten years a second, from 2025 to 2045 at an even pace, every change animated for 1.5 s.
+      const shot = B.defaultShot(s.spaceId, { lon: -145, lat: -5, zoom: 3, rotation: 0, projection: 'equirectangular' }, Y(2025), Y(2045), 24, 2);
+      shot.time = shot.time.map((k: any) => ({ ...k, ease: 'linear' }));
+      shot.width = 640; shot.height = 360; shot.overlays = [];
+      shot.transitions = { mode: 'all', style: 'border', angle: 0, timing: 'seconds', seconds: 1.5, easing: 'linear', restyleRecorded: false };
+      const frameOf = (y: number) => ((Y(y).day - Y(2025).day) / (Y(2045).day - Y(2025).day)) * (shot.frames - 1);
+      const r = new B.MapRenderer();
+      const c = new OffscreenCanvas(640, 360).getContext('2d') as OffscreenCanvasRenderingContext2D;
+      const all = B.PASS_DEFS.find((d: any) => d.name === 'all');
+      const at = (frame: number) => { B.renderFrame(c, r, s.world, s.engine, shot, frame, all, 640, 360); return r.lastTransitions.map((q: any) => Math.round(q.progress * 1000) / 1000); };
+      const before = Math.floor(frameOf(2031)), first = Math.ceil(frameOf(2030));
+      return { first: at(first), before: at(before), after: at(before + 2), frames: [first, before, frameOf(2030), frameOf(2031)] };
+    });
+    console.log(`    the first change ${JSON.stringify(r.first)} as it starts, ${JSON.stringify(r.before)} just before the next, then the next ${JSON.stringify(r.after)} (frames ${r.frames.map((f: number) => f.toFixed(2)).join(', ')})`);
+    assert.ok(r.first.length === 1 && r.first[0] < 0.6, `the first change under way (${r.first})`);
+    assert.ok(r.before.length === 1 && r.before[0] > 0.85, `over (or nearly) just before the land changes hands again, not part way (${r.before})`);
+    assert.ok(r.after.length === 1 && r.after[0] < 0.5, `then only the next under way (${r.after})`);
+  });
+
   await h.finish();
 } catch (e) {
   await h.finish(e);

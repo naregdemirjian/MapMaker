@@ -734,6 +734,37 @@ export class Engine {
     return m || 1e-9;
   }
 
+  /**
+   * When the land of a change next changes hands after `after`: the earliest later start among the
+   * assignments of these parcels (their own, or those of the parcels they were split from) that give
+   * them another owner than `value`. Null when it does not change again.
+   */
+  nextHandover(spaceId: string, layerId: string, faces: number[], after: Instant, value: string | null): Instant | null {
+    this.ensure();
+    const lm = this.timelines.get(layerId);
+    if (!lm) return null;
+    const arr = this.world.arrangements.get(spaceId);
+    let best: Instant | null = null;
+    const seen = new Set<number>();
+    for (const face of faces) {
+      let f: number | null | undefined = face;
+      while (f !== null && f !== undefined && !seen.has(f)) {
+        seen.add(f);
+        const tl = lm.get(f);
+        if (tl && tl.length) {
+          let lo = 0, hi = tl.length;
+          while (lo < hi) { const mid = (lo + hi) >> 1; if (compare(tl[mid].t, after) <= 0) lo = mid + 1; else hi = mid; }
+          for (let i = lo; i < tl.length; i++) {
+            if (best && compare(tl[i].t, best) >= 0) break;
+            if ((tl[i].value ?? '') !== (value ?? '')) { best = tl[i].t; break; }
+          }
+        }
+        f = arr?.faces.get(f)?.parent_id;
+      }
+    }
+    return best;
+  }
+
   /** Latest assignment affecting a leaf face at or before t (optionally strictly earlier in order than `before`). */
   latest(spaceId: string, layerId: string, face: number, t: Instant, before?: Assignment): Assignment | null {
     this.ensure();

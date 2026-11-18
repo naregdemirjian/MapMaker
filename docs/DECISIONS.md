@@ -61,6 +61,21 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D128. In a shot animating every change, a change is over before its land changes hands again (improvement pass)
+
+- **Found.** A shot that animates every change (as "+ Whole history" does) gives each one the same time on screen
+  (1.5 s by default). Imported maps a few years apart, played at several years a second, then put the next change
+  of the same land on screen while the one before was still under way (1914 and 1920 at eight years a second are
+  0.75 s apart): the next started from where the first was going, so all the first had not reached yet jumped to
+  its end in one frame (94% of it in the new test).
+- **What.** Such a change ends when its land next changes hands (`Engine.nextHandover`: the earliest later
+  assignment of any of its parcels, or of those they were split from, giving them another owner), so the next
+  starts from all of it: the first runs faster, nothing jumps. Changes far enough apart keep their full time.
+- **Tested.** render-compare: land given away in 2030 and again in 2031, at ten years a second with 1.5 s each:
+  just before the second, the first has come 96% of the way (6% before, and the rest jumped).
+- **Not done.** Changes recorded with animations of their own that overlap on the same land (two events animating
+  the same parcels at once) still show the earlier at its end once the later starts (known limitation 5).
+
 ### D127. A globe that turns, for shots (improvement pass)
 
 - **What.** "Globe (the planet as a ball, turning)" among a shot's projections: the planet seen from afar
@@ -85,7 +100,9 @@ Follows from D2. The test drives the real interface exactly as a person would.
   today's 242 countries at 1100 x 640: about 0.4 s here.
 - **Not done.** The working view stays flat (the drawing tools work in a flat map's terms). An SVG frame of a globe
   holds the globe as pictures (the texts over the frame stay editable): it cannot keep flat shapes.
-- **Tested.** render-compare: places where the flat map has them, lit, within 1.3 levels of colour; nothing beyond
+- **Tested.** camera: screen and map positions round-trip at every zoom, and zooming keeps the point under the
+  cursor fixed (as for every projection). render-compare: places where the flat map has them, lit, within 1.3
+  levels of colour; nothing beyond
   the edge in a picture without a background; only near-side names, none off the globe; a place on the far side
   has no place on the frame; the pole drawn; across 180° no seam; the flat picture kept while turning and drawn
   afresh at rest. workflows: chosen in the shot editor, dragged to turn, exported as frames (the globe in the

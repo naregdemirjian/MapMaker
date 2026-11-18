@@ -2747,7 +2747,7 @@ export class MapRenderer {
   }
 
   /** Per stretch of time: the parcels of each change that a shot may animate (not recorded as animated), with what they were before. */
-  private shotIndex = new Map<string, Map<string, { a: Assignment; faces: number[]; from: Array<{ value: string | null; prior: Assignment | null }> }>>();
+  private shotIndex = new Map<string, Map<string, { a: Assignment; faces: number[]; from: Array<{ value: string | null; prior: Assignment | null }>; next?: Instant | null }>>();
 
   /**
    * A shot's way of animating changes, applied to the recorded states: no animation at all, every
@@ -2761,6 +2761,17 @@ export class MapRenderer {
     if (o.mode === 'recorded' && !o.restyleRecorded && !eventSeconds.size) return { states, changing, sig: '' };
     const spec: CompiledTransition = { style: o.style, origin: null, maxDist: 0, easing: o.easing, angle: o.angle, shot: true };
     const progressOf = (a: Assignment): number => shotProgress(a, t, o, own(a));
+    /** How far a change has come when it must be over by `next` (its progress `p` otherwise). */
+    const endingBy = (a: Assignment, next: Instant, p: number): number => {
+      const ownS = own(a);
+      if (!ownS && o.timing === 'event' && compare(a.end, a.t) > 0) {
+        const span = diffMs(a.t, a.end), gap = diffMs(a.t, next);
+        return gap < span ? diffMs(a.t, t) / Math.max(1, gap) : p;
+      }
+      const length = ownS && ownS > 0 ? ownS : Math.max(1e-3, o.seconds);
+      const since = o.secondsSince(a.t), gap = since - o.secondsSince(next);
+      return gap < length ? since / Math.max(1e-3, gap) : p;
+    };
     let out: Map<number, FaceState> | null = null;
     const put = (f: number, st: FaceState) => { (out ??= new Map(states)).set(f, st); };
     const now: number[] = [];
@@ -2801,7 +2812,13 @@ export class MapRenderer {
       }
       for (const [id, e] of index) {
         if (o.mode !== 'all' && !own(e.a)) continue;
-        const p = progressOf(e.a);
+        let p = progressOf(e.a);
+        if (!(p >= 0 && p < 1)) continue;
+        // Its land changing hands again before this animation would end (maps of years close together, a
+        // shot's whole history at a few years a second): it ends then, so that the next change starts from
+        // all of it instead of what it had not reached jumping to its end.
+        if (e.next === undefined) e.next = engine.nextHandover(spaceId, layerId, e.faces, e.a.t, e.a.value);
+        if (e.next) p = endingBy(e.a, e.next, p);
         if (!(p >= 0 && p < 1)) continue;
         // (A change recorded with an animation of its own keeps it when its event takes its own time.)
         const tspec = own(e.a) && e.a.transition ? e.a.transition : spec;

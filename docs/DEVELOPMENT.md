@@ -290,7 +290,7 @@ The approved roadmap has 14 stages (0–13). Where each stands (brought up to da
 
 ## Tests
 
-All pass as of 18 November 2026 (357 unit and randomised tests in 68 files, 23 + 60 + 8 + 6 interface steps). The
+All pass as of 18 November 2026 (358 unit and randomised tests in 68 files, 23 + 60 + 9 + 6 interface steps). The
 interface tests run with the verify mode on (D57): everything the app works out from what was there before is also
 worked out afresh, and any difference stops the test.
 `sh scripts/check-all.sh` runs everything and prints ALL CHECKS PASSED only when every check passed.
@@ -340,7 +340,7 @@ worked out afresh, and any difference stops the test.
 | `test/engine-stretch.test.ts` | 2 | States shared between change instants equal states worked out afresh; edits to history are seen at once; edits that do not touch history do not recompile |
 | `test/plane.test.ts` | 8 | The projection formulas against d3-geo; a sheet covers exactly what the kernel says each parcel covers, across 180°, at the poles and on flat maps; neighbours simplified alike; dissolved outlines |
 | `test/blocks.test.ts` | 3 | A block keeps what matters inside it: the same fill (winding) and the same lines as the whole shape, on random shapes; stored working-view settings are made valid, presets recognised |
-| `e2e/render-compare.e2e.ts` | 8 steps | 35 scenes drawn by the renderer and by the old one (`e2e/reference/`) are the same picture (fills strictly, borders by position); a picture carried along as the view moves equals one drawn afresh (eight views, the planet's ends in view and two Equal Earth views holding their meridian among them; whole-pixel moves, then 170 small ones with the room around the frame drawn first; judged by how many pixels differ, how strongly and how densely); after brush strokes inside countries and an undo, the patched picture equals one drawn afresh; every frame of an animated change, renewed only in its own area, equals one drawn afresh, and so does stepping into a change, out of it and from one to another (24 steps, each drawn in part); an 80-frame shot through forty years drawn as an export draws it, each frame from the one before in three passes, equals frames drawn afresh; borders while fronts move (D126): inside the land a front from a zigzag border has reached, only the front itself, none of the old border and no seam; two changes meeting share a border only where a front has come; the globe (D127): places where the flat map has them, lit, nothing beyond its edge or from its far side, a pole and 180° without a seam, the flat picture kept while it turns |
+| `e2e/render-compare.e2e.ts` | 9 steps | 35 scenes drawn by the renderer and by the old one (`e2e/reference/`) are the same picture (fills strictly, borders by position); a picture carried along as the view moves equals one drawn afresh (eight views, the planet's ends in view and two Equal Earth views holding their meridian among them; whole-pixel moves, then 170 small ones with the room around the frame drawn first; judged by how many pixels differ, how strongly and how densely); after brush strokes inside countries and an undo, the patched picture equals one drawn afresh; every frame of an animated change, renewed only in its own area, equals one drawn afresh, and so does stepping into a change, out of it and from one to another (24 steps, each drawn in part); an 80-frame shot through forty years drawn as an export draws it, each frame from the one before in three passes, equals frames drawn afresh; borders while fronts move (D126): inside the land a front from a zigzag border has reached, only the front itself, none of the old border and no seam; two changes meeting share a border only where a front has come; the globe (D127): places where the flat map has them, lit, nothing beyond its edge or from its far side, a pole and 180° without a seam, the flat picture kept while it turns; in a shot animating every change, one whose land changes hands again soon after is over by then (D128) |
 | `e2e/vertical-slice.e2e.ts` | 23 steps | The vertical slice in Chrome: projects, drawing, Earth's geography and data sources, border points, versions, events, dates, version restore and undo, full restart, animation, export with data credits, identical re-export, 1080p, coastline clipping |
 | `e2e/desktop.e2e.ts` | 6 steps | The Electron app: own window, own data service on this computer only, project written to disk, videos encoded by the app itself (MP4 and WebM) and played back, one copy at a time, close and reopen with contents intact |
 | `test/event-groups.test.ts` | 4 | Event group commands with undo (several groups per event, filter rules, deletion keeps events, alternatives keep groups); a version 1 project file upgraded on opening (backup first, content and undo history intact, old backups restorable without rolling the format back); a file from a newer version refused untouched |
@@ -511,10 +511,14 @@ recompiling the 1,000-territory history took about 800 ms after every edit.
 4. **(Fixed 18 November 2026) Two animations meeting.** Where two simultaneous animated changes touch, their
    shared border is now shown only where the fronts make the owners on its two sides differ (D126); it was drawn
    throughout. In the same fix, borders inside an advancing front from a border are no longer a mesh of lines.
-5. **Animation taking over another animation.** When a change starts while an earlier one is still animating the same area, the earlier one is shown at its starting state.
+5. **Animation taking over another animation.** When a change starts while an earlier one is still animating the
+   same area, the earlier one is shown at its end. (In shots that animate every change, such as "+ Whole history",
+   a change now ends before its land changes hands again, D128; this remains for changes recorded with animations
+   of their own that overlap.)
 6. **Event groups are made by hand** (D8). Automatic groups, such as "every event that changes this world", are not
    built; tell me if they would help.
-7. **A control or occupation layer looks like a second fill** over the political layer; hatching and outline styles are needed.
+7. **(Fixed) A control or occupation layer can be drawn hatched** (stripes, crosses or dots in its owners' colours,
+   D88) instead of as a second fill over the political layer.
 8. **(Fixed) New layers and alternative versions are named in the app's own dialog** (the desktop app has no browser
    prompt); deleting still asks with the system's own small confirmation box.
 9. **View memory is per browser** and is lost if the app's port changes.
