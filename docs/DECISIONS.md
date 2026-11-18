@@ -61,6 +61,33 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D99. Rivers (Stage 8)
+
+Maps of the Earth now show **rivers**, and so do generated planets. "Rivers" is an item of Show (beside lakes), on
+by default, hidden while working or in exports like the others.
+
+- **Earth's rivers** are Natural Earth's (public domain, `scripts/fetch-rivers.mjs` converts them once; the files are
+  committed, `data/natural-earth/rivers-50m.json` at 231 KB and `rivers-10m.json` at 2 MB): 1:50m for the world
+  and continents (the smallest views keep the greater rivers only, ranks 0–4), 1:10m close in, loaded with the coast
+  detail. Lake centre lines are left out (the lakes are drawn). Each line keeps Natural Earth's rank, which sets its
+  width: the greatest rivers 1.6 pixels wide, the middling 1.05, the least 0.65, the same on screen at every zoom.
+  Long 1:10m rivers are cut into pieces of at most 400 points, so a close view draws only what is near it.
+- **A planet's rivers** are worked out from its heights (`terrain/rivers.ts`, about 0.4 s for 2048 × 1024 cells):
+  every land cell drains to one of its eight neighbours; hollows are filled first (a priority flood from the coast
+  inland, lowest first), so water never gets stuck and every river reaches the sea or another river; the rain on each
+  cell (by its area) gathers downstream; where the water gathered is among the most 1.5% of the land there is a
+  river. Rivers are traced from their sources and ranked like Natural Earth's by the water at their mouths (a tenth
+  of the greatest river's ranks 3, a hundredth 6). They are worked out again for sculpted heights, a moment after
+  the heights are shown (the working view draws without them meanwhile; an export waits for them).
+- **Drawn** in a blue that suits the palette, over the land colours and relief, under the coastline and territory.
+- **Not done.** Earth's rivers stay where Natural Earth has them: at another sea level or where the sea is painted
+  over land they are drawn over the sea, and sculpting does not move them. A planet's rivers follow sculpting but not
+  a sea level other than its own. No river names.
+- **Tests.** `rivers.test.ts` (a planet's rivers run downhill from cell to neighbouring cell to the sea or another
+  river; water in a basin still reaches the sea; the same heights the same rivers, longitudes continuous across the
+  180th meridian; a world all sea or all land has none; Natural Earth's at both scales, ranked, the Amazon at Manaus
+  and the Nile in Egypt); `e2e/workflows` (rivers drawn on the Earth, hidden while working and back with undo).
+
 ### D98. Sculpting the terrain (Stage 8)
 
 On any map with terrain (Earth, or a generated planet), the **Terrain** tool sculpts it with twelve brushes: raise,

@@ -42,7 +42,8 @@ export function ShowDialog() {
   };
   const set = (where: 'working' | 'export', key: keyof ShowSet, on: boolean) => s.execute((wd) => cmd.setWorldShow(wd, space.id, { [where]: { [key]: on } }));
   const look = terrainLook(space);
-  const items = SHOW_ITEMS.filter((it) => (earth || (it.key !== 'lakes' && it.key !== 'coastline')) && (it.key !== 'terrain' || !!look));
+  const planet = terrainSourceOf(space) === 'planet';
+  const items = SHOW_ITEMS.filter((it) => (earth || (it.key !== 'lakes' && it.key !== 'coastline' && (it.key !== 'rivers' || planet))) && (it.key !== 'terrain' || !!look));
   return (
     <div className="modal-back" onPointerDown={(ev) => ev.target === ev.currentTarget && close()}>
       <div className="modal" role="dialog" aria-label="What is shown" data-testid="show-dialog">

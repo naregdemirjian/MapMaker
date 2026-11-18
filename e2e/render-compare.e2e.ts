@@ -108,7 +108,8 @@ try {
         const view = B.makeView(sc.camera, W, H);
         const t = B.gregorian.fromCivil({ year: sc.year, month: sc.month ?? 1, day: 1 });
         // 1. Everything but the border lines: the pictures must be the same.
-        const opts = { passes: new Set(['background', 'graticule', 'land', 'fills']), transparent: false, layerIds: layers, basemap: sc.basemap ? only50 : null };
+        // (The reference renderer predates rivers, D99: they are left out of both pictures.)
+        const opts = { passes: new Set(['background', 'graticule', 'land', 'fills']), transparent: false, layerIds: layers, basemap: sc.basemap ? only50 : null, show: { rivers: false } };
         fresh.render(a, view, s.world, s.engine, s.spaceId, t, opts);
         old.render(b, view, s.world, s.engine, s.spaceId, t, opts);
         const da = a.getImageData(0, 0, W, H).data, db = b.getImageData(0, 0, W, H).data;
@@ -129,7 +130,7 @@ try {
         // renderer drew every border segment as a stroke of its own, and where segments are smaller
         // than a pixel the overlapping strokes came out darker than the line's width; the lines are
         // now continuous and keep their true width at every zoom.)
-        const bo = { passes: new Set(['borders']), transparent: true, layerIds: layers, basemap: sc.basemap ? only50 : null };
+        const bo = { passes: new Set(['borders']), transparent: true, layerIds: layers, basemap: sc.basemap ? only50 : null, show: { rivers: false } };
         fresh.render(a, view, s.world, s.engine, s.spaceId, t, bo);
         old.render(b, view, s.world, s.engine, s.spaceId, t, bo);
         const ia = a.getImageData(0, 0, W, H).data, ib = b.getImageData(0, 0, W, H).data;

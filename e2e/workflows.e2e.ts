@@ -1806,7 +1806,7 @@ try {
     assert.equal(await page.getByTestId('draw-speed').count(), 0);
   });
 
-  await h.step('What is shown: names and lakes hidden while working but kept in the presentation; small lakes left out by size', async () => {
+  await h.step('What is shown: names, lakes and rivers hidden while working but kept in the presentation; small lakes left out by size', async () => {
     await page.getByTestId('mode-world').click();
     const look = () => page.evaluate(() => {
       const s = (window as any).__mapmaker.store, space = s.world.get('map_space', s.spaceId);
@@ -1816,6 +1816,11 @@ try {
     await page.getByTestId('open-show').click();
     await page.getByTestId('show-dialog').waitFor();
     assert.ok(await page.getByTestId('show-working-names').isChecked() && await page.getByTestId('show-export-lakes').isChecked(), 'everything shown to begin with');
+    // Rivers (Natural Earth's) drawn to begin with; hidden while working.
+    assert.ok(await page.getByTestId('show-working-rivers').isChecked());
+    await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.basemapPainter.lastRivers > 100);
+    await page.getByTestId('show-working-rivers').uncheck();
+    await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.basemapPainter.lastRivers === 0);
     await page.getByTestId('show-working-names').uncheck();
     await page.getByTestId('show-working-lakes').uncheck();
     await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastLabels.length === 0);
@@ -1837,10 +1842,11 @@ try {
     await page.getByTestId('mode-world').click();
     await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.basemapPainter.lakeFilter.show === false);
     // Back as it was: one undo per change.
-    for (let i = 0; i < 3; i++) await page.getByTestId('undo').click();
+    for (let i = 0; i < 4; i++) await page.getByTestId('undo').click();
     await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastLabels.length > 0);
+    await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.basemapPainter.lastRivers > 100);
     const after = await look();
-    assert.ok(after.lakes.show && after.lakes.minKm2 === 0 && after.settings.working?.names !== false && after.settings.working?.lakes !== false && !after.settings.minLakeKm2, `names and lakes back (${JSON.stringify(after)})`);
+    assert.ok(after.lakes.show && after.lakes.minKm2 === 0 && after.settings.working?.names !== false && after.settings.working?.lakes !== false && after.settings.working?.rivers !== false && !after.settings.minLakeKm2, `names, lakes and rivers back (${JSON.stringify(after)})`);
   });
 
   await h.step('Locked countries: one locked from its menu keeps its land when drawn over and is given none; unlocked from its panel; all the others locked at once; undone', async () => {

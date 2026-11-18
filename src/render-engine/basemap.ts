@@ -8,7 +8,8 @@ import type { BlockPath } from './blocks.ts';
 
 export interface BasemapFile {
   format: string; dataset: string; version: string; scale: string; quantum: number;
-  layers: Record<string, { kind: 'polygons' | 'lines'; items: number[][][] | number[][] }>;
+  /** (A rivers file's lines carry their Natural Earth scalerank in `ranks`.) */
+  layers: Record<string, { kind: 'polygons' | 'lines'; items: number[][][] | number[][]; ranks?: number[] }>;
 }
 
 export interface BasemapScale {
@@ -19,6 +20,8 @@ export interface BasemapScale {
   borders: GeoJSON.MultiLineString;
   /** The longitude/latitude box of every item of each layer, in the same order, for culling. */
   boxes: Record<'land' | 'lakes' | 'coastline' | 'borders', Box[]>;
+  /** Rivers (D99), with each line's scalerank (0 the greatest); loaded beside the scale, absent until then. */
+  rivers?: { lines: GeoJSON.MultiLineString; ranks: number[] };
 }
 
 /** [west, south, east, north] in degrees, west <= east (Natural Earth items never cross 180°). */
@@ -143,10 +146,35 @@ export function loadBasemap(baseUrl = 'data/natural-earth/'): Promise<Basemap> {
       const res = await fetch(`${baseUrl}ne-${s}.json`);
       if (!res.ok) throw new Error(`The Earth basemap (${s}) could not be loaded.`);
       return decodeBasemap(await res.json() as BasemapFile);
-    })).then((scales) => ({ version: 'natural-earth', scales }));
+    })).then(async (scales) => {
+      // Rivers (D99): 1:50m for both scales (the smallest views keep the greater rivers only).
+      const rivers = await loadRivers(`${baseUrl}rivers-50m.json`);
+      if (rivers) {
+        scales[1].rivers = rivers;
+        const keep = rivers.ranks.map((r, i) => (r <= 4 ? i : -1)).filter((i) => i >= 0);
+        scales[0].rivers = { lines: { type: 'MultiLineString', coordinates: keep.map((i) => rivers.lines.coordinates[i]) }, ranks: keep.map((i) => rivers.ranks[i]) };
+      }
+      return { version: 'natural-earth', scales };
+    });
     loading.catch(() => { loading = null; });
   }
   return loading;
+}
+
+/** Rivers from a rivers file (D99); null when it cannot be had (the map is drawn without them). */
+async function loadRivers(url: string): Promise<BasemapScale['rivers'] | null> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    return decodeRivers(await res.json() as BasemapFile);
+  } catch { return null; }
+}
+
+/** The rivers of a rivers file (D99). */
+export function decodeRivers(file: BasemapFile): NonNullable<BasemapScale['rivers']> {
+  const layer = file.layers.rivers;
+  const items = (layer?.items ?? []) as number[][];
+  return { lines: { type: 'MultiLineString', coordinates: items.map((l) => decodeLine(l, file.quantum)) }, ranks: items.map((_, i) => layer?.ranks?.[i] ?? 6) };
 }
 
 let loadingDetail: Promise<BasemapScale> | null = null;
@@ -160,6 +188,8 @@ export function loadBasemapDetail(base: Basemap, baseUrl = 'data/natural-earth/'
       // Decoded and made ready a little at a time: the page stays responsive while 9 MB of coast arrive.
       const scale = await gently(decodeSteps(await res.json() as BasemapFile));
       await gently(readySteps(scale));
+      const rivers = await loadRivers(`${baseUrl}rivers-10m.json`);
+      if (rivers) scale.rivers = rivers;
       return scale;
     });
     loadingDetail.catch(() => { loadingDetail = null; });
@@ -193,6 +223,46 @@ export function chooseScale(basemap: Basemap, view: View): BasemapScale {
  * lake (polygon) each lake ring belongs to: its outline or one of its islands.
  */
 interface ScaleRings { land: Ring[]; lakes: Ring[]; lakePoly: Int32Array; coastline: Ring[]; borders: Ring[] }
+
+/** Rivers as lines with their ranks (0 the greatest): Natural Earth's, or a planet's (D99). */
+export interface RiverSet { lines: GeoJSON.MultiLineString; ranks: number[] }
+const riverRings = new WeakMap<RiverSet, Ring[]>();
+const riverPathsKey = new WeakMap<RiverSet, string>();
+let riverSets = 0;
+
+/**
+ * Strokes rivers on a sheet (D99): the greatest widest, the least thinnest, each the same width on
+ * screen at any zoom. Their paths are kept with the sheet.
+ */
+export function drawRiverLines(ctx: CanvasRenderingContext2D, view: View, sheet: Sheet, rivers: RiverSet, color: string): void {
+  let rings = riverRings.get(rivers);
+  if (!rings) {
+    rings = rivers.lines.coordinates.map((line) => makeRing(Float64Array.from(line, (q) => q[0]), Float64Array.from(line, (q) => q[1]), false, false));
+    riverRings.set(rivers, rings);
+    riverPathsKey.set(rivers, `rivers:${++riverSets}`);
+  }
+  const key = riverPathsKey.get(rivers)!;
+  let paths = sheet.cache.get(key) as BlockPath[] | undefined;
+  if (!paths) {
+    paths = [sheet.blocks(), sheet.blocks(), sheet.blocks()];
+    rings.forEach((r, i) => {
+      if (!sheet.copies(r.box).length) return;
+      rankRing(r);
+      const rank = rivers.ranks[i] ?? 6, cls = rank <= 2 ? 0 : rank <= 5 ? 1 : 2;
+      for (const l of sheet.lines(r)) paths![cls].addLine(l);
+    });
+    sheet.cache.set(key, paths);
+  }
+  const [k, e, f] = sheet.placement(view);
+  const px = view.unit / k;
+  ctx.save();
+  ctx.transform(k, 0, 0, k, e, f);
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = color;
+  [1.6, 1.05, 0.65].forEach((w, c) => { ctx.lineWidth = w * px; paths![c].paint(ctx, (w * px) / 2 + 1, (p) => ctx.stroke(p)); });
+  ctx.restore();
+}
 const ringsOfScale = new WeakMap<BasemapScale, ScaleRings>();
 
 function ringsOf(b: BasemapScale): ScaleRings {
@@ -359,6 +429,8 @@ export function lakeCount(basemap: Basemap, minKm2: number): { shown: number; to
 export class BasemapPainter {
   /** Which lakes are drawn (and cut out of territory that ends at the coast). */
   lakeFilter: LakeFilter = { show: true, minKm2: 0 };
+  /** How many river lines the last picture drew from (0 with rivers hidden); for the tests. */
+  lastRivers = 0;
   private filterKey(): string { return this.lakeFilter.show ? `l${this.lakeFilter.minKm2}` : 'nolakes'; }
   private shownLakes = new WeakMap<ScaleRings, { min: number; rings: Ring[] }>();
 
@@ -406,7 +478,7 @@ export class BasemapPainter {
    * Draws the land and lakes (unless `fills` is false: terrain colours stand for them), then whatever
    * `afterFills` lays over them (relief), then the coastline and the reference borders.
    */
-  draw(ctx: CanvasRenderingContext2D, view: View, sheet: Sheet, basemap: Basemap, o: { referenceBorders: boolean; style?: BasemapStyle; oceanColor?: string; coastline?: boolean; fills?: boolean | 'lakes'; afterFills?: () => void }): void {
+  draw(ctx: CanvasRenderingContext2D, view: View, sheet: Sheet, basemap: Basemap, o: { referenceBorders: boolean; style?: BasemapStyle; oceanColor?: string; coastline?: boolean; fills?: boolean | 'lakes'; afterFills?: () => void; rivers?: string | null }): void {
     const paths = this.pathsFor(view, sheet, basemap, o.referenceBorders);
     const st = o.style ?? DEFAULT_BASEMAP_STYLE;
     const [k, e, f] = sheet.placement(view);
@@ -434,6 +506,8 @@ export class BasemapPainter {
       ctx.restore();
     }
     o.afterFills?.();
+    if (o.rivers) this.rivers(ctx, view, sheet, basemap, o.rivers);
+    else this.lastRivers = 0;
     if (o.coastline !== false) this.coastline(ctx, view, sheet, basemap, st);
     ctx.save();
     ctx.transform(k, 0, 0, k, e, f);
@@ -446,6 +520,16 @@ export class BasemapPainter {
       paths.borders.paint(ctx, 0.45 * px + 1, stroke);
     }
     ctx.restore();
+  }
+
+  /**
+   * Strokes the rivers (D99) of the scale the view is drawn at: the greatest widest, the least
+   * thinnest, each the same width on screen at any zoom.
+   */
+  rivers(ctx: CanvasRenderingContext2D, view: View, sheet: Sheet, basemap: Basemap, color: string): void {
+    const b = chooseScale(basemap, view);
+    this.lastRivers = b.rivers?.ranks.length ?? 0;
+    if (b.rivers) drawRiverLines(ctx, view, sheet, b.rivers, color);
   }
 
   /** Strokes the coastline as the basemap shows it. */

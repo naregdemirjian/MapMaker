@@ -20,6 +20,7 @@ import { compare, fromStore, gregorian } from '../../core-time/index.ts';
 import { basemapSourceOf, shown, minLakeKm2, terrainLook, seaLevelPoints, planetOf, sculptOf } from '../../world-model/world-settings.ts';
 import { stampsAt } from '../../terrain/sculpt.ts';
 import { sculpted } from '../../terrain/sculpt-cache.ts';
+import { riversSoon } from '../../terrain/river-cache.ts';
 import { seaLevelAt } from '../../terrain/sea-level.ts';
 import { recordTransition } from '../record-length.ts';
 import { loadBasemapDetail, pixelsPerDegree, visibleBounds, DETAIL_PIXELS_PER_DEGREE, type Basemap } from '../../render-engine/basemap.ts';
@@ -276,7 +277,7 @@ export function MapView() {
     const space = s.world.get('map_space', s.spaceId);
     const where = shot ? 'export' as const : 'working' as const;
     const on = (k: Parameters<typeof shown>[2]) => shown(space, where, k);
-    const show = { lakes: on('lakes'), coastline: on('coastline'), minLakeKm2: minLakeKm2(space) };
+    const show = { lakes: on('lakes'), coastline: on('coastline'), rivers: on('rivers'), minLakeKm2: minLakeKm2(space) };
     const passes = new Set<PassName>(['background', 'land', 'fills']);
     // Terrain (D95): Earth's, loaded on first use.
     // Terrain (D95), the sea level of the moment (D96) and generated planets (D97, whose land and sea
@@ -288,7 +289,9 @@ export function MapView() {
     const needsGrid = terrainShown || seaPoints.length > 0 || !!planetOf(space) || strokes.length > 0;
     const ground = needsGrid ? s.terrainOf(space) : null;
     const carved = ground ? sculpted(ground.grid, ground.key, strokes, (space?.radius_m ?? 6371008.8) / 1000) : null;
-    const terrain = ground && carved ? { grid: carved.grid, key: carved.key, look: terrainShown ? look : null, seaLevel, override: carved.touched && basemapSourceOf(space) === 'natural-earth' ? { data: carved.touched, key: carved.key } : null } : null;
+    // A planet's rivers (D99), worked out a moment after its heights (drawn without them meanwhile).
+    const rivers = carved && planetOf(space) && on('rivers') ? riversSoon(carved.grid, carved.key, () => store.notify()) : null;
+    const terrain = ground && carved ? { grid: carved.grid, key: carved.key, look: terrainShown ? look : null, seaLevel, override: carved.touched && basemapSourceOf(space) === 'natural-earth' ? { data: carved.touched, key: carved.key } : null, rivers } : null;
     if (terrain?.look) passes.add('terrain');
     if (on('borders')) passes.add('borders');
     if (on('features')) passes.add('features');

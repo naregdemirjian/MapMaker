@@ -16,6 +16,7 @@ import { basemapSourceOf, loadBasemap, loadBasemapDetail, loadDatasetRecords, ty
 import { shown, minLakeKm2, terrainLook, seaLevelPoints, planetOf, sculptOf } from '../world-model/world-settings.ts';
 import { stampsAt } from '../terrain/sculpt.ts';
 import { sculpted } from '../terrain/sculpt-cache.ts';
+import { riversNow } from '../terrain/river-cache.ts';
 import { planetKey } from '../terrain/planet.ts';
 import { planetTerrain } from '../terrain/planet-cache.ts';
 import { seaLevelAt } from '../terrain/sea-level.ts';
@@ -153,12 +154,13 @@ export function renderFrame(ctx: CanvasRenderingContext2D, renderer: MapRenderer
   // Sculpting (D98): the strokes holding at the frame's moment, applied to the heights.
   const strokes = stampsAt(sculptOf(space), t);
   const carved = ground && (terrainShown || seaPoints.length || planetOf(space) || strokes.length) ? sculpted(ground.grid, ground.key, strokes, (space?.radius_m ?? 6371008.8) / 1000) : null;
-  const terrain = carved ? { grid: carved.grid, key: carved.key, look: terrainShown ? look : null, seaLevel: seaLevelAt(seaPoints, t), override: carved.touched && basemap ? { data: carved.touched, key: carved.key } : null } : null;
+  const rivers = carved && planetOf(space) && on('rivers') ? riversNow(carved.grid, carved.key) : null;
+  const terrain = carved ? { grid: carved.grid, key: carved.key, look: terrainShown ? look : null, seaLevel: seaLevelAt(seaPoints, t), override: carved.touched && basemap ? { data: carved.touched, key: carved.key } : null, rivers } : null;
   const passes = new Set<PassName>(def.passes.filter((p) => (p !== 'graticule' || (shot.graticule && on('graticule'))) && (p !== 'labels' || labels) && (p !== 'characters' || (shot.characters !== false && on('characters'))) && (p !== 'cities' || cities) && (p !== 'borders' || on('borders')) && (p !== 'features' || on('features')) && (p !== 'terrain' || !!terrain?.look)));
   ctx.clearRect(0, 0, width, height);
   if (passes.size) {
     const transparent = def.name === 'all' ? shot.transparent : !def.background;
-    renderer.render(ctx, view, world, engine, shot.spaceId, t, { passes, transparent, layerIds: visibleLayers(world, shot), basemap, transitions: transitionOptions(shot, frame), mediaSeconds: frame / shot.fps, mediaChannel: 'export', trails: !!shot.trails, layout: { labels, cities }, show: { lakes: on('lakes'), coastline: on('coastline'), minLakeKm2: minLakeKm2(space) }, terrain });
+    renderer.render(ctx, view, world, engine, shot.spaceId, t, { passes, transparent, layerIds: visibleLayers(world, shot), basemap, transitions: transitionOptions(shot, frame), mediaSeconds: frame / shot.fps, mediaChannel: 'export', trails: !!shot.trails, layout: { labels, cities }, show: { lakes: on('lakes'), coastline: on('coastline'), rivers: on('rivers'), minLakeKm2: minLakeKm2(space) }, terrain });
   }
   if (def.overlays) drawShotOverlays(ctx, width, height, world, shot, frame, t);
 }
