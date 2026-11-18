@@ -73,5 +73,27 @@
         "sha256": "3e458fc036ad0a66411f2c1e6cac49c5d7bfb81cb1123bc513b22511a2b7fdeb"
       }
     ]
+  },
+  {
+    "id": "terrain-tiles",
+    "name": "Terrain Tiles (Tilezen, formerly Mapzen)",
+    "version": "terrarium encoding, zoom 5",
+    "source": "https://registry.opendata.aws/terrain-tiles/ (made with https://github.com/tilezen/joerd)",
+    "licence": "Open data; each source keeps its own terms (https://github.com/tilezen/joerd/blob/master/docs/attribution.md). At this zoom: ETOPO1 (NOAA) and GMTED2010 (USGS), both public domain.",
+    "credit": "Global ETOPO1 terrain data U.S. National Oceanic and Atmospheric Administration; global GMTED2010 terrain data courtesy of the U.S. Geological Survey (via the Mapzen terrain tiles).",
+    "usedFor": "Earth's terrain and sea floor (data/terrain/earth-4096.bin), outside the ice sheets",
+    "retrieved": "2026-11-18",
+    "converted": "Resampled from Web Mercator onto a 4096 × 2048 longitude/latitude grid (0.0879° cells, about 9.8 km at the equator) by area-weighted means; rounded to 1 m. Beyond 85.05° the nearest row, smoothed towards the pole."
+  },
+  {
+    "id": "copernicus-dem",
+    "name": "Copernicus DEM GLO-90",
+    "version": "GLO-90 (2021 release), smallest overview of each tile",
+    "source": "https://registry.opendata.aws/copernicus-dem/",
+    "licence": "Free of charge for any use, including commercial, with the credit below (Copernicus DEM licence for GLO-90)",
+    "credit": "© DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved.",
+    "usedFor": "The ice surface of Greenland and Antarctica (and the land around Greenland) in data/terrain/earth-4096.bin",
+    "retrieved": "2026-11-18",
+    "converted": "Means of the overview pixels (3 to 10 km) in each 0.0879° cell, south of 60° S and within 59°-84° N, 74°-10° W; a cell partly at sea takes the sea floor of the terrain tiles for that part."
   }
 ]

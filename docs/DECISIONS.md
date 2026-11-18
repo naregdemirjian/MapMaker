@@ -60,6 +60,33 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D94. Earth's elevation, sea floor included (Stage 8)
+
+Terrain starts from one grid of Earth's surface height: 4096 × 2048 cells of 0.088° (about 9.8 km at the equator),
+each the mean height of its area to the metre, from the Mariana Trench (−9,748 m as a cell mean) to the Himalaya
+(6,230 m; cells are means, so peaks come out lower). It ships with the app (`data/terrain/earth-4096.bin`, 7.6 MB), so
+terrain works offline; closer detail will be fetched on demand later. `scripts/fetch-terrain.mjs` rebuilds it.
+
+- **Sources.** The Mapzen terrain tiles on AWS Open Data, at zoom 5 (GMTED2010 on land, ETOPO1 under the sea),
+  resampled from Web Mercator by area. At that zoom those tiles give the **rock beneath the ice sheets**: central
+  Greenland comes out near sea level and much of Antarctica below it. Greenland and Antarctica (everything south of
+  60° S, and 59°–84° N, 74°–10° W) therefore come from the **Copernicus DEM GLO-90**, a surface model with the ice
+  and the Antarctic ice shelves: the smallest overview of each of its 8,105 tiles there, read with range requests.
+  Summit, Greenland comes out at 3,202 m; the South Pole at 2,822 m; Dome A at 4,080 m. Coastal cells mix the two by
+  their share of land. ETOPO 2022 and GEBCO, which have the ice surface built in, could not be downloaded from the
+  development environment; they remain a way to improve the sea floor.
+- **Beyond 85.05° north** (the Web Mercator limit, the Arctic Ocean) the last row is smoothed more and more along the
+  parallel towards the pole, so no streaks converge on it; the south has Copernicus to the pole.
+- **File.** A 16-byte header, then the cells' residuals from a neighbour predictor in two byte planes, deflated
+  (`src/terrain/grid.ts`; the script and the app share the code). Coarser heights would save little: 2 m steps
+  measured 6.6 MB; steps growing with depth 4.6 MB, but 30 m steps on the flat abyssal plains show as terraces in
+  relief shading. Reading it takes about 0.2 s.
+- **Credits.** Both sources are in data/datasets.json, so they appear in "Data sources and credits"; exports will
+  credit them when terrain is drawn. The Copernicus DEM GLO-90 licence allows any use, commercial included, with its
+  credit line; the Mapzen sources at this zoom are public domain.
+- **Tests.** The file format round trip (heights at both ends of the range next to each other included),
+  interpolation between cells with longitudes wrapping, and heights at known places on land, at sea and on the ice.
+
 ### D93. Contested areas (Stage 7)
 
 Claims and zones are areas on feature layers (D71), belonging to a country or faction. An area can now also be
