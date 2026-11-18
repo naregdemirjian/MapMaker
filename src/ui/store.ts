@@ -12,6 +12,7 @@ import { MapRenderer, VIEW_QUALITY } from '../render-engine/map-renderer.ts';
 import { loadViewSettings, saveViewSettings, DETAIL_TOLERANCE, type ViewSettings } from './view-settings.ts';
 import { loadRecordLength, type RecordLength } from './record-length.ts';
 import { loadBasemap, loadBasemapDetail, type Basemap } from '../render-engine/basemap.ts';
+import { loadEarthTerrain, type ElevationGrid } from '../terrain/grid.ts';
 import { DEFAULT_PERIOD, type PeriodSpec } from '../domain/history-view.ts';
 import { setAssetBase } from '../render-engine/assets.ts';
 import { lonLatToVec, type Vec3 } from '../geo-kernel/vec.ts';
@@ -168,6 +169,9 @@ class AppStore {
   private readonly viewSettingsApplied = this.applyViewSettings();
   /** Earth's geography (Natural Earth), loaded once in the background. */
   basemap: Basemap | null = null;
+  /** Earth's elevation (D94), loaded the first time a map shows terrain. */
+  earthTerrain: ElevationGrid | null = null;
+  private terrainLoading = false;
   /** Show present-day country borders over the land while drawing (never exported). */
   referenceBorders = false;
   private queue: Promise<unknown> = Promise.resolve();
@@ -269,6 +273,13 @@ class AppStore {
     this.toasts = [...this.toasts, { id, text, kind }];
     this.notify();
     setTimeout(() => { this.toasts = this.toasts.filter((t) => t.id !== id); this.notify(); }, kind === 'error' ? 7000 : 3500);
+  }
+
+  /** Loads Earth's terrain unless it is there or on its way (everything is drawn again when it arrives). */
+  needEarthTerrain(): void {
+    if (this.earthTerrain || this.terrainLoading) return;
+    this.terrainLoading = true;
+    loadEarthTerrain().then((g) => { this.terrainLoading = false; this.set({ earthTerrain: g }); }, (e: Error) => { this.terrainLoading = false; this.toast(e.message, 'error'); });
   }
 
   get camera(): Camera {

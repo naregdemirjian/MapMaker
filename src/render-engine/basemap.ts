@@ -402,21 +402,31 @@ export class BasemapPainter {
     return p;
   }
 
-  draw(ctx: CanvasRenderingContext2D, view: View, sheet: Sheet, basemap: Basemap, o: { referenceBorders: boolean; style?: BasemapStyle; oceanColor?: string; coastline?: boolean }): void {
+  /**
+   * Draws the land and lakes (unless `fills` is false: terrain colours stand for them), then whatever
+   * `afterFills` lays over them (relief), then the coastline and the reference borders.
+   */
+  draw(ctx: CanvasRenderingContext2D, view: View, sheet: Sheet, basemap: Basemap, o: { referenceBorders: boolean; style?: BasemapStyle; oceanColor?: string; coastline?: boolean; fills?: boolean; afterFills?: () => void }): void {
     const paths = this.pathsFor(view, sheet, basemap, o.referenceBorders);
     const st = o.style ?? DEFAULT_BASEMAP_STYLE;
     const [k, e, f] = sheet.placement(view);
     const px = view.unit / k; // a design pixel, in sheet units
+    const fill = (p: Path2D) => ctx.fill(p, 'evenodd'), stroke = (p: Path2D) => ctx.stroke(p);
+    if (o.fills !== false) {
+      ctx.save();
+      ctx.transform(k, 0, 0, k, e, f);
+      ctx.fillStyle = st.land;
+      paths.land.paint(ctx, 1, fill);
+      // Lakes are cut out of the land, so they show whatever lies beneath (the ocean, or nothing).
+      ctx.globalCompositeOperation = 'destination-out';
+      paths.lakes.paint(ctx, 1, fill);
+      ctx.globalCompositeOperation = 'source-over';
+      if (o.oceanColor) { ctx.fillStyle = o.oceanColor; paths.lakes.paint(ctx, 1, fill); }
+      ctx.restore();
+    }
+    o.afterFills?.();
     ctx.save();
     ctx.transform(k, 0, 0, k, e, f);
-    const fill = (p: Path2D) => ctx.fill(p, 'evenodd'), stroke = (p: Path2D) => ctx.stroke(p);
-    ctx.fillStyle = st.land;
-    paths.land.paint(ctx, 1, fill);
-    // Lakes are cut out of the land, so they show whatever lies beneath (the ocean, or nothing).
-    ctx.globalCompositeOperation = 'destination-out';
-    paths.lakes.paint(ctx, 1, fill);
-    ctx.globalCompositeOperation = 'source-over';
-    if (o.oceanColor) { ctx.fillStyle = o.oceanColor; paths.lakes.paint(ctx, 1, fill); }
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
     ctx.strokeStyle = st.coast;

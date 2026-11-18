@@ -1,11 +1,12 @@
 // Settings stored with each world (map_space.settings, JSON).
 import type { MapSpaceRow } from './schema.ts';
+import { terrainLookOf, type TerrainLook } from '../terrain/look.ts';
 
 /** The reference geography a world shows under its territories. */
 export type BasemapSource = 'natural-earth' | 'none';
 
 /** What is shown on a map (D84): each true unless set false. */
-export interface ShowSet { lakes?: boolean; coastline?: boolean; graticule?: boolean; borders?: boolean; names?: boolean; cities?: boolean; characters?: boolean; features?: boolean }
+export interface ShowSet { lakes?: boolean; coastline?: boolean; graticule?: boolean; borders?: boolean; names?: boolean; cities?: boolean; characters?: boolean; features?: boolean; terrain?: boolean }
 export const SHOW_ITEMS: Array<{ key: keyof ShowSet; name: string }> = [
   { key: 'borders', name: 'Borders' },
   { key: 'names', name: 'Country names' },
@@ -15,11 +16,16 @@ export const SHOW_ITEMS: Array<{ key: keyof ShowSet; name: string }> = [
   { key: 'lakes', name: 'Lakes' },
   { key: 'coastline', name: 'Coastlines' },
   { key: 'graticule', name: 'Latitude and longitude lines' },
+  { key: 'terrain', name: 'Terrain' },
 ];
 /** While working, and in presentation and exports; lakes smaller than minLakeKm2 are not shown in either. */
 export interface ShowSettings { working?: ShowSet; export?: ShowSet; minLakeKm2?: number }
 
-export interface WorldSettings { projection?: string; basemap?: BasemapSource; show?: ShowSettings }
+export interface WorldSettings {
+  projection?: string; basemap?: BasemapSource; show?: ShowSettings;
+  /** How the world's terrain is drawn (D95); absent: no terrain. */
+  terrain?: TerrainLook;
+}
 
 /** Whether something is shown, while working or in exports. */
 export function shown(space: Pick<MapSpaceRow, 'settings'> | null | undefined, where: 'working' | 'export', key: keyof ShowSet): boolean {
@@ -47,4 +53,17 @@ export function basemapSourceOf(space: Pick<MapSpaceRow, 'settings' | 'radius_m'
   const b = worldSettings(space).basemap;
   if (b === 'natural-earth' || b === 'none') return b;
   return space.radius_m !== null && Math.abs(space.radius_m - EARTH_RADIUS_KM * 1000) < 1 ? 'natural-earth' : 'none';
+}
+
+/**
+ * The terrain a world has (D95): Earth's elevation for worlds showing Earth's geography; none
+ * otherwise (generated planets come later).
+ */
+export function terrainSourceOf(space: Pick<MapSpaceRow, 'settings' | 'radius_m' | 'kind'> | null | undefined): 'earth' | null {
+  return space && space.kind !== 'plane' && basemapSourceOf(space) === 'natural-earth' ? 'earth' : null;
+}
+
+/** How a world's terrain is drawn, or null when it shows none. */
+export function terrainLook(space: Pick<MapSpaceRow, 'settings' | 'radius_m' | 'kind'> | null | undefined): TerrainLook | null {
+  return space && terrainSourceOf(space) ? terrainLookOf(worldSettings(space).terrain) : null;
 }

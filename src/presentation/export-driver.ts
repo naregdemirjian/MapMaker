@@ -13,14 +13,15 @@ import { eventShown, entityStyle } from '../domain/commands.ts';
 import { isFeatureKind } from '../render-engine/feature-style.ts';
 import { preloadImages, prepareVideos } from '../render-engine/assets.ts';
 import { basemapSourceOf, loadBasemap, loadBasemapDetail, loadDatasetRecords, type Basemap } from '../render-engine/basemap.ts';
-import { shown, minLakeKm2 } from '../world-model/world-settings.ts';
+import { shown, minLakeKm2, terrainLook } from '../world-model/world-settings.ts';
+import { loadEarthTerrain, EARTH_TERRAIN_KEY, type ElevationGrid } from '../terrain/grid.ts';
 
 export interface ExportPassDef { name: string; label: string; blend: string; passes: PassName[]; overlays: boolean; background: boolean; note?: string }
 
 export const PASS_DEFS: ExportPassDef[] = [
-  { name: 'all', label: 'All', blend: 'Normal', passes: ['background', 'graticule', 'land', 'fills', 'borders', 'features', 'cities', 'labels', 'characters'], overlays: true, background: true, note: 'everything combined in one image sequence' },
-  { name: 'background', label: 'Background', blend: 'Normal', passes: ['background', 'graticule'], overlays: false, background: true, note: 'ocean and grid' },
-  { name: 'land', label: 'Land (Natural Earth)', blend: 'Normal', passes: ['land'], overlays: false, background: false, note: 'land, lakes and coastlines; empty for worlds without the Earth basemap' },
+  { name: 'all', label: 'All', blend: 'Normal', passes: ['background', 'terrain', 'graticule', 'land', 'fills', 'borders', 'features', 'cities', 'labels', 'characters'], overlays: true, background: true, note: 'everything combined in one image sequence' },
+  { name: 'background', label: 'Background', blend: 'Normal', passes: ['background', 'terrain', 'graticule'], overlays: false, background: true, note: 'ocean, terrain colours and grid' },
+  { name: 'land', label: 'Land (Natural Earth)', blend: 'Normal', passes: ['land'], overlays: false, background: false, note: 'land, lakes and coastlines (with terrain colours, only the coastlines; relief without colours lies here); empty for worlds without the Earth basemap' },
   { name: 'fills', label: 'Territory fills', blend: 'Normal', passes: ['fills'], overlays: false, background: false, note: 'lower the opacity in Premiere to taste' },
   { name: 'borders', label: 'Borders', blend: 'Normal', passes: ['borders'], overlays: false, background: false },
   { name: 'features', label: 'Areas, lines and points', blend: 'Normal', passes: ['features'], overlays: false, background: false, note: 'claims, zones, routes, front lines, battles' },
@@ -69,6 +70,7 @@ export async function estimateExportBytes(world: World, engine: Engine, shot: Sh
   const k = Math.min(1, 960 / W);
   const w = Math.max(16, Math.round(W * k)), h = Math.max(16, Math.round(H * k));
   const basemap = await basemapFor(world, shot.spaceId);
+  const terrain = await terrainFor(world, shot.spaceId);
   const canvas = new OffscreenCanvas(w, h);
   const ctx = canvas.getContext('2d') as unknown as CanvasRenderingContext2D;
   // One renderer for all estimates: what it has prepared (outlines, label places) serves the next estimate too.
@@ -79,7 +81,7 @@ export async function estimateExportBytes(world: World, engine: Engine, shot: Sh
   const frame = Math.floor(shot.frames / 2);
   let perFrame = 0;
   for (const def of defs) {
-    renderFrame(ctx, renderer, world, engine, shot, frame, def, w, h, basemap);
+    renderFrame(ctx, renderer, world, engine, shot, frame, def, w, h, basemap, terrain);
     const blob = await canvas.convertToBlob({ type: 'image/png' });
     perFrame += blob.size;
   }
@@ -118,19 +120,27 @@ export async function basemapFor(world: World, spaceId: string): Promise<Basemap
   return basemapSourceOf(world.get('map_space', spaceId)) === 'natural-earth' ? loadBasemapDetail(await loadBasemap()) : null;
 }
 
+/** The terrain a shot's world shows in exports (D95: Earth's, loaded on first use), or null. */
+export async function terrainFor(world: World, spaceId: string): Promise<ElevationGrid | null> {
+  const space = world.get('map_space', spaceId);
+  return terrainLook(space) && shown(space, 'export', 'terrain') ? loadEarthTerrain() : null;
+}
+
 /** Render one frame of one pass into a 2D context of the given size. */
-export function renderFrame(ctx: CanvasRenderingContext2D, renderer: MapRenderer, world: World, engine: Engine, shot: ShotSettings, frame: number, def: ExportPassDef, width: number, height: number, basemap: Basemap | null = null): void {
+export function renderFrame(ctx: CanvasRenderingContext2D, renderer: MapRenderer, world: World, engine: Engine, shot: ShotSettings, frame: number, def: ExportPassDef, width: number, height: number, basemap: Basemap | null = null, terrainGrid: ElevationGrid | null = null): void {
   const t = timeAt(shot, frame);
   const view = makeView(cameraAt(shot, frame), width, height);
   // What the map shows in exports (D84), on top of the shot's own choices.
   const space = world.get('map_space', shot.spaceId);
   const on = (k: Parameters<typeof shown>[2]) => shown(space, 'export', k);
   const labels = !!shot.labels && on('names'), cities = shot.cities !== false && on('cities');
-  const passes = new Set<PassName>(def.passes.filter((p) => (p !== 'graticule' || (shot.graticule && on('graticule'))) && (p !== 'labels' || labels) && (p !== 'characters' || (shot.characters !== false && on('characters'))) && (p !== 'cities' || cities) && (p !== 'borders' || on('borders')) && (p !== 'features' || on('features'))));
+  const look = terrainLook(space);
+  const terrain = look && terrainGrid && on('terrain') ? { grid: terrainGrid, key: EARTH_TERRAIN_KEY, look } : null;
+  const passes = new Set<PassName>(def.passes.filter((p) => (p !== 'graticule' || (shot.graticule && on('graticule'))) && (p !== 'labels' || labels) && (p !== 'characters' || (shot.characters !== false && on('characters'))) && (p !== 'cities' || cities) && (p !== 'borders' || on('borders')) && (p !== 'features' || on('features')) && (p !== 'terrain' || !!terrain)));
   ctx.clearRect(0, 0, width, height);
   if (passes.size) {
     const transparent = def.name === 'all' ? shot.transparent : !def.background;
-    renderer.render(ctx, view, world, engine, shot.spaceId, t, { passes, transparent, layerIds: visibleLayers(world, shot), basemap, transitions: transitionOptions(shot, frame), mediaSeconds: frame / shot.fps, mediaChannel: 'export', trails: !!shot.trails, layout: { labels, cities }, show: { lakes: on('lakes'), coastline: on('coastline'), minLakeKm2: minLakeKm2(space) } });
+    renderer.render(ctx, view, world, engine, shot.spaceId, t, { passes, transparent, layerIds: visibleLayers(world, shot), basemap, transitions: transitionOptions(shot, frame), mediaSeconds: frame / shot.fps, mediaChannel: 'export', trails: !!shot.trails, layout: { labels, cities }, show: { lakes: on('lakes'), coastline: on('coastline'), minLakeKm2: minLakeKm2(space) }, terrain });
   }
   if (def.overlays) drawShotOverlays(ctx, width, height, world, shot, frame, t);
 }
@@ -163,6 +173,7 @@ export async function runExport(o: {
   const started = performance.now();
   // Loaded before the first frame, so every frame is drawn from the same complete data.
   const basemap = await basemapFor(o.world, o.shot.spaceId);
+  const terrain = await terrainFor(o.world, o.shot.spaceId);
   // Pictures and videos: every picture loaded, and every video sought to its frame before drawing.
   const fills = o.world.all('entity').map((e) => entityStyle(e).fill).filter((f): f is NonNullable<typeof f> => !!f?.asset);
   const videoFills = fills.filter((f) => f.kind === 'video').map((f) => ({ file: f.asset!, play: f }));
@@ -170,7 +181,8 @@ export async function runExport(o: {
   const iconPictures = o.world.all('entity').map((e) => entityStyle(e).icon?.asset);
   await preloadImages([eventsBoxOf(o.shot.eventsBox).image, ...fills.filter((f) => f.kind === 'image').map((f) => f.asset), ...iconPictures]);
   // Credit lines for the data drawn in these frames (written into the manifest and the guide).
-  const credits = basemap ? (await loadDatasetRecords()).filter((d) => d.id === 'natural-earth').map((d) => `${d.name} ${d.version} (${d.licence}): ${d.credit}`) : [];
+  const drawn = new Set([...(basemap ? ['natural-earth'] : []), ...(terrain ? ['terrain-tiles', 'copernicus-dem'] : [])]);
+  const credits = drawn.size ? (await loadDatasetRecords()).filter((d) => drawn.has(d.id)).map((d) => `${d.name} ${d.version} (${d.licence}): ${d.credit}`) : [];
   const job = await Api.startExport(o.projectId, {
     credits,
     exportDir: o.shot.exportDir ?? null,
@@ -211,7 +223,7 @@ export async function runExport(o: {
       if (failure) throw failure;
       if (o.isCancelled?.()) { await Promise.allSettled(pending); throw new Error('Export cancelled.'); }
       if (videoFills.length) await prepareVideos(videoFills, frame / o.shot.fps);
-      renderFrame(ctx, renderer, o.world, o.engine, o.shot, frame, def, width, height, basemap);
+      renderFrame(ctx, renderer, o.world, o.engine, o.shot, frame, def, width, height, basemap, terrain);
       const [a, b] = pixelHash(ctx.getImageData(0, 0, width, height).data);
       const before = last.get(def.name);
       if (before && before.a === a && before.b === b) {

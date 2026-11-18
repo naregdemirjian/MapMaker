@@ -1888,6 +1888,76 @@ try {
     assert.equal(await steps(), before, 'every step of this one undone');
   });
 
+  await h.step('Terrain: land coloured by height and the sea by depth, with relief; relief over the countries; hidden while working but kept in the presentation; undone', async () => {
+    await page.getByTestId('mode-world').click();
+    // The whole world: the Himalaya, the plains of India, the Atlantic and the countries drawn over it.
+    await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 20, lat: 20, zoom: 0.3, rotation: 0, projection: 'equirectangular' }));
+    await h.setDate('1450');
+    const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
+    const before = await steps();
+    const pixelAt = (ll: LL) => page.evaluate(([lon, lat]) => {
+      const p = (window as any).__mapmaker.lonLatToPage(lon, lat);
+      const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement;
+      const r = c.getBoundingClientRect(), k = c.width / r.width;
+      return Array.from(c.getContext('2d')!.getImageData(Math.round((p[0] - r.left) * k), Math.round((p[1] - r.top) * k), 1, 1).data).slice(0, 3);
+    }, ll);
+    /** The pixels of a square of the map around a place (its colours, for comparing two pictures). */
+    const patch = (ll: LL, half: number) => page.evaluate(([lon, lat, n]) => {
+      const p = (window as any).__mapmaker.lonLatToPage(lon, lat);
+      const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement;
+      const r = c.getBoundingClientRect(), k = c.width / r.width;
+      return Array.from(c.getContext('2d')!.getImageData(Math.round((p[0] - r.left) * k) - n, Math.round((p[1] - r.top) * k) - n, 2 * n, 2 * n).data);
+    }, [ll[0], ll[1], half] as const);
+    const meanDiff = (a: number[], b: number[]) => { let d = 0; for (let i = 0; i < a.length; i++) if (i % 4 !== 3) d += Math.abs(a[i] - b[i]); return d / (a.length * 0.75); };
+    /** How light a square of the map around a place is: red, green and blue added up, averaged. */
+    const light = async (ll: LL) => { const px = await patch(ll, 6); let t = 0; for (let i = 0; i < px.length; i += 4) t += px[i] + px[i + 1] + px[i + 2]; return t / (px.length / 4); };
+    // Places no country of this test covers: the Tibetan plateau and the West Siberian Plain; the
+    // shallow North Sea and the deep Pacific off Japan.
+    const tibet: LL = [88, 33], siberia: LL = [75, 61], shelf: LL = [3, 55], deep: LL = [150, 30];
+    for (const ll of [tibet, siberia, shelf, deep]) assert.equal(await h.ownerAt(ll, '1450'), null, `nobody holds ${ll}`);
+    const lit = async () => (await light(tibet)) - (await light(siberia));
+    assert.ok(Math.abs(await lit()) < 20, `without terrain the land is one colour (${await lit()})`);
+    const show = async (fn: () => Promise<void>) => {
+      await page.getByTestId('open-show').click();
+      await page.getByTestId('show-dialog').waitFor();
+      await fn();
+      await page.getByTestId('show-dialog').getByRole('button', { name: 'Close' }).last().click();
+    };
+    const terrain = () => page.evaluate(() => (window as any).__mapmaker.store.renderer.lastTerrain) as Promise<{ colours: boolean; relief: boolean; overTerritories: boolean }>;
+    await show(async () => {
+      assert.equal(await page.getByTestId('show-working-terrain').count(), 0, 'no terrain row before there is terrain');
+      await page.getByTestId('terrain-on').check();
+      await page.getByTestId('show-working-terrain').waitFor();
+    });
+    await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastTerrain.colours, null, { timeout: 30000 });
+    // The plateau, at 5,000 m, in the light colours of the heights; the plain in the green of the lowlands.
+    let d = 0;
+    for (let i = 0; i < 40 && (d = await lit()) < 80; i++) await page.waitForTimeout(100);
+    assert.ok(d >= 80, `the Tibetan plateau lighter than the West Siberian Plain (${await pixelAt(tibet)} against ${await pixelAt(siberia)})`);
+    assert.ok((await light(shelf)) > (await light(deep)) + 25, `the North Sea's shallows (${await pixelAt(shelf)}) lighter than the deep Pacific (${await pixelAt(deep)})`);
+    await h.screenshot('terrain');
+    // Relief over the countries: the shading of the sea floor shows through the country drawn over the Atlantic.
+    const plain = await patch(P.a, 24);
+    await show(() => page.getByTestId('terrain-over-territories').check());
+    await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastTerrain.overTerritories);
+    await page.waitForTimeout(300);
+    const shaded = await patch(P.a, 24);
+    assert.ok(meanDiff(plain, shaded) > 0.5, `relief over the country (mean change ${meanDiff(plain, shaded).toFixed(2)})`);
+    await h.screenshot('terrain-relief-over-countries');
+    // Hidden while working: gone from the working view, kept in the presentation (and exports).
+    await show(() => page.getByTestId('show-working-terrain').uncheck());
+    await page.waitForFunction(() => !(window as any).__mapmaker.store.renderer.lastTerrain.colours);
+    await page.getByTestId('mode-present').click();
+    await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastTerrain.colours);
+    await page.getByTestId('mode-world').click();
+    assert.deepEqual(await terrain(), { colours: false, relief: false, overTerritories: false });
+    // Undone, step by step, to no terrain.
+    for (let i = 0; i < 3; i++) await page.getByTestId('undo').click();
+    await h.saved();
+    assert.equal(await steps(), before, 'each change was one step');
+    assert.equal(await page.evaluate(() => JSON.parse((window as any).__mapmaker.store.world.get('map_space', (window as any).__mapmaker.store.spaceId).settings).terrain ?? null), null);
+  });
+
   await h.step('History Health lists the overlap, nothing else; no browser errors', async () => {
     await page.getByTestId('mode-world').click();
     await page.getByTestId('health').click();

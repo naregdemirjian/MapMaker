@@ -108,3 +108,20 @@ export function heightAt(grid: ElevationGrid, lon: number, lat: number): number 
   const top = data[r0 + a] * (1 - tx) + data[r0 + b] * tx, bottom = data[r1 + a] * (1 - tx) + data[r1 + b] * tx;
   return (top * (1 - ty) + bottom * ty) * grid.step;
 }
+
+/** The name of Earth's grid's content (part of what a picture of it is kept by). */
+export const EARTH_TERRAIN_KEY = 'earth-4096';
+let earth: Promise<ElevationGrid> | null = null;
+
+/** Earth's grid (D94), loaded once from the interface's data folder. */
+export function loadEarthTerrain(url = 'data/terrain/earth-4096.bin'): Promise<ElevationGrid> {
+  if (!earth) {
+    earth = (async () => {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("Earth's terrain could not be loaded.");
+      return decodeTerrain(new Uint8Array(await res.arrayBuffer()), inflateInBrowser);
+    })();
+    earth.catch(() => { earth = null; });
+  }
+  return earth;
+}

@@ -9,7 +9,8 @@ import {
   BASE_EVENT_ID, MAIN_BRANCH, SCHEMA_VERSION, type RowDiff, type EffectRow, type EventRow, type EntityRow, type LayerKind, type FeatureRow, type RelationRow,
 } from '../world-model/schema.ts';
 import { type Vec3, vecToLonLat, normalize } from '../geo-kernel/vec.ts';
-import { worldSettings, type BasemapSource, type ShowSet, type ShowSettings } from '../world-model/world-settings.ts';
+import { worldSettings, terrainSourceOf, type BasemapSource, type ShowSet, type ShowSettings } from '../world-model/world-settings.ts';
+import { terrainLookOf, DEFAULT_TERRAIN_LOOK, type TerrainLook } from '../terrain/look.ts';
 import { resolvePointStyle, type LabelStyle, type CountryLabel, type PointStyle } from '../render-engine/label-style.ts';
 import { DEFAULT_FEATURE_STYLE, isFeatureKind, type FeatureKind, type FeatureStyle } from '../render-engine/feature-style.ts';
 import { relationKind, isRelationKind, type RelationKind } from './relations.ts';
@@ -134,6 +135,19 @@ export function setWorldShow(world: World, spaceId: string, patch: { working?: S
     ...(patch.minLakeKm2 !== undefined ? { minLakeKm2: Math.max(0, patch.minLakeKm2) } : {}),
   };
   return run(world, `Change what "${space.name}" shows`, (tx) => { tx.update('map_space', { ...space, settings: JSON.stringify({ ...worldSettings(space), show }) }); });
+}
+
+/** Turns a world's terrain on (with the look given, completed with the defaults), changes its look, or (null) turns it off (D95). */
+export function setWorldTerrain(world: World, spaceId: string, patch: Partial<TerrainLook> | null): CommandResult {
+  const space = world.get('map_space', spaceId);
+  if (!space) throw new Error('That map no longer exists.');
+  if (patch && !terrainSourceOf(space)) throw new Error('Only maps of the Earth have terrain so far.');
+  const settings = worldSettings(space);
+  const cur = terrainLookOf(settings.terrain);
+  const next = patch ? terrainLookOf({ ...(cur ?? DEFAULT_TERRAIN_LOOK), ...patch }) : null;
+  const { terrain: _old, ...rest } = settings;
+  const label = !patch ? `Hide the terrain of "${space.name}"` : cur ? `Change the terrain of "${space.name}"` : `Show the terrain of "${space.name}"`;
+  return run(world, label, (tx) => { tx.update('map_space', { ...space, settings: JSON.stringify(next ? { ...rest, terrain: next } : rest) }); });
 }
 
 export function createLayer(world: World, spaceId: string, name: string, kind: LayerKind = 'partition'): CommandResult<string> {

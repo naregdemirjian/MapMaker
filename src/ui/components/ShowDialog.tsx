@@ -1,10 +1,17 @@
 // What the map shows (fifth feedback round, D84): while working, and in presentation and exports, each
-// chosen on its own; and the smallest lake shown, so the thousands of small lakes can be left out.
+// chosen on its own; the smallest lake shown, so the thousands of small lakes can be left out; and the
+// terrain and how it is drawn (D95).
 import { useMemo, useState } from 'react';
 import { useStore } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
-import { SHOW_ITEMS, shown, minLakeKm2, basemapSourceOf, type ShowSet } from '../../world-model/world-settings.ts';
+import { SHOW_ITEMS, shown, minLakeKm2, basemapSourceOf, terrainLook, terrainSourceOf, type ShowSet } from '../../world-model/world-settings.ts';
 import { lakeCount } from '../../render-engine/basemap.ts';
+import { terrainDrawable } from '../../render-engine/terrain-gl.ts';
+import { PALETTES, STRENGTH_MIN, STRENGTH_MAX, type TerrainLook, type TerrainPalette } from '../../terrain/look.ts';
+
+// The relief strength slider: powers of two from a quarter to four times the usual.
+const strengthToSlider = (v: number) => Math.round(Math.log2(v) * 4);
+const sliderToStrength = (v: number) => Math.min(STRENGTH_MAX, Math.max(STRENGTH_MIN, 2 ** (v / 4)));
 
 // The lake slider: all lakes at the left, then from 1 to 100,000 square kilometres on a log scale.
 const LAKE_MAX = 100_000;
@@ -34,7 +41,8 @@ export function ShowDialog() {
     if (v !== minLakeKm2(space)) s.execute((wd) => cmd.setWorldShow(wd, space.id, { minLakeKm2: v }));
   };
   const set = (where: 'working' | 'export', key: keyof ShowSet, on: boolean) => s.execute((wd) => cmd.setWorldShow(wd, space.id, { [where]: { [key]: on } }));
-  const items = SHOW_ITEMS.filter((it) => earth || (it.key !== 'lakes' && it.key !== 'coastline'));
+  const look = terrainLook(space);
+  const items = SHOW_ITEMS.filter((it) => (earth || (it.key !== 'lakes' && it.key !== 'coastline')) && (it.key !== 'terrain' || !!look));
   return (
     <div className="modal-back" onPointerDown={(ev) => ev.target === ev.currentTarget && close()}>
       <div className="modal" role="dialog" aria-label="What is shown" data-testid="show-dialog">
@@ -59,8 +67,49 @@ export function ShowDialog() {
             <span className="muted">{counts ? `${counts.shown.toLocaleString()} of ${counts.total.toLocaleString()} lakes shown. ` : ''}For scale: Lake Geneva is about 580 km², Lake Titicaca 8,400 km², Lake Superior 82,000 km².</span>
           </label>
         )}
+        {terrainSourceOf(space) && <TerrainSection spaceId={space.id} look={look} />}
         <div className="modal-actions"><button className="primary" onClick={close}>Close</button></div>
       </div>
     </div>
+  );
+}
+
+/** The terrain of an Earth map (D95): on or off, and how it is drawn. */
+function TerrainSection({ spaceId, look }: { spaceId: string; look: TerrainLook | null }) {
+  const s = useStore();
+  const [drag, setDrag] = useState<number | null>(null);
+  const change = (patch: Partial<TerrainLook> | null) => s.execute((wd) => cmd.setWorldTerrain(wd, spaceId, patch));
+  const commit = () => {
+    if (drag === null) return;
+    const v = sliderToStrength(drag);
+    setDrag(null);
+    if (look && v !== look.strength) change({ strength: v });
+  };
+  const box = (key: 'colours' | 'relief' | 'overTerritories' | 'seaFloor', label: string, testid: string) => look && (
+    <label className="check"><input type="checkbox" checked={look[key]} onChange={(e) => change({ [key]: e.target.checked })} data-testid={testid} /> {label}</label>
+  );
+  return (
+    <section className="terrain-section" data-testid="terrain-section">
+      <h3>Terrain</h3>
+      {!terrainDrawable() && <p className="muted">Terrain is drawn by the graphics card (WebGL2), which this computer's browser does not offer: it cannot be shown here.</p>}
+      <label className="check"><input type="checkbox" checked={!!look} onChange={(e) => change(e.target.checked ? {} : null)} data-testid="terrain-on" /> Show the terrain: the heights of the land and the depths of the sea</label>
+      {look && (
+        <div className="terrain-options">
+          {box('colours', 'Colour the land by height and the sea by depth', 'terrain-colours')}
+          {box('relief', 'Relief shading (lit from the north-west)', 'terrain-relief')}
+          {box('overTerritories', 'Relief over the countries too', 'terrain-over-territories')}
+          {box('seaFloor', 'Relief of the sea floor', 'terrain-sea-floor')}
+          <label className="range-row">Relief strength: <b data-testid="terrain-strength-text">{Math.round((drag !== null ? sliderToStrength(drag) : look.strength) * 100)}%</b>
+            <input type="range" min={strengthToSlider(STRENGTH_MIN)} max={strengthToSlider(STRENGTH_MAX)} step={1} value={drag ?? strengthToSlider(look.strength)} onChange={(e) => setDrag(Number(e.target.value))} onPointerUp={commit} onKeyUp={commit} onBlur={commit} data-testid="terrain-strength" />
+          </label>
+          <label className="range-row">Colours
+            <select value={look.palette} onChange={(e) => change({ palette: e.target.value as TerrainPalette })} data-testid="terrain-palette">
+              {(Object.keys(PALETTES) as TerrainPalette[]).map((p) => <option key={p} value={p}>{PALETTES[p].name}</option>)}
+            </select>
+          </label>
+          <p className="muted">Earth's heights and depths, about 10 km apart (Mapzen terrain tiles; Greenland and Antarctica from the Copernicus DEM): see Data sources and credits.</p>
+        </div>
+      )}
+    </section>
   );
 }

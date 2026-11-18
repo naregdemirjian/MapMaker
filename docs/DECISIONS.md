@@ -21,6 +21,7 @@ model, the history engine, the parcel kernel, storage or the export writer.
   2026: about 210 ms per 1080p frame with 24,500 parcels (fine for export, about 5 frames a second when scrubbing).
 - **Way back.** Replace this one module once packages can be installed.
 - **Update (18 November 2026).** After the two optimisation stages (D48–D70) the Canvas renderer draws territories, features and names fast enough on large projects; reversing D1 is moved to Stages 8 and 9, where terrain and fields need the graphics card.
+- **Update (Stage 8).** Terrain is drawn with WebGL2 (D95), into pictures the Canvas renderer lays where they belong; everything else stays Canvas 2D.
 
 ### D2. Local service and browser instead of an Electron app (reversed, 16 November 2026)
 
@@ -59,6 +60,42 @@ model, the history engine, the parcel kernel, storage or the export writer.
 Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
+
+### D95. Terrain drawn by the graphics card (Stage 8)
+
+A map of the Earth can now show its terrain ("What is shown", Terrain): the land coloured by height and the sea by
+depth, relief shading lit from the north-west (25% to 400% strength), the relief of the sea floor, and relief over
+the countries (their fills shaded too, so mountains show through them). Two palettes: **Natural**, which goes with
+the map's dark style (its sea at 3,000 m is the map's own ocean colour), and **Atlas**, the light green-to-brown of
+printed atlases. Like everything in that dialog, terrain can be shown while working and in exports separately.
+
+- **How.** A WebGL2 shader finds, for every pixel, the place it shows: it undoes the projection (equirectangular,
+  Mercator, and Equal Earth and Natural Earth by Newton's method: d3-geo's inverses, written out a second time in
+  `terrain/look.ts`, where tests check them against d3) and reads the grid of D94, uploaded as half floats with
+  smaller averaged copies (mipmaps), so a zoomed-out view reads the mean of what each pixel covers. Relief comes from
+  the slope measured across what a pixel covers, exaggerated more the farther out the view, so it reads alike at
+  every zoom. This is the first use of the graphics card: D1 is reversed only where it is needed, as planned.
+- **Where it goes.** Pictures are made for the renderer's sheets (the plane it draws in) and where they lie on the
+  canvas, so a kept picture with room around it, a turned view, a partial redraw (only that part is made) and an
+  export frame are all made the same way. The sea's colours cover the planet; the land's are laid inside Natural
+  Earth's coastline (lakes keep the sea's), so the terrain's own 10 km coastline never shows; the plain land colour
+  is then left out. Relief without colours lies over the plain land. Relief over the countries shades each layer's
+  fills before its opacity is applied, only where it has territory.
+- **Exports.** Terrain colours are part of the Background pass (ocean, terrain, grid), so the passes still stack to
+  the full picture; with colours on, the Land pass holds only the coastlines; relief over the countries is in the
+  fills. When terrain is drawn, the export's credits include both of its sources.
+- **Without WebGL2** there is no terrain, and the dialog says why. Electron and Chrome have it (with software
+  rendering where a graphics card is refused), as does the headless browser of the tests.
+- **Cost.** In the tests' browser, which draws in software, terrain added a few milliseconds to a working-view frame
+  at 1600 × 950; drawing the room around a carried picture once the view rests took up to 0.7 s there. A graphics
+  card does the same in milliseconds.
+- **Limits.** Earth's grid is 10 km, so terrain looks soft closer in than a large country; close-up detail fetched
+  on demand comes later in Stage 8, as do sea level over time, generated planets and sculpting.
+- **Tests.** `terrain-look.test.ts` (the stored look; palettes; the inverse projections against d3-geo; relief
+  shading; the command, refused off Earth, undone); `e2e/workflows` (terrain on: the Tibetan plateau lighter than the
+  West Siberian Plain, the North Sea lighter than the deep Atlantic; relief over a country changes its pixels; hidden
+  while working but drawn in the presentation; every change undone); `e2e/render-compare` (carried pictures with
+  terrain and relief over the countries match pictures drawn afresh, in Equal Earth too).
 
 ### D94. Earth's elevation, sea floor included (Stage 8)
 

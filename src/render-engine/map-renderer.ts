@@ -27,15 +27,21 @@ import { parcelGeometry, type ParcelGeometry, type CycleGeom } from './parcel-ge
 import { featureStyle, featureColor, isFeatureKind, type FeatureKind, type FeatureStyle } from './feature-style.ts';
 import { shotProgress, eventScreenSeconds } from '../presentation/sequence.ts';
 import { iconById, iconOfStyle, unitOfStyle, drawIcon, type CharacterIcon, type RouteStyle } from './icons.ts';
+import { TerrainPictures, terrainDrawable, type TerrainFrame, type TerrainImageKind } from './terrain-gl.ts';
+import type { ElevationGrid } from '../terrain/grid.ts';
+import type { TerrainLook } from '../terrain/look.ts';
 
 type LabelEntity = { name: string; style?: string; color?: string; type_id?: string };
 
 /** How a territory layer is filled (D88): solid, or see-through stripes, crossed stripes or dots in each owner's colour. */
 export type TerritoryFill = 'solid' | 'hatch' | 'cross' | 'dots';
 
-export type PassName = 'background' | 'graticule' | 'land' | 'fills' | 'borders' | 'features' | 'cities' | 'labels' | 'characters';
+export type PassName = 'background' | 'terrain' | 'graticule' | 'land' | 'fills' | 'borders' | 'features' | 'cities' | 'labels' | 'characters';
 /** Drawing order. The grid lies under the land, so stacked export passes match the full picture. */
-export const ALL_PASSES: PassName[] = ['background', 'graticule', 'land', 'fills', 'borders', 'features', 'cities', 'labels', 'characters'];
+export const ALL_PASSES: PassName[] = ['background', 'terrain', 'graticule', 'land', 'fills', 'borders', 'features', 'cities', 'labels', 'characters'];
+
+/** The terrain a picture shows (D95): the grid, a name for its content, and how it is drawn. */
+export interface TerrainShown { grid: ElevationGrid; key: string; look: TerrainLook }
 
 export interface MapStyle {
   ocean: string;
@@ -78,6 +84,12 @@ export interface RenderOptions {
   referenceBorders?: boolean;
   /** What of the geography is shown (D84): lakes (and from what size), the coastline. All shown when absent. */
   show?: { lakes?: boolean; minLakeKm2?: number; coastline?: boolean };
+  /**
+   * The terrain the full picture shows (D95), or none. Its colours are drawn in the 'terrain' pass (the
+   * land's own flat colour is then left out of the 'land' pass); relief without colours is laid over
+   * the land in the 'land' pass, and relief over the territories over the fills in the 'fills' pass.
+   */
+  terrain?: TerrainShown | null;
   /** A shot's way of animating border changes; absent: as recorded (world-building view). */
   transitions?: ShotTransitionOptions;
   /** Screen seconds into the shot, for video fills (0 or absent: the first frame). */
@@ -379,6 +391,7 @@ export class MapRenderer {
   /** How closely prepared geometry follows the true shapes (exports use EXPORT_QUALITY whatever this is). */
   quality: RenderQuality = { ...VIEW_QUALITY };
   private basemapPainter = new BasemapPainter();
+  private terrainPictures = new TerrainPictures();
   lastLabels: LabelInfo[] = [];
   /** The characters drawn in the last frame, where (screen) and on the map, for picking and tests. */
   /** (r: how far the marker or icon reaches from its middle, in design pixels; icon: its icon, 'picture' or 'marker'.) */
@@ -406,6 +419,8 @@ export class MapRenderer {
   lastTransitions: Array<{ style: string; progress: number }> = [];
   /** The wars shown as front lines in the last frame (D89): on which layer, drawn from whose side, teeth toward whom. */
   lastFronts: Array<{ layerId: string; from: string; toward: string }> = [];
+  /** What of the terrain the last frame drew (D95): its colours, relief over the plain land, relief over the territories. */
+  lastTerrain = { colours: false, relief: false, overTerritories: false };
   /** For benchmarks and tests: how many sheets have been made, and snapshots of layers worked out. */
   stats = { sheets: 0, snaps: 0, snapsFollowed: 0 };
 
@@ -1400,6 +1415,29 @@ export class MapRenderer {
     return b.canvas as CanvasImageSource;
   }
 
+  /**
+   * Lays a picture of the terrain (D95) on a canvas, made for where the canvas shows the sheet (`at`:
+   * the frame's transform on it, when the canvas's own has changed since).
+   */
+  private layTerrain(c: CanvasRenderingContext2D, view: View, sheet: Sheet, terrain: TerrainShown, kind: TerrainImageKind, at?: DOMMatrix): void {
+    const [k, e, f] = sheet.placement(view);
+    const m = (at ?? c.getTransform()).multiply(new DOMMatrix([k, 0, 0, k, e, f]));
+    const frame: TerrainFrame = { kind: sheet.kind, S: sheet.S, ox: sheet.ox, oy: sheet.oy, lonRef: sheet.lonRef, m, width: c.canvas.width, height: c.canvas.height };
+    // Only part of the picture being drawn again: only that part of the terrain is made.
+    let part: [number, number, number, number] | undefined;
+    if (this.region && !this.regionWhole && this.region.length) {
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const [x, y, w, h] of this.region) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x + w); y1 = Math.max(y1, y + h); }
+      part = [x0, y0, x1 - x0, y1 - y0];
+    }
+    const out = this.terrainPictures.image(terrain.grid, terrain.key, terrain.look, kind, frame, part);
+    if (!out) return;
+    c.save();
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.drawImage(out.image, out.x, out.y);
+    c.restore();
+  }
+
   private maskLand(lc: CanvasRenderingContext2D, view: View, sheet: Sheet, basemap: Basemap, frameKey: string, lakes: boolean): void {
     const direct = () => this.basemapPainter.maskToLand(lc, view, sheet, basemap, lakes);
     if (this.caching === 'off' || lc.canvas.width * lc.canvas.height > MapRenderer.MASK_LIMIT) { direct(); return; }
@@ -1461,7 +1499,13 @@ export class MapRenderer {
     // ---- The base map: ocean, grid and land. The same picture for as long as the view stays put.
     const wantsBackground = opts.passes.has('background') && !opts.transparent;
     const wantsLand = opts.passes.has('land') && !!opts.basemap;
-    const wantsBase = wantsBackground || opts.passes.has('graticule') || wantsLand;
+    // Terrain (D95): on round maps, where the graphics card can draw it.
+    const terrain = opts.terrain && view.camera.projection !== 'flat' && terrainDrawable() ? opts.terrain : null;
+    const terrainColours = !!terrain?.look.colours, wantsTerrain = terrainColours && opts.passes.has('terrain');
+    // Relief without colours lies over the plain land (in the land pass); with colours it is part of them.
+    const reliefOnLand = !!terrain && !terrainColours && terrain.look.relief && wantsLand;
+    const wantsBase = wantsBackground || opts.passes.has('graticule') || wantsLand || wantsTerrain;
+    this.lastTerrain = { colours: wantsTerrain, relief: reliefOnLand, overTerritories: !!terrain?.look.overTerritories && opts.passes.has('fills') };
     // Where the frame fills the canvas and starts with the base map, the base map's kept picture
     // replaces what the canvas showed in one copy (see layered); otherwise the frame's area is cleared.
     const m0 = ctx.getTransform();
@@ -1518,9 +1562,10 @@ export class MapRenderer {
     if (wantsBase) {
       // (A flat map's grid changes its spacing with the zoom.)
       const gridStep = opts.passes.has('graticule') && view.camera.projection === 'flat' && space?.radius_m ? Math.floor(Math.log10(view.width / view.projection.scale()) * 3) : 0;
-      const baseKey = partKey(`${wantsBackground ? style.ocean : ''}|${opts.passes.has('graticule') ? style.graticule : ''}|${wantsLand ? `${opts.basemap!.scales.length}${opts.referenceBorders ? 'r' : ''}|${lakeKey}|${opts.show?.coastline === false ? 'nocoast' : ''}` : ''}|${space?.radius_m ?? 0}`, `${gridStep}`);
+      const terrainKey = terrain && (wantsTerrain || (wantsLand && (terrainColours || reliefOnLand))) ? `|t:${terrain.key}|${JSON.stringify(terrain.look)}|${wantsTerrain ? 'c' : ''}` : '';
+      const baseKey = partKey(`${wantsBackground ? style.ocean : ''}|${opts.passes.has('graticule') ? style.graticule : ''}|${wantsLand ? `${opts.basemap!.scales.length}${opts.referenceBorders ? 'r' : ''}|${lakeKey}|${opts.show?.coastline === false ? 'nocoast' : ''}` : ''}|${space?.radius_m ?? 0}${terrainKey}`, `${gridStep}`);
       // (One kept picture per combination of parts: an export draws several passes of each frame.)
-      base = { name: `base:${wantsBackground ? 'o' : ''}${opts.passes.has('graticule') ? 'g' : ''}${wantsLand ? 'l' : ''}`, key: baseKey, draw: (c) => {
+      base = { name: `base:${wantsBackground ? 'o' : ''}${wantsTerrain ? 't' : ''}${opts.passes.has('graticule') ? 'g' : ''}${wantsLand ? 'l' : ''}`, key: baseKey, draw: (c) => {
         if (wantsBackground) {
           c.fillStyle = style.ocean;
           const band = this.periodic;
@@ -1528,6 +1573,20 @@ export class MapRenderer {
         }
         c.save();
         clipPlanet(c);
+        if (wantsTerrain) {
+          // The sea's colours over the whole planet, then the land's inside the coastline (lakes keep
+          // the sea's). A world without a coastline drawn takes the terrain's own.
+          this.layTerrain(c, view, sheet, terrain!, opts.basemap ? 'sea' : 'both');
+          if (opts.basemap) {
+            const lc = this.scratch(c);
+            this.layTerrain(lc, view, sheet, terrain!, 'land');
+            this.maskLand(lc, view, sheet, opts.basemap, frameKey, true);
+            c.save();
+            c.setTransform(1, 0, 0, 1, 0, 0);
+            c.drawImage(lc.canvas as CanvasImageSource, 0, 0);
+            c.restore();
+          }
+        }
         if (opts.passes.has('graticule')) {
           c.strokeStyle = style.graticule;
           let key = 'graticule', lines: Ring[] | null = null;
@@ -1550,7 +1609,12 @@ export class MapRenderer {
           if (lines) { const p = new Path2D(); for (const l of lines) sheet.line(p, l); sheet.cache.set(key, p); }
           this.strokeOnSheet(c, sheet.cache.get(key) as Path2D, 0.8 * u);
         }
-        if (wantsLand) this.basemapPainter.draw(c, view, sheet, opts.basemap!, { referenceBorders: !!opts.referenceBorders, oceanColor: wantsBackground ? style.ocean : undefined, coastline: opts.show?.coastline !== false });
+        if (wantsLand) this.basemapPainter.draw(c, view, sheet, opts.basemap!, {
+          referenceBorders: !!opts.referenceBorders, oceanColor: wantsBackground ? style.ocean : undefined, coastline: opts.show?.coastline !== false,
+          // With terrain colours, the land and lakes are those colours (in the terrain pass).
+          fills: !terrainColours,
+          afterFills: reliefOnLand ? () => this.layTerrain(c, view, sheet, terrain!, 'relief') : undefined,
+        });
         c.restore();
       } };
     }
@@ -1659,7 +1723,8 @@ export class MapRenderer {
         }
         if (this.renewRects.rects) renew = { rects: this.renewRects.rects, moment };
       }
-      const key = animated && !renew && opts.transitions ? null : partKey(`${animated && !renew ? `${t.day}:${t.ms}|` : ''}${renew ? 'animated|' : ''}${wantsFills ? 'f' : ''}${wantsBorders ? 'b' : ''}|${world.revision}|${style.border}|${style.borderWidth}|${opts.basemap ? `${opts.basemap.scales.length}|${lakeKey}` : ''}${landKey}${anyMedia ? `|${assetEpoch()}|${this.mediaSeconds}|${this.mediaChannel}` : ''}`);
+      const reliefKey = terrain?.look.overTerritories && wantsFills ? `|r:${terrain.key}|${JSON.stringify(terrain.look)}` : '';
+      const key = animated && !renew && opts.transitions ? null : partKey(`${animated && !renew ? `${t.day}:${t.ms}|` : ''}${renew ? 'animated|' : ''}${wantsFills ? 'f' : ''}${wantsBorders ? 'b' : ''}|${world.revision}|${style.border}|${style.borderWidth}|${opts.basemap ? `${opts.basemap.scales.length}|${lakeKey}` : ''}${landKey}${reliefKey}${anyMedia ? `|${assetEpoch()}|${this.mediaSeconds}|${this.mediaChannel}` : ''}`);
       // The working view, after an edit or a step in time that changed few parcels: only where they lie is drawn again.
       // A change under way looks different at every moment, and different again once it is over: where
       // the picture before showed one, and where this one does, is drawn again along with the parcels
@@ -1678,7 +1743,7 @@ export class MapRenderer {
           for (let i = 0; i < look.length; i++) hsh = Math.imul(hsh ^ look.charCodeAt(i), 16777619);
           colours = (colours + (hsh >>> 0)) % 4294967291;
         }
-        const stable = `${key.loose.slice(0, looseBase.length)}|${detail}|${wantsFills ? 'f' : ''}${wantsBorders ? 'b' : ''}|${style.border}|${style.borderWidth}|${opts.basemap ? `${opts.basemap.scales.length}|${lakeKey}` : ''}${layerSig}|${colours}`;
+        const stable = `${key.loose.slice(0, looseBase.length)}|${detail}|${wantsFills ? 'f' : ''}${wantsBorders ? 'b' : ''}|${style.border}|${style.borderWidth}|${opts.basemap ? `${opts.basemap.scales.length}|${lakeKey}` : ''}${layerSig}${reliefKey}|${colours}`;
         const W = ctx.canvas.width, H = ctx.canvas.height;
         const own = this.changesSince(terrName, view, arr, engine, prepared.map((p) => p.states), key.strict, stable, m, W, H, widestLine * u + 3);
         const before = this.animPrev.get(terrName);
@@ -1793,6 +1858,13 @@ export class MapRenderer {
             if (col) { lc.fillStyle = look(lc, col); this.fill(lc, shape); }
           }
           for (const g of tg.groups.values()) this.drawTransition(lc, g, paint);
+          // Relief over the territories (D95): shadows and light laid on the layer's colours only.
+          if (terrain?.look.overTerritories) {
+            lc.save();
+            lc.globalCompositeOperation = 'source-atop';
+            this.layTerrain(lc, view, sheet, terrain, 'relief', cm);
+            lc.restore();
+          }
           if (clip) this.maskLand(lc, view, sheet, opts.basemap!, frameKey, true);
           c.save();
           c.setTransform(1, 0, 0, 1, 0, 0);

@@ -224,14 +224,25 @@ try {
         // meridian it had while the map is moved (see Camera.meridian), so its picture only shifts.
         { name: 'Equal Earth, a region, its meridian held', zoom: 3.2, lon: 12, lat: 46, basemap: true, projection: 'equalEarth', held: true },
         { name: 'Equal Earth, the world inside its outline, its meridian held', zoom: 0.3, lon: 10, lat: 15, basemap: true, projection: 'equalEarth', held: true, tall: 0.3 },
+        // Terrain (D95), drawn by the graphics card for the kept picture and its room as for a fresh one.
+        { name: 'terrain with relief over the countries', zoom: 2.6, lon: 85, lat: 32, basemap: true, terrain: true },
+        { name: 'Equal Earth terrain, its meridian held', zoom: 0.3, lon: 10, lat: 15, basemap: true, projection: 'equalEarth', held: true, tall: 0.3, terrain: true },
       ];
+      if (cases.some((c) => (c as { terrain?: boolean }).terrain) && !s.earthTerrain) {
+        s.needEarthTerrain();
+        while (!s.earthTerrain) await new Promise((r) => setTimeout(r, 50));
+      }
       // Moves by whole pixels (right, down), one after the other.
       const moves = [[37, 0], [-5, 23], [120, -61], [0, 1], [-333, 40], [9, -200], [1, 1]];
       for (const c of cases) {
         const carried = new B.MapRenderer(), fresh = new B.MapRenderer();
         carried.carry = true;
         fresh.caching = 'off';
-        const opts = { passes: new Set(['background', 'graticule', 'land', 'fills', 'borders']), transparent: false, layerIds: layers, basemap: c.basemap ? s.basemap : null };
+        const withTerrain = !!(c as { terrain?: boolean }).terrain;
+        const opts = {
+          passes: new Set(['background', 'graticule', 'land', 'fills', 'borders', ...(withTerrain ? ['terrain'] : [])]), transparent: false, layerIds: layers, basemap: c.basemap ? s.basemap : null,
+          terrain: withTerrain ? { grid: s.earthTerrain, key: 'earth-4096', look: { colours: true, relief: true, overTerritories: true, seaFloor: true, strength: 1, palette: 'natural' } } : null,
+        };
         const held = !!(c as { held?: boolean }).held;
         const cam = { lon: c.lon, lat: c.lat, zoom: c.zoom, rotation: 0, projection: (c as { projection?: string }).projection ?? 'equirectangular', ...(held ? { meridian: c.lon } : {}) };
         let view = B.makeView(cam, W, H);

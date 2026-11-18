@@ -17,7 +17,8 @@ import { cameraAt, timeAt, overlaysAt, drawOverlays, withStillCamera, moveOverla
 import { transitionOptions, drawShotOverlays } from '../../presentation/export-driver.ts';
 import { parseJSON, slerpLonLat } from '../../temporal-engine/engine.ts';
 import { compare, fromStore, gregorian } from '../../core-time/index.ts';
-import { basemapSourceOf, shown, minLakeKm2 } from '../../world-model/world-settings.ts';
+import { basemapSourceOf, shown, minLakeKm2, terrainLook } from '../../world-model/world-settings.ts';
+import { EARTH_TERRAIN_KEY } from '../../terrain/grid.ts';
 import { recordTransition } from '../record-length.ts';
 import { loadBasemapDetail, pixelsPerDegree, visibleBounds, DETAIL_PIXELS_PER_DEGREE, type Basemap } from '../../render-engine/basemap.ts';
 import * as cmd from '../../domain/commands.ts';
@@ -263,6 +264,11 @@ export function MapView() {
     const on = (k: Parameters<typeof shown>[2]) => shown(space, where, k);
     const show = { lakes: on('lakes'), coastline: on('coastline'), minLakeKm2: minLakeKm2(space) };
     const passes = new Set<PassName>(['background', 'land', 'fills']);
+    // Terrain (D95): Earth's, loaded on first use.
+    const look = terrainLook(space);
+    if (look && on('terrain') && !s.earthTerrain) s.needEarthTerrain();
+    const terrain = look && on('terrain') && s.earthTerrain ? { grid: s.earthTerrain, key: EARTH_TERRAIN_KEY, look } : null;
+    if (terrain) passes.add('terrain');
     if (on('borders')) passes.add('borders');
     if (on('features')) passes.add('features');
     const full = basemapSourceOf(s.world.get('map_space', s.spaceId)) === 'natural-earth' ? s.basemap : null;
@@ -291,7 +297,7 @@ export function MapView() {
     if ((!shot || shot.characters !== false) && on('characters')) passes.add('characters');
     if (citiesOn) passes.add('cities');
     try {
-      s.renderer.render(ctx, view, s.world, s.engine, s.spaceId, time, { passes, transparent: !!shot?.transparent, layerIds: layers, basemap, referenceBorders: !shot && s.referenceBorders, transitions: shot ? transitionOptions(shot, s.shotFrame) : undefined, mediaSeconds: shot ? s.shotFrame / shot.fps : 0, trails: !!shot?.trails, layout: { labels: namesOn && !namesHidden, cities: citiesOn }, moving: moving && vs.whileMoving === 'carry', holdNames: moving && vs.names === 'hold', fillAround, hurried, show });
+      s.renderer.render(ctx, view, s.world, s.engine, s.spaceId, time, { passes, transparent: !!shot?.transparent, layerIds: layers, basemap, referenceBorders: !shot && s.referenceBorders, transitions: shot ? transitionOptions(shot, s.shotFrame) : undefined, mediaSeconds: shot ? s.shotFrame / shot.fps : 0, trails: !!shot?.trails, layout: { labels: namesOn && !namesHidden, cities: citiesOn }, moving: moving && vs.whileMoving === 'carry', holdNames: moving && vs.names === 'hold', fillAround, hurried, show, terrain });
     } catch (e) {
       console.error(e);
     }
@@ -327,7 +333,7 @@ export function MapView() {
       const cc = cmpCanvas.getContext('2d') as unknown as CanvasRenderingContext2D;
       cc.setTransform(dpr, 0, 0, dpr, frame.x * dpr, frame.y * dpr);
       try {
-        s.compareRenderer.render(cc, view, s.world, s.engine, s.spaceId, s.compare.time, { passes, transparent: false, layerIds: layers, basemap, referenceBorders: s.referenceBorders, layout: { labels: namesOn && !namesHidden, cities: citiesOn }, moving: moving && vs.whileMoving === 'carry', holdNames: moving && vs.names === 'hold', fillAround, show });
+        s.compareRenderer.render(cc, view, s.world, s.engine, s.spaceId, s.compare.time, { passes, transparent: false, layerIds: layers, basemap, referenceBorders: s.referenceBorders, layout: { labels: namesOn && !namesHidden, cities: citiesOn }, moving: moving && vs.whileMoving === 'carry', holdNames: moving && vs.names === 'hold', fillAround, show, terrain });
       } catch (e) {
         console.error(e);
       }
