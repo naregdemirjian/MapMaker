@@ -320,8 +320,8 @@ class FieldGL {
     return t;
   }
 
-  draw(type: FieldType, opacity: number, sources: FieldInstance[], f: TerrainFrame, offset: [number, number], w: number, h: number, radiusKm: number, rasters: FieldRaster[] = []): void {
-    const gl = this.gl, def = FIELD_TYPES[type];
+  draw(type: FieldType, opacity: number, sources: FieldInstance[], f: TerrainFrame, offset: [number, number], w: number, h: number, radiusKm: number, rasters: FieldRaster[] = [], fullAt: number | null = null): void {
+    const gl = this.gl, def = { ...FIELD_TYPES[type], full: fullAt ?? FIELD_TYPES[type].full };
     if (this.canvas.width !== w || this.canvas.height !== h) { this.canvas.width = w; this.canvas.height = h; }
     this.target(w, h);
     // The sums.
@@ -426,7 +426,7 @@ export class FieldPictures {
   private kept = new Map<string, { key: string; image: ImageBitmap | OffscreenCanvas }>();
 
   /** The picture of a field layer for a frame (all of it), or null without WebGL2. `key`: what the picture shows. */
-  image(layerId: string, key: string, type: FieldType, opacity: number, sources: FieldInstance[], f: TerrainFrame, radiusKm: number, rasters: FieldRaster[] = []): ImageBitmap | OffscreenCanvas | null {
+  image(layerId: string, key: string, type: FieldType, opacity: number, sources: FieldInstance[], f: TerrainFrame, radiusKm: number, rasters: FieldRaster[] = [], fullAt: number | null = null): ImageBitmap | OffscreenCanvas | null {
     const W = Math.max(1, Math.round(f.width)), H = Math.max(1, Math.round(f.height));
     const k = this.kept.get(layerId);
     const full = `${key}|${W}x${H}`;
@@ -435,13 +435,13 @@ export class FieldPictures {
     if (!gl) return null;
     let image: ImageBitmap | OffscreenCanvas;
     if (W <= gl.max && H <= gl.max) {
-      gl.draw(type, opacity, sources, f, [0, 0], W, H, radiusKm, rasters);
+      gl.draw(type, opacity, sources, f, [0, 0], W, H, radiusKm, rasters, fullAt);
       image = gl.canvas.transferToImageBitmap();
     } else {
       const out = new OffscreenCanvas(W, H), ctx = out.getContext('2d')!;
       for (let y = 0; y < H; y += gl.max) for (let x = 0; x < W; x += gl.max) {
         const tw = Math.min(gl.max, W - x), th = Math.min(gl.max, H - y);
-        gl.draw(type, opacity, sources, f, [x, y], tw, th, radiusKm, rasters);
+        gl.draw(type, opacity, sources, f, [x, y], tw, th, radiusKm, rasters, fullAt);
         ctx.drawImage(gl.canvas, x, y);
       }
       image = out;

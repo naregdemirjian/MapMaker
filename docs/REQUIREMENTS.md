@@ -100,7 +100,7 @@ status. Last updated: 18 November 2026 (Stage 4; see DEVELOPMENT.md).
 | --- | --- | --- | --- |
 | Unlimited custom layers, created, shown and hidden, historically changed | Tested | `scenarios`, `e2e/workflows` step 2 | Territory layers only |
 | Polygon (territory) layers | Tested | as above | |
-| Line, point, route, heatmap and raster/numerical layers | Partial | `features` | Area, line and point layers with lifespans and dated shapes (D71): claims, zones, roads, front lines with teeth, arrows, battles and other symbols; their own export pass. Drawn with their own tool, chosen on the map, listed and styled in their own panel (`e2e/workflows` 'Areas, lines and points'). Routes, heatmaps and rasters: Stages 7 and 9 |
+| Line, point, route, heatmap and raster/numerical layers | Partial | `features` | Area, line and point layers with lifespans and dated shapes (D71): claims, zones, roads, front lines with teeth, arrows, battles and other symbols; their own export pass. Drawn with their own tool, chosen on the map, listed and styled in their own panel (`e2e/workflows` 'Areas, lines and points'). Heatmaps: conditions layers, from points too (D102, D105). Routes and raster/numerical layers: later stages |
 | Layer styling | Partial | `features`, `e2e/workflows` | Territory layers: opacity and border width, no editor. Areas, lines and points: colour (or their country's), fill opacity, hatching (diagonal, crossed, dotted), line width and dashes, front-line teeth, arrowheads, point symbols and sizes, names on the map; per layer and per feature (D71). Hatching for occupied territory on territory layers is still to come |
 | Exporting layers independently | Partial | `e2e/workflows` | Passes are separated by kind (fills, borders, labels…) across visible layers; a single layer is exported by hiding the others |
 | Countries and factions | Tested | `e2e/*` | |
@@ -126,7 +126,7 @@ status. Last updated: 18 November 2026 (Stage 4; see DEVELOPMENT.md).
 | Disasters: explosions, destruction zones, radiation, flooding, wildfire | Partial | `fields`, `spread`, `e2e/workflows` | Conditions (D102): radiation, fire, smoke and ash, flood, destruction, from sources placed with a click, round with uneven edges or carried downwind as plumes, rising, lasting and fading; wildfires, lava and floods spreading over the real terrain (D103); disasters placed with one click from templates sized by yield, magnitude, explosivity, depth or size: nuclear strikes, earthquakes, eruptions, floods, wildfires, meteor impacts (with their crater), droughts (D104) |
 | Expanding zones, intensity, duration | Tested | `fields`, `e2e/workflows` | A source's edge grows to its size over days; its strength rises, lasts and halves every so many days until it fades (D102) |
 | Permanent versus temporary change kept separate | Tested | `fields`, `sculpt`, `sea-level` | Temporary conditions are field layers that fade by themselves (D102); permanent changes are the terrain's: sculpting (D98) and the sea level (D96). A meteor impact makes both at once: its conditions fade, its crater stays (D104) |
-| Heatmaps | Partial | `fields` | A Heatmap kind of conditions layer, its sources placed by hand (D102). Heatmaps worked out from a layer of points: Stage 9, a later step |
+| Heatmaps | Tested | `fields`, `e2e/workflows` | A Heatmap kind of conditions layer, its sources placed by hand (D102) or worked out from a layer of points that change over time, each point a soft spot of a chosen size, the colours full where a chosen number overlap (D105); three thousand strikes drawn at 4K in about half a second |
 
 ## Animation and presentation
 
@@ -143,7 +143,7 @@ status. Last updated: 18 November 2026 (Stage 4; see DEVELOPMENT.md).
 | Camera movement | Partial | `e2e/workflows` step 7 | Start and end views with easing, checked frame by frame in the export. No multi-key camera or flights |
 | Text overlays | Partial | `e2e/workflows`, `events-box` | Date, title, and a fully styleable 'current events' box (with a graphic of the user's own). No free text boxes or animated text |
 | Shot playback | Needs testing | | Play button works by hand; not driven by an automated test |
-| Spreading phenomena, animated routes, environmental effects, heatmap changes | Not implemented | | Stages 7, 9 |
+| Spreading phenomena, animated routes, environmental effects, heatmap changes | Partial | `fields`, `spread`, `disasters`, `e2e/workflows` | Conditions that rise, last and fade, plumes carried by the wind, fires, lava and floods spreading over the terrain, heatmaps following points over time (D102–D105). Animated routes: Stage 7 |
 
 ## Export
 

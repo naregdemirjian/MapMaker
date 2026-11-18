@@ -29,13 +29,21 @@ export const FIELD_TYPES: Record<FieldType, { name: string; unit: string; full: 
 };
 export const isFieldType = (v: unknown): v is FieldType => typeof v === 'string' && v in FIELD_TYPES;
 
-/** A field layer's look: its kind, and how opaque it is drawn (1 as its ramp says). */
-export interface FieldLayerStyle { type: FieldType; opacity: number }
+/**
+ * A field layer's look: its kind, and how opaque it is drawn (1 as its ramp says). A heatmap may be
+ * worked out from a layer of points (D105: `from`, a point layer's id): each point in force there is a
+ * soft spot `kernelKm` across, worth 1, and the colours are full where `full` of them overlap.
+ */
+export interface FieldLayerStyle { type: FieldType; opacity: number; from: string | null; kernelKm: number; full: number | null }
 export function fieldLayerStyleOf(styleJson: string | undefined): FieldLayerStyle {
   let o: Record<string, unknown> = {};
   try { o = styleJson ? (JSON.parse(styleJson) as Record<string, unknown>) ?? {} : {}; } catch { o = {}; }
   const f = (o.field ?? {}) as Record<string, unknown>;
-  return { type: isFieldType(f.type) ? f.type : 'custom', opacity: typeof f.opacity === 'number' && Number.isFinite(f.opacity) ? Math.max(0, Math.min(1, f.opacity)) : 1 };
+  const n = (v: unknown, lo: number, hi: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : null);
+  return {
+    type: isFieldType(f.type) ? f.type : 'custom', opacity: n(f.opacity, 0, 1) ?? 1,
+    from: typeof f.from === 'string' && f.from ? f.from : null, kernelKm: n(f.kernelKm, 1, 5000) ?? 200, full: n(f.full, 0.01, 1e6),
+  };
 }
 
 /**

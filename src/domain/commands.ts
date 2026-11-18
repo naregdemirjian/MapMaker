@@ -1473,11 +1473,18 @@ export function createFieldLayer(world: World, spaceId: string, name: string, ty
   });
 }
 
-/** A field layer's kind and opacity (not dated: how it is drawn). */
-export function setFieldLayerStyle(world: World, layerId: string, patch: Partial<{ type: FieldType; opacity: number }>): CommandResult {
+/**
+ * A field layer's kind, opacity, and for a heatmap the layer of points it is worked out from, how far
+ * each point spreads and how many make the colours full (D105); not dated: how it is drawn.
+ */
+export function setFieldLayerStyle(world: World, layerId: string, patch: Partial<{ type: FieldType; opacity: number; from: string | null; kernelKm: number; full: number | null }>): CommandResult {
   const layer = world.get('layer', layerId);
   if (!layer || layer.kind !== 'field') throw new Error('That field layer no longer exists.');
   if (patch.type !== undefined && !isFieldType(patch.type)) throw new Error('Unknown kind of field.');
+  if (patch.from) {
+    const from = world.get('layer', patch.from);
+    if (!from || from.kind !== 'point' || from.space_id !== layer.space_id) throw new Error('A heatmap is worked out from a layer of points on the same map.');
+  }
   let o: Record<string, unknown> = {};
   try { o = JSON.parse(layer.style || '{}') ?? {}; } catch { o = {}; }
   const next = { ...fieldLayerStyleOf(layer.style), ...patch };
@@ -1503,6 +1510,24 @@ export function addFieldSource(world: World, o: { layerId: string; name: string;
     writeShape(tx, id, o.mode, { parts: [[((lon + 540) % 360) - 180, lat]], anim: null });
     return id;
   });
+}
+
+/**
+ * Many sources of a field at once (in one step): imported strikes, a scenario's sites. Each starts at
+ * the moment the edit mode gives, with the field's usual settings unless given.
+ */
+export function addFieldSources(world: World, o: { layerId: string; sources: Array<{ name: string; at: [number, number]; source?: Partial<FieldSource> }>; mode: EditMode }): CommandResult<string[]> {
+  const layer = world.get('layer', o.layerId);
+  if (!layer || layer.kind !== 'field') throw new Error('Choose a field layer first.');
+  const type = fieldLayerStyleOf(layer.style).type;
+  for (const s of o.sources) if (!Number.isFinite(s.at[0]) || !Number.isFinite(s.at[1]) || Math.abs(s.at[1]) > 90) throw new Error('A place is not on the map.');
+  return run(world, `Add ${o.sources.length} sources to "${layer.name}"`, (tx) => o.sources.map((s) => {
+    const id = newId('feat');
+    const source = fieldSourceOf({ ...DEFAULT_SOURCES[type], ...s.source }, type);
+    tx.insert('feature', { id, layer_id: layer.id, name: s.name.trim() || FIELD_TYPES[type].name, entity_id: '', style: JSON.stringify({ source }), notes: '', created_seq: tx.world.nextSeq('feature') });
+    writeShape(tx, id, o.mode, { parts: [[((s.at[0] + 540) % 360) - 180, s.at[1]]], anim: null });
+    return id;
+  }));
 }
 
 /**

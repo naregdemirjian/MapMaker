@@ -50,6 +50,25 @@ export function FieldToolOptions() {
           <option value="+">New field layer…</option>
         </select>
       </label>
+      {layer && style && type === 'heat' && (() => {
+        const points = w.all('layer').filter((l) => l.space_id === s.spaceId && l.kind === 'point').sort((a, b) => a.sort_order - b.sort_order);
+        return <>
+          <label className="inline" title="A heatmap can be worked out from a layer of points: each point in force at the date viewed counts, spread over the distance below (sources placed by hand count too)">From
+            <select value={style.from ?? ''} onChange={(e) => s.execute((wd) => cmd.setFieldLayerStyle(wd, layer.id, { from: e.target.value || null }))} data-testid="field-from">
+              <option value="">sources placed by hand</option>
+              {points.map((l) => <option key={l.id} value={l.id}>the points of "{l.name}"</option>)}
+            </select>
+          </label>
+          {style.from && <>
+            <label className="inline" title="How far each point spreads">Each over
+              <input type="number" min={1} step={10} value={style.kernelKm} onChange={(e) => { const v = Number(e.target.value); if (v >= 1) s.execute((wd) => cmd.setFieldLayerStyle(wd, layer.id, { kernelKm: v })); }} data-testid="field-kernel" /> km
+            </label>
+            <label className="inline" title="Where this many points overlap the colours are full">Full colour at
+              <input type="number" min={0.1} step={1} value={style.full ?? FIELD_TYPES.heat.full} onChange={(e) => { const v = Number(e.target.value); if (v > 0) s.execute((wd) => cmd.setFieldLayerStyle(wd, layer.id, { full: v })); }} data-testid="field-full" /> points
+            </label>
+          </>}
+        </>;
+      })()}
       {layer && style && <>
         <label className="inline" title="How opaque the layer is drawn">Opacity
           <input type="range" min={0.1} max={1} step={0.05} value={style.opacity} onChange={(e) => s.execute((wd) => cmd.setFieldLayerStyle(wd, layer.id, { opacity: Number(e.target.value) }))} data-testid="field-opacity" />

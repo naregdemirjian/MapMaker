@@ -2326,6 +2326,92 @@ try {
     await page.getByTestId('tool-select').click();
   });
 
+  await h.step('A heatmap worked out from the battles; three thousand strikes drawn in a 4K export frame and in the working view; undone', async () => {
+    await page.getByTestId('mode-world').click();
+    const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
+    // The layer of battles (points) and a date when it has some.
+    const found = await page.evaluate(() => {
+      const m = (window as any).__mapmaker, s = m.store;
+      const layer = s.world.all('layer').find((l: any) => l.kind === 'point' && l.space_id === s.spaceId);
+      if (!layer) return null;
+      for (const y of [1450, 1500, 1600, 1700, 1800, 1850, 1900, 1950, 2000, 1400]) {
+        const pts = s.engine.featuresAt(layer.id, m.bench.gregorian.fromCivil({ year: y }));
+        if (pts.length) return { layer: layer.id as string, name: layer.name as string, year: y, n: pts.length as number, at: pts[0].parts[0] as LL };
+      }
+      return null;
+    });
+    assert.ok(found, 'a layer of points with points in it');
+    await h.setDate(String(found.year));
+    await page.evaluate((c) => (window as any).__mapmaker.store.setCamera({ lon: c[0], lat: c[1], zoom: 2, rotation: 0, projection: 'equirectangular' }), found.at);
+    const pixelAt = (ll: LL) => page.evaluate(([lon, lat]) => {
+      const p = (window as any).__mapmaker.lonLatToPage(lon, lat);
+      const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement;
+      const r = c.getBoundingClientRect(), k = c.width / r.width;
+      return Array.from(c.getContext('2d')!.getImageData(Math.round((p[0] - r.left) * k) + 30, Math.round((p[1] - r.top) * k), 1, 1).data).slice(0, 3);
+    }, ll);
+    await page.waitForTimeout(300);
+    const plain = await pixelAt(found.at);
+    const before = await steps();
+    await page.getByRole('button', { name: '+ Layer' }).click();
+    await page.getByTestId('layer-kind-field').click();
+    await page.getByTestId('new-layer-field-type').selectOption('heat');
+    await page.getByTestId('new-layer-name').fill('Where the battles were');
+    await page.getByTestId('create-layer').click();
+    await page.getByTestId('field-from').selectOption(found.layer);
+    await page.getByTestId('field-kernel').fill('500');
+    await page.waitForFunction((n) => (window as any).__mapmaker.store.renderer.lastFields.some((f: any) => f.sources === n && f.drawn >= n), found.n);
+    let px = await pixelAt(found.at);
+    for (let i = 0; i < 30 && Math.max(...px.map((v, k) => Math.abs(v - plain[k]))) <= 20; i++) { await page.waitForTimeout(100); px = await pixelAt(found.at); }
+    assert.ok(Math.max(...px.map((v, k) => Math.abs(v - plain[k]))) > 20, `warm where the battles were (${px} against ${plain})`);
+    await h.screenshot('heatmap-from-points');
+    // Stress: three thousand strikes in one step, then a 4K export frame of the conditions alone, and the working view.
+    const r = await page.evaluate(async () => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const layer = s.execute((w: any) => B.commands.createFieldLayer(w, s.spaceId, 'Strikes', 'radiation'));
+      let seed = 7;
+      const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+      const sources = Array.from({ length: 3000 }, (_, i) => ({ name: `Strike ${i}`, at: [-10 + 150 * rnd(), 20 + 45 * rnd()], source: { shape: 'circle', radiusKm: 10 + 40 * rnd(), noise: 0.4, seed: i + 1 } }));
+      const t0 = performance.now();
+      s.execute((w: any) => B.commands.addFieldSources(w, { layerId: layer, sources, mode: { kind: 'change', t: s.time } }));
+      const added = performance.now() - t0;
+      const start = { day: s.time.day + 1, ms: 0 };
+      const shot = B.defaultShot(s.spaceId, { lon: 60, lat: 45, zoom: 1.6, rotation: 0, projection: 'equirectangular' }, start, { day: start.day + 1, ms: 0 }, 24, 1);
+      const def = B.PASS_DEFS.find((d: any) => d.name === 'fields');
+      const canvas = document.createElement('canvas');
+      canvas.width = 3840; canvas.height = 2160;
+      const ctx = canvas.getContext('2d')!;
+      const renderer = new B.MapRenderer();
+      renderer.quality = { ...B.EXPORT_QUALITY };
+      const t1 = performance.now();
+      B.renderFrame(ctx, renderer, s.world, s.engine, shot, 0, def, 3840, 2160, null, null);
+      const frameMs = performance.now() - t1;
+      const data = ctx.getImageData(0, 0, 3840, 2160).data;
+      let coloured = 0;
+      for (let i = 3; i < data.length; i += 4 * 16) if (data[i] > 20) coloured++;
+      const drawn = renderer.lastFields.find((f: any) => f.layer === layer);
+      // The working view, the day after.
+      s.setTime(start);
+      await new Promise((res) => setTimeout(res, 400));
+      const t2 = performance.now();
+      s.notify();
+      await new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res)));
+      const viewMs = performance.now() - t2;
+      return { added, frameMs, coloured: coloured / (data.length / 64), sources: drawn?.sources, rects: drawn?.drawn, view: s.renderer.lastFields.find((f: any) => f.layer === layer)?.sources, viewMs };
+    });
+    console.log(`  3000 strikes: added in ${Math.round(r.added)} ms; a 4K frame of them in ${Math.round(r.frameMs)} ms (${(r.coloured * 100).toFixed(0)}% coloured); the working view in ${Math.round(r.viewMs)} ms`);
+    assert.equal(r.sources, 3000, 'every strike in force');
+    assert.ok(r.rects > 1500 && r.coloured > 0.02, `drawn: those in the frame's view (${r.rects} rectangles, ${(r.coloured * 100).toFixed(1)}% of the frame)`);
+    assert.equal(r.view, 3000, 'and in the working view');
+    assert.ok(r.frameMs < 60000, `a 4K frame in reasonable time (${Math.round(r.frameMs)} ms)`);
+    await h.screenshot('strikes-3000');
+    // Undone: the strikes, their layer, the heatmap's settings and its layer.
+    for (let i = 0; i < 5; i++) await page.getByTestId('undo').click();
+    await h.saved();
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('layer').some((l: any) => l.kind === 'field')), false, 'no conditions left');
+    assert.ok((await steps()) >= before);
+    await page.getByTestId('tool-select').click();
+  });
+
   await h.step('History Health lists the overlap, nothing else; no browser errors', async () => {
     await page.getByTestId('mode-world').click();
     await page.getByTestId('health').click();

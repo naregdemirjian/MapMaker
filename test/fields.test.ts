@@ -70,8 +70,9 @@ test('distances and bearings on the sphere; stored settings checked; ramps; a la
   assert.equal(rampColour('flood', 0)[3], 0, 'nothing: see-through');
   assert.ok(rampColour('flood', FIELD_TYPES.flood.full)[2] > rampColour('flood', FIELD_TYPES.flood.full)[0], 'deep water blue');
   assert.deepEqual(rampColour('fire', 100), rampColour('fire', FIELD_TYPES.fire.full), 'held at its end');
-  assert.deepEqual(fieldLayerStyleOf('{"field":{"type":"smoke","opacity":3}}'), { type: 'smoke', opacity: 1 });
-  assert.deepEqual(fieldLayerStyleOf('not json'), { type: 'custom', opacity: 1 });
+  const plain = { from: null, kernelKm: 200, full: null };
+  assert.deepEqual(fieldLayerStyleOf('{"field":{"type":"smoke","opacity":3}}'), { type: 'smoke', opacity: 1, ...plain });
+  assert.deepEqual(fieldLayerStyleOf('not json'), { type: 'custom', opacity: 1, ...plain });
   const t = (y: number) => gregorian.fromCivil({ year: y });
   assert.deepEqual(onsetOf([{ t: t(1500), parts: [[0, 0]] }, { t: t(1510), parts: [[1, 1]] }, { t: t(1520), parts: null }], t(1515), compare), t(1500), 'moved, not started again');
   assert.equal(onsetOf([{ t: t(1500), parts: [[0, 0]] }, { t: t(1520), parts: null }], t(1525), compare), null, 'ended');
@@ -109,8 +110,34 @@ test('a field layer and its sources: placed from a date in an event, in force wh
   assert.throws(() => cmd.addFieldSource(world, { layerId: layer, name: 'x', at: [0, 95], mode: { kind: 'correct', t: day(1900) } }), /not on the map/);
   assert.throws(() => cmd.createFieldLayer(world, spaceId, 'x', 'lava' as never), /Unknown kind/);
   cmd.setFieldLayerStyle(world, layer, { opacity: 0.5 });
-  assert.deepEqual(fieldLayerStyleOf(world.get('layer', layer)!.style), { type: 'radiation', opacity: 0.5 });
+  assert.deepEqual(fieldLayerStyleOf(world.get('layer', layer)!.style), { type: 'radiation', opacity: 0.5, from: null, kernelKm: 200, full: null });
   // Deleted with its history, like any area, line or point.
   cmd.deleteFeatures(world, [strike.result]);
   assert.equal(at(day(1960, 1)).length, 0);
+});
+
+test('a heatmap worked out from a layer of points; many sources added in one step', async () => {
+  const { World } = await import('../src/world-model/world.ts');
+  const { Engine } = await import('../src/temporal-engine/engine.ts');
+  const cmd = await import('../src/domain/commands.ts');
+  const { invertDiffs } = await import('../src/world-model/schema.ts');
+  const world = new World(), engine = new Engine(world);
+  const { spaceId } = cmd.seedProject(world, 'Heat').result;
+  const heat = cmd.createFieldLayer(world, spaceId, 'Battles heat', 'heat').result;
+  const battles = cmd.createLayer(world, spaceId, 'Battles', 'point').result;
+  const areas = cmd.createLayer(world, spaceId, 'Claims', 'area').result;
+  cmd.setFieldLayerStyle(world, heat, { from: battles, kernelKm: 300, full: 4 });
+  assert.deepEqual(fieldLayerStyleOf(world.get('layer', heat)!.style), { type: 'heat', opacity: 1, from: battles, kernelKm: 300, full: 4 });
+  assert.throws(() => cmd.setFieldLayerStyle(world, heat, { from: areas }), /layer of points/);
+  cmd.setFieldLayerStyle(world, heat, { from: null });
+  assert.equal(fieldLayerStyleOf(world.get('layer', heat)!.style).from, null, 'back to sources placed by hand');
+  // A hundred strikes in one step, in force from the date given; one undo takes them all.
+  const t = gregorian.fromCivil({ year: 1944 });
+  const strikes = Array.from({ length: 100 }, (_, i) => ({ name: `Strike ${i}`, at: [i * 0.5, 50] as [number, number], source: { radiusKm: 20 } }));
+  const added = cmd.addFieldSources(world, { layerId: heat, sources: strikes, mode: { kind: 'change', t } });
+  assert.equal(added.result.length, 100);
+  assert.equal(activeSources(world, engine, heat, { day: t.day + 1, ms: 0 }, compare).length, 100);
+  world.applyDiffs(invertDiffs(added.diffs));
+  assert.equal(activeSources(world, engine, heat, { day: t.day + 1, ms: 0 }, compare).length, 0);
+  assert.throws(() => cmd.addFieldSources(world, { layerId: heat, sources: [{ name: 'x', at: [0, 100] }], mode: { kind: 'change', t } }), /not on the map/);
 });

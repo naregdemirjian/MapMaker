@@ -33,7 +33,7 @@ import type { TerrainCover } from '../terrain/cover.ts';
 import type { DetailGrid } from '../terrain/detail.ts';
 import { FieldPictures, edgePhases, type FieldInstance, type FieldRaster } from './fields-gl.ts';
 import { spreadRaster, type SpreadRaster, type SpreadKind } from '../domain/spread.ts';
-import { activeSources, fieldLayerStyleOf, sourceReach, sizeAt, type FieldSource } from '../domain/fields.ts';
+import { activeSources, fieldLayerStyleOf, sourceReach, sizeAt, DEFAULT_SOURCES, type FieldSource } from '../domain/fields.ts';
 import { PALETTES, rampAt, DEFAULT_TERRAIN_LOOK, type TerrainLook } from '../terrain/look.ts';
 
 type LabelEntity = { name: string; style?: string; color?: string; type_id?: string };
@@ -2183,6 +2183,15 @@ export class MapRenderer {
       if (!layer || layer.kind !== 'field' || layer.space_id !== spaceId) continue;
       const style = fieldLayerStyleOf(layer.style);
       const active = activeSources(world, engine, layerId, t, compare);
+      // A heatmap worked out from a layer of points (D105): each point in force a soft spot, worth 1.
+      const from = style.from ? world.get('layer', style.from) : undefined;
+      if (from && from.kind === 'point' && from.space_id === spaceId) {
+        const spot = { ...DEFAULT_SOURCES.heat, shape: 'circle' as const, intensity: 1, radiusKm: style.kernelKm, noise: 0, rise: 0, hold: 1e7, decay: 0, grow: 0 };
+        for (const fa of engine.featuresAt(from.id, t)) {
+          const p = fa.parts[0];
+          if (p && p.length >= 2) active.push({ id: fa.feature, name: '', lon: p[0], lat: p[1], source: spot, age: 1, strength: 1 });
+        }
+      }
       const inst: FieldInstance[] = [], spreads: FieldRaster[] = [];
       for (const a of active) {
         // Spreading over the terrain (D103), where there is terrain; elsewhere a circle.
@@ -2213,8 +2222,8 @@ export class MapRenderer {
       if (!inst.length && !spreads.length) continue;
       // (What the picture shows: every rectangle and setting, and where the sheet lies on it.)
       const spreadKey = spreads.map((r) => `${r.raster.key}@${r.rect.join(',')}:${r.age}:${r.value}:${r.level}`).join(';');
-      const key = `${hashInstances(inst)}|${spreadKey}|${style.type}|${style.opacity}|${sheet.kind}|${sheet.S}|${sheet.ox}|${sheet.oy}|${sheet.lonRef}|${m.a},${m.b},${m.c},${m.d},${m.e},${m.f}|${radiusKm}`;
-      const image = this.fieldPictures.image(layerId, key, style.type, style.opacity, inst, frame, radiusKm, spreads);
+      const key = `${hashInstances(inst)}|${spreadKey}|${style.type}|${style.opacity}|${style.full}|${sheet.kind}|${sheet.S}|${sheet.ox}|${sheet.oy}|${sheet.lonRef}|${m.a},${m.b},${m.c},${m.d},${m.e},${m.f}|${radiusKm}`;
+      const image = this.fieldPictures.image(layerId, key, style.type, style.opacity, inst, frame, radiusKm, spreads, style.full);
       if (!image) continue;
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);

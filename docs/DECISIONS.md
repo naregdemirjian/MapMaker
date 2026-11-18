@@ -61,6 +61,25 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D105. Heatmaps from points; thousands of strikes (Stage 9)
+
+- **Heatmaps from a layer of points.** A Heatmap layer of conditions can be worked out from a layer of points (in
+  the Conditions tool: "From the points of …"): every point in force at the moment shown counts as a soft spot so
+  many km across (each over 200 km unless changed), worth 1, and the colours are full where so many overlap ("Full
+  colour at … points"). As points appear, move and end over time (battles, sites, cities kept as points), the
+  heatmap follows. Sources placed by hand on the same layer add to it. The settings are the layer's look (not
+  dated), each change one undoable step; a layer that is not of points, or of another map, is refused.
+- **Many sources at once.** A command adds any number of sources to a field layer in one step (for imported strikes
+  or a scenario's sites).
+- **Stress test** (`e2e/workflows`): three thousand strikes over Europe and Asia added in one step (about 2 s),
+  then a 4K export frame of the conditions alone drawn in about half a second and the working view in about 30 ms,
+  on the test machine's software graphics (SwiftShader); every strike in force, those in the frame's view drawn.
+  Each source costs one rectangle in one instanced draw, so the cost grows with the pixels the sources cover, not
+  with their number.
+- **Tests.** `fields.test.ts` (a heatmap's layer of points set, refused when not points, set back; a hundred sources
+  in one step, undone in one); `e2e/workflows` (a heatmap from the test's battles, warm where they were; the three
+  thousand strikes at 4K and in the working view; undone).
+
 ### D104. Disasters from templates, in one click (Stage 9)
 
 The **Disasters** tool places a whole disaster with one click, from a template and one size: a **nuclear strike**
