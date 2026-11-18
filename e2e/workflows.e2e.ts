@@ -456,6 +456,59 @@ try {
     await h.screenshot('character-panel');
   });
 
+  await h.step('A character\'s icon: a ship facing the way it sails and flipped on the way back, an airliner turned, on a disc, larger; back to the marker', async () => {
+    await page.getByTestId('mode-world').click();
+    await page.getByTestId('tool-select').click();
+    await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: -30, lat: 45, zoom: 1.6, rotation: 0, projection: 'equirectangular' }));
+    const id = await page.evaluate(() => (window as any).__mapmaker.store.world.all('entity').find((e: any) => e.name === 'Ilse the Wanderer').id);
+    await page.evaluate((id) => (window as any).__mapmaker.store.set({ selection: { kind: 'entity', id } }), id);
+    await page.getByTestId('character-icon').waitFor();
+    const ilse = () => page.evaluate(() => (window as any).__mapmaker.store.renderer.lastCharacters.find((c: any) => c.name === 'Ilse the Wanderer')) as Promise<{ icon: string; angle: number; mirror: boolean; r: number }>;
+    const shows = (want: string) => page.waitForFunction((w) => (window as any).__mapmaker.store.renderer.lastCharacters.find((c: any) => c.name === 'Ilse the Wanderer')?.icon === w, want);
+    // On the way east in 1550, from 45°W to 28°W.
+    await h.setDate('1550');
+    assert.equal((await ilse()).icon, 'marker', 'a round marker to begin with');
+    await page.getByTestId('icon-choose').click();
+    await page.getByTestId('icon-grid').waitFor();
+    await page.getByTestId('icon-option-sailing-ship').click();
+    await shows('sailing-ship');
+    assert.match(await page.getByTestId('character-icon-now').innerText(), /Sailing ship/);
+    assert.equal((await ilse()).mirror, false, 'sailing east, it faces east');
+    // Back west by 1650: flipped on the way.
+    await page.getByTestId('place-character-button').click();
+    await h.setDate('1650');
+    const q = await h.toPage([-50, 47]); await page.mouse.click(q[0], q[1]);
+    await h.saved();
+    await page.getByTestId('tool-select').click();
+    await h.setDate('1625');
+    await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastCharacters.find((c: any) => c.name === 'Ilse the Wanderer')?.mirror === true);
+    await h.screenshot('character-icon');
+    // An airliner turns to face the way it flies: its nose to the west.
+    await page.getByTestId('icon-choose').click();
+    await page.getByTestId('icon-option-airliner').click();
+    await shows('airliner');
+    const plane = await ilse();
+    const nose = [Math.sin(plane.angle), -Math.cos(plane.angle)];
+    assert.ok(nose[0] < -0.8, `its nose points west (${nose.map((v) => v.toFixed(2))})`);
+    // On a disc of its colour, then three times the size (one change to undo for the slider).
+    await page.getByTestId('icon-look').selectOption('badge');
+    await page.waitForFunction(() => /"look":"badge"/.test((window as any).__mapmaker.store.world.all('entity').find((e: any) => e.name === 'Ilse the Wanderer').style));
+    const small = (await ilse()).r;
+    await page.getByTestId('icon-size').focus();
+    await page.keyboard.press('End');
+    await page.waitForFunction((r) => (window as any).__mapmaker.store.renderer.lastCharacters.find((c: any) => c.name === 'Ilse the Wanderer')?.r > r * 2.5, small);
+    assert.match((await page.getByTestId('character-icon').innerText()), /300%/);
+    // Shown in the list of characters too.
+    assert.equal(await page.getByTestId('entity-row-Ilse the Wanderer').locator('canvas').count(), 1, 'its icon in the list');
+    // Back to the round marker; the place of 1650 removed again.
+    await page.getByTestId('icon-choose').click();
+    await page.getByTestId('icon-marker').click();
+    await shows('marker');
+    await page.getByTestId('character-place').nth(2).getByRole('button', { name: 'Remove' }).click();
+    await h.saved();
+    assert.equal(await page.getByTestId('character-place').count(), 2, 'its two places as before');
+  });
+
   await h.step('A city: founded at a date, moved at once (never travelling), abandoned; drawn as its own layer', async () => {
     await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: -30, lat: 45, zoom: 1.6, rotation: 0, projection: 'equirectangular' }));
     await h.setDate('1500');

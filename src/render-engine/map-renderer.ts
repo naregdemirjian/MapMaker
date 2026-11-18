@@ -25,6 +25,7 @@ import { BlockPath, setPaintRegion, type DeviceRect } from './blocks.ts';
 import { Kept as Weighed } from './kept.ts';
 import { parcelGeometry, type ParcelGeometry, type CycleGeom } from './parcel-geometry.ts';
 import { featureStyle, featureColor, isFeatureKind, type FeatureKind, type FeatureStyle } from './feature-style.ts';
+import { iconById, iconOfStyle, drawIcon, type CharacterIcon } from './icons.ts';
 
 type LabelEntity = { name: string; style?: string; color?: string; type_id?: string };
 
@@ -363,7 +364,10 @@ export class MapRenderer {
   private basemapPainter = new BasemapPainter();
   lastLabels: LabelInfo[] = [];
   /** The characters drawn in the last frame, where (screen) and on the map, for picking and tests. */
-  lastCharacters: Array<{ entity: string; name: string; x: number; y: number; lon: number; lat: number; moving: boolean }> = [];
+  /** (r: how far the marker or icon reaches from its middle, in design pixels; icon: its icon, 'picture' or 'marker'.) */
+  lastCharacters: Array<{ entity: string; name: string; x: number; y: number; lon: number; lat: number; moving: boolean; r: number; icon: string; angle: number; mirror: boolean }> = [];
+  /** Characters' icons by their stored style (parsed once per style). */
+  private iconStyles = new Map<string, CharacterIcon | null>();
   /** The areas, lines and points drawn in the last frame, topmost last (for finding what is under the pointer: see featureAt). */
   lastFeatures: Array<{ id: string; kind: FeatureKind; path: Path2D | null; place: [number, number, number]; lines: Float32Array[]; x: number; y: number; r: number; width: number }> = [];
   /** The project's sizes for cities and characters (set for each frame by render()). */
@@ -3332,19 +3336,23 @@ export class MapRenderer {
       const e = entities.get(c.entity);
       if (!e || e.type_id === 'settlement') continue;
       const p = view.projection([c.lon, c.lat]);
-      if (!p || p[0] < -50 || p[1] < -50 || p[0] > view.width + 50 || p[1] > view.height + 50) continue;
+      if (!p || p[0] < -80 || p[1] < -80 || p[0] > view.width + 80 || p[1] > view.height + 80) continue;
       const k = pointScale(view, 0.6, 1.3) * this.pointSizes.character;
-      const r = 8 * k * u;
-      ctx.shadowColor = 'rgba(0,0,0,0.55)';
-      ctx.shadowBlur = 6 * u;
-      ctx.beginPath();
-      ctx.arc(p[0], p[1], r, 0, Math.PI * 2);
-      ctx.fillStyle = e.color ?? '#ffd166';
-      ctx.fill();
-      ctx.shadowBlur = 0;
-      ctx.lineWidth = 2.2 * Math.min(1, k) * u;
-      ctx.strokeStyle = '#ffffff';
-      ctx.stroke();
+      const color = e.color ?? '#ffd166';
+      const drawn = this.drawCharacterIcon(ctx, view, c, p, k, color, e.style);
+      const r = drawn ? drawn.r : 8 * k * u;
+      if (!drawn) {
+        ctx.shadowColor = 'rgba(0,0,0,0.55)';
+        ctx.shadowBlur = 6 * u;
+        ctx.beginPath();
+        ctx.arc(p[0], p[1], r, 0, Math.PI * 2);
+        ctx.fillStyle = color;
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.lineWidth = 2.2 * Math.min(1, k) * u;
+        ctx.strokeStyle = '#ffffff';
+        ctx.stroke();
+      }
       ctx.font = `600 ${(20 * k * u).toFixed(1)}px "Segoe UI", Arial, sans-serif`;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
@@ -3353,9 +3361,78 @@ export class MapRenderer {
       ctx.strokeText(e.name, p[0] + r + 5 * k * u, p[1]);
       ctx.fillStyle = '#ffffff';
       ctx.fillText(e.name, p[0] + r + 5 * k * u, p[1]);
-      this.lastCharacters.push({ entity: c.entity, name: e.name, x: p[0], y: p[1], lon: c.lon, lat: c.lat, moving: c.moving });
+      this.lastCharacters.push({ entity: c.entity, name: e.name, x: p[0], y: p[1], lon: c.lon, lat: c.lat, moving: c.moving, r: r / u, icon: drawn?.icon ?? 'marker', angle: drawn?.angle ?? 0, mirror: drawn?.mirror ?? false });
     }
     ctx.restore();
+  }
+
+  /**
+   * A character's icon (D85), if it has one that can be drawn now: an icon of the set, or its own
+   * picture once loaded (until then, the round marker). Turned or flipped to face the way it is
+   * travelling, or last travelled. Returns how far it reaches from its middle (where the name goes).
+   */
+  private drawCharacterIcon(ctx: CanvasRenderingContext2D, view: View, c: { lon: number; lat: number; ahead?: [number, number] }, p: [number, number], k: number, color: string, style: string | undefined): { r: number; icon: string; angle: number; mirror: boolean } | null {
+    if (!style) return null;
+    let icon = this.iconStyles.get(style);
+    if (icon === undefined) { if (this.iconStyles.size > 2000) this.iconStyles.clear(); icon = iconOfStyle(style); this.iconStyles.set(style, icon); }
+    if (!icon) return null;
+    const def = icon.set ? iconById(icon.set) : undefined;
+    const img = !def && icon.asset ? imageNow(icon.asset) : null;
+    if (!def && !img) return null;
+    const u = view.unit;
+    const look = icon.look ?? 'plain';
+    // Across: an icon on its own is drawn larger than one on a disc (its outline is its edge).
+    const size = (look === 'badge' ? 34 : 42) * k * u * (icon.size ?? 1);
+    // Which way it faces: aircraft (seen from above) turn to the way they go; ships and vehicles
+    // (seen from the side) face east or west; signs stay as they are.
+    const turn = icon.turn && icon.turn !== 'auto' ? icon.turn : (def?.turn ?? 'none');
+    let angle = 0, mirror = false;
+    if (turn !== 'none' && c.ahead) {
+      const q = view.projection(c.ahead);
+      if (q) {
+        const dx = q[0] - p[0], dy = q[1] - p[1];
+        if (dx * dx + dy * dy > 1e-10) { if (turn === 'rotate') angle = Math.atan2(dy, dx) + Math.PI / 2; else mirror = dx < 0; }
+      }
+    }
+    const ring = 2.2 * Math.min(1, k) * u;
+    if (look === 'badge') {
+      const R = size * 0.5;
+      ctx.shadowColor = 'rgba(0,0,0,0.55)';
+      ctx.shadowBlur = 6 * u;
+      ctx.beginPath();
+      ctx.arc(p[0], p[1], R, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      if (def) drawIcon(ctx, def, p[0], p[1], size * 0.66, { color: '#ffffff', detail: color, angle, mirror });
+      else if (img) {
+        ctx.save();
+        ctx.clip();
+        ctx.translate(p[0], p[1]);
+        if (angle) ctx.rotate(angle);
+        if (mirror) ctx.scale(-1, 1);
+        drawImageFit(ctx, img, -R, -R, 2 * R, 2 * R, 'cover');
+        ctx.restore();
+      }
+      ctx.beginPath();
+      ctx.arc(p[0], p[1], R, 0, Math.PI * 2);
+      ctx.lineWidth = ring;
+      ctx.strokeStyle = def ? '#ffffff' : color;
+      ctx.stroke();
+      return { r: R + ring / 2, icon: def?.id ?? 'picture', angle, mirror };
+    }
+    if (def) drawIcon(ctx, def, p[0], p[1], size, { color, detail: 'rgba(10,16,24,0.88)', halo: 3.5, angle, mirror });
+    else if (img) {
+      ctx.save();
+      ctx.translate(p[0], p[1]);
+      if (angle) ctx.rotate(angle);
+      if (mirror) ctx.scale(-1, 1);
+      ctx.shadowColor = 'rgba(0,0,0,0.55)';
+      ctx.shadowBlur = 5 * u;
+      drawImageFit(ctx, img, -size / 2, -size / 2, size, size, 'contain');
+      ctx.restore();
+    }
+    return { r: size * 0.45, icon: def?.id ?? 'picture', angle, mirror };
   }
 
   /** The map's scale in the frame before, and whether this frame is a step of a zoom (the scale changing while the view moves). */

@@ -2,6 +2,8 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../store.ts';
 import { Api } from '../api.ts';
+import { IconPicture } from './CharacterIcons.tsx';
+import { iconById } from '../../render-engine/icons.ts';
 import * as cmd from '../../domain/commands.ts';
 import { assetUrl } from '../../render-engine/assets.ts';
 
@@ -15,7 +17,11 @@ const kmToSlider = (km: number) => Math.round((Math.log10(Math.max(10, Math.min(
 const sliderToKm = (v: number) => { const km = 10 ** (1 + (v / 100) * (Math.log10(20000) - 1)); const step = km < 100 ? 5 : km < 1000 ? 25 : 250; return Math.round(km / step) * step; };
 
 export function FillSwatch({ entity }: { entity: { color: string; style?: string } }) {
-  const fill = cmd.entityStyle(entity).fill;
+  const { fill, icon } = cmd.entityStyle(entity);
+  // A character with an icon: the icon (D85).
+  const def = iconById(icon?.set);
+  if (def) return <span className="swatch-icon"><IconPicture icon={def} color={entity.color} look={icon?.look} size={16} /></span>;
+  if (icon?.asset) return <span className="swatch picture" style={{ backgroundImage: `url("${assetUrl(icon.asset)}")` }} />;
   if (fill?.off) return <span className="swatch" style={{ background: entity.color }} />;
   if (fill?.kind === 'image' && fill.asset) return <span className="swatch picture" style={{ backgroundImage: `url("${assetUrl(fill.asset)}")` }} />;
   if (fill?.kind === 'video') return <span className="swatch video" style={{ background: entity.color }} title="Video">▶</span>;

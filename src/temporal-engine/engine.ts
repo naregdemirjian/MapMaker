@@ -84,8 +84,11 @@ export interface FeatureAt {
 /** One compiled waypoint of a character's track. */
 export interface Waypoint { t: Instant; lon: number; lat: number; off: boolean; arrive: 'travel' | 'jump'; effectId: string; eventId: string; precedence: number; eventSeq: number; ordinal: number }
 
-/** A character on the map at a moment. */
-export interface CharacterAt { entity: string; lon: number; lat: number; moving: boolean }
+/**
+ * A character on the map at a moment. `ahead`: a point a little way on in the direction it is
+ * travelling, or last travelled (absent if it never has): which way its icon faces (D85).
+ */
+export interface CharacterAt { entity: string; lon: number; lat: number; moving: boolean; ahead?: [number, number] }
 
 export type ConflictKind = 'simultaneous' | 'overlap' | 'stale' | 'broken';
 export interface Conflict { kind: ConflictKind; effectId: string; eventId: string; otherEventId?: string; message: string }
@@ -1091,19 +1094,30 @@ function invSmooth(y: number): number {
 
 
 /** Where a track puts its character at instant t (null: not on the map). */
-export function positionOnTrack(tr: Waypoint[], t: Instant): { lon: number; lat: number; moving: boolean } | null {
+export function positionOnTrack(tr: Waypoint[], t: Instant): { lon: number; lat: number; moving: boolean; ahead?: [number, number] } | null {
   // The last waypoint at or before t.
   let lo = 0, hi = tr.length - 1, k = -1;
   while (lo <= hi) { const m = (lo + hi) >> 1; if (compare(tr[m].t, t) <= 0) { k = m; lo = m + 1; } else hi = m - 1; }
   if (k < 0 || tr[k].off) return null;
   const a = tr[k], b = tr[k + 1];
-  if (!b || b.off || b.arrive !== 'travel' || a.t.day === -Infinity) return { lon: a.lon, lat: a.lat, moving: false };
+  // Which way it last travelled: along the leg it arrived by.
+  const prev = tr[k - 1];
+  const arrived = prev && !prev.off && a.arrive === 'travel' && prev.t.day !== -Infinity ? aheadOn(prev, a, 1) : undefined;
+  const still = (w: Waypoint, ahead: [number, number] | undefined) => (ahead ? { lon: w.lon, lat: w.lat, moving: false, ahead } : { lon: w.lon, lat: w.lat, moving: false });
+  if (!b || b.off || b.arrive !== 'travel' || a.t.day === -Infinity) return still(a, arrived);
   const total = diffMs(a.t, b.t), done = diffMs(a.t, t);
   const f = total > 0 ? Math.min(1, Math.max(0, done / total)) : 1;
-  if (f <= 0) return { lon: a.lon, lat: a.lat, moving: false };
-  if (f >= 1) return { lon: b.lon, lat: b.lat, moving: false };
+  if (f <= 0) return still(a, aheadOn(a, b, 0));
+  if (f >= 1) return still(b, aheadOn(a, b, 1));
   const [lon, lat] = slerpLonLat(a.lon, a.lat, b.lon, b.lat, f);
-  return { lon, lat, moving: f > 0 && f < 1 };
+  return { lon, lat, moving: f > 0 && f < 1, ahead: aheadOn(a, b, f) };
+}
+
+/** A point a little way (about 5 km) on from the point a fraction f along the way from a to b, past b if need be. */
+function aheadOn(a: { lon: number; lat: number }, b: { lon: number; lat: number }, f: number): [number, number] | undefined {
+  const ang = angle(lonLatToVec(a.lon, a.lat), lonLatToVec(b.lon, b.lat));
+  if (!(ang > 1e-9)) return undefined;
+  return slerpLonLat(a.lon, a.lat, b.lon, b.lat, f + Math.min(0.5, (0.05 * Math.PI / 180) / ang));
 }
 
 /** The point a fraction f of the way along the shortest path between two places. */

@@ -60,6 +60,27 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D85. Character icons: a set of 46 drawn as shapes, a picture of one's own; facing the way of travel (fifth feedback round)
+
+A character can be shown by an **icon** instead of the round marker: one of a set of 46 designed for the project
+(`src/render-engine/icons.ts`) or a picture of one's own. The set: ships (sailing ship, galley, warship, aircraft
+carrier, submarine, cargo ship, tanker, ocean liner, boat); aircraft (airliner, propeller plane, fighter jet, bomber,
+military transport, drone, helicopter, airship, missile); on land (tank, armoured car, artillery, truck, cavalry, army,
+infantry, train, car); military signs (headquarters, fort, camp, battle, knight, shield, star, target, explosion,
+airborne, naval base, radar); people and places (person, ruler, wagon, caravan, envoy, trade, explorer, flag). Each is
+a few shapes on a 64 by 64 grid (the icon, its details in a contrasting colour, parts over the details, lines), drawn
+as paths, so it is sharp at any size (an 8K export too) and takes the character's colour. Two looks: the icon itself
+in the character's colour with a dark outline (so it stands out on land and sea), or white on a disc of the
+character's colour; a size from 50% to 300% (saved when the slider is let go); and which way it faces. The engine gives
+each character a point a little way (about 5 km) on in the direction it is travelling, or last travelled
+(`CharacterAt.ahead`), and the icon follows it in its own way: aircraft, drawn from above, **turn** to face it; ships
+and vehicles, drawn from the side, **face east or west** (flipped, never upside down); signs stay upright. Each can be
+set otherwise (turn, flip, never); a picture of one's own does not turn unless asked. The panel's "Icon" section
+chooses all this, with the set shown in the character's colour; the lists of characters show the icon too. A picture
+is a project asset like a country's fill picture (loaded before exporting). Picking a character on the map takes the
+icon's size into account. Stored in the character's `style` (`icon`), checked when saved (unknown icons and paths
+outside the project refused); characters without one are drawn as before.
+
 ### D84. What is shown, while working and in exports apart; lakes from a chosen size (fifth feedback round)
 
 Each map keeps a list of what it shows (`map_space.settings.show`), twice over: **while working** and **in presentation

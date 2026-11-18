@@ -8,6 +8,7 @@ import * as cmd from '../src/domain/commands.ts';
 import { gregorian, NEG_INF } from '../src/core-time/index.ts';
 import { lonLatToVec } from '../src/geo-kernel/vec.ts';
 import { invertDiffs } from '../src/world-model/schema.ts';
+import { cleanIcon, iconOfStyle } from '../src/render-engine/icons.ts';
 
 const Y = (y: number, m = 1, d = 1) => gregorian.fromCivil({ year: y, month: m, day: d });
 
@@ -29,12 +30,16 @@ test('a character travels between its places, steadily along the shortest path',
   s.place(30, 40, Y(1600));
   assert.equal(s.world.all('event').length, events, 'no event is made');
   assert.equal(s.at(Y(1499)), null, 'not on the map before it is first placed');
-  assert.deepEqual(s.at(Y(1500)), { entity: s.hero, lon: 10, lat: 50, moving: false });
+  const { ahead: setOff, ...first } = s.at(Y(1500))!;
+  assert.deepEqual(first, { entity: s.hero, lon: 10, lat: 50, moving: false });
+  assert.ok(setOff && setOff[0] > 10 && setOff[1] < 50, 'about to set off south-east (its icon faces that way)');
   const mid = s.at(Y(1550))!;
   const expect = slerpLonLat(10, 50, 30, 40, s.engine.characterTrack(s.space, s.hero).length && (Y(1550).day - Y(1500).day) / (Y(1600).day - Y(1500).day));
   assert.ok(Math.abs(mid.lon - expect[0]) < 1e-6 && Math.abs(mid.lat - expect[1]) < 1e-6 && mid.moving, `half-way: ${mid.lon}, ${mid.lat}`);
   assert.ok(mid.lon > 15 && mid.lon < 25);
-  assert.deepEqual(s.at(Y(1700)), { entity: s.hero, lon: 30, lat: 40, moving: false }, 'stays at the last place');
+  const { ahead: arrived, ...last } = s.at(Y(1700))!;
+  assert.deepEqual(last, { entity: s.hero, lon: 30, lat: 40, moving: false }, 'stays at the last place');
+  assert.ok(arrived && arrived[0] > 30 && arrived[1] < 40, 'still facing the way it came');
   // A point, not territory: nobody owns the place it stands on.
   assert.equal(s.engine.valueAtPoint(s.space, s.layer, lonLatToVec(30, 40), Y(1700)), null);
   assert.equal(s.world.arrangement(s.space).segments.size, 0, 'no borders were drawn');
@@ -113,4 +118,42 @@ test('cities: founded at a date or from the beginning, moved at once (never trav
   const inEvent = cmd.placeCharacter(s.world, { spaceId: s.space, entity: city, lon: 13, lat: 42, mode: { kind: 'new', eventId: ev } });
   assert.throws(() => cmd.placementFromBeginning(s.world, inEvent.result), /belongs to an event/);
   assert.equal(at(Y(1850))!.lat, 42, 'refounded by the event');
+});
+
+test('which way a character faces (D85): the way it travels, then the way it came; nowhere before it ever travels', () => {
+  const s = setup();
+  s.place(10, 50, Y(1500));
+  assert.equal(s.at(Y(1550))!.ahead, undefined, 'never travelled: no way to face');
+  s.place(-20, 50, Y(1600));
+  const west = s.at(Y(1550))!;
+  assert.ok(west.moving && west.ahead![0] < west.lon, 'travelling west faces west');
+  // A little way on, along the path: about 5 km.
+  const km = Math.hypot((west.ahead![0] - west.lon) * Math.cos(west.lat * Math.PI / 180), west.ahead![1] - west.lat) * 111.2;
+  assert.ok(km > 3 && km < 8, `${km.toFixed(1)} km on`);
+  s.place(-20, 70, Y(1700));
+  const north = s.at(Y(1650))!;
+  assert.ok(north.ahead![1] > north.lat && Math.abs(north.ahead![0] - north.lon) < 0.01, 'travelling north faces north');
+  assert.ok(s.at(Y(1800))!.ahead![1] > 70, 'arrived: faces the way it came');
+  // Appearing somewhere (not travelling) keeps no direction from the leg before.
+  s.place(0, 0, Y(1900), 'jump');
+  assert.equal(s.at(Y(1950))!.ahead, undefined);
+});
+
+test('a character\'s icon (D85): one of the set or a picture, its look, size and turning checked; cleared; undone', () => {
+  const s = setup();
+  const icon = () => cmd.entityStyle(s.world.get('entity', s.hero)).icon;
+  const r = cmd.setEntityStyle(s.world, s.hero, { icon: { set: 'sailing-ship', look: 'badge', size: 9, turn: 'none' } });
+  assert.deepEqual(icon(), { set: 'sailing-ship', look: 'badge', size: 3, turn: 'none' }, 'the size kept within 50% to 300%');
+  cmd.setEntityStyle(s.world, s.hero, { icon: { asset: 'a1b2c3.png', look: 'plain' } });
+  assert.deepEqual(icon(), { asset: 'a1b2c3.png', look: 'plain' });
+  assert.throws(() => cmd.setEntityStyle(s.world, s.hero, { icon: { set: 'unicorn' } }), /not known/);
+  assert.throws(() => cmd.setEntityStyle(s.world, s.hero, { icon: { asset: '../../secret.png' } }), /not known/);
+  assert.equal(cleanIcon({ set: 'tank', look: 'huge' as 'plain', turn: 'sideways' as 'none' })!.look, undefined, 'unknown choices left out');
+  cmd.setEntityStyle(s.world, s.hero, { icon: null });
+  assert.equal(icon(), undefined, 'back to the round marker');
+  assert.equal(iconOfStyle(s.world.get('entity', s.hero)!.style), null);
+  s.world.applyDiffs(invertDiffs(r.diffs));
+  assert.equal(icon(), undefined);
+  assert.equal(iconOfStyle(JSON.stringify({ icon: { set: 'fighter' } }))!.set, 'fighter');
+  assert.equal(iconOfStyle('not json'), null);
 });

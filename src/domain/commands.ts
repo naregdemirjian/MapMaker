@@ -13,6 +13,8 @@ import { worldSettings, type BasemapSource, type ShowSet, type ShowSettings } fr
 import { resolvePointStyle, type LabelStyle, type CountryLabel, type PointStyle } from '../render-engine/label-style.ts';
 import { DEFAULT_FEATURE_STYLE, isFeatureKind, type FeatureKind, type FeatureStyle } from '../render-engine/feature-style.ts';
 import { relationKind, isRelationKind, type RelationKind } from './relations.ts';
+import { cleanIcon, type CharacterIcon } from '../render-engine/icons.ts';
+export type { CharacterIcon } from '../render-engine/icons.ts';
 export { FEATURE_KINDS, DEFAULT_FEATURE_STYLE, isFeatureKind, featureStyle, type FeatureKind, type FeatureStyle } from '../render-engine/feature-style.ts';
 import { ringFromMapPoints } from '../render-engine/stroke.ts';
 import { flatRadiusKm } from '../render-engine/camera.ts';
@@ -182,7 +184,7 @@ export interface CountryFill {
 }
 
 /** What is stored in entity.style (JSON). */
-export interface EntityStyle { label?: CountryLabel; fill?: CountryFill; pictures?: string[] }
+export interface EntityStyle { label?: CountryLabel; fill?: CountryFill; pictures?: string[]; icon?: CharacterIcon }
 
 export function entityStyle(e: { style?: string } | null | undefined): EntityStyle {
   return parseJSON<EntityStyle>(e?.style ?? '{}', {}) ?? {};
@@ -216,7 +218,7 @@ export function setGeneralLabelStyle(world: World, patch: Partial<Record<keyof L
 }
 
 /** Change parts of an entity's look. `label: null` returns its label to the general style. */
-export function setEntityStyle(world: World, id: string, patch: { label?: CountryLabel | null; fill?: CountryFill | null }): CommandResult {
+export function setEntityStyle(world: World, id: string, patch: { label?: CountryLabel | null; fill?: CountryFill | null; icon?: CharacterIcon | null }): CommandResult {
   const e = world.get('entity', id);
   if (!e) throw new Error('That country no longer exists.');
   const next: EntityStyle = { ...entityStyle(e) };
@@ -229,6 +231,11 @@ export function setEntityStyle(world: World, id: string, patch: { label?: Countr
   else if (patch.fill) {
     if (!patch.fill.asset) throw new Error('Choose a picture or video first.');
     next.fill = patch.fill;
+  }
+  if (patch.icon !== undefined) {
+    const icon = cleanIcon(patch.icon);
+    if (patch.icon && !icon) throw new Error('That icon is not known.');
+    if (icon) next.icon = icon; else delete next.icon;
   }
   return run(world, `Change the look of "${e.name}"`, (tx) => { tx.patch('entity', id, { style: JSON.stringify(next) }); });
 }

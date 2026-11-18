@@ -660,7 +660,7 @@ export function MapView() {
     }
     // Select tool: a character's marker is picked up (dragged to move it, clicked to select it).
     if (!presentation && e.button === 0 && s.tool === 'select') {
-      const hit = [...s.renderer.lastCharacters, ...s.renderer.lastCities].find((c) => { const q = lonLatToScreen(view, c.lon, c.lat); return !!q && Math.hypot(q[0] - p[0], q[1] - p[1]) <= 11; });
+      const hit = [...s.renderer.lastCharacters, ...s.renderer.lastCities].find((c) => { const q = lonLatToScreen(view, c.lon, c.lat); return !!q && Math.hypot(q[0] - p[0], q[1] - p[1]) <= Math.max(11, 'r' in c ? (c.r as number) * view.unit : 0); });
       if (hit) { drag.current = { kind: 'character', entity: hit.entity, from: p, moved: 0 }; setCursor(p); return; }
     }
     const wantsPan = e.button === 1 || e.button === 2 || presentation || s.tool === 'select' || (e as unknown as KeyboardEvent).shiftKey;

@@ -303,3 +303,14 @@ label.indent { margin-left: 24px; }
 .show-table td:not(:first-child) { text-align: center; width: 120px; }
 .range-row { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
 .range-row input[type=range] { width: 100%; }
+/* Character icons (D85) */
+.character-icon { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.swatch.round { border-radius: 50%; width: 14px; height: 14px; }
+img.icon-own { width: 30px; height: 30px; object-fit: contain; }
+.icon-chooser { display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--line); border-radius: 6px; padding: 6px; max-height: 46vh; overflow-y: auto; }
+.icon-group-name { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+.icon-row { display: flex; flex-wrap: wrap; gap: 3px; }
+.icon-option { display: inline-flex; align-items: center; gap: 6px; padding: 2px; border: 1px solid transparent; background: none; }
+.icon-option.on { border-color: var(--accent, #4aa3df); background: rgba(74,163,223,0.15); }
+.icon-option:hover { border-color: var(--line); }
+.swatch-icon { display: inline-flex; width: 16px; height: 16px; flex: none; }

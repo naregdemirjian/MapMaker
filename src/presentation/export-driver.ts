@@ -166,7 +166,9 @@ export async function runExport(o: {
   // Pictures and videos: every picture loaded, and every video sought to its frame before drawing.
   const fills = o.world.all('entity').map((e) => entityStyle(e).fill).filter((f): f is NonNullable<typeof f> => !!f?.asset);
   const videoFills = fills.filter((f) => f.kind === 'video').map((f) => ({ file: f.asset!, play: f }));
-  await preloadImages([eventsBoxOf(o.shot.eventsBox).image, ...fills.filter((f) => f.kind === 'image').map((f) => f.asset)]);
+  // (and characters' own pictures used as their icons)
+  const iconPictures = o.world.all('entity').map((e) => entityStyle(e).icon?.asset);
+  await preloadImages([eventsBoxOf(o.shot.eventsBox).image, ...fills.filter((f) => f.kind === 'image').map((f) => f.asset), ...iconPictures]);
   // Credit lines for the data drawn in these frames (written into the manifest and the guide).
   const credits = basemap ? (await loadDatasetRecords()).filter((d) => d.id === 'natural-earth').map((d) => `${d.name} ${d.version} (${d.licence}): ${d.credit}`) : [];
   const job = await Api.startExport(o.projectId, {
