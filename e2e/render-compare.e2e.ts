@@ -671,11 +671,12 @@ try {
         const got = px(a, x, y), k = shadeAt((x - W / 2) / R, -(y - H / 2) / R);
         worst.push(Math.max(...[0, 1, 2].map((i) => Math.abs(got[i] - want[i] * k))));
       }
-      // 2. Beyond the edge: in a picture without a background, nothing; and the far side gives no places or names.
-      const clear = { ...opaque, passes: new Set(['fills', 'borders', 'labels']), transparent: true };
-      globe.render(a, gv, s.world, s.engine, s.spaceId, t, clear);
+      // 2. Beyond the edge: in a picture without a background, nothing of the sphere (names, upright over it,
+      //    may reach a little past its edge); and the far side gives no places or names.
+      globe.render(a, gv, s.world, s.engine, s.spaceId, t, { ...opaque, passes: new Set(['fills', 'borders']), transparent: true });
       let beyond = 0, n = 0;
       for (let i = 0; i < 360; i += 3) { const q = (i * Math.PI) / 180; const x = W / 2 + Math.cos(q) * R * 1.04, y = H / 2 + Math.sin(q) * R * 1.04; if (x < 0 || y < 0 || x >= W || y >= H) continue; n++; if (px(a, x, y)[3] > 0) beyond++; }
+      globe.render(a, gv, s.world, s.engine, s.spaceId, t, { ...opaque, passes: new Set(['fills', 'borders', 'labels']), transparent: true });
       const names = globe.lastLabels.filter((l: any) => l.drawn).map((l: any) => l.text);
       const outside = globe.lastLabels.filter((l: any) => l.drawn && Math.hypot(l.x - W / 2, l.y - H / 2) > R).length;
       const farSide = gv.projection([134, -25]); // Australia

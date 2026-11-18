@@ -92,8 +92,9 @@ Follows from D2. The test drives the real interface exactly as a person would.
   finds the place it shows and reads the picture there, with mipmaps and anisotropic filtering so land sloping away
   towards the edge stays clean. So territories, animations, borders, terrain, conditions, routes and characters are
   drawn by the same code as on flat maps. Country and city names are placed on the flat picture and drawn upright
-  over the sphere where their places are (placed again there so that none overlap; those far round towards the
-  edge, on land seen edge-on, are left out): painted on the picture, those near the poles would be squeezed.
+  over the sphere where their places are (placed again there so that none overlap; towards the edge they fade
+  out, and on land seen edge-on they are left out, so a turning globe brings them in and takes them away gently):
+  painted on the picture, those near the poles would be squeezed.
 - **Speed.** The flat picture's middle is on a grid of 2 degrees and its pixels to a radian on steps of an eighth
   of a doubling, so the same picture serves while the globe turns a little; while the preview is being dragged,
   the last picture serves for as long as it holds all in view (only the sphere is drawn again, about 60 ms a frame

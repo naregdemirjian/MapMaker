@@ -575,13 +575,14 @@ recompiling the 1,000-territory history took about 800 ms after every edit.
 ## Next priorities (18 November 2026, Stages 10 and 11 done; improvement pass)
 
 1. The user tries the latest installer: Stages 8 to 11 and the improvement pass (history played in the working view,
-   videos, borders imported from files, a shot of the whole history, layers' opacity and border width) and reports
-   back; Stage 12 waits for the go-ahead.
+   videos, borders imported from files, a shot of the whole history, layers' opacity and border width, each layer as
+   its own pass, the globe that turns, the advancing front and two changes meeting drawn right) and reports back;
+   Stage 12 waits for the go-ahead.
 2. The improvement pass goes on: playing shots and dragging the timeline through many changes on large projects
-   (the slowest steps measured), then the polish left (backups with pictures and drafts; two animations meeting is
-   done, D126).
-3. (Done, D127) A globe for shots. Next for it, if wanted: the working view on a globe (drawing tools work in the
-   flat picture's terms), and a choice of light and air.
+   (the slowest steps measured; GPU compositing is the next big step, D125); two recorded animations overlapping on
+   the same land (known limitation 5).
+3. The globe in the working view, if wanted (the drawing tools work in a flat map's terms), and a choice of light
+   and air for it.
 
 ## Next priorities (18 November 2026, Stages 8 and 9 done)
 

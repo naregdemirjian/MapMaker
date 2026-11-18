@@ -3105,11 +3105,14 @@ export class MapRenderer {
       const labels: LabelInfo[] = [];
       for (const l of inner.lastLabels) {
         const [lon, lat] = toLonLat(l.x, l.y);
-        // (Names far round towards the edge are left out: there they would lie on land seen edge-on.)
-        if (facing(lon, lat) < 0.25) continue;
+        // (Names far round towards the edge fade out, and are left out where they would lie on land seen
+        // edge-on: a turning globe brings them in and takes them away gently.)
+        const fc = facing(lon, lat);
+        if (fc < 0.2) continue;
         const p = view.projection([lon, lat]);
         if (!p) continue;
-        labels.push({ ...l, x: p[0], y: p[1], size: l.size * f, drawn: false, box: undefined });
+        const fade = Math.min(1, (fc - 0.2) / 0.25);
+        labels.push({ ...l, x: p[0], y: p[1], size: l.size * f, drawn: false, box: undefined, style: fade < 1 ? { ...l.style, opacity: l.style.opacity * fade } : l.style });
       }
       const cities: CityItem[] = [];
       for (const c of inner.lastCityItems) {
