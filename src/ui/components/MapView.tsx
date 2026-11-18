@@ -8,6 +8,7 @@ import { isFeatureKind } from '../../render-engine/feature-style.ts';
 import { finishFeatureDrawing } from './Features.tsx';
 import { placementMode } from './Characters.tsx';
 import { regionIndex } from './Regions.tsx';
+import { bordersAt } from '../../domain/border-points.ts';
 import { periodChangesNow, GAINED_COLOR, LOST_COLOR } from './CountryHistory.tsx';
 import { processLasso, densify, orientInteriorLeft, signedArea, splitLoops, simplify, smooth, type Pt, dedupe, ringFromMapPoints } from '../../render-engine/stroke.ts';
 import { geoCentroid } from 'd3-geo';
@@ -189,6 +190,18 @@ export function MapView() {
   const [overSplit, setOverSplit] = useState(false);
   // The region under the pointer with the Regions tool (D78).
   const hoverRegion = useRef<number | null>(null);
+  // The Border points tool shows and picks only points of borders at the date viewed: where the owners
+  // on the two sides differ on a visible territory layer (an erased border's points stay in the map, for
+  // the dates it existed, but are not shown). Worked out again when the map or the date changes.
+  const borderPts = useRef<{ key: string; vertices: Set<number>; segments: Set<number> } | null>(null);
+  function bordersNow(): { vertices: Set<number>; segments: Set<number> } {
+    const w = store.world!, en = store.engine!;
+    const layers = w.all('layer').filter((l) => l.space_id === store.spaceId && l.kind === 'partition' && l.visible);
+    const key = `${store.spaceId}|${w.revision}|${store.time.day}|${store.time.ms}|${layers.map((l) => l.id).join(',')}`;
+    if (borderPts.current?.key === key) return borderPts.current;
+    borderPts.current = { key, ...bordersAt(w, en, store.spaceId, layers.map((l) => l.id), store.time) };
+    return borderPts.current;
+  }
   const presentation = s.mode === 'present';
   const shot = presentation ? currentShot() : null;
 
@@ -433,7 +446,9 @@ export function MapView() {
       // hundred thousand border points took 20 ms a frame to find the few hundred in view).
       const vb = visibleBounds(v);
       const mid = vb ? (vb.west + vb.east) / 2 : 0, half = vb ? (vb.east - vb.west) / 2 : 0;
+      const onBorder = bordersNow().vertices;
       for (const vr of arr.vertices.values()) {
+        if (!onBorder.has(vr.id)) continue;
         const lon = vr.lon / E7, lat = vr.lat / E7;
         if (vb && (lat < vb.south || lat > vb.north || Math.abs(((((lon - mid) % 360) + 540) % 360) - 180) > half)) continue;
         const p = lonLatToScreen(v, lon, lat);
@@ -644,7 +659,8 @@ export function MapView() {
     if (!presentation && e.button === 0 && s.tool === 'vertex') {
       const ll = screenToLonLat(view, p[0], p[1]);
       if (ll) {
-        const vid = s.world.arrangement(s.spaceId).nearestVertex(lonLatToVec(ll[0], ll[1]), 8 * radiansPerPixel(view));
+        const on = bordersNow().vertices;
+        const vid = s.world.arrangement(s.spaceId).nearestVertex(lonLatToVec(ll[0], ll[1]), 8 * radiansPerPixel(view), (id) => !on.has(id));
         if (vid !== null) { drag.current = { kind: 'vertex', vid, x: p[0], y: p[1], moved: 0 }; setCursor(p); return; }
       }
       drag.current = { kind: 'pan', x: e.clientX, y: e.clientY, moved: 0, startX: p[0], startY: p[1] };
@@ -735,7 +751,8 @@ export function MapView() {
     if (polygon.length) setCursor(p);
     if (s.tool === 'vertex' && s.world && !presentation) {
       const ll = screenToLonLat(view, p[0], p[1]);
-      const vid = ll ? s.world.arrangement(s.spaceId).nearestVertex(lonLatToVec(ll[0], ll[1]), 8 * radiansPerPixel(view)) : null;
+      const on = bordersNow().vertices;
+      const vid = ll ? s.world.arrangement(s.spaceId).nearestVertex(lonLatToVec(ll[0], ll[1]), 8 * radiansPerPixel(view), (id) => !on.has(id)) : null;
       if (vid !== hoverVertex) setHoverVertex(vid);
     }
   }
@@ -937,7 +954,8 @@ export function MapView() {
       const ll = screenToLonLat(view, p[0], p[1]);
       if (!ll) return;
       const at = lonLatToVec(ll[0], ll[1]);
-      const seg = s.world.arrangement(s.spaceId).nearestSegment(at, 8 * radiansPerPixel(view));
+      const on = bordersNow().segments;
+      const seg = s.world.arrangement(s.spaceId).nearestSegment(at, 8 * radiansPerPixel(view), (id) => !on.has(id));
       if (seg) store.execute((w) => cmd.insertBorderVertex(w, { spaceId: store.spaceId, segmentId: seg.s.id, at }));
     }
   }

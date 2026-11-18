@@ -145,7 +145,7 @@ For development (Linux or Windows, Node 22.18 or newer):
 | `xvfb-run -a node --disable-warning=ExperimentalWarning e2e/desktop.e2e.ts` | The 5-step desktop app test (build first) |
 | `node --disable-warning=ExperimentalWarning dist/server.mjs --port 4317 --projects <folder> [--open]` | Runs the app |
 | `sh scripts/check-all.sh` | Every check: type check, unit tests, build, the four interface tests |
-| `npm test` | 230 unit, randomised and scenario tests |
+| `npm test` | 231 unit, randomised and scenario tests |
 | `node --disable-warning=ExperimentalWarning e2e/render-compare.e2e.ts` | The renderer against the old one kept in `e2e/reference/` (35 scenes); carried, patched and animated pictures against fresh ones (build first; `VERBOSE=1` lists every case) |
 | `node --disable-warning=ExperimentalWarning bench/make-fixtures.ts <folder> [massive]` | Makes the benchmark projects: "Bench Earth 242", "Bench Heavy", "Bench Random 1000" (minutes); with `massive`, one with 3,000 border changes as well. The benchmarks and tools below work on throwaway copies of them |
 | `node --disable-warning=ExperimentalWarning bench/render.bench.ts <folder> ["<project>"...] [--only a,b] [--label x] [--out file]` | Frame times in Chrome for each scenario (idle, pans at five zooms, zoom, scrub, stroke, play, exports); build first |
@@ -233,7 +233,7 @@ The approved roadmap has 14 stages (0–13). Where each stands (brought up to da
 
 ## Tests
 
-All pass as of 18 November 2026 (230 unit and randomised tests in 37 files, 23 + 31 + 6 + 5 interface steps). The
+All pass as of 18 November 2026 (231 unit and randomised tests in 37 files, 23 + 31 + 6 + 5 interface steps). The
 interface tests run with the verify mode on (D57): everything the app works out from what was there before is also
 worked out afresh, and any difference stops the test.
 `sh scripts/check-all.sh` runs everything and prints ALL CHECKS PASSED only when every check passed.
@@ -245,7 +245,7 @@ worked out afresh, and any difference stops the test.
 | `test/geo-kernel.stress.ts` | CLI | 12 seeds × 50 random rings with full validation after each (0 refusals) |
 | `test/temporal-engine.test.ts` | 18 | Editing events never changes earlier history; compiled timelines equal a naive replay; simultaneous and overlapping events; stale intentions; broken references; corrections; variants; undo; when the last change began (comparing dates) |
 | `test/event-types.test.ts` | 3 | Event types made, copied, renamed, recoloured, given a way of spreading and a usual length (days, months to the end of a shorter month, years, before the year 1); deleted (their events become plain events), undone, reloaded |
-| `test/split-merge.test.ts` | 4 | A line across a country: the part clicked to a new country from a date (verify mode), to an existing one in a new event (moved with it), as a correction of the starting map; refused when the line stops inside (and taken back), on the sea, or to its own country; merging into one of them or a new country in an event; one undo step each; a border point moved from a date (either way, in an event, verify mode), junctions and moves across a third country refused |
+| `test/split-merge.test.ts` | 5 | A line across a country: the part clicked to a new country from a date (verify mode), to an existing one in a new event (moved with it), as a correction of the starting map; refused when the line stops inside (and taken back), on the sea, or to its own country; merging into one of them or a new country in an event; one undo step each; a border point moved from a date (either way, in an event, verify mode), junctions and moves across a third country refused; border points shown only on borders at the date (D81) |
 | `test/regions.test.ts` | 2 | Today's 4,596 states and provinces found by a point (Berlin, an enclave of Brandenburg; New York; Fiji by the 180th meridian; the sea); anchors inside their regions; today's countries the same way; Brandenburg and Berlin given to two owners meet exactly (areas within 0.2%, no unowned sample along their border) |
 | `test/scenarios.test.ts` | 9 | A region's history (secession, partition, insertion, deletion, moving events); order independence; simultaneous and overlapping events with durations; seconds and millennia apart; advancing fronts from minutes to years; occupation on its own layer; edits never corrupt unrelated data; formation, fragmentation, collapse |
 | `test/geometry-worlds.test.ts` | 7 | Degenerate and self-crossing outlines refused cleanly; poles, the 180° line, more than a hemisphere, 20-metre shapes; splitting and merging; 1 cm precision after reopening; independent worlds of different sizes; undo per world |

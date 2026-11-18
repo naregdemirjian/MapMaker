@@ -60,6 +60,15 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D81. The Border points tool shows only points of borders at the date viewed (fifth feedback round)
+
+The parcel map keeps every line ever drawn: a border erased (or a country merged, or land given away) is still the
+border before that date, so its points stay in the map. The Border points tool used to show and pick all of them,
+so erased borders left trails of points. Now it shows, picks and adds points only on **borders at the date viewed**:
+segments with different owners on their two sides on a visible territory layer (a coast, owner against sea, counts),
+worked out again when the map or the date changes (`src/domain/border-points.ts` bordersAt). Going back to a date
+when the erased border existed shows its points again.
+
 ### D80. Date fields: a calendar, arrow keys, and an end that starts at the start (fifth feedback round)
 
 Every date field (the date viewed, events' starts and ends, shots, dialogs) can still be typed into ("14 May 1203",

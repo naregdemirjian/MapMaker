@@ -178,3 +178,27 @@ test('a border point moved from a date on: the land between the old and new line
   // Across into the sea beyond Bergholt: refused.
   assert.throws(() => cmd.moveBorderFrom(world, engine, { spaceId: space, layerId: layer, vertexId: vid, to: lonLatToVec(45, 0), t: Y(1900), mode: { kind: 'change', t: Y(1900) }, snap: 1e-9 }), /across another country/);
 });
+
+test('border points shown: only those of borders at the date viewed (an erased border\'s points are not)', async () => {
+  const { bordersAt } = await import('../src/domain/border-points.ts');
+  const world = new World();
+  const space = cmd.seedProject(world, 'Points').result.spaceId;
+  const layer = world.all('layer')[0].id;
+  const engine = new Engine(world);
+  const A = cmd.createEntity(world, { type_id: 'polity', name: 'Aldmark' }).result;
+  const B = cmd.createEntity(world, { type_id: 'polity', name: 'Bergholt' }).result;
+  for (const [o, lon] of [[A, 0], [B, 20]] as const) cmd.paintTerritory(world, engine, { spaceId: space, layerId: layer, ring: ring(square(lon, 0, 10)), value: o, snap: 1e-6, mode: { kind: 'correct', t: NEG_INF } });
+  const arr = world.arrangement(space);
+  const shared = arr.nearestVertex(lonLatToVec(10, 0), 0.02)!;
+  const coast = arr.nearestVertex(lonLatToVec(-10, 0), 0.02)!;
+  let b = bordersAt(world, engine, space, [layer], Y(1900));
+  assert.ok(b.vertices.has(shared) && b.vertices.has(coast));
+  // Bergholt's land goes to Aldmark from 1800 (the border erased): the shared points are no longer shown then.
+  const leaves = [...engine.partitionState(space, layer, Y(1900))].filter(([, st]) => st.value === B).map(([f]) => f);
+  cmd.assignFaces(world, engine, { spaceId: space, layerId: layer, leaves, value: A, mode: { kind: 'change', t: Y(1800) } });
+  b = bordersAt(world, engine, space, [layer], Y(1900));
+  assert.ok(!b.vertices.has(shared), 'the erased border\'s point is hidden');
+  assert.ok(b.vertices.has(coast), 'the coast is still a border');
+  assert.ok(bordersAt(world, engine, space, [layer], Y(1700)).vertices.has(shared), 'before 1800 the border is there, and its points');
+  assert.ok(arr.vertices.has(shared), 'the point stays in the map');
+});

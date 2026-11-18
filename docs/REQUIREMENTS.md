@@ -275,3 +275,4 @@ the same three benchmark projects, against the build before this stage, the two 
 | --- | --- | --- | --- |
 | The territory brush gives land to the country selected | Tested | `e2e/workflows` 'Region picker' (a country chosen in the list is the brush's owner) | Choosing a country or faction in a list or panel, or a place on the map that a country holds, makes it the brush's owner (a click on the sea leaves the owner as it was) |
 | An event's end starts at its start; dates chosen on a calendar with arrows, or typed | Tested | `core-time` (stepping by day, month, year; years typed alone), `e2e/workflows` 'Dates' (the end shown greyed and left alone, the calendar two months on and a year typed, keyboard in the calendar, the date viewed stepped by the arrow keys) | D80 |
+| Border points still visible after their borders were erased | Fixed | `split-merge` (an erased border's point hidden, the coast's kept, the old border's points shown before the date) | D81 |

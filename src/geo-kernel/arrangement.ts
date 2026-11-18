@@ -465,23 +465,24 @@ export class Arrangement {
     return id;
   }
 
-  nearestVertex(p: Vec3, tol: number, exclude?: Set<number>): number | null {
+  /** The nearest vertex within `tol` radians; `exclude`: ids left out, or a test that leaves an id out when true. */
+  nearestVertex(p: Vec3, tol: number, exclude?: Set<number> | ((id: number) => boolean)): number | null {
     const [lo, hi] = pointBox(p, tol);
     let best: number | null = null;
     let bestD = tol;
     for (const id of this.vgrid.query(lo, hi)) {
-      if (exclude?.has(id)) continue;
+      if (exclude && (typeof exclude === 'function' ? exclude(id) : exclude.has(id))) continue;
       const d = angle(p, this.v(id));
       if (d <= bestD) { bestD = d; best = id; }
     }
     return best;
   }
 
-  nearestSegment(p: Vec3, tol: number, exclude?: Set<number>): { s: SegmentRow; dist: number } | null {
+  nearestSegment(p: Vec3, tol: number, exclude?: Set<number> | ((id: number) => boolean)): { s: SegmentRow; dist: number } | null {
     const [lo, hi] = pointBox(p, tol);
     let best: { s: SegmentRow; dist: number } | null = null;
     for (const id of this.sgrid.query(lo, hi)) {
-      if (exclude?.has(id)) continue;
+      if (exclude && (typeof exclude === 'function' ? exclude(id) : exclude.has(id))) continue;
       const s = this.segments.get(id)!;
       const d = distanceToArc(p, this.v(s.a), this.v(s.b));
       if (d.interior && d.dist <= tol && (!best || d.dist < best.dist)) best = { s, dist: d.dist };
