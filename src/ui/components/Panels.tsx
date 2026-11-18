@@ -20,6 +20,7 @@ import { RelationsSection } from './Relations.tsx';
 import { SearchBox } from './Search.tsx';
 import { PicturesSection } from './Pictures.tsx';
 import { TypeDot, TypeSelect } from './EventTypes.tsx';
+import { CalendarPopover, stepDate } from './DatePicker.tsx';
 import { SplitToolOptions } from './SplitMerge.tsx';
 import { RegionToolOptions } from './Regions.tsx';
 import { typeColor } from '../../domain/event-types.ts';
@@ -27,23 +28,54 @@ import { isFeatureKind } from '../../render-engine/feature-style.ts';
 
 export const fmt = (t: Instant, precision: 'year' | 'day' | 'minute' = 'day') => gregorian.format(t, precision);
 
-export function DateField({ value, onChange, placeholder, allowEmpty, testId }: { value: Instant | null; onChange: (t: Instant | null) => void; placeholder?: string; allowEmpty?: boolean; testId?: string }) {
-  const [text, setText] = useState(value ? fmt(value, value.ms ? 'minute' : 'day') : '');
+/**
+ * A date: typed ("14 May 1203", "500 BCE"), chosen on a calendar (the button at its end), or stepped
+ * with the arrow keys (a day; Shift: a month; Alt: a year). `suggest`: where an empty field starts
+ * (an event's end at its start): shown greyed in it, and where the arrows and the calendar begin. `live`: arrow steps apply at once
+ * (the date viewed); otherwise on Enter or on leaving the field, as typing does.
+ */
+export function DateField({ value, onChange, placeholder, allowEmpty, testId, suggest, live }: { value: Instant | null; onChange: (t: Instant | null) => void; placeholder?: string; allowEmpty?: boolean; testId?: string; suggest?: Instant | null; live?: boolean }) {
+  const show = (t: Instant) => fmt(t, t.ms ? 'minute' : 'day');
+  const [text, setText] = useState(value ? show(value) : '');
   const [bad, setBad] = useState(false);
-  useEffect(() => { setText(value ? fmt(value, value.ms ? 'minute' : 'day') : ''); setBad(false); }, [value?.day, value?.ms]);
-  const commit = () => {
-    if (!text.trim()) { if (allowEmpty) onChange(null); else setBad(true); return; }
-    const p = gregorian.parse(text);
+  const [open, setOpen] = useState(false);
+  useEffect(() => { setText(value ? show(value) : ''); setBad(false); }, [value?.day, value?.ms]);
+  const suggested = !value && suggest ? show(suggest) : null;
+  const commit = (t = text) => {
+    if (!t.trim()) { if (allowEmpty) onChange(null); else setBad(true); return; }
+    const p = gregorian.parse(t);
     if (!p) { setBad(true); return; }
     setBad(false);
     onChange(p.instant);
   };
+  const current = (): Instant | null => { const typed = text.trim() ? gregorian.parse(text)?.instant : undefined; return typed ?? value ?? suggest ?? null; };
+  const key = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') { commit(); return; }
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+    const t = current();
+    if (!t || t.day === -Infinity || t.day === Infinity) return;
+    e.preventDefault();
+    const next = stepDate(t, e.altKey ? 'year' : e.shiftKey ? 'month' : 'day', e.key === 'ArrowUp' ? 1 : -1);
+    setText(show(next));
+    setBad(false);
+    if (live) onChange(next);
+  };
   return (
-    <input
-      className={bad ? 'date-input bad' : 'date-input'} value={text} placeholder={placeholder ?? 'e.g. 14 May 1203, 500 BCE, 2241-03-02'}
-      onChange={(e) => setText(e.target.value)} onBlur={commit} onKeyDown={(e) => e.key === 'Enter' && commit()}
-      title="Dates: 14 May 1203 · May 1203 · 1203 · 500 BCE · 2241-03-02T04:05 · c. 3000 BCE" data-testid={testId}
-    />
+    <span className="date-field">
+      <input
+        className={bad ? 'date-input bad' : 'date-input'} value={text} placeholder={suggested ?? placeholder ?? 'e.g. 14 May 1203, 500 BCE, 2241-03-02'}
+        onChange={(e) => setText(e.target.value)} onBlur={() => commit()} onKeyDown={key}
+        title="Dates: 14 May 1203 · May 1203 · 1203 · 500 BCE · 2241-03-02T04:05 · c. 3000 BCE. Arrow keys: a day (Shift: a month, Alt: a year)" data-testid={testId}
+      />
+      <button type="button" className="date-calendar-button" title="Choose on a calendar" onClick={() => setOpen(!open)} data-testid={testId ? `${testId}-calendar` : undefined} tabIndex={-1}>
+        <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="12" rx="2" fill="none" stroke="currentColor" strokeWidth="1.4" /><path d="M1.5 6.5h13M5 1v3M11 1v3" stroke="currentColor" strokeWidth="1.4" /></svg>
+      </button>
+      {open && (() => {
+        const start = current();
+        const at = start && Number.isFinite(start.day) ? start : gregorian.fromCivil({ year: 1900 });
+        return <CalendarPopover value={at} onClose={() => setOpen(false)} onPick={(t) => { setOpen(false); setText(show(t)); setBad(false); onChange(t); }} testId={testId ? `${testId}-popover` : undefined} />;
+      })()}
+    </span>
   );
 }
 
@@ -64,7 +96,7 @@ export function NumberField({ value, onCommit, min, max, step, testId, title }: 
 /** The date being viewed (follows the timeline as it is scrubbed). */
 function CurrentDate() {
   const s = useLive();
-  return <DateField value={s.time} onChange={(t) => t && s.setTime(t)} testId="current-date" />;
+  return <DateField value={s.time} onChange={(t) => t && s.setTime(t)} testId="current-date" live />;
 }
 
 /** A first date to compare with: the day before the last change up to the date viewed (the map as it
@@ -665,7 +697,7 @@ function EventPanel({ id }: { id: string }) {
         <label>Name<input value={name} onChange={(ev) => setName(ev.target.value)} onBlur={() => name.trim() && name !== e.name && s.execute((wd) => cmd.updateEvent(wd, id, { name: name.trim() }))} /></label>
         <label>Type<span className="row-inline"><TypeDot typeId={e.type_id} /><TypeSelect value={e.type_id} onChange={(t) => s.execute((wd) => cmd.updateEvent(wd, id, { type_id: t }))} testId="event-panel-type" /><button className="small" onClick={() => s.set({ dialog: 'event-types' })} title="Make, change and delete event types">Types…</button></span></label>
         <label>Starts<DateField value={start} onChange={(t) => t && s.execute((wd) => cmd.updateEvent(wd, id, { start: t }))} testId="event-panel-start" /></label>
-        <label>Ends<DateField value={end} allowEmpty placeholder="(instantaneous)" onChange={(t) => s.execute((wd) => cmd.updateEvent(wd, id, { end: t }))} testId="event-panel-end" /></label>
+        <label>Ends<DateField value={end} allowEmpty suggest={start} onChange={(t) => s.execute((wd) => cmd.updateEvent(wd, id, { end: t }))} testId="event-panel-end" /></label>
         <label title="When two events change the same place at the same instant, the higher precedence wins">Precedence<NumberField value={e.precedence} step={1} onCommit={(n) => s.execute((wd) => cmd.updateEvent(wd, id, { precedence: Math.round(n) }))} /></label>
         <label>Description<textarea rows={4} value={desc} onChange={(ev) => setDesc(ev.target.value)} onBlur={() => desc !== e.description && s.execute((wd) => cmd.updateEvent(wd, id, { description: desc }))} /></label>
         <PicturesSection holder={{ kind: 'event', id }} />

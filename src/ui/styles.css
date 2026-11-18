@@ -278,3 +278,21 @@ label.indent { margin-left: 24px; }
 .type-length select { flex: 1; min-width: 0; }
 .type-actions { display: flex; gap: 4px; }
 .choice.disabled { opacity: 0.55; }
+
+/* Date fields: a calendar to choose from (D80) */
+.date-field { position: relative; display: inline-flex; align-items: center; width: 100%; }
+.date-field .date-input { flex: 1; min-width: 0; padding-right: 26px; }
+.date-calendar-button { position: absolute; right: 3px; top: 50%; transform: translateY(-50%); border: none; background: transparent; color: var(--muted, #8a97a6); padding: 2px 4px; cursor: pointer; line-height: 0; }
+.date-calendar-button:hover { color: #ffd166; }
+.date-popover { position: absolute; top: calc(100% + 4px); right: 0; z-index: 80; width: 244px; background: var(--panel, #18212b); border: 1px solid var(--line, #2a3542); border-radius: 8px; padding: 8px; box-shadow: 0 12px 32px rgba(0,0,0,0.5); outline: none; }
+.date-popover-head { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }
+.date-popover-title { flex: 1; display: flex; gap: 4px; }
+.date-popover-title select { flex: 1; min-width: 0; }
+.date-popover-title input { width: 60px; }
+.date-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.date-weekday { font-size: 10px; text-align: center; color: var(--muted, #8a97a6); padding: 2px 0; }
+.date-day { padding: 4px 0; font-size: 12px; border: 1px solid transparent; background: transparent; border-radius: 4px; cursor: pointer; }
+.date-day:hover { background: rgba(255,255,255,0.08); }
+.date-day.focus { border-color: rgba(255,209,102,0.6); }
+.date-day.on { background: #4f7ca8; color: #fff; }
+.date-popover-hint { font-size: 10px; margin-top: 6px; }

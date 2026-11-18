@@ -135,7 +135,7 @@ function PaintPrompt({ p }: { p: Extract<PendingEdit, { kind: 'paint' }> }) {
             {target === 'new-event' && <>
               <label>Event name<input value={evName} onChange={(ev) => setEvName(ev.target.value)} data-testid="new-event-name" /></label>
               <label>Type<span className="row-inline"><TypeDot typeId={evType} /><TypeSelect value={evType} onChange={(t) => { setEvType(t); typeChanged('new-event', t); }} testId="new-event-type" /></span></label>
-              <label>Ends (optional, for animated changes)<DateField value={end} allowEmpty placeholder="(happens at once)" onChange={(t) => { setEnd(t); setEndTyped(true); }} testId="new-event-end" /></label>
+              <label>Ends (optional, for animated changes)<DateField value={end} allowEmpty suggest={s.time} onChange={(t) => { setEnd(t); setEndTyped(true); }} testId="new-event-end" /></label>
             </>}
             {(target !== 'new-event' ? w.get('event', target)?.end_day !== null : !!end) && (
               <label>How it spreads
@@ -288,7 +288,7 @@ export function NewEventDialog() {
       <label>Name<input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Fall of the Northern March" data-testid="event-name" /></label>
       <label>Type<span className="row-inline"><TypeDot typeId={type} /><TypeSelect value={type} onChange={(t) => { setType(t); follow(t, start); }} testId="event-type" /></span></label>
       <label>Starts<DateField value={start} onChange={(t) => { setStart(t); follow(type, t); }} testId="event-start" /></label>
-      <label>Ends (optional)<DateField value={end} allowEmpty placeholder="(happens at once)" onChange={(t) => { setEnd(t); setEndTyped(true); }} testId="event-end" /></label>
+      <label>Ends (optional)<DateField value={end} allowEmpty suggest={start} onChange={(t) => { setEnd(t); setEndTyped(true); }} testId="event-end" /></label>
       <label>Description<textarea rows={3} value={desc} onChange={(e) => setDesc(e.target.value)} /></label>
       {w.all('event_group').length > 0 && <><h4>Groups</h4><GroupChecks value={groups} onChange={setGroups} /></>}
       <label className="check"><input type="checkbox" checked={record} onChange={(e) => setRecord(e.target.checked)} /> Record what I draw next into this event</label>

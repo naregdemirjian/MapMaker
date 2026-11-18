@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, existsSync, rmSync, writeFileSync, statSync } from 'node:fs';
 import { encodePNG } from '../src/export/png.ts';
+import { gregorian } from '../src/core-time/index.ts';
 import { join } from 'node:path';
 import { Harness, ROOT, blob, readPNG, pixel, hexRGB, near, compositeOver, type LL } from './harness.ts';
 
@@ -730,6 +731,56 @@ try {
     await h.saved();
     assert.equal((await eventOf('Siege of Proba')).type_id, siege.id);
     assert.equal((await typeOf('Siege warfare'))?.id, siege.id);
+  });
+
+  await h.step('Dates: an event\'s end starts at its start; chosen on a calendar; the date viewed stepped with the arrow keys', async () => {
+    const union = () => page.evaluate(() => (window as any).__mapmaker.store.world.all('event').find((e: any) => e.name === 'Union'));
+    await page.getByTestId('event-row-Union').click();
+    const end = page.getByTestId('event-panel-end');
+    assert.equal(await end.getAttribute('placeholder'), '1 January 1900', 'an instantaneous event\'s end shows its start');
+    await end.focus();
+    await end.press('Tab');
+    assert.equal((await union()).end_day, null, 'left untouched, the event stays instantaneous');
+    // The arrow keys start from it: a day on.
+    await end.press('ArrowUp');
+    assert.equal(await end.inputValue(), '2 January 1900');
+    await end.press('Escape');
+    await end.fill('');
+    await end.press('Tab');
+    // On the calendar: two months on, the 15th.
+    await page.getByTestId('event-panel-end-calendar').click();
+    await page.getByTestId('event-panel-end-popover').waitFor();
+    await page.getByTestId('cal-month-forward').click();
+    await page.getByTestId('cal-month-forward').click();
+    await h.screenshot('calendar');
+    await page.getByTestId('cal-day-15').click();
+    await h.saved();
+    const ev = await union();
+    assert.equal(await end.inputValue(), '15 March 1900');
+    assert.equal(ev.end_day, gregorian.fromCivil({ year: 1900, month: 3, day: 15 }).day);
+    // A year typed into the calendar, then the keyboard: a week on, Enter.
+    await page.getByTestId('event-panel-end-calendar').click();
+    await page.getByTestId('cal-year').fill('1901');
+    await page.getByTestId('cal-year').press('Enter');
+    await page.getByTestId('event-panel-end-popover').press('ArrowDown');
+    await page.getByTestId('event-panel-end-popover').press('Enter');
+    await h.saved();
+    assert.equal(await end.inputValue(), '22 March 1901');
+    await page.getByTestId('undo').click();
+    await page.getByTestId('undo').click();
+    await h.saved();
+    assert.equal((await union()).end_day, null, 'undone');
+    // The date viewed: up a day, Shift: a month, Alt: a year.
+    await h.setDate('10 May 1930');
+    const cur = page.getByTestId('current-date');
+    await cur.press('ArrowUp');
+    assert.equal(await cur.inputValue(), '11 May 1930');
+    await cur.press('Shift+ArrowUp');
+    assert.equal(await cur.inputValue(), '11 June 1930');
+    await cur.press('Alt+ArrowDown');
+    assert.equal(await cur.inputValue(), '11 June 1929');
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.time.day), gregorian.fromCivil({ year: 1929, month: 6, day: 11 }).day, 'the date viewed moved with the keys');
+    await h.setDate('1930');
   });
 
   await h.step('Split and merge: a line drawn across a country, the part clicked becomes a new country; two countries merged into a new one in an event; undone', async () => {

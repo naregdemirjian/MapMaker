@@ -198,7 +198,7 @@ export function FeaturePrompt({ p }: { p: Extract<PendingEdit, { kind: 'feature'
               </label>
               {target === 'new-event' && <>
                 <label>Event name<input value={evName} placeholder={feature ? `${feature.name} changes` : `${name} appears`} onChange={(ev) => setEvName(ev.target.value)} data-testid="feature-event-name" /></label>
-                <label>Ends (optional)<DateField value={end} allowEmpty placeholder="(happens at once)" onChange={setEnd} testId="feature-event-end" /></label>
+                <label>Ends (optional)<DateField value={end} allowEmpty suggest={s.time} onChange={setEnd} testId="feature-event-end" /></label>
               </>}
               {(target === 'new-event' ? !!end : w.get('event', target)?.end_day !== null) && (
                 <label>How it appears over the event

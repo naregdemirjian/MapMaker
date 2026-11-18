@@ -145,7 +145,7 @@ For development (Linux or Windows, Node 22.18 or newer):
 | `xvfb-run -a node --disable-warning=ExperimentalWarning e2e/desktop.e2e.ts` | The 5-step desktop app test (build first) |
 | `node --disable-warning=ExperimentalWarning dist/server.mjs --port 4317 --projects <folder> [--open]` | Runs the app |
 | `sh scripts/check-all.sh` | Every check: type check, unit tests, build, the four interface tests |
-| `npm test` | 229 unit, randomised and scenario tests |
+| `npm test` | 230 unit, randomised and scenario tests |
 | `node --disable-warning=ExperimentalWarning e2e/render-compare.e2e.ts` | The renderer against the old one kept in `e2e/reference/` (35 scenes); carried, patched and animated pictures against fresh ones (build first; `VERBOSE=1` lists every case) |
 | `node --disable-warning=ExperimentalWarning bench/make-fixtures.ts <folder> [massive]` | Makes the benchmark projects: "Bench Earth 242", "Bench Heavy", "Bench Random 1000" (minutes); with `massive`, one with 3,000 border changes as well. The benchmarks and tools below work on throwaway copies of them |
 | `node --disable-warning=ExperimentalWarning bench/render.bench.ts <folder> ["<project>"...] [--only a,b] [--label x] [--out file]` | Frame times in Chrome for each scenario (idle, pans at five zooms, zoom, scrub, stroke, play, exports); build first |
@@ -157,7 +157,7 @@ For development (Linux or Windows, Node 22.18 or newer):
 | `MAPMAKER_E2E_VIEWPORT=1500x900 node ... e2e/vertical-slice.e2e.ts` (or `workflows`) | The interface tests in a window of another size (no step may depend on where things fall on screen) |
 | `node --disable-warning=ExperimentalWarning test/geo-kernel.stress.ts <seeds> <rings>` | Long randomised kernel run |
 | `node --disable-warning=ExperimentalWarning e2e/vertical-slice.e2e.ts` | The 23-step interface test in Chrome (build first); screenshots in `e2e/output/` |
-| `node --disable-warning=ExperimentalWarning e2e/workflows.e2e.ts` | The 30-step workflow and export-inspection test; screenshots in `e2e/output/workflows/` |
+| `node --disable-warning=ExperimentalWarning e2e/workflows.e2e.ts` | The 31-step workflow and export-inspection test; screenshots in `e2e/output/workflows/` |
 | `node --disable-warning=ExperimentalWarning test/perf.bench.ts 100 300 1000 [--keep <folder>]` | Performance benchmark (minutes at 1000) |
 | `node node_modules/typescript/bin/tsc -p tsconfig.json` | Type check (must report nothing) |
 
@@ -233,7 +233,7 @@ The approved roadmap has 14 stages (0–13). Where each stands (brought up to da
 
 ## Tests
 
-All pass as of 18 November 2026 (229 unit and randomised tests in 37 files, 23 + 30 + 6 + 5 interface steps). The
+All pass as of 18 November 2026 (230 unit and randomised tests in 37 files, 23 + 31 + 6 + 5 interface steps). The
 interface tests run with the verify mode on (D57): everything the app works out from what was there before is also
 worked out afresh, and any difference stops the test.
 `sh scripts/check-all.sh` runs everything and prints ALL CHECKS PASSED only when every check passed.
@@ -281,7 +281,7 @@ worked out afresh, and any difference stops the test.
 | `e2e/vertical-slice.e2e.ts` | 23 steps | The vertical slice in Chrome: projects, drawing, Earth's geography and data sources, border points, versions, events, dates, version restore and undo, full restart, animation, export with data credits, identical re-export, 1080p, coastline clipping |
 | `e2e/desktop.e2e.ts` | 5 steps | The Electron app: own window, own data service on this computer only, project written to disk, one copy at a time, close and reopen with contents intact |
 | `test/event-groups.test.ts` | 4 | Event group commands with undo (several groups per event, filter rules, deletion keeps events, alternatives keep groups); a version 1 project file upgraded on opening (backup first, content and undo history intact, old backups restorable without rolling the format back); a file from a newer version refused untouched |
-| `e2e/workflows.e2e.ts` | 30 steps | Precise shapes; occupation layer; hiding layers; alternative versions; annexation; deleting and undoing events; fades; a second world; a camera move at 2.39:1 and 25 fps with frame timing, history in the pixels and pass stacking checked; layers of lines, points and areas made with "+ Layer", drawn freehand, by a click and click by click, chosen by clicking, restyled, given a new shape from a date, ended and undone; a war added from a country's panel, read from both sides, resumed and ended; two dates compared across a dragged line and swapped; an event type made with a colour, a way of spreading and a length, used by a new event and a drawing, renamed, deleted and undone; a country split along a dragged line (the part clicked named by its side), a point of the new border moved from a date, today's states chosen by clicks and a box and given to a new country, a line in an event drawing itself (half drawn half way through, then set to appear at once), and the two merged into a new country in a new event, undone and redone; search (a country, an event, a point), a picture kept with a country's notes, the data exported as GeoJSON and CSV and read back; square size, Natural Earth projection, 23.976 fps, transparency; the preview of that shot dragged with the mouse (carried while its meridian is held, laid out afresh at rest) |
+| `e2e/workflows.e2e.ts` | 31 steps | Precise shapes; occupation layer; hiding layers; alternative versions; annexation; deleting and undoing events; fades; a second world; a camera move at 2.39:1 and 25 fps with frame timing, history in the pixels and pass stacking checked; layers of lines, points and areas made with "+ Layer", drawn freehand, by a click and click by click, chosen by clicking, restyled, given a new shape from a date, ended and undone; a war added from a country's panel, read from both sides, resumed and ended; two dates compared across a dragged line and swapped; an event's end shown from its start, chosen on a calendar, the date viewed stepped with arrow keys; an event type made with a colour, a way of spreading and a length, used by a new event and a drawing, renamed, deleted and undone; a country split along a dragged line (the part clicked named by its side), a point of the new border moved from a date, today's states chosen by clicks and a box and given to a new country, a line in an event drawing itself (half drawn half way through, then set to appear at once), and the two merged into a new country in a new event, undone and redone; search (a country, an event, a point), a picture kept with a country's notes, the data exported as GeoJSON and CSV and read back; square size, Natural Earth projection, 23.976 fps, transparency; the preview of that shot dragged with the mouse (carried while its meridian is held, laid out afresh at rest) |
 
 Checked by hand: 4K and 8K exports; the unzipped package starts and works; requests from other hosts are refused.
 

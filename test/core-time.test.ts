@@ -112,3 +112,21 @@ test('milliseconds are representable and formatted', () => {
   assert.equal(t.instant.ms, ((4 * 60 + 5) * 60 + 6) * 1000 + 7);
   assert.equal(gregorian.format(t.instant, 'millisecond'), '2 March 2241, 04:05:06.007');
 });
+
+test('stepping dates by a day, a month or a year (the date fields\' arrows); years typed on their own', async () => {
+  const { stepDate, parseYear, gregorian: g } = await import('../src/core-time/index.ts');
+  const D = (y: number, m: number, d: number) => g.fromCivil({ year: y, month: m, day: d });
+  assert.deepEqual(stepDate(D(1999, 12, 31), 'day', 1), D(2000, 1, 1));
+  assert.deepEqual(stepDate(D(1700, 1, 31), 'month', 1), D(1700, 2, 28), 'to the end of a shorter month');
+  assert.deepEqual(stepDate(D(1704, 3, 31), 'month', -1), D(1704, 2, 29));
+  assert.deepEqual(stepDate(D(2000, 2, 29), 'year', 1), D(2001, 2, 28));
+  assert.deepEqual(stepDate(D(1, 1, 1), 'year', -1), D(0, 1, 1), 'into BCE: the year 0 is 1 BCE');
+  const t = { ...D(1900, 5, 5), ms: 3_600_000 };
+  assert.equal(stepDate(t, 'month', 2).ms, 3_600_000, 'the time of day is kept');
+  assert.equal(parseYear('1450'), 1450);
+  assert.equal(parseYear('44 BCE'), -43);
+  assert.equal(parseYear('1 bc'), 0);
+  assert.equal(parseYear('AD 900'), 900);
+  assert.equal(parseYear('-499'), -499);
+  assert.equal(parseYear('May'), null);
+});

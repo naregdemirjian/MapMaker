@@ -60,6 +60,19 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D80. Date fields: a calendar, arrow keys, and an end that starts at the start (fifth feedback round)
+
+Every date field (the date viewed, events' starts and ends, shots, dialogs) can still be typed into ("14 May 1203",
+"500 BCE"), and now also has a **calendar** (the button at its end): a month at a time, with arrows for the month
+(‹ ›) and the year (« »), a list of months, and a box for any year ("1450", "44 BCE", "-499"); the keyboard moves the
+chosen day (arrows: a day or a week; Page Up/Down: a month; Shift: a year) and Enter takes it. In the field itself the
+**arrow keys step the date**: up or down a day, with Shift a month, with Alt a year (a month after 31 January is the end
+of February); on the date viewed each step applies at once, elsewhere on Enter or on leaving the field, as typing does.
+An event's empty **end shows its start**, greyed, where "(instantaneous)" was, and the arrows and the calendar start
+from it; nothing is written until a date is chosen, so the event stays instantaneous if the field is only visited
+(filling the start in on focus was tried and dropped: typing straight away could be glued onto it). Calendar arithmetic
+is `src/core-time/steps.ts` (stepDate, parseYear); the popover is `src/ui/components/DatePicker.tsx`.
+
 ### D79. Animated areas, lines and points: a line draws itself, an area grows, a shape fades (Stage 6)
 
 A shape change of an area, line or point that belongs to an event with a length can **appear over the rest of the

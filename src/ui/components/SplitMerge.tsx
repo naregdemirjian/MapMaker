@@ -59,7 +59,7 @@ export function WhenChooser({ when, setWhen }: { when: When; setWhen: (w: When) 
           {when.target === 'new-event' && <>
             <label>Event name<input value={when.evName} onChange={(ev) => set({ evName: ev.target.value })} data-testid="when-event-name" /></label>
             <label>Type<span className="row-inline"><TypeDot typeId={when.evType} /><TypeSelect value={when.evType} onChange={(t) => set({ evType: t, end: defaultEnd(w, t, s.time) ?? when.end })} /></span></label>
-            <label>Ends (optional)<DateField value={when.end} allowEmpty placeholder="(happens at once)" onChange={(t) => set({ end: t })} /></label>
+            <label>Ends (optional)<DateField value={when.end} allowEmpty suggest={s.time} onChange={(t) => set({ end: t })} /></label>
           </>}
         </div>
       )}
