@@ -6,6 +6,7 @@ import { lonLatToVec } from '../geo-kernel/vec.ts';
 import { makeView, screenToLonLat, lonLatToScreen } from '../render-engine/camera.ts';
 import { cameraAt, timeAt, defaultShot } from '../presentation/sequence.ts';
 import { currentShot, frameRect, shotOverlayRects, shownMapView } from './components/MapView.tsx';
+import { shownSpace } from './components/SpaceView.tsx';
 import * as commands from '../domain/commands.ts';
 import { runExport, renderFrame, PASS_DEFS } from '../presentation/export-driver.ts';
 import { decodeCountries, COUNTRY_GROUP_COLORS } from '../domain/countries.ts';
@@ -77,6 +78,25 @@ function shown(width: number, height: number) {
     const v = shownMapView();
     const p = lonLatToScreen(v && v.preview && v.view.width === fr.w && v.view.height === fr.h ? v.view : makeView(store.presentCamera ?? cameraAt(shot, store.shotFrame), fr.w, fr.h), lon, lat);
     return p ? [p[0] + fr.x + r.left, p[1] + fr.y + r.top] : null;
+  },
+  /** Where a star of a space map was drawn on the page (D110), or null (not drawn, or not a space map). */
+  starToPage(id: number) {
+    const v = shownSpace();
+    const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement | null;
+    const st = v?.stars.find((x) => x.id === id);
+    if (!v || !c || !st || c.dataset.space !== 'stars') return null;
+    const r = c.getBoundingClientRect();
+    return [r.left + v.frame.x + st.x, r.top + v.frame.y + st.y];
+  },
+  /** The star names written on the space map (D110). */
+  spaceNames() { return shownSpace()?.names ?? []; },
+  /** The middle of the space map's picture on the page (D110), or null. */
+  spaceMiddle() {
+    const v = shownSpace();
+    const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement | null;
+    if (!v || !c || c.dataset.space !== 'stars') return null;
+    const r = c.getBoundingClientRect();
+    return [r.left + v.frame.x + v.frame.w / 2, r.top + v.frame.y + v.frame.h / 2];
   },
   /** The shot preview's frame on the page (x, y, w, h), or null. */
   previewFrame() {

@@ -5,12 +5,13 @@ import type { VertexRow, SegmentRow, FaceRow } from '../geo-kernel/arrangement.t
 export type { VertexRow, SegmentRow, FaceRow };
 
 export type LayerKind = 'partition' | 'area' | 'line' | 'point' | 'field' | 'track';
-export type EffectKind = 'assign' | 'annex' | 'set_attribute' | 'place' | 'rename' | 'shape' | 'relate';
+export type EffectKind = 'assign' | 'annex' | 'set_attribute' | 'place' | 'rename' | 'shape' | 'relate' | 'system' | 'lane';
 export type Json = string; // stored JSON text
 
 export interface MetaRow { key: string; value: string }
 export interface MapSpaceRow {
-  id: string; name: string; kind: 'sphere' | 'plane'; body_id: string | null; radius_m: number | null;
+  /** 'space': a map of the stars around the Sun (D110), drawn in three dimensions; it keeps an empty parcel map. */
+  id: string; name: string; kind: 'sphere' | 'plane' | 'space'; body_id: string | null; radius_m: number | null;
   unit: string | null; parent_space_id: string | null; root_face: number; sort_order: number; settings: Json;
 }
 export interface EntityTypeRow { id: string; name: string; category: string; builtin: number }

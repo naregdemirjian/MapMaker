@@ -15,6 +15,8 @@ export interface Camera {
    * Never stored: shots, exports and a view at rest are laid out around the camera.
    */
   meridian?: number;
+  /** Space maps (D110): the point the camera circles, in light-years (the Sun when absent). */
+  target?: [number, number, number];
 }
 
 /** Does the shape of the map depend on its middle meridian (so that moving east or west is more than a shift)? */

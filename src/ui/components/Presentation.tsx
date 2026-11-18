@@ -7,6 +7,8 @@ import { defaultShot, timeAt, cameraAt, RESOLUTIONS, FRAME_RATES, shotTransition
 import { PASS_DEFS, runExport, exportPassesOf, estimateExportBytes, scaledBytes, formatBytes } from '../../presentation/export-driver.ts';
 import { eventsBoxOf, type EventsBox } from '../../presentation/events-box.ts';
 import { LOOKS, LOOK_IDS, GRADES, resolveLook, type LookId, type GradeId, type ShotLook } from '../../presentation/looks.ts';
+import { isSpaceMap } from '../../world-model/world-settings.ts';
+import { spaceCamera } from '../../space/space-view.ts';
 import { LABEL_FONTS } from '../../render-engine/label-style.ts';
 import { PROJECTIONS, type ProjectionName, type Camera } from '../../render-engine/camera.ts';
 import { parseJSON } from '../../temporal-engine/engine.ts';
@@ -112,6 +114,7 @@ export function ShotEditor() {
   // Re-estimated when anything that changes the files changes (after a pause, in the background).
   const estimateKey = JSON.stringify([row.settings, passes, s.world?.revision]);
   const tr = shotTransitions(shot);
+  const spaceMap = isSpaceMap(w.get('map_space', shot.spaceId));
   const look = resolveLook(shot.look);
   const setLook = (patch: Partial<ShotLook>) => update({ look: { ...(shot.look ?? { id: look.id }), ...patch } });
   const setTr = (patch: Partial<ShotTransitions>) => update({ transitions: { ...tr, ...patch } });
@@ -157,11 +160,11 @@ export function ShotEditor() {
           <p className="muted">Drag and scroll the preview to frame the shot. The view stays still for the whole shot.</p>
           {cameraMoves(shot) && <p className="muted" data-testid="camera-moves">This shot's camera moves (it was made that way before). Framing the preview or resetting makes it still.</p>}
           <div className="buttons">
-            <button onClick={() => setCamera(resetCamera(shot))} data-testid="reset-camera" title="The whole map, straight and centred">Reset camera</button>
+            <button onClick={() => setCamera(spaceMap ? spaceCamera() : resetCamera(shot))} data-testid="reset-camera" title={spaceMap ? 'All of it in view, from above at an angle' : 'The whole map, straight and centred'}>Reset camera</button>
           </div>
-          <label>Projection<select value={shot.camera[0].camera.projection} onChange={(e) => update({ camera: shot.camera.map((k) => ({ ...k, camera: { ...k.camera, projection: e.target.value as ProjectionName } })) })}>
+          {spaceMap ? <p className="muted">Drag the preview to turn the view, Shift-drag to move it, scroll to zoom; a double-click on a star turns the view round it.</p> : <label>Projection<select value={shot.camera[0].camera.projection} onChange={(e) => update({ camera: shot.camera.map((k) => ({ ...k, camera: { ...k.camera, projection: e.target.value as ProjectionName } })) })}>
             {shot.camera[0].camera.projection === 'flat' ? <option value="flat">Flat map (plan)</option> : PROJECTIONS.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select></label>
+          </select></label>}
           <label>Rotation (degrees)<NumberField min={-360} max={360} step={1} value={Math.round(liveCamera.rotation)} onCommit={(n) => setCamera({ ...liveCamera, rotation: n })} testId="camera-rotation" /></label>
         </Group>
         <Group title="Transitions">

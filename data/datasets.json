@@ -118,5 +118,22 @@
     "usedFor": "The ice surface of Greenland and Antarctica (and the land around Greenland) in data/terrain/earth-4096.bin",
     "retrieved": "2026-11-18",
     "converted": "Means of the overview pixels (3 to 10 km) in each 0.0879° cell, south of 60° S and within 59°-84° N, 74°-10° W; a cell partly at sea takes the sea floor of the terrain tiles for that part."
+  },
+  {
+    "id": "hyg",
+    "name": "HYG star database",
+    "version": "v4.1",
+    "source": "https://www.astronexus.com/hyg (files from https://github.com/astronexus/HYG-Database)",
+    "licence": "CC BY-SA 4.0",
+    "credit": "Star positions: HYG database v4.1 by David Nash (astronexus.com), CC BY-SA 4.0.",
+    "usedFor": "Space maps of the nearby stars: every star of the database within 50 light-years of the Sun (data/stars/nearby-50ly.json)",
+    "retrieved": "2026-11-18",
+    "converted": "Stars within 50 light-years kept; positions turned from parsecs on equatorial axes into light-years on galactic axes and rounded to 0.001 light-years; names made from the proper name, Bayer letter or Flamsteed number with the constellation, or the Gliese, HD or Hipparcos number, and a second name written out (\"Epsilon Eridani\"); nothing else changed. The converted file is under the same licence (CC BY-SA 4.0).",
+    "sources": [
+      {
+        "file": "hygdata_v41.csv",
+        "sha256": "d9f69fd86bbf90a4e4d52b4c5c53eacfa6dfc0bfdef85bfd94f095e0bebe4ebd"
+      }
+    ]
   }
 ]

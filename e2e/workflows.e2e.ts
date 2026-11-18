@@ -2667,6 +2667,42 @@ try {
     assert.equal(await page.evaluate((id) => !!(window as any).__mapmaker.store.world.get('sequence', id), shotId), false, 'the shot is gone');
   });
 
+  await h.step('Playing a shot: Play runs through its frames at its pace and stops at its end; Pause and the frame slider', async () => {
+    await page.getByTestId('mode-world').click();
+    const shotId = await page.evaluate(() => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const settings = B.defaultShot(s.spaceId, { lon: 10, lat: 48, zoom: 1, rotation: 0, projection: 'equirectangular' }, s.time, s.time, 24, 1.5);
+      const id = s.execute((w: any) => B.commands.createSequence(w, 'Playback', settings));
+      s.set({ shotId: id, shotFrame: 0, presentCamera: null, mode: 'present' });
+      return id as string;
+    });
+    await page.getByTestId('play').waitFor();
+    const state = () => page.evaluate(() => { const s = (window as any).__mapmaker.store; return { frame: s.shotFrame as number, playing: s.playing as boolean }; });
+    const t0 = Date.now();
+    await page.getByTestId('play').click();
+    await page.waitForFunction(() => (window as any).__mapmaker.store.shotFrame >= 6);
+    assert.equal((await state()).playing, true, 'playing');
+    await page.waitForFunction(() => !(window as any).__mapmaker.store.playing, undefined, { timeout: 15000 });
+    const end = await state(), took = (Date.now() - t0) / 1000;
+    assert.equal(end.frame, 35, 'stopped on its last frame');
+    assert.ok(took >= 1.2 && took < 8, `at about its pace (${took.toFixed(1)} s for 1.5 s)`);
+    assert.match((await page.getByTestId('frame-info').textContent()) ?? '', /Frame 36 \/ 36/);
+    // Played again from the start, paused part way.
+    await page.getByTestId('play').click();
+    await page.waitForFunction(() => (window as any).__mapmaker.store.shotFrame >= 4 && (window as any).__mapmaker.store.shotFrame < 30);
+    await page.getByTestId('play').click();
+    const paused = await state();
+    assert.equal(paused.playing, false);
+    await page.waitForTimeout(300);
+    assert.equal((await state()).frame, paused.frame, 'paused where it was');
+    // The slider goes to a frame.
+    await page.getByTestId('frame-slider').fill('12');
+    assert.equal((await state()).frame, 12);
+    // Undone.
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ mode: 'world', shotId: null }));
+    for (let i = 0; i < 4 && (await page.evaluate((id) => !!(window as any).__mapmaker.store.world.get('sequence', id), shotId)); i++) { await page.getByTestId('undo').click(); await h.saved(); }
+  });
+
   await h.step('TIFF sequences: a shot exported as ZIP-compressed TIFF files with straight alpha, read back at the preview size; undone', async () => {
     await page.getByTestId('mode-world').click();
     const shotId = await page.evaluate(() => {
@@ -2702,6 +2738,227 @@ try {
     await page.evaluate(() => (window as any).__mapmaker.store.set({ mode: 'world', shotId: null }));
     for (let i = 0; i < 5 && (await page.evaluate((id) => !!(window as any).__mapmaker.store.world.get('sequence', id), shotId)); i++) { await page.getByTestId('undo').click(); await h.saved(); }
     assert.equal(await page.evaluate((id) => !!(window as any).__mapmaker.store.world.get('sequence', id), shotId), false);
+  });
+
+  await h.step('A star map: the stars within 50 light-years in three dimensions; a star chosen and its panel; turned, zoomed and centred; star systems held by a country from a date; a lane between two stars; a shot of it exported; back to Earth', async () => {
+    await page.getByTestId('mode-world').click();
+    await page.getByRole('button', { name: '+ Map' }).click();
+    await page.getByTestId('new-map-stars').check();
+    await page.getByTestId('new-map-stars-note').waitFor();
+    await page.getByTestId('new-map-name').fill('Nearby stars');
+    await page.getByRole('button', { name: 'Create map' }).click();
+    await page.waitForFunction(() => { const s = (window as any).__mapmaker.store; return s.world.get('map_space', s.spaceId)?.kind === 'space'; });
+    // The stars drawn: the Sun in the middle, Alpha Centauri somewhere around it.
+    await page.waitForFunction(() => !!(window as any).__mapmaker.starToPage(71456));
+    const hook = <T,>(name: string, ...args: unknown[]) => page.evaluate(([n, a]) => (window as any).__mapmaker[n as string](...(a as unknown[])), [name, args] as const) as Promise<T>;
+    const sun = await hook<[number, number]>('starToPage', 0), middle = await hook<[number, number]>('spaceMiddle');
+    assert.ok(Math.hypot(sun[0] - middle[0], sun[1] - middle[1]) < 1, `the Sun in the middle (${sun} against ${middle})`);
+    assert.match((await page.getByTestId('space-note').textContent()) ?? '', /\d{3} stars within 50 light-years/);
+    const names = await page.evaluate(() => (window as any).__mapmaker.spaceNames() as string[]);
+    assert.ok(names.includes('Sirius') && names.includes('Sol'), `named stars written (${names.slice(0, 8).join(', ')}…)`);
+    // A click on a star: its panel.
+    const acen = await hook<[number, number]>('starToPage', 71456);
+    await page.mouse.click(acen[0], acen[1]);
+    await page.getByTestId('star-panel').waitFor();
+    assert.match((await page.getByTestId('star-name').textContent()) ?? '', /Rigil Kentaurus|Toliman/);
+    assert.match((await page.getByTestId('star-distance').textContent()) ?? '', /^4\.3\d light-years$/);
+    await h.screenshot('star-map');
+    // Dragged: the view turns around the Sun (it stays in the middle; Alpha Centauri moves).
+    await page.mouse.move(middle[0] + 150, middle[1] + 120);
+    await page.mouse.down();
+    await page.mouse.move(middle[0] + 250, middle[1] + 160, { steps: 6 });
+    await page.mouse.up();
+    await page.waitForTimeout(200);
+    const turned = await hook<[number, number]>('starToPage', 71456), sun2 = await hook<[number, number]>('starToPage', 0);
+    assert.ok(Math.hypot(sun2[0] - middle[0], sun2[1] - middle[1]) < 1, 'the Sun still in the middle');
+    assert.ok(Math.hypot(turned[0] - acen[0], turned[1] - acen[1]) > 3, `Alpha Centauri moved as the view turned (${acen} to ${turned})`);
+    // Zoomed in: farther from the middle.
+    const proxima0 = await hook<[number, number]>('starToPage', 70666);
+    await page.mouse.move(middle[0], middle[1]);
+    await page.mouse.wheel(0, -400);
+    await page.waitForTimeout(200);
+    const proxima1 = await hook<[number, number]>('starToPage', 70666);
+    assert.ok(Math.hypot(proxima1[0] - middle[0], proxima1[1] - middle[1]) > 1.5 * Math.hypot(proxima0[0] - middle[0], proxima0[1] - middle[1]), 'zooming in spreads the stars out');
+    // The view turned around the star chosen.
+    await page.getByTestId('star-centre').click();
+    await page.waitForTimeout(200);
+    const centred = await hook<[number, number]>('starToPage', (await page.evaluate(() => (window as any).__mapmaker.store.selection.id)) as number);
+    assert.ok(Math.hypot(centred[0] - middle[0], centred[1] - middle[1]) < 1, 'the chosen star in the middle');
+    await page.getByTestId('space-home').click();
+    // Star systems held over time (D111): Alpha Centauri given to a new country from 2150, with the tool.
+    await h.newCountry('Terran Union');
+    const terra = await page.evaluate(() => (window as any).__mapmaker.store.world.all('entity').find((e: any) => e.name === 'Terran Union').id as string);
+    await h.setDate('2150');
+    await page.getByTestId('tool-systems').click();
+    await page.getByTestId('systems-owner').selectOption(terra);
+    assert.match((await page.getByTestId('systems-hint').textContent()) ?? '', /held by Terran Union from/);
+    await page.waitForTimeout(200);
+    const acenNow = await hook<[number, number]>('starToPage', 71456);
+    const ringBefore = await page.evaluate(([x, y]) => {
+      const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement, r = c.getBoundingClientRect(), k = c.width / r.width;
+      return Array.from(c.getContext('2d')!.getImageData(Math.round((x - r.left) * k) - 14, Math.round((y - r.top) * k) - 14, 29, 29).data);
+    }, acenNow);
+    await page.mouse.click(acenNow[0], acenNow[1]);
+    await page.waitForFunction(([id]) => { const s = (window as any).__mapmaker.store; return s.engine.systemsAt(s.spaceId, s.time).get(71456) === id; }, [terra] as const);
+    await page.getByTestId('star-holder').waitFor();
+    assert.match((await page.getByTestId('star-holder').textContent()) ?? '', /Terran Union/);
+    // Its realm glows around it in the country's colour.
+    const ringAfter = await page.evaluate(([x, y]) => {
+      const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement, r = c.getBoundingClientRect(), k = c.width / r.width;
+      return Array.from(c.getContext('2d')!.getImageData(Math.round((x - r.left) * k) - 14, Math.round((y - r.top) * k) - 14, 29, 29).data);
+    }, acenNow);
+    let tinted = 0;
+    for (let i = 0; i < ringAfter.length; i += 4) if (Math.max(Math.abs(ringAfter[i] - ringBefore[i]), Math.abs(ringAfter[i + 1] - ringBefore[i + 1]), Math.abs(ringAfter[i + 2] - ringBefore[i + 2])) > 12) tinted++;
+    assert.ok(tinted > 40, `the realm drawn around Alpha Centauri (${tinted} pixels changed)`);
+    // Not before 2150.
+    await h.setDate('2149');
+    await page.waitForTimeout(150);
+    assert.match((await page.getByTestId('star-holder').textContent()) ?? '', /Nobody/);
+    await h.setDate('2150');
+    // A box with Ctrl around the Sun: every star in it given at once (one undo step).
+    const held0 = await page.evaluate(() => { const s = (window as any).__mapmaker.store; return s.engine.systemsAt(s.spaceId, s.time).size as number; });
+    const sunAt = await hook<[number, number]>('starToPage', 0);
+    await page.keyboard.down('Control');
+    await page.mouse.move(sunAt[0] - 40, sunAt[1] - 40);
+    await page.mouse.down();
+    await page.mouse.move(sunAt[0] + 40, sunAt[1] + 40, { steps: 5 });
+    await page.mouse.up();
+    await page.keyboard.up('Control');
+    await page.waitForFunction((n) => { const s = (window as any).__mapmaker.store; return s.engine.systemsAt(s.spaceId, s.time).size > n + 2; }, held0);
+    // Only the stars in the box (the Sun is a system of its own, not of every single star).
+    const held1 = await page.evaluate(() => { const s = (window as any).__mapmaker.store; return s.engine.systemsAt(s.spaceId, s.time).size as number; });
+    assert.ok(held1 < held0 + 120, `the stars in the box, not all of them (${held1 - held0} given)`);
+    await h.screenshot('star-map-realm');
+    // A lane from the Sun to Alpha Centauri with the Lanes tool (D112): a star, then another.
+    await page.getByTestId('tool-lanes').click();
+    await page.getByTestId('lanes-owner').selectOption(terra);
+    assert.match((await page.getByTestId('lanes-hint').textContent()) ?? '', /Click a star, then another/);
+    const sunP = await hook<[number, number]>('starToPage', 0), acenP = await hook<[number, number]>('starToPage', 71456);
+    await page.mouse.click(sunP[0], sunP[1]);
+    await page.mouse.click(acenP[0], acenP[1]);
+    await page.waitForFunction(() => { const s = (window as any).__mapmaker.store; return s.engine.lanesAt(s.spaceId, s.time).some((l: any) => l.a === 0 && l.b === 71456 && l.progress === 1); });
+    await page.getByTestId('star-lane').first().waitFor();
+    assert.match((await page.getByTestId('star-lane').first().textContent()) ?? '', /to Sol.*Terran Union/);
+    await page.getByTestId('tool-select').click();
+    // A shot of the star map, exported: a frame of stars (the Sun bright in its middle).
+    const frame = await page.evaluate(() => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const settings = B.defaultShot(s.spaceId, s.camera, s.time, s.time, 24, 2);
+      const id = s.execute((w: any) => B.commands.createSequence(w, 'Stars', settings));
+      const shot = JSON.parse(s.world.get('sequence', id).settings);
+      const canvas = document.createElement('canvas');
+      canvas.width = 640; canvas.height = 360;
+      const ctx = canvas.getContext('2d')!;
+      B.renderFrame(ctx, new B.MapRenderer(), s.world, s.engine, shot, 0, B.PASS_DEFS.find((d: any) => d.name === 'all'), 640, 360, null, null);
+      const d = ctx.getImageData(0, 0, 640, 360).data;
+      let bright = 0;
+      for (let i = 0; i < d.length; i += 4) if (d[i] + d[i + 1] + d[i + 2] > 450) bright++;
+      const mid = Array.from(ctx.getImageData(320, 180, 1, 1).data).slice(0, 3);
+      // The separate layers: the realms in the territory fills, the lane in the areas and lines. The
+      // stars were given at the shot's first moment: their realm grows in over its first second or so.
+      const painted = (pass: string, f: number) => {
+        B.renderFrame(ctx, new B.MapRenderer(), s.world, s.engine, shot, f, B.PASS_DEFS.find((d: any) => d.name === pass), 640, 360, null, null);
+        const px = ctx.getImageData(0, 0, 640, 360).data;
+        let n = 0;
+        for (let i = 3; i < px.length; i += 4) if (px[i] > 30) n++;
+        return n;
+      };
+      const last = shot.frames - 1;
+      return { id: id as string, bright, mid, growing: painted('fills', 6), realms: painted('fills', last), lanes: painted('features', last), labels: painted('labels', last) };
+    });
+    assert.ok(frame.bright > 200, `stars in the exported frame (${frame.bright} bright pixels)`);
+    assert.ok(frame.realms > 200 && frame.lanes > 5 && frame.labels > 200, `realms, lanes and names in their own layers (${frame.realms}, ${frame.lanes}, ${frame.labels} pixels)`);
+    assert.ok(frame.growing < frame.realms * 0.8, `the realm grows in (${frame.growing} pixels at a quarter of a second, ${frame.realms} at the end)`);
+    assert.ok(frame.mid.reduce((a, b) => a + b, 0) > 600, `the Sun in its middle (${frame.mid})`);
+    // Back to Earth; the shot and the star map undone.
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
+    await page.locator('header select').first().selectOption({ label: 'Earth' });
+    await page.waitForFunction(() => { const s = (window as any).__mapmaker.store; return s.world.get('map_space', s.spaceId)?.kind === 'sphere'; });
+    for (let i = 0; i < 10 && (await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.kind === 'space'))); i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.kind === 'space')), false, 'the star map undone');
+    assert.ok(frame.id);
+  });
+
+  await h.step('The solar system: the planets where they are on the date viewed, moving as the date changes; true or compressed distances; a planet\'s panel; undone', async () => {
+    await page.getByTestId('mode-world').click();
+    await page.getByRole('button', { name: '+ Map' }).click();
+    await page.getByTestId('new-map-solar').check();
+    await page.getByTestId('new-map-solar-note').waitFor();
+    await page.getByRole('button', { name: 'Create map' }).click();
+    await page.waitForFunction(() => { const s = (window as any).__mapmaker.store; const m = s.world.get('map_space', s.spaceId); return m?.kind === 'space' && JSON.parse(m.settings).space.catalogue === 'solar'; });
+    await h.setDate('1 January 2030');
+    await page.waitForFunction(() => !!(window as any).__mapmaker.starToPage(3));
+    const hook = <T,>(name: string, ...args: unknown[]) => page.evaluate(([n, a]) => (window as any).__mapmaker[n as string](...(a as unknown[])), [name, args] as const) as Promise<T>;
+    const middle = await hook<[number, number]>('spaceMiddle');
+    const sun = await hook<[number, number]>('starToPage', 0);
+    assert.ok(Math.hypot(sun[0] - middle[0], sun[1] - middle[1]) < 1, 'the Sun in the middle');
+    const names = await page.evaluate(() => (window as any).__mapmaker.spaceNames() as string[]);
+    const named = ['Mercury', 'Venus', 'Earth', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto'].filter((n) => names.includes(n));
+    assert.ok(named.length >= 7 && names.includes('Jupiter') && names.includes('Neptune'), `the planets named (${names.join(', ')})`);
+    assert.match((await page.getByTestId('space-note').textContent()) ?? '', /The Sun and the planets on 1 January 2030/);
+    // Half a year on, the Earth is on the other side of the Sun; Neptune has hardly moved.
+    const earth0 = await hook<[number, number]>('starToPage', 3), neptune0 = await hook<[number, number]>('starToPage', 8);
+    await h.setDate('1 July 2030');
+    await page.waitForTimeout(200);
+    const earth1 = await hook<[number, number]>('starToPage', 3), neptune1 = await hook<[number, number]>('starToPage', 8);
+    const side = (p: [number, number]) => [p[0] - middle[0], p[1] - middle[1]];
+    const [a, b] = [side(earth0), side(earth1)];
+    assert.ok(a[0] * b[0] + a[1] * b[1] < 0, `the Earth across the Sun after half a year (${earth0} to ${earth1})`);
+    assert.ok(Math.hypot(neptune1[0] - neptune0[0], neptune1[1] - neptune0[1]) < Math.hypot(earth1[0] - earth0[0], earth1[1] - earth0[1]) / 5, 'Neptune hardly moved');
+    await h.screenshot('solar-system');
+    // True to scale: the inner planets close in round the Sun.
+    const marsCompressed = await hook<[number, number]>('starToPage', 4);
+    await page.getByTestId('solar-scale').click();
+    await page.waitForFunction(() => { const s = (window as any).__mapmaker.store; return JSON.parse(s.world.get('map_space', s.spaceId).settings).space.scale === 'true'; });
+    await page.waitForTimeout(200);
+    const marsTrue = await hook<[number, number]>('starToPage', 4);
+    assert.ok(Math.hypot(marsTrue[0] - middle[0], marsTrue[1] - middle[1]) < Math.hypot(marsCompressed[0] - middle[0], marsCompressed[1] - middle[1]) * 0.6, 'Mars nearer the Sun when true to scale');
+    // Mars's panel: its distance from the Sun on the date viewed.
+    await page.getByTestId('solar-scale').click();
+    await page.waitForTimeout(200);
+    const mars = await hook<[number, number]>('starToPage', 4);
+    await page.mouse.click(mars[0], mars[1]);
+    await page.getByTestId('star-panel').waitFor();
+    assert.equal(await page.getByTestId('star-name').textContent(), 'Mars');
+    assert.match((await page.getByTestId('star-distance').textContent()) ?? '', /^1\.\d\d au \([\d,]+ million km\) on 1 July 2030$/);
+    // Undone; back to Earth.
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
+    await page.locator('header select').first().selectOption({ label: 'Earth' });
+    for (let i = 0; i < 6 && (await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.kind === 'space'))); i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.kind === 'space')), false);
+  });
+
+  await h.step('An invented star map: stars of one\'s own from a seed, made again from the next seed; found by search; undone', async () => {
+    await page.getByTestId('mode-world').click();
+    await page.getByRole('button', { name: '+ Map' }).click();
+    await page.getByTestId('new-map-invented').check();
+    await page.getByTestId('new-map-invented-note').waitFor();
+    await page.getByTestId('new-map-invented-count').fill('150');
+    await page.getByTestId('new-map-invented-seed').fill('5');
+    await page.getByTestId('new-map-name').fill('The Reach');
+    await page.getByRole('button', { name: 'Create map' }).click();
+    await page.waitForFunction(() => /150 invented stars within 50 light-years · seed 5/.test(document.querySelector('[data-testid=space-note]')?.textContent ?? ''));
+    await page.waitForFunction(() => !!(window as any).__mapmaker.starToPage(1));
+    const first = (await page.evaluate(() => (window as any).__mapmaker.starToPage(1))) as [number, number];
+    // Found by its name in the search box, chosen, the view turned round it.
+    const name = (await page.evaluate(() => (window as any).__mapmaker.spaceNames().find((n: string) => n !== 'Sol' && !/^KX-/.test(n)))) as string;
+    await page.getByTestId('search').fill(name);
+    await page.getByTestId('search-result').filter({ hasText: name }).first().click();
+    await page.getByTestId('star-panel').waitFor();
+    assert.equal(await page.getByTestId('star-name').textContent(), name);
+    await h.screenshot('invented-stars');
+    // Other stars from the next seed.
+    await page.getByTestId('invented-again').click();
+    await page.waitForFunction(() => /seed 6/.test(document.querySelector('[data-testid=space-note]')?.textContent ?? ''));
+    await page.getByTestId('space-home').click();
+    await page.waitForTimeout(200);
+    const other = (await page.evaluate(() => (window as any).__mapmaker.starToPage(1))) as [number, number];
+    assert.ok(Math.hypot(other[0] - first[0], other[1] - first[1]) > 2, 'other stars');
+    // Undone; back to Earth.
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
+    await page.locator('header select').first().selectOption({ label: 'Earth' });
+    for (let i = 0; i < 6 && (await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.kind === 'space'))); i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.kind === 'space')), false);
   });
 
   await h.step('History Health lists the overlap, nothing else; no browser errors', async () => {

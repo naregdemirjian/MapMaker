@@ -85,6 +85,27 @@ export interface ShapeIntent { op: 'shape'; feature: string; parts?: number[][];
 /** A relationship holds (`on`) or no longer holds from a date on (an effect of kind 'relate'). */
 export interface RelateIntent { op: 'relate'; relation: string; on: boolean }
 
+/**
+ * A star of a space map held by a country or faction from a date on (an effect of kind 'system', D111):
+ * `entity` '' when nobody holds it from then on.
+ */
+export interface SystemIntent { op: 'system'; star: number; entity: string }
+/** One compiled step of who holds a star: from a moment on. */
+export interface SystemStep { t: Instant; entity: string; effectId: string; eventId: string; precedence: number; eventSeq: number; ordinal: number }
+
+/**
+ * A lane between two stars of a space map from a date on (an effect of kind 'lane', D112): open (`on`)
+ * or closed, belonging to a country or faction (`entity`, '' for none). Opened in an event with a
+ * length and `grow` in its transition, it grows from star `a` to star `b` over the rest of the event.
+ */
+export interface LaneIntent { op: 'lane'; a: number; b: number; on: boolean; entity: string }
+/** One compiled step of a lane: open or closed from a moment on, growing until `growEnd` if it does. */
+export interface LaneStep { t: Instant; on: boolean; a: number; b: number; entity: string; growEnd: Instant | null; effectId: string; eventId: string; precedence: number; eventSeq: number; ordinal: number }
+/** A lane as it is at a moment: its stars (from `a` toward `b`), who it belongs to, and how far it has grown (1: whole). */
+export interface LaneAt { a: number; b: number; entity: string; progress: number; effectId: string }
+/** The key of a lane: its two stars in order. */
+export const laneKey = (a: number, b: number) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+
 /** One compiled step of a relationship: it holds, or not, from a moment on. */
 export interface RelateStep { t: Instant; on: boolean; effectId: string; eventId: string; precedence: number; eventSeq: number; ordinal: number }
 
@@ -235,6 +256,10 @@ export class Engine {
   private tracks = new Map<string, Map<string, Waypoint[]>>();
   /** Every relationship's steps (in time order; one step per moment). */
   private relates = new Map<string, RelateStep[]>();
+  /** Who holds each star of each space map (D111): map -> star -> steps in time order (one per moment). */
+  private systems = new Map<string, Map<number, SystemStep[]>>();
+  /** The lanes between stars (D112): map -> lane key -> steps in time order (one per moment). */
+  private lanes = new Map<string, Map<string, LaneStep[]>>();
   /** Every feature's shapes over time, by layer then feature (in time order; one step per moment). */
   private shapes = new Map<string, Map<string, ShapeStep[]>>();
   private effectAssignments = new Map<string, Assignment[]>();
@@ -486,14 +511,50 @@ export class Engine {
     this.names.clear();
     this.shapes.clear();
     this.relates.clear();
+    this.systems.clear();
+    this.lanes.clear();
     const count = (t: Instant) => { if (t.day !== -Infinity) { this.pointTimes.push(t); this.countTime(t, 1, false); } };
     for (const ef of effects) {
-      if (ef.kind !== 'rename' && ef.kind !== 'place' && ef.kind !== 'shape' && ef.kind !== 'relate') continue;
+      if (ef.kind !== 'rename' && ef.kind !== 'place' && ef.kind !== 'shape' && ef.kind !== 'relate' && ef.kind !== 'system' && ef.kind !== 'lane') continue;
       this.broken.delete(ef.id);
       const ev = events.get(ef.event_id);
       const problem = (message: string) => this.broken.set(ef.id, [{ kind: 'broken', effectId: ef.id, eventId: ev ? ev.id : ef.event_id, message }]);
       if (!ev) { problem('This change belongs to an event that no longer exists.'); continue; }
       if (!this.isActiveEvent(ev)) continue;
+      if (ef.kind === 'lane') {
+        const it = parseJSON<LaneIntent | null>(ef.intent, null);
+        if (!it || !Number.isInteger(it.a) || !Number.isInteger(it.b) || it.a === it.b || !ef.space_id || !w.get('map_space', ef.space_id)) { problem('This lane between stars refers to a map that no longer exists.'); continue; }
+        if (it.entity && !w.get('entity', it.entity)) { problem('This lane belongs to a country or faction that no longer exists.'); continue; }
+        let bySpace = this.lanes.get(ef.space_id);
+        if (!bySpace) this.lanes.set(ef.space_id, (bySpace = new Map()));
+        const key = laneKey(it.a, it.b);
+        let steps = bySpace.get(key);
+        if (!steps) bySpace.set(key, (steps = []));
+        const t = effectTime(ef, ev);
+        // Growing from a to b over the rest of its event, if asked to.
+        let growEnd: Instant | null = null;
+        const tr = parseJSON<{ grow?: unknown } | null>(ef.transition, null);
+        if (it.on && tr?.grow === true && !isUntracked(ef) && ev.end_day !== null) {
+          const end = fromStore(ev.end_day, ev.end_ms ?? 0);
+          if (compare(end, t) > 0) { growEnd = end; this.animEnds.push(end); this.countTime(end, 1, false); }
+        }
+        steps.push({ t, on: !!it.on, a: it.a, b: it.b, entity: it.entity ?? '', growEnd, effectId: ef.id, eventId: ev.id, precedence: isUntracked(ef) ? UNTRACKED_PRECEDENCE : ev.precedence, eventSeq: ev.created_seq, ordinal: ef.ordinal });
+        count(t);
+        continue;
+      }
+      if (ef.kind === 'system') {
+        const it = parseJSON<SystemIntent | null>(ef.intent, null);
+        if (!it || !Number.isInteger(it.star) || !ef.space_id || !w.get('map_space', ef.space_id)) { problem('This change of who holds a star refers to a map that no longer exists.'); continue; }
+        if (it.entity && !w.get('entity', it.entity)) { problem('This star is given to a country or faction that no longer exists.'); continue; }
+        let bySpace = this.systems.get(ef.space_id);
+        if (!bySpace) this.systems.set(ef.space_id, (bySpace = new Map()));
+        let steps = bySpace.get(it.star);
+        if (!steps) bySpace.set(it.star, (steps = []));
+        const t = effectTime(ef, ev);
+        steps.push({ t, entity: it.entity ?? '', effectId: ef.id, eventId: ev.id, precedence: isUntracked(ef) ? UNTRACKED_PRECEDENCE : ev.precedence, eventSeq: ev.created_seq, ordinal: ef.ordinal });
+        count(t);
+        continue;
+      }
       if (ef.kind === 'relate') {
         const it = parseJSON<RelateIntent | null>(ef.intent, null);
         const r = it ? w.get('relation', it.relation) : undefined;
@@ -563,6 +624,15 @@ export class Engine {
       steps.sort((a, b) => compare(a.t, b.t) || a.precedence - b.precedence || a.eventSeq - b.eventSeq || a.ordinal - b.ordinal);
       for (let i = steps.length - 2; i >= 0; i--) if (compare(steps[i].t, steps[i + 1].t) === 0) steps.splice(i, 1);
     }
+    for (const bySpace of this.lanes.values()) for (const steps of bySpace.values()) {
+      steps.sort((a, b) => compare(a.t, b.t) || a.precedence - b.precedence || a.eventSeq - b.eventSeq || a.ordinal - b.ordinal);
+      for (let i = steps.length - 2; i >= 0; i--) if (compare(steps[i].t, steps[i + 1].t) === 0) steps.splice(i, 1);
+    }
+    for (const bySpace of this.systems.values()) for (const steps of bySpace.values()) {
+      steps.sort((a, b) => compare(a.t, b.t) || a.precedence - b.precedence || a.eventSeq - b.eventSeq || a.ordinal - b.ordinal);
+      // Several changes at one moment: the last in order stands.
+      for (let i = steps.length - 2; i >= 0; i--) if (compare(steps[i].t, steps[i + 1].t) === 0) steps.splice(i, 1);
+    }
     for (const byLayer of this.shapes.values()) for (const steps of byLayer.values()) {
       steps.sort((a, b) => compare(a.t, b.t) || a.precedence - b.precedence || a.eventSeq - b.eventSeq || a.ordinal - b.ordinal);
       // Several shapes at one moment: the last in order stands.
@@ -592,7 +662,7 @@ export class Engine {
       if (s.table === 'vertex' || s.table === 'face') { spaces.add(((s.after ?? s.before) as { space_id: string }).space_id); continue; }
       if (s.table === 'effect') {
         effects.add(((s.after ?? s.before) as EffectRow).id);
-        for (const r of [s.before, s.after] as Array<EffectRow | null>) if (r && (r.kind === 'rename' || r.kind === 'place' || r.kind === 'shape' || r.kind === 'relate')) points = true;
+        for (const r of [s.before, s.after] as Array<EffectRow | null>) if (r && (r.kind === 'rename' || r.kind === 'place' || r.kind === 'shape' || r.kind === 'relate' || r.kind === 'system' || r.kind === 'lane')) points = true;
         continue;
       }
       // An area, line or point that came or went: its shapes are compiled again (with the names and places).
@@ -611,7 +681,7 @@ export class Engine {
       if (!(before && now && sameStanding(before, now))) moved.add(id);
     }
     const all = moved.size || points ? w.all('effect') : null;
-    if (moved.size) for (const ef of all!) if (moved.has(ef.event_id)) { effects.add(ef.id); if (ef.kind === 'rename' || ef.kind === 'place' || ef.kind === 'shape' || ef.kind === 'relate') points = true; }
+    if (moved.size) for (const ef of all!) if (moved.has(ef.event_id)) { effects.add(ef.id); if (ef.kind === 'rename' || ef.kind === 'place' || ef.kind === 'shape' || ef.kind === 'relate' || ef.kind === 'system' || ef.kind === 'lane') points = true; }
     // Parcels: one that is gone may not be referred to; land whose outline changed may change how far an animation reaches.
     const again = new Set<string>();
     const gone: number[] = [];
@@ -802,6 +872,53 @@ export class Engine {
   relationSteps(relationId: string): RelateStep[] {
     this.ensure();
     return this.relates.get(relationId) ?? [];
+  }
+
+  /** Who holds each star of a space map at instant t (D111): star -> country or faction (stars held by nobody left out). */
+  systemsAt(spaceId: string, t: Instant): Map<number, string> {
+    this.ensure();
+    const out = new Map<number, string>();
+    for (const [star, steps] of this.systems.get(spaceId) ?? []) {
+      let k = -1;
+      for (let lo = 0, hi = steps.length - 1; lo <= hi;) { const m = (lo + hi) >> 1; if (compare(steps[m].t, t) <= 0) { k = m; lo = m + 1; } else hi = m - 1; }
+      if (k >= 0 && steps[k].entity) out.set(star, steps[k].entity);
+    }
+    return out;
+  }
+
+  /** The lanes open on a space map at instant t (D112), with how far each has grown. */
+  lanesAt(spaceId: string, t: Instant): LaneAt[] {
+    this.ensure();
+    const out: LaneAt[] = [];
+    for (const steps of this.lanes.get(spaceId)?.values() ?? []) {
+      let k = -1;
+      for (let lo = 0, hi = steps.length - 1; lo <= hi;) { const m = (lo + hi) >> 1; if (compare(steps[m].t, t) <= 0) { k = m; lo = m + 1; } else hi = m - 1; }
+      if (k < 0 || !steps[k].on) continue;
+      const st = steps[k];
+      const progress = st.growEnd && compare(t, st.growEnd) < 0 ? Math.max(0, Math.min(1, diffMs(st.t, t) / Math.max(1, diffMs(st.t, st.growEnd)))) : 1;
+      out.push({ a: st.a, b: st.b, entity: st.entity, progress, effectId: st.effectId });
+    }
+    return out;
+  }
+
+  /** A lane's steps (opened and closed), in time order (D112). */
+  laneSteps(spaceId: string, a: number, b: number): LaneStep[] {
+    this.ensure();
+    return this.lanes.get(spaceId)?.get(laneKey(a, b)) ?? [];
+  }
+
+  /** The lanes of a space map that have ever touched a star (their keys and steps). */
+  lanesOf(spaceId: string, star: number): Array<{ key: string; steps: LaneStep[] }> {
+    this.ensure();
+    const out: Array<{ key: string; steps: LaneStep[] }> = [];
+    for (const [key, steps] of this.lanes.get(spaceId) ?? []) if (steps.some((x) => x.a === star || x.b === star)) out.push({ key, steps });
+    return out;
+  }
+
+  /** Who held a star of a space map, step by step in time order (D111). */
+  systemSteps(spaceId: string, star: number): SystemStep[] {
+    this.ensure();
+    return this.systems.get(spaceId)?.get(star) ?? [];
   }
 
   /** The characters on a map with a track (placed at least once). */

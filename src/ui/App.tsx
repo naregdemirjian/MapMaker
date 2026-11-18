@@ -4,6 +4,8 @@ import { TopBar, Outliner, ToolBar, Inspector, Toasts } from './components/Panel
 import { ShowDialog } from './components/ShowDialog.tsx';
 import { SeaLevelDialog } from './components/SeaLevelDialog.tsx';
 import { MapView } from './components/MapView.tsx';
+import { SpaceView } from './components/SpaceView.tsx';
+import { isSpaceMap } from '../world-model/world-settings.ts';
 import { Timeline } from './components/Timeline.tsx';
 import { EditPrompt, NewWorldDialog, NewEventDialog, VersionsDialog, HealthDialog, DataSourcesDialog, ProjectPicker, OfflineNotice, AskDialog } from './components/Dialogs.tsx';
 import { ShotsPanel, ShotEditor, ShotTimeline } from './components/Presentation.tsx';
@@ -46,7 +48,7 @@ export function App() {
       {s.mode === 'world' ? <Outliner /> : <ShotsPanel />}
       <main className="center">
         {s.mode === 'world' && <ToolBar />}
-        <MapView />
+        {isSpaceMap(s.world.get('map_space', s.spaceId)) ? <SpaceView /> : <MapView />}
       </main>
       {s.mode === 'world' ? <Inspector /> : <ShotEditor />}
       <footer className="bottom">{s.mode === 'world' ? <Timeline /> : <ShotTimeline />}</footer>

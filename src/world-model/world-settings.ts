@@ -95,3 +95,29 @@ export function seaLevelPoints(space: Pick<MapSpaceRow, 'settings' | 'radius_m' 
 export function sculptOf(space: Pick<MapSpaceRow, 'settings' | 'radius_m' | 'kind'> | null | undefined): TerrainStamp[] {
   return space && terrainSourceOf(space) ? cleanStamps(worldSettings(space).sculpt) : [];
 }
+
+/**
+ * A space map's settings (D110): which stars it shows: the nearby stars, the solar system (D113) and how
+ * its distances are drawn, or stars of the user's own (D114) made from a seed.
+ */
+export interface SpaceSettings {
+  catalogue: 'nearby' | 'solar' | 'invented'; radiusLy: number; scale?: 'true' | 'compressed';
+  invented?: { seed: number; count: number; radiusLy: number; shape: 'sphere' | 'disc' };
+}
+
+/** Whether a map is a map of the stars (D110). */
+export const isSpaceMap = (space: MapSpaceRow | null | undefined): boolean => space?.kind === 'space';
+
+/** A space map's settings, or null for other maps. */
+export function spaceSettingsOf(space: MapSpaceRow | null | undefined): SpaceSettings | null {
+  if (!space || space.kind !== 'space') return null;
+  const o = (worldSettings(space) as { space?: Partial<SpaceSettings> }).space ?? {};
+  if (o.catalogue === 'solar') return { catalogue: 'solar', radiusLy: 50, scale: o.scale === 'true' ? 'true' : 'compressed' };
+  if (o.catalogue === 'invented') {
+    const i = (o.invented ?? {}) as Partial<NonNullable<SpaceSettings['invented']>>;
+    const num = (v: unknown, lo: number, hi: number, d: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, Math.round(v))) : d);
+    const inv = { seed: num(i.seed, 1, 1e9, 1), count: num(i.count, 2, 3000, 300), radiusLy: num(i.radiusLy, 5, 5000, 50), shape: i.shape === 'disc' ? 'disc' as const : 'sphere' as const };
+    return { catalogue: 'invented', radiusLy: inv.radiusLy, invented: inv };
+  }
+  return { catalogue: 'nearby', radiusLy: typeof o.radiusLy === 'number' && o.radiusLy > 0 ? o.radiusLy : 50 };
+}

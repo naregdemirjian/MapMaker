@@ -7,6 +7,9 @@ import { mapGeoJSON, eventsCSV, entitiesCSV, relationsCSV, featuresCSV, isoDate 
 import { type Instant, compare, fromStore } from '../../core-time/index.ts';
 import { isFeatureKind } from '../../render-engine/feature-style.ts';
 import { DateField, fmt } from './Panels.tsx';
+import { spaceSettingsOf } from '../../world-model/world-settings.ts';
+import { spaceScene } from '../../space/scene.ts';
+import { findStars, type Star } from '../../space/catalogue.ts';
 
 /** Go to what was found: choose it, and bring the date and the view to where it can be seen. */
 export function goToResult(r: SearchResult): void {
@@ -68,7 +71,15 @@ export function SearchBox() {
   const [open, setOpen] = useState(false);
   const [at, setAt] = useState(0);
   const box = useRef<HTMLDivElement | null>(null);
-  const results = useMemo(() => (q.trim() && s.world ? search(s.world, s.engine, q) : []), [q, s.world?.revision]);
+  const found = useMemo(() => (q.trim() && s.world ? search(s.world, s.engine, q) : []), [q, s.world?.revision]);
+  // On a map of space, its stars or planets too (D110, D113), after what the project holds.
+  const settings = spaceSettingsOf(s.world?.get('map_space', s.spaceId));
+  const stars = useMemo(() => {
+    if (!settings || !q.trim()) return [];
+    const scene = spaceScene(settings, s.time);
+    return scene.cat ? findStars(scene.cat, q, 8).map((st) => ({ star: st, what: scene.unit === 'au' ? (st.id === 0 ? 'The Sun' : st.id === 9 ? 'Dwarf planet' : 'Planet') : st.id === 0 ? 'The Sun' : `Star, ${st.dist.toFixed(1)} light-years`, context: st.alt })) : [];
+  }, [q, s.spaceId, settings?.catalogue, s.time.day]);
+  const results: Array<{ r: SearchResult } | { star: Star; what: string; context: string }> = [...found.map((r) => ({ r })), ...stars];
   useEffect(() => setAt(0), [q]);
   useEffect(() => {
     const away = (e: PointerEvent) => { if (box.current && !box.current.contains(e.target as Node)) setOpen(false); };
@@ -83,7 +94,16 @@ export function SearchBox() {
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
   }, []);
-  const pick = (r: SearchResult) => { goToResult(r); setOpen(false); setQ(''); (document.activeElement as HTMLElement | null)?.blur(); };
+  const pick = (item: (typeof results)[number]) => {
+    if ('r' in item) goToResult(item.r);
+    else {
+      // A star or planet: chosen, and the view turned around it.
+      const st = item.star;
+      s.set({ selection: { kind: 'star', id: st.id }, mode: 'world', tool: 'select' });
+      s.setCamera({ ...s.camera, target: [st.x, st.y, st.z] });
+    }
+    setOpen(false); setQ(''); (document.activeElement as HTMLElement | null)?.blur();
+  };
   return (
     <div className="search" ref={box}>
       <input value={q} placeholder="Search… (Ctrl+F)" onChange={(e) => { setQ(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)} data-testid="search"
@@ -95,12 +115,16 @@ export function SearchBox() {
         }} />
       {open && q.trim() && (
         <div className="search-results" data-testid="search-results">
-          {results.map((r, i) => (
-            <div key={`${r.kind}:${r.id}`} className={`search-result ${i === at ? 'on' : ''}`} onPointerDown={(e) => { e.preventDefault(); pick(r); }} onPointerMove={() => i !== at && setAt(i)} data-testid="search-result">
-              <div><b>{r.title}</b> <span className="muted">· {r.what}</span></div>
-              {r.context && <div className="muted small-note">{r.context}</div>}
-            </div>
-          ))}
+          {results.map((item, i) => {
+            const key = 'r' in item ? `${item.r.kind}:${item.r.id}` : `star:${item.star.id}`;
+            const title = 'r' in item ? item.r.title : item.star.name, what = 'r' in item ? item.r.what : item.what, context = 'r' in item ? item.r.context : item.context;
+            return (
+              <div key={key} className={`search-result ${i === at ? 'on' : ''}`} onPointerDown={(e) => { e.preventDefault(); pick(item); }} onPointerMove={() => i !== at && setAt(i)} data-testid="search-result">
+                <div><b>{title}</b> <span className="muted">· {what}</span></div>
+                {context && <div className="muted small-note">{context}</div>}
+              </div>
+            );
+          })}
           {!results.length && <div className="muted pad">Nothing found.</div>}
         </div>
       )}

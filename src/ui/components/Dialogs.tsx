@@ -16,6 +16,7 @@ import { placementMode } from './Characters.tsx';
 import { defaultEnd, typeSettings, type Spread } from '../../domain/event-types.ts';
 import { PLANET_PRESETS, planetParamsOf, type PlanetParams, type PlanetPreset } from '../../terrain/planet.ts';
 import { planetPreview } from '../../terrain/planet-preview.ts';
+import { spaceCamera } from '../../space/space-view.ts';
 
 function Modal({ title, children, onClose, wide }: { title: string; children: React.ReactNode; onClose: () => void; wide?: boolean }) {
   return (
@@ -207,18 +208,27 @@ export function NewWorldDialog() {
   const [name, setName] = useState('');
   const [km, setKm] = useState('6371');
   const [earth, setEarth] = useState(false);
-  const [kind, setKind] = useState<'round' | 'planet' | 'flat'>('round');
+  const [kind, setKind] = useState<'round' | 'planet' | 'flat' | 'stars' | 'solar' | 'invented'>('round');
+  const [inv, setInv] = useState({ seed: newSeed(), count: 300, radiusLy: 50, shape: 'sphere' as 'sphere' | 'disc' });
   const flat = kind === 'flat';
   const [widthKm, setWidthKm] = useState('20');
   const [planet, setPlanet] = useState<PlanetParams>(() => planetParamsOf({ seed: newSeed(), preset: 'earthlike' })!);
   const close = () => s.set({ dialog: null });
   const create = () => {
-    const id = flat
+    const id = kind === 'stars' || kind === 'solar' || kind === 'invented'
+      ? s.execute((w) => cmd.createSpaceMap(w, name.trim() || (kind === 'solar' ? 'The solar system' : kind === 'invented' ? 'Invented stars' : 'Nearby stars'), kind === 'stars' ? 'nearby' : kind, kind === 'invented' ? inv : undefined))
+      : flat
       ? s.execute((w) => cmd.createFlatMap(w, name.trim() || 'New flat map', Number(widthKm)))
       : kind === 'planet'
         ? s.execute((w) => cmd.createPlanet(w, name.trim() || 'New planet', Number(km), planet))
         : s.execute((w) => cmd.createWorld(w, name.trim() || 'New map', Number(km), earth ? 'natural-earth' : 'none'));
-    if (id) { s.set({ spaceId: id, layerId: s.world!.all('layer').find((l) => l.space_id === id)?.id ?? '', selection: null }); close(); }
+    if (id) {
+      const space = kind === 'stars' || kind === 'solar' || kind === 'invented';
+      s.set({ spaceId: id, layerId: s.world!.all('layer').find((l) => l.space_id === id)?.id ?? '', selection: null, ...(space ? { tool: 'select' as const } : {}) });
+      // A map of space opens looking down at its plane at an angle, all of it in view.
+      if (space) s.setCamera(spaceCamera());
+      close();
+    }
   };
   return (
     <Modal title="New map" onClose={close} wide={kind === 'planet'}>
@@ -227,9 +237,20 @@ export function NewWorldDialog() {
         <label className="check"><input type="radio" name="map-kind" checked={kind === 'round'} onChange={() => setKind('round')} /> Round: a planet or moon (Earth, another real body, or a blank one of your own)</label>
         <label className="check"><input type="radio" name="map-kind" checked={kind === 'planet'} onChange={() => setKind('planet')} data-testid="new-map-planet" /> A planet of your own, generated: continents, seas and mountains from a seed</label>
         <label className="check"><input type="radio" name="map-kind" checked={flat} onChange={() => setKind('flat')} data-testid="new-map-flat" /> Flat: a city, a battlefield, a region (a plan, true to scale)</label>
+        <label className="check"><input type="radio" name="map-kind" checked={kind === 'stars'} onChange={() => setKind('stars')} data-testid="new-map-stars" /> The stars around the Sun: every known star within 50 light-years, in three dimensions</label>
+        <label className="check"><input type="radio" name="map-kind" checked={kind === 'solar'} onChange={() => setKind('solar')} data-testid="new-map-solar" /> The solar system: the Sun and the planets where they are on the date viewed</label>
+        <label className="check"><input type="radio" name="map-kind" checked={kind === 'invented'} onChange={() => setKind('invented')} data-testid="new-map-invented" /> Stars of your own: an invented star map, made from a seed</label>
       </div>
-      <label>Name<input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={flat ? 'e.g. Old Town' : 'e.g. Aster Prime'} data-testid="new-map-name" /></label>
-      {flat ? <>
+      <label>Name<input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={flat ? 'e.g. Old Town' : kind === 'stars' ? 'e.g. Nearby stars' : kind === 'solar' ? 'e.g. The solar system' : kind === 'invented' ? 'e.g. The Veyran Reach' : 'e.g. Aster Prime'} data-testid="new-map-name" /></label>
+      {kind === 'invented' ? <>
+        <div className="two">
+          <label>Stars<input type="number" min={2} max={3000} value={inv.count} onChange={(e) => setInv({ ...inv, count: Math.max(2, Math.min(3000, Number(e.target.value) || 2)) })} data-testid="new-map-invented-count" /></label>
+          <label>Reaching (light-years)<input type="number" min={5} max={5000} value={inv.radiusLy} onChange={(e) => setInv({ ...inv, radiusLy: Math.max(5, Math.min(5000, Number(e.target.value) || 5)) })} data-testid="new-map-invented-radius" /></label>
+          <label>Seed<input type="number" min={1} value={inv.seed} onChange={(e) => setInv({ ...inv, seed: Math.max(1, Math.round(Number(e.target.value) || 1)) })} data-testid="new-map-invented-seed" /></label>
+          <label>Shape<select value={inv.shape} onChange={(e) => setInv({ ...inv, shape: e.target.value as 'sphere' | 'disc' })}><option value="sphere">A sphere round the home star</option><option value="disc">A flat disc</option></select></label>
+        </div>
+        <p className="muted" data-testid="new-map-invented-note">Stars round a home star, most of them red dwarfs as around the Sun, with names of their own (the faintest numbered). The same seed gives the same stars; held stars and lanes work as on the real map.</p>
+      </> : kind === 'solar' ? <p className="muted" data-testid="new-map-solar-note">The planets and Pluto on their orbits, where they are on any date from their orbital elements (JPL): they move as the date changes. Give them to countries and factions, join them with lanes, as on a star map.</p> : kind === 'stars' ? <p className="muted" data-testid="new-map-stars-note">982 stars from the HYG database: real positions, colours by type, names. Drag to turn the view, scroll to zoom, click a star to see what it is.</p> : flat ? <>
         <label>Width (km)<input type="number" min={0.01} max={5000} value={widthKm} onChange={(e) => setWidthKm(e.target.value)} data-testid="new-map-width" /></label>
         <p className="muted">Borders on a flat map are straight lines; the scale bar reads in metres and kilometres.</p>
       </> : <>

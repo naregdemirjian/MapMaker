@@ -31,13 +31,15 @@ export type Mode = 'world' | 'present';
 /** One line of a right-click menu: an action, a heading, or a divider. */
 export type MenuItem = { label: string; run: () => void; danger?: boolean; testId?: string } | { heading: string } | 'divider';
 
-export type Tool = 'select' | 'lasso' | 'polygon' | 'pen' | 'vertex' | 'place' | 'erase' | 'feature' | 'split' | 'regions' | 'sculpt' | 'field' | 'disaster';
+export type Tool = 'select' | 'lasso' | 'polygon' | 'pen' | 'vertex' | 'place' | 'erase' | 'feature' | 'split' | 'regions' | 'sculpt' | 'field' | 'disaster' | 'systems' | 'lanes';
 export type Selection =
   | { kind: 'entity'; id: string }
   | { kind: 'event'; id: string }
   | { kind: 'point'; lon: number; lat: number }
   | { kind: 'shot'; id: string }
   | { kind: 'feature'; id: string }
+  /** A star on a space map (D110), by its catalogue id. */
+  | { kind: 'star'; id: number }
   | null;
 
 export type PendingEdit =

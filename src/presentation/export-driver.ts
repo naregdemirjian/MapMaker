@@ -15,7 +15,12 @@ import { eventShown, entityStyle } from '../domain/commands.ts';
 import { isFeatureKind } from '../render-engine/feature-style.ts';
 import { preloadImages, prepareVideos } from '../render-engine/assets.ts';
 import { basemapSourceOf, loadBasemap, loadBasemapDetail, loadDatasetRecords, DEFAULT_BASEMAP_STYLE, type Basemap, type BasemapStyle } from '../render-engine/basemap.ts';
-import { shown, minLakeKm2, terrainLook, seaLevelPoints, planetOf, sculptOf, terrainSourceOf } from '../world-model/world-settings.ts';
+import { shown, minLakeKm2, terrainLook, seaLevelPoints, planetOf, sculptOf, terrainSourceOf, isSpaceMap, spaceSettingsOf } from '../world-model/world-settings.ts';
+import { makeSpaceView } from '../space/space-view.ts';
+import { SpaceRenderer } from '../space/space-renderer.ts';
+import { loadNearbyStars } from '../space/catalogue.ts';
+import { spaceScene } from '../space/scene.ts';
+import { holdingsAt, lanesFor } from '../space/realms.ts';
 import { stampsAt } from '../terrain/sculpt.ts';
 import { sculpted } from '../terrain/sculpt-cache.ts';
 import { riversNow } from '../terrain/river-cache.ts';
@@ -83,6 +88,7 @@ export async function estimateExportBytes(world: World, engine: Engine, shot: Sh
   const W = Math.max(16, Math.round(shot.width * scale)), H = Math.max(16, Math.round(shot.height * scale));
   const k = Math.min(1, 960 / W);
   const w = Math.max(16, Math.round(W * k)), h = Math.max(16, Math.round(H * k));
+  if (isSpaceMap(world.get('map_space', shot.spaceId))) await loadNearbyStars();
   const basemap = await basemapFor(world, shot.spaceId);
   const terrain = await terrainFor(world, shot.spaceId);
   const canvas = new OffscreenCanvas(w, h);
@@ -186,9 +192,10 @@ export async function detailForFrame(world: World, shot: ShotSettings, frame: nu
 /** Render one frame of one pass into a 2D context of the given size (`detail`: from detailForFrame). */
 export function renderFrame(ctx: CanvasRenderingContext2D, renderer: MapRenderer, world: World, engine: Engine, shot: ShotSettings, frame: number, def: ExportPassDef, width: number, height: number, basemap: Basemap | null = null, ground: Ground | null = null, detail: DetailGrid | null = null): void {
   const t = timeAt(shot, frame);
+  const space = world.get('map_space', shot.spaceId);
+  if (isSpaceMap(space)) { renderSpaceFrame(ctx, world, engine, shot, frame, def, width, height); return; }
   const view = makeView(cameraAt(shot, frame), width, height);
   // What the map shows in exports (D84), on top of the shot's own choices.
-  const space = world.get('map_space', shot.spaceId);
   const on = (k: Parameters<typeof shown>[2]) => shown(space, 'export', k);
   const labels = !!shot.labels && on('names'), cities = shot.cities !== false && on('cities');
   const look = terrainLook(space), terrainShown = !!look && on('terrain');
@@ -212,6 +219,36 @@ export function renderFrame(ctx: CanvasRenderingContext2D, renderer: MapRenderer
     if (ls?.finish) finishLook(ctx, 0, 0, width, height, ls.look, width / 1920);
   }
   if (def.overlays) drawShotOverlays(ctx, width, height, world, shot, frame, t, view);
+}
+
+/** One space renderer for exports (it keeps nothing between frames but where it drew). */
+let spaceRenderer: SpaceRenderer | null = null;
+
+/**
+ * A frame of a space map (D110): the stars from the shot's camera. "All" draws everything; the
+ * background pass the dark sky, the far stars and the rings; the labels pass the names; the texts
+ * pass the texts. Other passes are empty on a space map.
+ */
+function renderSpaceFrame(ctx: CanvasRenderingContext2D, world: World, engine: Engine, shot: ShotSettings, frame: number, def: ExportPassDef, width: number, height: number): void {
+  const t = timeAt(shot, frame);
+  const settings = spaceSettingsOf(world.get('map_space', shot.spaceId));
+  const scene = spaceScene(settings, t);
+  const view = makeSpaceView(cameraAt(shot, frame), width, height, scene.radius);
+  const all = def.name === 'all', back = def.passes.includes('background'), names = def.passes.includes('labels');
+  const realms = !all && def.passes.includes('fills'), lanes = !all && def.passes.includes('features');
+  ctx.clearRect(0, 0, width, height);
+  if (all || back || (names && shot.labels) || realms || lanes) {
+    spaceRenderer ??= new SpaceRenderer();
+    spaceRenderer.render(ctx, view, scene.cat, {
+      rings: scene.rings, axisLabel: scene.axisLabel, orbits: scene.orbits, realmReach: scene.realmReach,
+      transparent: all ? shot.transparent : !def.background, grid: shot.graticule && (all || back), dropLines: all, names: shot.labels && (all || names) ? 'auto' : 'none',
+      only: all ? undefined : back ? 'background' : realms ? 'realms' : lanes ? 'lanes' : 'names',
+      holdings: holdingsAt(world, engine, shot.spaceId, t, (t0) => screenSecondsSince(shot, frame, t0)), lanes: lanesFor(world, engine, shot.spaceId, t),
+    });
+    const ls = lookStyles(shot);
+    if (ls?.finish) finishLook(ctx, 0, 0, width, height, ls.look, width / 1920);
+  }
+  if (def.overlays) drawShotOverlays(ctx, width, height, world, shot, frame, t);
 }
 
 /** Two 32-bit hashes of a frame's pixels: frames with the same pair are taken to be the same picture. */
@@ -243,6 +280,9 @@ export async function runExport(o: {
   // TIFF files (D109) are encoded here from the frame's pixels; PNG by the browser's own encoder.
   const tiff = o.shot.format === 'tiff' || o.shot.format === 'tiff-zip', zipped = o.shot.format === 'tiff-zip';
   // Loaded before the first frame, so every frame is drawn from the same complete data.
+  const spaceMap = isSpaceMap(o.world.get('map_space', o.shot.spaceId));
+  const nearbyStars = spaceMap && spaceSettingsOf(o.world.get('map_space', o.shot.spaceId))?.catalogue !== 'solar';
+  if (nearbyStars) await loadNearbyStars();
   const basemap = await basemapFor(o.world, o.shot.spaceId);
   const terrain = await terrainFor(o.world, o.shot.spaceId);
   // Pictures and videos: every picture loaded, and every video sought to its frame before drawing.
@@ -254,7 +294,7 @@ export async function runExport(o: {
   // Credit lines for the data drawn in these frames (written into the manifest and the guide).
   // (Close-up tiles credited whenever the map may use them: the Earth with finer heights close in, D101.)
   const closeUp = !!terrain?.key.startsWith(EARTH_TERRAIN_KEY) && !!terrainLook(o.world.get('map_space', o.shot.spaceId))?.detail;
-  const drawn = new Set([...(basemap || terrain?.cover ? ['natural-earth'] : []), ...(terrain?.key.startsWith(EARTH_TERRAIN_KEY) ? ['terrain-tiles', 'copernicus-dem'] : []), ...(closeUp ? ['terrain-tiles-close'] : [])]);
+  const drawn = new Set([...(basemap || terrain?.cover ? ['natural-earth'] : []), ...(terrain?.key.startsWith(EARTH_TERRAIN_KEY) ? ['terrain-tiles', 'copernicus-dem'] : []), ...(closeUp ? ['terrain-tiles-close'] : []), ...(nearbyStars ? ['hyg'] : [])]);
   const credits = drawn.size ? (await loadDatasetRecords()).filter((d) => drawn.has(d.id)).map((d) => `${d.name} ${d.version} (${d.licence}): ${d.credit}`) : [];
   const job = await Api.startExport(o.projectId, {
     credits,

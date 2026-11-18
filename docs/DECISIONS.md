@@ -61,6 +61,127 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D114. Invented star maps, and finding stars (Stage 11)
+
+- **Stars of one's own.** "+ Map", "Stars of your own": a star map of a setting that is not our neighbourhood, made
+  from a seed: so many stars (2 to 3,000) within so many light-years of a home star, in a sphere or a flat disc. The
+  kinds of star come in about the shares they have around the Sun (seven in ten red dwarfs, then orange dwarfs,
+  Sun-like stars, a few white dwarfs and giants), each with a brightness of its kind; names are made from syllables,
+  every one its own, the faintest given catalogue numbers ("KX-1043"). The same seed always gives the same stars, so
+  nothing but the settings is stored. "Other stars" on the map makes them again from the next seed (one undo step);
+  stars keep their numbers, so held stars and lanes stay with the same numbers. Everything of a star map works on it:
+  realms, lanes, the panel, shots and exports.
+- **Finding stars.** On a map of space, the search box (Ctrl+F) finds its stars or planets too, by name or other name
+  ("tau ceti", "epsilon eridani"), after what the project holds: choosing one chooses it and turns the view round it.
+- **Tests.** `invented.test.ts` (the same seed the same stars, another seed others; their number, reach and order; a
+  disc flat; mostly red dwarfs; names their own; made once for the same settings; the map made, made again and
+  undone, refused when wrong); `e2e/workflows` 'An invented star map' (150 stars from seed 5, one found by search and
+  chosen, other stars from seed 6; undone).
+
+### D113. The solar system, where the planets are on any date (Stage 11)
+
+- **A map of the solar system** ("+ Map", "The solar system"): the Sun, the eight planets and Pluto on their orbits,
+  each where it is on the date viewed, worked out from the Keplerian elements and their rates of JPL's "Approximate
+  Positions of the Planets" (E. M. Standish, table 1, the mean ecliptic and equinox of J2000; fitted to 1800-2050,
+  the orbits keep their shape outside it and their phases drift slowly). Checked against the great opposition of
+  Mars: on 28 August 2003 the Earth and Mars are in line with the Sun and 0.373 au apart (0.3727 au in fact).
+  Scrubbing the date moves the planets; a shot across years shows them going round.
+- **Seen as the stars are** (the same camera, rings and names), on the ecliptic: rings at 1, 5, 10, 20, 30, 40 and
+  50 au, each orbit drawn in its planet's colour, the planets in their colours and sizes. Distances are compressed
+  by default (the square root of the distance, the outer orbits where they are) so that the inner planets have room;
+  one click shows them true to scale (one undo step, kept with the map).
+- **Held and joined like stars**: the Star systems tool gives planets to countries and factions over time (their
+  realms move with them), the Lanes tool joins them (a lane between moving planets follows them), as on a star map
+  (D111, D112). A planet's panel gives its distance from the Sun on the date viewed and how long it takes to go round.
+- **Not yet**: moons, asteroids and comets.
+- **Tests.** `solar.test.ts` (the 2003 opposition; the Earth nearest the Sun in January; every planet within its
+  orbit's reach from 1800 to 2300; a year once round, Jupiter about 30° a year; Pluto above the plane; orbits closed
+  and through their planets; compressed and true distances; the catalogue drawn; the map made, its scale chosen and
+  undone; planets held); `e2e/workflows` 'The solar system' (made from "+ Map": the Sun in the middle, the planets
+  named, the Earth across the Sun half a year on and Neptune hardly moved, Mars nearer the Sun true to scale, Mars's
+  panel at its distance; undone).
+
+### D112. Lanes between stars: routes, expeditions and fleets (Stage 11)
+
+- **A lane** joins two stars of a star map from a date on: a route, a jump lane, a trade or supply line. The Lanes
+  tool makes one with two clicks (a star, then another), from the date viewed or in the event being recorded,
+  belonging to the country or faction chosen (drawn in its colour) or to nobody (pale blue). A star's panel lists the
+  lanes it has at the date viewed, and closes one from that date.
+- **Expeditions and fleets.** A lane recorded into an event with a length grows from the first star to the second
+  over the rest of the event, a pointed head at its front while it is on its way: a colony ship, an expedition, a
+  fleet. Shots and exports show it growing frame by frame.
+- **Stored as changes** of kind `lane` (the two stars, open or closed, its owner; `{"grow": true}` in the
+  transition when it grows), compiled like held stars (`lanesAt`, `laneSteps`, `lanesOf`); the two stars in either
+  order are the same lane; the same lane at the same moment in the same event is replaced; a deleted owner's lanes go
+  with it.
+- **Realms in shots.** A star newly held now grows into its holder's realm over 1.2 seconds of the shot, its glow
+  widening from nothing, instead of appearing at once.
+- **Tests.** `space.test.ts` (a lane from 2150, not before; an expedition growing over a ten-year event, half way at
+  half time, from the star it set out from, whole after; closed in 2250 with the stars given the other way round;
+  replaced at the same moment; refused for one star, another kind of map, an owner gone; the owner deleted and back;
+  undone); `e2e/workflows` 'A star map' (a lane from the Sun to Alpha Centauri with the Lanes tool, listed in the
+  star's panel).
+
+### D111. Star systems held over time: realms in space (Stage 11)
+
+- **Holding a star.** On a star map, a country or faction holds stars from dates: the Star systems tool gives the star
+  system clicked, the star and its companions (or, with Ctrl, every system in a box dragged), to the country or
+  faction chosen, from the date viewed, or in the event being recorded; "Nobody" gives them up. (A companion sits
+  where its primary is, so a click means the system: Alpha Centauri A and B are given together.) Each is a change of kind `system` (the star and who holds it from
+  then on), dated like every other change: no file change, one undo step for the click or the box, and giving a
+  star again at the same moment in the same event replaces that change. A deleted country's or faction's holdings go
+  with it.
+- **Compiled like names and places.** The engine keeps each star's steps in time order (one per moment, the later in
+  order winning) and answers who holds every star at a moment (`systemsAt`) and a star's history (`systemSteps`);
+  changes in events follow their event (alternative versions and moves included).
+- **Drawn as realms.** Every star held glows in its holder's colour, all of one holder's glows joined into one region
+  (laid on lightly, with its edge), a ring round each star, and the holder's name (as it is at the moment shown) over
+  its stars. A realm grows and shrinks as stars change hands; shots and exports show it as it is at each frame.
+- **A star's panel** tells who holds it on the date viewed and lists every change, with "Go to" and a button to take
+  one out.
+- **Tests.** `space.test.ts` (three stars given from 2150, not held before; Proxima taken in an event of 2200, given
+  up in 2250, the others kept; the same moment replaced; refused on another kind of map, for someone gone, without
+  stars; the holder deleted and its holdings with it, undone; the gift undone); `e2e/workflows` 'A star map' (Alpha
+  Centauri given to a new country from 2150 with the tool: its panel names the holder, its realm drawn in the
+  country's colour, nobody in 2149; a box with Ctrl gives the stars round the Sun; undone).
+
+### D110. Space maps: the stars within 50 light-years (Stage 11)
+
+- **Data.** The HYG star database (v4.1, by David Nash, CC BY-SA 4.0; the converted file is under the same licence):
+  every star of it within 50 light-years of the Sun, 982 with the Sun, `data/stars/nearby-50ly.json`
+  (`scripts/fetch-stars.mjs`). Positions are turned from parsecs on equatorial axes into light-years on galactic
+  axes (x toward the galactic centre, y the way the galaxy turns, z toward its north pole), so the galactic plane
+  is the map's floor. Each star keeps its name (the proper name, else its Bayer letter or Flamsteed number with the
+  constellation, else its Gliese, HD or Hipparcos number), a second name written out ("Epsilon Eridani", "61 Cygni"),
+  its spectral type, absolute magnitude and the primary of its system (companions named as their primary take a
+  letter: "61 Cyg B"). HYG is built on Hipparcos, Yale and Gliese; stars found since (some brown dwarfs) are not in it.
+  Listed under Data sources and credited in exports of star maps.
+- **A new kind of map.** "+ Map", "The stars around the Sun": a map of kind `space` (no file change: the kind is a
+  text column). It keeps an empty parcel map like every map, so that what asks for one finds it.
+- **Seeing it.** A camera circles a point (the Sun at first): dragging turns it around the galactic pole and tilts it
+  over the plane, Shift-drag or the right button moves the point it circles, the wheel zooms, a double-click on a star
+  (or "Turn the view around it" in its panel) circles that star, ⌂ goes back to the Sun. Gentle perspective: the
+  stars of the near side are drawn up to half as large again as those of the far side. Rings on the galactic plane
+  every 10 light-years with their distances, spokes, the way to the galactic centre; each star in its colour (blue O
+  and B to orange-red M, white dwarfs bluish white), larger when brighter, with a line down to the plane (dashed
+  below it); far stars behind, denser toward the Milky Way. Names: the Sun, named stars and the brightest first,
+  more as the view closes in, none overlapping.
+- **A star's panel.** A click chooses a star system (its primary star): its names, distance, kind in words and
+  spectral type, brightness, its direction in galactic longitude and latitude, and the stars of its system, each of
+  which can be chosen from there.
+- **Shots and exports.** A shot of a star map is framed by dragging and zooming its preview like any shot (its camera
+  still); texts, looks and the events box as on other maps. "All" exports everything; the background pass the sky,
+  far stars and rings; the territory fills pass the realms (D111); the areas, lines and points pass the lanes (D112);
+  the labels pass the star names; the other passes are empty on a star map. "Reset camera" gives the map's own
+  starting view (all of it, from above at an angle); there is no projection to choose.
+- **Tests.** `space.test.ts` (982 stars within 50 light-years, nearest first, the Sun in the middle, Proxima, Sirius
+  and Vega at their distances, Barnard's Star toward the galactic centre, systems and companions, found by either
+  name; kinds, colours and sizes; the camera: the point looked at in the middle, nearer stars larger, from above and
+  from the side, zooming, turning and moving by dragging, nothing behind it; the map made, kept on reopening, undone);
+  `e2e/workflows` 'A star map' (made from "+ Map": the Sun in the middle, names written, a click on Alpha Centauri
+  shows its panel at 4.3 light-years, dragging turns the view around the Sun, zooming spreads the stars, a star
+  centred, an exported frame of stars with the Sun bright in its middle; undone).
+
 ### D109. TIFF sequences (Stage 10)
 
 - **A choice per shot.** Under Output quality, "File format": PNG (as before), TIFF uncompressed, or TIFF

@@ -2,7 +2,7 @@
 // in-memory world and returns the exact row diffs to save (and to undo). Commands never draw anything.
 import { World, Tx, newId } from '../world-model/world.ts';
 import {
-  Engine, canonicalFaces, leafDescendants, hashFaces, parseJSON, effectTime, eventStart, type Resolution, type TransitionSpec, type AnnexIntent, type PlaceIntent, type RenameIntent, type ShapeIntent, type RelateIntent, type FeatureAnimStyle, isFeatureAnim,
+  Engine, canonicalFaces, leafDescendants, hashFaces, parseJSON, effectTime, eventStart, type Resolution, type TransitionSpec, type AnnexIntent, type PlaceIntent, type RenameIntent, type ShapeIntent, type RelateIntent, type SystemIntent, type LaneIntent, laneKey, type FeatureAnimStyle, isFeatureAnim,
 } from '../temporal-engine/engine.ts';
 import { type Instant, toStore, fromStore, NEG_INF, compare } from '../core-time/index.ts';
 import {
@@ -170,6 +170,44 @@ export function clearTerrainStamps(world: World, spaceId: string): CommandResult
   if (!space) throw new Error('That map no longer exists.');
   const { sculpt: _old, ...rest } = worldSettings(space);
   return run(world, `Remove the sculpting of "${space.name}"`, (tx) => { tx.update('map_space', { ...space, settings: JSON.stringify(rest) }); });
+}
+
+/**
+ * A map of the stars around the Sun (D110): the HYG database's stars within 50 light-years, seen in
+ * three dimensions. It keeps an empty parcel map, like every map, so that what asks for one finds it.
+ */
+export function createSpaceMap(world: World, name: string, catalogue: 'nearby' | 'solar' | 'invented' = 'nearby', invented?: { seed: number; count: number; radiusLy: number; shape: 'sphere' | 'disc' }): CommandResult<string> {
+  if (catalogue === 'invented' && (!invented || !(invented.count >= 2 && invented.count <= 3000) || !(invented.radiusLy >= 5 && invented.radiusLy <= 5000))) throw new Error('An invented star map has between 2 and 3,000 stars, within 5 to 5,000 light-years.');
+  return run(world, catalogue === 'solar' ? `Create solar system map "${name}"` : `Create star map "${name}"`, (tx) => {
+    const id = createWorldIn(tx, name, 6371.0088, 'none');
+    const space = tx.world.get('map_space', id)!;
+    const sp = catalogue === 'solar' ? { catalogue: 'solar', radiusLy: 50, scale: 'compressed' }
+      : catalogue === 'invented' ? { catalogue: 'invented', radiusLy: invented!.radiusLy, invented: { ...invented, seed: Math.round(invented!.seed), count: Math.round(invented!.count) } }
+      : { catalogue: 'nearby', radiusLy: 50 };
+    tx.update('map_space', { ...space, kind: 'space', settings: JSON.stringify({ projection: 'equirectangular', basemap: 'none', space: sp }) });
+    return id;
+  });
+}
+
+/**
+ * An invented star map made again from other settings (D114): another seed, more or fewer stars, another
+ * size or shape. Stars keep their numbers, so what is held and the lanes stay with the same numbers.
+ */
+export function setInventedStars(world: World, spaceId: string, invented: { seed: number; count: number; radiusLy: number; shape: 'sphere' | 'disc' }): CommandResult {
+  const space = world.get('map_space', spaceId);
+  const o = space ? (worldSettings(space) as { space?: Record<string, unknown> }) : null;
+  if (!space || space.kind !== 'space' || o?.space?.catalogue !== 'invented') throw new Error('Only an invented star map can be made again.');
+  if (!(invented.count >= 2 && invented.count <= 3000) || !(invented.radiusLy >= 5 && invented.radiusLy <= 5000)) throw new Error('An invented star map has between 2 and 3,000 stars, within 5 to 5,000 light-years.');
+  return run(world, 'Make the stars again', (tx) => tx.update('map_space', { ...space, settings: JSON.stringify({ ...o, space: { ...o.space, radiusLy: invented.radiusLy, invented: { ...invented, seed: Math.round(invented.seed), count: Math.round(invented.count) } } }) }));
+}
+
+/** How a solar system map draws its distances (D113): true, or compressed so the inner planets have room. */
+export function setSolarScale(world: World, spaceId: string, scale: 'true' | 'compressed'): CommandResult {
+  const space = world.get('map_space', spaceId);
+  if (!space || space.kind !== 'space') throw new Error('That is not a map of space.');
+  const o = worldSettings(space) as { space?: Record<string, unknown> };
+  if (o.space?.catalogue !== 'solar') throw new Error('Only the solar system has a choice of scale.');
+  return run(world, scale === 'true' ? 'Distances true to scale' : 'Distances compressed', (tx) => tx.update('map_space', { ...space, settings: JSON.stringify({ ...o, space: { ...o.space, scale } }) }));
 }
 
 export function createWorld(world: World, name: string, radiusKm: number, basemap: BasemapSource = 'none'): CommandResult<string> {
@@ -450,7 +488,7 @@ export function deleteEntities(world: World, ids: string[]): CommandResult {
 function purgeFromHistory(tx: Tx, gone: Set<string>): number {
   let n = 0;
   for (const ef of tx.world.all('effect')) {
-    if (ef.kind === 'place' || ef.kind === 'rename') {
+    if (ef.kind === 'place' || ef.kind === 'rename' || ef.kind === 'system' || ef.kind === 'lane') {
       const it = parseJSON<{ entity?: string } | null>(ef.intent, null);
       if (it?.entity && gone.has(it.entity)) { tx.remove('effect', ef.id); n++; }
       continue;
@@ -477,7 +515,7 @@ export function purgeDeletedOwners(world: World): CommandResult<number> {
   for (const ef of world.all('effect')) {
     for (const [, v] of parseJSON<Resolution>(ef.resolution, { set: [] }).set ?? []) if (v && !exists.has(v)) gone.add(v);
     const it = parseJSON<{ entity?: string; from?: string; to?: string } | null>(ef.intent, null);
-    for (const v of [it?.entity, it?.from, it?.to]) if (v && !exists.has(v) && (ef.kind === 'place' || ef.kind === 'annex' || ef.kind === 'rename')) gone.add(v);
+    for (const v of [it?.entity, it?.from, it?.to]) if (v && !exists.has(v) && (ef.kind === 'place' || ef.kind === 'annex' || ef.kind === 'rename' || ef.kind === 'system' || ef.kind === 'lane')) gone.add(v);
   }
   return run(world, 'Remove deleted countries from history', (tx) => purgeFromHistory(tx, gone));
 }
@@ -1313,6 +1351,75 @@ export function placeCharacter(world: World, o: { spaceId: string; entity: strin
   // Characters travel between their places; cities and other places move (if at all) at once.
   const arrive = o.arrive ?? (e.type_id === 'character' ? undefined : 'jump');
   return run(world, `Place ${e.name}`, (tx) => writePlacement(tx, o.spaceId, o.entity, o.mode, { lon, lat: o.lat, arrive }));
+}
+
+/**
+ * Stars of a space map held by a country or faction from a date on (D111): without an event (mode
+ * 'change'), in an event (mode 'new'), or from the beginning (mode 'correct' at NEG_INF). `entity` ''
+ * gives them to nobody from then on. One undo step; giving a star again at the same moment, in the
+ * same event, replaces that change. `label` names them for the undo list.
+ */
+export function holdStars(world: World, o: { spaceId: string; stars: number[]; entity: string; mode: EditMode; label?: string }): CommandResult<number> {
+  const space = world.get('map_space', o.spaceId);
+  if (!space || space.kind !== 'space') throw new Error('Stars are held on star maps.');
+  const e = o.entity ? world.get('entity', o.entity) : null;
+  if (o.entity && !e) throw new Error('That country or faction no longer exists.');
+  const stars = [...new Set(o.stars.filter((x) => Number.isInteger(x) && x >= 0))];
+  if (!stars.length) throw new Error('Choose at least one star.');
+  const what = o.label ?? (stars.length === 1 ? 'a star' : `${stars.length} stars`);
+  return run(world, e ? `Give ${what} to ${e.name}` : `${what[0].toUpperCase()}${what.slice(1)} held by nobody`, (tx) => {
+    const eventId = o.mode.kind === 'new' ? o.mode.eventId : BASE_EVENT_ID;
+    if (o.mode.kind === 'new' && !tx.world.get('event', eventId)) throw new Error('That event no longer exists.');
+    const t: Instant | null = o.mode.kind === 'new' ? o.mode.at ?? null : o.mode.t;
+    const at = t && t.day !== -Infinity ? toStore(t) : null;
+    for (const star of stars) {
+      const intent: SystemIntent = { op: 'system', star, entity: o.entity };
+      const same = tx.world.all('effect').find((f) => f.kind === 'system' && f.space_id === o.spaceId && f.event_id === eventId && f.at_day === (at ? at[0] : null) && f.at_ms === (at ? at[1] : null) && parseJSON<SystemIntent | null>(f.intent, null)?.star === star);
+      if (same) { tx.patch('effect', same.id, { intent: JSON.stringify(intent) }); continue; }
+      tx.insert('effect', {
+        id: newId('eff'), event_id: eventId, ordinal: nextOrdinal(tx.world, eventId), kind: 'system', space_id: o.spaceId, layer_id: null,
+        at_day: at ? at[0] : null, at_ms: at ? at[1] : null, transition: '', intent: JSON.stringify(intent), resolution: JSON.stringify({ set: [] }), basis_hash: '',
+      });
+    }
+    return stars.length;
+  });
+}
+
+/**
+ * A lane between two stars of a space map from a date on (D112): opened (belonging to a country or
+ * faction, or to nobody) or closed. Opened in an event with a length and `grow`, it grows from star `a`
+ * to star `b` over the rest of the event (an expedition, a fleet on its way). One undo step; the same
+ * lane at the same moment in the same event replaces that change.
+ */
+export function setLane(world: World, o: { spaceId: string; a: number; b: number; on: boolean; entity: string; mode: EditMode; grow?: boolean; label?: string }): CommandResult<string> {
+  const space = world.get('map_space', o.spaceId);
+  if (!space || space.kind !== 'space') throw new Error('Lanes join stars on star maps.');
+  if (!Number.isInteger(o.a) || !Number.isInteger(o.b) || o.a < 0 || o.b < 0) throw new Error('Choose two stars.');
+  if (o.a === o.b) throw new Error('A lane joins two different stars.');
+  const e = o.entity ? world.get('entity', o.entity) : null;
+  if (o.entity && !e) throw new Error('That country or faction no longer exists.');
+  const what = o.label ?? 'a lane';
+  return run(world, o.on ? `Open ${what}${e ? ` (${e.name})` : ''}` : `Close ${what}`, (tx) => {
+    const eventId = o.mode.kind === 'new' ? o.mode.eventId : BASE_EVENT_ID;
+    if (o.mode.kind === 'new' && !tx.world.get('event', eventId)) throw new Error('That event no longer exists.');
+    const t: Instant | null = o.mode.kind === 'new' ? o.mode.at ?? null : o.mode.t;
+    const at = t && t.day !== -Infinity ? toStore(t) : null;
+    const intent: LaneIntent = { op: 'lane', a: o.a, b: o.b, on: o.on, entity: o.entity };
+    const transition = o.on && o.grow && o.mode.kind === 'new' ? JSON.stringify({ grow: true }) : '';
+    const key = laneKey(o.a, o.b);
+    const same = tx.world.all('effect').find((f) => {
+      if (f.kind !== 'lane' || f.space_id !== o.spaceId || f.event_id !== eventId || f.at_day !== (at ? at[0] : null) || f.at_ms !== (at ? at[1] : null)) return false;
+      const it = parseJSON<LaneIntent | null>(f.intent, null);
+      return !!it && laneKey(it.a, it.b) === key;
+    });
+    if (same) { tx.patch('effect', same.id, { intent: JSON.stringify(intent), transition }); return same.id; }
+    const id = newId('eff');
+    tx.insert('effect', {
+      id, event_id: eventId, ordinal: nextOrdinal(tx.world, eventId), kind: 'lane', space_id: o.spaceId, layer_id: null,
+      at_day: at ? at[0] : null, at_ms: at ? at[1] : null, transition, intent: JSON.stringify(intent), resolution: JSON.stringify({ set: [] }), basis_hash: '',
+    });
+    return id;
+  });
 }
 
 /** A character leaves the map from a date on (until placed again). */

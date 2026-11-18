@@ -4,7 +4,7 @@ import * as cmd from '../../domain/commands.ts';
 import { SCULPT_TOOLS } from '../../terrain/sculpt.ts';
 import { type Instant, gregorian, fromStore, formatYear, compare, add, NEG_INF } from '../../core-time/index.ts';
 import { BASE_EVENT_ID, type EffectRow } from '../../world-model/schema.ts';
-import { basemapSourceOf, worldSettings, terrainSourceOf, sculptOf } from '../../world-model/world-settings.ts';
+import { basemapSourceOf, worldSettings, terrainSourceOf, sculptOf, isSpaceMap } from '../../world-model/world-settings.ts';
 import { parseJSON, leafDescendants, isUntracked, resolutionOf, type Resolution, type TransitionSpec } from '../../temporal-engine/engine.ts';
 import type { World } from '../../world-model/world.ts';
 import { lonLatToVec } from '../../geo-kernel/vec.ts';
@@ -29,6 +29,7 @@ import { SplitToolOptions } from './SplitMerge.tsx';
 import { RegionToolOptions } from './Regions.tsx';
 import { typeColor } from '../../domain/event-types.ts';
 import { isFeatureKind } from '../../render-engine/feature-style.ts';
+import { StarPanel } from './Stars.tsx';
 
 export const fmt = (t: Instant, precision: 'year' | 'day' | 'minute' = 'day') => gregorian.format(t, precision);
 
@@ -119,7 +120,10 @@ export function TopBar() {
   const spaces = w.all('map_space').sort((a, b) => a.sort_order - b.sort_order);
   const switchSpace = (id: string) => {
     const layer = w.all('layer').find((l) => l.space_id === id && l.kind === 'partition');
-    s.set({ spaceId: id, layerId: layer?.id ?? '', selection: null, presentCamera: null });
+    // (A star map has only the Select tool, D110.)
+    // (Leaving one for another kind of map, a tool of the other kind gives way to Select.)
+    const space = isSpaceMap(w.get('map_space', id));
+    s.set({ spaceId: id, layerId: layer?.id ?? '', selection: null, presentCamera: null, ...(space !== SPACE_TOOLS.includes(s.tool) || s.tool === 'select' ? { tool: 'select' as const } : {}) });
   };
   return (
     <header className="topbar">
@@ -174,6 +178,8 @@ const TOOLS: Array<{ id: Tool; name: string; hint: string }> = [
   { id: 'sculpt', name: 'Terrain', hint: 'Sculpt the terrain: raise and lower ground, draw mountain ranges and valleys, make craters and islands, paint land and sea, smooth, flatten, roughen or erode. A stroke changes the base world or holds from the date viewed.' },
   { id: 'disaster', name: 'Disasters', hint: 'Nuclear strikes, earthquakes, eruptions, floods, wildfires, meteor impacts and droughts: choose one and its size, then click the map. It is placed as an event from the date viewed, its conditions rising and fading by themselves (an impact leaves its crater in the terrain); one undo takes it all back.' },
   { id: 'field', name: 'Conditions', hint: 'Radiation, fire, smoke and ash, floods, destruction and heatmaps: click the map to place a source on a field layer from the date viewed (or in the event being recorded). It rises, lasts and fades by itself.' },
+  { id: 'lanes', name: 'Lanes', hint: 'On a star map: click a star, then another: a lane between them (a route, a jump lane, a supply line) from the date viewed, belonging to the country or faction chosen. Recorded into an event with a length, it grows from the first star to the second over the event: an expedition or a fleet on its way.' },
+  { id: 'systems', name: 'Star systems', hint: 'On a star map: click a star to give it to the country or faction chosen, from the date viewed (or in the event being recorded); hold Ctrl and drag a box to give every star in it. Their realm glows around the stars they hold.' },
 ];
 
 
@@ -203,6 +209,9 @@ function PenControls() {
   );
 }
 
+/** The tools that work on a space map (D110); the others draw on the surface of a world. */
+const SPACE_TOOLS: string[] = ['select', 'systems', 'lanes'];
+
 export function ToolBar() {
   const s = useStore();
   const w = s.world!;
@@ -211,13 +220,35 @@ export function ToolBar() {
   return (
     <>
     <div className="toolbar">
-      {TOOLS.filter((t) => (t.id !== 'sculpt' || terrainSourceOf(w.get('map_space', s.spaceId))) && ((t.id !== 'field' && t.id !== 'disaster') || w.get('map_space', s.spaceId)?.kind === 'sphere')).map((t) => (
+      {TOOLS.filter((t) => (t.id !== 'sculpt' || terrainSourceOf(w.get('map_space', s.spaceId))) && ((t.id !== 'field' && t.id !== 'disaster') || w.get('map_space', s.spaceId)?.kind === 'sphere') && (!isSpaceMap(w.get('map_space', s.spaceId)) || SPACE_TOOLS.includes(t.id)) && ((t.id !== 'systems' && t.id !== 'lanes') || isSpaceMap(w.get('map_space', s.spaceId)))).map((t) => (
         <button key={t.id} className={s.tool === t.id ? 'on' : ''} title={t.hint} onClick={() => s.set({ tool: t.id })} data-testid={`tool-${t.id}`}>{t.name}</button>
       ))}
     </div>
     {/* What a tool needs besides its button lies over the top edge of the map, so that the map
         keeps its size and place whichever tool is chosen (a map that changes size is drawn again in full). */}
     <div className="tool-options-anchor"><div className="tool-options">
+      {s.tool === 'systems' && isSpaceMap(w.get('map_space', s.spaceId)) && (
+        <div className="toolbar sub" data-testid="systems-options">
+          <label className="inline">Give to
+            <select value={s.paintValue ?? ''} onChange={(e) => s.set({ paintValue: e.target.value || null })} data-testid="systems-owner">
+              <option value="">Nobody (no longer held)</option>
+              {owners.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+            </select>
+          </label>
+          <span className="muted" data-testid="systems-hint">Click a star, or hold Ctrl and drag a box around several: {s.paintValue ? `held by ${w.get('entity', s.paintValue)?.name ?? '?'}` : 'held by nobody'} from {rec ? `"${rec.name}"` : fmt(s.time)}.</span>
+        </div>
+      )}
+      {s.tool === 'lanes' && isSpaceMap(w.get('map_space', s.spaceId)) && (
+        <div className="toolbar sub" data-testid="lanes-options">
+          <label className="inline">Belonging to
+            <select value={s.paintValue ?? ''} onChange={(e) => s.set({ paintValue: e.target.value || null })} data-testid="lanes-owner">
+              <option value="">Nobody in particular</option>
+              {owners.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+            </select>
+          </label>
+          <span className="muted" data-testid="lanes-hint">Click a star, then another: a lane between them from {rec ? `"${rec.name}"${rec.end_day !== null ? ', growing from the first star to the second over the event' : ''}` : fmt(s.time)}.</span>
+        </div>
+      )}
       {(s.tool === 'lasso' || s.tool === 'polygon' || s.tool === 'pen') && (
         <div className="toolbar sub">
           <label className="inline">Give to
@@ -598,6 +629,7 @@ export function Inspector() {
       {sel?.kind === 'event' && <EventPanel id={sel.id} />}
       {sel?.kind === 'point' && <PointPanel lon={sel.lon} lat={sel.lat} />}
       {sel?.kind === 'feature' && <FeaturePanel id={sel.id} />}
+      {sel?.kind === 'star' && <StarPanel id={sel.id} />}
     </aside>
   );
 }

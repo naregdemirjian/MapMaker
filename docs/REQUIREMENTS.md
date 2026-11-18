@@ -65,7 +65,7 @@ status. Last updated: 18 November 2026 (Stage 4; see DEVELOPMENT.md).
 | No Earth-specific assumptions | Tested | `geometry-worlds` (areas follow each world's radius) | |
 | Custom projections | Partial | `camera`, `e2e/workflows` step 8 | Four projections for shots. The world-building view has no projection choice; flat (non-spherical) coordinate systems are not implemented |
 | Separate timelines per world | Tested | `geometry-worlds`, `event-groups`, `e2e/workflows` step 7 | Territorial history is per world. Events belong to the project and are grouped by the user (D8): the timeline shows the chosen groups; an event can be in several |
-| Moon, planets, solar system, exoplanets, nearby stars (50 light-years), Milky Way, galaxies | Not implemented | | Blank spheres with correct radii only (Stages 8, 11) |
+| Moon, planets, solar system, exoplanets, nearby stars (50 light-years), Milky Way, galaxies | Partial | `space`, `solar`, `invented`, `e2e/workflows` 'A star map', 'The solar system', 'An invented star map' | Star maps of the 982 stars within 50 light-years (HYG v4.1) in three dimensions, with their names, kinds and systems (D110); stars held by countries and factions over time, drawn as realms (D111); lanes between stars, growing over an event for expeditions and fleets (D112); the solar system with the planets where they are on any date (D113); invented star maps for settings of one's own, stars found by search (D114); shots and exports. Moons and planets as worlds: blank or generated round maps (Stage 8). Moons on the solar system map, exoplanets, the Milky Way and galaxies: not yet |
 
 ## Time and history
 
@@ -142,7 +142,7 @@ status. Last updated: 18 November 2026 (Stage 4; see DEVELOPMENT.md).
 | Per-event "out of sync with the clock" override | Tested | `sequence` (its own seconds whatever the pace, timed by events or seconds; stored, checked, cleared, undone), `e2e/workflows` 'A shot framed in the preview' (the union of 1900 set to 0.4 s in its panel: half way 5 frames on, over 11 frames on, against the same frames following the clock) | D92. In any shot that animates; recorded animations keep their style |
 | Camera movement | Partial | `e2e/workflows` step 7 | Start and end views with easing, checked frame by frame in the export. No multi-key camera or flights |
 | Text overlays | Tested | `e2e/workflows`, `events-box`, `text-boxes` | Date, title, a fully styleable 'current events' box (with a graphic of the user's own), and any number of text boxes and callouts (D107): styled, wrapped, timed by the shot's seconds or by history's dates, coming in and going (fade, rise, pop, typed out, sink), pointing at places |
-| Shot playback | Needs testing | | Play button works by hand; not driven by an automated test |
+| Shot playback | Tested | `e2e/workflows` 'Playing a shot' | Play runs through the frames at the shot's pace and stops on the last; played again from the start; paused where it is; the frame slider |
 | Spreading phenomena, animated routes, environmental effects, heatmap changes | Tested | `fields`, `spread`, `disasters`, `routes`, `e2e/workflows` | Conditions that rise, last and fade, plumes carried by the wind, fires, lava and floods spreading over the terrain, heatmaps following points over time (D102–D105). Animated routes: lines with marks flowing along them and campaign arrows growing along their path (D106) |
 
 ## Export
