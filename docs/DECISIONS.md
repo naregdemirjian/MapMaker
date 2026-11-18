@@ -61,6 +61,28 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D108. Looks for shots (Stage 10)
+
+- **A look per shot.** A shot is drawn in a look chosen under Look in its settings: Classic (the working view's
+  colours, as before), Parchment (pale sea, tan land, brown ink, sepia, stained paper and darkened edges), Atlas
+  (light blue sea, pale land, grey borders), Night (near black, pale blue borders), Blueprint (white lines on deep
+  blue), Minimal (quiet greys, white borders) and Wartime map (grey-blue sea, buff land, black borders, a little
+  worn). Each sets the sea, land, lake and coast colours, the grid's, the borders' colour and width, a colour grade,
+  how dark the frame's edges become and how strong the paper's grain is; any of these can be changed for the shot
+  ("Back to the look's own colours" undoes the changes). Territories keep their own colours (under the grade).
+- **Where it applies.** The preview and every export of the shot; the world-building view keeps its own colours.
+  The grade (a colour filter: sepia, faded, vivid, cool, warm, black and white), the darker edges and the paper are
+  laid over the map once it is drawn, in every exported layer, and never over the texts; what is transparent stays
+  transparent, so the layers still stack into "All". The paper's grain is the same in every frame (a fixed seed),
+  so still frames stay identical and are written once.
+- **Classic as it was.** A shot without a look, or in Classic unchanged, is drawn exactly as before (the renderer is
+  given no colours of its own).
+- **Tests.** `looks.test.ts` (the preset chosen and its own changes, kept where they make sense; unknown looks are
+  Classic; Classic unchanged is plain; colours for the renderer and the basemap; the paper the same every time,
+  with light and dark specks and brown stains when asked); `e2e/workflows` 'Looks' (Atlas: the preview's sea light
+  blue; darker edges darken the corner and not the middle; an exported frame the same; Parchment: a warm sea; the
+  working view's sea unchanged; undone).
+
 ### D107. Text boxes and callouts in shots (Stage 10)
 
 - **Text boxes.** A shot can have any number of text boxes of the user's own ("+ Text box" under Text in the shot's

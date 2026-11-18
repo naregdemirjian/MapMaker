@@ -119,6 +119,8 @@ export interface ShotSettings {
   transitions?: ShotTransitions;
   /** The 'current events' box (absent: not shown). See events-box.ts. */
   eventsBox?: Partial<import('./events-box.ts').EventsBox>;
+  /** The map's look in this shot (D108; absent: classic, the colours of the working view). See looks.ts. */
+  look?: import('./looks.ts').ShotLook;
 }
 
 export type TransitionEasing = 'linear' | 'smooth' | 'in' | 'out';

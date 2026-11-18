@@ -78,6 +78,15 @@ function shown(width: number, height: number) {
     const p = lonLatToScreen(v && v.preview && v.view.width === fr.w && v.view.height === fr.h ? v.view : makeView(store.presentCamera ?? cameraAt(shot, store.shotFrame), fr.w, fr.h), lon, lat);
     return p ? [p[0] + fr.x + r.left, p[1] + fr.y + r.top] : null;
   },
+  /** The shot preview's frame on the page (x, y, w, h), or null. */
+  previewFrame() {
+    const shot = currentShot();
+    const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement | null;
+    if (!shot || !c) return null;
+    const r = c.getBoundingClientRect();
+    const fr = frameRect(shot, r.width, r.height);
+    return { x: fr.x + r.left, y: fr.y + r.top, w: fr.w, h: fr.h };
+  },
   /** Where the shot preview drew its texts and events box, as page rectangles (id, x, y, w, h). */
   previewOverlays() {
     const shot = currentShot();

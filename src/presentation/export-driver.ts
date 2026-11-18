@@ -4,7 +4,8 @@
 import { Api } from '../ui/api.ts';
 import type { World } from '../world-model/world.ts';
 import type { Engine } from '../temporal-engine/engine.ts';
-import { MapRenderer, DEFAULT_STYLE, EXPORT_QUALITY, type PassName } from '../render-engine/map-renderer.ts';
+import { MapRenderer, DEFAULT_STYLE, EXPORT_QUALITY, type PassName, type MapStyle } from '../render-engine/map-renderer.ts';
+import { resolveLook, isPlainLook, mapStyleOf, basemapStyleOf, finishLook, type Look } from './looks.ts';
 import { makeView, viewBounds, metresPerPixel, lonLatToScreen, type View } from '../render-engine/camera.ts';
 import { type ShotSettings, type OverlayRect, EVENTS_BOX_ID, timeAt, cameraAt, overlaysAt, drawOverlays, shotTransitions, screenSecondsSince } from './sequence.ts';
 import { gregorian, type Instant } from '../core-time/index.ts';
@@ -12,7 +13,7 @@ import { eventsBoxOf, currentEvents, drawEventsBox } from './events-box.ts';
 import { eventShown, entityStyle } from '../domain/commands.ts';
 import { isFeatureKind } from '../render-engine/feature-style.ts';
 import { preloadImages, prepareVideos } from '../render-engine/assets.ts';
-import { basemapSourceOf, loadBasemap, loadBasemapDetail, loadDatasetRecords, type Basemap } from '../render-engine/basemap.ts';
+import { basemapSourceOf, loadBasemap, loadBasemapDetail, loadDatasetRecords, DEFAULT_BASEMAP_STYLE, type Basemap, type BasemapStyle } from '../render-engine/basemap.ts';
 import { shown, minLakeKm2, terrainLook, seaLevelPoints, planetOf, sculptOf, terrainSourceOf } from '../world-model/world-settings.ts';
 import { stampsAt } from '../terrain/sculpt.ts';
 import { sculpted } from '../terrain/sculpt-cache.ts';
@@ -124,6 +125,16 @@ export function drawShotOverlays(ctx: CanvasRenderingContext2D, width: number, h
   return rects;
 }
 
+/**
+ * The renderer's colours for a shot's look (D108), and whether it needs finishing (a grade, darker
+ * edges, paper); null for the classic look as it is (drawn exactly as before looks existed).
+ */
+export function lookStyles(shot: ShotSettings): { look: Look; style: MapStyle; basemap: BasemapStyle; finish: boolean } | null {
+  const look = resolveLook(shot.look);
+  if (isPlainLook(look)) return null;
+  return { look, style: mapStyleOf(look, DEFAULT_STYLE), basemap: basemapStyleOf(look, DEFAULT_BASEMAP_STYLE), finish: look.grade !== 'none' || look.vignette > 0 || look.grain > 0 || look.blotches };
+}
+
 /** The shot's transition settings for one frame, as the renderer takes them. */
 export function transitionOptions(shot: ShotSettings, frame: number) {
   return { ...shotTransitions(shot), secondsSince: (t0: Parameters<typeof screenSecondsSince>[2]) => screenSecondsSince(shot, frame, t0) };
@@ -192,7 +203,10 @@ export function renderFrame(ctx: CanvasRenderingContext2D, renderer: MapRenderer
   ctx.clearRect(0, 0, width, height);
   if (passes.size) {
     const transparent = def.name === 'all' ? shot.transparent : !def.background;
-    renderer.render(ctx, view, world, engine, shot.spaceId, t, { passes, transparent, layerIds: visibleLayers(world, shot), basemap, transitions: transitionOptions(shot, frame), mediaSeconds: frame / shot.fps, mediaChannel: 'export', trails: !!shot.trails, layout: { labels, cities }, show: { lakes: on('lakes'), coastline: on('coastline'), rivers: on('rivers'), minLakeKm2: minLakeKm2(space) }, terrain });
+    const ls = lookStyles(shot);
+    renderer.render(ctx, view, world, engine, shot.spaceId, t, { passes, transparent, layerIds: visibleLayers(world, shot), basemap, transitions: transitionOptions(shot, frame), mediaSeconds: frame / shot.fps, mediaChannel: 'export', trails: !!shot.trails, layout: { labels, cities }, show: { lakes: on('lakes'), coastline: on('coastline'), rivers: on('rivers'), minLakeKm2: minLakeKm2(space) }, terrain, style: ls?.style, basemapStyle: ls?.basemap });
+    // The look's finish (D108): its grade, darker edges and paper, over the map and under the texts.
+    if (ls?.finish) finishLook(ctx, 0, 0, width, height, ls.look, width / 1920);
   }
   if (def.overlays) drawShotOverlays(ctx, width, height, world, shot, frame, t, view);
 }

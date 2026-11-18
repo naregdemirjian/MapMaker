@@ -6,6 +6,7 @@ import { type Instant, add, fromJSONValue, toJSONValue, fromStore, compare, greg
 import { defaultShot, timeAt, cameraAt, RESOLUTIONS, FRAME_RATES, shotTransitions, withStillCamera, cameraMoves, resetCamera, newTextBox, textBoxOf, type ShotSettings, type Ease, type ShotTransitions, type Overlay, type TextBox, type TextEnter, type TextExit } from '../../presentation/sequence.ts';
 import { PASS_DEFS, runExport, exportPassesOf, estimateExportBytes, scaledBytes, formatBytes } from '../../presentation/export-driver.ts';
 import { eventsBoxOf, type EventsBox } from '../../presentation/events-box.ts';
+import { LOOKS, LOOK_IDS, GRADES, resolveLook, type LookId, type GradeId, type ShotLook } from '../../presentation/looks.ts';
 import { LABEL_FONTS } from '../../render-engine/label-style.ts';
 import { PROJECTIONS, type ProjectionName, type Camera } from '../../render-engine/camera.ts';
 import { parseJSON } from '../../temporal-engine/engine.ts';
@@ -111,6 +112,8 @@ export function ShotEditor() {
   // Re-estimated when anything that changes the files changes (after a pause, in the background).
   const estimateKey = JSON.stringify([row.settings, passes, s.world?.revision]);
   const tr = shotTransitions(shot);
+  const look = resolveLook(shot.look);
+  const setLook = (patch: Partial<ShotLook>) => update({ look: { ...(shot.look ?? { id: look.id }), ...patch } });
   const setTr = (patch: Partial<ShotTransitions>) => update({ transitions: { ...tr, ...patch } });
   const chooseFolder = async () => {
     try {
@@ -257,6 +260,24 @@ export function ShotEditor() {
           </>}
         </Group>
         <Group title="Look">
+          <label>Map look<select value={look.id} onChange={(e) => update({ look: { id: e.target.value as LookId } })} data-testid="shot-look">
+            {LOOK_IDS.map((id) => <option key={id} value={id}>{LOOKS[id].name}</option>)}
+          </select></label>
+          <p className="muted" data-testid="shot-look-about">{LOOKS[look.id].about}. The world-building view keeps its own colours.</p>
+          <div className="two">
+            <label>Sea colour<input type="color" value={colourParts(look.ocean).hex} onChange={(e) => setLook({ ocean: e.target.value })} data-testid="look-ocean" /></label>
+            <label>Land colour<input type="color" value={colourParts(look.land).hex} onChange={(e) => setLook({ land: e.target.value })} data-testid="look-land" /></label>
+            <label>Border colour<input type="color" value={colourParts(look.border).hex} onChange={(e) => setLook({ border: e.target.value })} data-testid="look-border" /></label>
+            <label>Border width<NumberField min={0} max={20} step={0.1} value={look.borderWidth} onCommit={(n) => setLook({ borderWidth: n })} testId="look-border-width" /></label>
+            <label>Colour grade<select value={look.grade} onChange={(e) => setLook({ grade: e.target.value as GradeId })} data-testid="look-grade">
+              {(Object.keys(GRADES) as GradeId[]).map((g) => <option key={g} value={g}>{GRADES[g].name}</option>)}
+            </select></label>
+            <label title="The frame's edges darkened, drawing the eye to the middle">Darker edges<input type="range" min={0} max={1} step={0.05} value={look.vignette} onChange={(e) => setLook({ vignette: Number(e.target.value) })} data-testid="look-vignette" /></label>
+            <label title="The fine grain of paper over the map">Paper grain<input type="range" min={0} max={1} step={0.05} value={look.grain} onChange={(e) => setLook({ grain: Number(e.target.value) })} data-testid="look-grain" /></label>
+          </div>
+          <label className="check"><input type="checkbox" checked={look.blotches} onChange={(e) => setLook({ blotches: e.target.checked })} data-testid="look-blotches" /> Stains of old paper</label>
+          {shot.look && Object.keys(shot.look).length > 1 && <div className="buttons"><button className="small" onClick={() => update({ look: { id: look.id } })} data-testid="look-reset">Back to the look's own colours</button></div>}
+          <p className="muted">The grade, darker edges and paper are over the map in every exported layer, never over the texts; transparent parts stay transparent.</p>
           <label className="check"><input type="checkbox" checked={shot.graticule} onChange={(e) => update({ graticule: e.target.checked })} /> Latitude and longitude grid</label>
           <label className="check"><input type="checkbox" checked={shot.labels} onChange={(e) => update({ labels: e.target.checked })} /> Country labels</label>
           <label className="check"><input type="checkbox" checked={shot.cities !== false} onChange={(e) => update({ cities: e.target.checked })} data-testid="shot-cities" /> Cities</label>

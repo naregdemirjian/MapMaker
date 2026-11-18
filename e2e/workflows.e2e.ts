@@ -2575,6 +2575,98 @@ try {
     assert.equal(await page.evaluate((id) => !!(window as any).__mapmaker.store.world.get('sequence', id), shotId), false, 'the shot is gone');
   });
 
+  await h.step('Looks: a shot in the Atlas look (its sea in the preview and an exported frame), darker edges, then Parchment; the world-building view keeps its colours; undone', async () => {
+    await page.getByTestId('mode-world').click();
+    const sea: LL = [-40, 50];
+    const shotId = await page.evaluate((c) => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const settings = B.defaultShot(s.spaceId, { lon: c[0], lat: c[1], zoom: 2, rotation: 0, projection: 'equirectangular' }, s.time, s.time, 24, 1);
+      settings.overlays = [];
+      const id = s.execute((w: any) => B.commands.createSequence(w, 'Looks', settings));
+      s.set({ shotId: id, shotFrame: 0, presentCamera: null, mode: 'present' });
+      return id as string;
+    }, sea);
+    await page.getByTestId('shot-editor').waitFor();
+    const pixelAtPage = (p: [number, number]) => page.evaluate(([x, y]) => {
+      const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement;
+      const r = c.getBoundingClientRect(), k = c.width / r.width;
+      return Array.from(c.getContext('2d')!.getImageData(Math.round((x - r.left) * k), Math.round((y - r.top) * k), 1, 1).data).slice(0, 3);
+    }, p);
+    const pixelOf = async (ll: LL) => pixelAtPage((await page.evaluate(([lon, lat]) => (window as any).__mapmaker.previewToPage(lon, lat), ll)) as [number, number]);
+    // A place of open sea in the shot (the countries drawn earlier cover some of the ocean).
+    await page.waitForTimeout(300);
+    let probe: LL | null = null;
+    for (let dx = 0; dx <= 12 && !probe; dx += 4) for (let dy = -8; dy <= 8 && !probe; dy += 4) for (const sx of [1, -1]) {
+      const c: LL = [sea[0] + sx * dx, sea[1] + dy];
+      if (Math.max(...(await pixelOf(c)).map((v, k) => Math.abs(v - [20, 50, 74][k]))) <= 14) { probe = c; break; }
+    }
+    assert.ok(probe, 'a place of open sea in the shot');
+    const centre = () => pixelOf(probe!);
+    /** A pixel near the frame's top left corner (inside it). */
+    const corner = async () => {
+      // (The frame is letterboxed in the canvas.)
+      const rect = (await page.evaluate(() => (window as any).__mapmaker.previewFrame())) as { x: number; y: number; w: number; h: number };
+      return pixelAtPage([rect.x + 8, rect.y + 8]);
+    };
+    const dist = (a: number[], b: number[]) => Math.max(...a.map((v, k) => Math.abs(v - b[k])));
+    await page.waitForTimeout(300);
+    const classicSea = await centre();
+    assert.ok(dist(classicSea, [20, 50, 74]) <= 14, `the classic sea first (${classicSea})`);
+    // Atlas: a light blue sea in the preview.
+    await page.getByTestId('shot-look').selectOption('atlas');
+    let atlas = await centre();
+    for (let i = 0; i < 30 && dist(atlas, [168, 203, 224]) > 14; i++) { await page.waitForTimeout(100); atlas = await centre(); }
+    assert.ok(dist(atlas, [168, 203, 224]) <= 14, `the Atlas sea (${atlas})`);
+    // Darker edges: the corner darkens, the middle does not.
+    const cornerBefore = await corner();
+    await page.getByTestId('look-vignette').fill('1');
+    await page.waitForFunction((id) => JSON.parse((window as any).__mapmaker.store.world.get('sequence', id).settings).look?.vignette === 1, shotId);
+    let cornerAfter = await corner();
+    for (let i = 0; i < 30 && cornerAfter.reduce((a, b) => a + b, 0) > cornerBefore.reduce((a, b) => a + b, 0) - 60; i++) { await page.waitForTimeout(100); cornerAfter = await corner(); }
+    assert.ok(cornerAfter.reduce((a, b) => a + b, 0) < cornerBefore.reduce((a, b) => a + b, 0) - 60, `the corner darker (${cornerAfter} against ${cornerBefore})`);
+    assert.ok(dist(await centre(), atlas) <= 8, 'the middle as it was');
+    // An exported frame in the same look: the sea at the same place, darker at its corner.
+    const at = (await page.evaluate(([lon, lat]) => (window as any).__mapmaker.exportPixel(lon, lat, 0, 0.25), probe!)) as [number, number];
+    const exported = await page.evaluate(([id, x, y]) => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const shot = JSON.parse(s.world.get('sequence', id).settings);
+      const canvas = document.createElement('canvas');
+      canvas.width = 480; canvas.height = 270;
+      const ctx = canvas.getContext('2d')!;
+      const renderer = new B.MapRenderer();
+      renderer.quality = { ...B.EXPORT_QUALITY };
+      B.renderFrame(ctx, renderer, s.world, s.engine, shot, 0, B.PASS_DEFS.find((d: any) => d.name === 'all'), 480, 270, null, null);
+      const px = (a: number, b: number) => Array.from(ctx.getImageData(Math.round(a), Math.round(b), 1, 1).data).slice(0, 3);
+      // (Drawn without the basemap, territories are not trimmed at the coast: the sea is looked for in the middle of the frame.)
+      let sea = 0, n = 0;
+      for (let gx = 120; gx <= 360; gx += 12) for (let gy = 70; gy <= 200; gy += 10) { n++; const p = px(gx, gy); if (Math.max(Math.abs(p[0] - 168), Math.abs(p[1] - 203), Math.abs(p[2] - 224)) <= 14) sea++; }
+      return { sea: sea / n, corner: px(3, 3), probe: px(x, y) };
+    }, [shotId, at[0], at[1]] as const);
+    assert.ok(exported.sea > 0.1, `the exported frame's sea in the Atlas blue (${Math.round(exported.sea * 100)}% of the middle)`);
+    assert.ok(exported.corner.reduce((a, b) => a + b, 0) < 168 + 203 + 224 - 100, `its corner darker (${exported.corner})`);
+    await h.screenshot('look-atlas');
+    // Parchment: a warm, pale sea (sepia over it), with paper.
+    await page.getByTestId('shot-look').selectOption('parchment');
+    let warm = await centre();
+    for (let i = 0; i < 30 && !(warm[0] > warm[2] + 15 && dist(warm, atlas) > 25); i++) { await page.waitForTimeout(100); warm = await centre(); }
+    assert.ok(warm[0] > warm[2] + 15 && dist(warm, atlas) > 25, `a warm parchment sea (${warm})`);
+    await h.screenshot('look-parchment');
+    // The world-building view keeps its own colours.
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ mode: 'world', shotId: null }));
+    await page.evaluate((c) => (window as any).__mapmaker.store.setCamera({ lon: c[0], lat: c[1], zoom: 2, rotation: 0, projection: 'equirectangular' }), sea);
+    await page.waitForTimeout(300);
+    const worldSea = await page.evaluate(([lon, lat]) => {
+      const p = (window as any).__mapmaker.lonLatToPage(lon, lat);
+      const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement;
+      const r = c.getBoundingClientRect(), k = c.width / r.width;
+      return Array.from(c.getContext('2d')!.getImageData(Math.round((p[0] - r.left) * k), Math.round((p[1] - r.top) * k), 1, 1).data).slice(0, 3);
+    }, probe!);
+    assert.ok(dist(worldSea, [20, 50, 74]) <= 14, `the working view's sea unchanged (${worldSea})`);
+    // Undone: the looks and the shot.
+    for (let i = 0; i < 10 && (await page.evaluate((id) => !!(window as any).__mapmaker.store.world.get('sequence', id), shotId)); i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await page.evaluate((id) => !!(window as any).__mapmaker.store.world.get('sequence', id), shotId), false, 'the shot is gone');
+  });
+
   await h.step('History Health lists the overlap, nothing else; no browser errors', async () => {
     await page.getByTestId('mode-world').click();
     await page.getByTestId('health').click();
