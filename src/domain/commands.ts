@@ -587,6 +587,20 @@ export function createEventGroup(world: World, name: string, color?: string): Co
   });
 }
 
+/**
+ * An event's own time on screen in presentations (D92): its changes take this many screen seconds from
+ * the moment they happen, however fast a shot's clock runs ("out of sync with the clock"); null: they
+ * follow the clock.
+ */
+export function setEventScreenSeconds(world: World, id: string, seconds: number | null): CommandResult {
+  const e = world.get('event', id);
+  if (!e) throw new Error('That event no longer exists.');
+  if (seconds !== null && !(seconds > 0 && seconds <= 600)) throw new Error('Choose between a tenth of a second and ten minutes.');
+  const p = parseJSON<Record<string, unknown>>(e.presentation, {}) ?? {};
+  if (seconds === null) delete p.screen; else p.screen = { seconds: Math.round(seconds * 100) / 100 };
+  return run(world, seconds === null ? `"${e.name}" follows the clock` : `"${e.name}" takes ${seconds} s on screen`, (tx) => tx.patch('event', id, { presentation: JSON.stringify(p) }));
+}
+
 export function updateEventGroup(world: World, id: string, patch: { name?: string; color?: string }): CommandResult {
   const g = world.get('event_group', id);
   if (!g) throw new Error('That group no longer exists.');

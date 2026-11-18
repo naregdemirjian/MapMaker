@@ -1384,6 +1384,11 @@ try {
   await h.step('A shot framed in the preview (still camera, reset) at 2.39:1 and 25 fps; inspect every exported pass', async () => {
     colours = await page.evaluate((names) => Object.fromEntries(names.map((n) => [n, (window as any).__mapmaker.store.world.all('entity').find((e: any) => e.name === n).color])), [A, B]);
     await page.locator('.left .row', { hasText: 'Union' }).click();
+    // Out of sync with the clock (D92): the union, an instant of 1900, takes 0.4 s on screen in presentations.
+    await page.getByTestId('event-screen').selectOption('own');
+    await page.getByTestId('event-screen-seconds').fill('0.4');
+    await page.getByTestId('event-screen-seconds').press('Enter');
+    await page.waitForFunction(() => /"seconds":0.4/.test((window as any).__mapmaker.store.world.all('event').find((e: any) => e.name === 'Union').presentation));
     await page.getByTestId('mode-present').click();
     await page.getByTestId('new-shot').click();
     await page.getByTestId('shot-editor').waitFor();
@@ -1426,6 +1431,17 @@ try {
     await page.getByTestId('shot-trails').check();
     await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastTrails >= 1);
     await page.getByTestId('shot-trails').uncheck();
+    // The union shows at frame 12 (1900); with its own 0.4 s it is half done 5 frames later and over by frame 23,
+    // though the shot's clock passes a year in a twenty-fifth of a second.
+    const animating = (frame: number) => page.evaluate(async (f) => { const s = (window as any).__mapmaker.store; s.set({ shotFrame: f }); await new Promise((r) => setTimeout(r, 300)); return s.renderer.lastTransitions.map((x: any) => x.progress); }, frame) as Promise<number[]>;
+    const own17 = await animating(17), own23 = await animating(23);
+    // Back to following the clock (the exports below check the frames as they were): the same frames without it.
+    await page.evaluate(() => { const m = (window as any).__mapmaker; const id = m.store.world.all('event').find((e: any) => e.name === 'Union').id; m.store.execute((w: any) => m.bench.commands.setEventScreenSeconds(w, id, null)); });
+    const clock17 = await animating(17), clock23 = await animating(23);
+    assert.equal(own17.length, clock17.length + 1, `one more change under way: the union (${own17.map((p) => p.toFixed(2))} against ${clock17.map((p) => p.toFixed(2))})`);
+    assert.ok(own17.some((p) => p > 0.3 && p < 0.7 && !clock17.includes(p)), 'half way through its own time');
+    assert.equal(own23.length, clock23.length, 'over by frame 23');
+    await page.getByTestId('frame-slider').fill('12');
 
     // What to export: only "All" at first, explained; then every separate layer too.
     const separate = ['background', 'land', 'fills', 'borders', 'features', 'cities', 'labels', 'characters', 'overlays'];

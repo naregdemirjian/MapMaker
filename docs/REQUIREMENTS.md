@@ -139,7 +139,7 @@ status. Last updated: 18 November 2026 (Stage 4; see DEVELOPMENT.md).
 | Fragmentation and collapse | Needs testing | `scenarios` (history), | The history is tested; their animation uses the same fade and front, without a dedicated test |
 | Encirclement | Tested | `pincers` (two ends change hands first, the middle last, everything at the end; undone; only an expansion has starting points), `engine-follow` (expansions from several points among the random edits), `e2e/workflows` 'Recording into an event' (a second starting point clicked on the map, then taken away) | An expansion from several starting points at once (D91). Keyframed fronts: Stage 6 |
 | Animation length independent of historical length | Tested | `e2e/workflows` (40 years in one second), `scenarios` (a 20-minute event) | |
-| Per-event "out of sync with the clock" override | Not implemented | | Approved; Stage 6 |
+| Per-event "out of sync with the clock" override | Tested | `sequence` (its own seconds whatever the pace, timed by events or seconds; stored, checked, cleared, undone), `e2e/workflows` 'A shot framed in the preview' (the union of 1900 set to 0.4 s in its panel: half way 5 frames on, over 11 frames on, against the same frames following the clock) | D92. In any shot that animates; recorded animations keep their style |
 | Camera movement | Partial | `e2e/workflows` step 7 | Start and end views with easing, checked frame by frame in the export. No multi-key camera or flights |
 | Text overlays | Partial | `e2e/workflows`, `events-box` | Date, title, and a fully styleable 'current events' box (with a graphic of the user's own). No free text boxes or animated text |
 | Shot playback | Needs testing | | Play button works by hand; not driven by an automated test |

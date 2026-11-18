@@ -25,6 +25,7 @@ import { BlockPath, setPaintRegion, type DeviceRect } from './blocks.ts';
 import { Kept as Weighed } from './kept.ts';
 import { parcelGeometry, type ParcelGeometry, type CycleGeom } from './parcel-geometry.ts';
 import { featureStyle, featureColor, isFeatureKind, type FeatureKind, type FeatureStyle } from './feature-style.ts';
+import { shotProgress, eventScreenSeconds } from '../presentation/sequence.ts';
 import { iconById, iconOfStyle, unitOfStyle, drawIcon, type CharacterIcon, type RouteStyle } from './icons.ts';
 
 type LabelEntity = { name: string; style?: string; color?: string; type_id?: string };
@@ -164,6 +165,19 @@ export interface ShotTransitionOptions {
   front: { show: boolean; color: string; width: number; glow: number };
   /** Screen seconds since the frame that showed instant t (Infinity if before the shot). */
   secondsSince: (t: Instant) => number;
+}
+
+/** The events with a time of their own on screen (D92), by id: seconds. Worked out once per state of the events. */
+const ownSecondsOf = new WeakMap<World, { revision: number; map: Map<string, number> }>();
+function eventSecondsOf(world: World): Map<string, number> {
+  const revision = world.tableRevision('event');
+  let kept = ownSecondsOf.get(world);
+  if (!kept || kept.revision !== revision) {
+    const map = new Map<string, number>();
+    for (const e of world.all('event')) { if (!e.presentation?.includes('"screen"')) continue; const s = eventScreenSeconds(e.presentation); if (s) map.set(e.id, s); }
+    ownSecondsOf.set(world, (kept = { revision, map }));
+  }
+  return kept.map;
 }
 
 function ease(kind: string | undefined, p: number): number {
@@ -1585,7 +1599,7 @@ export class MapRenderer {
       let states = engine.partitionState(spaceId, layerId, t);
       let changing = engine.partitionChanging(spaceId, layerId, t);
       let sig = '';
-      if (opts.transitions) ({ states, changing, sig } = this.shotStates(engine, spaceId, layerId, t, states, changing, opts.transitions));
+      if (opts.transitions) ({ states, changing, sig } = this.shotStates(engine, spaceId, layerId, t, states, changing, opts.transitions, eventSecondsOf(world)));
       const snap = this.snapFor(`${engine.revision}|${arr.revision}|${spaceId}|${layerId}|${engine.stretchOf(t)}|${sig}`, arr, states, changing, engine);
       const ls = parseJSON<LayerStyle>(layer.style, {});
       // Coastline clipping: territory ends at the coast unless the layer is set to cover the sea.
@@ -2235,13 +2249,12 @@ export class MapRenderer {
    * Only the parcels in a change being animated get states of their own; `sig` says which changes
    * those are (so that what stays the same between frames can be kept).
    */
-  private shotStates(engine: Engine, spaceId: string, layerId: string, t: Instant, states: Map<number, FaceState>, changing: number[], o: ShotTransitionOptions): { states: Map<number, FaceState>; changing: number[]; sig: string } {
-    if (o.mode === 'recorded' && !o.restyleRecorded) return { states, changing, sig: '' };
+  private shotStates(engine: Engine, spaceId: string, layerId: string, t: Instant, states: Map<number, FaceState>, changing: number[], o: ShotTransitionOptions, eventSeconds: ReadonlyMap<string, number> = new Map()): { states: Map<number, FaceState>; changing: number[]; sig: string } {
+    // Events with a time of their own on screen (D92) animate in any shot that animates at all.
+    const own = (a: Assignment | null | undefined) => (a ? eventSeconds.get(a.eventId) : undefined);
+    if (o.mode === 'recorded' && !o.restyleRecorded && !eventSeconds.size) return { states, changing, sig: '' };
     const spec: CompiledTransition = { style: o.style, origin: null, maxDist: 0, easing: o.easing, angle: o.angle, shot: true };
-    const progressOf = (a: Assignment): number => {
-      if (o.timing === 'event' && compare(a.end, a.t) > 0) return diffMs(a.t, t) / Math.max(1, diffMs(a.t, a.end));
-      return o.secondsSince(a.t) / Math.max(1e-3, o.seconds);
-    };
+    const progressOf = (a: Assignment): number => shotProgress(a, t, o, own(a));
     let out: Map<number, FaceState> | null = null;
     const put = (f: number, st: FaceState) => { (out ??= new Map(states)).set(f, st); };
     const now: number[] = [];
@@ -2250,13 +2263,21 @@ export class MapRenderer {
     for (const f of changing) {
       const st = states.get(f)!, a = st.assignment;
       if (o.mode === 'instant') { put(f, { value: st.value, assignment: a }); continue; }
+      if (own(a)) {
+        // Its own time on screen, in its own style.
+        const p = progressOf(a!);
+        if (p >= 1 || !(p >= 0)) put(f, { value: st.value, assignment: a });
+        else { put(f, { ...st, transition: { ...st.transition!, progress: p } }); now.push(f); active.add(a!.effectId); }
+        continue;
+      }
       if (!o.restyleRecorded) { now.push(f); active.add(a!.effectId); continue; }
       const p = progressOf(a!);
       if (p >= 1 || !(p >= 0)) put(f, { value: st.value, assignment: a });
       else { put(f, { ...st, transition: { ...st.transition!, progress: p, spec } }); now.push(f); active.add(a!.effectId); }
     }
-    // Every other change, animated by the shot ('all'): only those under way at this frame.
-    if (o.mode === 'all') {
+    // Every other change, animated by the shot ('all'), or by its event's own time on screen (D92): only
+    // those under way at this frame.
+    if (o.mode === 'all' || (o.mode !== 'instant' && eventSeconds.size)) {
       const key = `${engine.revision}|${engine.stretchOf(t)}|${spaceId}|${layerId}|${states.size}`;
       let index = this.shotIndex.get(key);
       if (!index) {
@@ -2273,14 +2294,17 @@ export class MapRenderer {
         this.shotIndex.set(key, index);
       }
       for (const [id, e] of index) {
+        if (o.mode !== 'all' && !own(e.a)) continue;
         const p = progressOf(e.a);
         if (!(p >= 0 && p < 1)) continue;
+        // (A change recorded with an animation of its own keeps it when its event takes its own time.)
+        const tspec = own(e.a) && e.a.transition ? e.a.transition : spec;
         for (let i = 0; i < e.faces.length; i++) {
           const f = e.faces[i], st = states.get(f)!;
           let was = e.from[i];
           if (!was) { const prior = engine.latest(spaceId, layerId, f, t, st.assignment!); was = e.from[i] = { value: prior ? prior.value : null, prior }; }
           if ((was.value ?? '') === (st.value ?? '')) continue;
-          put(f, { value: st.value, assignment: st.assignment, transition: { from: was.value, progress: p, spec, prior: was.prior } });
+          put(f, { value: st.value, assignment: st.assignment, transition: { from: was.value, progress: p, spec: tspec, prior: was.prior } });
           now.push(f);
           active.add(id);
         }

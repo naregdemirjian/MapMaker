@@ -1,7 +1,10 @@
 // Shots: screen-time arithmetic used by transitions timed in screen seconds.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { defaultShot, screenSecondsSince, timeAt, shotTransitions, DEFAULT_TRANSITIONS } from '../src/presentation/sequence.ts';
+import { defaultShot, screenSecondsSince, timeAt, shotTransitions, DEFAULT_TRANSITIONS, shotProgress, eventScreenSeconds } from '../src/presentation/sequence.ts';
+import { World } from '../src/world-model/world.ts';
+import * as cmd from '../src/domain/commands.ts';
+import { invertDiffs } from '../src/world-model/schema.ts';
 import { gregorian } from '../src/core-time/index.ts';
 
 const Y = (y: number) => gregorian.fromCivil({ year: y });
@@ -73,4 +76,35 @@ test('export choices: "All" alone unless chosen otherwise; sizes written for peo
   assert.equal(formatBytes(1536), '1.5 KB');
   assert.equal(formatBytes(850 * 1024 * 1024), '850 MB');
   assert.equal(formatBytes(2.4 * 1024 ** 3), '2.4 GB');
+});
+
+test('an event out of sync with the clock (D92): its changes take its own screen seconds, whatever the shot\'s pace', () => {
+  const D = (y: number) => gregorian.fromCivil({ year: y, month: 1, day: 1 });
+  // A shot where a year passes in a hundredth of a second: a change at 1900 is over at once by the clock.
+  const secondsSince = (t0: ReturnType<typeof D>) => ((D(1901).day - t0.day) / 365) * 0.01;
+  const change = { t: D(1900), end: D(1900) };
+  const shot = { timing: 'seconds' as const, seconds: 1.5, secondsSince };
+  assert.ok(shotProgress(change, D(1901), shot) < 0.01, 'the shot\'s own 1.5 s from the change');
+  assert.ok(Math.abs(shotProgress(change, D(1901), shot, 0.02) - 0.5) < 0.01, 'half of its own 0.02 s');
+  // Timed by events: the change's span in history, unless the event takes its own time.
+  const long = { t: D(1900), end: D(1902) };
+  assert.ok(Math.abs(shotProgress(long, D(1901), { ...shot, timing: 'event' }) - 0.5) < 0.01);
+  assert.ok(Math.abs(shotProgress(long, D(1901), { ...shot, timing: 'event' }, 0.04) - 0.25) < 0.01);
+  // Stored with the event's presentation settings; checked; cleared; undone.
+  const world = new World();
+  cmd.seedProject(world, 'Sync');
+  const ev = cmd.createEvent(world, { name: 'Battle of the Ford', start: D(1900) }).result;
+  const own = () => eventScreenSeconds(world.get('event', ev)!.presentation);
+  assert.equal(own(), null, 'follows the clock to begin with');
+  const r = cmd.setEventScreenSeconds(world, ev, 3);
+  assert.equal(own(), 3);
+  assert.throws(() => cmd.setEventScreenSeconds(world, ev, 0), /tenth of a second/);
+  cmd.setEventScreenSeconds(world, ev, null);
+  assert.equal(own(), null);
+  const again = cmd.setEventScreenSeconds(world, ev, 2.5);
+  world.applyDiffs(invertDiffs(again.diffs));
+  assert.equal(own(), null);
+  assert.ok(r.diffs.length > 0);
+  assert.equal(eventScreenSeconds('not json'), null);
+  assert.equal(eventScreenSeconds('{"screen":{"seconds":-1}}'), null);
 });

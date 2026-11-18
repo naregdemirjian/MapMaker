@@ -1,7 +1,7 @@
 // Shots (sequences): presentation recipes that point at the world and never copy it.
 // A shot maps screen time (frames) to historical time through its time-remap keys, and to a camera
 // through its camera keys. Shot data lives in the `sequence` table, apart from the world data.
-import { type Instant, lerp, fromJSONValue, toJSONValue, gregorian, type Precision } from '../core-time/index.ts';
+import { type Instant, lerp, fromJSONValue, toJSONValue, gregorian, compare, diffMs, type Precision } from '../core-time/index.ts';
 import { type Camera, interpolateCamera } from '../render-engine/camera.ts';
 
 export type Ease = 'linear' | 'smooth' | 'hold';
@@ -77,6 +77,29 @@ export function shotTransitions(shot: ShotSettings): ShotTransitions {
   const out = { ...DEFAULT_TRANSITIONS, ...(t ?? {}), front: { ...DEFAULT_TRANSITIONS.front, ...(t?.front ?? {}) } };
   if (out.style === 'wipe') out.style = 'border';
   return out;
+}
+
+/**
+ * An event's own time on screen in presentations (D92), from its presentation settings: its changes then take
+ * that many screen seconds from the moment they happen, however fast the shot's clock runs. Null:
+ * it follows the clock (the shot's settings).
+ */
+export function eventScreenSeconds(presentation: string | null | undefined): number | null {
+  try {
+    const v = (presentation ? (JSON.parse(presentation) as { screen?: { seconds?: unknown } } | null) : null)?.screen?.seconds;
+    return typeof v === 'number' && v > 0 && Number.isFinite(v) ? Math.min(600, v) : null;
+  } catch { return null; }
+}
+
+/**
+ * How far a change has come in a shot at instant t (0 to 1; outside: not under way). An event with a
+ * time of its own on screen (D92) sets it; otherwise the shot's timing: its seconds of screen time, or the
+ * change's own span in history when timed by events.
+ */
+export function shotProgress(a: { t: Instant; end: Instant }, t: Instant, o: { timing: 'seconds' | 'event'; seconds: number; secondsSince: (x: Instant) => number }, ownSeconds?: number | null): number {
+  if (ownSeconds && ownSeconds > 0) return o.secondsSince(a.t) / ownSeconds;
+  if (o.timing === 'event' && compare(a.end, a.t) > 0) return diffMs(a.t, t) / Math.max(1, diffMs(a.t, a.end));
+  return o.secondsSince(a.t) / Math.max(1e-3, o.seconds);
 }
 
 /**

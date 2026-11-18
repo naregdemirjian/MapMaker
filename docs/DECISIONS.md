@@ -60,6 +60,19 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D92. Events out of sync with the clock in presentations (Stage 6)
+
+A shot maps history onto screen time; an event that is short in history (a battle of one day) flashes past in a shot
+that spans centuries, and its changes, if instant, are not animated at all unless the shot animates every change.
+An event can now **take its own time on screen** ("In presentations" in its panel: "Follows the clock" or "Takes its
+own time on screen", a number of seconds, kept in the event's `presentation` settings, which were set aside for this):
+in any shot that animates (not one set to show every change at once), each of its changes takes that many screen
+seconds from the frame where it happens, however fast the clock runs. A change recorded with an animation of its own
+keeps its style (an advancing front, an expansion from its starting points, a fade) and is only re-timed; an instant
+change takes the shot's style. The timing is one pure function (`shotProgress` in presentation/sequence.ts) used by
+the renderer for each change: the event's own seconds first, then the shot's timing (its seconds, or the change's
+span in history when timed by events). History itself is never changed.
+
 ### D91. Expansions from several starting points: pincers and encirclement (Stage 6)
 
 An expansion ("a circle from where you started drawing") spread from one point. A change animated as an expansion

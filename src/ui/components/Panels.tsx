@@ -13,6 +13,7 @@ import { CountryLabelSection } from './LabelStyles.tsx';
 import { CountryFillSection, FillSwatch } from './CountryFill.tsx';
 import { CharacterSection } from './Characters.tsx';
 import { RecordLengthControls, ChangeLength } from './RecordLength.tsx';
+import { eventScreenSeconds } from '../../presentation/sequence.ts';
 import { openMenu, entityMenu, groupMenu, eventMenu } from './ContextMenu.tsx';
 import { CountryHistorySection } from './CountryHistory.tsx';
 import { NamesSection } from './Names.tsx';
@@ -749,6 +750,21 @@ function EventPanel({ id }: { id: string }) {
         <label>Type<span className="row-inline"><TypeDot typeId={e.type_id} /><TypeSelect value={e.type_id} onChange={(t) => s.execute((wd) => cmd.updateEvent(wd, id, { type_id: t }))} testId="event-panel-type" /><button className="small" onClick={() => s.set({ dialog: 'event-types' })} title="Make, change and delete event types">Types…</button></span></label>
         <label>Starts<DateField value={start} onChange={(t) => t && s.execute((wd) => cmd.updateEvent(wd, id, { start: t }))} testId="event-panel-start" /></label>
         <label>Ends<DateField value={end} allowEmpty suggest={start} onChange={(t) => s.execute((wd) => cmd.updateEvent(wd, id, { end: t }))} testId="event-panel-end" /></label>
+        {(() => {
+          // In presentations (D92): following the clock, or taking its own time on screen.
+          const own = eventScreenSeconds(e.presentation);
+          return (
+            <label title="In a presentation, its changes can take a set time on screen from the moment they happen, however fast the clock runs (a one-day battle in a shot of centuries, say)">In presentations
+              <span className="row-inline">
+                <select value={own ? 'own' : 'clock'} onChange={(ev) => s.execute((wd) => cmd.setEventScreenSeconds(wd, id, ev.target.value === 'own' ? 2 : null))} data-testid="event-screen">
+                  <option value="clock">Follows the clock</option>
+                  <option value="own">Takes its own time on screen</option>
+                </select>
+                {own && <><NumberField value={own} min={0.1} max={600} step={0.5} onCommit={(n) => s.execute((wd) => cmd.setEventScreenSeconds(wd, id, n))} testId="event-screen-seconds" title="Screen seconds" /> s</>}
+              </span>
+            </label>
+          );
+        })()}
         <label title="When two events change the same place at the same instant, the higher precedence wins">Precedence<NumberField value={e.precedence} step={1} onCommit={(n) => s.execute((wd) => cmd.updateEvent(wd, id, { precedence: Math.round(n) }))} /></label>
         <label>Description<textarea rows={4} value={desc} onChange={(ev) => setDesc(ev.target.value)} onBlur={() => desc !== e.description && s.execute((wd) => cmd.updateEvent(wd, id, { description: desc }))} /></label>
         <PicturesSection holder={{ kind: 'event', id }} />
