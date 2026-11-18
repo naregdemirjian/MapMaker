@@ -149,6 +149,7 @@ export function TopBar() {
       <button className={problems ? 'warn' : ''} onClick={() => s.set({ dialog: 'health' })} data-testid="health">
         History Health{problems ? ` (${problems})` : ' ✓'}
       </button>
+      <button onClick={() => s.set({ dialog: 'show' })} title="What the map shows while you work and in presentation and exports: borders, names, lakes (and from what size)…" data-testid="open-show">Show…</button>
       <button onClick={() => s.set({ dialog: 'settings' })} title="Settings: how fast and how sharp the map is drawn while you work (never changes an export)" data-testid="settings">Settings</button>
       <button onClick={() => s.closeProject()} title="Back to the project list">Projects</button>
     </header>
@@ -475,6 +476,7 @@ export function Outliner() {
                 <input type="checkbox" data-testid="reference-borders-toggle" checked={s.referenceBorders} onChange={(e) => s.set({ referenceBorders: e.target.checked })} /> Present-day borders (guide)
               </label>
             )}
+            <button className="link" onClick={() => s.set({ dialog: 'show' })} data-testid="open-show-lakes" title="Which lakes are shown (from what size), coastlines, and the rest">Lakes and what is shown…</button>
             <button className="link" onClick={() => s.set({ dialog: 'data-sources' })} data-testid="data-sources">Data sources and credits</button>
           </div>
         )}

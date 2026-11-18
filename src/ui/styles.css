@@ -296,3 +296,10 @@ label.indent { margin-left: 24px; }
 .date-day.focus { border-color: rgba(255,209,102,0.6); }
 .date-day.on { background: #4f7ca8; color: #fff; }
 .date-popover-hint { font-size: 10px; margin-top: 6px; }
+/* What is shown (D84) */
+.show-table { width: 100%; border-collapse: collapse; margin: 8px 0; }
+.show-table th { font-size: 11px; font-weight: normal; color: var(--muted, #8a97a6); text-transform: uppercase; letter-spacing: 0.04em; text-align: center; padding: 2px 4px; }
+.show-table td { padding: 3px 4px; border-top: 1px solid var(--line); }
+.show-table td:not(:first-child) { text-align: center; width: 120px; }
+.range-row { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
+.range-row input[type=range] { width: 100%; }

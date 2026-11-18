@@ -1567,6 +1567,43 @@ try {
     assert.equal(await page.getByTestId('draw-speed').count(), 0);
   });
 
+  await h.step('What is shown: names and lakes hidden while working but kept in the presentation; small lakes left out by size', async () => {
+    await page.getByTestId('mode-world').click();
+    const look = () => page.evaluate(() => {
+      const s = (window as any).__mapmaker.store, space = s.world.get('map_space', s.spaceId);
+      return { labels: s.renderer.lastLabels.length as number, lakes: s.renderer.basemapPainter.lakeFilter as { show: boolean; minKm2: number }, settings: JSON.parse(space.settings).show ?? {} };
+    });
+    await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastLabels.length > 0);
+    await page.getByTestId('open-show').click();
+    await page.getByTestId('show-dialog').waitFor();
+    assert.ok(await page.getByTestId('show-working-names').isChecked() && await page.getByTestId('show-export-lakes').isChecked(), 'everything shown to begin with');
+    await page.getByTestId('show-working-names').uncheck();
+    await page.getByTestId('show-working-lakes').uncheck();
+    await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastLabels.length === 0);
+    assert.equal((await look()).lakes.show, false, 'no lakes while working');
+    assert.ok(await page.getByTestId('show-export-names').isChecked() && await page.getByTestId('show-export-lakes').isChecked(), 'still in exports');
+    // The smallest lake: about a thousand square kilometres, from part way along the slider.
+    const slider = page.getByTestId('lake-min');
+    const sb = (await slider.boundingBox())!;
+    await slider.click({ position: { x: sb.width * 0.6, y: sb.height / 2 } });
+    await page.waitForFunction(() => /km² and larger/.test(document.querySelector('[data-testid=lake-min-text]')?.textContent ?? ''));
+    const set = await look();
+    assert.ok(set.settings.minLakeKm2 >= 300 && set.settings.minLakeKm2 <= 3000, `about 1,000 km² (${set.settings.minLakeKm2})`);
+    assert.match(await page.getByTestId('show-dialog').innerText(), /\d[\d,]* of [\d,]+ lakes shown/);
+    await h.screenshot('what-is-shown');
+    await page.getByTestId('show-dialog').getByRole('button', { name: 'Close' }).last().click();
+    // The presentation preview shows what exports show: lakes, of the size chosen.
+    await page.getByTestId('mode-present').click();
+    await page.waitForFunction((min) => { const f = (window as any).__mapmaker.store.renderer.basemapPainter.lakeFilter; return f.show && f.minKm2 === min; }, set.settings.minLakeKm2);
+    await page.getByTestId('mode-world').click();
+    await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.basemapPainter.lakeFilter.show === false);
+    // Back as it was: one undo per change.
+    for (let i = 0; i < 3; i++) await page.getByTestId('undo').click();
+    await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastLabels.length > 0);
+    const after = await look();
+    assert.ok(after.lakes.show && after.lakes.minKm2 === 0 && after.settings.working?.names !== false && after.settings.working?.lakes !== false && !after.settings.minLakeKm2, `names and lakes back (${JSON.stringify(after)})`);
+  });
+
   await h.step('History Health lists the overlap, nothing else; no browser errors', async () => {
     await page.getByTestId('mode-world').click();
     await page.getByTestId('health').click();

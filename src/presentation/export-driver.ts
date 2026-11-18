@@ -13,6 +13,7 @@ import { eventShown, entityStyle } from '../domain/commands.ts';
 import { isFeatureKind } from '../render-engine/feature-style.ts';
 import { preloadImages, prepareVideos } from '../render-engine/assets.ts';
 import { basemapSourceOf, loadBasemap, loadBasemapDetail, loadDatasetRecords, type Basemap } from '../render-engine/basemap.ts';
+import { shown, minLakeKm2 } from '../world-model/world-settings.ts';
 
 export interface ExportPassDef { name: string; label: string; blend: string; passes: PassName[]; overlays: boolean; background: boolean; note?: string }
 
@@ -121,11 +122,15 @@ export async function basemapFor(world: World, spaceId: string): Promise<Basemap
 export function renderFrame(ctx: CanvasRenderingContext2D, renderer: MapRenderer, world: World, engine: Engine, shot: ShotSettings, frame: number, def: ExportPassDef, width: number, height: number, basemap: Basemap | null = null): void {
   const t = timeAt(shot, frame);
   const view = makeView(cameraAt(shot, frame), width, height);
-  const passes = new Set<PassName>(def.passes.filter((p) => (p !== 'graticule' || shot.graticule) && (p !== 'labels' || shot.labels) && (p !== 'characters' || shot.characters !== false) && (p !== 'cities' || shot.cities !== false)));
+  // What the map shows in exports (D84), on top of the shot's own choices.
+  const space = world.get('map_space', shot.spaceId);
+  const on = (k: Parameters<typeof shown>[2]) => shown(space, 'export', k);
+  const labels = !!shot.labels && on('names'), cities = shot.cities !== false && on('cities');
+  const passes = new Set<PassName>(def.passes.filter((p) => (p !== 'graticule' || (shot.graticule && on('graticule'))) && (p !== 'labels' || labels) && (p !== 'characters' || (shot.characters !== false && on('characters'))) && (p !== 'cities' || cities) && (p !== 'borders' || on('borders')) && (p !== 'features' || on('features'))));
   ctx.clearRect(0, 0, width, height);
   if (passes.size) {
     const transparent = def.name === 'all' ? shot.transparent : !def.background;
-    renderer.render(ctx, view, world, engine, shot.spaceId, t, { passes, transparent, layerIds: visibleLayers(world, shot), basemap, transitions: transitionOptions(shot, frame), mediaSeconds: frame / shot.fps, mediaChannel: 'export', trails: !!shot.trails, layout: { labels: !!shot.labels, cities: shot.cities !== false } });
+    renderer.render(ctx, view, world, engine, shot.spaceId, t, { passes, transparent, layerIds: visibleLayers(world, shot), basemap, transitions: transitionOptions(shot, frame), mediaSeconds: frame / shot.fps, mediaChannel: 'export', trails: !!shot.trails, layout: { labels, cities }, show: { lakes: on('lakes'), coastline: on('coastline'), minLakeKm2: minLakeKm2(space) } });
   }
   if (def.overlays) drawShotOverlays(ctx, width, height, world, shot, frame, t);
 }

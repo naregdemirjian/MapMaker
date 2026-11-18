@@ -71,6 +71,8 @@ export interface RenderOptions {
   basemap?: Basemap | null;
   /** Present-day country borders over the land, as a drawing aid (never part of an export). */
   referenceBorders?: boolean;
+  /** What of the geography is shown (D84): lakes (and from what size), the coastline. All shown when absent. */
+  show?: { lakes?: boolean; minLakeKm2?: number; coastline?: boolean };
   /** A shot's way of animating border changes; absent: as recorded (world-building view). */
   transitions?: ShotTransitionOptions;
   /** Screen seconds into the shot, for video fills (0 or absent: the first frame). */
@@ -1401,7 +1403,10 @@ export class MapRenderer {
     }
     // What this frame is drawn on: the view, the size of the canvas and where the frame sits on it.
     const m = ctx.getTransform();
-    const frameKey = `${view.key}|${ctx.canvas.width}x${ctx.canvas.height}|${m.a},${m.b},${m.c},${m.d},${m.e},${m.f}|${spaceId}`;
+    // Which lakes are shown (and cut out of territory ending at the coast): part of everything kept of this frame.
+    this.basemapPainter.lakeFilter = { show: opts.show?.lakes !== false, minKm2: Math.max(0, opts.show?.minLakeKm2 ?? 0) };
+    const lakeKey = `${opts.show?.lakes === false ? 'nolakes' : `l${Math.max(0, opts.show?.minLakeKm2 ?? 0)}`}`;
+    const frameKey = `${view.key}|${ctx.canvas.width}x${ctx.canvas.height}|${m.a},${m.b},${m.c},${m.d},${m.e},${m.f}|${spaceId}|${lakeKey}`;
     // Where the map's plane lies on the canvas, and what a part of the picture depends on besides its
     // own content: the frame's size and the kind of map (loosely), and the detail it is drawn at (strictly).
     const [pk, pe, pf] = this.place, px = pe - pk * sheet.S * sheet.ox, py = pf - pk * sheet.S * sheet.oy;
@@ -1441,7 +1446,7 @@ export class MapRenderer {
     if (wantsBase) {
       // (A flat map's grid changes its spacing with the zoom.)
       const gridStep = opts.passes.has('graticule') && view.camera.projection === 'flat' && space?.radius_m ? Math.floor(Math.log10(view.width / view.projection.scale()) * 3) : 0;
-      const baseKey = partKey(`${wantsBackground ? style.ocean : ''}|${opts.passes.has('graticule') ? style.graticule : ''}|${wantsLand ? `${opts.basemap!.scales.length}${opts.referenceBorders ? 'r' : ''}` : ''}|${space?.radius_m ?? 0}`, `${gridStep}`);
+      const baseKey = partKey(`${wantsBackground ? style.ocean : ''}|${opts.passes.has('graticule') ? style.graticule : ''}|${wantsLand ? `${opts.basemap!.scales.length}${opts.referenceBorders ? 'r' : ''}|${lakeKey}|${opts.show?.coastline === false ? 'nocoast' : ''}` : ''}|${space?.radius_m ?? 0}`, `${gridStep}`);
       // (One kept picture per combination of parts: an export draws several passes of each frame.)
       base = { name: `base:${wantsBackground ? 'o' : ''}${opts.passes.has('graticule') ? 'g' : ''}${wantsLand ? 'l' : ''}`, key: baseKey, draw: (c) => {
         if (wantsBackground) {
@@ -1473,7 +1478,7 @@ export class MapRenderer {
           if (lines) { const p = new Path2D(); for (const l of lines) sheet.line(p, l); sheet.cache.set(key, p); }
           this.strokeOnSheet(c, sheet.cache.get(key) as Path2D, 0.8 * u);
         }
-        if (wantsLand) this.basemapPainter.draw(c, view, sheet, opts.basemap!, { referenceBorders: !!opts.referenceBorders, oceanColor: wantsBackground ? style.ocean : undefined });
+        if (wantsLand) this.basemapPainter.draw(c, view, sheet, opts.basemap!, { referenceBorders: !!opts.referenceBorders, oceanColor: wantsBackground ? style.ocean : undefined, coastline: opts.show?.coastline !== false });
         c.restore();
       } };
     }
@@ -1578,7 +1583,7 @@ export class MapRenderer {
         }
         if (this.renewRects.rects) renew = { rects: this.renewRects.rects, moment };
       }
-      const key = animated && !renew && opts.transitions ? null : partKey(`${animated && !renew ? `${t.day}:${t.ms}|` : ''}${renew ? 'animated|' : ''}${wantsFills ? 'f' : ''}${wantsBorders ? 'b' : ''}|${world.revision}|${style.border}|${style.borderWidth}|${opts.basemap ? opts.basemap.scales.length : ''}${landKey}${anyMedia ? `|${assetEpoch()}|${this.mediaSeconds}|${this.mediaChannel}` : ''}`);
+      const key = animated && !renew && opts.transitions ? null : partKey(`${animated && !renew ? `${t.day}:${t.ms}|` : ''}${renew ? 'animated|' : ''}${wantsFills ? 'f' : ''}${wantsBorders ? 'b' : ''}|${world.revision}|${style.border}|${style.borderWidth}|${opts.basemap ? `${opts.basemap.scales.length}|${lakeKey}` : ''}${landKey}${anyMedia ? `|${assetEpoch()}|${this.mediaSeconds}|${this.mediaChannel}` : ''}`);
       // The working view, after an edit or a step in time that changed few parcels: only where they lie is drawn again.
       // A change under way looks different at every moment, and different again once it is over: where
       // the picture before showed one, and where this one does, is drawn again along with the parcels
@@ -1597,7 +1602,7 @@ export class MapRenderer {
           for (let i = 0; i < look.length; i++) hsh = Math.imul(hsh ^ look.charCodeAt(i), 16777619);
           colours = (colours + (hsh >>> 0)) % 4294967291;
         }
-        const stable = `${key.loose.slice(0, looseBase.length)}|${detail}|${wantsFills ? 'f' : ''}${wantsBorders ? 'b' : ''}|${style.border}|${style.borderWidth}|${opts.basemap ? opts.basemap.scales.length : ''}${layerSig}|${colours}`;
+        const stable = `${key.loose.slice(0, looseBase.length)}|${detail}|${wantsFills ? 'f' : ''}${wantsBorders ? 'b' : ''}|${style.border}|${style.borderWidth}|${opts.basemap ? `${opts.basemap.scales.length}|${lakeKey}` : ''}${layerSig}|${colours}`;
         const W = ctx.canvas.width, H = ctx.canvas.height;
         const own = this.changesSince(terrName, view, arr, engine, prepared.map((p) => p.states), key.strict, stable, m, W, H, widestLine * u + 3);
         const before = this.animPrev.get(terrName);

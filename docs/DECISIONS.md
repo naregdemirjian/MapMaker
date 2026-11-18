@@ -60,6 +60,25 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D84. What is shown, while working and in exports apart; lakes from a chosen size (fifth feedback round)
+
+Each map keeps a list of what it shows (`map_space.settings.show`), twice over: **while working** and **in presentation
+and exports** (the presentation preview shows what exports show). The list: borders, country names, cities,
+characters, areas lines and points (feature layers), lakes, coastlines, and latitude and longitude lines; everything is
+shown unless switched off, so maps saved before keep their look. The top bar's **Show…** button (and "Lakes and what is
+shown…" under the map's Earth geography) opens it. A shot's own choices (names, cities, characters, grid lines) still
+apply on top of the export list, and the layer list still hides whole layers. Hiding borders or names while working
+also makes the working view lighter to draw.
+
+Lakes have a **smallest size**, for both: a slider from "every lake" through 1 km² to 100,000 km² on a log scale, with
+how many lakes that leaves and the size of a few known lakes for scale. A lake is judged whole: its outline less its
+islands, and at 1:10m, where the data cuts large lakes into 10° tiles, the pieces that share a point on a tile's edge
+are counted together (Lake Victoria, cut at the equator, is 68,000 km² at both scales), so no lake is ever half shown
+and an island never fills in. Areas are worked out on an equal-area plane (longitude against the sine of the
+latitude), exact for shapes the size of lakes. A hidden lake is land for the coastline rule (D83): territory covers
+it. Of the 1,365 lakes at 1:10m, 354 are 500 km² or larger and 200 are 1,000 km² or larger. Lake sizes are worked out
+once per scale (about 25 ms at 1:10m) when the filter is first used; changing the size rebuilds the sheet's paths once.
+
 ### D83. Territory reaches the detailed coastline: a coastal band under the fills (fifth feedback round)
 
 Today's countries are added from Natural Earth's 1:50m shapes, but close up the coastline is drawn from the 1:10m data:

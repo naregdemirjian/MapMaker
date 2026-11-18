@@ -17,7 +17,7 @@ import { cameraAt, timeAt, overlaysAt, drawOverlays, withStillCamera, moveOverla
 import { transitionOptions, drawShotOverlays } from '../../presentation/export-driver.ts';
 import { parseJSON, slerpLonLat } from '../../temporal-engine/engine.ts';
 import { compare, fromStore, gregorian } from '../../core-time/index.ts';
-import { basemapSourceOf } from '../../world-model/world-settings.ts';
+import { basemapSourceOf, shown, minLakeKm2 } from '../../world-model/world-settings.ts';
 import { loadBasemapDetail, pixelsPerDegree, visibleBounds, DETAIL_PIXELS_PER_DEGREE, type Basemap } from '../../render-engine/basemap.ts';
 import * as cmd from '../../domain/commands.ts';
 
@@ -256,14 +256,21 @@ export function MapView() {
     if (shot) ctx.clearRect(0, 0, c.width, c.height);
     ctx.setTransform(dpr, 0, 0, dpr, frame.x * dpr, frame.y * dpr);
     const layers = s.world.all('layer').filter((l) => l.space_id === s.spaceId && (l.kind === 'partition' || isFeatureKind(l.kind)) && (shot ? (shot.layers.length ? shot.layers.includes(l.id) : l.visible) : l.visible)).sort((a, b) => a.sort_order - b.sort_order).map((l) => l.id);
-    const passes = new Set<PassName>(['background', 'land', 'fills', 'borders', 'features']);
+    // What the map shows (D84): while working, or (the shot's preview) in exports.
+    const space = s.world.get('map_space', s.spaceId);
+    const where = shot ? 'export' as const : 'working' as const;
+    const on = (k: Parameters<typeof shown>[2]) => shown(space, where, k);
+    const show = { lakes: on('lakes'), coastline: on('coastline'), minLakeKm2: minLakeKm2(space) };
+    const passes = new Set<PassName>(['background', 'land', 'fills']);
+    if (on('borders')) passes.add('borders');
+    if (on('features')) passes.add('features');
     const full = basemapSourceOf(s.world.get('map_space', s.spaceId)) === 'natural-earth' ? s.basemap : null;
     const basemap = full && vs.coast === 'medium' ? withoutDetail(full) : full;
     // Close up, load the detailed coastlines (once) and redraw when they arrive.
     if (basemap && vs.coast === 'full' && pixelsPerDegree(view) > DETAIL_PIXELS_PER_DEGREE && !basemap.scales.some((sc) => sc.scale === '10m')) {
       loadBasemapDetail(basemap).then(() => store.notify(), (e: Error) => store.toast(e.message, 'error'));
     }
-    if (!shot || shot.graticule) passes.add('graticule');
+    if ((!shot || shot.graticule) && on('graticule')) passes.add('graticule');
     // The view counts as moving from when it changes until it has rested for a moment: meanwhile the
     // picture may be carried along (see MapRenderer.carry), and it is drawn afresh once it rests.
     const mo = motion.current;
@@ -278,11 +285,12 @@ export function MapView() {
     const fillAround = fl.due && !moving && !shot;
     fl.due = false;
     const namesHidden = moving && vs.names === 'hide';
-    if ((!shot || shot.labels) && !namesHidden) passes.add('labels');
-    if (!shot || shot.characters !== false) passes.add('characters');
-    if (!shot || shot.cities !== false) passes.add('cities');
+    const namesOn = (!shot || shot.labels) && on('names'), citiesOn = (!shot || shot.cities !== false) && on('cities');
+    if (namesOn && !namesHidden) passes.add('labels');
+    if ((!shot || shot.characters !== false) && on('characters')) passes.add('characters');
+    if (citiesOn) passes.add('cities');
     try {
-      s.renderer.render(ctx, view, s.world, s.engine, s.spaceId, time, { passes, transparent: !!shot?.transparent, layerIds: layers, basemap, referenceBorders: !shot && s.referenceBorders, transitions: shot ? transitionOptions(shot, s.shotFrame) : undefined, mediaSeconds: shot ? s.shotFrame / shot.fps : 0, trails: !!shot?.trails, layout: { labels: (!shot || shot.labels) && !namesHidden, cities: !shot || shot.cities !== false }, moving: moving && vs.whileMoving === 'carry', holdNames: moving && vs.names === 'hold', fillAround, hurried });
+      s.renderer.render(ctx, view, s.world, s.engine, s.spaceId, time, { passes, transparent: !!shot?.transparent, layerIds: layers, basemap, referenceBorders: !shot && s.referenceBorders, transitions: shot ? transitionOptions(shot, s.shotFrame) : undefined, mediaSeconds: shot ? s.shotFrame / shot.fps : 0, trails: !!shot?.trails, layout: { labels: namesOn && !namesHidden, cities: citiesOn }, moving: moving && vs.whileMoving === 'carry', holdNames: moving && vs.names === 'hold', fillAround, hurried, show });
     } catch (e) {
       console.error(e);
     }
@@ -318,7 +326,7 @@ export function MapView() {
       const cc = cmpCanvas.getContext('2d') as unknown as CanvasRenderingContext2D;
       cc.setTransform(dpr, 0, 0, dpr, frame.x * dpr, frame.y * dpr);
       try {
-        s.compareRenderer.render(cc, view, s.world, s.engine, s.spaceId, s.compare.time, { passes, transparent: false, layerIds: layers, basemap, referenceBorders: s.referenceBorders, layout: { labels: !namesHidden, cities: true }, moving: moving && vs.whileMoving === 'carry', holdNames: moving && vs.names === 'hold', fillAround });
+        s.compareRenderer.render(cc, view, s.world, s.engine, s.spaceId, s.compare.time, { passes, transparent: false, layerIds: layers, basemap, referenceBorders: s.referenceBorders, layout: { labels: namesOn && !namesHidden, cities: citiesOn }, moving: moving && vs.whileMoving === 'carry', holdNames: moving && vs.names === 'hold', fillAround, show });
       } catch (e) {
         console.error(e);
       }

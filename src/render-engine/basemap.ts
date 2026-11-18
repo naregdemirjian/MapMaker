@@ -188,8 +188,11 @@ export function chooseScale(basemap: Basemap, view: View): BasemapScale {
   return by('110m') ?? basemap.scales[0];
 }
 
-/** A scale's shapes as rings and lines ready for drawing (made on first use). */
-interface ScaleRings { land: Ring[]; lakes: Ring[]; coastline: Ring[]; borders: Ring[] }
+/**
+ * A scale's shapes as rings and lines ready for drawing (made on first use). lakePoly gives the
+ * lake (polygon) each lake ring belongs to: its outline or one of its islands.
+ */
+interface ScaleRings { land: Ring[]; lakes: Ring[]; lakePoly: Int32Array; coastline: Ring[]; borders: Ring[] }
 const ringsOfScale = new WeakMap<BasemapScale, ScaleRings>();
 
 function ringsOf(b: BasemapScale): ScaleRings {
@@ -203,7 +206,10 @@ function ringsOf(b: BasemapScale): ScaleRings {
       return makeRing(lon, lat, true, false);
     }));
     const open = (ml: GeoJSON.MultiLineString): Ring[] => ml.coordinates.map((line) => makeRing(Float64Array.from(line, (q) => q[0]), Float64Array.from(line, (q) => q[1]), false, false));
-    r = { land: closed(b.land), lakes: closed(b.lakes), coastline: open(b.coastline), borders: open(b.borders) };
+    const lakePoly = new Int32Array(b.lakes.coordinates.reduce((n, p) => n + p.length, 0));
+    let at = 0;
+    b.lakes.coordinates.forEach((p, i) => { for (let k = 0; k < p.length; k++) lakePoly[at++] = i; });
+    r = { land: closed(b.land), lakes: closed(b.lakes), lakePoly, coastline: open(b.coastline), borders: open(b.borders) };
     ringsOfScale.set(b, r);
   }
   return r;
@@ -282,19 +288,107 @@ function insideRings(rings: Ring[], lon: number, lat: number): boolean {
  * Draws the basemap from paths prepared on the current sheet (see plane.ts): only what the sheet
  * shows, at the detail its scale can show; kept while the view stays on the sheet.
  */
+/** Which lakes are shown (D84): none, or those of at least `minKm2` square kilometres. */
+export interface LakeFilter { show: boolean; minKm2: number }
+
+const RAD = Math.PI / 180;
+/**
+ * A ring's area on the Earth in square kilometres: its area on an equal-area map (longitude against
+ * the sine of the latitude), which for rings as small and as finely drawn as lakes is the true area.
+ */
+export function ringAreaKm2(r: Pick<Ring, 'lon' | 'lat'>): number {
+  let sum = 0;
+  const n = r.lon.length;
+  for (let i = 0, j = n - 1; i < n; j = i++) sum += (r.lon[j] - r.lon[i]) * (Math.sin(r.lat[j] * RAD) + Math.sin(r.lat[i] * RAD));
+  return Math.abs(sum / 2) * RAD * 6371.0088 * 6371.0088;
+}
+
+/** The tiles the finest scale is cut into (scripts/fetch-natural-earth.mjs), in degrees. */
+const TILE_DEG = 10;
+const onTileLine = (v: number) => Math.abs(v / TILE_DEG - Math.round(v / TILE_DEG)) < 1e-9;
+
+/**
+ * The size of the lake each lake ring belongs to, in square kilometres: its outline less its islands,
+ * and at 1:10m, where large lakes are cut into tiles, the pieces of one lake (those sharing a point on
+ * a tile's edge) counted together, so a lake is shown or hidden whole.
+ */
+export function lakeSizes(lakes: ReadonlyArray<Pick<Ring, 'lon' | 'lat'>>, lakePoly: ArrayLike<number>): { size: Float64Array; lake: Int32Array } {
+  const polys = lakes.length ? lakePoly[lakes.length - 1] + 1 : 0;
+  const area = new Float64Array(polys), outline = new Int32Array(polys).fill(-1);
+  for (let i = 0; i < lakes.length; i++) {
+    const p = lakePoly[i];
+    if (outline[p] < 0) { outline[p] = i; area[p] += ringAreaKm2(lakes[i]); } else area[p] -= ringAreaKm2(lakes[i]);
+  }
+  // Pieces of one lake: joined where they share a point on a tile's edge.
+  const parent = Int32Array.from({ length: polys }, (_, i) => i);
+  const find = (i: number): number => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+  const seen = new Map<string, number>();
+  for (let i = 0; i < lakes.length; i++) {
+    const r = lakes[i], p = lakePoly[i];
+    for (let k = 0; k < r.lon.length; k++) {
+      if (!onTileLine(r.lon[k]) && !onTileLine(r.lat[k])) continue;
+      const key = `${r.lon[k]},${r.lat[k]}`;
+      const q = seen.get(key);
+      if (q === undefined) seen.set(key, p);
+      else { const a = find(p), b = find(q); if (a !== b) parent[a] = b; }
+    }
+  }
+  const whole = new Float64Array(polys);
+  for (let p = 0; p < polys; p++) whole[find(p)] += Math.max(0, area[p]);
+  const size = new Float64Array(lakes.length), lake = new Int32Array(lakes.length);
+  for (let i = 0; i < lakes.length; i++) { lake[i] = find(lakePoly[i]); size[i] = whole[lake[i]]; }
+  return { size, lake };
+}
+const lakeSizesOf = new WeakMap<ScaleRings, { size: Float64Array; lake: Int32Array }>();
+function sizesOf(rings: ScaleRings) {
+  let sizes = lakeSizesOf.get(rings);
+  if (!sizes) { sizes = lakeSizes(rings.lakes, rings.lakePoly); lakeSizesOf.set(rings, sizes); }
+  return sizes;
+}
+
+/** How many lakes the most detailed scale loaded has, and how many of them are at least `minKm2`. */
+export function lakeCount(basemap: Basemap, minKm2: number): { shown: number; total: number } {
+  const b = basemap.scales[basemap.scales.length - 1];
+  if (!b) return { shown: 0, total: 0 };
+  const { size, lake } = sizesOf(ringsOf(b));
+  const all = new Set<number>(), kept = new Set<number>();
+  for (let i = 0; i < lake.length; i++) { all.add(lake[i]); if (size[i] >= minKm2) kept.add(lake[i]); }
+  return { shown: kept.size, total: all.size };
+}
+
 export class BasemapPainter {
+  /** Which lakes are drawn (and cut out of territory that ends at the coast). */
+  lakeFilter: LakeFilter = { show: true, minKm2: 0 };
+  private filterKey(): string { return this.lakeFilter.show ? `l${this.lakeFilter.minKm2}` : 'nolakes'; }
+  private shownLakes = new WeakMap<ScaleRings, { min: number; rings: Ring[] }>();
+
+  /** The lake rings shown at a scale: whole lakes (with their islands) of at least the smallest size. */
+  private lakesOf(rings: ScaleRings): Ring[] {
+    if (!this.lakeFilter.show) return [];
+    const min = this.lakeFilter.minKm2;
+    if (!(min > 0)) return rings.lakes;
+    const kept = this.shownLakes.get(rings);
+    if (kept && kept.min === min) return kept.rings;
+    const { size } = sizesOf(rings);
+    const out: Ring[] = [];
+    for (let i = 0; i < rings.lakes.length; i++) if (size[i] >= min) out.push(rings.lakes[i]);
+    this.shownLakes.set(rings, { min, rings: out });
+    return out;
+  }
+
   /** The paths for this sheet (land, lakes, coastline; the reference borders on request). */
   pathsFor(view: View, sheet: Sheet, basemap: Basemap, referenceBorders = false): Paths {
     const b = chooseScale(basemap, view);
-    const key = `basemap:${b.scale}`;
+    const key = `basemap:${b.scale}|${this.filterKey()}`;
     let paths = sheet.cache.get(key) as Paths | undefined;
     const rings = ringsOf(b);
     if (!paths) {
       const fill = (list: Ring[]) => { const p = sheet.blocks(); for (const r of list) { if (sheet.copies(r.box).length) { rankRing(r); sheet.ring(p, r); } } return p; };
       sheet.touched = false;
-      const land = fill(rings.land), lakes = fill(rings.lakes);
+      const shownLakes = this.lakesOf(rings);
+      const land = fill(rings.land), lakes = fill(shownLakes);
       // No shore anywhere on the sheet: it is all land or all sea, as its middle is.
-      const coast = sheet.touched ? 'mixed' : insideRings(rings.land, sheet.centre[0], sheet.centre[1]) && !insideRings(rings.lakes, sheet.centre[0], sheet.centre[1]) ? 'land' : 'sea';
+      const coast = sheet.touched ? 'mixed' : insideRings(rings.land, sheet.centre[0], sheet.centre[1]) && !insideRings(shownLakes, sheet.centre[0], sheet.centre[1]) ? 'land' : 'sea';
       paths = { land, lakes, coastline: this.lines(sheet, rings.coastline), borders: null, coast };
       sheet.cache.set(key, paths);
     }
@@ -308,7 +402,7 @@ export class BasemapPainter {
     return p;
   }
 
-  draw(ctx: CanvasRenderingContext2D, view: View, sheet: Sheet, basemap: Basemap, o: { referenceBorders: boolean; style?: BasemapStyle; oceanColor?: string }): void {
+  draw(ctx: CanvasRenderingContext2D, view: View, sheet: Sheet, basemap: Basemap, o: { referenceBorders: boolean; style?: BasemapStyle; oceanColor?: string; coastline?: boolean }): void {
     const paths = this.pathsFor(view, sheet, basemap, o.referenceBorders);
     const st = o.style ?? DEFAULT_BASEMAP_STYLE;
     const [k, e, f] = sheet.placement(view);
@@ -327,7 +421,7 @@ export class BasemapPainter {
     ctx.lineCap = 'round';
     ctx.strokeStyle = st.coast;
     ctx.lineWidth = 0.8 * px;
-    paths.coastline.paint(ctx, 0.4 * px + 1, stroke);
+    if (o.coastline !== false) paths.coastline.paint(ctx, 0.4 * px + 1, stroke);
     if (o.referenceBorders && paths.borders) {
       ctx.strokeStyle = st.reference;
       ctx.lineWidth = 0.9 * px;

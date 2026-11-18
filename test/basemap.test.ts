@@ -6,10 +6,10 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { geoArea, geoContains } from 'd3-geo';
-import { decodeBasemap, visibleBounds, boxIntersects, type BasemapFile, type BasemapScale } from '../src/render-engine/basemap.ts';
+import { decodeBasemap, visibleBounds, boxIntersects, lakeSizes, lakeCount, ringAreaKm2, type BasemapFile, type BasemapScale } from '../src/render-engine/basemap.ts';
 import { makeView, lonLatToScreen, type ProjectionName } from '../src/render-engine/camera.ts';
 import { rng } from './helpers.ts';
-import { basemapSourceOf } from '../src/world-model/world-settings.ts';
+import { basemapSourceOf, shown, minLakeKm2, worldSettings } from '../src/world-model/world-settings.ts';
 import { World } from '../src/world-model/world.ts';
 import { invertDiffs } from '../src/world-model/schema.ts';
 import * as cmd from '../src/domain/commands.ts';
@@ -149,4 +149,83 @@ test('basemap 1:10m: cut into tiles, the land keeps its exact area and every pie
   }
   // Coastline and border pieces are short, and consecutive pieces join up.
   assert.ok(b.coastline.coordinates.every((l) => l.length <= 401));
+});
+
+// What is shown (D84): lakes judged whole, by size.
+const ringOf = (pts: number[][]) => ({ lon: Float64Array.from(pts, (p) => p[0]), lat: Float64Array.from(pts, (p) => p[1]) });
+const lakeRings = (m: GeoJSON.MultiPolygon) => {
+  const rings: Array<{ lon: Float64Array; lat: Float64Array }> = [], poly: number[] = [];
+  m.coordinates.forEach((p, i) => { for (const r of p) { rings.push(ringOf(r.slice(0, -1))); poly.push(i); } });
+  return { rings, poly };
+};
+
+test('lake sizes: a lake is its outline less its islands, and the pieces of a lake cut at a tile edge count together', () => {
+  // A 1° square lake on the equator with a 0.2° island, and a lake cut at 10°E into two pieces that
+  // share the points where the cut crosses it; a small lake on its own.
+  const sq = (x0: number, y0: number, x1: number, y1: number) => ringOf([[x0, y0], [x1, y0], [x1, y1], [x0, y1]]);
+  const rings = [sq(0, 0, 1, 1), sq(0.4, 0.4, 0.6, 0.6), sq(9, 20, 10, 21), sq(10, 20, 10.5, 21), sq(30, 30, 30.1, 30.1)];
+  const poly = [0, 0, 1, 2, 3];
+  const { size, lake } = lakeSizes(rings, poly);
+  const deg = 111.195 * 111.195;
+  assert.ok(Math.abs(size[0] - deg * (1 - 0.04)) / deg < 0.01, `lake less its island: ${size[0]}`);
+  assert.equal(size[1], size[0], 'the island goes with its lake');
+  const cut = deg * 1.5 * Math.cos(20.5 * Math.PI / 180);
+  assert.ok(Math.abs(size[2] - cut) / cut < 0.01, `cut lake ${size[2]} vs ${cut}`);
+  assert.ok(Math.abs(size[2] - cut) / cut < 0.01 && size[3] === size[2], 'both pieces of the cut lake have its whole size');
+  assert.equal(lake[2], lake[3]);
+  assert.notEqual(lake[0], lake[2]);
+  assert.ok(size[4] < 200 && lake[4] !== lake[2]);
+});
+
+test('lake sizes: Lake Victoria, cut at the equator at 1:10m, is as large as at 1:50m; small lakes are many', () => {
+  const at = (scale: '50m' | '10m') => {
+    const { rings, poly } = lakeRings(scales[scale].lakes);
+    const { size } = lakeSizes(rings, poly);
+    // (Even-odd, on the plane of longitude and latitude: islands' rings are wound the other way.)
+    const holds = (i: number, x: number, y: number) => {
+      const { lon, lat } = rings[i];
+      let inside = false;
+      for (let a = 0, b = lon.length - 1; a < lon.length; b = a++) if ((lat[a] > y) !== (lat[b] > y) && x < lon[a] + ((y - lat[a]) * (lon[b] - lon[a])) / (lat[b] - lat[a])) inside = !inside;
+      return inside;
+    };
+    const north = rings.findIndex((_, i) => holds(i, 33.5, 0.2)), south = rings.findIndex((_, i) => holds(i, 33, -1));
+    return { north: size[north], south: size[south] };
+  };
+  const a50 = at('50m'), a10 = at('10m');
+  assert.ok(a50.north === a50.south && a50.north > 60000 && a50.north < 75000, `1:50m: ${a50.north}`);
+  assert.equal(a10.north, a10.south, 'the two pieces are one lake');
+  assert.ok(Math.abs(a10.north - a50.north) / a50.north < 0.03, `1:10m ${a10.north} vs 1:50m ${a50.north}`);
+  const basemap = { version: 'test', scales: [scales['110m'], scales['50m'], scales['10m']] };
+  const all = lakeCount(basemap, 0), big = lakeCount(basemap, 1000);
+  assert.equal(all.shown, all.total);
+  assert.ok(all.total > 1000 && big.shown < all.total / 4 && big.shown > 50, `${big.shown} of ${all.total} lakes are 1,000 km² or more`);
+  // A degree square: 12,364 km² at the equator, 11,582 km² between 20° and 21° north.
+  assert.ok(Math.abs(ringAreaKm2(ringOf([[0, 0], [1, 0], [1, 1], [0, 1]])) - 12364) < 15);
+  assert.ok(Math.abs(ringAreaKm2(ringOf([[0, 20], [1, 20], [1, 21], [0, 21]])) - 11582) < 15);
+});
+
+test('what is shown: everything unless switched off, while working and in exports apart; smallest lake; undoable', () => {
+  const world = new World();
+  const earth = cmd.seedProject(world, 'Show').result.spaceId;
+  const space = () => world.get('map_space', earth);
+  assert.ok(shown(space(), 'working', 'lakes') && shown(space(), 'export', 'borders'));
+  assert.equal(minLakeKm2(space()), 0);
+  const r1 = cmd.setWorldShow(world, earth, { working: { lakes: false, names: false } });
+  cmd.setWorldShow(world, earth, { export: { borders: false }, minLakeKm2: 500 });
+  cmd.setWorldShow(world, earth, { working: { names: true } });
+  assert.equal(shown(space(), 'working', 'lakes'), false);
+  assert.equal(shown(space(), 'working', 'names'), true, 'a later change keeps the rest');
+  assert.equal(shown(space(), 'export', 'lakes'), true, 'hidden while working, still exported');
+  assert.equal(shown(space(), 'export', 'borders'), false);
+  assert.equal(shown(space(), 'working', 'borders'), true);
+  assert.equal(minLakeKm2(space()), 500);
+  assert.equal(worldSettings(space()!).projection, 'equirectangular', 'other settings kept');
+  assert.equal(basemapSourceOf(space()), 'natural-earth');
+  const r = cmd.setWorldShow(world, earth, { minLakeKm2: -5 });
+  assert.equal(minLakeKm2(space()), 0, 'never below nothing');
+  world.applyDiffs(invertDiffs(r.diffs));
+  assert.equal(minLakeKm2(space()), 500);
+  assert.ok(r1.diffs.length > 0);
+  assert.equal(shown(null, 'export', 'lakes'), true);
+  assert.throws(() => cmd.setWorldShow(world, 'space_missing', {}), /no longer exists/);
 });

@@ -9,7 +9,7 @@ import {
   BASE_EVENT_ID, MAIN_BRANCH, SCHEMA_VERSION, type RowDiff, type EffectRow, type EventRow, type EntityRow, type LayerKind, type FeatureRow, type RelationRow,
 } from '../world-model/schema.ts';
 import { type Vec3, vecToLonLat, normalize } from '../geo-kernel/vec.ts';
-import { worldSettings, type BasemapSource } from '../world-model/world-settings.ts';
+import { worldSettings, type BasemapSource, type ShowSet, type ShowSettings } from '../world-model/world-settings.ts';
 import { resolvePointStyle, type LabelStyle, type CountryLabel, type PointStyle } from '../render-engine/label-style.ts';
 import { DEFAULT_FEATURE_STYLE, isFeatureKind, type FeatureKind, type FeatureStyle } from '../render-engine/feature-style.ts';
 import { relationKind, isRelationKind, type RelationKind } from './relations.ts';
@@ -117,6 +117,20 @@ export function setWorldBasemap(world: World, spaceId: string, basemap: BasemapS
   if (!space) throw new Error('That map no longer exists.');
   const label = basemap === 'none' ? `Hide Earth's geography on "${space.name}"` : `Show Earth's geography on "${space.name}"`;
   return run(world, label, (tx) => { tx.update('map_space', { ...space, settings: JSON.stringify({ ...worldSettings(space), basemap }) }); });
+}
+
+/** What a map shows while working and in exports, and its smallest lake (D84). */
+export function setWorldShow(world: World, spaceId: string, patch: { working?: ShowSet; export?: ShowSet; minLakeKm2?: number }): CommandResult {
+  const space = world.get('map_space', spaceId);
+  if (!space) throw new Error('That map no longer exists.');
+  const cur = worldSettings(space).show ?? {};
+  const show: ShowSettings = {
+    ...cur,
+    ...(patch.working ? { working: { ...cur.working, ...patch.working } } : {}),
+    ...(patch.export ? { export: { ...cur.export, ...patch.export } } : {}),
+    ...(patch.minLakeKm2 !== undefined ? { minLakeKm2: Math.max(0, patch.minLakeKm2) } : {}),
+  };
+  return run(world, `Change what "${space.name}" shows`, (tx) => { tx.update('map_space', { ...space, settings: JSON.stringify({ ...worldSettings(space), show }) }); });
 }
 
 export function createLayer(world: World, spaceId: string, name: string, kind: LayerKind = 'partition'): CommandResult<string> {
