@@ -61,6 +61,34 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D126. Borders while fronts move; two changes meeting (improvement pass)
+
+- **Found.** An advancing front from a border (the default "Advancing front", and fronts from several starting
+  points, D91) reaches an area made of many overlapping pieces (a strip along each piece of the border it starts
+  from, a circle at each corner), filled with the nonzero rule. The borders were clipped to it with the even-odd
+  rule, which leaves holes wherever an even number of pieces overlap, and the moving border was drawn by stroking
+  the area's path, which outlines every piece: a mesh of straight lines and arcs across the land being taken (10,779
+  pixels of lines inside it, half way across a 200 km wide change in the new test), the old border showing in
+  patches behind the front, and the old owner's colour left as a hairline along the old border. The reference
+  renderer the pictures are compared with (e2e/reference) had the same rules, so the comparison could not see it.
+- **What.** Borders that show after a change are clipped to the reached area by its own rule. Borders that show
+  before it are drawn apart (in a buffer of their own the size of the change's box, not one of the frame's scratch
+  buffers, whose turns the frame relies on), the reached area is taken out of them, and the rest is laid on. The moving border is the area's edge, drawn as a band: the
+  area reached half a line-width later less that reached half a line-width earlier (from a border), or each
+  circle's outline less every circle's inside (from several points); the highlight of the front the same way. The
+  land a front has reached is painted together with the new owner's own parcels beside it, as one shape, so the
+  edge between them leaves no seam.
+- **Two changes meeting** (known limitation 4). Where parcels of two changes animating at once touch, each side
+  shows the owner before or after its own change as far as its own front has come: the border between them is
+  worked out for each of the four combinations (neither front there, either, both) and drawn where it holds (a
+  fade counts as everywhere at once, weighted by its progress). A country split between two neighbours advancing
+  from both sides shows no line where they will meet until a front gets there.
+- **Tested.** render-compare: a front from a zigzag border half way across: every line inside the reached land at
+  one distance from the zigzag (the front itself, 121.7 to 122.2 px from it), none of the old border behind it, no
+  seam (0 levels off the new owner's colour; 100 before); two changes meeting: no border where they meet before
+  either front is there (100% inked before), the border there once both have passed. The reference renderer has
+  the same rules, so the 35 scenes still compare the pictures.
+
 ### D125. Shots playing: names placed quickly; where the time goes (improvement pass)
 
 - **What.** While a shot plays in the preview (or its frames are dragged), country names are placed the quick way,

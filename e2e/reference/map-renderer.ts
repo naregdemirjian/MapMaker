@@ -350,14 +350,23 @@ export class MapRenderer {
         ctx.save();
         if (clip) ctx.clip(land());
         ctx.clip(g.changing, 'evenodd');
-        if (g.border) {
-          // The edge of the reached area: the area minus the area reached a line-width earlier.
-          const r = g.progress * g.border.maxDist, w = Math.max(0.5, front.width * view.unit);
+        if (g.discRule === 'nonzero') {
+          // The edge of the reached area: from a border, the area minus the area reached a line-width
+          // earlier; from several points, each circle's outline less every circle's inside.
+          const w = Math.max(0.5, front.width * view.unit);
           const band = this.scratch(ctx);
           band.fillStyle = front.color;
-          band.fill(g.disc, 'nonzero');
-          band.globalCompositeOperation = 'destination-out';
-          band.fill(g.border.reach(r - w), 'nonzero');
+          band.strokeStyle = front.color;
+          if (g.border) {
+            band.fill(g.disc, 'nonzero');
+            band.globalCompositeOperation = 'destination-out';
+            band.fill(g.border.reach(g.progress * g.border.maxDist - w), 'nonzero');
+          } else {
+            band.lineWidth = 2 * w;
+            band.stroke(g.disc);
+            band.globalCompositeOperation = 'destination-out';
+            band.fill(g.disc, 'nonzero');
+          }
           band.globalCompositeOperation = 'source-over';
           ctx.setTransform(1, 0, 0, 1, 0, 0);
           ctx.shadowColor = front.color;
@@ -803,17 +812,31 @@ export class MapRenderer {
     const plain: number[][][] = [];
     const inside = new Map<TransitionGroup, number[][][]>(), outside = new Map<TransitionGroup, number[][][]>();
     const add = (m: Map<TransitionGroup, number[][][]>, g: TransitionGroup, line: number[][]) => { let l = m.get(g); if (!l) m.set(g, (l = [])); l.push(line); };
+    // Where two animations meet: by the pair, the lines shown for each combination of the two fronts
+    // having come or not (2 * reached by a + reached by b); each side shows the owner before or after its own change.
+    const meet = new Map<string, { a: TransitionGroup; b: TransitionGroup; lines: number[][][][] }>();
     for (const s of arr.segments.values()) {
       const a = states.get(s.left_face), b = states.get(s.right_face);
       if (!a || !b) continue;
       const ga = tg.of.get(s.left_face), gb = tg.of.get(s.right_face);
+      const va = arr.vertices.get(s.a)!, vb = arr.vertices.get(s.b)!;
+      const line = [[va.lon / E7, va.lat / E7], [vb.lon / E7, vb.lat / E7]];
+      if (ga && gb && ga !== gb) {
+        if (which === 'open') continue;
+        const oa = [a.transition!.from, a.value], ob = [b.transition!.from, b.value];
+        const shows = [0, 1, 2, 3].map((k) => differs(oa[k >> 1], ob[k & 1]));
+        if (shows.every(Boolean)) { plain.push(line); continue; }
+        const key = `${ga.a.effectId}|${gb.a.effectId}`;
+        let m = meet.get(key);
+        if (!m) meet.set(key, (m = { a: ga, b: gb, lines: [[], [], [], []] }));
+        shows.forEach((on, k) => { if (on) m!.lines[k].push(line); });
+        continue;
+      }
       const now = differs(a.value, b.value);
       const before = ga || gb ? differs(ga ? a.transition!.from : a.value, gb ? b.transition!.from : b.value) : now;
       if (!now && !before) continue;
-      const va = arr.vertices.get(s.a)!, vb = arr.vertices.get(s.b)!;
-      const line = [[va.lon / E7, va.lat / E7], [vb.lon / E7, vb.lat / E7]];
-      // Unaffected by any animation, a border both before and after, or where two animations meet.
-      if ((!ga && !gb) || (now && before) || (ga && gb && ga !== gb)) {
+      // Unaffected by any animation, or a border both before and after.
+      if ((!ga && !gb) || (now && before)) {
         // (Against nobody, away from any animation: 'open'; the rest 'shared'.)
         const open = !ga && !gb && (!a.value || !b.value);
         if (which === 'all' || (which === 'open') === open) plain.push(line);
@@ -829,18 +852,65 @@ export class MapRenderer {
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
     if (plain.length) ctx.stroke(path(plain));
+    // Lines shown where every front in `ins` has come and none in `outs` has. (A front from a border
+    // reaches a union of overlapping pieces: its outside is no clip, so the lines are drawn apart and
+    // the reached area taken out of them.)
+    const where = (lines: number[][][], ins: TransitionGroup[], outs: TransitionGroup[], alpha: number) => {
+      if (!lines.length || ins.some((g) => !g.disc)) return;
+      const out = outs.filter((g) => g.disc), apart = out.filter((g) => g.discRule !== 'evenodd');
+      const on = apart.length ? this.scratch(ctx, 2) : ctx;
+      on.save();
+      on.strokeStyle = style.border; on.lineWidth = width; on.lineJoin = 'round'; on.lineCap = 'round';
+      for (const g of ins) on.clip(g.disc!, g.discRule);
+      for (const g of out) if (g.discRule === 'evenodd') on.clip(outsideOf(g.disc!), 'evenodd');
+      if (on === ctx) on.globalAlpha *= alpha;
+      on.stroke(path(lines));
+      on.restore();
+      if (on === ctx) return;
+      on.globalCompositeOperation = 'destination-out';
+      for (const g of apart) on.fill(g.disc!, 'nonzero');
+      ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha *= alpha; ctx.drawImage(on.canvas as CanvasImageSource, 0, 0); ctx.restore();
+    };
     for (const g of tg.groups.values()) {
       const ins = inside.get(g), outs = outside.get(g);
       if (g.advance) {
-        if (!g.disc) { if (outs) ctx.stroke(path(outs)); continue; }
-        if (ins) { ctx.save(); ctx.clip(g.disc, 'evenodd'); ctx.stroke(path(ins)); ctx.restore(); }
-        if (outs) { ctx.save(); ctx.clip(outsideOf(g.disc), 'evenodd'); ctx.stroke(path(outs)); ctx.restore(); }
-        ctx.save(); ctx.clip(g.changing, 'evenodd'); ctx.stroke(g.disc); ctx.restore();
+        if (ins) where(ins, [g], [], 1);
+        if (outs) where(outs, [], [g], 1);
+        if (!g.disc) continue;
+        // The front itself is the moving border; the edge of a union of pieces is drawn as a band.
+        ctx.save(); ctx.clip(g.changing, 'evenodd');
+        if (g.discRule === 'evenodd') ctx.stroke(g.disc);
+        else {
+          const band = this.scratch(ctx, 3);
+          band.fillStyle = style.border; band.strokeStyle = style.border;
+          if (g.border) {
+            const r = g.progress * g.border.maxDist;
+            band.fill(g.border.reach(r + width / 2), 'nonzero');
+            band.globalCompositeOperation = 'destination-out';
+            band.fill(g.border.reach(r - width / 2), 'nonzero');
+          } else {
+            band.lineWidth = 2 * width; band.stroke(g.disc);
+            band.globalCompositeOperation = 'destination-out';
+            band.fill(g.disc, 'nonzero');
+          }
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.drawImage(band.canvas as CanvasImageSource, 0, 0);
+        }
+        ctx.restore();
       } else {
         if (ins) { ctx.globalAlpha = g.progress; ctx.stroke(path(ins)); }
         if (outs) { ctx.globalAlpha = 1 - g.progress; ctx.stroke(path(outs)); }
         ctx.globalAlpha = 1;
       }
+    }
+    for (const { a, b, lines } of meet.values()) for (let k = 0; k < 4; k++) {
+      const ins: TransitionGroup[] = [], outs: TransitionGroup[] = [];
+      let alpha = 1;
+      for (const [g, reached] of [[a, k >> 1], [b, k & 1]] as const) {
+        if (!g.advance) alpha *= reached ? g.progress : 1 - g.progress;
+        else (reached ? ins : outs).push(g);
+      }
+      if (alpha > 0) where(lines[k], ins, outs, alpha);
     }
     ctx.restore();
   }

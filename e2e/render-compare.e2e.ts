@@ -546,6 +546,101 @@ try {
     assert.ok((how.patched ?? 0) >= 9 && (how.renewed ?? 0) >= 9 && (how.drawn ?? 0) <= 3, `how the still shot's pictures were drawn: ${JSON.stringify(how)}`);
   });
 
+  await h.step('Borders while fronts move: inside the land a front has reached only the front itself, no seam behind it; two changes meeting share a border only where a front has come', async () => {
+    const W = 1100, H = 640;
+    const r = await page.evaluate(async ({ W, H }) => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const Y = (y: number, mo = 1) => B.gregorian.fromCivil({ year: y, month: mo, day: 1 });
+      const V = (lon: number, lat: number) => B.lonLatToVec(lon, lat);
+      const box = (w: number, so: number, e: number, n: number) => [V(w, so), V(e, so), V(e, n), V(w, n)];
+      // Three countries in the open South Atlantic, west to east: West, Middle and East. West's border
+      // with Middle zigzags (48 teeth): a front from it starts from many pieces at once.
+      for (const [name, color] of [['Zig West', '#c0392b'], ['Zig Middle', '#2a9d8f'], ['Zig East', '#e9c46a']]) s.execute((w: any) => B.commands.createEntity(w, { type_id: 'polity', name, color }));
+      const id = (name: string) => s.world.all('entity').find((e: any) => e.name === name).id;
+      const always = { kind: 'correct', t: { day: -Infinity, ms: 0 } };
+      const paint = (ring: unknown, owner: string, mode: unknown = always, transition: unknown = null) => s.execute((w: any, e: any) => B.commands.paintTerritory(w, e, { spaceId: s.spaceId, layerId: s.layerId, ring, value: id(owner), snap: 1e-7, mode, transition }));
+      paint(box(-21, -20, -10, -10), 'Zig Middle');
+      paint(box(-10, -20, -5, -10), 'Zig East');
+      const zig: Array<[number, number]> = [];
+      for (let i = 0; i <= 48; i++) zig.push([i % 2 ? -20.0 : -20.6, -21 + i * 0.25]);
+      paint([V(-26, -21), ...zig.map(([lo, la]) => V(lo, la)), V(-26, -9)], 'Zig West');
+      // From 2000 to 2002, at once and as two events: West takes Middle's west from the zigzag, East
+      // takes Middle's east from its straight border; they meet at 15 °W.
+      const change = (name: string, owner: string, ring: unknown) => s.execute((w: any, e: any) => {
+        const ev = B.commands.createEvent(w, { name, start: Y(2000), end: Y(2002) });
+        const p = B.commands.paintTerritory(w, e, { spaceId: s.spaceId, layerId: s.layerId, ring, value: id(owner), snap: 1e-7, mode: { kind: 'new', eventId: ev.result }, transition: { style: 'border', easing: 'linear' } });
+        return { label: p.label, diffs: [...ev.diffs, ...p.diffs], result: null };
+      });
+      change('West advances', 'Zig West', box(-21, -19, -15, -11));
+      change('East advances', 'Zig East', box(-15, -19, -10, -11));
+      await s.flush();
+      const view = B.makeView({ lon: -15, lat: -15, zoom: 4, rotation: 0, projection: 'equirectangular' }, W, H);
+      const P = (lon: number, lat: number) => view.projection([lon, lat]) as [number, number];
+      const fresh = new B.MapRenderer();
+      fresh.caching = 'always';
+      const c = new OffscreenCanvas(W, H).getContext('2d', { willReadFrequently: true }) as OffscreenCanvasRenderingContext2D;
+      const draw = (t: unknown, passes: string[]) => {
+        fresh.render(c, view, s.world, s.engine, s.spaceId, t, { passes: new Set(passes), transparent: passes[0] !== 'background', layerIds: [s.layerId], basemap: null, show: { rivers: false } });
+        return c.getImageData(0, 0, W, H).data;
+      };
+      const mid = Y(2001);
+      const ink = draw(mid, ['borders']);
+      const progress = fresh.lastTransitions.map((q: any) => Math.round(q.progress * 100) / 100);
+      const inked = (x: number, y: number) => ink[(Math.round(y) * W + Math.round(x)) * 4 + 3] > 96;
+      // The zigzag where the front starts (between 19 and 11 °S), on screen; distance to it.
+      const src = zig.filter(([, la]) => la >= -19 - 1e-9 && la <= -11 + 1e-9).map(([lo, la]) => P(lo, la));
+      const toSource = (x: number, y: number) => {
+        let d = Infinity;
+        for (let i = 0; i + 1 < src.length; i++) {
+          const [ax, ay] = src[i], [bx, by] = src[i + 1], dx = bx - ax, dy = by - ay;
+          const k = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy)));
+          d = Math.min(d, Math.hypot(x - ax - k * dx, y - ay - k * dy));
+        }
+        return d;
+      };
+      // 1. Inside the land West's front has reached (4 px clear of its edges and of the zigzag): every
+      //    line there is the front, at one distance from the zigzag.
+      const [x0, y0] = P(-19.9, -11), [x1, y1] = P(-15, -19);
+      const dists: number[] = [];
+      for (let y = Math.ceil(y0 + 4); y < y1 - 4; y++) for (let x = Math.ceil(x0 + 4); x < x1 - 4; x++) if (inked(x, y)) dists.push(toSource(x, y));
+      // 2. The old border along the zigzag, behind the front: gone.
+      let oldInk = 0, oldAt = 0;
+      // (Its first and last two teeth are left out: the reached land's edges meet the zigzag there.)
+      for (let i = 2; i + 3 < src.length; i++) {
+        const [ax, ay] = src[i], [bx, by] = src[i + 1];
+        for (let k = 1; k < 8; k++) { oldAt++; if (inked(ax + ((bx - ax) * k) / 8, ay + ((by - ay) * k) / 8)) oldInk++; }
+      }
+      // 3. Where the two changes meet (15 °W, between 17 and 13 °S): neither front is there yet, so no border.
+      const meetAt = (data: Uint8ClampedArray) => {
+        const [mx] = P(-15, -15), [, ya] = P(-15, -13), [, yb] = P(-15, -17);
+        let n = 0, on = 0;
+        for (let y = Math.ceil(ya); y < yb; y++) { n++; let any = false; for (let dx = -2; dx <= 2; dx++) if (data[(y * W + Math.round(mx) + dx) * 4 + 3] > 96) any = true; if (any) on++; }
+        return on / n;
+      };
+      const meetMid = meetAt(ink);
+      // 4. The fills: along the zigzag, behind the front, West's colour exactly as in its own land.
+      const fill = draw(mid, ['background', 'fills']);
+      const at = (x: number, y: number) => { const i = (Math.round(y) * W + Math.round(x)) * 4; return [fill[i], fill[i + 1], fill[i + 2]]; };
+      const own = at(...P(-23, -15));
+      let seam = 0;
+      for (let i = 2; i + 3 < src.length; i++) {
+        const [ax, ay] = src[i], [bx, by] = src[i + 1];
+        for (let k = 0; k <= 8; k++) { const q = at(ax + ((bx - ax) * k) / 8, ay + ((by - ay) * k) / 8); seam = Math.max(seam, ...q.map((v, j) => Math.abs(v - own[j]))); }
+      }
+      // 5. After both: their border where they met.
+      const meetAfter = meetAt(draw(Y(2003), ['borders']));
+      return { progress, n: dists.length, spread: dists.length ? Math.max(...dists) - Math.min(...dists) : 0, near: dists.length ? Math.min(...dists) : 0, oldInk, oldAt, meetMid, meetAfter, seam, own };
+    }, { W, H });
+    console.log(`    halfway (${r.progress.join(', ')}): ${r.n} pixels of line inside the reached land, ${r.near.toFixed(1)} to ${(r.near + r.spread).toFixed(1)} px from the zigzag; old border ${r.oldInk}/${r.oldAt}; where they meet ${(r.meetMid * 100).toFixed(0)}% inked, after ${(r.meetAfter * 100).toFixed(0)}%; seam ${r.seam}`);
+    assert.ok(r.progress.length === 2 && r.progress.every((p: number) => p > 0.4 && p < 0.6), `both changes halfway (${r.progress})`);
+    assert.ok(r.n >= 40, `the front is drawn inside the land it has reached (${r.n} pixels)`);
+    assert.ok(r.spread <= 6, `every line inside the reached land is the front, at one distance from the border it started from (${r.near.toFixed(1)} to ${(r.near + r.spread).toFixed(1)} px)`);
+    assert.ok(r.oldInk === 0, `the old border behind the front is gone (${r.oldInk} of ${r.oldAt} places inked)`);
+    assert.ok(r.meetMid === 0, `no border where the two changes meet before either front is there (${(r.meetMid * 100).toFixed(0)}% inked)`);
+    assert.ok(r.meetAfter > 0.9, `their border once both have passed (${(r.meetAfter * 100).toFixed(0)}% inked)`);
+    assert.ok(r.seam <= 6, `no seam behind the front: the land along the old border is the new owner's colour (${r.seam} levels off ${r.own})`);
+  });
+
   await h.finish();
 } catch (e) {
   await h.finish(e);

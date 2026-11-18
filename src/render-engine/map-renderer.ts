@@ -355,7 +355,18 @@ interface TransitionGroup {
   changing: Shape | null;
 }
 
-interface BorderPaths { plain: Array<Path2D | BlockPath>; /** Each owner's border against nobody (often a coast), apart (D83). */ open: Array<Path2D | BlockPath>; openBy: Map<string, Path2D | BlockPath>; inside: Map<string, Path2D>; outside: Map<string, Path2D> }
+interface BorderPaths {
+  plain: Array<Path2D | BlockPath>;
+  /** Each owner's border against nobody (often a coast), apart (D83). */ open: Array<Path2D | BlockPath>; openBy: Map<string, Path2D | BlockPath>;
+  /** Around each animated change: the borders after it (shown where its front has come) and before it (where it has not yet). */
+  inside: Map<string, Path2D>; outside: Map<string, Path2D>;
+  /**
+   * Where two animated changes meet (`a` and `b`, their group ids): the borders shown for each of the
+   * four combinations of a point being reached by `a`'s front or not and by `b`'s or not (index
+   * 2 * reachedA + reachedB). Each side's owner there is the one before or after its own change.
+   */
+  meet: Array<{ a: string; b: string; paths: Array<Path2D | null> }>;
+}
 
 /** Paths prepared on one sheet for one parcel map. */
 interface SheetParcels {
@@ -903,6 +914,7 @@ export class MapRenderer {
     }
     // 2. Around the parcels of animated changes: chain by chain.
     const inside = new Map<string, Path2D>(), outside = new Map<string, Path2D>();
+    const meet = new Map<string, { a: string; b: string; paths: Array<Path2D | null> }>();
     if (inGroup.size) {
       const differs = (x: string | null, y: string | null) => (x ?? '') !== (y ?? '');
       const addTo = (m: Map<string, Path2D>, g: ChangeGroup, lines: Float32Array[]) => { if (!lines.length) return; let p = m.get(g.id); if (!p) m.set(g.id, (p = new Path2D())); for (const l of lines) addLine(p, l); };
@@ -917,19 +929,34 @@ export class MapRenderer {
             if (gb && !cg.canonical[i]) continue;
             const b = states.get(other);
             if (!b) continue;
+            if (gb && gb !== ga) {
+              // Where two changes meet, each side shows the owner before or after its own change, as
+              // far as its own front has come: a border wherever those two differ.
+              const oa = [a.transition!.from, a.value], ob = [b.transition!.from, b.value];
+              let mask = 0;
+              for (let k = 0; k < 4; k++) if (differs(oa[k >> 1], ob[k & 1])) mask |= 1 << k;
+              if (!mask) continue;
+              const lines = this.chainLines(sp, sheet, geom, c, i);
+              if (mask === 15) { for (const l of lines) { addLine(loose, l); anyLoose = true; } continue; }
+              const mk = `${ga.id}|${gb.id}`;
+              let m = meet.get(mk);
+              if (!m) meet.set(mk, (m = { a: ga.id, b: gb.id, paths: [null, null, null, null] }));
+              for (let k = 0; k < 4; k++) if (mask & (1 << k)) { const p = m.paths[k] ?? (m.paths[k] = new Path2D()); for (const l of lines) addLine(p, l); }
+              continue;
+            }
             const now = differs(a.value, b.value);
             const was = differs(a.transition!.from, gb ? b.transition!.from : b.value);
             if (!now && !was) continue;
             const lines = this.chainLines(sp, sheet, geom, c, i);
-            // A border both before and after, or where two animations meet: drawn throughout.
-            if ((now && was) || (gb && gb !== ga)) { for (const l of lines) { addLine(loose, l); anyLoose = true; } }
+            // A border both before and after: drawn throughout.
+            if (now && was) { for (const l of lines) { addLine(loose, l); anyLoose = true; } }
             else addTo(now ? inside : outside, ga, lines);
           }
         }
       }
     }
     if (anyLoose) plain.push(loose);
-    bp = { plain, open, openBy, inside, outside };
+    bp = { plain, open, openBy, inside, outside, meet: [...meet.values()] };
     if (sp.borders.size >= 8) sp.borders.delete(sp.borders.keys().next().value!);
     sp.borders.set(snap.key, bp);
     return bp;
@@ -2052,7 +2079,9 @@ export class MapRenderer {
             const col = colorOf(owner);
             if (col) { lc.fillStyle = look(lc, col); this.fill(lc, shape); }
           }
-          for (const g of tg.groups.values()) this.drawTransition(lc, g, paint);
+          // (A new owner of one colour paints its own land beside the change too: no seam between them.)
+          const solidLook = !ls.fill || ls.fill === 'solid';
+          for (const [id, g] of tg.groups) this.drawTransition(lc, g, paint, solidLook && g.a.value && !fillOf(g.a.value) ? this.withOwnLand(sp, sheet, arr, snap, id, g) : null);
           // Relief over the territories (D95): shadows and light laid on the layer's colours only.
           if (tLook?.overTerritories) {
             lc.save();
@@ -2072,14 +2101,23 @@ export class MapRenderer {
             c.save();
             if (clip && opts.basemap && !terrainLand) this.clip(c, land());
             this.clip(c, g.changing);
-            if (g.border) {
-              // The edge of the reached area: the area minus the area reached a line-width earlier.
-              const r = g.progress * g.border.maxDist, w = Math.max(0.5, front.width * view.unit);
+            if (g.discRule === 'nonzero') {
+              // The edge of the reached area: from a border, the area minus the area reached a
+              // line-width earlier; from several points, each circle's outline less every circle's inside.
+              const w = Math.max(0.5, front.width * view.unit);
               const band = this.scratch(c);
               band.fillStyle = front.color;
-              band.fill(g.disc, 'nonzero');
-              band.globalCompositeOperation = 'destination-out';
-              band.fill(g.border.reach(r - w), 'nonzero');
+              band.strokeStyle = front.color;
+              if (g.border) {
+                band.fill(g.disc, 'nonzero');
+                band.globalCompositeOperation = 'destination-out';
+                band.fill(g.border.reach(g.progress * g.border.maxDist - w), 'nonzero');
+              } else {
+                band.lineWidth = 2 * w;
+                band.stroke(g.disc);
+                band.globalCompositeOperation = 'destination-out';
+                band.fill(g.disc, 'nonzero');
+              }
               band.globalCompositeOperation = 'source-over';
               c.setTransform(1, 0, 0, 1, 0, 0);
               c.shadowColor = front.color;
@@ -2097,16 +2135,18 @@ export class MapRenderer {
             c.restore();
           }
         }
+        // (The device box of an animated change: lines drawn apart around it are laid on only there.)
+        const boxOf = (g: TransitionGroup, pad: number): Box2 => this.deviceBox(this.screenBox(view, arr, g.faces), cm, pad, c.canvas.width, c.canvas.height);
         if (wantsBorders) for (const { ls, states, snap, tg, clip, wars } of prepared) {
           const width = (ls.borderWidth ?? style.borderWidth) * u;
           const fronts = (on: CanvasRenderingContext2D) => { if (wars.length) this.drawFronts(on, sheet, sp, arr, snap, states, wars, ls.fronts === 'plain', ls.frontColor ?? FRONT_COLOR, Math.max(2.5, 4 * u)); };
-          if (!clip) { this.drawBorders(c, sheet, sp, arr, snap, states, tg, style, width); fronts(c); continue; }
+          if (!clip) { this.drawBorders(c, sheet, sp, arr, snap, states, tg, style, width, 'all', boxOf); fronts(c); continue; }
           // Ending at the coast: drawn in the scratch buffer, masked by the land, then laid on. Where land
           // along the coast takes the look of the territory beside it (D83), an owner's border against
           // nobody is left out in that band (the coastline is the edge there); borders between owners stay.
           const lc = this.scratch(c);
           if (!terrainLand && this.basemapPainter.pathsFor(view, sheet, opts.basemap!).coast === 'mixed') {
-            this.drawBorders(lc, sheet, sp, arr, snap, states, tg, style, width, 'shared');
+            this.drawBorders(lc, sheet, sp, arr, snap, states, tg, style, width, 'shared', boxOf);
             const oc = this.scratch(c);
             this.drawBorders(oc, sheet, sp, arr, snap, states, tg, style, width, 'open');
             const band = this.coastBand(c, view, sheet, opts.basemap!, frameKey, 2 * coastRim(view));
@@ -2119,7 +2159,7 @@ export class MapRenderer {
             lc.setTransform(1, 0, 0, 1, 0, 0);
             lc.drawImage(oc.canvas as CanvasImageSource, 0, 0);
             lc.restore();
-          } else this.drawBorders(lc, sheet, sp, arr, snap, states, tg, style, width);
+          } else this.drawBorders(lc, sheet, sp, arr, snap, states, tg, style, width, 'all', boxOf);
           fronts(lc);
           this.trimToLand(lc, view, sheet, opts.basemap ?? null, frameKey, false, terrainLand ? terrain : null, seaLevel, cm);
           c.save();
@@ -2867,20 +2907,50 @@ export class MapRenderer {
    * buffer: an advancing front fills the reached area with the new owner; a fade mixes the new
    * owner in. Territory that becomes nobody's is erased from the layer, never from the map below.
    */
-  private drawTransition(lc: CanvasRenderingContext2D, g: TransitionGroup, paint: (c: CanvasRenderingContext2D, v: string | null, shape: Shape) => void): void {
+  private drawTransition(lc: CanvasRenderingContext2D, g: TransitionGroup, paint: (c: CanvasRenderingContext2D, v: string | null, shape: Shape) => void, within: Shape | null = null): void {
     if (!g.changing) return; // nothing changes owner, or none of it is in view
     if (g.advance && !g.disc) return; // the front has not reached anything yet
+    // Painted over the changing parcels, or over them and the new owner's own parcels beside them
+    // taken as one shape (see withOwnLand): two shapes painted apart leave a hairline of what was
+    // under them along the edge they share (each covers its side of an edge pixel only in part).
+    const area = within ?? g.changing;
     lc.save();
     if (g.advance) {
       // The area the front has reached (a union of shapes for a front from a border), within the changing parcels.
-      this.clip(lc, g.changing);
-      if (g.discRule === 'nonzero') { lc.clip(g.disc!, 'nonzero'); paint(lc, g.a.value, g.changing); }
+      this.clip(lc, area);
+      if (g.discRule === 'nonzero') { lc.clip(g.disc!, 'nonzero'); paint(lc, g.a.value, area); }
       else paint(lc, g.a.value, { path: g.disc!, onSheet: false });
     } else {
       lc.globalAlpha = Math.min(1, Math.max(0, g.progress));
-      paint(lc, g.a.value, g.changing);
+      paint(lc, g.a.value, area);
     }
     lc.restore();
+  }
+
+  private ownLandCache = new Map<string, number[]>();
+
+  /**
+   * The parcels a change gives to its new owner together with the owner's parcels beside them (as
+   * one shape, its outline taken as a whole): painting the owner's colour over both leaves no seam
+   * along the old border between them as the front crosses it. Null when the owner holds none beside the change.
+   */
+  private withOwnLand(sp: SheetParcels, sheet: Sheet, arr: Arrangement, snap: LayerSnap, id: string, g: TransitionGroup): Shape | null {
+    const key = `${snap.key}|${id}`;
+    let faces = this.ownLandCache.get(key);
+    if (!faces) {
+      const owner = g.a.value, geom = parcelGeometry(arr), t = arr.topology();
+      const inChange = new Set(g.changingFaces), beside = new Set<number>();
+      for (const f of g.changingFaces) for (const c of t.facesCycles.get(f) ?? []) for (const h of geom.cycle(c, t).heads) {
+        const o = arr.halfEdgeFace(h ^ 1);
+        if (inChange.has(o) || beside.has(o)) continue;
+        const st = snap.states.get(o);
+        if (st && (st.transition ? st.transition.from : st.value) === owner) beside.add(o);
+      }
+      faces = beside.size ? [...g.changingFaces, ...[...beside].sort((x, y) => x - y)] : [];
+      if (this.ownLandCache.size > 256) this.ownLandCache.clear();
+      this.ownLandCache.set(key, faces);
+    }
+    return faces.length ? this.setPath(sp, sheet, arr, this.faceSet(arr, faces)) : null;
   }
 
   private borderCache = new Map<string, { lonlat: Float64Array; line: boolean } | null>();
@@ -3335,7 +3405,7 @@ export class MapRenderer {
   private drawBorders(
     ctx: CanvasRenderingContext2D, sheet: Sheet, sp: SheetParcels, arr: Arrangement, snap: LayerSnap, states: Map<number, FaceState>,
     tg: { groups: Map<string, TransitionGroup>; of: Map<number, TransitionGroup> }, style: MapStyle, width: number,
-    which: 'all' | 'shared' | 'open' = 'all',
+    which: 'all' | 'shared' | 'open' = 'all', boxOf: ((g: TransitionGroup, pad: number) => Box2) | null = null,
   ): void {
     const bp = this.borderPaths(sp, sheet, arr, snap, states);
     const stroke = (p: Path2D | BlockPath | null | undefined) => { if (p) this.strokeOnSheet(ctx, p, width); };
@@ -3351,16 +3421,144 @@ export class MapRenderer {
     for (const [id, g] of tg.groups) {
       const ins = bp.inside.get(id), outs = bp.outside.get(id);
       if (g.advance) {
-        if (!g.disc) { stroke(outs); continue; }
-        if (ins) { ctx.save(); ctx.clip(g.disc, 'evenodd'); stroke(ins); ctx.restore(); }
-        if (outs) { ctx.save(); ctx.clip(outsideOf(g.disc), 'evenodd'); stroke(outs); ctx.restore(); }
-        if (g.changing) { ctx.save(); this.clip(ctx, g.changing); ctx.stroke(g.disc); ctx.restore(); }
+        if (ins) this.strokeWhere(ctx, ins, width, [g], [], 1, [g], boxOf);
+        if (outs) this.strokeWhere(ctx, outs, width, [], [g], 1, [g], boxOf);
+        this.frontLine(ctx, g, width, boxOf);
       } else {
         if (ins) { ctx.globalAlpha = g.progress; stroke(ins); }
         if (outs) { ctx.globalAlpha = 1 - g.progress; stroke(outs); }
         ctx.globalAlpha = 1;
       }
     }
+    // Where two changes meet: each combination of the two fronts having come or not, where it holds.
+    for (const m of bp.meet) {
+      const A = tg.groups.get(m.a), B = tg.groups.get(m.b);
+      if (!A || !B) continue;
+      for (let k = 0; k < 4; k++) {
+        const path = m.paths[k];
+        if (!path) continue;
+        const inside: TransitionGroup[] = [], outside: TransitionGroup[] = [];
+        let alpha = 1;
+        for (const [g, reached] of [[A, k >> 1], [B, k & 1]] as const) {
+          // A fade is everywhere at once: before and after mixed by its progress.
+          if (!g.advance) alpha *= reached ? g.progress : 1 - g.progress;
+          else (reached ? inside : outside).push(g);
+        }
+        if (alpha > 0) this.strokeWhere(ctx, path, width, inside, outside, alpha, [A, B], boxOf);
+      }
+    }
+    ctx.restore();
+  }
+
+  /**
+   * Border lines shown only where every front in `inside` has come and none in `outside` has (at
+   * `alpha`). A front from a border reaches a union of overlapping pieces, whose outside cannot be
+   * a clip: there the lines are drawn apart, the reached area is taken out of them, and the rest is
+   * laid on (within the boxes of the changes `near`).
+   */
+  private strokeWhere(
+    ctx: CanvasRenderingContext2D, path: Path2D | BlockPath, width: number, inside: TransitionGroup[], outside: TransitionGroup[],
+    alpha: number, near: TransitionGroup[], boxOf: ((g: TransitionGroup, pad: number) => Box2) | null,
+  ): void {
+    if (inside.some((g) => !g.disc)) return; // (a front that has not set off yet has reached nowhere)
+    const out = outside.filter((g) => g.disc);
+    const apart = out.filter((g) => g.discRule !== 'evenodd');
+    const box = apart.length ? this.unionBox(ctx, boxOf ? near.map((g) => boxOf(g, width + 2)) : null) : null;
+    if (apart.length && !box) return; // (none of it on the picture)
+    const on = box ? this.boxBuffer(ctx, box) : ctx;
+    on.save();
+    if (on !== ctx) { on.strokeStyle = ctx.strokeStyle; on.lineJoin = ctx.lineJoin; on.lineCap = ctx.lineCap; on.lineWidth = ctx.lineWidth; }
+    for (const g of inside) on.clip(g.disc!, g.discRule);
+    for (const g of out) if (g.discRule === 'evenodd') on.clip(outsideOf(g.disc!), 'evenodd');
+    if (on === ctx) on.globalAlpha *= alpha;
+    this.strokeOnSheet(on, path, width);
+    on.restore();
+    if (on === ctx) return;
+    on.save();
+    on.globalCompositeOperation = 'destination-out';
+    for (const g of apart) on.fill(g.disc!, g.discRule);
+    on.restore();
+    this.layOn(ctx, on, alpha, box!);
+  }
+
+  /**
+   * The moving border: the edge of the area a front has reached, within the parcels changing hands.
+   * The edge of a union of pieces (a front from a border, or from several points) is drawn as a band:
+   * from a border, the area reached half a line-width later less that reached half a line-width
+   * earlier; from several points, each circle's outline less every circle's inside.
+   */
+  private frontLine(ctx: CanvasRenderingContext2D, g: TransitionGroup, width: number, boxOf: ((g: TransitionGroup, pad: number) => Box2) | null): void {
+    if (!g.disc || !g.changing) return;
+    ctx.save();
+    this.clip(ctx, g.changing);
+    if (g.discRule === 'evenodd') { ctx.stroke(g.disc); ctx.restore(); return; }
+    const box = this.unionBox(ctx, boxOf ? [boxOf(g, width + 2)] : null);
+    if (!box) { ctx.restore(); return; }
+    const band = this.boxBuffer(ctx, box);
+    band.fillStyle = ctx.strokeStyle;
+    band.strokeStyle = ctx.strokeStyle;
+    if (g.border) {
+      const r = g.progress * g.border.maxDist;
+      band.fill(g.border.reach(r + width / 2), 'nonzero');
+      band.globalCompositeOperation = 'destination-out';
+      band.fill(g.border.reach(r - width / 2), 'nonzero');
+    } else {
+      band.lineWidth = 2 * width;
+      band.stroke(g.disc);
+      band.globalCompositeOperation = 'destination-out';
+      band.fill(g.disc, 'nonzero');
+    }
+    band.globalCompositeOperation = 'source-over';
+    this.layOn(ctx, band, 1, box);
+    ctx.restore();
+  }
+
+  /** The box (device pixels) around the boxes given, within the picture; all of it for none; null when empty. */
+  private unionBox(ctx: CanvasRenderingContext2D, boxes: Box2[] | null): Box2 | null {
+    const W = ctx.canvas.width, H = ctx.canvas.height;
+    if (!boxes) return [0, 0, W, H];
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const [x, y, w, h] of boxes) { if (w <= 0 || h <= 0) continue; x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x + w); y1 = Math.max(y1, y + h); }
+    x0 = Math.max(0, Math.floor(x0)); y0 = Math.max(0, Math.floor(y0)); x1 = Math.min(W, Math.ceil(x1)); y1 = Math.min(H, Math.ceil(y1));
+    return x1 > x0 && y1 > y0 ? [x0, y0, x1 - x0, y1 - y0] : null;
+  }
+
+  private boxBuffers: Array<{ canvas: OffscreenCanvas; ctx: CanvasRenderingContext2D; used: [number, number] | null }> = [];
+  private boxNext = 0;
+
+  /**
+   * A cleared buffer for drawing a part of the picture apart (border lines with an area taken out of
+   * them, the edge of a front): the size of `box` (device pixels of `ctx`), with `ctx`'s transform
+   * moved so that what is drawn lands there. Four take turns (a buffer drawn on again soon after it
+   * was laid on another costs a copy of it, see scratch), apart from the scratch buffers, whose turns
+   * a frame relies on (one taken here in their turn was one still being drawn on).
+   */
+  private boxBuffer(ctx: CanvasRenderingContext2D, box: Box2): CanvasRenderingContext2D {
+    const [bx, by, bw, bh] = box;
+    const i = this.boxNext++ % 4;
+    let b = this.boxBuffers[i];
+    if (!b || b.canvas.width < bw || b.canvas.height < bh) {
+      const canvas = new OffscreenCanvas(Math.max(bw, b?.canvas.width ?? 1), Math.max(bh, b?.canvas.height ?? 1));
+      b = this.boxBuffers[i] = { canvas, ctx: canvas.getContext('2d') as unknown as CanvasRenderingContext2D, used: null };
+    }
+    const c = b.ctx;
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.globalAlpha = 1;
+    c.globalCompositeOperation = 'source-over';
+    c.clearRect(0, 0, b.used ? b.used[0] : b.canvas.width, b.used ? b.used[1] : b.canvas.height);
+    b.used = [bw, bh];
+    const m = ctx.getTransform();
+    c.setTransform(m.a, m.b, m.c, m.d, m.e - bx, m.f - by);
+    return c;
+  }
+
+  /** A box buffer's pixels laid on the target, where its box is, at an opacity. */
+  private layOn(ctx: CanvasRenderingContext2D, from: CanvasRenderingContext2D, alpha: number, box: Box2): void {
+    const [x, y, w, h] = box;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha *= alpha;
+    ctx.drawImage(from.canvas as CanvasImageSource, 0, 0, w, h, x, y, w, h);
     ctx.restore();
   }
 
