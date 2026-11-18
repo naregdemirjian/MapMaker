@@ -5,7 +5,7 @@ import { Api } from '../ui/api.ts';
 import type { World } from '../world-model/world.ts';
 import type { Engine } from '../temporal-engine/engine.ts';
 import { MapRenderer, DEFAULT_STYLE, EXPORT_QUALITY, type PassName } from '../render-engine/map-renderer.ts';
-import { makeView, viewBounds, metresPerPixel } from '../render-engine/camera.ts';
+import { makeView, viewBounds, metresPerPixel, lonLatToScreen, type View } from '../render-engine/camera.ts';
 import { type ShotSettings, type OverlayRect, EVENTS_BOX_ID, timeAt, cameraAt, overlaysAt, drawOverlays, shotTransitions, screenSecondsSince } from './sequence.ts';
 import { gregorian, type Instant } from '../core-time/index.ts';
 import { eventsBoxOf, currentEvents, drawEventsBox } from './events-box.ts';
@@ -111,8 +111,10 @@ export function visibleLayers(world: World, shot: ShotSettings): string[] {
 }
 
 /** Text overlays and the current-events box of a shot frame (the same in the preview and exports). */
-export function drawShotOverlays(ctx: CanvasRenderingContext2D, width: number, height: number, world: World, shot: ShotSettings, frame: number, t: Instant): OverlayRect[] {
-  const rects = drawOverlays(ctx, width, height, overlaysAt(shot, frame, t), width / 1920, DEFAULT_STYLE.font);
+export function drawShotOverlays(ctx: CanvasRenderingContext2D, width: number, height: number, world: World, shot: ShotSettings, frame: number, t: Instant, view?: View): OverlayRect[] {
+  // (Callouts point at places on the map: where the frame's view shows them, D107.)
+  const project = view ? (lon: number, lat: number) => lonLatToScreen(view, lon, lat) as [number, number] | null : undefined;
+  const rects = drawOverlays(ctx, width, height, overlaysAt(shot, frame, t), width / 1920, DEFAULT_STYLE.font, project);
   const box = eventsBoxOf(shot.eventsBox);
   if (!box.show) return rects;
   const groups = box.groups ? new Set(box.groups) : null;
@@ -192,7 +194,7 @@ export function renderFrame(ctx: CanvasRenderingContext2D, renderer: MapRenderer
     const transparent = def.name === 'all' ? shot.transparent : !def.background;
     renderer.render(ctx, view, world, engine, shot.spaceId, t, { passes, transparent, layerIds: visibleLayers(world, shot), basemap, transitions: transitionOptions(shot, frame), mediaSeconds: frame / shot.fps, mediaChannel: 'export', trails: !!shot.trails, layout: { labels, cities }, show: { lakes: on('lakes'), coastline: on('coastline'), rivers: on('rivers'), minLakeKm2: minLakeKm2(space) }, terrain });
   }
-  if (def.overlays) drawShotOverlays(ctx, width, height, world, shot, frame, t);
+  if (def.overlays) drawShotOverlays(ctx, width, height, world, shot, frame, t, view);
 }
 
 /** Two 32-bit hashes of a frame's pixels: frames with the same pair are taken to be the same picture. */

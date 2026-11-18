@@ -61,6 +61,31 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D107. Text boxes and callouts in shots (Stage 10)
+
+- **Text boxes.** A shot can have any number of text boxes of the user's own ("+ Text box" under Text in the shot's
+  settings), besides the date and the title: several lines (wrapped by words at a chosen width), a font, size,
+  weight and slant, a colour, a box behind them (colour, opacity, inner spacing, rounded corners) and a line around
+  the letters for reading over the map. `{date}` writes the date shown. They are dragged on the preview like the
+  date and the title, and exported with the texts ("Text overlays", and in "All").
+- **When they show.** Either at times in the shot (from and to so many seconds; to the end when no end is given),
+  or while history is between two dates (from a date on when no end is given): such a box stays with the events
+  it is about whatever the shot's pace. They come in at once, fading in, rising, popping up or typed out letter by
+  letter, and go at once, fading out or sinking, over a chosen number of seconds of the shot (counted in screen
+  time also when timed by history, so a box tied to a date fades as quickly in a fast shot as in a slow one).
+- **Callouts.** A text box can point at a place ("+ Callout", then a click on the preview; or "Point it at a
+  place…" on any box): a line from the nearest point of its box to the place, with a dot there, in the text's
+  colour or one of its own. The line grows from the box as the box comes in. The place is kept as a longitude and
+  latitude, so it stays on the place in every frame and export size.
+- **Kept with the shot.** Text boxes are overlays of the shot with a `box` of settings; older shots are unchanged,
+  and the date and title work as before. Every change is one undoable step.
+- **Tests.** `text-boxes.test.ts` (settings with defaults and broken values; timed by the shot: not yet, coming in,
+  half way, shown, going, gone; timed by history: before, just come, in, leaving at its last date, gone, and fully
+  in when its date is before the shot; the date written in; moved like the title; wrapping by words; where a
+  pointer starts); `e2e/workflows` 'Text boxes and callouts' (a text written and timed in its settings, not shown
+  at 0.25 s, shown at 1 s, gone at 1.7 s; a callout's place clicked on the preview, its dot there and a line from
+  its box; the box dragged; undone).
+
 ### D106. Routes: campaign arrows and lines that flow (Stage 10)
 
 - **No camera paths.** Stage 10 was to include camera moves; the user never moves the camera during a video (D34),

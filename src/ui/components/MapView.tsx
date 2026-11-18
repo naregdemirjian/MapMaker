@@ -357,7 +357,7 @@ export function MapView() {
     }
     if (shot) {
       const o = s.presentOverlay;
-      overlayRects = drawShotOverlays(ctx, frame.w, frame.h, s.world, o ? moveOverlay(shot, o.id, o.dx, o.dy, o.from) : shot, s.shotFrame, time);
+      overlayRects = drawShotOverlays(ctx, frame.w, frame.h, s.world, o ? moveOverlay(shot, o.id, o.dx, o.dy, o.from) : shot, s.shotFrame, time, view);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.strokeStyle = 'rgba(255,255,255,0.35)';
       ctx.lineWidth = 1;
@@ -674,6 +674,14 @@ export function MapView() {
     const p = local(e);
     // Comparing two dates: the line between them is picked up (a few pixels either side).
     if (!presentation && e.button === 0 && s.compare.on && Math.abs(p[0] - s.compare.split * frame.w) <= 8) { drag.current = { kind: 'swipe' }; return; }
+    // A callout's place (D107), chosen in its settings: this click on the preview is it.
+    if (presentation && e.button === 0 && s.pickCallout) {
+      const ll = screenToLonLat(view, p[0], p[1]);
+      const id = s.pickCallout, sh = currentShot(), shotId = s.shotId;
+      store.set({ pickCallout: null });
+      if (ll && sh && shotId) store.execute((w) => cmd.updateSequence(w, shotId, { settings: { ...sh, overlays: sh.overlays.map((o) => (o.id === id && o.box ? { ...o, box: { ...o.box, anchor: [ll[0], ll[1]] as [number, number] } } : o)) } }));
+      return;
+    }
     // In the shot preview, a text or the events box under the pointer is picked up and moved.
     if (presentation && e.button === 0) {
       const hit = overlayAt(p);

@@ -3,11 +3,11 @@ import { useStore, useLive, store } from '../store.ts';
 import { Api } from '../api.ts';
 import * as cmd from '../../domain/commands.ts';
 import { type Instant, add, fromJSONValue, toJSONValue, fromStore, compare, gregorian, type Precision } from '../../core-time/index.ts';
-import { defaultShot, timeAt, cameraAt, RESOLUTIONS, FRAME_RATES, shotTransitions, withStillCamera, cameraMoves, resetCamera, type ShotSettings, type Ease, type ShotTransitions } from '../../presentation/sequence.ts';
+import { defaultShot, timeAt, cameraAt, RESOLUTIONS, FRAME_RATES, shotTransitions, withStillCamera, cameraMoves, resetCamera, newTextBox, textBoxOf, type ShotSettings, type Ease, type ShotTransitions, type Overlay, type TextBox, type TextEnter, type TextExit } from '../../presentation/sequence.ts';
 import { PASS_DEFS, runExport, exportPassesOf, estimateExportBytes, scaledBytes, formatBytes } from '../../presentation/export-driver.ts';
 import { eventsBoxOf, type EventsBox } from '../../presentation/events-box.ts';
 import { LABEL_FONTS } from '../../render-engine/label-style.ts';
-import { PROJECTIONS, type ProjectionName } from '../../render-engine/camera.ts';
+import { PROJECTIONS, type ProjectionName, type Camera } from '../../render-engine/camera.ts';
 import { parseJSON } from '../../temporal-engine/engine.ts';
 import { DateField, NumberField } from './Panels.tsx';
 import { currentShot } from './MapView.tsx';
@@ -274,6 +274,13 @@ export function ShotEditor() {
             const rest = shot.overlays.filter((o) => o.id !== 'title');
             update({ overlays: text ? [...rest, { id: 'title', kind: 'text', text, x: 0.5, y: 0.1, size: 56, color: '#f4efe6', background: null, align: 'center', inFrame: 0, outFrame: shot.frames - 1, fade: Math.round(shot.fps / 2), datePrecision: 'day' }] : rest });
           }} /></label>
+          <h4>Text boxes and callouts</h4>
+          <div className="buttons">
+            <button className="small" onClick={() => update({ overlays: [...shot.overlays, newTextBox(shot, 'Your text')] })} data-testid="add-text-box" title="A box of text of your own: shown at times in the shot, or while history is between two dates">+ Text box</button>
+            <button className="small" onClick={() => { const o = newTextBox(shot, 'A place', [liveCamera.lon, liveCamera.lat]); update({ overlays: [...shot.overlays, o] }); s.set({ pickCallout: o.id }); }} data-testid="add-callout" title="A text box with a line pointing at a place: click the preview to choose the place">+ Callout</button>
+          </div>
+          {s.pickCallout && <p className="muted" data-testid="callout-hint">Click the place on the preview that the callout points to.</p>}
+          {shot.overlays.filter((o) => o.box).map((o) => <TextBoxEditor key={o.id} o={o} shot={shot} update={update} camera={liveCamera} />)}
         </Group>
         <Group title="Export">
           <h4>What to export</h4>
@@ -308,6 +315,83 @@ export function ShotEditor() {
         <button className="danger" onClick={() => { if (confirm(`Delete the shot "${row.name}"?`)) { s.execute((wd) => cmd.deleteSequence(wd, row.id)); s.set({ shotId: null }); } }}>Delete shot</button>
       </div>
     </aside>
+  );
+}
+
+/** A colour stored as rgba() or #rrggbb, as a hex colour and an opacity. */
+function colourParts(c: string | null): { hex: string; a: number } {
+  const m = c ? /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+))?\)/i.exec(c) : null;
+  if (m) return { hex: `#${[m[1], m[2], m[3]].map((x) => Math.min(255, Number(x)).toString(16).padStart(2, '0')).join('')}`, a: m[4] !== undefined ? Number(m[4]) : 1 };
+  if (c && /^#[0-9a-f]{6}$/i.test(c)) return { hex: c, a: 1 };
+  return { hex: '#080e16', a: 0.7 };
+}
+const rgbaOf = (hex: string, a: number) => `rgba(${parseInt(hex.slice(1, 3), 16)},${parseInt(hex.slice(3, 5), 16)},${parseInt(hex.slice(5, 7), 16)},${Math.round(Math.max(0, Math.min(1, a)) * 100) / 100})`;
+const lonLatText = (p: [number, number]) => `${Math.abs(p[1]).toFixed(2)}° ${p[1] >= 0 ? 'N' : 'S'}, ${Math.abs(p[0]).toFixed(2)}° ${p[0] >= 0 ? 'E' : 'W'}`;
+
+/** The settings of one text box or callout (D107): its text and look, when it shows, how it comes and goes, the place it points to. */
+function TextBoxEditor({ o, shot, update, camera }: { o: Overlay; shot: ShotSettings; update: (patch: Partial<ShotSettings>) => void; camera: Camera }) {
+  const s = useStore();
+  const b = textBoxOf(o.box);
+  const set = (patch: Partial<Overlay>, box?: Partial<TextBox>) => update({ overlays: shot.overlays.map((x) => (x.id === o.id ? { ...x, ...patch, box: { ...b, ...(box ?? {}) } } : x)) });
+  const [text, setText] = useState(o.text);
+  useEffect(() => setText(o.text), [o.id, o.text]);
+  const bg = colourParts(o.background), timing = b.timing;
+  const fonts = LABEL_FONTS.includes(b.font) ? LABEL_FONTS : [b.font, ...LABEL_FONTS];
+  return (
+    <details className="text-box-editor" open data-testid="text-box">
+      <summary>{b.anchor ? 'Callout' : 'Text'}: {o.text.split('\n')[0].slice(0, 40) || '(empty)'}</summary>
+      <label>Text<textarea rows={3} value={text} onChange={(e) => setText(e.target.value)} onBlur={() => text !== o.text && set({ text })} data-testid="text-box-text" /></label>
+      <p className="muted">Write {'{date}'} for the date shown. Drag the box on the preview to place it.</p>
+      <div className="two">
+        <label>Font<select value={b.font} onChange={(e) => set({}, { font: e.target.value })}>{fonts.map((f) => <option key={f} value={f}>{f}</option>)}</select></label>
+        <label>Size<NumberField min={6} max={400} step={1} value={o.size} onCommit={(n) => set({ size: n })} testId="text-box-size" /></label>
+        <label>Weight<select value={b.weight} onChange={(e) => set({}, { weight: Number(e.target.value) })}><option value={400}>Regular</option><option value={600}>Semibold</option><option value={700}>Bold</option><option value={800}>Heavy</option></select></label>
+        <label>Align<select value={o.align} onChange={(e) => set({ align: e.target.value as Overlay['align'] })}><option value="left">Left</option><option value="center">Centre</option><option value="right">Right</option></select></label>
+        <label>Colour<input type="color" value={o.color} onChange={(e) => set({ color: e.target.value })} data-testid="text-box-color" /></label>
+        <label title="Lines longer than this are wrapped (pixels of a 1920-wide frame; 0: only where you start a new line)">Wrap at<NumberField min={0} max={8000} step={10} value={b.wrap} onCommit={(n) => set({}, { wrap: n })} /></label>
+      </div>
+      <label className="check"><input type="checkbox" checked={b.italic} onChange={(e) => set({}, { italic: e.target.checked })} /> Italic</label>
+      <label className="check"><input type="checkbox" checked={!!o.background} onChange={(e) => set({ background: e.target.checked ? rgbaOf(bg.hex, bg.a) : null })} data-testid="text-box-background" /> A box behind the text</label>
+      {o.background && <div className="two">
+        <label>Box colour<input type="color" value={bg.hex} onChange={(e) => set({ background: rgbaOf(e.target.value, bg.a) })} /></label>
+        <label>Opacity (%)<NumberField min={0} max={100} step={5} value={Math.round(bg.a * 100)} onCommit={(n) => set({ background: rgbaOf(bg.hex, n / 100) })} /></label>
+        <label>Inner spacing<NumberField min={0} max={400} step={1} value={b.padding} onCommit={(n) => set({}, { padding: n })} /></label>
+        <label>Corner rounding<NumberField min={0} max={400} step={1} value={b.radius} onCommit={(n) => set({}, { radius: n })} /></label>
+      </div>}
+      <label className="check"><input type="checkbox" checked={!!b.outline} onChange={(e) => set({}, { outline: e.target.checked ? '#000000' : null })} /> A line around the letters</label>
+      {b.outline && <div className="two">
+        <label>Line colour<input type="color" value={b.outline} onChange={(e) => set({}, { outline: e.target.value })} /></label>
+        <label>Line width<NumberField min={0} max={60} step={0.5} value={b.outlineWidth} onCommit={(n) => set({}, { outlineWidth: n })} /></label>
+      </div>}
+      <label>Shown<select value={timing.by} onChange={(e) => set({}, { timing: e.target.value === 'history' ? { by: 'history', from: toJSONValue(timeAt(shot, s.shotFrame)) as [number, number], to: null } : { by: 'shot', from: 0, to: null } })} data-testid="text-box-timing">
+        <option value="shot">At times in the shot</option><option value="history">While history is between two dates</option>
+      </select></label>
+      {timing.by === 'shot' ? <div className="two">
+        <label>From (seconds)<NumberField min={0} max={36000} step={0.1} value={timing.from} onCommit={(n) => set({}, { timing: { ...timing, from: n } })} testId="text-box-from" /></label>
+        <label title="0: until the end of the shot">To (seconds)<NumberField min={0} max={36000} step={0.1} value={timing.to ?? 0} onCommit={(n) => set({}, { timing: { ...timing, to: n > 0 ? n : null } })} testId="text-box-to" /></label>
+      </div> : <>
+        <label>From<DateField value={fromJSONValue(timing.from)} onChange={(t) => t && set({}, { timing: { ...timing, from: toJSONValue(t) as [number, number] } })} testId="text-box-from-date" /></label>
+        <label>To<DateField value={timing.to ? fromJSONValue(timing.to) : null} allowEmpty placeholder="(from then on)" onChange={(t) => set({}, { timing: { ...timing, to: t ? (toJSONValue(t) as [number, number]) : null } })} testId="text-box-to-date" /></label>
+      </>}
+      <div className="two">
+        <label>Comes in<select value={b.enter} onChange={(e) => set({}, { enter: e.target.value as TextEnter })} data-testid="text-box-enter">
+          <option value="none">At once</option><option value="fade">Fading in</option><option value="rise">Rising</option><option value="pop">Popping up</option><option value="type">Typed out</option>
+        </select></label>
+        <label>Goes<select value={b.exit} onChange={(e) => set({}, { exit: e.target.value as TextExit })} data-testid="text-box-exit">
+          <option value="none">At once</option><option value="fade">Fading out</option><option value="sink">Sinking</option>
+        </select></label>
+        <label>Taking (seconds)<NumberField min={0} max={60} step={0.1} value={b.seconds} onCommit={(n) => set({}, { seconds: n })} testId="text-box-seconds" /></label>
+      </div>
+      {b.anchor ? <>
+        <p className="muted" data-testid="callout-place">Points to {lonLatText(b.anchor)}.</p>
+        <div className="buttons">
+          <button className="small" onClick={() => s.set({ pickCallout: o.id })} data-testid="callout-pick">Choose the place on the preview</button>
+          <button className="small" onClick={() => set({}, { anchor: null })}>No pointer</button>
+        </div>
+        <label>Pointer colour<input type="color" value={b.pointer || o.color} onChange={(e) => set({}, { pointer: e.target.value })} /></label>
+      </> : <div className="buttons"><button className="small" onClick={() => { set({}, { anchor: [camera.lon, camera.lat] }); s.set({ pickCallout: o.id }); }}>Point it at a place…</button></div>}
+      <div className="buttons"><button className="small danger" onClick={() => update({ overlays: shot.overlays.filter((x) => x.id !== o.id) })} data-testid="text-box-delete">Delete this text</button></div>
+    </details>
   );
 }
 

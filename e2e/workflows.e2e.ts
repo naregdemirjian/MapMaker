@@ -2500,6 +2500,81 @@ try {
     assert.ok(shotId && (await steps()) >= 0 && before >= 0);
   });
 
+  await h.step('Text boxes and callouts: a text shown from half a second to one and a half; a callout pointing at a place clicked on the preview, its dot there; dragged; undone', async () => {
+    await page.getByTestId('mode-world').click();
+    // A short shot of one date (no title, no date).
+    const shotId = await page.evaluate(() => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const settings = B.defaultShot(s.spaceId, { lon: 15, lat: 46, zoom: 2, rotation: 0, projection: 'equirectangular' }, s.time, s.time, 24, 2);
+      settings.overlays = [];
+      const id = s.execute((w: any) => B.commands.createSequence(w, 'Texts', settings));
+      s.set({ shotId: id, shotFrame: 0, presentCamera: null, mode: 'present' });
+      return id as string;
+    });
+    await page.getByTestId('shot-editor').waitFor();
+    const shotNow = () => page.evaluate((id) => JSON.parse((window as any).__mapmaker.store.world.get('sequence', id).settings), shotId) as Promise<any>;
+    // A text box: written, shown from 0.5 s to 1.5 s, coming in and going over a quarter of a second.
+    await page.getByTestId('add-text-box').click();
+    await page.getByTestId('text-box').waitFor();
+    await page.getByTestId('text-box-text').fill('The drive begins');
+    await page.getByTestId('text-box-text').blur();
+    for (const [id, v] of [['text-box-from', '0.5'], ['text-box-to', '1.5'], ['text-box-seconds', '0.25']]) { await page.getByTestId(id).fill(v); await page.getByTestId(id).press('Enter'); }
+    await page.waitForFunction((id) => { const o = JSON.parse((window as any).__mapmaker.store.world.get('sequence', id).settings).overlays.find((x: any) => x.box); return !!o && o.text === 'The drive begins' && o.box.timing.from === 0.5 && o.box.timing.to === 1.5 && o.box.seconds === 0.25; }, shotId);
+    const textId = (await shotNow()).overlays.find((o: any) => o.box).id as string;
+    const drawnAt = async (frame: number) => {
+      await page.evaluate((f) => (window as any).__mapmaker.store.set({ shotFrame: f, presentCamera: null }), frame);
+      await page.waitForTimeout(200);
+      return (await page.evaluate(() => (window as any).__mapmaker.previewOverlays())) as Array<{ id: string; x: number; y: number; w: number; h: number }>;
+    };
+    assert.ok(!(await drawnAt(6)).some((r) => r.id === textId), 'not shown a quarter of a second in');
+    assert.ok((await drawnAt(24)).some((r) => r.id === textId), 'shown at one second');
+    assert.ok(!(await drawnAt(40)).some((r) => r.id === textId), 'gone at 1.7 seconds');
+    // A callout: its place chosen with a click on the preview, its line and dot drawn there.
+    await drawnAt(24);
+    await page.getByTestId('add-callout').click();
+    await page.getByTestId('callout-hint').waitFor();
+    const place: LL = [20, 43];
+    const at = (await page.evaluate(([lon, lat]) => (window as any).__mapmaker.previewToPage(lon, lat), place)) as [number, number];
+    await page.mouse.click(at[0], at[1]);
+    await page.waitForFunction(([id, lon, lat]) => {
+      const o = JSON.parse((window as any).__mapmaker.store.world.get('sequence', id).settings).overlays.find((x: any) => x.box?.anchor);
+      return !!o && Math.abs(o.box.anchor[0] - lon) < 0.6 && Math.abs(o.box.anchor[1] - lat) < 0.6;
+    }, [shotId, place[0], place[1]] as const);
+    assert.equal(await page.getByTestId('callout-hint').count(), 0, 'the click chose the place');
+    const calloutId = (await shotNow()).overlays.find((o: any) => o.box?.anchor).id as string;
+    const pixelAtPage = (p: [number, number]) => page.evaluate(([x, y]) => {
+      const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement;
+      const r = c.getBoundingClientRect(), k = c.width / r.width;
+      return Array.from(c.getContext('2d')!.getImageData(Math.round((x - r.left) * k), Math.round((y - r.top) * k), 1, 1).data).slice(0, 3);
+    }, p);
+    let dot = await pixelAtPage(at);
+    for (let i = 0; i < 20 && Math.max(...dot.map((v, k) => Math.abs(v - [244, 239, 230][k]))) > 45; i++) { await page.waitForTimeout(100); dot = await pixelAtPage(at); }
+    assert.ok(Math.max(...dot.map((v, k) => Math.abs(v - [244, 239, 230][k]))) <= 45, `the callout's dot at its place (${dot})`);
+    const boxes = await drawnAt(24);
+    const box = boxes.find((r) => r.id === calloutId)!;
+    assert.ok(box, 'the callout\'s box is drawn');
+    // The pointer: pixels between the box and the place are the text's colour somewhere along the line.
+    const from = [Math.min(box.x + box.w, Math.max(box.x, at[0])), Math.min(box.y + box.h, Math.max(box.y, at[1]))];
+    let lit = 0;
+    for (let i = 2; i <= 8; i++) {
+      const f = i / 10, px = await pixelAtPage([from[0] + (at[0] - from[0]) * f, from[1] + (at[1] - from[1]) * f]);
+      if (Math.max(...px.map((v, k) => Math.abs(v - [244, 239, 230][k]))) <= 60) lit++;
+    }
+    assert.ok(lit >= 4, `a line from the box to the place (${lit} of 7 points on it)`);
+    await h.screenshot('text-box-callout');
+    // The callout's box dragged on the preview (one step).
+    const x0 = (await shotNow()).overlays.find((o: any) => o.id === calloutId).x as number;
+    await page.mouse.move(box.x + box.w / 2, box.y + box.h / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.w / 2 + 60, box.y + box.h / 2 + 10, { steps: 5 });
+    await page.mouse.up();
+    await page.waitForFunction(([id, cid, x]) => JSON.parse((window as any).__mapmaker.store.world.get('sequence', id).settings).overlays.find((o: any) => o.id === cid).x > x + 0.02, [shotId, calloutId, x0] as const);
+    // Undone: the drag, the callout, the text and the shot.
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ mode: 'world', shotId: null }));
+    for (let i = 0; i < 15 && (await page.evaluate((id) => !!(window as any).__mapmaker.store.world.get('sequence', id), shotId)); i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await page.evaluate((id) => !!(window as any).__mapmaker.store.world.get('sequence', id), shotId), false, 'the shot is gone');
+  });
+
   await h.step('History Health lists the overlap, nothing else; no browser errors', async () => {
     await page.getByTestId('mode-world').click();
     await page.getByTestId('health').click();
