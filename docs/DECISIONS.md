@@ -60,6 +60,27 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D83. Territory reaches the detailed coastline: a coastal band under the fills (fifth feedback round)
+
+Today's countries are added from Natural Earth's 1:50m shapes, but close up the coastline is drawn from the 1:10m data:
+with "Territory ends at the coast", land between the two coasts was left unfilled (rims along Denmark's and Greece's
+coasts, whole strips in Norway's fjords), small islands near a coast were empty, and a country's border against the
+sea was drawn as a line across the land. Adding the countries at 1:10m instead was measured on the whole world: 520,000
+points instead of 95,000, 34 s instead of 2 s to add, 1.7 GB of memory instead of 0.3, an 82 MB snapshot and strokes
+three times slower, which is too heavy for large projects on a slower computer; simplifying the 1:10m coasts barely
+helps (430,000 points at 0.002°). So the drawing makes up for it instead: where a territory layer ends at the coast,
+each owner's borders **against nobody** (its coasts, as kept for its border lines) are stroked about **5 km** wide (1 to
+48 pixels) in the owner's look (its colour, or its picture placed as its fill is) **under** the fills, kept only in a
+band 5 km either side of the coastline drawn, and the land mask then trims it to the land: land along the coast that no
+territory covers takes the look of the territory beside it, and small islands within that distance with it. Inland,
+land that nobody holds is untouched (it is not near the coastline), and anything someone holds is drawn over the band.
+An owner's border against nobody is left out within the band (the coastline is the edge there); borders between two
+owners still run to the coast. The band of the coastline is kept between frames while the view stays (as the land mask
+is), so a brush stroke's redraw costs 0.5 ms more (20 ms against 19 ms on the Earth 242 benchmark); moving the map
+costs nothing measurable. The reference renderer of the picture comparison (`e2e/reference`) follows the same rule.
+Making the comparison on the whole world also found that saving a snapshot of a map with half a million border points
+overflowed the call stack (lists were spread into one call); such lists are now copied item by item.
+
 ### D82. Pictures over countries in several pieces; flags fitted without cropping their stripes; territories (fifth feedback round)
 
 A picture fill (a flag) was placed by the box around **all** of a country's land, so France's flag spread from French

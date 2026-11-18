@@ -197,7 +197,10 @@ export class World {
     s.vertex = []; s.segment = []; s.face = [];
     for (const arr of this.arrangements.values()) {
       const r = arr.rows();
-      s.vertex.push(...r.vertices); s.segment.push(...r.segments); s.face.push(...r.faces);
+      // (Row by row: spreading half a million rows into one call overflows the stack.)
+      for (const v of r.vertices) s.vertex.push(v);
+      for (const g of r.segments) s.segment.push(g);
+      for (const f of r.faces) s.face.push(f);
     }
     return s;
   }

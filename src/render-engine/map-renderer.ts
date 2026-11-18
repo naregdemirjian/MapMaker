@@ -133,6 +133,12 @@ const newKept = (): Kept => ({ canvas: null, ctx: null, key: '', seen: '', stric
 interface Renew { rects: DeviceRect[]; moment: string }
 
 /** A picture or video fill (see domain/commands.ts CountryFill). */
+/** How far land along the coast that no territory covers takes the look of the territory beside it (D83). */
+const COAST_RIM_KM = 5;
+const EARTH_RADIUS_KM = 6371;
+/** That distance in view pixels (at least one, at most 48). */
+const coastRim = (view: View) => Math.min(48, Math.max(1, (COAST_RIM_KM / EARTH_RADIUS_KM) * view.projection.scale()));
+
 interface CountryFillLike { kind: 'color' | 'image' | 'video'; asset?: string; off?: boolean; fit?: 'cover' | 'contain' | 'stretch' | 'tile' | 'fill'; tileSize?: number; play?: 'loop' | 'once'; speed?: number; start?: number; pieces?: FillPieces; gapKm?: number }
 
 /** x, y, width, height on screen. */
@@ -246,7 +252,7 @@ interface LayerSnap {
 }
 
 /** The border chains an owner draws: `take` are positions in `b` (see boundaryOf); `key` says which lines those are. */
-interface OwnerBorder { key: string; b: Int32Array; take: number[] }
+interface OwnerBorder { key: string; b: Int32Array; take: number[]; /** Of those, the chains against nobody. */ open: Set<number> }
 
 interface TransitionGroup {
   a: Assignment;
@@ -269,7 +275,7 @@ interface TransitionGroup {
   changing: Shape | null;
 }
 
-interface BorderPaths { plain: Array<Path2D | BlockPath>; inside: Map<string, Path2D>; outside: Map<string, Path2D> }
+interface BorderPaths { plain: Array<Path2D | BlockPath>; /** Each owner's border against nobody (often a coast), apart (D83). */ open: Array<Path2D | BlockPath>; openBy: Map<string, Path2D | BlockPath>; inside: Map<string, Path2D>; outside: Map<string, Path2D> }
 
 /** Paths prepared on one sheet for one parcel map. */
 interface SheetParcels {
@@ -609,7 +615,7 @@ export class MapRenderer {
     }
     const byOwner = new Map(prev.byOwner), reach = new Map(prev.reach), after = new Map(prev.after);
     const num = (x: number, y: number) => x - y;
-    const rest = (l: number[] | undefined, more: number[] | undefined) => { const o = (l ?? []).filter((f) => !moved.has(f)); if (more) o.push(...more); return o.sort(num); };
+    const rest = (l: number[] | undefined, more: number[] | undefined) => { const o = (l ?? []).filter((f) => !moved.has(f)); if (more) for (const f of more) o.push(f); return o.sort(num); };
     let cameOrWent = false;
     for (const owner of owners) {
       const o = rest(prev.byOwner.get(owner)?.faces, gains.get(owner));
@@ -681,7 +687,7 @@ export class MapRenderer {
     const geom = parcelGeometry(arr), t = arr.topology();
     const b = this.boundaryOf(arr, set);
     let h1 = 0x811c9dc5, h2 = 0x9e3779b9, n = 0;
-    const take: number[] = [];
+    const take: number[] = [], open = new Set<number>();
     for (let q = 0; q < b.length; q += 3) {
       const other = arr.halfEdgeFace(geom.cycle(b[q], t).heads[b[q + 1]] ^ 1);
       if (inGroup.size && (inGroup.has(other) || inGroup.has(t.cycleLabel.get(b[q])!))) continue;
@@ -689,9 +695,10 @@ export class MapRenderer {
       if (across === undefined) continue;
       if (across.value !== null && (across.value === owner || !b[q + 2])) continue;
       take.push(q);
+      if (across.value === null) open.add(q);
       h1 = Math.imul(h1 ^ q, 16777619) >>> 0; h2 = (Math.imul(h2 + q, 2246822519) ^ (h2 >>> 13)) >>> 0; n++;
     }
-    return n ? { key: `${set.key}|${n}|${h1}|${h2}`, b, take } : null;
+    return n ? { key: `${set.key}|${n}|${h1}|${h2}`, b, take, open } : null;
   }
 
   /**
@@ -732,21 +739,27 @@ export class MapRenderer {
     if (bp) return bp;
     const geom = parcelGeometry(arr), t = arr.topology();
     const inGroup = snap.groupOf;
-    const plain: Array<Path2D | BlockPath> = [];
+    const plain: Array<Path2D | BlockPath> = [], open: Array<Path2D | BlockPath> = [], openBy = new Map<string, Path2D | BlockPath>();
     // (Borders both before and after an animated change, chain by chain: see step 2.)
     const loose = new Path2D();
     let anyLoose = false;
-    // 1. Away from any animated change: owner by owner.
-    for (const e of this.bordersOf(arr, snap, states).values()) {
-      let p = sp.ownerBorders.get(e.key);
-      if (p === undefined) {
-        const path = sheet.blocks();
-        let any = false;
-        for (const q of e.take) for (const l of this.chainLines(sp, sheet, geom, e.b[q], e.b[q + 1])) { path.addLine(l); any = true; }
-        p = any ? path : null;
-        sp.ownerBorders.set(e.key, p);
+    // 1. Away from any animated change: owner by owner; against other owners, and against nobody.
+    for (const [owner, e] of this.bordersOf(arr, snap, states)) {
+      for (const against of ['owner', 'nobody'] as const) {
+        const key = `${e.key}|${against}`;
+        let p = sp.ownerBorders.get(key);
+        if (p === undefined) {
+          const path = sheet.blocks();
+          let any = false;
+          for (const q of e.take) {
+            if (e.open.has(q) !== (against === 'nobody')) continue;
+            for (const l of this.chainLines(sp, sheet, geom, e.b[q], e.b[q + 1])) { path.addLine(l); any = true; }
+          }
+          p = any ? path : null;
+          sp.ownerBorders.set(key, p);
+        }
+        if (p) { (against === 'owner' ? plain : open).push(p); if (against === 'nobody') openBy.set(owner, p); }
       }
-      if (p) plain.push(p);
     }
     // 2. Around the parcels of animated changes: chain by chain.
     const inside = new Map<string, Path2D>(), outside = new Map<string, Path2D>();
@@ -776,7 +789,7 @@ export class MapRenderer {
       }
     }
     if (anyLoose) plain.push(loose);
-    bp = { plain, inside, outside };
+    bp = { plain, open, openBy, inside, outside };
     if (sp.borders.size >= 8) sp.borders.delete(sp.borders.keys().next().value!);
     sp.borders.set(snap.key, bp);
     return bp;
@@ -1288,6 +1301,31 @@ export class MapRenderer {
    * Keep only what lies on land in a buffer (coastline clipping). The land is painted once per view
    * into a mask that every layer's fills and borders then use, instead of each tracing the coast.
    */
+  /**
+   * The band along the coastline (D83), `width` pixels wide, in the target's pixels: kept from frame to
+   * frame while the view stays (a brush stroke redraws territory, not the coast). Drawn afresh where only
+   * part of the frame is being drawn and none is kept yet.
+   */
+  private coastBand(target: CanvasRenderingContext2D, view: View, sheet: Sheet, basemap: Basemap, frameKey: string, width: number): CanvasImageSource {
+    const t = target.getTransform();
+    const draw = (c: CanvasRenderingContext2D) => { c.setTransform(t); this.basemapPainter.strokeCoastline(c, view, sheet, basemap, width); };
+    if (this.caching === 'off' || target.canvas.width * target.canvas.height > MapRenderer.MASK_LIMIT) {
+      const sc = this.scratch(target);
+      draw(sc);
+      return sc.canvas as CanvasImageSource;
+    }
+    const b = this.keptBuffer('coastband', target);
+    const key = `${frameKey}|${sheet.id}|${basemap.scales.length}|${t.e},${t.f}|${width.toFixed(2)}`;
+    if (b.key !== key) {
+      b.ctx!.setTransform(1, 0, 0, 1, 0, 0);
+      b.ctx!.clearRect(0, 0, b.canvas!.width, b.canvas!.height);
+      // (The whole band, even when only part of the frame is being drawn: it is kept for the rest.)
+      draw(b.ctx!);
+      b.key = key;
+    }
+    return b.canvas as CanvasImageSource;
+  }
+
   private maskLand(lc: CanvasRenderingContext2D, view: View, sheet: Sheet, basemap: Basemap, frameKey: string, lakes: boolean): void {
     const direct = () => this.basemapPainter.maskToLand(lc, view, sheet, basemap, lakes);
     if (this.caching === 'off' || lc.canvas.width * lc.canvas.height > MapRenderer.MASK_LIMIT) { direct(); return; }
@@ -1608,6 +1646,41 @@ export class MapRenderer {
             if (v && media && this.paintMedia(pc, media, shape, boxOf(v), view.unit)) return;
             plain(pc, v, shape);
           };
+          // Where territory ends at the coast (D83): land along the coastline that no parcel covers
+          // (today's countries are drawn from 1:50m shapes, the coast close up from 1:10m ones, and a
+          // brushed outline rarely follows the coast) takes the look of the territory beside it: each
+          // owner's outline is stroked a few kilometres wide under the fills, kept only in a band along
+          // the coastline, and the land mask then trims it to the land.
+          if (clip && opts.basemap && this.basemapPainter.pathsFor(view, sheet, opts.basemap).coast === 'mixed') {
+            const rim = coastRim(view);
+            const rc = this.scratch(c);
+            rc.lineJoin = 'round';
+            rc.lineCap = 'round';
+            // (Each owner's borders against nobody: its coasts, kept as paths for its border lines.)
+            for (const [owner, path] of this.borderPaths(sp, sheet, arr, snap, snap.states).openBy) {
+              const media = fillOf(owner);
+              let style: string | CanvasPattern = colorOf(owner) ?? '#888';
+              if (media) {
+                const set = snap.byOwner.get(owner);
+                const main = set ? this.fillClusters(arr, set, media)[0] : null;
+                const b = main ? this.boxesOnScreen(view, main.box)[0] : null, k = main ? this.boxesOnScreen(view, main.core)[0] ?? b : null;
+                const pattern = b && k ? this.mediaPattern(rc, media, [k[0], k[1], k[2] - k[0], k[3] - k[1]], [b[0], b[1], b[2] - b[0], b[3] - b[1]], view.unit) : null;
+                if (pattern) style = pattern;
+              }
+              rc.strokeStyle = style;
+              this.strokeOnSheet(rc, path, 2 * rim);
+            }
+            const band = this.coastBand(c, view, sheet, opts.basemap, frameKey, 2 * rim);
+            rc.globalCompositeOperation = 'destination-in';
+            rc.setTransform(1, 0, 0, 1, 0, 0);
+            rc.drawImage(band, 0, 0);
+            rc.globalCompositeOperation = 'source-over';
+            // (The buffers share the target's pixels: laid on without its transform.)
+            lc.save();
+            lc.setTransform(1, 0, 0, 1, 0, 0);
+            lc.drawImage(rc.canvas as CanvasImageSource, 0, 0);
+            lc.restore();
+          }
           // Every owner's parcels as one shape (those not on this sheet are skipped altogether).
           for (const [owner, set] of snap.byOwner) {
             const shape = this.setPath(sp, sheet, arr, set);
@@ -1677,9 +1750,25 @@ export class MapRenderer {
         if (wantsBorders) for (const { ls, states, snap, tg, clip } of prepared) {
           const width = (ls.borderWidth ?? style.borderWidth) * u;
           if (!clip) { this.drawBorders(c, sheet, sp, arr, snap, states, tg, style, width); continue; }
-          // Ending at the coast: drawn in the scratch buffer, masked by the land, then laid on.
+          // Ending at the coast: drawn in the scratch buffer, masked by the land, then laid on. Where land
+          // along the coast takes the look of the territory beside it (D83), an owner's border against
+          // nobody is left out in that band (the coastline is the edge there); borders between owners stay.
           const lc = this.scratch(c);
-          this.drawBorders(lc, sheet, sp, arr, snap, states, tg, style, width);
+          if (this.basemapPainter.pathsFor(view, sheet, opts.basemap!).coast === 'mixed') {
+            this.drawBorders(lc, sheet, sp, arr, snap, states, tg, style, width, 'shared');
+            const oc = this.scratch(c);
+            this.drawBorders(oc, sheet, sp, arr, snap, states, tg, style, width, 'open');
+            const band = this.coastBand(c, view, sheet, opts.basemap!, frameKey, 2 * coastRim(view));
+            oc.save();
+            oc.setTransform(1, 0, 0, 1, 0, 0);
+            oc.globalCompositeOperation = 'destination-out';
+            oc.drawImage(band, 0, 0);
+            oc.restore();
+            lc.save();
+            lc.setTransform(1, 0, 0, 1, 0, 0);
+            lc.drawImage(oc.canvas as CanvasImageSource, 0, 0);
+            lc.restore();
+          } else this.drawBorders(lc, sheet, sp, arr, snap, states, tg, style, width);
           this.maskLand(lc, view, sheet, opts.basemap!, frameKey, false);
           c.save();
           c.setTransform(1, 0, 0, 1, 0, 0);
@@ -2519,6 +2608,31 @@ export class MapRenderer {
   }
   private clusterCache = new Map<string, { arr: Arrangement; clusters: Array<{ set: FaceSet; box: GeoBox; core: GeoBox }> }>();
 
+  /** A picture or video frame as a pattern laid where paintMedia puts it (for the coastal band, D83); null if not loaded. */
+  private mediaPattern(c: CanvasRenderingContext2D, fill: CountryFillLike, box: Box2, cover: Box2 | null, unit: number): CanvasPattern | null {
+    const src = fill.kind === 'video' ? videoNow(fill.asset, this.mediaSeconds, fill, this.mediaChannel) : imageNow(fill.asset);
+    if (!src) return null;
+    const iw = (src as HTMLVideoElement).videoWidth || src.width, ih = (src as HTMLVideoElement).videoHeight || src.height;
+    const pattern = iw && ih ? c.createPattern(src, 'repeat') : null;
+    if (!pattern) return null;
+    if (fill.fit === 'tile') {
+      const size = (fill.tileSize ?? 120) * unit;
+      pattern.setTransform(new DOMMatrix().translate(box[0], box[1]).scale(size / iw));
+      return pattern;
+    }
+    const fit = !fill.fit || (fill.fit === 'cover' && fill.asset?.startsWith('data/flags/')) ? 'fill' : fill.fit;
+    let [x, y, w, h] = box;
+    let [sx, sy] = fit === 'stretch' ? [w / iw, h / ih] : fitScales(iw, ih, w, h, fit);
+    if (cover && fit !== 'contain' && fit !== 'stretch') {
+      const dw = iw * sx, dh = ih * sy, cx = x + w / 2, cy = y + h / 2;
+      const k = Math.max(1, (cx - cover[0]) / (dw / 2), (cover[0] + cover[2] - cx) / (dw / 2), (cy - cover[1]) / (dh / 2), (cover[1] + cover[3] - cy) / (dh / 2));
+      if (k > 1) { w *= k; h *= k; x = cx - w / 2; y = cy - h / 2; [sx, sy] = fitScales(iw, ih, w, h, fit); }
+    }
+    const dw = iw * sx, dh = ih * sy;
+    pattern.setTransform(new DOMMatrix([sx, 0, 0, sy, x + (w - dw) / 2, y + (h - dh) / 2]));
+    return pattern;
+  }
+
   /** Fill a shape with a picture or video frame; false if it cannot be drawn yet. */
   private paintMedia(c: CanvasRenderingContext2D, fill: CountryFillLike, shape: Shape, box: Box2, unit: number, rect: Box2 | null = null, cover: Box2 | null = null): boolean {
     const src = fill.kind === 'video' ? videoNow(fill.asset, this.mediaSeconds, fill, this.mediaChannel) : imageNow(fill.asset);
@@ -2632,6 +2746,7 @@ export class MapRenderer {
   private drawBorders(
     ctx: CanvasRenderingContext2D, sheet: Sheet, sp: SheetParcels, arr: Arrangement, snap: LayerSnap, states: Map<number, FaceState>,
     tg: { groups: Map<string, TransitionGroup>; of: Map<number, TransitionGroup> }, style: MapStyle, width: number,
+    which: 'all' | 'shared' | 'open' = 'all',
   ): void {
     const bp = this.borderPaths(sp, sheet, arr, snap, states);
     const stroke = (p: Path2D | BlockPath | null | undefined) => { if (p) this.strokeOnSheet(ctx, p, width); };
@@ -2641,7 +2756,9 @@ export class MapRenderer {
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
     // (Owner by owner: each owner's lines are skipped where none of them shows.)
-    for (const p of bp.plain) stroke(p);
+    if (which !== 'open') for (const p of bp.plain) stroke(p);
+    if (which !== 'shared') for (const p of bp.open) stroke(p);
+    if (which === 'open') { ctx.restore(); return; }
     for (const [id, g] of tg.groups) {
       const ins = bp.inside.get(id), outs = bp.outside.get(id);
       if (g.advance) {

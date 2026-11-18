@@ -882,8 +882,9 @@ export class Arrangement {
     for (const sg of this.segments.values()) fresh.indexSegment({ ...sg });
     const f = fresh.topology();
     const sig = (x: Topology) => [...x.cycles.values()].map((c) => {
-      const m = c.indexOf(Math.min(...c));
-      return [...c.slice(m), ...c.slice(0, m)].join(',');
+      let m = 0;
+      for (let i = 1; i < c.length; i++) if (c[i] < c[m]) m = i;
+      return c.slice(m).concat(c.slice(0, m)).join(',');
     }).sort();
     const problems: string[] = [];
     const a = sig(t), b = sig(f);

@@ -294,6 +294,26 @@ export class MapRenderer {
         const l = byColor.get(c);
         if (l) l.push(face); else byColor.set(c, [face]);
       }
+      // Land along the coastline that no parcel covers takes the look of the territory beside it (D83):
+      // outlines stroked a few kilometres wide under the fills, kept only in a band along the coastline.
+      if (clip) {
+        const rim = Math.min(48, Math.max(1, (5 / 6371) * view.projection.scale()));
+        const rc = this.scratch(ctx, 1);
+        rc.lineJoin = 'round'; rc.lineCap = 'round'; rc.lineWidth = 2 * rim;
+        for (const [c, faces] of byColor) { rc.strokeStyle = c; rc.stroke(this.groupPath(view, arr, faces)); }
+        for (const [v, faces] of byMedia) { rc.strokeStyle = colorOf(v) ?? '#888'; rc.stroke(this.groupPath(view, arr, faces)); }
+        const band = this.scratch(ctx, 2);
+        band.lineJoin = 'round'; band.lineCap = 'round'; band.lineWidth = 2 * rim; band.strokeStyle = '#000';
+        band.stroke(this.basemapPainter.pathsFor(view, opts.basemap!).coastline);
+        rc.setTransform(1, 0, 0, 1, 0, 0);
+        rc.globalCompositeOperation = 'destination-in';
+        rc.drawImage(band.canvas as CanvasImageSource, 0, 0);
+        rc.globalCompositeOperation = 'source-over';
+        lc.save();
+        lc.setTransform(1, 0, 0, 1, 0, 0);
+        lc.drawImage(rc.canvas as CanvasImageSource, 0, 0);
+        lc.restore();
+      }
       for (const [c, faces] of byColor) { lc.fillStyle = c; lc.fill(this.groupPath(view, arr, faces), 'evenodd'); }
       // Pictures are placed by the bounding box of the owner's whole territory (so a flag does not
       // jump between the owner's pieces); an owner whose picture is not loaded yet shows its colour.
@@ -357,7 +377,23 @@ export class MapRenderer {
     if (opts.passes.has('borders')) for (const { ls, states, tg, clip } of prepared) {
       ctx.save();
       if (clip) ctx.clip(land());
-      this.drawBorders(ctx, view, arr, states, tg, style, (ls.borderWidth ?? style.borderWidth) * u);
+      if (!clip) this.drawBorders(ctx, view, arr, states, tg, style, (ls.borderWidth ?? style.borderWidth) * u);
+      else {
+        // A border against nobody is left out along the coastline, where the coastline is the edge (D83).
+        this.drawBorders(ctx, view, arr, states, tg, style, (ls.borderWidth ?? style.borderWidth) * u, 'shared');
+        const oc = this.scratch(ctx, 1);
+        this.drawBorders(oc, view, arr, states, tg, style, (ls.borderWidth ?? style.borderWidth) * u, 'open');
+        const rim = Math.min(48, Math.max(1, (5 / 6371) * view.projection.scale()));
+        oc.save();
+        oc.globalCompositeOperation = 'destination-out';
+        oc.lineJoin = 'round'; oc.lineCap = 'round'; oc.lineWidth = 2 * rim; oc.strokeStyle = '#000';
+        oc.stroke(this.basemapPainter.pathsFor(view, opts.basemap!).coastline);
+        oc.restore();
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.drawImage(oc.canvas as CanvasImageSource, 0, 0);
+        ctx.restore();
+      }
       ctx.restore();
     }
 
@@ -731,19 +767,20 @@ export class MapRenderer {
   private mediaSeconds = 0;
   private mediaChannel: MediaChannel = 'live';
 
-  private scratchCanvas: OffscreenCanvas | null = null;
-  private scratchCtx: CanvasRenderingContext2D | null = null;
+  private scratchCanvases: Array<{ canvas: OffscreenCanvas; ctx: CanvasRenderingContext2D }> = [];
 
   /** A cleared buffer the size of the target, with the target's current transform. */
-  private scratch(ctx: CanvasRenderingContext2D): CanvasRenderingContext2D {
+  /** A cleared buffer the size of the target; `i` picks one of several (used at the same time). */
+  private scratch(ctx: CanvasRenderingContext2D, i = 0): CanvasRenderingContext2D {
     const w = ctx.canvas.width, h = ctx.canvas.height;
-    if (!this.scratchCanvas || this.scratchCanvas.width !== w || this.scratchCanvas.height !== h) {
-      this.scratchCanvas = new OffscreenCanvas(w, h);
+    let b = this.scratchCanvases[i];
+    if (!b || b.canvas.width !== w || b.canvas.height !== h) {
+      const canvas = new OffscreenCanvas(w, h);
       // Match the target's memory placement so copying between them stays cheap.
       const willReadFrequently = !!ctx.getContextAttributes?.().willReadFrequently;
-      this.scratchCtx = this.scratchCanvas.getContext('2d', { willReadFrequently }) as unknown as CanvasRenderingContext2D;
+      b = this.scratchCanvases[i] = { canvas, ctx: canvas.getContext('2d', { willReadFrequently }) as unknown as CanvasRenderingContext2D };
     }
-    const sc = this.scratchCtx!;
+    const sc = b.ctx;
     sc.setTransform(1, 0, 0, 1, 0, 0);
     sc.globalAlpha = 1;
     sc.globalCompositeOperation = 'source-over';
@@ -760,6 +797,7 @@ export class MapRenderer {
   private drawBorders(
     ctx: CanvasRenderingContext2D, view: View, arr: Arrangement, states: Map<number, FaceState>,
     tg: { groups: Map<string, TransitionGroup>; of: Map<number, TransitionGroup> }, style: MapStyle, width: number,
+    which: 'all' | 'shared' | 'open' = 'all',
   ): void {
     const differs = (x: string | null, y: string | null) => (x ?? '') !== (y ?? '');
     const plain: number[][][] = [];
@@ -775,7 +813,13 @@ export class MapRenderer {
       const va = arr.vertices.get(s.a)!, vb = arr.vertices.get(s.b)!;
       const line = [[va.lon / E7, va.lat / E7], [vb.lon / E7, vb.lat / E7]];
       // Unaffected by any animation, a border both before and after, or where two animations meet.
-      if ((!ga && !gb) || (now && before) || (ga && gb && ga !== gb)) { plain.push(line); continue; }
+      if ((!ga && !gb) || (now && before) || (ga && gb && ga !== gb)) {
+        // (Against nobody, away from any animation: 'open'; the rest 'shared'.)
+        const open = !ga && !gb && (!a.value || !b.value);
+        if (which === 'all' || (which === 'open') === open) plain.push(line);
+        continue;
+      }
+      if (which === 'open') continue;
       add(now ? inside : outside, (ga ?? gb)!, line);
     }
     const path = (lines: number[][][]) => new Path2D(geoPath(view.projection)({ type: 'MultiLineString', coordinates: lines }) ?? '');

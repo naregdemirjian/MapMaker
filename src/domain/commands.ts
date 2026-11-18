@@ -836,7 +836,7 @@ function paintInside(tx: Tx, engine: Engine, p: PaintInput, out: number[] = []):
   const arr = world.arrangement(p.spaceId);
   const inside = [...leafDescendants(arr, insideAll)];
   writeAssignments(tx, engine, p.spaceId, p.layerId, p.mode, [{ leaves: inside, value: p.value }], { transition: p.mode.kind === 'new' ? p.transition ?? null : null, intent: { op: 'paint', value: p.value } });
-  out.push(...inside);
+  for (const f of inside) out.push(f);
   return 'paint';
 }
 

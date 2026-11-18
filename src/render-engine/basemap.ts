@@ -352,6 +352,20 @@ export class BasemapPainter {
     ctx.restore();
   }
 
+  /** Stroke the coastline `width` screen pixels wide (the band along the coast that gaps are filled in, D83). */
+  strokeCoastline(ctx: CanvasRenderingContext2D, view: View, sheet: Sheet, basemap: Basemap, width: number): void {
+    const paths = this.pathsFor(view, sheet, basemap);
+    const [k, e, f] = sheet.placement(view);
+    ctx.save();
+    ctx.transform(k, 0, 0, k, e, f);
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = width / k;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    paths.coastline.paint(ctx, width / k / 2 + 1, (p) => ctx.stroke(p));
+    ctx.restore();
+  }
+
   /** Paint the land solid (for a mask of the land, see MapRenderer). */
   fillLand(ctx: CanvasRenderingContext2D, view: View, sheet: Sheet, basemap: Basemap): void {
     const paths = this.pathsFor(view, sheet, basemap);

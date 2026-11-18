@@ -578,7 +578,8 @@ class AppStore {
       return [a, b];
     });
     if (ys.length === 0) { this.timeline = { start: 900, end: 2100 }; return; }
-    const lo = Math.min(...ys), hi = Math.max(...ys);
+    let lo = Infinity, hi = -Infinity;
+    for (const y of ys) { if (y < lo) lo = y; if (y > hi) hi = y; }
     const pad = Math.max(5, (hi - lo) * 0.15);
     this.timeline = { start: lo - pad, end: hi + pad };
   }
