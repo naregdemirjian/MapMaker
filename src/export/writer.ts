@@ -45,6 +45,26 @@ export interface ExportJob {
 
 const safe = (s: string) => s.replace(/[^\w\-]+/g, '_').replace(/^_+|_+$/g, '') || 'shot';
 
+/**
+ * An SVG frame (D115): written into the export folder (the project's, or the one the shot chooses)
+ * as "<shot>_frame<number>.svg", never over a file already there. Returns its path.
+ */
+export function writeSvgFrame(projectDir: string, exportDir: string | null | undefined, shotName: string, frame: number, svg: Uint8Array): string {
+  const head = Buffer.from(svg.subarray(0, 400)).toString('utf8');
+  if (!/^(?:\uFEFF)?<\?xml[^>]*>\s*<svg[\s>]/.test(head)) throw Object.assign(new Error('Not an SVG file.'), { status: 400 });
+  const root = exportRoot(projectDir, exportDir);
+  const base = `${safe(shotName)}_frame${String(frame + 1).padStart(6, '0')}`;
+  let file = join(root, `${base}.svg`);
+  for (let n = 2; existsSync(file); n++) file = join(root, `${base}_${n}.svg`);
+  try {
+    mkdirSync(root, { recursive: true });
+    writeFileSync(file, svg);
+  } catch (e) {
+    throw Object.assign(new Error(`Map Maker cannot write to ${root} (${(e as Error).message.split(':')[0]}). Choose another folder.`), { status: 400 });
+  }
+  return file;
+}
+
 export function startJob(projectDir: string, settings: ExportSettings): ExportJob {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   // Never reuse a folder: two exports of the same shot started in the same second get _2, _3, ...

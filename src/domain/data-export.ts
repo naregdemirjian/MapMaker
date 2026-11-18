@@ -7,6 +7,7 @@ import type { Engine } from '../temporal-engine/engine.ts';
 import { BASE_EVENT_ID } from '../world-model/schema.ts';
 import { type Instant, gregorian, fromStore } from '../core-time/index.ts';
 import { parcelGeometry } from '../render-engine/parcel-geometry.ts';
+import type { Arrangement } from '../geo-kernel/arrangement.ts';
 import { isFeatureKind } from '../render-engine/feature-style.ts';
 import { relationKind } from './relations.ts';
 import { groupsOfEvent, featureKind } from './commands.ts';
@@ -69,6 +70,45 @@ export function ringsToPolygons(rings: Position[][]): Position[][][] {
 
 const round = (v: number) => Math.round(v * 1e7) / 1e7;
 
+/**
+ * Each owner's territory on a partition layer at t: its parcels joined into GeoJSON polygons (outer
+ * rings anticlockwise, see ringsToPolygons), owners in the order they are first met.
+ */
+export function territoryPolygons(world: World, engine: Engine, spaceId: string, layerId: string, t: Instant): Map<string, Position[][][]> {
+  const out = new Map<string, Position[][][]>();
+  const arr = world.arrangements.get(spaceId);
+  if (!arr) return out;
+  const byOwner = new Map<string, number[]>();
+  for (const [face, st] of engine.partitionState(spaceId, layerId, t)) if (st.value) { const l = byOwner.get(st.value); if (l) l.push(face); else byOwner.set(st.value, [face]); }
+  for (const [owner, faces] of byOwner) {
+    const polys = facesPolygons(arr, faces);
+    if (polys.length) out.set(owner, polys);
+  }
+  return out;
+}
+
+/** Parcels joined into GeoJSON polygons (outer rings anticlockwise, see ringsToPolygons). */
+export function facesPolygons(arr: Arrangement, faces: number[]): Position[][][] {
+  const rings: Position[][] = [];
+  const dissolved = parcelGeometry(arr).dissolve(faces);
+  if (dissolved) {
+    for (const ring of dissolved) {
+      const pts: Position[] = [];
+      const put = (x: number, y: number) => { const q: Position = [round(x), round(y)]; const l = pts[pts.length - 1]; if (!l || l[0] !== q[0] || l[1] !== q[1]) pts.push(q); };
+      for (const p of ring.parts) {
+        // (A part's turn is in degrees; consecutive parts share their meeting point.)
+        const c = p.cycle;
+        for (let i = p.from; i < p.to; i++) put(c.lon[i] + p.turn, c.lat[i]);
+        if (p.toFirst) put(c.lon[0] + p.turn + 360 * c.wind, c.lat[0]);
+      }
+      // (The last chain ends where the ring began.)
+      if (pts.length > 1 && pts[0][0] === pts[pts.length - 1][0] && pts[0][1] === pts[pts.length - 1][1]) pts.pop();
+      rings.push(pts);
+    }
+  } else for (const f of faces) for (const r of arr.faceRingsLonLat(f)) rings.push(r.map(([x, y]) => [round(x), round(y)] as Position));
+  return ringsToPolygons(rings);
+}
+
 /** The map of one world at instant t as a GeoJSON FeatureCollection. */
 export function mapGeoJSON(world: World, engine: Engine, spaceId: string, t: Instant): { type: 'FeatureCollection'; features: GeoFeature[]; properties: Record<string, unknown> } {
   const features: GeoFeature[] = [];
@@ -79,29 +119,7 @@ export function mapGeoJSON(world: World, engine: Engine, spaceId: string, t: Ins
   for (const layer of layers) {
     if (layer.kind === 'partition' && arr) {
       // Territory, owner by owner: the parcels joined into the owner's outline.
-      const byOwner = new Map<string, number[]>();
-      for (const [face, st] of engine.partitionState(spaceId, layer.id, t)) if (st.value) { const l = byOwner.get(st.value); if (l) l.push(face); else byOwner.set(st.value, [face]); }
-      const geom = parcelGeometry(arr);
-      for (const [owner, faces] of byOwner) {
-        const rings: Position[][] = [];
-        const dissolved = geom.dissolve(faces);
-        if (dissolved) {
-          for (const ring of dissolved) {
-            const pts: Position[] = [];
-            const put = (x: number, y: number) => { const q: Position = [round(x), round(y)]; const l = pts[pts.length - 1]; if (!l || l[0] !== q[0] || l[1] !== q[1]) pts.push(q); };
-            for (const p of ring.parts) {
-              // (A part's turn is in degrees; consecutive parts share their meeting point.)
-              const c = p.cycle;
-              for (let i = p.from; i < p.to; i++) put(c.lon[i] + p.turn, c.lat[i]);
-              if (p.toFirst) put(c.lon[0] + p.turn + 360 * c.wind, c.lat[0]);
-            }
-            // (The last chain ends where the ring began.)
-            if (pts.length > 1 && pts[0][0] === pts[pts.length - 1][0] && pts[0][1] === pts[pts.length - 1][1]) pts.pop();
-            rings.push(pts);
-          }
-        } else for (const f of faces) for (const r of arr.faceRingsLonLat(f)) rings.push(r.map(([x, y]) => [round(x), round(y)] as Position));
-        const polys = ringsToPolygons(rings);
-        if (!polys.length) continue;
+      for (const [owner, polys] of territoryPolygons(world, engine, spaceId, layer.id, t)) {
         const e = world.get('entity', owner);
         features.push({
           type: 'Feature',

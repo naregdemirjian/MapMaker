@@ -4,11 +4,12 @@ import { store } from './store.ts';
 import { gregorian } from '../core-time/index.ts';
 import { lonLatToVec } from '../geo-kernel/vec.ts';
 import { makeView, screenToLonLat, lonLatToScreen } from '../render-engine/camera.ts';
-import { cameraAt, timeAt, defaultShot } from '../presentation/sequence.ts';
+import { cameraAt, timeAt, defaultShot, newTextBox } from '../presentation/sequence.ts';
 import { currentShot, frameRect, shotOverlayRects, shownMapView } from './components/MapView.tsx';
 import { shownSpace } from './components/SpaceView.tsx';
 import * as commands from '../domain/commands.ts';
 import { runExport, renderFrame, PASS_DEFS } from '../presentation/export-driver.ts';
+import { svgFrame } from '../presentation/svg-frame.ts';
 import { decodeCountries, COUNTRY_GROUP_COLORS } from '../domain/countries.ts';
 import { MapRenderer, EXPORT_QUALITY } from '../render-engine/map-renderer.ts';
 import { labelStats } from '../render-engine/label-place.ts';
@@ -31,7 +32,7 @@ function shown(width: number, height: number) {
    * and any difference stops the drawing with an error. Slow; never on in normal use.
    */
   verify(on = true) { Engine.verify = on; store.renderer.verify = on; },
-  bench: { commands, gregorian, lonLatToVec, runExport, renderFrame, PASS_DEFS, defaultShot, EXPORT_QUALITY, decodeCountries, COUNTRY_GROUP_COLORS, MapRenderer, makeView, Engine, labelStats },
+  bench: { commands, gregorian, lonLatToVec, runExport, renderFrame, svgFrame, newTextBox, PASS_DEFS, defaultShot, EXPORT_QUALITY, decodeCountries, COUNTRY_GROUP_COLORS, MapRenderer, makeView, Engine, labelStats },
   /** A view of the map for a camera and size (for off-screen comparisons in tests). */
   viewOf(camera: Parameters<typeof makeView>[0], width: number, height: number) { return makeView(camera, width, height); },
   /** Who owns the place at (lon, lat) on the date written in `date`, on the layer being drawn on. */

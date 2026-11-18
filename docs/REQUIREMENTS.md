@@ -162,7 +162,7 @@ status. Last updated: 18 November 2026 (Stage 4; see DEVELOPMENT.md).
 | Repeatable output | Tested | `e2e/vertical-slice` step 13 (identical checksums after reloading) | |
 | Suitable for Premiere Pro | Needs testing | compositing maths checked | Not yet imported into Premiere on the user's PC; `COMPOSITING_GUIDE.txt` explains the steps |
 | TIFF sequences | Tested | `tiff`, `e2e/workflows` 'TIFF sequences' | D109. Uncompressed or ZIP, 8-bit with straight alpha; chosen per shot |
-| SVG | Not implemented | | Left for later (D109): the renderer works with kept pictures and masks; a vector export would be a second renderer |
+| SVG | Tested | `svg-pen`, `svg-frame`, `e2e/workflows` 'SVG frames' | D115. One frame of a shot: countries, borders, features, cities, names, characters and texts as shapes and text in named layers; sea, terrain, land and conditions as pictures; within 2% of the PNG frame |
 | GeoJSON and CSV export of the data | Tested | `search-export` (polygon areas equal the map's land), `e2e/workflows` | The map at a date as GeoJSON (territories joined owner by owner with holes, areas, lines and points, cities and characters, RFC 7946 winding); events, entities with their other names, relationships by period and features over time as CSV (D73) |
 | Selected geographical regions | Partial | | By framing the camera; no crop tool |
 | Dataset credits travel with exports | Tested | `e2e/vertical-slice` step 13 | `manifest.json` (`dataCredits`) and `COMPOSITING_GUIDE.txt`; all datasets listed with licences under Worlds > Data sources and credits |

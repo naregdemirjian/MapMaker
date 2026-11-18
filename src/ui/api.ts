@@ -74,6 +74,9 @@ export const Api = {
   /** A frame already encoded as a TIFF (D109). */
   sendTiffFrame: (id: string, job: string, pass: string, frame: number, tiff: Blob) =>
     call<{ file: string; sha256: string }>('POST', `${p(id)}/exports/${encodeURIComponent(job)}/frames?pass=${encodeURIComponent(pass)}&frame=${frame}&format=tiff`, undefined, tiff),
+  /** An SVG frame of a shot (D115), written into the export folder (`dir`: the shot's own, if it has one). */
+  saveSvgFrame: (id: string, shot: string, frame: number, dir: string | null, svg: string) =>
+    call<{ file: string }>('POST', `${p(id)}/svg-frame?shot=${encodeURIComponent(shot)}&frame=${frame}${dir ? `&dir=${encodeURIComponent(dir)}` : ''}`, undefined, new Blob([svg], { type: 'image/svg+xml' })),
   /** A frame that is the same picture as an earlier frame of the pass. */
   repeatFrame: (id: string, job: string, pass: string, frame: number, sameAs: number) =>
     call<{ file: string; sha256: string }>('POST', `${p(id)}/exports/${encodeURIComponent(job)}/frames?pass=${encodeURIComponent(pass)}&frame=${frame}&same=${sameAs}`),

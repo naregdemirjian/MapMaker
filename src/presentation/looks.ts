@@ -173,6 +173,16 @@ export function finishLook(ctx: CanvasRenderingContext2D | OffscreenCanvasRender
     ctx.fillStyle = g;
     ctx.fillRect(X, Y, W, H);
   }
+  drawPaper(ctx, X, Y, W, H, l, unit);
+  ctx.restore();
+}
+
+/**
+ * A look's paper (D108): its stains and grain laid over a frame, painted as the context paints (over
+ * the map in finishLook; on their own for SVG frames, D115).
+ */
+export function drawPaper(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, X: number, Y: number, W: number, H: number, l: Look, unit: number): void {
+  ctx.save();
   if (l.blotches) {
     // Two sizes of stain, each a little noise stretched smoothly over the whole frame.
     stains ??= [canvasOf(24, 14, stainTexture(24, 14, 11)), canvasOf(9, 5, stainTexture(9, 5, 23))];
@@ -194,4 +204,9 @@ export function finishLook(ctx: CanvasRenderingContext2D | OffscreenCanvasRender
     }
   }
   ctx.restore();
+}
+
+/** A look's darker edges (D108): the colour they darken to and how strongly; null for none. */
+export function vignetteOf(l: Look): { color: string; alpha: number } | null {
+  return l.vignette > 0 ? { color: l.blotches ? '#281808' : '#000000', alpha: 0.75 * l.vignette } : null;
 }

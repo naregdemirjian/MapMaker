@@ -48,19 +48,24 @@ export function decodeStars(file: { format: string; radiusLy: number; stars: Raw
 }
 
 let loading: Promise<StarCatalogue> | null = null;
-/** The nearby stars (loaded once). */
+/** The catalogue once loaded (null until then), for drawing without waiting. */
+let loaded: StarCatalogue | null = null;
+let announced = false;
+/**
+ * The nearby stars (loaded once). Once this has resolved, nearbyStarsNow has them too (an export
+ * that waits for it draws every frame with the stars, even of a map not shown yet).
+ */
 export function loadNearbyStars(): Promise<StarCatalogue> {
   loading ??= fetch('data/stars/nearby-50ly.json').then((r) => {
     if (!r.ok) throw new Error(`Could not load the nearby stars (${r.status}).`);
     return r.json();
-  }).then(decodeStars);
+  }).then(decodeStars).then((c) => { loaded = c; return c; });
   return loading;
 }
 
-/** The catalogue once loaded (null until then), for drawing without waiting. */
-let loaded: StarCatalogue | null = null;
+/** The nearby stars if they are loaded, else null (loading them, and calling `onLoad` once, for the first to ask, when they are in). */
 export function nearbyStarsNow(onLoad?: () => void): StarCatalogue | null {
-  if (!loaded) void loadNearbyStars().then((c) => { const first = !loaded; loaded = c; if (first) onLoad?.(); }, () => undefined);
+  if (!loaded) void loadNearbyStars().then(() => { if (!announced) { announced = true; onLoad?.(); } }, () => undefined);
   return loaded;
 }
 

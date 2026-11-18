@@ -61,6 +61,42 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D115. SVG frames (Stage 10)
+
+- **What it is.** In a shot's Export section, "Save frame N as SVG" writes the frame shown in the preview as an SVG
+  file into the export folder ("<shot>_frame000004.svg", never over another), for print and drawing programs
+  (Illustrator, Inkscape, Affinity). Countries, borders, areas, lines and points (campaign arrows, lines with teeth,
+  symbols), cities, names, characters, text boxes and the date are shapes and text, each country a named shape and
+  each name a piece of text, in groups (layers) stacked as the export passes are: "Sea, terrain, grid and land
+  (picture)", "Territories: <layer>", "Borders: <layer>", "Conditions (picture)", "Areas, lines and points",
+  "Cities", "Labels", "Characters", "Edges and paper", "Texts". The sea, terrain, grid, land and conditions stay
+  pictures, exactly as the renderer draws them for the image sequences. Star maps too: stars, lanes and names as
+  shapes and text, their realms a picture (they are joined offscreen).
+- **How, without a second renderer** (what D109 feared). An SVG pen (`svg-pen.ts`) is drawn on as a 2D canvas is and
+  writes SVG: paths through the transform of their moment, fills, strokes with their widths, joins and dashes,
+  gradients and patterns, clipping, text placed exactly where the canvas puts it (the browser's own baseline), and
+  pictures drawn on it kept as pictures. While it is drawn on, Path2D stands for its own paths, so the map's own drawing
+  of features, cities, names, characters, stars and texts runs unchanged into it: the SVG shows what the frame shows.
+  Only territories and borders, which the renderer draws through kept pictures and masks, are made here, from the
+  parcels' outlines projected as the frame's view projects (d3): each owner one shape, each border between owners
+  once, borders against nobody apart. They end at the coast through masks of the land the renderer makes for the
+  frame (lakes cut out of fills; along a coast in view, land no parcel covers takes the territory's colour and borders
+  against nobody give way to the coastline, as in D83); pictures and flags fill countries piece by piece as frames
+  place them (D82); hatching is a pattern. A look's grade is an SVG filter over the map (its CSS filter by the
+  standard's equivalents), its darker edges a gradient and its paper a picture, over the map and under the texts.
+- **What differs.** A frame in the middle of an animated change shows the map as it is at that moment without the
+  animation (no advancing front, no fading borders); front lines along wars are left out of the borders; a dashed or
+  flowing line keeps its pattern. Drawn by a browser, a frame's SVG differs from its PNG in fewer than one pixel in a
+  hundred (anti-aliasing of text and coasts), checked by the tests.
+- **Tests.** `svg-pen.test.ts` (numbers, text and colours written for SVG; arcs on their circle and swept as the canvas
+  sweeps them; shapes through the transform of their moment with their styles; Path2D standing for the pen's paths,
+  clipping, erasing left out; text placed, aligned and styled with its halo; gradients and patterns as definitions);
+  `svg-frame.test.ts` (the grades as SVG filters; border lines once from one side, against nobody apart; an owner
+  with an enclave one polygon with a hole; the file numbered by its frame, never over another, refused when it is not
+  SVG); `e2e/workflows` 'SVG frames' (a frame of a turned view with a text box saved from the button: its layers in
+  order, countries as named shapes, names and the text box as text, and drawn by the browser within 2% of the PNG of
+  the same frame; undone).
+
 ### D114. Invented star maps, and finding stars (Stage 11)
 
 - **Stars of one's own.** "+ Map", "Stars of your own": a star map of a setting that is not our neighbourhood, made
@@ -193,8 +229,8 @@ Follows from D2. The test drives the real interface exactly as a person would.
   which checks the size in the file's directory. Frames that are the same picture as the one before are copied, as
   for PNG. The manifest and the compositing guide say which format and that the alpha is straight.
 - **Size estimate.** Uncompressed TIFF is exact (four bytes a pixel); ZIP is estimated as a fifth more than PNG.
-- **SVG** (also planned for this stage) is left for later: the map is drawn with pictures kept between frames and
-  masks at the coast, which have no direct SVG form; a vector export would be a second renderer.
+- **SVG** (also planned for this stage) was left for later here: the map is drawn with pictures kept between frames
+  and masks at the coast, which have no direct SVG form. Done since without a second renderer: D115.
 - **Tests.** `tiff.test.ts` (header, strips, straight alpha, read back the same uncompressed and ZIP, ZIP far smaller
   for a map, a one-strip picture, wrong sizes refused); `e2e/workflows` 'TIFF sequences' (a shot exported as ZIP TIFF:
   six .tif files at a quarter of 1920 x 1080, read back with transparent and painted pixels, the manifest and the

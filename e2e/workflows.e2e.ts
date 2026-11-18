@@ -2740,6 +2740,60 @@ try {
     assert.equal(await page.evaluate((id) => !!(window as any).__mapmaker.store.world.get('sequence', id), shotId), false);
   });
 
+  await h.step('SVG frames: the frame shown saved as an SVG file; territories, borders, names and texts as shapes and text in their layers; drawn by the browser it is the exported frame; undone', async () => {
+    await page.getByTestId('mode-world').click();
+    const shotId = await page.evaluate(() => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const settings = B.defaultShot(s.spaceId, { lon: 10, lat: 48, zoom: 2.2, rotation: 8, projection: 'equirectangular' }, s.time, s.time, 24, 0.5);
+      settings.width = 960; settings.height = 540; settings.labels = true;
+      settings.overlays.push(B.newTextBox(settings, 'A frame for print'));
+      const id = s.execute((w: any) => B.commands.createSequence(w, 'Vector frame', settings));
+      s.set({ shotId: id, shotFrame: 3, presentCamera: null, mode: 'present' });
+      return id as string;
+    });
+    await page.getByTestId('shot-editor').waitFor();
+    assert.match((await page.getByTestId('export-svg').textContent()) ?? '', /Save frame 4 as SVG/);
+    await page.getByTestId('export-svg').click();
+    await page.getByTestId('svg-result').waitFor({ timeout: 120000 });
+    const file = ((await page.locator('[data-testid=svg-result] .path').textContent()) ?? '').trim();
+    assert.match(file, /Vector_frame_frame000004\.svg$/);
+    const svg = readFileSync(file, 'utf8');
+    assert.match(svg, /^<\?xml version="1\.0" encoding="UTF-8"\?>\n<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg"[^>]* width="960" height="540" viewBox="0 0 960 540">/);
+    // Layers as drawing programs show them, bottom first: pictures of the sea and land, then shapes and text.
+    const order = ['background', 'territories-1', 'borders-1', 'labels', 'texts'].map((id) => svg.indexOf(`<g id="${id}" inkscape:groupmode="layer"`));
+    assert.ok(order.every((i, k) => i > 0 && (k === 0 || i > order[k - 1])), `the layers in order (${order})`);
+    const names = await page.evaluate(() => { const s = (window as any).__mapmaker.store; return s.world.all('entity').map((e: any) => e.name); }) as string[];
+    const territories = [...svg.matchAll(/<path id="territory-[^"]+" inkscape:label="([^"]+)"/g)].map((m) => m[1]);
+    assert.ok(territories.length >= 2 && territories.every((n) => names.includes(n.replace(/&amp;/g, '&'))), `countries as named shapes (${territories.slice(0, 6).join(', ')})`);
+    // Their names as text (a halo and the name itself).
+    const labels = svg.slice(svg.indexOf('<g id="labels"'), svg.indexOf('<g id="texts"'));
+    const written = [...labels.matchAll(/>([^<]+)<\/text>/g)].map((m) => m[1]);
+    assert.ok(territories.some((n) => written.includes(n)), `names as text (${[...new Set(written)].slice(0, 6).join(', ')})`);
+    assert.match(svg.slice(svg.indexOf('<g id="texts"')), />A frame for print<\/text>/);
+    // The browser draws the file as the frame is exported.
+    const cmp = await page.evaluate(async ([text, id]) => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const shot = JSON.parse(s.world.get('sequence', id).settings);
+      const c = document.createElement('canvas'); c.width = 960; c.height = 540;
+      const ctx = c.getContext('2d', { willReadFrequently: true })!;
+      B.renderFrame(ctx, new B.MapRenderer(), s.world, s.engine, shot, 3, B.PASS_DEFS.find((d: any) => d.name === 'all'), 960, 540, s.basemap, null);
+      const a = ctx.getImageData(0, 0, 960, 540).data;
+      const img = new Image();
+      await new Promise((ok, bad) => { img.onload = ok; img.onerror = bad; img.src = URL.createObjectURL(new Blob([text], { type: 'image/svg+xml' })); });
+      ctx.clearRect(0, 0, 960, 540);
+      ctx.drawImage(img, 0, 0);
+      const b = ctx.getImageData(0, 0, 960, 540).data;
+      let off = 0;
+      for (let i = 0; i < a.length; i += 4) if (Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]) > 60) off++;
+      return off / (a.length / 4);
+    }, [svg, shotId] as const);
+    assert.ok(cmp < 0.02, `the SVG drawn is the frame (${(cmp * 100).toFixed(2)}% of pixels apart)`);
+    // Undone: the shot.
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ mode: 'world', shotId: null }));
+    for (let i = 0; i < 5 && (await page.evaluate((id) => !!(window as any).__mapmaker.store.world.get('sequence', id), shotId)); i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await page.evaluate((id) => !!(window as any).__mapmaker.store.world.get('sequence', id), shotId), false);
+  });
+
   await h.step('A star map: the stars within 50 light-years in three dimensions; a star chosen and its panel; turned, zoomed and centred; star systems held by a country from a date; a lane between two stars; a shot of it exported; back to Earth', async () => {
     await page.getByTestId('mode-world').click();
     await page.getByRole('button', { name: '+ Map' }).click();

@@ -1557,6 +1557,60 @@ export class MapRenderer {
     if (lakes) this.basemapPainter.eraseLakes(lc, view, sheet, basemap);
   }
 
+  /**
+   * For SVG frames (D115), where territory ending at the coast is kept, as pictures of the frame
+   * (white where kept): the land with its lakes cut out (for fills) and with them (for borders); and,
+   * where the coastline runs through the view, the band along it in which land takes the look of the
+   * territory beside it (D83), and the frame without that band. `coast` says which case the view is
+   * ('terrain': the terrain decides the coast). Null where nothing ends at a coast.
+   */
+  svgMasks(view: View, spaceId: string, opts: RenderOptions): { fills: OffscreenCanvas; borders: OffscreenCanvas; band: OffscreenCanvas | null; outsideBand: OffscreenCanvas | null; rim: number; coast: 'land' | 'sea' | 'mixed' | 'terrain' } | null {
+    const terrain = opts.terrain && view.camera.projection !== 'flat' && terrainDrawable() ? opts.terrain : null;
+    const seaLevel = terrain ? Math.round((terrain.seaLevel ?? 0) * 100) / 100 : 0;
+    const terrainLand = !!terrain && (seaLevel !== 0 || !opts.basemap || !!terrain.override);
+    if (!opts.basemap && !terrainLand) return null;
+    const sheet = this.sheetFor(view, spaceId);
+    this.basemapPainter.lakeFilter = { show: opts.show?.lakes !== false, minKm2: Math.max(0, opts.show?.minLakeKm2 ?? 0) };
+    this.region = null;
+    const coast = terrainLand ? 'terrain' as const : this.basemapPainter.pathsFor(view, sheet, opts.basemap!).coast;
+    const frame = (fill: boolean) => {
+      const c = new OffscreenCanvas(view.width, view.height);
+      const g = c.getContext('2d') as unknown as CanvasRenderingContext2D;
+      if (fill) { g.fillStyle = '#ffffff'; g.fillRect(0, 0, view.width, view.height); }
+      if (view.rotation) {
+        g.translate(view.width / 2, view.height / 2);
+        g.rotate((view.rotation * Math.PI) / 180);
+        g.translate(-view.width / 2, -view.height / 2);
+      }
+      return { c, g };
+    };
+    const land = (lakes: boolean) => {
+      const { c, g } = frame(true);
+      const was = this.caching;
+      this.caching = 'off';
+      try { this.trimToLand(g, view, sheet, opts.basemap ?? null, '', lakes, terrainLand ? terrain : null, seaLevel, g.getTransform()); } finally { this.caching = was; }
+      return c;
+    };
+    let band: OffscreenCanvas | null = null, outsideBand: OffscreenCanvas | null = null;
+    const rim = coastRim(view);
+    if (coast === 'mixed') {
+      const b = frame(false);
+      this.basemapPainter.strokeCoastline(b.g, view, sheet, opts.basemap!, 2 * rim);
+      // (Stroked in black: made white, for a mask.)
+      b.g.setTransform(1, 0, 0, 1, 0, 0);
+      b.g.globalCompositeOperation = 'source-in';
+      b.g.fillStyle = '#ffffff';
+      b.g.fillRect(0, 0, view.width, view.height);
+      band = b.c;
+      const o = frame(true);
+      o.g.setTransform(1, 0, 0, 1, 0, 0);
+      o.g.globalCompositeOperation = 'destination-out';
+      o.g.drawImage(band, 0, 0);
+      outsideBand = o.c;
+    }
+    return { fills: land(true), borders: land(false), band, outsideBand, rim, coast };
+  }
+
   // ---------------------------------------------------------------- a frame
 
   render(ctx: CanvasRenderingContext2D, view: View, world: World, engine: Engine, spaceId: string, t: Instant, opts: RenderOptions): void {
@@ -3197,23 +3251,32 @@ export class MapRenderer {
         c.fillRect(-1e5, -1e5, 2e5, 2e5);
       }
     } else {
-      // Flags added before 'fill' existed asked for 'cover', which cropped the stripes of long countries away.
-      const fit = !fill.fit || (fill.fit === 'cover' && fill.asset?.startsWith('data/flags/')) ? 'fill' : fill.fit;
-      // Placed by `box`; enlarged about its middle where it must also cover `cover` (outlying pieces).
-      let [x, y, w, h] = box;
-      if (cover && fit !== 'contain' && fit !== 'stretch') {
-        const iw = (src as HTMLVideoElement).videoWidth || src.width, ih = (src as HTMLVideoElement).videoHeight || src.height;
-        if (iw && ih) {
-          const [sx, sy] = fitScales(iw, ih, w, h, fit);
-          const dw = iw * sx, dh = ih * sy, cx = x + w / 2, cy = y + h / 2;
-          const k = Math.max(1, (cx - cover[0]) / (dw / 2), (cover[0] + cover[2] - cx) / (dw / 2), (cy - cover[1]) / (dh / 2), (cover[1] + cover[3] - cy) / (dh / 2));
-          if (k > 1) { w *= k; h *= k; x = cx - w / 2; y = cy - h / 2; }
-        }
-      }
-      drawImageFit(c, src, x, y, w, h, fit);
+      const m = mediaBox(src, fill, box, cover);
+      drawImageFit(c, src, m.box[0], m.box[1], m.box[2], m.box[3], m.fit);
     }
     c.restore();
     return true;
+  }
+
+  /**
+   * For SVG frames (D115): where an owner's picture fill goes on screen, as frames place it (D82):
+   * each cluster of its parcels, and for each copy of it in view the box the picture is fitted to
+   * (`at`), the box it must cover, and where a cluster shows more than once the part of the screen
+   * that copy keeps (`rect`).
+   */
+  mediaPlacements(view: View, world: World, spaceId: string, faces: number[], fill: CountryFillLike): Array<{ faces: number[]; at: Box2; cover: Box2 | null; rect: Box2 | null }> {
+    const arr = world.arrangement(spaceId);
+    const out: Array<{ faces: number[]; at: Box2; cover: Box2 | null; rect: Box2 | null }> = [];
+    for (const cl of this.fillClusters(arr, this.faceSet(arr, faces), fill)) {
+      const boxes = this.boxesOnScreen(view, cl.box), cores = this.boxesOnScreen(view, cl.core);
+      for (const b of boxes) {
+        const rect: Box2 = [b[0], b[1], b[2] - b[0], b[3] - b[1]];
+        const k = cores.find((q) => q[0] < b[2] && q[2] > b[0] && q[1] < b[3] && q[3] > b[1]);
+        out.push({ faces: cl.set.faces, at: k ? [k[0], k[1], k[2] - k[0], k[3] - k[1]] : rect, cover: rect, rect: boxes.length > 1 ? rect : null });
+      }
+      if (!boxes.length) out.push({ faces: cl.set.faces, at: this.screenBox(view, arr, cl.set.faces), cover: null, rect: null });
+    }
+    return out;
   }
 
   /** Screen seconds into the shot (videos show the frame for this moment); 0 while editing. */
@@ -4075,6 +4138,26 @@ export class MapRenderer {
   }
 
 
+}
+
+/**
+ * Where a picture filling territory is drawn (D81): placed by `box`, fitted as the fill asks (flags
+ * filling it), and enlarged about its middle where it must also cover `cover` (outlying pieces, D82).
+ */
+export function mediaBox(src: CanvasImageSource & { width: number; height: number }, fill: CountryFillLike, box: Box2, cover: Box2 | null): { box: Box2; fit: 'stretch' | 'cover' | 'contain' | 'fill' } {
+  // Flags added before 'fill' existed asked for 'cover', which cropped the stripes of long countries away.
+  const fit = !fill.fit || fill.fit === 'tile' || (fill.fit === 'cover' && fill.asset?.startsWith('data/flags/')) ? 'fill' : fill.fit;
+  let [x, y, w, h] = box;
+  if (cover && fit !== 'contain' && fit !== 'stretch') {
+    const iw = (src as HTMLVideoElement).videoWidth || src.width, ih = (src as HTMLVideoElement).videoHeight || src.height;
+    if (iw && ih) {
+      const [sx, sy] = fitScales(iw, ih, w, h, fit);
+      const dw = iw * sx, dh = ih * sy, cx = x + w / 2, cy = y + h / 2;
+      const k = Math.max(1, (cx - cover[0]) / (dw / 2), (cover[0] + cover[2] - cx) / (dw / 2), (cy - cover[1]) / (dh / 2), (cover[1] + cover[3] - cy) / (dh / 2));
+      if (k > 1) { w *= k; h *= k; x = cx - w / 2; y = cy - h / 2; }
+    }
+  }
+  return { box: [x, y, w, h], fit };
 }
 
 /** Which way a front line's teeth face (D89): toward the second country of the war (as entered), the first, or none. */

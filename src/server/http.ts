@@ -6,7 +6,7 @@ import { readFileSync, existsSync, mkdirSync, writeFileSync, renameSync } from '
 import { join, extname, dirname } from 'node:path';
 import { spawn } from 'node:child_process';
 import { ProjectRegistry } from './projects.ts';
-import { startJob, writeFrame, writeEncodedFrame, writeEncodedTiff, repeatFrame, finishJob, type ExportJob, type ExportSettings } from '../export/writer.ts';
+import { startJob, writeFrame, writeEncodedFrame, writeEncodedTiff, writeSvgFrame, repeatFrame, finishJob, type ExportJob, type ExportSettings } from '../export/writer.ts';
 import { saveAsset, serveAsset } from './assets.ts';
 import type { RowDiff } from '../world-model/schema.ts';
 
@@ -224,6 +224,12 @@ export function createAppServer(opts: ServerOptions): { server: Server; registry
       mkdirSync(dir, { recursive: true });
       for (const f of files) writeFileSync(join(dir, f.name), f.text, 'utf8');
       return send(res, 201, { dir, files: files.map((f) => f.name) });
+    }
+    // An SVG frame of a shot (D115): written into the export folder.
+    if (action === 'svg-frame' && method === 'POST') {
+      const body = await readBody(req);
+      const file = writeSvgFrame(db.dir, url.searchParams.get('dir'), url.searchParams.get('shot') ?? 'shot', Math.max(0, Number(url.searchParams.get('frame')) || 0), new Uint8Array(body.buffer, body.byteOffset, body.byteLength));
+      return send(res, 201, { file });
     }
     if (action === 'exports') {
       if (parts.length === 4 && method === 'POST') {

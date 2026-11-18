@@ -5,6 +5,7 @@ import * as cmd from '../../domain/commands.ts';
 import { type Instant, add, fromJSONValue, toJSONValue, fromStore, compare, gregorian, type Precision } from '../../core-time/index.ts';
 import { defaultShot, timeAt, cameraAt, RESOLUTIONS, FRAME_RATES, shotTransitions, withStillCamera, cameraMoves, resetCamera, newTextBox, textBoxOf, EXPORT_FORMATS, type ExportFormat, type ShotSettings, type Ease, type ShotTransitions, type Overlay, type TextBox, type TextEnter, type TextExit } from '../../presentation/sequence.ts';
 import { PASS_DEFS, runExport, exportPassesOf, estimateExportBytes, scaledBytes, formatBytes } from '../../presentation/export-driver.ts';
+import { svgFrame } from '../../presentation/svg-frame.ts';
 import { eventsBoxOf, type EventsBox } from '../../presentation/events-box.ts';
 import { LOOKS, LOOK_IDS, GRADES, resolveLook, type LookId, type GradeId, type ShotLook } from '../../presentation/looks.ts';
 import { isSpaceMap } from '../../world-model/world-settings.ts';
@@ -60,6 +61,8 @@ export function ShotEditor() {
   const [estimate, setEstimate] = useState<{ key: string; bytes: number } | null>(null);
   const [progress, setProgress] = useState<null | { done: number; total: number; label: string }>(null);
   const [result, setResult] = useState<null | { dir: string; frames: number; seconds: number }>(null);
+  const [svgSaved, setSvgSaved] = useState<string | null>(null);
+  const [svgBusy, setSvgBusy] = useState(false);
   const cancel = useRef(false);
   useEffect(() => setName(row?.name ?? ''), [s.shotId]);
   if (!shot || !row) return <aside className="right"><div className="panel"><h3>Presentation</h3><p className="muted">Create or pick a shot on the left. Its preview appears in the middle; drag and scroll there to frame the view.</p></div></aside>;
@@ -103,6 +106,21 @@ export function ShotEditor() {
       s.toast((e as Error).message, 'error');
     }
     setProgress(null);
+  };
+  // The frame shown in the preview as an SVG file (D115).
+  const saveSvg = async () => {
+    setSvgSaved(null);
+    setSvgBusy(true);
+    try {
+      await s.flush();
+      const f = await svgFrame({ world: w, engine: s.engine!, shot, shotName: row.name, frame: s.shotFrame });
+      const r = await Api.saveSvgFrame(s.projectId!, row.name, s.shotFrame, shot.exportDir ?? null, f.svg);
+      setSvgSaved(r.file);
+      s.toast(`Saved frame ${s.shotFrame + 1} as ${r.file}`);
+    } catch (e) {
+      s.toast((e as Error).message, 'error');
+    }
+    setSvgBusy(false);
   };
   const box = eventsBoxOf(shot.eventsBox);
   const setBox = (patch: Partial<EventsBox>) => update({ eventsBox: { ...box, ...patch } });
@@ -338,6 +356,11 @@ export function ShotEditor() {
             </div>
           )}
           {result && <div className="ok-box" data-testid="export-result">Wrote {result.frames} frames in {result.seconds.toFixed(1)} s.<br /><span className="path">{result.dir}</span><br /><button onClick={() => Api.showFolder(s.projectId!, 'exports', shot.exportDir ?? undefined)}>Show the export folder</button></div>}
+          <h4>One frame for print or a drawing program</h4>
+          <div className="buttons">
+            <button onClick={saveSvg} disabled={svgBusy} data-testid="export-svg" title="Territories, borders, areas, lines, cities, names and texts as shapes and text you can edit; the sea, land, terrain and conditions as pictures">{svgBusy ? 'Saving…' : `Save frame ${s.shotFrame + 1} as SVG`}</button>
+          </div>
+          {svgSaved && <div className="ok-box" data-testid="svg-result">Saved <span className="path">{svgSaved}</span></div>}
         </Group>
         <button className="danger" onClick={() => { if (confirm(`Delete the shot "${row.name}"?`)) { s.execute((wd) => cmd.deleteSequence(wd, row.id)); s.set({ shotId: null }); } }}>Delete shot</button>
       </div>
