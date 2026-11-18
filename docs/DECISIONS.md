@@ -61,6 +61,36 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D97. Generated planets (Stage 8)
+
+"New map" can now make **a planet of one's own**: a preset (Earth-like, desert, ocean, ice, volcanic, barren moon,
+gas giant), a seed, and sliders for the share of sea, the number of continents, how high mountains rise, how rough
+the ground is and how far ice caps reach, with a picture of the planet that follows every change. The same seed and
+settings always make the same planet, so only the settings are stored with the map (`planet` in its settings); the
+heights are made again when the map is opened (about 2 seconds for 2048 × 1024 cells, a few rows at a time so the
+interface stays responsive) and kept for the session. Each preset has its own colours (five palettes added: desert,
+ice, volcanic, barren, gas giant), and every Earth palette can be chosen too.
+
+- **How a planet is made** (`terrain/planet.ts`, seeded simplex noise over the sphere, so nothing is stretched at
+  the poles or cut at the 180th meridian): continents are low-frequency noise whose size follows the number asked
+  for; plates (centres on the sphere, their edges bent by noise) raise mountain belts where they meet on land and
+  ridges where they meet at sea; finer noise and sharper ridged noise give the texture. The sea then covers exactly
+  the share asked for, by area (a fine histogram of the heights), and the heights are scaled to metres, up to about
+  7 km and down to 6.5 km. Ice caps thicken the land towards the poles. A barren moon is pitted with craters (a bowl
+  and a raised rim each, many small and a few large); a gas giant has bands of cloud instead of a surface.
+- **Its coast is its own.** As at another sea level on Earth (D96), the terrain decides land and sea everywhere: the
+  land (in colours, or plain), territory on layers that end at the coast (the option shows on planets too) and its
+  borders. A planet can have a sea level over time like Earth.
+- **Made anew.** `setWorldPlanet` changes a planet's settings in one undoable step (its history stays); there is no
+  dialog for it yet.
+- **Fixed on the way.** Undoing the creation of the map being viewed left the app showing a map that no longer
+  existed, and the page went blank; after an undo or redo the first remaining map is now shown.
+- **Tests.** `planet.test.ts` (seeded noise; the same settings make the same planet, also when made a few rows at a
+  time; another seed or setting another; the sea's share for four values; heights within a real planet's; presets
+  differ; ice caps; craters as bowls with rims; settings checked; the dialog's picture; the commands, undone);
+  `e2e/workflows` (a planet chosen in the dialog with its picture following the seed, made, land and sea drawn
+  differently, territory set to end at its coast; its creation undone, the first map shown).
+
 ### D96. Sea level over time (Stage 8)
 
 A map of the Earth can have its sea stand higher or lower than today's at dates of one's choosing ("Sea level over

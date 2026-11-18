@@ -1449,13 +1449,13 @@ export class MapRenderer {
    * Ends what a buffer holds at the coast: Natural Earth's at today's sea level; at another level
    * (`terrain` given, D96), the terrain's coast of the moment.
    */
-  private trimToLand(lc: CanvasRenderingContext2D, view: View, sheet: Sheet, basemap: Basemap, frameKey: string, lakes: boolean, terrain: TerrainShown | null, seaLevel: number, at: DOMMatrix): void {
-    if (!terrain) { this.maskLand(lc, view, sheet, basemap, frameKey, lakes); return; }
+  private trimToLand(lc: CanvasRenderingContext2D, view: View, sheet: Sheet, basemap: Basemap | null, frameKey: string, lakes: boolean, terrain: TerrainShown | null, seaLevel: number, at: DOMMatrix): void {
+    if (!terrain) { if (basemap) this.maskLand(lc, view, sheet, basemap, frameKey, lakes); return; }
     lc.save();
     lc.globalCompositeOperation = 'destination-in';
     this.layTerrain(lc, view, sheet, terrain, 'landmask', at, this.seaOf(lc, view, sheet, basemap, seaLevel, at));
     lc.restore();
-    if (lakes) this.basemapPainter.eraseLakes(lc, view, sheet, basemap);
+    if (lakes && basemap) this.basemapPainter.eraseLakes(lc, view, sheet, basemap);
   }
 
   /**
@@ -1546,11 +1546,16 @@ export class MapRenderer {
     const terrain = opts.terrain && view.camera.projection !== 'flat' && terrainDrawable() ? opts.terrain : null;
     const tLook = terrain?.look ?? null;
     const terrainColours = !!tLook?.colours, wantsTerrain = terrainColours && opts.passes.has('terrain');
-    // Relief without colours lies over the plain land (in the land pass); with colours it is part of them.
-    const reliefOnLand = !!tLook && !terrainColours && tLook.relief && wantsLand;
     // The sea of the moment (D96): another level than today's moves the coasts off Natural Earth's.
     const seaLevel = terrain ? Math.round((terrain.seaLevel ?? 0) * 100) / 100 : 0, shifted = seaLevel !== 0;
-    const wantsBase = wantsBackground || opts.passes.has('graticule') || wantsLand || wantsTerrain;
+    // Where the terrain decides what is land: at another sea level than today's, and on a world without
+    // Natural Earth's coastline (a generated planet, D97).
+    const terrainLand = !!terrain && (shifted || !opts.basemap);
+    // The plain land the terrain decides (without terrain colours), in the land pass.
+    const landByTerrain = terrainLand && !terrainColours && opts.passes.has('land');
+    // Relief without colours lies over the plain land (in the land pass); with colours it is part of them.
+    const reliefOnLand = !!tLook && !terrainColours && tLook.relief && (wantsLand || landByTerrain);
+    const wantsBase = wantsBackground || opts.passes.has('graticule') || wantsLand || wantsTerrain || landByTerrain;
     this.lastTerrain = { colours: wantsTerrain, relief: reliefOnLand, overTerritories: !!tLook?.overTerritories && opts.passes.has('fills'), seaLevel };
     // Where the frame fills the canvas and starts with the base map, the base map's kept picture
     // replaces what the canvas showed in one copy (see layered); otherwise the frame's area is cleared.
@@ -1608,7 +1613,7 @@ export class MapRenderer {
     if (wantsBase) {
       // (A flat map's grid changes its spacing with the zoom.)
       const gridStep = opts.passes.has('graticule') && view.camera.projection === 'flat' && space?.radius_m ? Math.floor(Math.log10(view.width / view.projection.scale()) * 3) : 0;
-      const terrainKey = terrain && (wantsTerrain || (wantsLand && (terrainColours || reliefOnLand || shifted))) ? `|t:${terrain.key}|${JSON.stringify(tLook)}|${wantsTerrain ? 'c' : ''}|${seaLevel}` : '';
+      const terrainKey = terrain && (wantsTerrain || landByTerrain || (wantsLand && (terrainColours || reliefOnLand || shifted))) ? `|t:${terrain.key}|${JSON.stringify(tLook)}|${wantsTerrain ? 'c' : ''}|${landByTerrain ? 'l' : ''}|${seaLevel}` : '';
       const baseKey = partKey(`${wantsBackground ? style.ocean : ''}|${opts.passes.has('graticule') ? style.graticule : ''}|${wantsLand ? `${opts.basemap!.scales.length}${opts.referenceBorders ? 'r' : ''}|${lakeKey}|${opts.show?.coastline === false ? 'nocoast' : ''}` : ''}|${space?.radius_m ?? 0}${terrainKey}`, `${gridStep}`);
       // (One kept picture per combination of parts: an export draws several passes of each frame.)
       base = { name: `base:${wantsBackground ? 'o' : ''}${wantsTerrain ? 't' : ''}${opts.passes.has('graticule') ? 'g' : ''}${wantsLand ? 'l' : ''}`, key: baseKey, draw: (c) => {
@@ -1619,7 +1624,7 @@ export class MapRenderer {
         }
         c.save();
         clipPlanet(c);
-        if (wantsTerrain && (shifted || !opts.basemap)) {
+        if (wantsTerrain && terrainLand) {
           // The coasts of the moment (D96), or of a world without a coastline drawn: the terrain's.
           this.layTerrain(c, view, sheet, terrain!, 'both', undefined, this.seaOf(c, view, sheet, opts.basemap ?? null, seaLevel));
         } else if (wantsTerrain) {
@@ -1656,10 +1661,10 @@ export class MapRenderer {
           if (lines) { const p = new Path2D(); for (const l of lines) sheet.line(p, l); sheet.cache.set(key, p); }
           this.strokeOnSheet(c, sheet.cache.get(key) as Path2D, 0.8 * u);
         }
-        // Another sea level than today's (D96) without terrain colours: the plain land where the terrain has land then.
-        if (wantsLand && shifted && !terrainColours) {
+        // Land the terrain decides, without terrain colours: the plain land where the terrain has land.
+        if (landByTerrain) {
           const lc = this.scratch(c);
-          this.layTerrain(lc, view, sheet, terrain!, 'landmask', undefined, this.seaOf(c, view, sheet, opts.basemap!, seaLevel));
+          this.layTerrain(lc, view, sheet, terrain!, 'landmask', undefined, this.seaOf(c, view, sheet, opts.basemap ?? null, seaLevel));
           lc.save();
           lc.setTransform(1, 0, 0, 1, 0, 0);
           lc.globalCompositeOperation = 'source-in';
@@ -1681,6 +1686,7 @@ export class MapRenderer {
           fills: shifted ? 'lakes' : !terrainColours,
           afterFills: reliefOnLand ? () => this.layTerrain(c, view, sheet, terrain!, 'relief', undefined, shifted ? this.seaOf(c, view, sheet, opts.basemap!, seaLevel) : undefined) : undefined,
         });
+        else if (reliefOnLand) this.layTerrain(c, view, sheet, terrain!, 'relief', undefined, this.seaOf(c, view, sheet, null, seaLevel));
         c.restore();
       } };
     }
@@ -1734,9 +1740,9 @@ export class MapRenderer {
       const ls = parseJSON<LayerStyle>(layer.style, {});
       // Coastline clipping: territory ends at the coast unless the layer is set to cover the sea.
       // Away from any coast there is nothing to trim (all land), or nothing to see (all sea).
-      let clip = !!opts.basemap && ls.clipToLand !== false;
-      // (At another sea level than today's, D96, land and sea are anywhere: always trimmed.)
-      if (clip && !shifted) {
+      let clip = (!!opts.basemap || terrainLand) && ls.clipToLand !== false;
+      // (Where the terrain decides the coast, D96 and D97, land and sea are anywhere: always trimmed.)
+      if (clip && !terrainLand) {
         const coast = this.basemapPainter.pathsFor(view, sheet, opts.basemap!).coast;
         if (coast === 'land') clip = false;
         else if (coast === 'sea') continue;
@@ -1790,7 +1796,7 @@ export class MapRenderer {
         }
         if (this.renewRects.rects) renew = { rects: this.renewRects.rects, moment };
       }
-      const reliefKey = (tLook?.overTerritories && wantsFills ? `|r:${terrain!.key}|${JSON.stringify(tLook)}` : '') + (shifted && prepared.some((p) => p.clip) ? `|sea:${terrain!.key}|${seaLevel}` : '');
+      const reliefKey = (tLook?.overTerritories && wantsFills ? `|r:${terrain!.key}|${JSON.stringify(tLook)}` : '') + (terrainLand && prepared.some((p) => p.clip) ? `|sea:${terrain!.key}|${seaLevel}` : '');
       const key = animated && !renew && opts.transitions ? null : partKey(`${animated && !renew ? `${t.day}:${t.ms}|` : ''}${renew ? 'animated|' : ''}${wantsFills ? 'f' : ''}${wantsBorders ? 'b' : ''}|${world.revision}|${style.border}|${style.borderWidth}|${opts.basemap ? `${opts.basemap.scales.length}|${lakeKey}` : ''}${landKey}${reliefKey}${anyMedia ? `|${assetEpoch()}|${this.mediaSeconds}|${this.mediaChannel}` : ''}`);
       // The working view, after an edit or a step in time that changed few parcels: only where they lie is drawn again.
       // A change under way looks different at every moment, and different again once it is over: where
@@ -1866,7 +1872,7 @@ export class MapRenderer {
           // brushed outline rarely follows the coast) takes the look of the territory beside it: each
           // owner's outline is stroked a few kilometres wide under the fills, kept only in a band along
           // the coastline, and the land mask then trims it to the land.
-          if (clip && opts.basemap && !shifted && this.basemapPainter.pathsFor(view, sheet, opts.basemap).coast === 'mixed') {
+          if (clip && opts.basemap && !terrainLand && this.basemapPainter.pathsFor(view, sheet, opts.basemap).coast === 'mixed') {
             const rim = coastRim(view);
             const rc = this.scratch(c);
             rc.lineJoin = 'round';
@@ -1929,10 +1935,10 @@ export class MapRenderer {
           if (tLook?.overTerritories) {
             lc.save();
             lc.globalCompositeOperation = 'source-atop';
-            this.layTerrain(lc, view, sheet, terrain!, 'relief', cm, shifted ? this.seaOf(lc, view, sheet, opts.basemap ?? null, seaLevel, cm) : undefined);
+            this.layTerrain(lc, view, sheet, terrain!, 'relief', cm, terrainLand ? this.seaOf(lc, view, sheet, opts.basemap ?? null, seaLevel, cm) : undefined);
             lc.restore();
           }
-          if (clip) this.trimToLand(lc, view, sheet, opts.basemap!, frameKey, true, shifted ? terrain : null, seaLevel, cm);
+          if (clip) this.trimToLand(lc, view, sheet, opts.basemap ?? null, frameKey, true, terrainLand ? terrain : null, seaLevel, cm);
           c.save();
           c.setTransform(1, 0, 0, 1, 0, 0);
           c.globalAlpha = ls.fillOpacity ?? 0.78;
@@ -1942,7 +1948,7 @@ export class MapRenderer {
           if (front.show) for (const g of tg.groups.values()) {
             if (!g.advance || !g.disc || !g.changing) continue;
             c.save();
-            if (clip) this.clip(c, land());
+            if (clip && opts.basemap && !terrainLand) this.clip(c, land());
             this.clip(c, g.changing);
             if (g.border) {
               // The edge of the reached area: the area minus the area reached a line-width earlier.
@@ -1977,7 +1983,7 @@ export class MapRenderer {
           // along the coast takes the look of the territory beside it (D83), an owner's border against
           // nobody is left out in that band (the coastline is the edge there); borders between owners stay.
           const lc = this.scratch(c);
-          if (!shifted && this.basemapPainter.pathsFor(view, sheet, opts.basemap!).coast === 'mixed') {
+          if (!terrainLand && this.basemapPainter.pathsFor(view, sheet, opts.basemap!).coast === 'mixed') {
             this.drawBorders(lc, sheet, sp, arr, snap, states, tg, style, width, 'shared');
             const oc = this.scratch(c);
             this.drawBorders(oc, sheet, sp, arr, snap, states, tg, style, width, 'open');
@@ -1993,7 +1999,7 @@ export class MapRenderer {
             lc.restore();
           } else this.drawBorders(lc, sheet, sp, arr, snap, states, tg, style, width);
           fronts(lc);
-          this.trimToLand(lc, view, sheet, opts.basemap!, frameKey, false, shifted ? terrain : null, seaLevel, cm);
+          this.trimToLand(lc, view, sheet, opts.basemap ?? null, frameKey, false, terrainLand ? terrain : null, seaLevel, cm);
           c.save();
           c.setTransform(1, 0, 0, 1, 0, 0);
           c.drawImage(lc.canvas as CanvasImageSource, 0, 0);
@@ -2017,7 +2023,7 @@ export class MapRenderer {
     // One label per country: a country on several layers (its land, and its military control, say) is
     // labelled from the lowest layer it is on.
     if (placesText && layout.labels) for (const { states, snap, clip } of prepared) {
-      for (const l of this.layerLabels(view, arr, snap, states, entities, clip ? landMaskOf(opts.basemap!) : null)) if (!labels.some((x) => x.entityId === l.entityId)) labels.push(l);
+      for (const l of this.layerLabels(view, arr, snap, states, entities, clip && opts.basemap ? landMaskOf(opts.basemap) : null)) if (!labels.some((x) => x.entityId === l.entityId)) labels.push(l);
     }
     // Country labels and city names are placed together: they move apart where they would overlap,
     // and where they cannot the one with less priority is hidden (larger countries, then smaller

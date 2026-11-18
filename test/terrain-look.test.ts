@@ -96,7 +96,7 @@ test('terrain is turned on for a map of the Earth, changed, turned off and undon
   assert.equal(worldSettings(space()).show?.working?.names, false);
   // A world without Earth's geography, or a flat map, has none (yet).
   const plain = cmd.createWorld(world, 'Elsewhere', 3000).result;
-  assert.throws(() => cmd.setWorldTerrain(world, plain, {}), /Only maps of the Earth/);
+  assert.throws(() => cmd.setWorldTerrain(world, plain, {}), /Only maps of the Earth and generated planets/);
   const city = cmd.createFlatMap(world, 'City', 10).result;
   assert.equal(terrainSourceOf(world.get('map_space', city)), null);
   assert.throws(() => cmd.setWorldTerrain(world, 'space_missing', {}), /no longer exists/);

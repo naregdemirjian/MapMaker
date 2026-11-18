@@ -3,7 +3,7 @@
 // same arithmetic the terrain shader does (src/render-engine/terrain-gl.ts).
 import type { ProjectionName } from '../render-engine/camera.ts';
 
-export type TerrainPalette = 'natural' | 'atlas';
+export type TerrainPalette = 'natural' | 'atlas' | 'desert' | 'ice' | 'volcanic' | 'moon' | 'gas';
 
 export interface TerrainLook {
   /** Land coloured by height (lowlands to peaks) and the sea by depth. Off: the map's plain land and sea. */
@@ -30,7 +30,7 @@ export function terrainLookOf(raw: unknown): TerrainLook | null {
   const strength = typeof r.strength === 'number' && Number.isFinite(r.strength) ? Math.min(STRENGTH_MAX, Math.max(STRENGTH_MIN, r.strength)) : d.strength;
   return {
     colours: bool(r.colours, d.colours), relief: bool(r.relief, d.relief), overTerritories: bool(r.overTerritories, d.overTerritories),
-    seaFloor: bool(r.seaFloor, d.seaFloor), strength, palette: r.palette === 'atlas' || r.palette === 'natural' ? r.palette : d.palette,
+    seaFloor: bool(r.seaFloor, d.seaFloor), strength, palette: typeof r.palette === 'string' && r.palette in PALETTES ? (r.palette as TerrainPalette) : d.palette,
   };
 }
 
@@ -52,6 +52,31 @@ export const PALETTES: Record<TerrainPalette, { name: string; sea: Stop[]; land:
     name: 'Atlas (light, as in printed atlases)',
     sea: [[-11000, '#2f5f92'], [-6000, '#4a80b5'], [-3000, '#6ea2d0'], [-1000, '#8cbbe0'], [-200, '#a9d2ec'], [0, '#c8e6f6']],
     land: [[0, '#9fc58b'], [200, '#c3d99b'], [500, '#e6e0a8'], [1000, '#ddc58b'], [2000, '#c49c6e'], [3000, '#a7826a'], [4500, '#b9aea8'], [6500, '#f6f4f2']],
+  },
+  desert: {
+    name: 'Desert (sand and rock, turquoise shallows)',
+    sea: [[-11000, '#0d2a3a'], [-3000, '#174a5e'], [-500, '#2a6b78'], [0, '#4f9a96']],
+    land: [[0, '#c9a66b'], [300, '#d6b47a'], [1000, '#c79a5e'], [2000, '#a8774a'], [3000, '#8a5e3c'], [4500, '#a08a78'], [6500, '#e8e0d6']],
+  },
+  ice: {
+    name: 'Ice (a frozen world)',
+    sea: [[-11000, '#10243a'], [-3000, '#1d3d5c'], [-500, '#3c6a8c'], [0, '#7fa8c4']],
+    land: [[0, '#c9d6de'], [500, '#dde7ee'], [1500, '#eaf1f6'], [3000, '#f6f9fc'], [5000, '#ffffff']],
+  },
+  volcanic: {
+    name: 'Volcanic (dark rock, glowing peaks)',
+    sea: [[-11000, '#06080c'], [-3000, '#0d1720'], [-300, '#1a2a33'], [0, '#2b3d42']],
+    land: [[0, '#2a2522'], [500, '#3a302a'], [1500, '#4a3a30'], [3000, '#5c463a'], [4500, '#6e3a2a'], [6000, '#8a3a22'], [7500, '#c0502a']],
+  },
+  moon: {
+    name: 'Barren (greys of a moon)',
+    sea: [[-11000, '#202022'], [0, '#3a3a3c']],
+    land: [[0, '#3d3d3f'], [500, '#555557'], [1500, '#707072'], [2500, '#8b8b8d'], [3500, '#a7a7a9'], [5000, '#c4c4c6']],
+  },
+  gas: {
+    name: 'Gas giant (bands of cloud)',
+    sea: [[-11000, '#3a2414'], [0, '#8a5a3c']],
+    land: [[0, '#8a5a3c'], [1000, '#c49a6c'], [2000, '#e8d2b0'], [3000, '#d9b48a'], [4000, '#b07850'], [5000, '#f0e4cc'], [6000, '#a86a44']],
   },
 };
 

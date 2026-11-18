@@ -12,7 +12,11 @@ import { MapRenderer, VIEW_QUALITY } from '../render-engine/map-renderer.ts';
 import { loadViewSettings, saveViewSettings, DETAIL_TOLERANCE, type ViewSettings } from './view-settings.ts';
 import { loadRecordLength, type RecordLength } from './record-length.ts';
 import { loadBasemap, loadBasemapDetail, type Basemap } from '../render-engine/basemap.ts';
-import { loadEarthTerrain, type ElevationGrid } from '../terrain/grid.ts';
+import { loadEarthTerrain, EARTH_TERRAIN_KEY, type ElevationGrid } from '../terrain/grid.ts';
+import { planetKey, type PlanetParams } from '../terrain/planet.ts';
+import { planetTerrain } from '../terrain/planet-cache.ts';
+import { terrainSourceOf, planetOf } from '../world-model/world-settings.ts';
+import type { MapSpaceRow } from '../world-model/schema.ts';
 import { DEFAULT_PERIOD, type PeriodSpec } from '../domain/history-view.ts';
 import { setAssetBase } from '../render-engine/assets.ts';
 import { lonLatToVec, type Vec3 } from '../geo-kernel/vec.ts';
@@ -273,6 +277,38 @@ class AppStore {
     this.toasts = [...this.toasts, { id, text, kind }];
     this.notify();
     setTimeout(() => { this.toasts = this.toasts.filter((t) => t.id !== id); this.notify(); }, kind === 'error' ? 7000 : 3500);
+  }
+
+  /** Generated planets' heights by their settings (D97), made on first use. */
+  private planets = new Map<string, ElevationGrid | 'making'>();
+  /** A planet being made: how far along (0 to 1), for the interface. */
+  planetProgress: number | null = null;
+
+  /**
+   * The terrain a map has, if it is ready: Earth's (D94) or a generated planet's (D97). What is not
+   * ready yet is loaded or made, and everything is drawn again when it is.
+   */
+  terrainOf(space: Pick<MapSpaceRow, 'settings' | 'radius_m' | 'kind'> | null | undefined): { grid: ElevationGrid; key: string } | null {
+    const source = terrainSourceOf(space);
+    if (source === 'earth') {
+      if (!this.earthTerrain) this.needEarthTerrain();
+      return this.earthTerrain ? { grid: this.earthTerrain, key: EARTH_TERRAIN_KEY } : null;
+    }
+    const params = source === 'planet' ? planetOf(space) : null;
+    if (!params) return null;
+    const key = planetKey(params), have = this.planets.get(key);
+    if (have && have !== 'making') return { grid: have, key };
+    if (!have) this.makePlanet(params, key);
+    return null;
+  }
+
+  private makePlanet(params: PlanetParams, key: string): void {
+    this.planets.set(key, 'making');
+    this.planetProgress = 0;
+    planetTerrain(params, (done) => { this.planetProgress = done; this.notify(); }).then(
+      (g) => { this.planets.set(key, g); this.planetProgress = null; this.notify(); },
+      (e: Error) => { this.planets.delete(key); this.planetProgress = null; this.toast(e.message, 'error'); },
+    );
   }
 
   /** Loads Earth's terrain unless it is there or on its way (everything is drawn again when it arrives). */
@@ -577,6 +613,16 @@ class AppStore {
   }
 
   validateSelection() {
+    // The map viewed may have gone (its creation undone): the first map left is shown instead.
+    if (this.world && this.spaceId && !this.world.get('map_space', this.spaceId)) {
+      const first = this.world.all('map_space').sort((a, b) => a.sort_order - b.sort_order)[0];
+      this.spaceId = first?.id ?? '';
+      this.layerId = first ? this.world.all('layer').find((l) => l.space_id === first.id && l.kind === 'partition')?.id ?? '' : '';
+      this.selection = null;
+    }
+    if (this.world && this.layerId && !this.world.get('layer', this.layerId)) {
+      this.layerId = this.world.all('layer').find((l) => l.space_id === this.spaceId && l.kind === 'partition')?.id ?? '';
+    }
     const s = this.selection;
     if (!s || !this.world) return;
     if (s.kind === 'entity' && !this.world.get('entity', s.id)) this.selection = null;

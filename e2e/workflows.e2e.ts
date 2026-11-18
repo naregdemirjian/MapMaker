@@ -2017,6 +2017,58 @@ try {
     await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastTerrain.seaLevel === 0);
   });
 
+  await h.step('A generated planet: chosen with a picture of it, made from its seed, land and sea drawn, territory ending at its coast; undone', async () => {
+    await page.getByTestId('mode-world').click();
+    const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
+    const before = await steps();
+    const was = await page.evaluate(() => { const s = (window as any).__mapmaker.store; return { spaceId: s.spaceId as string, layerId: s.layerId as string }; });
+    await page.getByRole('button', { name: '+ Map' }).click();
+    await page.getByTestId('new-map-planet').check();
+    await page.getByTestId('new-map-name').fill('Seedworld');
+    await page.getByTestId('planet-preset-ocean').click();
+    await page.getByTestId('planet-preset-earthlike').click();
+    await page.getByTestId('planet-seed').fill('7');
+    // The picture follows the settings.
+    await page.waitForFunction(() => document.querySelector('[data-testid=planet-preview]')?.getAttribute('data-planet') === 'earthlike:7');
+    await h.screenshot('planet-dialog');
+    await page.getByTestId('new-map-create').click();
+    await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastTerrain.colours, null, { timeout: 60000 });
+    // A place of land and a place of sea on the planet, read from its heights; they are drawn differently.
+    const places = await page.evaluate(() => {
+      const s = (window as any).__mapmaker.store, g = s.terrainOf(s.world.get('map_space', s.spaceId)).grid;
+      const ll = (k: number): [number, number] => [-180 + ((k % g.width) + 0.5) * (360 / g.width), 90 - (Math.floor(k / g.width) + 0.5) * (180 / g.height)];
+      const ok = (k: number, land: boolean) => { const j = Math.floor(k / g.width); if (j < g.height * 0.25 || j > g.height * 0.75) return false; for (const d of [-2, -1, 0, 1, 2]) for (const e of [-2, -1, 0, 1, 2]) { const v = g.data[k + d * g.width + e]; if (land ? v < 300 : v > -1500) return false; } return true; };
+      let land = -1, sea = -1;
+      for (let k = 0; k < g.data.length && (land < 0 || sea < 0); k += 97) { if (land < 0 && ok(k, true)) land = k; if (sea < 0 && ok(k, false)) sea = k; }
+      return { land: ll(land), sea: ll(sea) };
+    });
+    await page.evaluate(([lon, lat]) => (window as any).__mapmaker.store.setCamera({ lon, lat, zoom: 0.5, rotation: 0, projection: 'equirectangular' }), places.land);
+    const pixelAt = (ll: [number, number]) => page.evaluate(([lon, lat]) => {
+      const p = (window as any).__mapmaker.lonLatToPage(lon, lat);
+      const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement;
+      const r = c.getBoundingClientRect(), k = c.width / r.width;
+      return Array.from(c.getContext('2d')!.getImageData(Math.round((p[0] - r.left) * k), Math.round((p[1] - r.top) * k), 1, 1).data).slice(0, 3);
+    }, ll);
+    let landPx: number[] = [], seaPx: number[] = [];
+    for (let i = 0; i < 30; i++) {
+      landPx = await pixelAt(places.land); seaPx = await pixelAt(places.sea);
+      if (Math.max(...landPx.map((v, k) => Math.abs(v - seaPx[k]))) > 25) break;
+      await page.waitForTimeout(100);
+    }
+    assert.ok(Math.max(...landPx.map((v, k) => Math.abs(v - seaPx[k]))) > 25, `land (${landPx}) and sea (${seaPx}) look different`);
+    // Territory ends at the planet's own coast, as on Earth.
+    assert.ok(await page.getByTestId('clip-to-land').isChecked(), 'territory ends at the coast');
+    await h.screenshot('planet');
+    // Undone: the planet is gone, and with it the map viewed: the first map is shown instead (not a blank page).
+    await page.getByTestId('undo').click();
+    await h.saved();
+    assert.equal(await steps(), before);
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.name === 'Seedworld')), false, 'the planet is gone');
+    await page.getByTestId('map-canvas').waitFor();
+    assert.ok(await page.evaluate(() => { const s = (window as any).__mapmaker.store; return !!s.world.get('map_space', s.spaceId); }), 'a map that exists is shown');
+    await page.evaluate((w) => (window as any).__mapmaker.store.set({ spaceId: w.spaceId, layerId: w.layerId, selection: null }), was);
+  });
+
   await h.step('History Health lists the overlap, nothing else; no browser errors', async () => {
     await page.getByTestId('mode-world').click();
     await page.getByTestId('health').click();

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useStore, store, type PendingEdit } from '../store.ts';
 import { Api, type VersionInfo, type BackupInfo, type ProjectInfo } from '../api.ts';
 import * as cmd from '../../domain/commands.ts';
@@ -14,6 +14,8 @@ import { TypeDot, TypeSelect } from './EventTypes.tsx';
 import { SplitPrompt } from './SplitMerge.tsx';
 import { placementMode } from './Characters.tsx';
 import { defaultEnd, typeSettings, type Spread } from '../../domain/event-types.ts';
+import { PLANET_PRESETS, planetParamsOf, type PlanetParams, type PlanetPreset } from '../../terrain/planet.ts';
+import { planetPreview } from '../../terrain/planet-preview.ts';
 
 function Modal({ title, children, onClose, wide }: { title: string; children: React.ReactNode; onClose: () => void; wide?: boolean }) {
   return (
@@ -205,33 +207,92 @@ export function NewWorldDialog() {
   const [name, setName] = useState('');
   const [km, setKm] = useState('6371');
   const [earth, setEarth] = useState(false);
-  const [flat, setFlat] = useState(false);
+  const [kind, setKind] = useState<'round' | 'planet' | 'flat'>('round');
+  const flat = kind === 'flat';
   const [widthKm, setWidthKm] = useState('20');
+  const [planet, setPlanet] = useState<PlanetParams>(() => planetParamsOf({ seed: newSeed(), preset: 'earthlike' })!);
   const close = () => s.set({ dialog: null });
   const create = () => {
     const id = flat
       ? s.execute((w) => cmd.createFlatMap(w, name.trim() || 'New flat map', Number(widthKm)))
-      : s.execute((w) => cmd.createWorld(w, name.trim() || 'New map', Number(km), earth ? 'natural-earth' : 'none'));
+      : kind === 'planet'
+        ? s.execute((w) => cmd.createPlanet(w, name.trim() || 'New planet', Number(km), planet))
+        : s.execute((w) => cmd.createWorld(w, name.trim() || 'New map', Number(km), earth ? 'natural-earth' : 'none'));
     if (id) { s.set({ spaceId: id, layerId: s.world!.all('layer').find((l) => l.space_id === id)?.id ?? '', selection: null }); close(); }
   };
   return (
-    <Modal title="New map" onClose={close}>
+    <Modal title="New map" onClose={close} wide={kind === 'planet'}>
       <p className="muted">Each map has its own geography, layers and territorial history; events and countries are shared by the whole project.</p>
       <div className="choice-row">
-        <label className="check"><input type="radio" name="map-kind" checked={!flat} onChange={() => setFlat(false)} /> Round: a planet or moon (Earth, another real body, or one of your own)</label>
-        <label className="check"><input type="radio" name="map-kind" checked={flat} onChange={() => setFlat(true)} data-testid="new-map-flat" /> Flat: a city, a battlefield, a region (a plan, true to scale)</label>
+        <label className="check"><input type="radio" name="map-kind" checked={kind === 'round'} onChange={() => setKind('round')} /> Round: a planet or moon (Earth, another real body, or a blank one of your own)</label>
+        <label className="check"><input type="radio" name="map-kind" checked={kind === 'planet'} onChange={() => setKind('planet')} data-testid="new-map-planet" /> A planet of your own, generated: continents, seas and mountains from a seed</label>
+        <label className="check"><input type="radio" name="map-kind" checked={flat} onChange={() => setKind('flat')} data-testid="new-map-flat" /> Flat: a city, a battlefield, a region (a plan, true to scale)</label>
       </div>
       <label>Name<input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={flat ? 'e.g. Old Town' : 'e.g. Aster Prime'} data-testid="new-map-name" /></label>
       {flat ? <>
         <label>Width (km)<input type="number" min={0.01} max={5000} value={widthKm} onChange={(e) => setWidthKm(e.target.value)} data-testid="new-map-width" /></label>
         <p className="muted">Borders on a flat map are straight lines; the scale bar reads in metres and kilometres.</p>
       </> : <>
-        <label>Radius (km)<input type="number" value={km} onChange={(e) => setKm(e.target.value)} /></label>
-        <div className="presets">{WORLD_PRESETS.map((p) => <button key={p.name} className="small" onClick={() => { setName(p.name); setKm(String(p.km)); setEarth(p.name === 'Earth'); }}>{p.name}</button>)}</div>
-        <label className="check"><input type="checkbox" checked={earth} onChange={(e) => setEarth(e.target.checked)} data-testid="new-world-earth" /> Start with Earth's geography (land, lakes and coastlines)</label>
+        <label>Radius (km)<input type="number" value={km} onChange={(e) => setKm(e.target.value)} data-testid="new-map-radius" /></label>
+        {kind === 'round' && <>
+          <div className="presets">{WORLD_PRESETS.map((p) => <button key={p.name} className="small" onClick={() => { setName(p.name); setKm(String(p.km)); setEarth(p.name === 'Earth'); }}>{p.name}</button>)}</div>
+          <label className="check"><input type="checkbox" checked={earth} onChange={(e) => setEarth(e.target.checked)} data-testid="new-world-earth" /> Start with Earth's geography (land, lakes and coastlines)</label>
+        </>}
+        {kind === 'planet' && <PlanetChooser value={planet} onChange={setPlanet} />}
       </>}
-      <div className="modal-actions"><button onClick={close}>Cancel</button><button className="primary" onClick={create}>Create map</button></div>
+      <div className="modal-actions"><button onClick={close}>Cancel</button><button className="primary" onClick={create} data-testid="new-map-create">Create map</button></div>
     </Modal>
+  );
+}
+
+/** A seed for a new planet: any whole number from 1 to 999,999. */
+const newSeed = () => 1 + Math.floor(Math.random() * 999_999);
+
+/** The settings of a generated planet (D97), with a picture of it that follows them. */
+export function PlanetChooser({ value, onChange }: { value: PlanetParams; onChange: (p: PlanetParams) => void }) {
+  const canvas = useRef<HTMLCanvasElement | null>(null);
+  const set = (patch: Partial<PlanetParams>) => onChange(planetParamsOf({ ...value, ...patch })!);
+  const choose = (preset: PlanetPreset) => onChange(planetParamsOf({ ...PLANET_PRESETS[preset].params, seed: value.seed, preset })!);
+  // The picture is made a moment after the settings stop changing (it takes a few tens of milliseconds).
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const c = canvas.current;
+      if (!c) return;
+      const px = planetPreview(value, c.width);
+      c.getContext('2d')!.putImageData(new ImageData(px as unknown as Uint8ClampedArray<ArrayBuffer>, c.width, c.height), 0, 0);
+      c.dataset.planet = `${value.preset}:${value.seed}`;
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, [value.seed, value.preset, value.sea, value.continents, value.mountains, value.roughness, value.ice]);
+  const gas = value.preset === 'gas';
+  const slider = (key: 'sea' | 'mountains' | 'roughness' | 'ice', label: string, max: number) => (
+    <label className="range-row planet-slider">{label}: <b>{Math.round(value[key] * 100)}%</b>
+      <input type="range" min={0} max={max * 100} step={1} value={Math.round(value[key] * 100)} onChange={(e) => set({ [key]: Number(e.target.value) / 100 })} data-testid={`planet-${key}`} />
+    </label>
+  );
+  return (
+    <div className="planet-chooser" data-testid="planet-chooser">
+      <div className="presets">
+        {(Object.keys(PLANET_PRESETS) as PlanetPreset[]).map((p) => (
+          <button key={p} className={`small ${value.preset === p ? 'on' : ''}`} title={PLANET_PRESETS[p].about} onClick={() => choose(p)} data-testid={`planet-preset-${p}`}>{PLANET_PRESETS[p].name}</button>
+        ))}
+      </div>
+      <canvas ref={canvas} width={360} height={180} className="planet-preview" data-testid="planet-preview" />
+      <div className="planet-seed">
+        <label>Seed<input type="number" min={1} value={value.seed} onChange={(e) => Number.isFinite(Number(e.target.value)) && set({ seed: Number(e.target.value) })} data-testid="planet-seed" /></label>
+        <button onClick={() => set({ seed: newSeed() })} data-testid="planet-another" title="Another planet with these settings">Another</button>
+        <span className="muted">The same seed and settings always make the same planet.</span>
+      </div>
+      {!gas && <>
+        {slider('sea', 'Sea', 0.98)}
+        <label className="range-row planet-slider">Continents: <b>{value.continents}</b>
+          <input type="range" min={1} max={12} step={1} value={value.continents} onChange={(e) => set({ continents: Number(e.target.value) })} data-testid="planet-continents" />
+        </label>
+        {slider('mountains', 'Mountains', 2)}
+        {slider('ice', 'Ice caps', 1)}
+      </>}
+      {slider('roughness', gas ? 'Turbulence' : 'Roughness', 1)}
+    </div>
   );
 }
 

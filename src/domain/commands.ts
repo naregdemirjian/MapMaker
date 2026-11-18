@@ -12,6 +12,7 @@ import { type Vec3, vecToLonLat, normalize } from '../geo-kernel/vec.ts';
 import { worldSettings, terrainSourceOf, type BasemapSource, type ShowSet, type ShowSettings } from '../world-model/world-settings.ts';
 import { terrainLookOf, DEFAULT_TERRAIN_LOOK, type TerrainLook } from '../terrain/look.ts';
 import { cleanSeaLevel, type SeaLevelPoint } from '../terrain/sea-level.ts';
+import { planetParamsOf, PLANET_PRESETS, type PlanetParams } from '../terrain/planet.ts';
 import { resolvePointStyle, type LabelStyle, type CountryLabel, type PointStyle } from '../render-engine/label-style.ts';
 import { DEFAULT_FEATURE_STYLE, isFeatureKind, type FeatureKind, type FeatureStyle } from '../render-engine/feature-style.ts';
 import { relationKind, isRelationKind, type RelationKind } from './relations.ts';
@@ -111,6 +112,33 @@ function createWorldIn(tx: Tx, name: string, radiusKm: number, basemap: BasemapS
   return spaceId;
 }
 
+/**
+ * A generated planet (D97): a round map whose terrain is made from the settings given (the same every
+ * time), shown in its preset's colours.
+ */
+export function createPlanet(world: World, name: string, radiusKm: number, params: PlanetParams): CommandResult<string> {
+  if (!(radiusKm > 0)) throw new Error('A round map needs a positive radius.');
+  const planet = planetParamsOf(params);
+  if (!planet) throw new Error('Those are not settings for a planet.');
+  const preset = PLANET_PRESETS[planet.preset];
+  return run(world, `Create planet "${name}"`, (tx) => {
+    const id = createWorldIn(tx, name, radiusKm, 'none');
+    const space = tx.world.get('map_space', id)!;
+    tx.update('map_space', { ...space, settings: JSON.stringify({ ...worldSettings(space), planet, terrain: terrainLookOf({ palette: preset.palette, relief: preset.relief }) }) });
+    return id;
+  });
+}
+
+/** Makes a planet anew from other settings (D97): its terrain changes everywhere, its history stays. */
+export function setWorldPlanet(world: World, spaceId: string, params: PlanetParams): CommandResult {
+  const space = world.get('map_space', spaceId);
+  if (!space) throw new Error('That map no longer exists.');
+  if (terrainSourceOf(space) !== 'planet') throw new Error('Only a generated planet can be made anew.');
+  const planet = planetParamsOf(params);
+  if (!planet) throw new Error('Those are not settings for a planet.');
+  return run(world, `Make "${space.name}" anew`, (tx) => { tx.update('map_space', { ...space, settings: JSON.stringify({ ...worldSettings(space), planet }) }); });
+}
+
 export function createWorld(world: World, name: string, radiusKm: number, basemap: BasemapSource = 'none'): CommandResult<string> {
   if (!(radiusKm > 0)) throw new Error('A round map needs a positive radius.');
   return run(world, `Create map "${name}"`, (tx) => createWorldIn(tx, name, radiusKm, basemap));
@@ -142,7 +170,7 @@ export function setWorldShow(world: World, spaceId: string, patch: { working?: S
 export function setWorldTerrain(world: World, spaceId: string, patch: Partial<TerrainLook> | null): CommandResult {
   const space = world.get('map_space', spaceId);
   if (!space) throw new Error('That map no longer exists.');
-  if (patch && !terrainSourceOf(space)) throw new Error('Only maps of the Earth have terrain so far.');
+  if (patch && !terrainSourceOf(space)) throw new Error('Only maps of the Earth and generated planets have terrain.');
   const settings = worldSettings(space);
   const cur = terrainLookOf(settings.terrain);
   const next = patch ? terrainLookOf({ ...(cur ?? DEFAULT_TERRAIN_LOOK), ...patch }) : null;
@@ -155,7 +183,7 @@ export function setWorldTerrain(world: World, spaceId: string, patch: Partial<Te
 export function setWorldSeaLevel(world: World, spaceId: string, points: SeaLevelPoint[]): CommandResult {
   const space = world.get('map_space', spaceId);
   if (!space) throw new Error('That map no longer exists.');
-  if (!terrainSourceOf(space)) throw new Error('Only maps of the Earth have a sea level so far.');
+  if (!terrainSourceOf(space)) throw new Error('Only maps of the Earth and generated planets have a sea level.');
   const clean = cleanSeaLevel(points);
   if (clean.length !== points.length && points.some((p) => !Number.isFinite(p?.day) || !Number.isFinite(p?.m))) throw new Error('A sea level needs a date and a height in metres.');
   const { seaLevel: _old, ...rest } = worldSettings(space);

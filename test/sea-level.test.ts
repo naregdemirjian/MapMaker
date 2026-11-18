@@ -70,6 +70,6 @@ test('a sea level is set, changed and cleared in one step each, and refused on w
   assert.ok(r.diffs.length > 0);
   assert.throws(() => cmd.setWorldSeaLevel(world, spaceId, [{ day: Number.NaN, ms: 0, m: 3 }]), /date and a height/);
   const elsewhere = cmd.createWorld(world, 'Elsewhere', 3000).result;
-  assert.throws(() => cmd.setWorldSeaLevel(world, elsewhere, [point(0, 10)]), /Only maps of the Earth/);
+  assert.throws(() => cmd.setWorldSeaLevel(world, elsewhere, [point(0, 10)]), /Only maps of the Earth and generated planets/);
   assert.deepEqual(seaLevelPoints(world.get('map_space', elsewhere)), []);
 });

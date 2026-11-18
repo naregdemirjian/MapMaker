@@ -2,6 +2,7 @@
 import type { MapSpaceRow } from './schema.ts';
 import { terrainLookOf, type TerrainLook } from '../terrain/look.ts';
 import { cleanSeaLevel, type SeaLevelPoint } from '../terrain/sea-level.ts';
+import { planetParamsOf, type PlanetParams } from '../terrain/planet.ts';
 
 /** The reference geography a world shows under its territories. */
 export type BasemapSource = 'natural-earth' | 'none';
@@ -28,6 +29,8 @@ export interface WorldSettings {
   terrain?: TerrainLook;
   /** The sea level at dates (D96), in time order; absent: today's, always. */
   seaLevel?: SeaLevelPoint[];
+  /** A generated planet's settings (D97): its terrain is made from them whenever the map is opened. */
+  planet?: PlanetParams;
 }
 
 /** Whether something is shown, while working or in exports. */
@@ -59,11 +62,18 @@ export function basemapSourceOf(space: Pick<MapSpaceRow, 'settings' | 'radius_m'
 }
 
 /**
- * The terrain a world has (D95): Earth's elevation for worlds showing Earth's geography; none
- * otherwise (generated planets come later).
+ * The terrain a world has: Earth's elevation for worlds showing Earth's geography (D95), its own for a
+ * generated planet (D97); none otherwise.
  */
-export function terrainSourceOf(space: Pick<MapSpaceRow, 'settings' | 'radius_m' | 'kind'> | null | undefined): 'earth' | null {
-  return space && space.kind !== 'plane' && basemapSourceOf(space) === 'natural-earth' ? 'earth' : null;
+export function terrainSourceOf(space: Pick<MapSpaceRow, 'settings' | 'radius_m' | 'kind'> | null | undefined): 'earth' | 'planet' | null {
+  if (!space || space.kind === 'plane') return null;
+  if (basemapSourceOf(space) === 'natural-earth') return 'earth';
+  return planetParamsOf(worldSettings(space).planet) ? 'planet' : null;
+}
+
+/** A generated planet's settings (D97), or null. */
+export function planetOf(space: Pick<MapSpaceRow, 'settings' | 'radius_m' | 'kind'> | null | undefined): PlanetParams | null {
+  return space && terrainSourceOf(space) === 'planet' ? planetParamsOf(worldSettings(space).planet) : null;
 }
 
 /** How a world's terrain is drawn, or null when it shows none. */

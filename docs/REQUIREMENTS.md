@@ -61,7 +61,7 @@ status. Last updated: 18 November 2026 (Stage 4; see DEVELOPMENT.md).
 | Requirement | Status | Evidence | Notes |
 | --- | --- | --- | --- |
 | Several independent worlds with their own maps, layers and territorial history | Tested | `geometry-worlds`, `e2e/workflows` step 6 | |
-| Fictional planet with custom geography, no real data needed | Partial | `geometry-worlds`, `e2e/workflows` | Territories can be drawn on a blank world of any radius. Terrain and planet generation not implemented (Stage 8) |
+| Fictional planet with custom geography, no real data needed | Partial | `geometry-worlds`, `planet`, `e2e/workflows` | Territories can be drawn on a blank world of any radius, or on a generated planet (D97): seven presets, a seed and sliders (sea, continents, mountains, roughness, ice caps), its own coasts, colours and relief; territory ends at its coast. Sculpting the terrain by hand comes next (Stage 8) |
 | No Earth-specific assumptions | Tested | `geometry-worlds` (areas follow each world's radius) | |
 | Custom projections | Partial | `camera`, `e2e/workflows` step 8 | Four projections for shots. The world-building view has no projection choice; flat (non-spherical) coordinate systems are not implemented |
 | Separate timelines per world | Tested | `geometry-worlds`, `event-groups`, `e2e/workflows` step 7 | Territorial history is per world. Events belong to the project and are grouped by the user (D8): the timeline shows the chosen groups; an event can be in several |
