@@ -74,7 +74,8 @@ Follows from D2. The test drives the real interface exactly as a person would.
   pictures on each other (each territory layer is painted in a buffer, trimmed to the land, laid on at its
   opacity; the coast's band and the borders the same) and a third in the browser's own drawing: the next thing
   to make faster, for frames that cross many changes at once (the heavy project changes fifty times a second of
-  that shot). Exports of the same frames: 1080p 139 ms as PNG, 73 ms as MP4 (H.264), 90 ms as WebM; 4K MP4 192 ms.
+  that shot). Exports of the same frames: 1080p about 140 ms as PNG, 75 ms as MP4 (H.264) and 80–90 ms as WebM; 4K
+  MP4 160–190 ms (the software encoders' speed varies from run to run here). The table: DEVELOPMENT.md, Performance.
 
 ### D124. Each layer on its own, as export passes (improvement pass)
 

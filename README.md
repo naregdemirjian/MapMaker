@@ -1,7 +1,7 @@
 # Map Maker
 
 Bespoke software for one independent feature film: a historical world-building database for its universe, and a tool
-that turns that history into animated maps exported as image sequences for Premiere Pro. Single user, works offline,
+that turns that history into animated maps exported as image sequences for Premiere Pro, or as videos. Single user, works offline,
 no accounts.
 
 ## Installing Map Maker on Windows (the desktop app)
@@ -37,17 +37,28 @@ while Map Maker is closed. Don't keep projects inside OneDrive or Dropbox while 
   are founded, moved and abandoned at dates.
 - Animate changes (an advancing front from the border, an expansion or a fade); style labels, fill countries with
   colours, flags, pictures or videos; add a current-events box to shots.
-- Make shots and export PNG image sequences with transparency, in separate layers for Premiere, at HD, 4K, 8K or any
-  size and frame rate.
-- Earth's real geography (Natural Earth land, lakes and coastlines); countries can be painted loosely over the sea and
-  end at the coast; today's borders can be shown as a drawing guide.
+- Make shots and export PNG or TIFF image sequences with transparency, in separate layers for Premiere (by kind, or
+  each layer on its own), at HD, 4K, 8K or any size and frame rate; or one MP4 (H.264) or WebM (VP9) video to play
+  and share; or a single frame as an editable SVG file. "+ Whole history" makes a timelapse of everything in one click.
+- Shots in their own look (Parchment, Atlas, Night, Blueprint, Minimal, Wartime…), with text boxes and callouts,
+  campaign arrows and routes that flow.
+- Play history in the working view, from a month to a thousand years a second.
+- Import borders from GeoJSON files: one map for each year, or a dataset that dates each shape (such as CShapes); the
+  same border drawn again in another file follows the one already on the map.
+- Earth's real geography (Natural Earth land, lakes, rivers and coastlines, terrain with relief, the sea floor, a
+  satellite look, finer heights downloaded close in); planets of your own from a seed; sculpting the terrain.
+- Countries can be painted loosely over the sea and end at the coast; today's borders can be shown as a drawing guide.
+- Wars with front lines, areas, lines and points (claims, roads, battles), relationships between countries.
+- Conditions over the map: radiation, fire, smoke, floods, destruction and heatmaps, spreading over the terrain;
+  disasters (strikes, earthquakes, eruptions, impacts) in one click.
+- Space maps: the stars within 50 light-years with their known planets, the solar system on any date, the Milky Way,
+  invented stars and galaxies; star systems held by countries and factions, and lanes between them.
 - Undo and redo, named versions, automatic backups, and recovery of a damaged project from its latest healthy backup.
 - Built to stay fast on large projects: moving the map, scrubbing time, drawing and exporting all keep their speed with
   hundreds of countries and detailed coasts. **Settings** (top right) trades sharpness for speed on slower computers;
   it only affects the screen while you work, never an export.
 
-Not there yet: terrain, rivers, military fronts, environmental events, space maps and more.
-See `docs/REQUIREMENTS.md`.
+What is planned next, and what each part has been tested with: see `docs/REQUIREMENTS.md` and `docs/DEVELOPMENT.md`.
 
 ## For development
 
