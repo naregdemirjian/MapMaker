@@ -931,6 +931,17 @@ try {
     await page.getByTestId('change-for-n').press('Enter');
     await page.waitForFunction(() => document.querySelectorAll('[data-testid=change-span]')[2]?.textContent === '1 January 1966 to 1 January 1968');
     await h.screenshot('record-lengths');
+    // The last made an expansion, then from two points at once (D91): the second chosen by a click on the map.
+    await page.getByTestId('transition-style').nth(2).selectOption('advance');
+    await page.getByTestId('add-origin').click();
+    await page.mouse.click(cx + 190, cy - 170);
+    await page.waitForFunction(() => /2 points at once/.test(document.querySelector('[data-testid=change-origins]')?.textContent ?? ''));
+    const pincer = await page.evaluate((id) => JSON.parse((window as any).__mapmaker.store.world.all('effect').filter((f: any) => f.event_id === id).sort((a: any, b: any) => a.ordinal - b.ordinal)[2].transition), evId);
+    assert.equal(pincer.style, 'advance');
+    assert.equal(pincer.origins?.length, 1, 'a second starting point');
+    assert.deepEqual(pincer.for, { n: 2, unit: 'year' }, 'its length kept');
+    await page.getByTestId('clear-origins').click();
+    await page.waitForFunction(() => /one point/.test(document.querySelector('[data-testid=change-origins]')?.textContent ?? ''));
     // Back as it was: changes happen at once when recorded; the event deleted.
     await page.getByTestId('record-when').selectOption('instant');
     await page.getByTestId('recording').getByRole('button', { name: 'Stop' }).click();

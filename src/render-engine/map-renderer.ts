@@ -2324,8 +2324,12 @@ export class MapRenderer {
       if (!origin || !maxDist) ({ origin, maxDist } = this.reachOf(arr, g.faces));
       const r = (g.progress * maxDist * 180) / Math.PI;
       if (r <= 0) continue;
-      const circle = geoCircle().center(toLonLat(origin)).radius(Math.min(r, 179.9)).precision(0.5)();
-      g.disc = new Path2D(geoPath(view.projection)(circle) ?? '');
+      // From every starting point at once (D91): the circles together.
+      const centres = g.spec.origins && g.spec.origins.length > 1 ? g.spec.origins : [origin];
+      const disc = new Path2D();
+      for (const o of centres) disc.addPath(new Path2D(geoPath(view.projection)(geoCircle().center(toLonLat(o)).radius(Math.min(r, 179.9)).precision(0.5)()) ?? ''));
+      g.disc = disc;
+      if (centres.length > 1) g.discRule = 'nonzero';
     }
     return { groups, of };
   }

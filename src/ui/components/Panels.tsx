@@ -737,6 +737,7 @@ function EventPanel({ id }: { id: string }) {
       else if (old?.for) spec.for = old.for;
       else if (!end) spec.for = { n: 1, unit: 'year' };
       if (old?.next) spec.next = true;
+      if (spec.style === 'advance' && old?.origins) spec.origins = old.origins;
     }
     s.execute((wd) => cmd.setEffectTransition(wd, f.id, spec));
   };
@@ -778,6 +779,19 @@ function EventPanel({ id }: { id: string }) {
               </label>
               <button className="small danger" onClick={() => s.execute((wd) => cmd.deleteEffect(wd, f.id))}>Remove</button>
               <ChangeLength f={f} ev={e} />
+              {(() => {
+                // An expansion's starting points (D91): more of them, and it spreads from all at once.
+                const sp = parseJSON<TransitionSpec | null>(f.transition, null);
+                if (sp?.style !== 'advance' || !sp.origin) return null;
+                const n = 1 + (sp.origins?.length ?? 0);
+                return (
+                  <span className="change-length" data-testid="change-origins">
+                    <span className="muted">Spreads from {n === 1 ? 'one point' : `${n} points at once`}</span>
+                    <button className="small" onClick={() => { s.set({ pickOrigin: f.id }); s.toast('Click on the map where it also starts from.'); }} data-testid="add-origin">{s.pickOrigin === f.id ? 'Click the map…' : 'Add a starting point'}</button>
+                    {n > 1 && <button className="small" onClick={() => s.execute((wd) => cmd.clearTransitionOrigins(wd, f.id))} data-testid="clear-origins">Only the first</button>}
+                  </span>
+                );
+              })()}
             </div>
           )}
         </div>

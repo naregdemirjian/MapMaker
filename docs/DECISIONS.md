@@ -60,6 +60,19 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D91. Expansions from several starting points: pincers and encirclement (Stage 6)
+
+An expansion ("a circle from where you started drawing") spread from one point. A change animated as an expansion
+can now have **more starting points** ("Add a starting point" beside it in the event's panel, then a click on the
+map; "Only the first" takes them away): it spreads from all of them at once, each place changing hands when the
+front from its nearest starting point reaches it, so two pincers close on the middle (encirclement) and the land
+farthest from every starting point changes last. The engine keeps the points with the change (`transition.origins`)
+and measures from the nearest (`fromNearest`); how far the front must go is the farthest point of the change from its
+nearest starting point, so the change still ends at its end. The renderer draws the land reached as the circles
+around every starting point together. A change keeps its starting points when its animation is switched and back,
+and keeps its length (D86). This covers the encirclement the requirements list; keyframed fronts (a front line
+placed at chosen dates) remain to be done.
+
 ### D90. Units: characters belonging to a country, with arrows of advance (Stage 7)
 
 Armies, fleets and other units are characters (D35, with icons, D85) that can **belong to a country or faction**

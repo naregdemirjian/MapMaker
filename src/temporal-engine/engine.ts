@@ -14,6 +14,8 @@ import type { Arrangement } from '../geo-kernel/arrangement.ts';
 export type TransitionStyle = 'instant' | 'border' | 'advance' | 'fade' | 'wipe';
 export interface TransitionSpec {
   style: TransitionStyle; origin?: [number, number]; easing?: 'linear' | 'smooth';
+  /** An expansion's other starting points (D91): it spreads from all of them at once (pincers, encirclement). */
+  origins?: Array<[number, number]>;
   /**
    * How long the change takes (D86): until this moment (stored day and milliseconds), or for this
    * long from its own time; without either, until its event ends.
@@ -26,7 +28,18 @@ export interface TransitionSpec {
 export interface Resolution { set: Array<[number[], string | null]> }
 export interface AnnexIntent { op: 'annex'; from: string; to: string }
 
-export interface CompiledTransition { style: TransitionStyle; origin: Vec3 | null; maxDist: number; easing: 'linear' | 'smooth' | 'in' | 'out'; /** Wipe direction in degrees (shot-level wipes). */ angle?: number; /** Made by a shot's transition settings, not recorded. */ shot?: boolean }
+export interface CompiledTransition {
+  style: TransitionStyle; origin: Vec3 | null; maxDist: number; easing: 'linear' | 'smooth' | 'in' | 'out';
+  /** Every starting point of an expansion, the first being `origin` (D91); absent when there is one. */
+  origins?: Vec3[];
+  /** Wipe direction in degrees (shot-level wipes). */ angle?: number; /** Made by a shot's transition settings, not recorded. */ shot?: boolean;
+}
+
+/** The distance (radians) from the nearest of an expansion's starting points. */
+export function fromNearest(spec: Pick<CompiledTransition, 'origin' | 'origins'>, p: Vec3): number {
+  if (spec.origins && spec.origins.length > 1) { let m = Infinity; for (const o of spec.origins) m = Math.min(m, angle(o, p)); return m; }
+  return spec.origin ? angle(spec.origin, p) : 0;
+}
 
 /** One assignment of a value to a parcel (or an ancestor parcel) of a partition layer. */
 export interface Assignment {
@@ -114,6 +127,13 @@ export function eventStart(e: EventRow): Instant {
 export function eventEnd(e: EventRow): Instant | null {
   return e.end_day === null || e.end_ms === null ? null : fromStore(e.end_day, e.end_ms);
 }
+/** An expansion's starting points beyond its first, as unit vectors (D91); nothing when it has only one. */
+function startingPoints(spec: TransitionSpec): { origins?: Vec3[] } {
+  if (spec.style !== 'advance' || !spec.origin || !Array.isArray(spec.origins) || !spec.origins.length) return {};
+  const more = spec.origins.filter((o) => Array.isArray(o) && Number.isFinite(o[0]) && Number.isFinite(o[1])).map((o) => lonLatToVec(o[0], o[1]));
+  return more.length ? { origins: [lonLatToVec(spec.origin[0], spec.origin[1]), ...more] } : {};
+}
+
 /** When a change starting at t with this transition has finished: at its own end if it has one, else at its event's end. */
 export function transitionEnd(spec: TransitionSpec | null, t: Instant, ev: EventRow): Instant | null {
   if (spec?.until && Number.isFinite(spec.until[0])) return fromStore(spec.until[0], spec.until[1] ?? 0);
@@ -382,7 +402,7 @@ export class Engine {
     const end = transitionEnd(spec, t, ev);
     const hasTransition = spec && spec.style !== 'instant' && end && compare(end, t) > 0;
     const compiled: CompiledTransition | null = hasTransition
-      ? { style: spec.style, origin: spec.origin ? lonLatToVec(spec.origin[0], spec.origin[1]) : null, maxDist: 0, easing: spec.easing ?? 'smooth' }
+      ? { style: spec.style, origin: spec.origin ? lonLatToVec(spec.origin[0], spec.origin[1]) : null, maxDist: 0, easing: spec.easing ?? 'smooth', ...startingPoints(spec) }
       : null;
     const res = resolutionOf(ef);
     const list: Assignment[] = [];
@@ -413,7 +433,7 @@ export class Engine {
     });
     this.effectAssignments.set(ef.id, list);
     this.effectLayer.set(ef.id, layer.id);
-    if (compiled && compiled.origin) { compiled.maxDist = this.regionMaxDistance(arr, list.map((a) => a.face), compiled.origin); this.originEffects.add(ef.id); }
+    if (compiled && compiled.origin) { compiled.maxDist = this.regionMaxDistance(arr, list.map((a) => a.face), compiled); this.originEffects.add(ef.id); }
     const times = compiled && end ? [t, end] : [t];
     this.effectTimes.set(ef.id, times);
     for (const x of times) {
@@ -623,7 +643,7 @@ export class Engine {
       const list = this.effectAssignments.get(id), ef = w.get('effect', id);
       const arr = ef?.space_id ? w.arrangements.get(ef.space_id) : undefined;
       const spec = list?.[0]?.transition;
-      if (list && arr && spec?.origin) spec.maxDist = this.regionMaxDistance(arr, list.map((a) => a.face), spec.origin);
+      if (list && arr && spec?.origin) spec.maxDist = this.regionMaxDistance(arr, list.map((a) => a.face), spec);
     }
     for (const spaceId of spaces) { const arr = w.arrangements.get(spaceId)!; this.kernelMarks.set(arr, arr.touchMark()); }
     if (this.stateLog.length > 60_000) { this.stateLogFrom = this.stateLog[30_000].rev; this.stateLog.splice(0, 30_001); }
@@ -632,12 +652,13 @@ export class Engine {
     return true;
   }
 
-  private regionMaxDistance(arr: Arrangement, faces: number[], origin: Vec3): number {
+  /** How far an expansion must go: to the point of the change farthest from its nearest starting point. */
+  private regionMaxDistance(arr: Arrangement, faces: number[], spec: Pick<CompiledTransition, 'origin' | 'origins'>): number {
     let m = 0;
     for (const leaf of leafDescendants(arr, faces)) {
       for (const cyc of arr.faceCycles(leaf)) for (const vid of cyc) {
         const r = arr.vertices.get(vid)!;
-        m = Math.max(m, angle(origin, e7ToVec(r.lon, r.lat)));
+        m = Math.max(m, fromNearest(spec, e7ToVec(r.lon, r.lat)));
       }
     }
     return m || 1e-9;
@@ -937,7 +958,7 @@ export class Engine {
   /** Fraction (0..1) of a transition's duration after which point p changes hands. */
   arrivalFraction(spec: CompiledTransition, p: Vec3): number {
     if (spec.style === 'fade' || !spec.origin) return 0.5;
-    return Math.max(0, Math.min(1, angle(spec.origin, p) / spec.maxDist));
+    return Math.max(0, Math.min(1, fromNearest(spec, p) / spec.maxDist));
   }
 
   /** The instant point p changes hands under assignment a. */

@@ -1552,6 +1552,28 @@ export function deleteEffect(world: World, effectId: string): CommandResult {
   return run(world, 'Remove change', (tx) => tx.remove('effect', effectId));
 }
 
+/** Another starting point for an expansion (D91): it spreads from all of them at once (pincers, encirclement). */
+export function addTransitionOrigin(world: World, effectId: string, at: [number, number]): CommandResult {
+  const ef = world.get('effect', effectId);
+  if (!ef) throw new Error('That change no longer exists.');
+  const spec = parseJSON<TransitionSpec | null>(ef.transition, null);
+  if (!spec || spec.style !== 'advance' || !spec.origin) throw new Error('Only an expansion starts from points: choose "Expansion" for it first.');
+  if (!Number.isFinite(at[0]) || !Number.isFinite(at[1]) || Math.abs(at[1]) > 90) throw new Error('Click on the map.');
+  if ((spec.origins?.length ?? 0) >= 15) throw new Error('An expansion starts from at most 16 points.');
+  const next: TransitionSpec = { ...spec, origins: [...(spec.origins ?? []), [at[0], at[1]]] };
+  return run(world, 'Add a starting point', (tx) => tx.patch('effect', effectId, { transition: JSON.stringify(next) }));
+}
+
+/** An expansion back to its first starting point only (D91). */
+export function clearTransitionOrigins(world: World, effectId: string): CommandResult {
+  const ef = world.get('effect', effectId);
+  if (!ef) throw new Error('That change no longer exists.');
+  const spec = parseJSON<TransitionSpec | null>(ef.transition, null);
+  if (!spec?.origins) return run(world, 'Only the first starting point', () => undefined);
+  const { origins: _o, ...rest } = spec;
+  return run(world, 'Only the first starting point', (tx) => tx.patch('effect', effectId, { transition: JSON.stringify(rest) }));
+}
+
 export function setEffectTransition(world: World, effectId: string, spec: TransitionSpec | null): CommandResult {
   return run(world, 'Change transition', (tx) => tx.patch('effect', effectId, { transition: spec ? JSON.stringify(spec) : '' }));
 }

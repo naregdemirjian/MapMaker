@@ -111,6 +111,8 @@ class AppStore {
    */
   historyView: { on: boolean; period: PeriodSpec } = { on: false, period: DEFAULT_PERIOD };
   recordEventId: string | null = null;
+  /** A change whose expansion is given another starting point by the next click on the map (D91). */
+  pickOrigin: string | null = null;
   /** What each change recorded into an event does: at once, or spreading for how long, and how (D86; kept on this computer). */
   recordLength: RecordLength = loadRecordLength();
   cameras = new Map<string, Camera>();

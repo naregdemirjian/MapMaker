@@ -37,7 +37,9 @@ function run(seed: number, steps: number) {
   const assigns = () => world.all('effect').filter((e) => e.kind === 'assign' || e.kind === 'annex');
   const somewhere = () => ring(square(r.float(-25, 25), r.float(-25, 25), r.float(2, 12)));
   const spec = () => {
-    const base = r.pick([null, { style: 'fade' as const }, { style: 'border' as const }, { style: 'advance' as const, origin: [r.float(-25, 25), r.float(-25, 25)] as [number, number] }]);
+    const base = r.pick([null, { style: 'fade' as const }, { style: 'border' as const }, { style: 'advance' as const, origin: [r.float(-25, 25), r.float(-25, 25)] as [number, number] },
+      // An expansion from several points at once (D91).
+      { style: 'advance' as const, origin: [r.float(-25, 25), r.float(-25, 25)] as [number, number], origins: [[r.float(-25, 25), r.float(-25, 25)], [r.float(-25, 25), r.float(-25, 25)]] as Array<[number, number]> }]);
     if (!base) return null;
     // How long it takes (D86): the event's length, a date of its own, a while from its own time, or until the next change recorded.
     return r.pick([base, { ...base, until: toStore(D(year())) }, { ...base, for: { n: r.int(1, 30), unit: r.pick(['day', 'month', 'year'] as const) } }, { ...base, next: true }]);

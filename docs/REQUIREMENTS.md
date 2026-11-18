@@ -137,7 +137,7 @@ status. Last updated: 18 November 2026 (Stage 4; see DEVELOPMENT.md).
 | Rapid occupation (instant change) | Tested | `scenarios` | |
 | Fades | Tested | `scenarios`, `e2e/workflows` step 5 | |
 | Fragmentation and collapse | Needs testing | `scenarios` (history), | The history is tested; their animation uses the same fade and front, without a dedicated test |
-| Encirclement | Not implemented | | Needs front keyframes (Stage 6) |
+| Encirclement | Tested | `pincers` (two ends change hands first, the middle last, everything at the end; undone; only an expansion has starting points), `engine-follow` (expansions from several points among the random edits), `e2e/workflows` 'Recording into an event' (a second starting point clicked on the map, then taken away) | An expansion from several starting points at once (D91). Keyframed fronts: Stage 6 |
 | Animation length independent of historical length | Tested | `e2e/workflows` (40 years in one second), `scenarios` (a 20-minute event) | |
 | Per-event "out of sync with the clock" override | Not implemented | | Approved; Stage 6 |
 | Camera movement | Partial | `e2e/workflows` step 7 | Start and end views with easing, checked frame by frame in the export. No multi-key camera or flights |

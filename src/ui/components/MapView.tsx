@@ -622,6 +622,14 @@ export function MapView() {
       const hit = overlayAt(p);
       if (hit) { drag.current = { kind: 'overlay', id: hit.id, x: p[0], y: p[1], from: { x: hit.x / frame.w, y: hit.y / frame.h } }; return; }
     }
+    // Another starting point for an expansion (D91), chosen in the event's panel: this click is it.
+    if (!presentation && e.button === 0 && s.pickOrigin) {
+      const ll = screenToLonLat(view, p[0], p[1]);
+      const id = s.pickOrigin;
+      store.set({ pickOrigin: null });
+      if (ll) store.execute((wd) => cmd.addTransitionOrigin(wd, id, [ll[0], ll[1]]));
+      return;
+    }
     // Border eraser: a stroke across borders.
     if (!presentation && e.button === 0 && s.tool === 'erase') {
       const ll = screenToLonLat(view, p[0], p[1]);
