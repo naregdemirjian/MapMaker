@@ -18,7 +18,9 @@ export function AddCountriesDialog({ onClose }: { onClose: () => void }) {
   const [all, setAll] = useState<CountryShape[] | null>(null);
   const [error, setError] = useState('');
   const [q, setQ] = useState('');
-  const [nationsOnly, setNationsOnly] = useState(true);
+  // Territories (Greenland, Puerto Rico, Hong Kong…): countries of their own (with their own flags),
+  // part of the nation they belong to (their land given to it, when it is added too), or left out.
+  const [territories, setTerritories] = useState<'own' | 'part' | 'none'>('own');
   const [chosen, setChosen] = useState<Set<string>>(new Set());
   const [colours, setColours] = useState<'map' | 'distinct'>('map');
   const [flags, setFlags] = useState(false);
@@ -34,19 +36,27 @@ export function AddCountriesDialog({ onClose }: { onClose: () => void }) {
   });
   const into = target === 'into' ? owners.find((e) => e.id === intoId) ?? null : null;
   useEffect(() => { loadCountries().then(setAll, (e: Error) => setError(e.message)); }, []);
-  const pool = useMemo(() => (all ?? []).filter((c) => !nationsOnly || c.nation), [all, nationsOnly]);
+  // (As part of their nation, territories are not listed: they come with it. Antarctica belongs to nobody.)
+  const pool = useMemo(() => (all ?? []).filter((c) => c.nation || territories === 'own' || (territories === 'part' && c.name === 'Antarctica')), [all, territories]);
   const shown = pool.filter((c) => !q.trim() || c.name.toLowerCase().includes(q.trim().toLowerCase()));
   const existing = new Set(w.all('entity').map((e) => e.name.toLowerCase()));
   const toggle = (names: string[], on: boolean) => setChosen((cur) => { const n = new Set(cur); for (const x of names) { if (on) n.add(x); else n.delete(x); } return n; });
 
   const add = () => {
-    const list = (all ?? []).filter((c) => chosen.has(c.name));
+    let list = (all ?? []).filter((c) => chosen.has(c.name));
     if (!list.length) return;
+    // Territories as part of their nation: their land goes with the nation's (when it is chosen).
+    const parts = new Map<string, CountryShape[]>();
+    if (territories === 'part') for (const t of (all ?? []).filter((c) => !c.nation && c.of && c.name !== 'Antarctica')) {
+      const nation = list.find((n) => n.name === t.of);
+      if (nation) parts.set(nation.name, [...(parts.get(nation.name) ?? []), t]);
+    }
+    if (territories === 'part') list = list.filter((c) => c.nation || c.name === 'Antarctica');
     if (target === 'into' && !into) { s.toast('Choose the country that gets the land.', 'error'); return; }
     const countries: cmd.CountryToAdd[] = list.map((c, i) => ({
-      name: c.name, polygons: c.polygons,
+      name: c.name, polygons: [...c.polygons, ...(parts.get(c.name) ?? []).flatMap((t) => t.polygons)],
       color: colours === 'map' ? COUNTRY_GROUP_COLORS[(c.colorGroup - 1 + COUNTRY_GROUP_COLORS.length) % COUNTRY_GROUP_COLORS.length] : `hsl(${Math.round((i * 137.508) % 360)}, 45%, 52%)`,
-      fill: flags && c.flag ? { kind: 'image', asset: `data/flags/${c.flag}.svg`, fit: 'cover' } : undefined,
+      fill: flags && c.flag ? { kind: 'image', asset: `data/flags/${c.flag}.svg`, fit: 'fill' } : undefined,
     }));
     const layerId = s.layerId;
     if (!layerId) { s.toast('This map has no political layer to draw on.', 'error'); return; }
@@ -78,7 +88,13 @@ export function AddCountriesDialog({ onClose }: { onClose: () => void }) {
         {all && <>
           <div className="country-filters">
             <input placeholder="Search, e.g. Peru" value={q} onChange={(e) => setQ(e.target.value)} data-testid="country-search" />
-            <label className="check"><input type="checkbox" checked={nationsOnly} onChange={(e) => setNationsOnly(e.target.checked)} /> Nations only (no dependencies)</label>
+            <label className="inline" title="Greenland, Puerto Rico, Hong Kong, New Caledonia and the like">Territories
+              <select value={territories} onChange={(e) => setTerritories(e.target.value as typeof territories)} data-testid="countries-territories">
+                <option value="own">as countries of their own (their own flags)</option>
+                <option value="part">as part of their nation (Greenland with Denmark)</option>
+                <option value="none">left out</option>
+              </select>
+            </label>
           </div>
           <div className="continents">
             {CONTINENTS.map((ct) => {

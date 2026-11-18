@@ -159,7 +159,7 @@ for (const scale of SCALES) {
     const polys = f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates;
     countries.push({
       name, iso2: /^[a-z]{2}$/.test(iso2) ? iso2 : null, iso3: p.ISO_A3_EH && p.ISO_A3_EH !== '-99' ? p.ISO_A3_EH : null,
-      continent: p.CONTINENT, subregion: p.SUBREGION, nation, color: p.MAPCOLOR9, flag: flags.has(iso2) ? iso2 : null,
+      continent: p.CONTINENT, subregion: p.SUBREGION, nation, ...(nation ? {} : { of: p.SOVEREIGNT }), color: p.MAPCOLOR9, flag: flags.has(iso2) ? iso2 : null,
       polygons: polys.map((poly) => poly.map(encode).filter((r) => r.length >= 6)).filter((poly) => poly.length),
     });
   }
@@ -175,9 +175,9 @@ const record = {
   source: 'https://www.naturalearthdata.com/ (files from https://github.com/nvkelso/natural-earth-vector)',
   licence: 'Public domain',
   credit: 'Made with Natural Earth. Free vector and raster map data @ naturalearthdata.com.',
-  usedFor: "Earth basemap: land, lakes, coastlines and present-day country borders (reference only) at 1:110m, 1:50m and 1:10m; today's countries (1:50m) to add to a map",
+  usedFor: "Earth basemap: land, lakes, coastlines and present-day country borders (reference only) at 1:110m, 1:50m and 1:10m; today's countries and territories (1:50m) to add to a map; today's states and provinces (admin-1, 1:10m) for the region picker",
   retrieved: new Date().toISOString().slice(0, 10),
-  converted: `Coordinates rounded to ${QUANTUM} degrees; at 1:10m, land and lakes cut into ${TILE}-degree tiles and lines into pieces (for drawing speed); nothing else changed.`,
+  converted: `Coordinates rounded to ${QUANTUM} degrees; at 1:10m, land and lakes cut into ${TILE}-degree tiles and lines into pieces (for drawing speed); nothing else changed. States and provinces: coordinates rounded to 0.001 degrees; coasts simplified to about 900 m, borders shared between regions kept point for point (scripts/fetch-regions.mjs).`,
   sources,
 };
 const datasetsFile = join(root, 'data', 'datasets.json');

@@ -748,12 +748,19 @@ try {
     await setDate('1460');
     await page.getByTestId('open-add-countries').click();
     await page.getByTestId('add-countries').waitFor();
+    // Territories are countries of their own unless asked otherwise: Greenland is listed, with its flag.
+    await page.getByTestId('country-search').fill('Greenland');
+    await page.getByTestId('country-Greenland').waitFor();
+    await page.getByTestId('countries-territories').selectOption('none');
+    assert.equal(await page.getByTestId('country-Greenland').count(), 0, 'left out when asked');
+    await page.getByTestId('countries-territories').selectOption('own');
+    await page.getByTestId('country-search').fill('');
     await page.getByTestId('continent-Europe').click();
     await page.getByTestId('countries-flags').check();
     await page.getByTestId('countries-as-event').check();
     const label = await page.getByTestId('add-countries-go').innerText();
     const n = Number(/Add (\d+)/.exec(label)?.[1]);
-    assert.ok(n >= 40 && n <= 50, `about 45 European nations chosen (${label})`);
+    assert.ok(n >= 45 && n <= 55, `about 45 European nations and a few territories chosen (${label})`);
     await screenshot('add-countries-dialog');
     await page.getByTestId('add-countries-go').click();
     await page.getByTestId('add-countries').waitFor({ state: 'detached', timeout: 60000 });

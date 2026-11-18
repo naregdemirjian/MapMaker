@@ -19,6 +19,7 @@ import { BasemapPainter, chooseScale, landMaskOf, visibleBounds, boxIntersects, 
 import { planeShape, placeLabel, lineChoices, textWidthEm, blockHeightEm, LINE_HEIGHT, type PlaneShape } from './label-place.ts';
 import { resolveLabelStyle, resolvePointStyle, labelSize, labelFont, labelText, type LabelStyle, type CountryLabel } from './label-style.ts';
 import { imageNow, videoNow, drawImageFit, assetEpoch, type MediaChannel } from './assets.ts';
+import { clusterPieces, joinBoxes, fitScales, type GeoBox, type FillPieces } from './fill-clusters.ts';
 import { Sheet, makeRing, addLine, projectPoint, isCylindrical, SHARP_UP_TO, type Ring } from './plane.ts';
 import { BlockPath, setPaintRegion, type DeviceRect } from './blocks.ts';
 import { Kept as Weighed } from './kept.ts';
@@ -132,7 +133,7 @@ const newKept = (): Kept => ({ canvas: null, ctx: null, key: '', seen: '', stric
 interface Renew { rects: DeviceRect[]; moment: string }
 
 /** A picture or video fill (see domain/commands.ts CountryFill). */
-interface CountryFillLike { kind: 'color' | 'image' | 'video'; asset?: string; off?: boolean; fit?: 'cover' | 'contain' | 'stretch' | 'tile'; tileSize?: number; play?: 'loop' | 'once'; speed?: number; start?: number }
+interface CountryFillLike { kind: 'color' | 'image' | 'video'; asset?: string; off?: boolean; fit?: 'cover' | 'contain' | 'stretch' | 'tile' | 'fill'; tileSize?: number; play?: 'loop' | 'once'; speed?: number; start?: number; pieces?: FillPieces; gapKm?: number }
 
 /** x, y, width, height on screen. */
 type Box2 = [number, number, number, number];
@@ -1583,26 +1584,55 @@ export class MapRenderer {
           // Each layer is painted fully opaque in a scratch buffer and laid onto the map once at the
           // layer's opacity: neighbouring parcels then never show seams, and fades mix correctly.
           const lc = this.scratch(c);
-          // Pictures are placed by the bounding box of the owner's whole territory (so a flag does not
-          // jump between the owner's pieces); an owner whose picture is not loaded yet shows its colour.
+          // Pictures are placed by clusters of the owner's pieces (D82): pieces close together share a
+          // picture, placed by their box; pieces far off have their own. An owner whose picture is not
+          // loaded yet shows its colour. (A change under way is painted with the largest cluster's box.)
           const ownerBox = new Map<string, Box2>();
           const boxOf = (v: string) => {
             let b = ownerBox.get(v);
-            if (!b) ownerBox.set(v, (b = this.screenBox(view, arr, snap.reach.get(v) ?? [])));
+            if (!b) {
+              const set = snap.byOwner.get(v), media = fillOf(v);
+              const main = set && media ? this.fillClusters(arr, set, media)[0] : null;
+              const on = main ? this.boxesOnScreen(view, main.box)[0] : null;
+              ownerBox.set(v, (b = on ? [on[0], on[1], on[2] - on[0], on[3] - on[1]] : this.screenBox(view, arr, snap.reach.get(v) ?? [])));
+            }
             return b;
+          };
+          const plain = (pc: CanvasRenderingContext2D, v: string | null, shape: Shape) => {
+            const col = colorOf(v);
+            if (col) { pc.fillStyle = col; this.fill(pc, shape); }
+            else { pc.save(); pc.globalCompositeOperation = 'destination-out'; pc.fillStyle = '#000'; this.fill(pc, shape); pc.restore(); }
           };
           const paint = (pc: CanvasRenderingContext2D, v: string | null, shape: Shape) => {
             const media = v ? fillOf(v) : null;
             if (v && media && this.paintMedia(pc, media, shape, boxOf(v), view.unit)) return;
-            const col = colorOf(v);
-            if (col) { pc.fillStyle = col; this.fill(pc, shape); }
-            else { pc.save(); pc.globalCompositeOperation = 'destination-out'; pc.fillStyle = '#000'; this.fill(pc, shape); pc.restore(); }
+            plain(pc, v, shape);
           };
           // Every owner's parcels as one shape (those not on this sheet are skipped altogether).
           for (const [owner, set] of snap.byOwner) {
             const shape = this.setPath(sp, sheet, arr, set);
             if (!shape) continue;
-            if (fillOf(owner)) { paint(lc, owner, shape); continue; }
+            const media = fillOf(owner);
+            if (media) {
+              // Each cluster: its own shape, and a copy of the picture in each place its box shows on screen.
+              const clusters = this.fillClusters(arr, set, media);
+              let drawn = true;
+              for (const cl of clusters) {
+                const cs = cl.set === set ? shape : this.setPath(sp, sheet, arr, cl.set);
+                if (!cs) continue;
+                const boxes = this.boxesOnScreen(view, cl.box), cores = this.boxesOnScreen(view, cl.core);
+                for (const b of boxes) {
+                  const rect: Box2 = [b[0], b[1], b[2] - b[0], b[3] - b[1]];
+                  // Placed by the core where it shows in this copy; covering the whole copy.
+                  const k = cores.find((q) => q[0] < b[2] && q[2] > b[0] && q[1] < b[3] && q[3] > b[1]);
+                  const at: Box2 = k ? [k[0], k[1], k[2] - k[0], k[3] - k[1]] : rect;
+                  if (!this.paintMedia(lc, media, cs, at, view.unit, boxes.length > 1 ? rect : null, rect)) drawn = false;
+                }
+                if (!boxes.length && !this.paintMedia(lc, media, cs, this.screenBox(view, arr, cl.set.faces), view.unit)) drawn = false;
+              }
+              if (!drawn) plain(lc, owner, shape);
+              continue;
+            }
             const col = colorOf(owner);
             if (col) { lc.fillStyle = col; this.fill(lc, shape); }
           }
@@ -2441,12 +2471,62 @@ export class MapRenderer {
     return [x0, y0, x1 - x0, y1 - y0];
   }
 
+  /**
+   * The clusters of an owner's pieces that share a copy of its picture (D82), largest first: each
+   * with its parcels (the owner's whole set when there is one cluster) and its box in degrees.
+   * Pieces are the owner's parcels that touch; kept per set of parcels and rule.
+   */
+  private fillClusters(arr: Arrangement, set: FaceSet, fill: CountryFillLike): Array<{ set: FaceSet; box: GeoBox; core: GeoBox }> {
+    const rule = `${fill.pieces ?? 'auto'}${fill.pieces === 'near' ? `:${fill.gapKm ?? 500}` : ''}`;
+    const key = `${set.key}|${rule}`;
+    const hit = this.clusterCache.get(key);
+    if (hit && hit.arr === arr) return hit.clusters;
+    const t = arr.topology(), geom = parcelGeometry(arr);
+    const gr = geom.graph(set.faces, t, set.key);
+    const count = set.faces.length;
+    const parent = new Int32Array(count);
+    for (let i = 0; i < count; i++) parent[i] = i;
+    const find = (i: number): number => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+    for (let q = 0; q < gr.n; q++) {
+      const o = gr.across[q];
+      if (o < 0 || o === gr.of[q]) continue;
+      const a = find(gr.of[q]), b = find(o);
+      if (a !== b) parent[a] = b;
+    }
+    const pieceOf = new Map<number, number>();
+    const pieces: Array<{ faces: number[]; box: GeoBox; area: number }> = [];
+    for (let i = 0; i < count; i++) {
+      const r = find(i);
+      let k = pieceOf.get(r);
+      if (k === undefined) { k = pieces.length; pieceOf.set(r, k); pieces.push({ faces: [], box: [0, 0, 0, 0], area: 0 }); }
+      const pc = pieces[k], f = set.faces[i];
+      let fb: GeoBox | null = null;
+      for (const c of t.facesCycles.get(f) ?? []) { const b = geom.cycle(c, t).box; fb = fb ? joinBoxes(fb, [b[0], b[1], b[2], b[3]]) : [b[0], b[1], b[2], b[3]]; }
+      if (!fb) continue;
+      pc.box = pc.faces.length ? joinBoxes(pc.box, fb) : fb;
+      pc.faces.push(f);
+      pc.area += arr.faceArea(f);
+    }
+    const found = clusterPieces(pieces.filter((p) => p.faces.length), fill);
+    const live = pieces.filter((p) => p.faces.length);
+    const whole: GeoBox = [-180, -90, 180, 90];
+    const clusters = found.length <= 1
+      ? [{ set, box: found[0]?.box ?? whole, core: found[0]?.core ?? whole }]
+      : found.map((c, i) => ({ set: { faces: c.members.flatMap((m) => live[m].faces).sort((a, b) => a - b), key: `${key}#${i}` }, box: c.box, core: c.core }));
+    if (this.clusterCache.size > 4000) this.clusterCache.clear();
+    this.clusterCache.set(key, { arr, clusters });
+    return clusters;
+  }
+  private clusterCache = new Map<string, { arr: Arrangement; clusters: Array<{ set: FaceSet; box: GeoBox; core: GeoBox }> }>();
+
   /** Fill a shape with a picture or video frame; false if it cannot be drawn yet. */
-  private paintMedia(c: CanvasRenderingContext2D, fill: CountryFillLike, shape: Shape, box: Box2, unit: number): boolean {
+  private paintMedia(c: CanvasRenderingContext2D, fill: CountryFillLike, shape: Shape, box: Box2, unit: number, rect: Box2 | null = null, cover: Box2 | null = null): boolean {
     const src = fill.kind === 'video' ? videoNow(fill.asset, this.mediaSeconds, fill, this.mediaChannel) : imageNow(fill.asset);
     if (!src) return false;
     c.save();
     this.clip(c, shape);
+    // (One copy of several, where a cluster shows more than once: only its own part of the screen.)
+    if (rect) { c.beginPath(); c.rect(rect[0], rect[1], rect[2], rect[3]); c.clip(); }
     if (fill.fit === 'tile') {
       const w = (src as HTMLVideoElement).videoWidth || src.width, h = (src as HTMLVideoElement).videoHeight || src.height;
       const pattern = c.createPattern(src, 'repeat');
@@ -2457,7 +2537,22 @@ export class MapRenderer {
         // The shape clips; the pattern is laid over everything in screen space.
         c.fillRect(-1e5, -1e5, 2e5, 2e5);
       }
-    } else drawImageFit(c, src, box[0], box[1], box[2], box[3], fill.fit ?? 'cover');
+    } else {
+      // Flags added before 'fill' existed asked for 'cover', which cropped the stripes of long countries away.
+      const fit = !fill.fit || (fill.fit === 'cover' && fill.asset?.startsWith('data/flags/')) ? 'fill' : fill.fit;
+      // Placed by `box`; enlarged about its middle where it must also cover `cover` (outlying pieces).
+      let [x, y, w, h] = box;
+      if (cover && fit !== 'contain' && fit !== 'stretch') {
+        const iw = (src as HTMLVideoElement).videoWidth || src.width, ih = (src as HTMLVideoElement).videoHeight || src.height;
+        if (iw && ih) {
+          const [sx, sy] = fitScales(iw, ih, w, h, fit);
+          const dw = iw * sx, dh = ih * sy, cx = x + w / 2, cy = y + h / 2;
+          const k = Math.max(1, (cx - cover[0]) / (dw / 2), (cover[0] + cover[2] - cx) / (dw / 2), (cy - cover[1]) / (dh / 2), (cover[1] + cover[3] - cy) / (dh / 2));
+          if (k > 1) { w *= k; h *= k; x = cx - w / 2; y = cy - h / 2; }
+        }
+      }
+      drawImageFit(c, src, x, y, w, h, fit);
+    }
     c.restore();
     return true;
   }

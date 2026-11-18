@@ -3,13 +3,15 @@
 
 export interface CountriesFile {
   format: string; version: string; quantum: number;
-  countries: Array<{ name: string; iso2: string | null; iso3: string | null; continent: string; subregion: string; nation: boolean; color: number; flag: string | null; polygons: number[][][] }>;
+  countries: Array<{ name: string; iso2: string | null; iso3: string | null; continent: string; subregion: string; nation: boolean; of?: string; color: number; flag: string | null; polygons: number[][][] }>;
 }
 
 export interface CountryShape {
   name: string; iso2: string | null; iso3: string | null; continent: string; subregion: string;
   /** A nation (UN member or similar), as opposed to a dependency or other territory. */
   nation: boolean;
+  /** For a territory: the nation it belongs to (Greenland: Denmark), as Natural Earth names it. */
+  of: string | null;
   /** Natural Earth's colour group (1-9): neighbours never share one. */
   colorGroup: number;
   /** The file name of its flag in data/flags, if there is one. */
@@ -28,7 +30,7 @@ export function decodeCountries(file: CountriesFile): CountryShape[] {
     return out;
   };
   return file.countries.map((c) => ({
-    name: c.name, iso2: c.iso2, iso3: c.iso3, continent: c.continent, subregion: c.subregion, nation: c.nation,
+    name: c.name, iso2: c.iso2, iso3: c.iso3, continent: c.continent, subregion: c.subregion, nation: c.nation, of: c.of ?? null,
     colorGroup: c.color, flag: c.flag, polygons: c.polygons.map((poly) => poly.map(ring)),
   }));
 }

@@ -39,10 +39,13 @@ test('fill command: picture and video fills are stored, colour removes them, and
   assert.equal(world.get('entity', varn)!.style, '{}');
 });
 
-test("flags: today's 197 nations, each with its drawing, and a credit record", () => {
-  const list = JSON.parse(readFileSync(join(root, 'data', 'flags', 'index.json'), 'utf8')) as Array<{ code: string; name: string }>;
-  assert.equal(list.length, 197);
-  for (const n of ['France', 'Japan', 'Brazil', 'Vatican City', 'Palestine', 'Kosovo', 'Taiwan', 'South Sudan', 'China']) assert.ok(list.some((f) => f.name === n), n);
+test("flags: today's 197 nations and 40 territories (Greenland…), each with its drawing, and a credit record", () => {
+  const list = JSON.parse(readFileSync(join(root, 'data', 'flags', 'index.json'), 'utf8')) as Array<{ code: string; name: string; territory?: boolean; of?: string }>;
+  assert.equal(list.filter((f) => !f.territory).length, 197);
+  assert.equal(list.filter((f) => f.territory).length, 40);
+  for (const n of ['France', 'Japan', 'Brazil', 'Vatican City', 'Palestine', 'Kosovo', 'Taiwan', 'South Sudan', 'China']) assert.ok(list.some((f) => f.name === n && !f.territory), n);
+  assert.deepEqual(list.find((f) => f.name === 'Greenland'), { code: 'gl', name: 'Greenland', territory: true, of: 'Denmark' });
+  assert.ok(!list.some((f) => f.code === 'eh' || f.code === 'aq'), 'no flag for disputed Western Sahara, nor the unofficial Antarctic design');
   for (const f of list) assert.ok(existsSync(join(root, 'data', 'flags', `${f.code}.svg`)), f.code);
   const rec = (JSON.parse(readFileSync(join(root, 'data', 'datasets.json'), 'utf8')) as Array<{ id: string; licence: string }>).find((d) => d.id === 'flag-icons')!;
   assert.match(rec.licence, /MIT/);

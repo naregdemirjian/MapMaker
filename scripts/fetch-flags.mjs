@@ -1,6 +1,8 @@
 // Fetches the flags of today's nations (the 193 UN members, Vatican City, Palestine, Kosovo and
-// Taiwan) as SVG drawings from the flag-icons package (MIT), with English names from Natural Earth,
-// into data/flags/. The files are committed; run this only to update them.
+// Taiwan), and of the territories that have flags of their own (Greenland, Puerto Rico, the Faroe
+// Islands…; marked `territory`, with the nation they belong to), as SVG drawings from the flag-icons
+// package (MIT), with English names from Natural Earth, into data/flags/. The files are committed;
+// run this only to update them.
 //
 //   node scripts/fetch-flags.mjs [--countries <ne_10m_admin_0_countries.geojson>] [--package <flag-icons folder>]
 import { execFileSync } from 'node:child_process';
@@ -37,6 +39,15 @@ for (const f of JSON.parse(countriesText).features) {
   const name = p.NAME_EN === "People's Republic of China" ? 'China' : p.NAME_EN === 'East Timor' ? 'Timor-Leste' : p.NAME_EN;
   nations.push({ code, name });
 }
+// Territories with a flag of their own (Natural Earth's other units with a two-letter code).
+for (const f of JSON.parse(countriesText).features) {
+  const p = f.properties;
+  const code = String(p.ISO_A2_EH ?? '').toLowerCase();
+  // (Not Western Sahara, whose status is disputed and whose drawing is one side's flag, nor
+  // Antarctica, whose drawing is an unofficial design.)
+  if (!/^[a-z]{2}$/.test(code) || nations.some((n) => n.code === code) || code === 'eh' || code === 'aq') continue;
+  nations.push({ code, name: p.NAME_EN, territory: true, of: p.SOVEREIGNT });
+}
 nations.sort((a, b) => a.name.localeCompare(b.name));
 
 rmSync(out, { recursive: true, force: true });
@@ -58,7 +69,7 @@ const record = {
   source: 'https://github.com/lipis/flag-icons (npm package flag-icons); nation names from Natural Earth',
   licence: 'MIT (the drawings); national flags themselves are generally not subject to copyright',
   credit: 'Flag drawings: flag-icons by Panayiotis Lipiridis and contributors, MIT licence.',
-  usedFor: `Flags of today's ${list.length} nations, offered as country fills (optional)`,
+  usedFor: `Flags of today's ${list.filter((n) => !n.territory).length} nations and ${list.filter((n) => n.territory).length} territories, offered as country fills (optional)`,
   retrieved: new Date().toISOString().slice(0, 10),
 };
 const datasetsFile = join(root, 'data', 'datasets.json');

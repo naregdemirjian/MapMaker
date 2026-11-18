@@ -60,6 +60,34 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D82. Pictures over countries in several pieces; flags fitted without cropping their stripes; territories (fifth feedback round)
+
+A picture fill (a flag) was placed by the box around **all** of a country's land, so France's flag spread from French
+Guiana to Réunion and mainland France showed only its white stripe; Russia's box ran round the whole map across the
+180th meridian (all blue); the Canary Islands pushed Spain's flag south. Now (`src/render-engine/fill-clusters.ts`,
+`MapRenderer.fillClusters`): a country's **pieces** (parcels that touch) are gathered into **clusters**, and each
+cluster gets its own copy of the picture, placed by the cluster's box. The rule, by default ("automatic"): pieces join
+when the gap between their nearest pieces is under 1° (about 110 km: an archipelago's islands) or under 15% of the
+larger cluster's extent (Corsica with France, Tasmania with Australia, Kaliningrad with Russia); otherwise they have
+their own copy (French Guiana, Réunion, the Canary Islands together, Alaska with the Aleutians, Hawaii, Svalbard, the
+Azores). Boxes and gaps are taken the short way round the 180th meridian (Russia and Fiji have one box), and a
+cluster's picture is placed by its **core**, its pieces of at least 5% of its largest, enlarged where it must still cover
+the outlying pieces (Russia's flag over its mainland, its white stripe not spent on the Arctic islands). Each copy is
+drawn in every place its box shows (the copies either side of the map's edge). A new fit, **"cover it, stretched a little
+rather than cropped"**, is the default: the picture covers the box but may be stretched up to twice one way instead
+of cropped, so a long country keeps all its stripes; flags added earlier with "cover" are drawn this way too. A
+country's fill now offers **"Land in several pieces"**: automatic, one picture over all of it, a copy for every piece,
+or a copy for pieces farther apart than a distance (a slider from 10 km to 20,000 km). Checked against today's
+countries (France 6 copies, Spain 2, the USA 3, Russia 1; Indonesia, Japan's main islands, the Philippines, Greece,
+Canada one each).
+
+**Territories** (Greenland, Puerto Rico, Hong Kong, New Caledonia, the Faroe Islands…; 43 in Natural Earth) were left
+out by "Nations only" and had no flags. Their flags are now fetched too (40, from flag-icons, `scripts/fetch-flags.mjs`;
+not Western Sahara's, whose status is disputed and whose drawing is one side's flag, nor the unofficial Antarctic
+design), today's countries record the nation each territory belongs to, and "Add today's countries" asks how to add
+territories: as countries of their own with their own flags (the default), as part of their nation (Greenland's land
+given to Denmark when Denmark is added), or left out.
+
 ### D81. The Border points tool shows only points of borders at the date viewed (fifth feedback round)
 
 The parcel map keeps every line ever drawn: a border erased (or a country merged, or land given away) is still the

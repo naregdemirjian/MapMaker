@@ -148,8 +148,14 @@ export interface CountryFill {
   kind: 'color' | 'image' | 'video';
   /** A project asset name, or a file shipped with the app (for example 'data/flags/fr.svg'). */
   asset?: string;
-  /** How the picture covers the territory: cover (cropped), contain, stretch, or tile (repeat). */
-  fit?: 'cover' | 'contain' | 'stretch' | 'tile';
+  /** How the picture covers the territory: fill (covering, stretched up to twice rather than cropped; the default), cover (cropped), contain, stretch, or tile (repeat). */
+  fit?: 'cover' | 'contain' | 'stretch' | 'tile' | 'fill';
+  /**
+   * Land in several pieces (D82): auto (pieces far from the rest get their own copy), whole (one
+   * picture over everything), each (a copy per piece), near (pieces farther apart than gapKm get their own).
+   */
+  pieces?: 'auto' | 'whole' | 'each' | 'near';
+  gapKm?: number;
   /** Tile size in pixels of a 1920-wide frame. */
   tileSize?: number;
   /** Videos: loop, or play once and hold the last frame. */

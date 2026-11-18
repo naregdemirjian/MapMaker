@@ -4,6 +4,12 @@
   "name": "Afghanistan"
  },
  {
+  "code": "ax",
+  "name": "Åland",
+  "territory": true,
+  "of": "Finland"
+ },
+ {
   "code": "al",
   "name": "Albania"
  },
@@ -12,12 +18,24 @@
   "name": "Algeria"
  },
  {
+  "code": "as",
+  "name": "American Samoa",
+  "territory": true,
+  "of": "United States of America"
+ },
+ {
   "code": "ad",
   "name": "Andorra"
  },
  {
   "code": "ao",
   "name": "Angola"
+ },
+ {
+  "code": "ai",
+  "name": "Anguilla",
+  "territory": true,
+  "of": "United Kingdom"
  },
  {
   "code": "ag",
@@ -30,6 +48,12 @@
  {
   "code": "am",
   "name": "Armenia"
+ },
+ {
+  "code": "aw",
+  "name": "Aruba",
+  "territory": true,
+  "of": "Netherlands"
  },
  {
   "code": "au",
@@ -72,6 +96,12 @@
   "name": "Benin"
  },
  {
+  "code": "bm",
+  "name": "Bermuda",
+  "territory": true,
+  "of": "United Kingdom"
+ },
+ {
   "code": "bt",
   "name": "Bhutan"
  },
@@ -90,6 +120,18 @@
  {
   "code": "br",
   "name": "Brazil"
+ },
+ {
+  "code": "io",
+  "name": "British Indian Ocean Territory",
+  "territory": true,
+  "of": "United Kingdom"
+ },
+ {
+  "code": "vg",
+  "name": "British Virgin Islands",
+  "territory": true,
+  "of": "United Kingdom"
  },
  {
   "code": "bn",
@@ -124,6 +166,12 @@
   "name": "Cape Verde"
  },
  {
+  "code": "ky",
+  "name": "Cayman Islands",
+  "territory": true,
+  "of": "United Kingdom"
+ },
+ {
   "code": "cf",
   "name": "Central African Republic"
  },
@@ -148,6 +196,12 @@
   "name": "Comoros"
  },
  {
+  "code": "ck",
+  "name": "Cook Islands",
+  "territory": true,
+  "of": "New Zealand"
+ },
+ {
   "code": "cr",
   "name": "Costa Rica"
  },
@@ -158,6 +212,12 @@
  {
   "code": "cu",
   "name": "Cuba"
+ },
+ {
+  "code": "cw",
+  "name": "Curaçao",
+  "territory": true,
+  "of": "Netherlands"
  },
  {
   "code": "cy",
@@ -220,6 +280,18 @@
   "name": "Ethiopia"
  },
  {
+  "code": "fk",
+  "name": "Falkland Islands",
+  "territory": true,
+  "of": "United Kingdom"
+ },
+ {
+  "code": "fo",
+  "name": "Faroe Islands",
+  "territory": true,
+  "of": "Denmark"
+ },
+ {
   "code": "fm",
   "name": "Federated States of Micronesia"
  },
@@ -234,6 +306,18 @@
  {
   "code": "fr",
   "name": "France"
+ },
+ {
+  "code": "pf",
+  "name": "French Polynesia",
+  "territory": true,
+  "of": "France"
+ },
+ {
+  "code": "tf",
+  "name": "French Southern and Antarctic Lands",
+  "territory": true,
+  "of": "France"
  },
  {
   "code": "ga",
@@ -252,16 +336,40 @@
   "name": "Ghana"
  },
  {
+  "code": "gi",
+  "name": "Gibraltar",
+  "territory": true,
+  "of": "United Kingdom"
+ },
+ {
   "code": "gr",
   "name": "Greece"
+ },
+ {
+  "code": "gl",
+  "name": "Greenland",
+  "territory": true,
+  "of": "Denmark"
  },
  {
   "code": "gd",
   "name": "Grenada"
  },
  {
+  "code": "gu",
+  "name": "Guam",
+  "territory": true,
+  "of": "United States of America"
+ },
+ {
   "code": "gt",
   "name": "Guatemala"
+ },
+ {
+  "code": "gg",
+  "name": "Guernsey",
+  "territory": true,
+  "of": "United Kingdom"
  },
  {
   "code": "gn",
@@ -280,8 +388,20 @@
   "name": "Haiti"
  },
  {
+  "code": "hm",
+  "name": "Heard Island and McDonald Islands",
+  "territory": true,
+  "of": "Australia"
+ },
+ {
   "code": "hn",
   "name": "Honduras"
+ },
+ {
+  "code": "hk",
+  "name": "Hong Kong",
+  "territory": true,
+  "of": "China"
  },
  {
   "code": "hu",
@@ -312,6 +432,12 @@
   "name": "Ireland"
  },
  {
+  "code": "im",
+  "name": "Isle of Man",
+  "territory": true,
+  "of": "United Kingdom"
+ },
+ {
   "code": "il",
   "name": "Israel"
  },
@@ -330,6 +456,12 @@
  {
   "code": "jp",
   "name": "Japan"
+ },
+ {
+  "code": "je",
+  "name": "Jersey",
+  "territory": true,
+  "of": "United Kingdom"
  },
  {
   "code": "jo",
@@ -396,6 +528,12 @@
   "name": "Luxembourg"
  },
  {
+  "code": "mo",
+  "name": "Macau",
+  "territory": true,
+  "of": "China"
+ },
+ {
   "code": "mg",
   "name": "Madagascar"
  },
@@ -452,6 +590,12 @@
   "name": "Montenegro"
  },
  {
+  "code": "ms",
+  "name": "Montserrat",
+  "territory": true,
+  "of": "United Kingdom"
+ },
+ {
   "code": "ma",
   "name": "Morocco"
  },
@@ -480,6 +624,12 @@
   "name": "Netherlands"
  },
  {
+  "code": "nc",
+  "name": "New Caledonia",
+  "territory": true,
+  "of": "France"
+ },
+ {
   "code": "nz",
   "name": "New Zealand"
  },
@@ -496,12 +646,30 @@
   "name": "Nigeria"
  },
  {
+  "code": "nu",
+  "name": "Niue",
+  "territory": true,
+  "of": "New Zealand"
+ },
+ {
+  "code": "nf",
+  "name": "Norfolk Island",
+  "territory": true,
+  "of": "Australia"
+ },
+ {
   "code": "kp",
   "name": "North Korea"
  },
  {
   "code": "mk",
   "name": "North Macedonia"
+ },
+ {
+  "code": "mp",
+  "name": "Northern Mariana Islands",
+  "territory": true,
+  "of": "United States of America"
  },
  {
   "code": "no",
@@ -544,12 +712,24 @@
   "name": "Philippines"
  },
  {
+  "code": "pn",
+  "name": "Pitcairn Islands",
+  "territory": true,
+  "of": "United Kingdom"
+ },
+ {
   "code": "pl",
   "name": "Poland"
  },
  {
   "code": "pt",
   "name": "Portugal"
+ },
+ {
+  "code": "pr",
+  "name": "Puerto Rico",
+  "territory": true,
+  "of": "United States of America"
  },
  {
   "code": "qa",
@@ -572,12 +752,36 @@
   "name": "Rwanda"
  },
  {
+  "code": "bl",
+  "name": "Saint Barthélemy",
+  "territory": true,
+  "of": "France"
+ },
+ {
+  "code": "sh",
+  "name": "Saint Helena",
+  "territory": true,
+  "of": "United Kingdom"
+ },
+ {
   "code": "kn",
   "name": "Saint Kitts and Nevis"
  },
  {
   "code": "lc",
   "name": "Saint Lucia"
+ },
+ {
+  "code": "mf",
+  "name": "Saint Martin",
+  "territory": true,
+  "of": "France"
+ },
+ {
+  "code": "pm",
+  "name": "Saint Pierre and Miquelon",
+  "territory": true,
+  "of": "France"
  },
  {
   "code": "vc",
@@ -620,6 +824,12 @@
   "name": "Singapore"
  },
  {
+  "code": "sx",
+  "name": "Sint Maarten",
+  "territory": true,
+  "of": "Netherlands"
+ },
+ {
   "code": "sk",
   "name": "Slovakia"
  },
@@ -638,6 +848,12 @@
  {
   "code": "za",
   "name": "South Africa"
+ },
+ {
+  "code": "gs",
+  "name": "South Georgia and the South Sandwich Islands",
+  "territory": true,
+  "of": "United Kingdom"
  },
  {
   "code": "kr",
@@ -728,6 +944,12 @@
   "name": "Turkmenistan"
  },
  {
+  "code": "tc",
+  "name": "Turks and Caicos Islands",
+  "territory": true,
+  "of": "United Kingdom"
+ },
+ {
   "code": "tv",
   "name": "Tuvalu"
  },
@@ -748,8 +970,20 @@
   "name": "United Kingdom"
  },
  {
+  "code": "um",
+  "name": "United States Minor Outlying Islands",
+  "territory": true,
+  "of": "United States of America"
+ },
+ {
   "code": "us",
   "name": "United States of America"
+ },
+ {
+  "code": "vi",
+  "name": "United States Virgin Islands",
+  "territory": true,
+  "of": "United States of America"
  },
  {
   "code": "uy",
@@ -774,6 +1008,12 @@
  {
   "code": "vn",
   "name": "Vietnam"
+ },
+ {
+  "code": "wf",
+  "name": "Wallis and Futuna",
+  "territory": true,
+  "of": "France"
  },
  {
   "code": "ye",

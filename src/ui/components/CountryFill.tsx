@@ -10,6 +10,10 @@ let flagList: Promise<Flag[]> | null = null;
 const loadFlags = () => (flagList ??= fetch('data/flags/index.json').then((r) => r.json() as Promise<Flag[]>));
 
 /** A small sample of a country's fill, for lists. */
+/** The distance slider (0 to 100) runs from 10 km to 20,000 km, evenly by orders of size. */
+const kmToSlider = (km: number) => Math.round((Math.log10(Math.max(10, Math.min(20000, km))) - 1) / (Math.log10(20000) - 1) * 100);
+const sliderToKm = (v: number) => { const km = 10 ** (1 + (v / 100) * (Math.log10(20000) - 1)); const step = km < 100 ? 5 : km < 1000 ? 25 : 250; return Math.round(km / step) * step; };
+
 export function FillSwatch({ entity }: { entity: { color: string; style?: string } }) {
   const fill = cmd.entityStyle(entity).fill;
   if (fill?.off) return <span className="swatch" style={{ background: entity.color }} />;
@@ -56,7 +60,7 @@ export function CountryFillSection({ id }: { id: string }) {
     setBusy(true);
     try {
       const a = await Api.uploadAsset(s.projectId!, file);
-      save({ ...(fill ?? {}), kind: k, asset: a.file, fit: fill?.fit ?? 'cover', ...(k === 'video' ? { play: fill?.play ?? 'loop', speed: fill?.speed ?? 1, start: fill?.start ?? 0 } : {}) });
+      save({ ...(fill ?? {}), kind: k, asset: a.file, fit: fill?.fit ?? 'fill', ...(k === 'video' ? { play: fill?.play ?? 'loop', speed: fill?.speed ?? 1, start: fill?.start ?? 0 } : {}) });
     } catch (err) { s.toast((err as Error).message, 'error'); }
     setBusy(false);
   };
@@ -79,9 +83,20 @@ export function CountryFillSection({ id }: { id: string }) {
       </div>
       {busy && <p className="muted">Adding the file to the project…</p>}
       {fill && (fill.kind === 'image' || fill.kind === 'video') && <>
-        <label>How it covers the territory<select value={fill.fit ?? 'cover'} onChange={(ev) => save({ ...fill, fit: ev.target.value as cmd.CountryFill['fit'] })} data-testid="fill-fit">
-          <option value="cover">Cover the territory (cropped)</option><option value="contain">Fit inside the territory</option><option value="stretch">Stretch over the territory</option><option value="tile">Repeat as a pattern</option>
+        <label>How it covers the territory<select value={fill.fit === 'cover' && fill.asset?.startsWith('data/flags/') ? 'fill' : fill.fit ?? 'fill'} onChange={(ev) => save({ ...fill, fit: ev.target.value as cmd.CountryFill['fit'] })} data-testid="fill-fit">
+          <option value="fill">Cover it, stretched a little rather than cropped</option><option value="cover">Cover it (cropped)</option><option value="contain">Fit inside the territory</option><option value="stretch">Stretch over the territory</option><option value="tile">Repeat as a pattern</option>
         </select></label>
+        {fill.fit !== 'tile' && <>
+          <label>Land in several pieces<select value={fill.pieces ?? 'auto'} onChange={(ev) => save({ ...fill, pieces: ev.target.value as cmd.CountryFill['pieces'] })} data-testid="fill-pieces">
+            <option value="auto">Automatic: pieces far from the rest get their own copy</option>
+            <option value="whole">One picture over all of it</option>
+            <option value="each">A copy for every separate piece</option>
+            <option value="near">One picture, and a copy for pieces farther than…</option>
+          </select></label>
+          {fill.pieces === 'near' && <label className="range-row">Pieces farther apart than <b>{(fill.gapKm ?? 500).toLocaleString()} km</b> get their own copy
+            <input type="range" min={0} max={100} step={1} value={kmToSlider(fill.gapKm ?? 500)} onChange={(ev) => save({ ...fill, gapKm: sliderToKm(Number(ev.target.value)) })} data-testid="fill-gap" />
+          </label>}
+        </>}
         {fill.fit === 'tile' && <label>Pattern size (px)<input type="number" min={4} max={2000} value={fill.tileSize ?? 120} onChange={(ev) => Number(ev.target.value) > 0 && save({ ...fill, tileSize: Number(ev.target.value) })} /></label>}
         {fill.kind === 'video' && <>
           <label>Playback<select value={fill.play ?? 'loop'} onChange={(ev) => save({ ...fill, play: ev.target.value as 'loop' | 'once' })} data-testid="fill-play">
@@ -95,7 +110,7 @@ export function CountryFillSection({ id }: { id: string }) {
         </>}
         <p className="muted">Where a picture cannot be shown yet, the country's colour is used.</p>
       </>}
-      {picking && <FlagPicker current={fill?.asset} onClose={() => setPicking(false)} onPick={(code) => { save({ kind: 'image', asset: `data/flags/${code}.svg`, fit: fill?.kind === 'image' ? fill.fit ?? 'cover' : 'cover' }); setPicking(false); }} />}
+      {picking && <FlagPicker current={fill?.asset} onClose={() => setPicking(false)} onPick={(code) => { save({ ...(fill?.kind === 'image' ? fill : {}), kind: 'image', asset: `data/flags/${code}.svg`, fit: fill?.kind === 'image' ? fill.fit ?? 'fill' : 'fill' }); setPicking(false); }} />}
     </div>
   );
 }
