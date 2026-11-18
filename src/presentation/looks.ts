@@ -114,34 +114,33 @@ export function seeded(seed: number): () => number {
   };
 }
 
-/**
- * The texture of paper as RGBA (a `size` square that tiles): fine grain of light and dark specks, and
- * with `blotches` soft brown stains (value noise over a coarse grid that wraps round).
- */
-export function paperTexture(size: number, blotches: boolean, seed = 7): Uint8ClampedArray<ArrayBuffer> {
+/** The fine grain of paper as RGBA (a `size` square that tiles): light and dark specks. */
+export function paperTexture(size: number, seed = 7): Uint8ClampedArray<ArrayBuffer> {
   const rnd = seeded(seed), out = new Uint8ClampedArray(size * size * 4);
-  const cells = 6, grid = Array.from({ length: cells * cells }, () => rnd());
-  const at = (i: number, j: number) => grid[((j + cells) % cells) * cells + ((i + cells) % cells)];
-  const smooth = (f: number) => f * f * (3 - 2 * f);
-  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
-    const o = 4 * (y * size + x), speck = rnd();
-    let r = 0, g = 0, b = 0, a = 0;
-    // Fine grain: a light or a dark speck.
-    if (speck < 0.5) { r = g = b = 0; a = (0.5 - speck) * 2 * 120; } else { r = g = b = 255; a = (speck - 0.5) * 2 * 90; }
-    if (blotches) {
-      const gx = (x / size) * cells, gy = (y / size) * cells, i = Math.floor(gx), j = Math.floor(gy), fx = smooth(gx - i), fy = smooth(gy - j);
-      const v = at(i, j) * (1 - fx) * (1 - fy) + at(i + 1, j) * fx * (1 - fy) + at(i, j + 1) * (1 - fx) * fy + at(i + 1, j + 1) * fx * fy;
-      // A stain where the noise is high: brown, laid over the grain.
-      const stain = Math.max(0, v - 0.55) * 2.2;
-      if (stain > 0) { const k = Math.min(1, stain); r = Math.round(r * (1 - k) + 110 * k); g = Math.round(g * (1 - k) + 72 * k); b = Math.round(b * (1 - k) + 30 * k); a = Math.max(a, 150 * k); }
-    }
-    out[o] = r; out[o + 1] = g; out[o + 2] = b; out[o + 3] = a;
+  for (let i = 0; i < size * size; i++) {
+    const o = 4 * i, speck = rnd();
+    if (speck < 0.5) { out[o] = out[o + 1] = out[o + 2] = 0; out[o + 3] = (0.5 - speck) * 2 * 120; } else { out[o] = out[o + 1] = out[o + 2] = 255; out[o + 3] = (speck - 0.5) * 2 * 90; }
   }
   return out;
 }
 
-let paper: { key: string; canvas: OffscreenCanvas } | null = null;
+/**
+ * The stains of old paper as RGBA, `cols` by `rows` cells (a little noise, laid smoothly over the whole
+ * frame, so that no pattern repeats): brown where the noise is high, clear elsewhere.
+ */
+export function stainTexture(cols: number, rows: number, seed = 11): Uint8ClampedArray<ArrayBuffer> {
+  const rnd = seeded(seed), out = new Uint8ClampedArray(cols * rows * 4);
+  for (let i = 0; i < cols * rows; i++) {
+    const k = Math.max(0, rnd() * 0.6 + rnd() * 0.4 - 0.55) / 0.45;
+    out[4 * i] = 112; out[4 * i + 1] = 74; out[4 * i + 2] = 32; out[4 * i + 3] = Math.round(255 * k * k);
+  }
+  return out;
+}
+
+let paper: OffscreenCanvas | null = null;
+let stains: OffscreenCanvas[] | null = null;
 let scratch: OffscreenCanvas | null = null;
+const canvasOf = (w: number, h: number, data: Uint8ClampedArray<ArrayBuffer>) => { const c = new OffscreenCanvas(w, h); c.getContext('2d')!.putImageData(new ImageData(data, w, h), 0, 0); return c; };
 
 /**
  * Finishes a frame of the map in a look (before its texts): the colour grade, then the edges
@@ -174,19 +173,22 @@ export function finishLook(ctx: CanvasRenderingContext2D | OffscreenCanvasRender
     ctx.fillStyle = g;
     ctx.fillRect(X, Y, W, H);
   }
-  if (l.grain > 0 || l.blotches) {
-    const key = `${l.blotches}`;
-    if (!paper || paper.key !== key) {
-      const size = 256, c = new OffscreenCanvas(size, size);
-      c.getContext('2d')!.putImageData(new ImageData(paperTexture(size, l.blotches), size, size), 0, 0);
-      paper = { key, canvas: c };
-    }
-    const pattern = ctx.createPattern(paper.canvas, 'repeat');
+  if (l.blotches) {
+    // Two sizes of stain, each a little noise stretched smoothly over the whole frame.
+    stains ??= [canvasOf(24, 14, stainTexture(24, 14, 11)), canvasOf(9, 5, stainTexture(9, 5, 23))];
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.globalAlpha = 0.28;
+    for (const st of stains) ctx.drawImage(st, X, Y, W, H);
+  }
+  if (l.grain > 0) {
+    paper ??= canvasOf(256, 256, paperTexture(256));
+    const pattern = ctx.createPattern(paper, 'repeat');
     if (pattern) {
       // (The grain keeps its size on screen: a 1920-wide frame shows it at its own size.)
       const k = Math.max(0.25, unit);
       pattern.setTransform(new DOMMatrix([k, 0, 0, k, X, Y]));
-      ctx.globalAlpha = Math.min(1, 0.35 * Math.max(l.grain, l.blotches ? 0.6 : 0));
+      ctx.globalAlpha = Math.min(1, 0.35 * l.grain);
       ctx.fillStyle = pattern;
       ctx.fillRect(X, Y, W, H);
     }

@@ -1,7 +1,7 @@
 // Looks for shots (Stage 10, D108): presets with their own colours and finish, changed per shot.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { LOOKS, LOOK_IDS, GRADES, resolveLook, isPlainLook, mapStyleOf, basemapStyleOf, seeded, paperTexture } from '../src/presentation/looks.ts';
+import { LOOKS, LOOK_IDS, GRADES, resolveLook, isPlainLook, mapStyleOf, basemapStyleOf, seeded, paperTexture, stainTexture } from '../src/presentation/looks.ts';
 
 test('a shot\'s look: the preset chosen, with its own changes; classic as it is changes nothing', () => {
   const classic = resolveLook(null);
@@ -41,16 +41,17 @@ test('a look\'s colours for the renderer and the basemap; the rest kept', () => 
   assert.deepEqual(bm, { land: l.land, coast: l.coast, lake: l.lake, reference: 'ref' });
 });
 
-test('paper: the same grain every time, specks light and dark, and stains when asked', () => {
+test('paper: the same grain every time, specks light and dark; stains of brown, the same every time', () => {
   const a = seeded(42), b = seeded(42);
   for (let i = 0; i < 10; i++) assert.equal(a(), b());
-  const grain = paperTexture(64, false), again = paperTexture(64, false);
+  const grain = paperTexture(64), again = paperTexture(64);
   assert.deepEqual(grain, again, 'the same in every frame and export');
   let light = 0, dark = 0;
   for (let i = 0; i < grain.length; i += 4) { if (grain[i] === 255) light++; else if (grain[i] === 0) dark++; assert.ok(grain[i + 3] <= 120); }
   assert.ok(light > 1000 && dark > 1000, `both kinds of speck (${light} light, ${dark} dark)`);
-  const stained = paperTexture(64, true);
-  let brown = 0;
-  for (let i = 0; i < stained.length; i += 4) if (stained[i] > stained[i + 2] + 20) brown++;
-  assert.ok(brown > 50, `brown stains (${brown} pixels)`);
+  const stains = stainTexture(24, 14);
+  assert.deepEqual(stains, stainTexture(24, 14));
+  let stained = 0, clear = 0;
+  for (let i = 0; i < stains.length; i += 4) { assert.ok(stains[i] > stains[i + 2], 'brown'); if (stains[i + 3] > 20) stained++; else clear++; }
+  assert.ok(stained > 10 && clear > 50, `stains here and there (${stained} of ${stains.length / 4} cells)`);
 });
