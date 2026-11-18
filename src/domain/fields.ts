@@ -12,7 +12,7 @@
 import type { Instant } from '../core-time/index.ts';
 
 /** The kinds of field, each with its own colours. */
-export type FieldType = 'radiation' | 'fire' | 'smoke' | 'flood' | 'damage' | 'heat' | 'custom';
+export type FieldType = 'radiation' | 'fire' | 'smoke' | 'flood' | 'damage' | 'drought' | 'heat' | 'custom';
 
 /** A colour ramp: [share of the full value (0 to 1), red, green, blue, opacity (0 to 1)], in order. */
 export type FieldRamp = Array<[number, number, number, number, number]>;
@@ -23,6 +23,7 @@ export const FIELD_TYPES: Record<FieldType, { name: string; unit: string; full: 
   smoke: { name: 'Smoke and ash', unit: 'cm of ash', full: 50, about: 'Smoke, dust and ashfall: light grey to near black', ramp: [[0, 200, 200, 200, 0], [0.05, 190, 190, 190, 0.3], [0.4, 120, 118, 115, 0.6], [1, 40, 38, 36, 0.85]] },
   flood: { name: 'Flood', unit: 'm of water', full: 5, about: 'Floodwater: pale where shallow, deep blue where deep', ramp: [[0, 120, 180, 230, 0], [0.02, 120, 180, 230, 0.45], [0.3, 60, 120, 210, 0.7], [1, 20, 50, 140, 0.85]] },
   damage: { name: 'Destruction', unit: '% destroyed', full: 100, about: 'Ruin and burnt ground: brown to black', ramp: [[0, 120, 90, 60, 0], [0.05, 140, 100, 60, 0.35], [0.5, 80, 55, 35, 0.65], [1, 25, 20, 18, 0.85]] },
+  drought: { name: 'Drought', unit: 'dryness', full: 1, about: 'Land drying out: pale ochre to deep tan', ramp: [[0, 210, 180, 110, 0], [0.05, 215, 185, 115, 0.3], [0.5, 200, 160, 90, 0.55], [1, 170, 120, 60, 0.75]] },
   heat: { name: 'Heatmap', unit: 'value', full: 1, about: 'Any quantity: blue for little, through green and yellow, to red for most', ramp: [[0, 40, 80, 220, 0], [0.05, 40, 80, 220, 0.4], [0.3, 40, 200, 120, 0.55], [0.6, 250, 220, 50, 0.7], [1, 230, 40, 30, 0.8]] },
   custom: { name: 'Custom', unit: 'value', full: 1, about: 'One colour, more opaque where stronger', ramp: [[0, 230, 120, 200, 0], [1, 230, 120, 200, 0.8]] },
 };
@@ -61,6 +62,7 @@ export const DEFAULT_SOURCES: Record<FieldType, FieldSource> = {
   smoke: { shape: 'plume', spread: 'fire', intensity: 20, radiusKm: 25, rise: 0.2, hold: 2, decay: 4, grow: 0, noise: 0.3, seed: 1, windDeg: 90, windKmPerDay: 300 },
   flood: { shape: 'spread', spread: 'flood', intensity: 3, radiusKm: 60, rise: 2, hold: 5, decay: 6, grow: 2, noise: 0.6, seed: 1, windDeg: 0, windKmPerDay: 0 },
   damage: { shape: 'circle', spread: 'fire', intensity: 90, radiusKm: 8, rise: 0, hold: 3650, decay: 3650, grow: 0, noise: 0.25, seed: 1, windDeg: 0, windKmPerDay: 0 },
+  drought: { shape: 'circle', spread: 'fire', intensity: 0.8, radiusKm: 300, rise: 180, hold: 3650, decay: 3650, grow: 365, noise: 0.6, seed: 1, windDeg: 0, windKmPerDay: 0 },
   heat: { shape: 'circle', spread: 'fire', intensity: 0.5, radiusKm: 300, rise: 0, hold: 36500, decay: 0, grow: 0, noise: 0, seed: 1, windDeg: 0, windKmPerDay: 0 },
   custom: { shape: 'circle', spread: 'fire', intensity: 1, radiusKm: 100, rise: 1, hold: 10, decay: 10, grow: 1, noise: 0.3, seed: 1, windDeg: 0, windKmPerDay: 0 },
 };

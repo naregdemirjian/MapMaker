@@ -61,6 +61,31 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D104. Disasters from templates, in one click (Stage 9)
+
+The **Disasters** tool places a whole disaster with one click, from a template and one size: a **nuclear strike**
+(yield: blast destruction about 0.9 km × the cube root of the kilotons, a firestorm, radioactive fallout carried
+downwind), an **earthquake** (magnitude: destruction lasting for years, 50 km around at magnitude 7, ten times as far
+at 9), a **volcanic eruption** (explosivity: lava running downhill, an ash plume downwind, pyroclastic ruin around
+the vent), a **flood** (how high the water rises, filling the low ground), a **wildfire** (how far it spreads, with
+its smoke), a **meteor impact** (the meteor's size: a crater twenty times as wide left in the terrain for good, the
+land around flattened and burnt, dust carried downwind) and a **drought** (land drying out over months, staying dry
+for years: a new Drought kind of conditions). Plumes take the wind direction given.
+
+- **As an event.** A disaster becomes an event named after it ("Nuclear strike (1 Mt)") from the date viewed, or goes
+  into the event being recorded; it is chosen once placed. Its conditions go on the map's first field layer of each
+  kind, made where there is none ("Destruction", "Fire", "Radiation", "Smoke and ash", "Flood", "Drought").
+- **Temporary and permanent.** The conditions fade by themselves (D102, D103); an impact's crater is a dated change
+  to the terrain (sculpting, D98) from the moment of impact on, and only where the map has terrain. Everything a
+  disaster made, its event and new layers included, is one undoable step.
+- **Rough rules.** The sizes are rules of thumb for a map, not physics (`domain/disasters.ts`); every condition can
+  still be placed by hand with the Conditions tool, with its own strength, size, shape and life.
+- **Tests.** `disasters.test.ts` (each template sized by its measure and held within its range; the command: an
+  event from its moment, a layer for each kind, made once and reused, conditions in force from then, an impact's
+  crater from then, all undone in one step; in the event being recorded; errors; a blank world gets conditions and
+  no crater); `e2e/workflows` (a meteor impact placed with one click: its event, layers and crater, the blast shown
+  the next day, one undo takes it all back).
+
 ### D103. Conditions that spread over the terrain: fire, lava, floods (Stage 9)
 
 A source of conditions (D102) can now **spread over the terrain itself**, as a fire, lava or a flood, on any map

@@ -2278,6 +2278,54 @@ try {
     await page.getByTestId('tool-select').click();
   });
 
+  await h.step('Disasters: a meteor impact placed with one click as an event from the date viewed, its crater in the terrain and its blast, fires and dust; one undo takes it all back', async () => {
+    await page.getByTestId('mode-world').click();
+    const site: LL = [75, 61];
+    await page.evaluate((c) => (window as any).__mapmaker.store.setCamera({ lon: c[0], lat: c[1], zoom: 3, rotation: 0, projection: 'equirectangular' }), site);
+    await h.setDate('1450');
+    const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
+    const before = await steps();
+    const state = () => page.evaluate(() => {
+      const s = (window as any).__mapmaker.store, space = s.world.get('map_space', s.spaceId);
+      return { fields: s.world.all('layer').filter((l: any) => l.kind === 'field').map((l: any) => JSON.parse(l.style).field.type).sort(), craters: (JSON.parse(space.settings).sculpt ?? []).length, events: s.world.all('event').map((e: any) => e.name) };
+    }) as Promise<{ fields: string[]; craters: number; events: string[] }>;
+    const was = await state();
+    const pixelAt = (ll: LL) => page.evaluate(([lon, lat]) => {
+      const p = (window as any).__mapmaker.lonLatToPage(lon, lat);
+      const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement;
+      const r = c.getBoundingClientRect(), k = c.width / r.width;
+      return Array.from(c.getContext('2d')!.getImageData(Math.round((p[0] - r.left) * k), Math.round((p[1] - r.top) * k), 1, 1).data).slice(0, 3);
+    }, ll);
+    const plain = await pixelAt(site);
+    await page.getByTestId('tool-disaster').click();
+    await page.getByTestId('disaster-kind').selectOption('meteor');
+    await page.getByTestId('disaster-size').fill('2000');
+    assert.match((await page.getByTestId('disaster-hint').textContent()) ?? '', /meteor impact \(2 km across\) as a new event from/);
+    const at = await h.toPage(site);
+    await page.mouse.click(at[0], at[1]);
+    await h.saved();
+    const now = await state();
+    assert.ok(now.events.includes('Meteor impact (2 km across)'), 'an event named after it');
+    assert.deepEqual(now.fields, ['damage', 'fire', 'smoke'], 'its blast, fires and dust, each on a layer of its kind');
+    assert.equal(now.craters, was.craters + 1, 'its crater in the terrain');
+    const journal = () => page.evaluate(() => (window as any).__mapmaker.store.journal) as Promise<{ undoLabel: string | null; redoLabel: string | null }>;
+    assert.equal((await journal()).undoLabel, 'Meteor impact (2 km across)', 'one step, named after it');
+    // The day after: ruined ground where it struck.
+    await h.setDate('2 January 1450');
+    await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastFields.some((f: any) => f.drawn > 0));
+    let px = await pixelAt(site);
+    for (let i = 0; i < 30 && Math.max(...px.map((v, k) => Math.abs(v - plain[k]))) <= 30; i++) { await page.waitForTimeout(100); px = await pixelAt(site); }
+    assert.ok(Math.max(...px.map((v, k) => Math.abs(v - plain[k]))) > 30, `the blast shows (${px} against ${plain})`);
+    await h.screenshot('disaster-meteor');
+    // One undo takes it all back.
+    await page.getByTestId('undo').click();
+    await h.saved();
+    assert.deepEqual(await state(), was);
+    assert.equal((await journal()).redoLabel, 'Meteor impact (2 km across)', 'undone in one step');
+    assert.ok((await steps()) >= before);
+    await page.getByTestId('tool-select').click();
+  });
+
   await h.step('History Health lists the overlap, nothing else; no browser errors', async () => {
     await page.getByTestId('mode-world').click();
     await page.getByTestId('health').click();

@@ -18,6 +18,7 @@ import { resolvePointStyle, type LabelStyle, type CountryLabel, type PointStyle 
 import { DEFAULT_FEATURE_STYLE, isFeatureKind, type FeatureKind, type FeatureStyle } from '../render-engine/feature-style.ts';
 import { relationKind, isRelationKind, type RelationKind } from './relations.ts';
 import { DEFAULT_SOURCES, fieldLayerStyleOf, fieldSourceOf, isFieldType, FIELD_TYPES, type FieldSource, type FieldType } from './fields.ts';
+import { planDisaster, isDisasterId, type DisasterId } from './disasters.ts';
 import { cleanIcon, type CharacterIcon, type RouteStyle } from '../render-engine/icons.ts';
 import type { TerritoryFill, FrontTeeth } from '../render-engine/map-renderer.ts';
 export type { CharacterIcon } from '../render-engine/icons.ts';
@@ -1501,6 +1502,46 @@ export function addFieldSource(world: World, o: { layerId: string; name: string;
     tx.insert('feature', { id, layer_id: layer.id, name, entity_id: '', style: JSON.stringify({ source }), notes: '', created_seq: world.nextSeq('feature') });
     writeShape(tx, id, o.mode, { parts: [[((lon + 540) % 360) - 180, lat]], anim: null });
     return id;
+  });
+}
+
+/**
+ * A disaster from a template (D104): its conditions, each on the map's first field layer of its kind
+ * (made if there is none), and an impact's crater in the terrain (from moment `t` on), all in a new
+ * event named after it starting at `t`, or in the event being recorded (`eventId`); one undoable step.
+ * Returns the event.
+ */
+export function addDisaster(world: World, o: { spaceId: string; disaster: DisasterId; size: number; windDeg?: number; at: [number, number]; t: Instant; eventId?: string | null; seed?: number }): CommandResult<string> {
+  const space = world.get('map_space', o.spaceId);
+  if (!space || space.kind !== 'sphere') throw new Error('Disasters are placed on round maps.');
+  if (!isDisasterId(o.disaster)) throw new Error('Unknown kind of disaster.');
+  const [lon0, lat] = o.at;
+  if (!Number.isFinite(lon0) || !Number.isFinite(lat) || Math.abs(lat) > 90) throw new Error('That place is not on the map.');
+  const lon = ((lon0 + 540) % 360) - 180;
+  const ev = o.eventId ? world.get('event', o.eventId) : null;
+  if (o.eventId && !ev) throw new Error('That event no longer exists.');
+  const plan = planDisaster(o.disaster, o.size, o.windDeg ?? 90);
+  return run(world, plan.name, (tx) => {
+    const eventId = ev ? ev.id : insertEventIn(tx, { name: plan.name, start: o.t, end: null });
+    const at = ev && compare(o.t, fromStore(ev.start_day, ev.start_ms)) > 0 ? o.t : null;
+    for (const p of plan.sources) {
+      let layer = tx.world.all('layer').filter((l) => l.space_id === space.id && l.kind === 'field' && fieldLayerStyleOf(l.style).type === p.type).sort((a, b) => a.sort_order - b.sort_order)[0];
+      if (!layer) {
+        const name = FIELD_TYPES[p.type].name;
+        layer = tx.insert('layer', { id: newId('layer'), space_id: space.id, kind: 'field', name, sort_order: tx.world.all('layer').filter((l) => l.space_id === space.id).length, visible: 1, style: JSON.stringify({ field: { type: p.type, opacity: 1 } }), export_pass: name.toLowerCase().replace(/\W+/g, '-') });
+      }
+      const source = fieldSourceOf({ ...DEFAULT_SOURCES[p.type], ...p.source, seed: o.seed ?? 1 }, p.type);
+      const id = newId('feat');
+      tx.insert('feature', { id, layer_id: layer.id, name: `${plan.name.replace(/ \(.*\)$/, '')}: ${p.name.toLowerCase()}`, entity_id: '', style: JSON.stringify({ source }), notes: '', created_seq: tx.world.nextSeq('feature') });
+      writeShape(tx, id, { kind: 'new', eventId, at }, { parts: [[lon, lat]], anim: null });
+    }
+    // The crater stays for good: a change to the terrain from the moment of the impact.
+    if (plan.crater && terrainSourceOf(space)) {
+      const settings = worldSettings(tx.world.get('map_space', space.id)!);
+      const stamp = { id: newId('stamp'), tool: 'crater' as const, path: [[Math.round(lon * 1e5) / 1e5, Math.round(lat * 1e5) / 1e5]] as Array<[number, number]>, radiusKm: plan.crater.radiusKm, strength: plan.crater.depthM, seed: o.seed ?? 1, from: { day: o.t.day, ms: o.t.ms } };
+      tx.update('map_space', { ...tx.world.get('map_space', space.id)!, settings: JSON.stringify({ ...settings, sculpt: [...cleanStamps(settings.sculpt), ...cleanStamps([stamp])] }) });
+    }
+    return eventId;
   });
 }
 

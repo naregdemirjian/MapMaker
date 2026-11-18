@@ -732,6 +732,15 @@ export function MapView() {
       store.execute((wd) => cmd.addFieldSource(wd, { layerId: layer.id, name: '', at: ll, mode: placementMode(), source: s.fieldSource }));
       return;
     }
+    // The Disasters tool (D104): a click places the whole disaster, as a new event (or in the one being recorded).
+    if (!presentation && e.button === 0 && s.tool === 'disaster') {
+      const ll = screenToLonLat(view, p[0], p[1]);
+      if (!ll) return;
+      const d = s.disaster;
+      const ev = store.execute((wd) => cmd.addDisaster(wd, { spaceId: s.spaceId, disaster: d.id, size: d.size, windDeg: d.windDeg, at: ll, t: s.time, eventId: s.recordEventId, seed: 1 + Math.floor(Math.random() * 9973) }));
+      if (ev) store.set({ selection: { kind: 'event', id: ev } });
+      return;
+    }
     if (!presentation && e.button === 0 && s.tool === 'place') {
       const ll = screenToLonLat(view, p[0], p[1]);
       if (!ll) return;

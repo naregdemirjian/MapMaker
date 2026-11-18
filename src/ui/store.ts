@@ -18,6 +18,7 @@ import { planetTerrain } from '../terrain/planet-cache.ts';
 import { loadEarthCover, coverSoon, type TerrainCover } from '../terrain/cover.ts';
 import { climateOf } from '../terrain/biomes.ts';
 import type { FieldSource } from '../domain/fields.ts';
+import type { DisasterId } from '../domain/disasters.ts';
 import type { SculptTool } from '../terrain/sculpt.ts';
 import { terrainSourceOf, planetOf } from '../world-model/world-settings.ts';
 import type { MapSpaceRow } from '../world-model/schema.ts';
@@ -30,7 +31,7 @@ export type Mode = 'world' | 'present';
 /** One line of a right-click menu: an action, a heading, or a divider. */
 export type MenuItem = { label: string; run: () => void; danger?: boolean; testId?: string } | { heading: string } | 'divider';
 
-export type Tool = 'select' | 'lasso' | 'polygon' | 'pen' | 'vertex' | 'place' | 'erase' | 'feature' | 'split' | 'regions' | 'sculpt' | 'field';
+export type Tool = 'select' | 'lasso' | 'polygon' | 'pen' | 'vertex' | 'place' | 'erase' | 'feature' | 'split' | 'regions' | 'sculpt' | 'field' | 'disaster';
 export type Selection =
   | { kind: 'entity'; id: string }
   | { kind: 'event'; id: string }
@@ -115,6 +116,8 @@ class AppStore {
   /** The Conditions tool (D102): the field layer it places sources on, and the settings of the next source (the layer's usual ones, changed). */
   fieldLayerId = '';
   fieldSource: Partial<FieldSource> = {};
+  /** The Disasters tool (D104): which template, its size, and where the wind carries its plumes (degrees from north). */
+  disaster: { id: DisasterId; size: number; windDeg: number } = { id: 'nuclear', size: 1000, windDeg: 90 };
   /** The kind the New layer dialog starts with (null: territory). */
   newLayerKind: 'partition' | 'area' | 'line' | 'point' | 'field' | null = null;
   featureDraw: 'freehand' | 'clicks' = 'freehand';

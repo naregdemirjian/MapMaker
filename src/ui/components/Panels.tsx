@@ -19,7 +19,7 @@ import { openMenu, entityMenu, groupMenu, eventMenu } from './ContextMenu.tsx';
 import { CountryHistorySection } from './CountryHistory.tsx';
 import { NamesSection } from './Names.tsx';
 import { FeatureToolOptions, FeaturePanel, FeatureRows, featureLayers } from './Features.tsx';
-import { FieldToolOptions } from './Fields.tsx';
+import { FieldToolOptions, DisasterToolOptions } from './Fields.tsx';
 import { RelationsSection } from './Relations.tsx';
 import { SearchBox } from './Search.tsx';
 import { PicturesSection } from './Pictures.tsx';
@@ -172,6 +172,7 @@ const TOOLS: Array<{ id: Tool; name: string; hint: string }> = [
   { id: 'feature', name: 'Areas, lines & points', hint: 'Draw on a layer of areas, lines or points: claims and zones, front lines, roads and arrows, battles and sites. They overlap freely and never change who holds the land.' },
   { id: 'place', name: 'Characters & cities', hint: 'Click the map to put the chosen character or city there from the date being viewed (a point, no borders). With Select, drag one to move it.' },
   { id: 'sculpt', name: 'Terrain', hint: 'Sculpt the terrain: raise and lower ground, draw mountain ranges and valleys, make craters and islands, paint land and sea, smooth, flatten, roughen or erode. A stroke changes the base world or holds from the date viewed.' },
+  { id: 'disaster', name: 'Disasters', hint: 'Nuclear strikes, earthquakes, eruptions, floods, wildfires, meteor impacts and droughts: choose one and its size, then click the map. It is placed as an event from the date viewed, its conditions rising and fading by themselves (an impact leaves its crater in the terrain); one undo takes it all back.' },
   { id: 'field', name: 'Conditions', hint: 'Radiation, fire, smoke and ash, floods, destruction and heatmaps: click the map to place a source on a field layer from the date viewed (or in the event being recorded). It rises, lasts and fades by itself.' },
 ];
 
@@ -210,7 +211,7 @@ export function ToolBar() {
   return (
     <>
     <div className="toolbar">
-      {TOOLS.filter((t) => (t.id !== 'sculpt' || terrainSourceOf(w.get('map_space', s.spaceId))) && (t.id !== 'field' || w.get('map_space', s.spaceId)?.kind === 'sphere')).map((t) => (
+      {TOOLS.filter((t) => (t.id !== 'sculpt' || terrainSourceOf(w.get('map_space', s.spaceId))) && ((t.id !== 'field' && t.id !== 'disaster') || w.get('map_space', s.spaceId)?.kind === 'sphere')).map((t) => (
         <button key={t.id} className={s.tool === t.id ? 'on' : ''} title={t.hint} onClick={() => s.set({ tool: t.id })} data-testid={`tool-${t.id}`}>{t.name}</button>
       ))}
     </div>
@@ -241,6 +242,7 @@ export function ToolBar() {
     {s.tool === 'feature' && <FeatureToolOptions />}
     {s.tool === 'sculpt' && <SculptToolOptions />}
     {s.tool === 'field' && <FieldToolOptions />}
+    {s.tool === 'disaster' && <DisasterToolOptions />}
     {s.tool === 'split' && <SplitToolOptions />}
     {s.tool === 'regions' && <RegionToolOptions />}
     {s.tool === 'place' && (

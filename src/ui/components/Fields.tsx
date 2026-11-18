@@ -4,6 +4,8 @@
 import { useStore } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
 import { DEFAULT_SOURCES, FIELD_TYPES, fieldLayerStyleOf, fieldSourceOf, lifespan, type FieldSource, type FieldType } from '../../domain/fields.ts';
+import { DISASTERS, planDisaster, type DisasterId } from '../../domain/disasters.ts';
+import { terrainSourceOf } from '../../world-model/world-settings.ts';
 import { fieldsDrawable } from '../../render-engine/fields-gl.ts';
 import { fmt } from './Panels.tsx';
 
@@ -89,6 +91,37 @@ export function FieldToolOptions() {
         <span className="muted" data-testid="field-hint">Click the map: {FIELD_TYPES[type].name.toLowerCase()} from {rec ? `"${rec.name}"` : fmt(s.time)}, gone after about {lengthText(lifespan(src))}.</span>
         {count > 0 && <button className="link" onClick={() => s.execute((wd) => cmd.deleteFeatures(wd, wd.all('feature').filter((f) => f.layer_id === layer.id).map((f) => f.id)))} data-testid="field-clear" title="Take every source on this layer away (one step, which can be undone)">Remove all {count} source{count === 1 ? '' : 's'}</button>}
       </>}
+    </div>
+  );
+}
+
+/**
+ * The Disasters tool (D104): a template, its size and the wind; a click places the whole disaster
+ * (its conditions on layers of their kinds, made where missing; an impact's crater) in a new event.
+ */
+export function DisasterToolOptions() {
+  const s = useStore();
+  const d = s.disaster, t = DISASTERS.find((x) => x.id === d.id)!;
+  const set = (patch: Partial<typeof d>) => s.set({ disaster: { ...d, ...patch } });
+  const plan = planDisaster(d.id, d.size, d.windDeg);
+  const rec = s.recordEventId ? s.world?.get('event', s.recordEventId) : null;
+  const terrain = !!terrainSourceOf(s.world?.get('map_space', s.spaceId));
+  return (
+    <div className="toolbar sub disaster-options" data-testid="disaster-options">
+      <label className="inline" title={t.hint}>Disaster
+        <select value={d.id} onChange={(e) => { const n = DISASTERS.find((x) => x.id === e.target.value)!; set({ id: n.id as DisasterId, size: n.size.value }); }} data-testid="disaster-kind">
+          {DISASTERS.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+        </select>
+      </label>
+      <label className="inline" title={`From ${t.size.min} to ${t.size.max}`}>{t.size.label}
+        <input type="number" min={t.size.min} max={t.size.max} step={t.size.step} value={d.size} onChange={(e) => { const v = Number(e.target.value); if (Number.isFinite(v) && v > 0) set({ size: v }); }} data-testid="disaster-size" /> {t.size.unit}
+      </label>
+      {t.wind && (
+        <label className="inline" title="The direction the wind carries its plume: 0 north, 90 east, 180 south, 270 west">Wind towards
+          <input type="number" min={0} max={359} step={15} value={d.windDeg} onChange={(e) => { const v = Number(e.target.value); if (Number.isFinite(v)) set({ windDeg: ((v % 360) + 360) % 360 }); }} data-testid="disaster-wind" /> °
+        </label>
+      )}
+      <span className="muted" data-testid="disaster-hint">{t.hint}. Click the map: {plan.name.toLowerCase()} {rec ? `in "${rec.name}"` : `as a new event from ${fmt(s.time)}`}{plan.crater && !terrain ? ' (no crater: this map has no terrain)' : ''}; one undo takes it all back.</span>
     </div>
   );
 }
