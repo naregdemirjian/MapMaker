@@ -121,7 +121,16 @@ export interface ShotSettings {
   eventsBox?: Partial<import('./events-box.ts').EventsBox>;
   /** The map's look in this shot (D108; absent: classic, the colours of the working view). See looks.ts. */
   look?: import('./looks.ts').ShotLook;
+  /** The image files written (D109): PNG (absent), or TIFF uncompressed or ZIP-compressed. */
+  format?: ExportFormat;
 }
+
+export type ExportFormat = 'png' | 'tiff' | 'tiff-zip';
+export const EXPORT_FORMATS: Array<{ id: ExportFormat; name: string; note: string }> = [
+  { id: 'png', name: 'PNG', note: 'PNG image sequences, 8-bit with transparency: small, read by every editor.' },
+  { id: 'tiff', name: 'TIFF, uncompressed', note: 'TIFF image sequences, 8-bit with straight alpha, uncompressed: large (4 bytes a pixel), read by everything, quick to play in an editor.' },
+  { id: 'tiff-zip', name: 'TIFF, ZIP-compressed', note: 'TIFF image sequences, 8-bit with straight alpha, compressed with ZIP (Deflate, as Photoshop writes it): about as small as PNG.' },
+];
 
 export type TransitionEasing = 'linear' | 'smooth' | 'in' | 'out';
 

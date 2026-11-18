@@ -71,6 +71,9 @@ export const Api = {
   /** A frame already encoded as a PNG. */
   sendPngFrame: (id: string, job: string, pass: string, frame: number, png: Blob) =>
     call<{ file: string; sha256: string }>('POST', `${p(id)}/exports/${encodeURIComponent(job)}/frames?pass=${encodeURIComponent(pass)}&frame=${frame}&format=png`, undefined, png),
+  /** A frame already encoded as a TIFF (D109). */
+  sendTiffFrame: (id: string, job: string, pass: string, frame: number, tiff: Blob) =>
+    call<{ file: string; sha256: string }>('POST', `${p(id)}/exports/${encodeURIComponent(job)}/frames?pass=${encodeURIComponent(pass)}&frame=${frame}&format=tiff`, undefined, tiff),
   /** A frame that is the same picture as an earlier frame of the pass. */
   repeatFrame: (id: string, job: string, pass: string, frame: number, sameAs: number) =>
     call<{ file: string; sha256: string }>('POST', `${p(id)}/exports/${encodeURIComponent(job)}/frames?pass=${encodeURIComponent(pass)}&frame=${frame}&same=${sameAs}`),

@@ -6,7 +6,7 @@ import { readFileSync, existsSync, mkdirSync, writeFileSync, renameSync } from '
 import { join, extname, dirname } from 'node:path';
 import { spawn } from 'node:child_process';
 import { ProjectRegistry } from './projects.ts';
-import { startJob, writeFrame, writeEncodedFrame, repeatFrame, finishJob, type ExportJob, type ExportSettings } from '../export/writer.ts';
+import { startJob, writeFrame, writeEncodedFrame, writeEncodedTiff, repeatFrame, finishJob, type ExportJob, type ExportSettings } from '../export/writer.ts';
 import { saveAsset, serveAsset } from './assets.ts';
 import type { RowDiff } from '../world-model/schema.ts';
 
@@ -241,6 +241,10 @@ export function createAppServer(opts: ServerOptions): { server: Server; registry
         const same = url.searchParams.get('same');
         if (same !== null) { await readBody(req); return send(res, 200, repeatFrame(job, pass, frame, Number(same))); }
         // Already encoded (by the browser), or raw pixels to encode here.
+        if (url.searchParams.get('format') === 'tiff') {
+          const tiff = await readBody(req);
+          return send(res, 200, writeEncodedTiff(job, pass, frame, new Uint8Array(tiff.buffer, tiff.byteOffset, tiff.byteLength)));
+        }
         if (url.searchParams.get('format') === 'png') {
           const png = await readBody(req);
           return send(res, 200, writeEncodedFrame(job, pass, frame, new Uint8Array(png.buffer, png.byteOffset, png.byteLength)));

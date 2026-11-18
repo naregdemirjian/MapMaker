@@ -9,6 +9,7 @@ import { resolveLook, isPlainLook, mapStyleOf, basemapStyleOf, finishLook, type 
 import { makeView, viewBounds, metresPerPixel, lonLatToScreen, type View } from '../render-engine/camera.ts';
 import { type ShotSettings, type OverlayRect, EVENTS_BOX_ID, timeAt, cameraAt, overlaysAt, drawOverlays, shotTransitions, screenSecondsSince } from './sequence.ts';
 import { gregorian, type Instant } from '../core-time/index.ts';
+import { encodeTiff, deflateInBrowser } from '../export/tiff.ts';
 import { eventsBoxOf, currentEvents, drawEventsBox } from './events-box.ts';
 import { eventShown, entityStyle } from '../domain/commands.ts';
 import { isFeatureKind } from '../render-engine/feature-style.ts';
@@ -99,7 +100,9 @@ export async function estimateExportBytes(world: World, engine: Engine, shot: Sh
     const blob = await canvas.convertToBlob({ type: 'image/png' });
     perFrame += blob.size;
   }
-  return scaledBytes(perFrame, W / w) * shot.frames;
+  // Uncompressed TIFF (D109): four bytes a pixel; ZIP about a fifth more than PNG.
+  if (shot.format === 'tiff') return W * H * 4 * defs.length * shot.frames;
+  return scaledBytes(perFrame, W / w) * shot.frames * (shot.format === 'tiff-zip' ? 1.2 : 1);
 }
 
 let estimator: MapRenderer | null = null;
@@ -237,6 +240,8 @@ export async function runExport(o: {
   if (!defs.length) throw new Error('Choose at least one thing to export.');
   const [f0, f1] = o.frameRange ?? [0, o.shot.frames - 1];
   const started = performance.now();
+  // TIFF files (D109) are encoded here from the frame's pixels; PNG by the browser's own encoder.
+  const tiff = o.shot.format === 'tiff' || o.shot.format === 'tiff-zip', zipped = o.shot.format === 'tiff-zip';
   // Loaded before the first frame, so every frame is drawn from the same complete data.
   const basemap = await basemapFor(o.world, o.shot.spaceId);
   const terrain = await terrainFor(o.world, o.shot.spaceId);
@@ -255,6 +260,7 @@ export async function runExport(o: {
     credits,
     exportDir: o.shot.exportDir ?? null,
     shotName: o.scale === 1 ? o.shotName : `${o.shotName} (preview)`, width, height, fps: o.shot.fps, frameStart: f0, frameEnd: f1,
+    format: tiff ? 'tiff' : 'png',
     passes: defs.map((d) => ({ name: d.name, label: d.label, blend: d.blend, note: d.note })), transparent: o.shot.transparent,
     historicalRange: [gregorian.format(timeAt(o.shot, f0), 'minute'), gregorian.format(timeAt(o.shot, f1), 'minute')],
   });
@@ -294,11 +300,16 @@ export async function runExport(o: {
       if (o.isCancelled?.()) { await Promise.allSettled(pending); throw new Error('Export cancelled.'); }
       if (videoFills.length) await prepareVideos(videoFills, frame / o.shot.fps);
       renderFrame(ctx, renderer, o.world, o.engine, o.shot, frame, def, width, height, basemap, terrain, detail);
-      const [a, b] = pixelHash(ctx.getImageData(0, 0, width, height).data);
+      const pixels = ctx.getImageData(0, 0, width, height).data;
+      const [a, b] = pixelHash(pixels);
       const before = last.get(def.name);
       if (before && before.a === a && before.b === b) {
         const sameAs = before.frame;
         queue(def.name, () => Api.repeatFrame(o.projectId, job.jobId, def.name, frame, sameAs));
+      } else if (tiff) {
+        last.set(def.name, { a, b, frame });
+        // (The pixels are this frame's own copy: encoded while the next frame is drawn.)
+        queue(def.name, async () => Api.sendTiffFrame(o.projectId, job.jobId, def.name, frame, new Blob([(await encodeTiff(pixels, width, height, zipped ? 'zip' : 'none', deflateInBrowser)) as BlobPart], { type: 'image/tiff' })));
       } else {
         last.set(def.name, { a, b, frame });
         // The canvas is copied now; encoding goes on in the background.

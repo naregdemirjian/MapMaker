@@ -61,6 +61,24 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D109. TIFF sequences (Stage 10)
+
+- **A choice per shot.** Under Output quality, "File format": PNG (as before), TIFF uncompressed, or TIFF
+  ZIP-compressed. TIFF files are 8 bits a sample, RGB with straight (unassociated) alpha, little-endian, in strips of
+  about a quarter of a megabyte; ZIP is Deflate as Photoshop writes it. Uncompressed files are four bytes a pixel
+  (read by everything, quick to play in an editor); ZIP is about as small as PNG.
+- **Where they are made.** In the browser, from the very pixels the frame was drawn with (the same pixels give the same
+  file), compressed with the browser's own Deflate while the next frame is drawn, then written by the data service,
+  which checks the size in the file's directory. Frames that are the same picture as the one before are copied, as
+  for PNG. The manifest and the compositing guide say which format and that the alpha is straight.
+- **Size estimate.** Uncompressed TIFF is exact (four bytes a pixel); ZIP is estimated as a fifth more than PNG.
+- **SVG** (also planned for this stage) is left for later: the map is drawn with pictures kept between frames and
+  masks at the coast, which have no direct SVG form; a vector export would be a second renderer.
+- **Tests.** `tiff.test.ts` (header, strips, straight alpha, read back the same uncompressed and ZIP, ZIP far smaller
+  for a map, a one-strip picture, wrong sizes refused); `e2e/workflows` 'TIFF sequences' (a shot exported as ZIP TIFF:
+  six .tif files at a quarter of 1920 x 1080, read back with transparent and painted pixels, the manifest and the
+  guide say so; undone).
+
 ### D108. Looks for shots (Stage 10)
 
 - **A look per shot.** A shot is drawn in a look chosen under Look in its settings: Classic (the working view's

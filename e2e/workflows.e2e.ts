@@ -2667,6 +2667,43 @@ try {
     assert.equal(await page.evaluate((id) => !!(window as any).__mapmaker.store.world.get('sequence', id), shotId), false, 'the shot is gone');
   });
 
+  await h.step('TIFF sequences: a shot exported as ZIP-compressed TIFF files with straight alpha, read back at the preview size; undone', async () => {
+    await page.getByTestId('mode-world').click();
+    const shotId = await page.evaluate(() => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const settings = B.defaultShot(s.spaceId, { lon: 10, lat: 48, zoom: 2, rotation: 0, projection: 'equirectangular' }, s.time, s.time, 24, 0.25);
+      settings.transparent = true;
+      const id = s.execute((w: any) => B.commands.createSequence(w, 'Tiff', settings));
+      s.set({ shotId: id, shotFrame: 0, presentCamera: null, mode: 'present' });
+      return id as string;
+    });
+    await page.getByTestId('shot-editor').waitFor();
+    await page.getByTestId('export-format').selectOption('tiff-zip');
+    await page.waitForFunction((id) => JSON.parse((window as any).__mapmaker.store.world.get('sequence', id).settings).format === 'tiff-zip', shotId);
+    assert.match((await page.getByTestId('export-format-note').textContent()) ?? '', /ZIP/);
+    await page.getByTestId('export-preview').click();
+    await page.getByTestId('export-result').waitFor({ timeout: 300000 });
+    const dir = ((await page.locator('[data-testid=export-result] .path').textContent()) ?? '').trim();
+    const manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'));
+    assert.match(manifest.alpha, /TIFF/);
+    const files = readdirSync(join(dir, 'all')).sort();
+    assert.equal(files.length, 6, `six frames (${files.join(', ')})`);
+    assert.ok(files.every((f) => f.endsWith('.tif')), 'TIFF files');
+    const { decodeTiff } = await import('../src/export/tiff.ts');
+    const { inflateSync } = await import('node:zlib');
+    const t = await decodeTiff(new Uint8Array(readFileSync(join(dir, 'all', files[0]))), async (d) => new Uint8Array(inflateSync(d)));
+    assert.equal(t.compression, 8, 'ZIP');
+    assert.deepEqual([t.width, t.height], [480, 270], 'a quarter of 1920 x 1080');
+    let clear = 0, solid = 0;
+    for (let i = 3; i < t.rgba.length; i += 4) { if (t.rgba[i] === 0) clear++; else if (t.rgba[i] === 255) solid++; }
+    assert.ok(clear > 0 && solid > 0, `transparent and painted pixels both kept (${clear} clear, ${solid} solid)`);
+    assert.match(readFileSync(join(dir, 'COMPOSITING_GUIDE.txt'), 'utf8'), /Alpha: straight \(the TIFF files say so\)/);
+    // Undone: the format and the shot.
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ mode: 'world', shotId: null }));
+    for (let i = 0; i < 5 && (await page.evaluate((id) => !!(window as any).__mapmaker.store.world.get('sequence', id), shotId)); i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await page.evaluate((id) => !!(window as any).__mapmaker.store.world.get('sequence', id), shotId), false);
+  });
+
   await h.step('History Health lists the overlap, nothing else; no browser errors', async () => {
     await page.getByTestId('mode-world').click();
     await page.getByTestId('health').click();

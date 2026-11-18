@@ -231,6 +231,7 @@ Terminology: the interface calls them **maps** (DECISIONS D24); the code and old
 | `src/export/` | Files on disk | PNG encoder, export folders, `manifest.json`, `COMPOSITING_GUIDE.txt`. |
 | `src/ui/` | The interface | React. `store.ts` holds the session state and saves every command; components for the map, timeline, panels, dialogs and presentation mode. |
 | `src/domain/countries.ts` | Today's countries | Decoding `countries-50m.json`; colour groups. The command is `addCountries` in commands.ts. |
+| `src/export/tiff.ts` | TIFF files (D109) | 8-bit RGBA with straight alpha in strips, uncompressed or Deflate; encoded in the browser during exports (`export-driver.ts` runExport), written by `writer.ts` writeEncodedTiff. |
 | `src/presentation/looks.ts` | Looks for shots (D108) | The presets and their colours, the grade, darker edges and paper laid over a finished frame (`finishLook`), and what the renderer is given (`export-driver.ts` lookStyles). |
 | `src/presentation/events-box.ts` | Current events box | Which events show at a frame (with fades) and how the box is drawn. |
 | `src/render-engine/label-style.ts`, `assets.ts` | Looks | Label styles (general, per country); pictures and videos (loaded once; exports preload pictures and seek videos per frame on their own elements). |
@@ -274,12 +275,12 @@ The approved roadmap has 14 stages (0–13). Where each stands (brought up to da
 | 7 Military and movement | Mostly done | Occupied territory drawn with stripes, crossed stripes or dots over the political map (D88); front lines between countries at war (D89); units of a country with trails or arrows of advance (D90); contested areas in both claimants' stripes (D93); characters with icons that face the way they travel (D85) | Bases and supply lines as their own kinds, if wanted (units that stay put and lines with arrows cover them today) |
 | 8 Terrain and fictional worlds | Done | Earth's elevation with the sea floor and the ice sheets (D94); terrain colours and relief drawn by the graphics card, over the countries too, in the working view and exports (D95); sea level over time, with coasts, land and territory following it (D96); generated planets (D97); sculpting with twelve brushes, in the base world or dated (D98); rivers on the Earth and on planets (D99); the satellite look, with Earth's land cover and planets' biomes (D100); finer heights close in, downloaded as needed (D101) | Land cover finer than 10 km; terrain-aware drawing (Stage 12) |
 | 9 Environment and fields | Done | Conditions: field layers of radiation, fire, smoke, floods, destruction and heat, their sources rising, lasting and fading, circles and plumes, drawn by the graphics card (D102); fires, lava and floods spreading over the terrain (D103); disasters from templates in one click (D104); heatmaps from points, three thousand strikes at 4K (D105) | Raster and numerical layers from files; arrival-time fronts slowed by terrain |
-| 10 Presentation polish | In progress | Routes: campaign arrows and lines that flow (D106); text boxes and callouts (D107); looks for shots (D108) | TIFF and SVG (camera paths dropped: the camera stays still, D34) |
+| 10 Presentation polish | Mostly done | Routes: campaign arrows and lines that flow (D106); text boxes and callouts (D107); looks for shots (D108); TIFF sequences (D109) | SVG (left for later, D109); camera paths dropped (the camera stays still, D34) |
 | 11–13 | Not started | | Space maps (nearby stars to 50 light-years), smart brushes, branches and calendars |
 
 ## Tests
 
-All pass as of 18 November 2026 (316 unit and randomised tests in 58 files, 23 + 47 + 6 + 5 interface steps). The
+All pass as of 18 November 2026 (317 unit and randomised tests in 59 files, 23 + 48 + 6 + 5 interface steps). The
 interface tests run with the verify mode on (D57): everything the app works out from what was there before is also
 worked out afresh, and any difference stops the test.
 `sh scripts/check-all.sh` runs everything and prints ALL CHECKS PASSED only when every check passed.

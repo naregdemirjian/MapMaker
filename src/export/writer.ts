@@ -24,6 +24,8 @@ export interface ExportSettings {
   credits?: string[];
   /** Folder to export into (absolute path); empty or absent: the project's own exports folder. */
   exportDir?: string | null;
+  /** The files written (D109): 'png' (absent) or 'tiff' (either compression; the browser encodes them). */
+  format?: 'png' | 'tiff';
 }
 
 /** The folder a project's exports go into, unless a shot chooses another. */
@@ -59,7 +61,7 @@ export function startJob(projectDir: string, settings: ExportSettings): ExportJo
 }
 
 export function frameFileName(job: ExportJob, pass: string, frame: number): string {
-  return `${safe(job.settings.shotName)}_${safe(pass)}_${String(frame).padStart(6, '0')}.png`;
+  return `${safe(job.settings.shotName)}_${safe(pass)}_${String(frame).padStart(6, '0')}.${job.settings.format === 'tiff' ? 'tif' : 'png'}`;
 }
 
 /** Encode and write one frame of one pass. Returns the checksum of the pixels (for determinism checks). */
@@ -102,6 +104,31 @@ export function writeEncodedFrame(job: ExportJob, pass: string, frame: number, p
   return { file, sha256 };
 }
 
+/**
+ * Write one frame of one pass that arrives encoded as a TIFF by the browser (D109). Its directory must
+ * say the shot's size; the checksum is that of the file written.
+ */
+export function writeEncodedTiff(job: ExportJob, pass: string, frame: number, tiff: Uint8Array): { file: string; sha256: string } {
+  checkFrame(job, pass, frame);
+  const st = job.settings;
+  if (st.format !== 'tiff') throw new Error('This export writes PNG files.');
+  const v = new DataView(tiff.buffer, tiff.byteOffset, tiff.byteLength);
+  if (tiff.length < 16 || tiff[0] !== 0x49 || tiff[1] !== 0x49 || v.getUint16(2, true) !== 42) throw new Error('Not a TIFF file');
+  const ifd = v.getUint32(4, true), n = ifd + 2 <= tiff.length ? v.getUint16(ifd, true) : 0;
+  let w = -1, h = -1;
+  for (let i = 0; i < n && ifd + 2 + 12 * (i + 1) <= tiff.length; i++) {
+    const e = ifd + 2 + 12 * i, tag = v.getUint16(e, true);
+    if (tag === 256) w = v.getUint32(e + 8, true);
+    if (tag === 257) h = v.getUint32(e + 8, true);
+  }
+  if (w !== st.width || h !== st.height) throw new Error(`Frame is not ${st.width}x${st.height}`);
+  const sha256 = createHash('sha256').update(tiff).digest('hex');
+  const file = join(job.dir, safe(pass), frameFileName(job, pass, frame));
+  writeFileSync(file, tiff);
+  (job.checksums[pass] ??= {})[frame] = sha256;
+  return { file, sha256 };
+}
+
 /** Write a frame that is pixel for pixel the same as an earlier frame of the same pass: the file is copied. */
 export function repeatFrame(job: ExportJob, pass: string, frame: number, sameAs: number): { file: string; sha256: string } {
   checkFrame(job, pass, frame);
@@ -127,7 +154,7 @@ export function finishJob(job: ExportJob): { manifest: string; guide: string } {
     frames: [s.frameStart, s.frameEnd],
     historicalRange: s.historicalRange ?? null,
     transparentBackground: s.transparent,
-    alpha: 'straight (unpremultiplied), 8-bit PNG, sRGB',
+    alpha: s.format === 'tiff' ? 'straight (unassociated), 8-bit TIFF, sRGB' : 'straight (unpremultiplied), 8-bit PNG, sRGB',
     passes: s.passes,
     dataCredits: s.credits ?? [],
     checksums: job.checksums,
@@ -143,7 +170,7 @@ export function finishJob(job: ExportJob): { manifest: string; guide: string } {
     'In Premiere Pro:',
     '  1. File > Import, open a pass folder, select the first frame and tick "Image Sequence".',
     `  2. Right-click the clip > Modify > Interpret Footage: set the frame rate to ${s.fps} fps.`,
-    '     Alpha: leave as straight (the default for PNG).',
+    s.format === 'tiff' ? '     Alpha: straight (the TIFF files say so).' : '     Alpha: leave as straight (the default for PNG).',
     '  3. Stack the passes on video tracks in this order, bottom track first:',
     ...s.passes.map((p, i) => `       V${i + 1}  ${p.label.padEnd(22)} blend mode: ${p.blend}${p.note ? `  (${p.note})` : ''}`),
     '',
