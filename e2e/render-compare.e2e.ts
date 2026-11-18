@@ -641,6 +641,77 @@ try {
     assert.ok(r.seam <= 6, `no seam behind the front: the land along the old border is the new owner's colour (${r.seam} levels off ${r.own})`);
   });
 
+  await h.step('The globe: every place where the flat map has it, lit; nothing beyond its edge or from its far side; a pole and the 180° meridian without a seam; the flat picture kept while it turns', async () => {
+    const W = 1100, H = 640;
+    const r = await page.evaluate(({ W, H }) => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const layers = s.world.all('layer').filter((l: any) => l.space_id === s.spaceId && l.kind === 'partition').map((l: any) => l.id);
+      const t = B.gregorian.fromCivil({ year: 1990 });
+      const canvas = () => new OffscreenCanvas(W, H).getContext('2d', { willReadFrequently: true }) as OffscreenCanvasRenderingContext2D;
+      const a = canvas(), b = canvas();
+      const globe = new B.MapRenderer(), flat = new B.MapRenderer();
+      globe.caching = 'always';
+      const opaque = { passes: new Set(['background', 'land', 'fills']), transparent: false, layerIds: layers, basemap: s.basemap, show: { rivers: false } };
+      const px = (c: OffscreenCanvasRenderingContext2D, x: number, y: number) => Array.from(c.getImageData(Math.round(x), Math.round(y), 1, 1).data);
+      // The light the sphere is shaded with (globe-gl.ts), at a point of it.
+      const L = [-0.45, 0.55, 0.7], ll = Math.hypot(...L);
+      const shadeAt = (u: number, v: number) => { const z = Math.sqrt(Math.max(0, 1 - u * u - v * v)); const lit = 0.4 + 0.6 * Math.max(0, (u * L[0] + v * L[1] + z * L[2]) / ll); return 1 - 0.55 * (1 - lit); };
+      // 1. Places on the near side: the flat map's colour there, as lit.
+      const gv = B.makeView({ lon: 10, lat: 42, zoom: 0.5, rotation: 0, projection: 'globe' }, W, H);
+      globe.render(a, gv, s.world, s.engine, s.spaceId, t, opaque);
+      const first = globe.lastGlobe;
+      const R = gv.projection.scale();
+      const places: Array<[string, number, number]> = [['France', 2.5, 46.5], ['Spain', -3.7, 40.2], ['Poland', 19.4, 52.1], ['Ukraine', 31, 49], ['Turkey', 35, 39], ['Germany', 10.3, 51], ['Italy', 12.5, 42.8], ['Russia', 45, 58], ['Egypt', 29, 26.5]];
+      const worst: number[] = [];
+      for (const [, lon, lat] of places) {
+        const fv = B.makeView({ lon, lat, zoom: 3, rotation: 0, projection: 'equirectangular' }, W, H);
+        flat.render(b, fv, s.world, s.engine, s.spaceId, t, opaque);
+        const want = px(b, W / 2, H / 2);
+        const [x, y] = gv.projection([lon, lat]);
+        const got = px(a, x, y), k = shadeAt((x - W / 2) / R, -(y - H / 2) / R);
+        worst.push(Math.max(...[0, 1, 2].map((i) => Math.abs(got[i] - want[i] * k))));
+      }
+      // 2. Beyond the edge: in a picture without a background, nothing; and the far side gives no places or names.
+      const clear = { ...opaque, passes: new Set(['fills', 'borders', 'labels']), transparent: true };
+      globe.render(a, gv, s.world, s.engine, s.spaceId, t, clear);
+      let beyond = 0, n = 0;
+      for (let i = 0; i < 360; i += 3) { const q = (i * Math.PI) / 180; const x = W / 2 + Math.cos(q) * R * 1.04, y = H / 2 + Math.sin(q) * R * 1.04; if (x < 0 || y < 0 || x >= W || y >= H) continue; n++; if (px(a, x, y)[3] > 0) beyond++; }
+      const names = globe.lastLabels.filter((l: any) => l.drawn).map((l: any) => l.text);
+      const outside = globe.lastLabels.filter((l: any) => l.drawn && Math.hypot(l.x - W / 2, l.y - H / 2) > R).length;
+      const farSide = gv.projection([134, -25]); // Australia
+      // 3. A pole in view: the picture goes all the way round, and the pole is land or sea, not a hole.
+      const pv = B.makeView({ lon: 0, lat: 75, zoom: 0, rotation: 0, projection: 'globe' }, W, H);
+      globe.render(a, pv, s.world, s.engine, s.spaceId, t, opaque);
+      const pole = pv.projection([0, 90]), polePx = px(a, pole[0], pole[1]), round = globe.lastGlobe.round;
+      // 4. Across 180°: the open sea on both sides of the meridian the same.
+      const dv = B.makeView({ lon: 180, lat: 0, zoom: 1.5, rotation: 0, projection: 'globe' }, W, H);
+      globe.render(a, dv, s.world, s.engine, s.spaceId, t, opaque);
+      let seam = 0;
+      for (let lat = -8; lat <= 8; lat += 2) {
+        const [x, y] = dv.projection([180, lat]);
+        const mid = px(a, x, y), side = px(a, x + 3, y);
+        seam = Math.max(seam, ...[0, 1, 2].map((i) => Math.abs(mid[i] - side[i])));
+      }
+      // 5. Turned a little while moving (tipped 4° north): the flat picture kept, as it still holds all in
+      //    view (only the sphere drawn again); at rest, drawn for the view.
+      const mv = (lat: number) => B.makeView({ lon: 10, lat, zoom: 0.5, rotation: 0, projection: 'globe' }, W, H);
+      globe.render(a, mv(42), s.world, s.engine, s.spaceId, t, opaque);
+      globe.render(a, mv(46), s.world, s.engine, s.spaceId, t, { ...opaque, moving: true });
+      const moving = { reused: globe.lastGlobe.reused, approximate: globe.lastApproximate, ms: Math.round(globe.lastGlobe.ms) };
+      globe.render(a, mv(46), s.world, s.engine, s.spaceId, t, opaque);
+      const rest = { approximate: globe.lastApproximate };
+      return { worst, beyond, n, names, outside, farSide, polePx, round, seam, moving, rest, first };
+    }, { W, H });
+    console.log(`    places off their lit colour by at most ${Math.max(...r.worst).toFixed(1)} levels; ${r.beyond}/${r.n} points beyond the edge drawn; ${r.names.length} names (${r.outside} off the globe); pole ${JSON.stringify(r.polePx)} (all round: ${r.round}); across 180° ${r.seam}; turning: ${JSON.stringify(r.moving)}, at rest ${JSON.stringify(r.rest)}; first picture ${JSON.stringify(r.first)}`);
+    assert.ok(Math.max(...r.worst) <= 8, `each place has the flat map's colour, lit (${r.worst.map((w: number) => w.toFixed(1)).join(', ')})`);
+    assert.equal(r.beyond, 0, 'nothing beyond the globe in a picture without a background');
+    assert.ok(r.names.includes('France') && r.names.includes('Egypt') && !r.names.includes('Australia') && r.outside === 0, `names of the near side only, on the globe (${r.names.length})`);
+    assert.equal(r.farSide, null, 'a place on the far side has no place on the frame');
+    assert.ok(r.round && r.polePx[3] === 255 && r.polePx[0] + r.polePx[1] + r.polePx[2] > 30, `the pole drawn (${r.polePx})`);
+    assert.ok(r.seam <= 6, `no seam along 180° (${r.seam})`);
+    assert.ok(r.moving.reused && r.moving.approximate && !r.rest.approximate, 'the flat picture kept while turning, drawn afresh at rest');
+  });
+
   await h.finish();
 } catch (e) {
   await h.finish(e);

@@ -41,7 +41,7 @@ while Map Maker is closed. Don't keep projects inside OneDrive or Dropbox while 
   each layer on its own), at HD, 4K, 8K or any size and frame rate; or one MP4 (H.264) or WebM (VP9) video to play
   and share; or a single frame as an editable SVG file. "+ Whole history" makes a timelapse of everything in one click.
 - Shots in their own look (Parchment, Atlas, Night, Blueprint, Minimal, Wartime…), with text boxes and callouts,
-  campaign arrows and routes that flow.
+  campaign arrows and routes that flow; on a flat map or on a globe that turns, lit, with the air's glow round it.
 - Play history in the working view, from a month to a thousand years a second.
 - Import borders from GeoJSON files: one map for each year, or a dataset that dates each shape (such as CShapes); the
   same border drawn again in another file follows the one already on the map.

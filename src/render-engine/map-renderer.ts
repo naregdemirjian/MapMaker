@@ -9,11 +9,12 @@
 import { geoPath, geoCircle, geoCentroid, geoArea, type GeoPermissibleObjects } from 'd3-geo';
 import type { World } from '../world-model/world.ts';
 import type { Engine, FaceState, Assignment, CompiledTransition } from '../temporal-engine/engine.ts';
+import { globeGL, globeInView } from './globe-gl.ts';
 import { parseJSON, slerpLonLat } from '../temporal-engine/engine.ts';
 import { type Instant, compare, diffMs } from '../core-time/index.ts';
 import { BASE_EVENT_ID } from '../world-model/schema.ts';
 import type { Vec3 } from '../geo-kernel/vec.ts';
-import { screenToLonLat, meridianOf, FLAT_EXTENT_DEG, type View } from './camera.ts';
+import { screenToLonLat, meridianOf, makeView, FLAT_EXTENT_DEG, type View, type Camera } from './camera.ts';
 import type { Arrangement } from '../geo-kernel/arrangement.ts';
 import { BasemapPainter, chooseScale, landMaskOf, visibleBounds, boxIntersects, drawRiverLines, DEFAULT_BASEMAP_STYLE, type Basemap, type BasemapStyle, type LandMask, type RiverSet } from './basemap.ts';
 import { planeShape, placeLabel, lineChoices, textWidthEm, blockHeightEm, LINE_HEIGHT, type PlaneShape } from './label-place.ts';
@@ -63,6 +64,13 @@ export interface TerrainShown {
   detail?: DetailGrid | null;
 }
 const rgbOf = ([r, g, b]: [number, number, number]) => `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
+/** A CSS colour given as #rgb, #rrggbb or rgb()/rgba(), as 0-255 values (null for anything else). */
+function parseCss(c: string): [number, number, number] | null {
+  const h = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(c.trim());
+  if (h) { const x = h[1].length === 3 ? h[1].split('').map((d) => d + d).join('') : h[1]; return [0, 2, 4].map((i) => parseInt(x.slice(i, i + 2), 16)) as [number, number, number]; }
+  const r = /^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)/i.exec(c.trim());
+  return r ? [Number(r[1]), Number(r[2]), Number(r[3])] : null;
+}
 /** Spreads worked out (D103), the last few hundred: each once for its source's settings, place and the heights. */
 const spreads = new Map<string, SpreadRaster>();
 function spreadFor(kind: SpreadKind, s: FieldSource, centre: [number, number], grid: ElevationGrid, gridKey: string, planetKm: number): SpreadRaster {
@@ -175,6 +183,11 @@ export interface RenderOptions {
    * such a frame on a large map, for places nobody sees for longer than that frame.
    */
   hurried?: boolean;
+  /**
+   * (The globe, D127) Texts are placed but not drawn: the globe draws the names upright over the
+   * sphere from where they were placed on its flat picture.
+   */
+  textsApart?: boolean;
 }
 
 /** Where the map's plane lies on the canvas: the transform's linear part, the plane's origin in device pixels and its scale. */
@@ -455,6 +468,14 @@ export class MapRenderer {
   /** The field layers drawn last (D102): how many sources each had in force, and how many rectangles were drawn (for the tests). */
   lastFields: Array<{ layer: string; sources: number; drawn: number }> = [];
   lastLabels: LabelInfo[] = [];
+  /** The cities of the last frame as placed (with their dots' sizes), for the globe (D127). */
+  private lastCityItems: CityItem[] = [];
+  /** The last globe drawn (D127): its flat picture's size, pixels to a radian, whether it went all the way round, and the time it took (ms). */
+  lastGlobe: { picture: [number, number]; perRad: number; round: boolean; ms: number; reused: boolean } | null = null;
+  private globeFlat: MapRenderer | null = null;
+  /** The flat picture last laid on the globe: where it lies, what it shows (see renderGlobe). */
+  private globeLast: { content: string; west: number; east: number; south: number; north: number; round: boolean; pw: number; ph: number; lonMid: number; latMid: number; perRad: number } | null = null;
+  private globePicture: { canvas: OffscreenCanvas; ctx: CanvasRenderingContext2D } | null = null;
   /** The characters drawn in the last frame, where (screen) and on the map, for picking and tests. */
   /** (r: how far the marker or icon reaches from its middle, in design pixels; icon: its icon, 'picture' or 'marker'.) */
   lastCharacters: Array<{ entity: string; name: string; x: number; y: number; lon: number; lat: number; moving: boolean; r: number; icon: string; angle: number; mirror: boolean; color: string }> = [];
@@ -1641,6 +1662,7 @@ export class MapRenderer {
   // ---------------------------------------------------------------- a frame
 
   render(ctx: CanvasRenderingContext2D, view: View, world: World, engine: Engine, spaceId: string, t: Instant, opts: RenderOptions): void {
+    if (view.camera.projection === 'globe') { this.renderGlobe(ctx, view, world, engine, spaceId, t, opts); return; }
     const style = opts.style ?? DEFAULT_STYLE;
     const arr = world.arrangement(spaceId);
     const u = view.unit;
@@ -2196,9 +2218,10 @@ export class MapRenderer {
     const cities = placesText && layout.cities ? this.cityItems(view, engine, spaceId, t, entities) : [];
     if (placesText) this.placeTexts(ctx, labels, cities);
     this.lastCities = cities.map((c) => ({ entity: c.entity, name: c.name, x: c.x, y: c.y, lon: c.lon, lat: c.lat, moving: false, named: c.drawn, box: c.box }));
-    if (opts.passes.has('cities')) this.drawCities(ctx, cities, u);
-    if (opts.passes.has('labels')) this.drawLabels(ctx, labels, style, u);
+    if (opts.passes.has('cities') && !opts.textsApart) this.drawCities(ctx, cities, u);
+    if (opts.passes.has('labels') && !opts.textsApart) this.drawLabels(ctx, labels, style, u);
     this.lastLabels = labels;
+    this.lastCityItems = cities;
     this.lastCharacters = [];
     this.lastTrails = 0;
     if (opts.passes.has('characters')) this.drawCharacters(ctx, view, engine, spaceId, t, entities, !!opts.trails);
@@ -2925,6 +2948,147 @@ export class MapRenderer {
       paint(lc, g.a.value, area);
     }
     lc.restore();
+  }
+
+  /**
+   * The globe (D127): the part of the planet in view drawn flat (an equirectangular picture, by a
+   * renderer of its own, as many pixels to a radian as the globe has at its middle) and laid onto the
+   * sphere by the graphics card (globe-gl.ts). Country and city names are placed on the flat picture
+   * and drawn upright over the sphere, where their places are, placed again so that none overlap.
+   */
+  private renderGlobe(ctx: CanvasRenderingContext2D, view: View, world: World, engine: Engine, spaceId: string, t: Instant, opts: RenderOptions): void {
+    const started = performance.now();
+    const style = opts.style ?? DEFAULT_STYLE;
+    const m = ctx.getTransform();
+    const k = Math.hypot(m.a, m.b) || 1;
+    const W = ctx.canvas.width, H = ctx.canvas.height;
+    const cam = view.camera, RAD = Math.PI / 180;
+    const Rv = view.projection.scale(), R = Rv * k;
+    const cx = m.a * (view.width / 2) + m.c * (view.height / 2) + m.e, cy = m.b * (view.width / 2) + m.d * (view.height / 2) + m.f;
+    const lat0d = Math.max(-89.9, Math.min(89.9, cam.lat));
+    const lon0 = cam.lon * RAD, lat0 = lat0d * RAD, roll = (view.rotation ?? 0) * RAD + Math.atan2(m.b, m.a);
+    // The frame's area is cleared (as any frame not opening with a kept picture).
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    const fx0 = Math.max(0, Math.floor(m.e)), fy0 = Math.max(0, Math.floor(m.f));
+    const fx1 = Math.min(W, Math.ceil(m.e + m.a * view.width)), fy1 = Math.min(H, Math.ceil(m.f + m.d * view.height));
+    ctx.clearRect(fx0, fy0, fx1 - fx0, fy1 - fy0);
+    ctx.restore();
+    this.lastLabels = []; this.lastCities = []; this.lastCharacters = []; this.lastFeatures = []; this.lastTransitions = []; this.lastFronts = [];
+    this.lastApproximate = false; this.lastParts = { globe: 'drawn' };
+    const gl = globeGL();
+    // (Without WebGL2 there is no globe: the flat map, centred on the same place, rather than nothing.)
+    if (!gl) { this.lastGlobe = null; this.render(ctx, makeView({ ...cam, projection: 'equirectangular' }, view.width, view.height), world, engine, spaceId, t, opts); return; }
+    const area = globeInView(W, H, cx, cy, R, lon0, lat0, roll);
+    if (!area) { this.lastGlobe = null; return; }
+    // What the flat picture shows (it is drawn again when any of this changes).
+    const content = `${engine.revision}|${world.revision}|${spaceId}|${t.day}|${t.ms}|${[...opts.passes].join(',')}|${opts.layerIds.join(',')}|${opts.transparent ? 1 : 0}|${opts.basemap ? `${opts.basemap.version}|${opts.basemap.scales.length}` : '-'}|${JSON.stringify(opts.style ?? null)}|${JSON.stringify(opts.basemapStyle ?? null)}|${JSON.stringify(opts.show ?? null)}|${opts.terrain ? `${JSON.stringify(opts.terrain.look)}|${opts.terrain.detail?.key ?? ''}|${opts.terrain.seaLevel ?? 0}` : '-'}|${JSON.stringify(opts.transitions ?? null)}|${opts.mediaSeconds ?? 0}|${opts.trails ? 1 : 0}|${JSON.stringify(opts.layout ?? null)}|${opts.hurried ? 1 : 0}|${assetEpoch()}|${view.unit * k}`;
+    // The flat picture: around the middle of what is in view (on a grid of 2 degrees, and its pixels to a
+    // radian on steps of an eighth of a doubling, so that the same picture serves while the globe turns a
+    // little), within what the graphics card takes.
+    const STEP = 2 * RAD;
+    let west: number, east: number;
+    if (area.round) { west = -Math.PI; east = Math.PI; }
+    else { west = Math.floor((lon0 + area.west) / STEP) * STEP; east = Math.ceil((lon0 + area.east) / STEP) * STEP; }
+    const south = Math.max(-Math.PI / 2, Math.floor(area.south / STEP) * STEP), north = Math.min(Math.PI / 2, Math.ceil(area.north / STEP) * STEP);
+    const limit = Math.min(gl.maxTexture, 8192);
+    let perRad = 2 ** (Math.ceil(Math.log2(Math.max(1, R)) * 8) / 8);
+    perRad = Math.min(perRad, limit / (east - west), limit / (north - south), Math.sqrt(40e6 / ((east - west) * (north - south))));
+    let pw = Math.max(2, Math.ceil((east - west) * perRad)), ph = Math.max(2, Math.ceil((north - south) * perRad));
+    // (All the way round: exactly, so the picture's two ends meet.)
+    if (area.round) perRad = pw / (2 * Math.PI);
+    let lonMid = (west + east) / 2, latMid = (north + south) / 2;
+    // The last picture serves again: when it is this very picture, or while the view moves, when it
+    // holds all that is in view and is about as sharp (the view is drawn afresh once it rests).
+    const last = this.globeLast;
+    let reuse = false;
+    if (last && last.content === content) {
+      if (last.pw === pw && last.ph === ph && last.lonMid === lonMid && last.latMid === latMid && last.perRad === perRad) reuse = true;
+      else if (opts.moving && last.perRad >= 0.6 * R && last.perRad <= 2.5 * R && area.south >= last.south && area.north <= last.north) {
+        const d = ((((lon0 + area.west - last.west) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI));
+        if (last.round || d + (area.east - area.west) <= last.east - last.west) { reuse = true; this.lastApproximate = true; }
+      }
+    }
+    const inner = (this.globeFlat ??= new MapRenderer());
+    let pc = this.globePicture;
+    if (reuse && last && pc) ({ pw, ph, lonMid, latMid, perRad } = last);
+    else {
+      const flatCam: Camera = { lon: lonMid / RAD, lat: latMid / RAD, zoom: 0, rotation: 0, projection: 'equirectangular' };
+      // (makeView fits 0.96 of the world's width at zoom 0: the zoom that gives perRad.)
+      const unitWorld = 2 * Math.PI * (359.998 / 360);
+      flatCam.zoom = Math.log2((perRad * unitWorld) / (0.96 * pw));
+      const flat = makeView(flatCam, pw, ph);
+      // Lines and names as wide and as large at the globe's middle as on a flat map of the frame's size.
+      flat.unit = view.unit * k * (perRad / R);
+      flat.key += `|u${flat.unit.toFixed(5)}`;
+      if (!pc || pc.canvas.width !== pw || pc.canvas.height !== ph) {
+        const canvas = new OffscreenCanvas(pw, ph);
+        pc = this.globePicture = { canvas, ctx: canvas.getContext('2d') as unknown as CanvasRenderingContext2D };
+      }
+      pc.ctx.setTransform(1, 0, 0, 1, 0, 0);
+      pc.ctx.clearRect(0, 0, pw, ph);
+      inner.quality = this.quality;
+      inner.caching = this.caching === 'off' ? 'off' : 'always';
+      inner.render(pc.ctx, flat, world, engine, spaceId, t, { ...opts, moving: false, holdNames: false, fillAround: false, textsApart: true });
+      this.globeLast = { content, west: area.round ? -Math.PI : lon0 + area.west, east: area.round ? Math.PI : lon0 + area.east, south: area.south, north: area.north, round: area.round, pw, ph, lonMid, latMid, perRad };
+      if (area.round) Object.assign(this.globeLast, { west, east, south, north });
+    }
+    const textsWanted = opts.passes.has('labels') || opts.passes.has('cities');
+    this.lastTransitions = inner.lastTransitions;
+    this.lastFronts = inner.lastFronts;
+    // The sphere: lit, and in a picture with a background, with the air's glow and space around it.
+    const background = opts.passes.has('background') && !opts.transparent;
+    const ocean = parseCss(style.ocean) ?? [20, 50, 74];
+    const air: [number, number, number] = [0.55 + 0.45 * (ocean[0] / 255) * 0.3, 0.72 + 0.28 * (ocean[1] / 255) * 0.3, 0.95];
+    const out = gl.draw(
+      { image: pc!.canvas, width: pw, height: ph, lonMid, latMid, perRad, round: reuse && last ? last.round : area.round },
+      {
+        width: W, height: H, cx, cy, R, lon0, lat0, roll, shade: 0.55,
+        air: background ? { rgb: air, width: Math.max(4, 0.06 * R) } : null,
+        space: background ? [(ocean[0] / 255) * 0.22, (ocean[1] / 255) * 0.22, (ocean[2] / 255) * 0.26, 1] : null,
+      },
+      !reuse,
+    );
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(out as unknown as CanvasImageSource, 0, 0);
+    ctx.restore();
+    // Names over the sphere, upright: from their places on the flat picture, where those face the viewer.
+    if (textsWanted) {
+      const toLonLat = (x: number, y: number): [number, number] => [(lonMid + (x - pw / 2) / perRad) / RAD, (latMid - (y - ph / 2) / perRad) / RAD];
+      const c0 = Math.cos(lat0), s0 = Math.sin(lat0);
+      const facing = (lon: number, lat: number) => { const la = lat * RAD; return s0 * Math.sin(la) + c0 * Math.cos(la) * Math.cos(lon * RAD - lon0); };
+      const f = Rv / perRad; // view pixels for a pixel of the flat picture, at the globe's middle
+      const labels: LabelInfo[] = [];
+      for (const l of inner.lastLabels) {
+        const [lon, lat] = toLonLat(l.x, l.y);
+        // (Names far round towards the edge are left out: there they would lie on land seen edge-on.)
+        if (facing(lon, lat) < 0.25) continue;
+        const p = view.projection([lon, lat]);
+        if (!p) continue;
+        labels.push({ ...l, x: p[0], y: p[1], size: l.size * f, drawn: false, box: undefined });
+      }
+      const cities: CityItem[] = [];
+      for (const c of inner.lastCityItems) {
+        if (facing(c.lon, c.lat) < 0.15) continue;
+        const p = view.projection([c.lon, c.lat]);
+        if (!p) continue;
+        cities.push({ ...c, x: p[0], y: p[1], tx: p[0], ty: p[1], r: c.r * f, size: c.size * f, drawn: false, box: undefined });
+      }
+      ctx.save();
+      if (view.rotation) {
+        ctx.translate(view.width / 2, view.height / 2);
+        ctx.rotate((view.rotation * Math.PI) / 180);
+        ctx.translate(-view.width / 2, -view.height / 2);
+      }
+      this.placeTexts(ctx, labels, cities);
+      if (opts.passes.has('cities')) this.drawCities(ctx, cities, view.unit);
+      if (opts.passes.has('labels')) this.drawLabels(ctx, labels, style, view.unit);
+      ctx.restore();
+      this.lastLabels = labels;
+      this.lastCities = cities.map((c) => ({ entity: c.entity, name: c.name, x: c.x, y: c.y, lon: c.lon, lat: c.lat, moving: false, named: c.drawn, box: c.box }));
+    }
+    this.lastGlobe = { picture: [pw, ph], perRad, round: reuse && last ? last.round : area.round, ms: performance.now() - started, reused: reuse };
   }
 
   private ownLandCache = new Map<string, number[]>();

@@ -1,10 +1,13 @@
 // Camera and projections. The map is always flat; the camera chooses the projection, the centre,
 // the zoom and a 2D rotation. Layouts are defined for a 1920-pixel-wide design frame and scale with
 // the output size, so a preview and an 8K export show exactly the same picture.
-import { geoEquirectangular, geoEqualEarth, geoMercator, geoNaturalEarth1, geoGnomonic, type GeoProjection } from 'd3-geo';
+import { geoEquirectangular, geoEqualEarth, geoMercator, geoNaturalEarth1, geoGnomonic, geoOrthographic, type GeoProjection } from 'd3-geo';
 
-/** Projections for round maps; 'flat' is the plan view of a flat map (a city, a region). */
-export type ProjectionName = 'equirectangular' | 'equalEarth' | 'naturalEarth' | 'mercator' | 'flat';
+/**
+ * Projections for round maps; 'flat' is the plan view of a flat map (a city, a region); 'globe' is the
+ * planet seen as a ball from afar (orthographic, D127): drawn from a flat picture of the part in view.
+ */
+export type ProjectionName = 'equirectangular' | 'equalEarth' | 'naturalEarth' | 'mercator' | 'flat' | 'globe';
 export interface Camera {
   lon: number; lat: number; zoom: number; rotation: number; projection: ProjectionName;
   /**
@@ -30,6 +33,7 @@ export const PROJECTIONS: Array<{ id: ProjectionName; name: string }> = [
   { id: 'equalEarth', name: 'Equal Earth (world overview)' },
   { id: 'naturalEarth', name: 'Natural Earth (world overview)' },
   { id: 'mercator', name: 'Mercator (regional shapes; poles cut off)' },
+  { id: 'globe', name: 'Globe (the planet as a ball, turning)' },
 ];
 
 export const defaultCamera = (): Camera => ({ lon: 0, lat: 0, zoom: 0, rotation: 0, projection: 'equirectangular' });
@@ -65,7 +69,31 @@ export interface View {
 /** What a view is of: the camera (without a held meridian) and the size of the frame. */
 export const cameraKey = (cam: Camera, width: number, height: number): string => `${cam.projection}|${cam.lon}|${cam.lat}|${cam.zoom}|${cam.rotation}|${width}x${height}`;
 
+/** The globe's radius (pixels) at zoom 0: it fills most of the frame's height. */
+export const GLOBE_FILL = 0.46;
+
+/**
+ * A projection that gives no point for places on the far side of the globe (d3's orthographic
+ * projection gives one for every place; its clipping applies to shapes only).
+ */
+function nearSideOnly(p: GeoProjection, lon0: number, lat0: number): GeoProjection {
+  const r = Math.PI / 180, c0 = Math.cos(lat0 * r), s0 = Math.sin(lat0 * r);
+  const f = ((pt: [number, number]) => {
+    const la = pt[1] * r, dl = (pt[0] - lon0) * r;
+    if (s0 * Math.sin(la) + c0 * Math.cos(la) * Math.cos(dl) < 0) return null;
+    return p(pt);
+  }) as unknown as GeoProjection;
+  Object.assign(f, p);
+  return f;
+}
+
 export function makeView(cam: Camera, width: number, height: number): View {
+  if (cam.projection === 'globe') {
+    const lat = Math.max(-89.9, Math.min(89.9, cam.lat));
+    const R = GLOBE_FILL * Math.min(width, height) * Math.pow(2, cam.zoom);
+    const p = geoOrthographic().rotate([-cam.lon, -lat, 0]).clipAngle(90).precision(0.25).scale(R).translate([width / 2, height / 2]);
+    return { projection: nearSideOnly(p, cam.lon, lat), width, height, rotation: cam.rotation, unit: width / DESIGN_WIDTH, camera: cam, key: cameraKey(cam, width, height) };
+  }
   const flat = cam.projection === 'flat';
   // A flat map's plan is centred on (0, 0) and never turned; round maps turn to the camera's
   // longitude (or to the meridian it holds, see Camera.meridian).
@@ -154,6 +182,13 @@ export function panCamera(cam: Camera, v: View, dx: number, dy: number): Camera 
   }
   const [ux, uy] = rotatePoint(dx, dy, 0, 0, -cam.rotation);
   const degPerPx = (180 / Math.PI) / v.projection.scale();
+  // A globe turns under the pointer: east and west by the degrees of longitude the move spans at the
+  // middle's latitude; it can be turned to look straight down on a pole.
+  if (cam.projection === 'globe') {
+    const lat = Math.max(-89, Math.min(89, cam.lat + uy * degPerPx));
+    const lon = cam.lon - (ux * degPerPx) / Math.max(0.15, Math.cos((cam.lat * Math.PI) / 180));
+    return { ...cam, lon: ((lon + 540) % 360) - 180, lat };
+  }
   let lon = cam.lon - ux * degPerPx;
   lon = ((lon + 540) % 360) - 180;
   const lat = Math.max(-85, Math.min(85, cam.lat + uy * degPerPx));

@@ -196,9 +196,16 @@ export async function svgFrame(o: SvgFrameOptions): Promise<SvgFrame> {
     };
     const under = picture(['background', 'terrain', 'graticule', 'land'], !shot.transparent);
     if (under) mapLayers.push(layer('background', 'Sea, terrain, grid and land (picture)', frameImage(under, W, H)));
+    // A globe (D127) is a flat picture laid onto a sphere: its territories and what lies on them come as
+    // pictures too (the texts over the frame stay editable).
+    const globe = view.camera.projection === 'globe';
+    if (globe) {
+      const sphere = picture(['fills', 'borders', 'features'], false);
+      if (sphere) mapLayers.push(layer('globe', 'Territories, borders, areas and lines on the globe (picture)', frameImage(sphere, W, H)));
+    }
 
     // Territories and borders, layer by layer, as shapes.
-    const masks = options.passes.has('fills') || options.passes.has('borders') ? pictures.svgMasks(view, shot.spaceId, options) : null;
+    const masks = !globe && (options.passes.has('fills') || options.passes.has('borders')) ? pictures.svgMasks(view, shot.spaceId, options) : null;
     const maskDef = (id: string, c: OffscreenCanvas | null) => {
       if (!c) return false;
       const f = frameCanvas(W, H);
@@ -219,7 +226,7 @@ export async function svgFrame(o: SvgFrameOptions): Promise<SvgFrame> {
     };
     const fillLayers: string[] = [], borderLayers: string[] = [];
     let n = 0;
-    for (const layerId of options.layerIds) {
+    for (const layerId of globe ? [] : options.layerIds) {
       const row = world.get('layer', layerId);
       if (!row || row.kind !== 'partition' || row.space_id !== shot.spaceId) continue;
       n++;
@@ -369,10 +376,15 @@ export async function svgFrame(o: SvgFrameOptions): Promise<SvgFrame> {
       defs.push(pen.defs());
       return pen.body();
     };
-    mapLayers.push(layer('features', 'Areas, lines and points', drawn('features', 'ft')));
-    mapLayers.push(layer('cities', 'Cities', drawn('cities', 'ct')));
-    mapLayers.push(layer('labels', 'Labels', drawn('labels', 'lb')));
-    mapLayers.push(layer('characters', 'Characters', drawn('characters', 'ch')));
+    if (globe) {
+      const names = picture(['cities', 'labels', 'characters'], false);
+      if (names) mapLayers.push(layer('names', 'Cities, names and characters (picture)', frameImage(names, W, H)));
+    } else {
+      mapLayers.push(layer('features', 'Areas, lines and points', drawn('features', 'ft')));
+      mapLayers.push(layer('cities', 'Cities', drawn('cities', 'ct')));
+      mapLayers.push(layer('labels', 'Labels', drawn('labels', 'lb')));
+      mapLayers.push(layer('characters', 'Characters', drawn('characters', 'ch')));
+    }
   }
 
   // The look (D108): its grade over the whole map; its darker edges and paper laid on top.

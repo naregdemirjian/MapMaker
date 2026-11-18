@@ -2925,6 +2925,52 @@ try {
     assert.deepEqual(clips, setup.clips, 'each layer ends at the coast as before');
   });
 
+  await h.step('A shot on the globe (D127): the projection chosen, the preview dragged to turn the planet, exported as frames and as an SVG frame; undone', async () => {
+    await page.getByTestId('mode-world').click();
+    const shotId = await page.evaluate(([a]) => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const settings = B.defaultShot(s.spaceId, { lon: a[0], lat: a[1], zoom: 0.3, rotation: 0, projection: 'equirectangular' }, B.gregorian.fromCivil({ year: 1760 }), B.gregorian.fromCivil({ year: 1760 }), 24, 0.25);
+      settings.transparent = false;
+      const id = s.execute((w: any) => B.commands.createSequence(w, 'Round', settings));
+      s.set({ shotId: id, shotFrame: 0, presentCamera: null, mode: 'present' });
+      return id as string;
+    }, [P.a] as const);
+    await page.getByTestId('shot-editor').waitFor();
+    await page.getByLabel('Projection').selectOption('globe');
+    const cam = () => page.evaluate((id) => JSON.parse((window as any).__mapmaker.store.world.get('sequence', id).settings).camera[0].camera, shotId) as Promise<{ lon: number; lat: number; projection: string }>;
+    assert.equal((await cam()).projection, 'globe');
+    await page.waitForFunction(() => !!(window as any).__mapmaker.store.renderer.lastGlobe);
+    await h.screenshot('globe-shot');
+    // Dragged to the left, the planet turns: the middle moves east.
+    const before = await cam();
+    const box = (await page.getByTestId('map-canvas').boundingBox())!;
+    const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
+    await page.mouse.move(cx, cy);
+    await page.mouse.down();
+    for (let i = 1; i <= 8; i++) await page.mouse.move(cx - i * 20, cy);
+    await page.mouse.up();
+    await page.waitForFunction(([id, lon]) => {
+      const s = (window as any).__mapmaker.store, c = s.presentCamera ?? JSON.parse(s.world.get('sequence', id).settings).camera[0].camera;
+      return ((c.lon - lon + 540) % 360) - 180 > 5;
+    }, [shotId, before.lon] as const);
+    // Frames: the globe in the middle, space round it.
+    const r = await exportShot('export-preview');
+    const img = readPNG(r.frames('all')[0]);
+    const mid = pixel(img, Math.floor(img.width / 2), Math.floor(img.height / 2)), corner = pixel(img, 2, 2);
+    assert.equal(mid[3], 255, 'the globe in the middle');
+    assert.ok(corner[3] === 255 && corner[0] + corner[1] + corner[2] < 80, `space round it (${corner})`);
+    // An SVG frame: the globe as pictures, the date as text.
+    await page.getByTestId('export-svg').click();
+    await page.getByTestId('svg-result').waitFor({ timeout: 120000 });
+    const svg = readFileSync(((await page.locator('[data-testid=svg-result] .path').textContent()) ?? '').trim(), 'utf8');
+    assert.match(svg, /<g id="globe" inkscape:groupmode="layer"/);
+    assert.ok(/<text/.test(svg) && svg.includes('1760'), 'the date as text');
+    // Undone: the shot.
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ mode: 'world', shotId: null, presentCamera: null }));
+    for (let i = 0; i < 12 && (await page.evaluate((id) => !!(window as any).__mapmaker.store.world.get('sequence', id), shotId)); i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await page.evaluate((id) => !!(window as any).__mapmaker.store.world.get('sequence', id), shotId), false);
+  });
+
   await h.step('A star map: the stars within 50 light-years in three dimensions; a star chosen and its panel; turned, zoomed and centred; star systems held by a country from a date; a lane between two stars; a shot of it exported; back to Earth', async () => {
     await page.getByTestId('mode-world').click();
     await page.getByRole('button', { name: '+ Map' }).click();

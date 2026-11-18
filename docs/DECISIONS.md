@@ -61,6 +61,36 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D127. A globe that turns, for shots (improvement pass)
+
+- **What.** "Globe (the planet as a ball, turning)" among a shot's projections: the planet seen from afar
+  (orthographic), lit from the upper left, with a rim and a glow of air round its edge and dark space behind it in
+  pictures with a background (nothing behind it in transparent ones). Dragging the preview turns it (east and west
+  by the longitude the move spans at the middle's latitude; it can look straight down on a pole); the wheel zooms
+  in until it is a close view of a region on a curved planet. Every pass, export format, video, and the shot's
+  camera moves work as for flat maps.
+- **How.** The renderer draws the part of the planet in view flat, as for any other view (an equirectangular
+  picture around its middle, with a renderer of its own), as many pixels to a radian as the globe has at its
+  middle (within the graphics card's limit and 40 million pixels); with a pole in view the picture goes all the way
+  round. The graphics card then lays it onto the sphere (`globe-gl.ts`): for each pixel of the frame the shader
+  finds the place it shows and reads the picture there, with mipmaps and anisotropic filtering so land sloping away
+  towards the edge stays clean. So territories, animations, borders, terrain, conditions, routes and characters are
+  drawn by the same code as on flat maps. Country and city names are placed on the flat picture and drawn upright
+  over the sphere where their places are (placed again there so that none overlap; those far round towards the
+  edge, on land seen edge-on, are left out): painted on the picture, those near the poles would be squeezed.
+- **Speed.** The flat picture's middle is on a grid of 2 degrees and its pixels to a radian on steps of an eighth
+  of a doubling, so the same picture serves while the globe turns a little; while the preview is being dragged,
+  the last picture serves for as long as it holds all in view (only the sphere is drawn again, about 60 ms a frame
+  here in software, much less on a graphics card), and the view is drawn afresh at rest. A first picture of
+  today's 242 countries at 1100 x 640: about 0.4 s here.
+- **Not done.** The working view stays flat (the drawing tools work in a flat map's terms). An SVG frame of a globe
+  holds the globe as pictures (the texts over the frame stay editable): it cannot keep flat shapes.
+- **Tested.** render-compare: places where the flat map has them, lit, within 1.3 levels of colour; nothing beyond
+  the edge in a picture without a background; only near-side names, none off the globe; a place on the far side
+  has no place on the frame; the pole drawn; across 180° no seam; the flat picture kept while turning and drawn
+  afresh at rest. workflows: chosen in the shot editor, dragged to turn, exported as frames (the globe in the
+  middle, space round it) and as an SVG frame.
+
 ### D126. Borders while fronts move; two changes meeting (improvement pass)
 
 - **Found.** An advancing front from a border (the default "Advancing front", and fronts from several starting

@@ -9,7 +9,8 @@
 import { geoEquirectangular, geoEqualEarth, geoMercator, geoNaturalEarth1, geoGnomonic, type GeoProjection } from 'd3-geo';
 import type { ProjectionName } from './camera.ts';
 
-const factories = { equirectangular: geoEquirectangular, equalEarth: geoEqualEarth, naturalEarth: geoNaturalEarth1, mercator: geoMercator, flat: geoGnomonic };
+// (A globe's labels are placed on the flat picture it is drawn from, D127: equirectangular.)
+const factories = { equirectangular: geoEquirectangular, equalEarth: geoEqualEarth, naturalEarth: geoNaturalEarth1, mercator: geoMercator, flat: geoGnomonic, globe: geoEquirectangular };
 const RAD = Math.PI / 180;
 
 /** A territory's outline in a projection's plane (scale 1), centred on the territory. */
