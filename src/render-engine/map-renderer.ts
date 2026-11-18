@@ -381,6 +381,8 @@ export class MapRenderer {
   lastCities: Array<{ entity: string; name: string; x: number; y: number; lon: number; lat: number; moving: boolean; named: boolean; box?: [number, number, number, number] }> = [];
   /** The animated changes drawn in the last frame (style and eased progress), for checks and tests. */
   lastTransitions: Array<{ style: string; progress: number }> = [];
+  /** The wars shown as front lines in the last frame (D89): on which layer, drawn from whose side, teeth toward whom. */
+  lastFronts: Array<{ layerId: string; from: string; toward: string }> = [];
   /** For benchmarks and tests: how many sheets have been made, and snapshots of layers worked out. */
   stats = { sheets: 0, snaps: 0, snapsFollowed: 0 };
 
@@ -1564,8 +1566,9 @@ export class MapRenderer {
     const layout = opts.layout ?? { labels: opts.passes.has('labels'), cities: opts.passes.has('cities') };
     const placesText = opts.passes.has('labels') || opts.passes.has('cities');
     const drawsLayers = opts.passes.has('fills') || opts.passes.has('borders') || (placesText && layout.labels);
-    type LayerStyle = { fillOpacity?: number; borderWidth?: number; clipToLand?: boolean; fill?: TerritoryFill };
-    const prepared: Array<{ ls: LayerStyle; states: Map<number, FaceState>; snap: LayerSnap; tg: { groups: Map<string, TransitionGroup>; of: Map<number, TransitionGroup> }; clip: boolean }> = [];
+    type LayerStyle = { fillOpacity?: number; borderWidth?: number; clipToLand?: boolean; fill?: TerritoryFill; fronts?: FrontTeeth; frontColor?: string };
+    const prepared: Array<{ ls: LayerStyle; states: Map<number, FaceState>; snap: LayerSnap; tg: { groups: Map<string, TransitionGroup>; of: Map<number, TransitionGroup> }; clip: boolean; wars: Array<[string, string]> }> = [];
+    this.lastFronts = [];
     let landKey = '', layerSig = '', animated = false;
     for (const layerId of drawsLayers ? opts.layerIds : []) {
       const layer = world.get('layer', layerId);
@@ -1585,9 +1588,12 @@ export class MapRenderer {
         else if (coast === 'sea') continue;
       }
       const tg = this.transitionGroups(view, sheet, sp, arr, snap, states);
-      prepared.push({ ls, states, snap, tg, clip });
+      // Front lines (D89): the wars holding now, each as the side it is drawn from and the side its teeth face.
+      const wars = ls.fronts ? warsAt(world, engine, t, ls.fronts) : [];
+      for (const [from, toward] of wars) this.lastFronts.push({ layerId, from, toward });
+      prepared.push({ ls, states, snap, tg, clip, wars });
       landKey += `|${snap.key}|${layer.style}|${clip ? 1 : 0}`;
-      layerSig += `|${layerId}|${layer.style}|${clip ? 1 : 0}`;
+      layerSig += `|${layerId}|${layer.style}|${clip ? 1 : 0}${wars.length ? `|w:${wars.map((w) => w.join('>')).join(',')}` : ''}`;
       if (tg.groups.size) animated = true;
       for (const owner of snap.byOwner.keys()) if (fillOf(owner)) anyMedia = true;
     }
@@ -1801,9 +1807,10 @@ export class MapRenderer {
             c.restore();
           }
         }
-        if (wantsBorders) for (const { ls, states, snap, tg, clip } of prepared) {
+        if (wantsBorders) for (const { ls, states, snap, tg, clip, wars } of prepared) {
           const width = (ls.borderWidth ?? style.borderWidth) * u;
-          if (!clip) { this.drawBorders(c, sheet, sp, arr, snap, states, tg, style, width); continue; }
+          const fronts = (on: CanvasRenderingContext2D) => { if (wars.length) this.drawFronts(on, sheet, sp, arr, snap, states, wars, ls.fronts === 'plain', ls.frontColor ?? FRONT_COLOR, Math.max(2.5, 4 * u)); };
+          if (!clip) { this.drawBorders(c, sheet, sp, arr, snap, states, tg, style, width); fronts(c); continue; }
           // Ending at the coast: drawn in the scratch buffer, masked by the land, then laid on. Where land
           // along the coast takes the look of the territory beside it (D83), an owner's border against
           // nobody is left out in that band (the coastline is the edge there); borders between owners stay.
@@ -1823,6 +1830,7 @@ export class MapRenderer {
             lc.drawImage(oc.canvas as CanvasImageSource, 0, 0);
             lc.restore();
           } else this.drawBorders(lc, sheet, sp, arr, snap, states, tg, style, width);
+          fronts(lc);
           this.maskLand(lc, view, sheet, opts.basemap!, frameKey, false);
           c.save();
           c.setTransform(1, 0, 0, 1, 0, 0);
@@ -2090,6 +2098,44 @@ export class MapRenderer {
   }
 
   /** Teeth along a line (a front line), pointing to one side: -1 left, 1 right of its direction. */
+  /**
+   * Front lines (D89): the border between two countries at war, from the side of `from`, as a line in
+   * the front's colour on a dark edge, with teeth facing the other side (unless plain).
+   */
+  private drawFronts(c: CanvasRenderingContext2D, sheet: Sheet, sp: SheetParcels, arr: Arrangement, snap: LayerSnap, states: Map<number, FaceState>, wars: Array<[string, string]>, plain: boolean, color: string, width: number): void {
+    const geom = parcelGeometry(arr), t = arr.topology();
+    const [k, e, f] = this.place;
+    c.save();
+    c.transform(k, 0, 0, k, e, f);
+    c.lineJoin = 'round';
+    c.lineCap = 'round';
+    for (const [from, toward] of wars) {
+      const set = snap.byOwner.get(from);
+      if (!set) continue;
+      const b = this.boundaryOf(arr, set);
+      const lines: Float32Array[] = [];
+      for (let q = 0; q < b.length; q += 3) {
+        const other = arr.halfEdgeFace(geom.cycle(b[q], t).heads[b[q + 1]] ^ 1);
+        if (states.get(other)?.value !== toward) continue;
+        for (const l of this.chainLines(sp, sheet, geom, b[q], b[q + 1])) lines.push(l);
+      }
+      if (!lines.length) continue;
+      const path = new Path2D();
+      for (const l of lines) addLine(path, l);
+      c.strokeStyle = 'rgba(10,16,24,0.75)';
+      c.lineWidth = (width * 2) / k;
+      c.stroke(path);
+      c.strokeStyle = color;
+      c.lineWidth = width / k;
+      c.stroke(path);
+      if (plain) continue;
+      // (An owner's outline runs with its land on one side, the same for every chain: the teeth go to the other.)
+      c.fillStyle = color;
+      for (const l of lines) this.drawTeeth(c, l, (width * 2) / k, FRONT_SIDE);
+    }
+    c.restore();
+  }
+
   private drawTeeth(ctx: CanvasRenderingContext2D, l: Float32Array, width: number, side: number): void {
     const step = 6 * width, size = 2.4 * width;
     let carry = step / 2;
@@ -3530,6 +3576,23 @@ export class MapRenderer {
   }
 
 
+}
+
+/** Which way a front line's teeth face (D89): toward the second country of the war (as entered), the first, or none. */
+export type FrontTeeth = 'second' | 'first' | 'plain';
+const FRONT_COLOR = '#d62828';
+/** The side of an owner's outline (as drawn on a sheet) that faces away from its land. */
+const FRONT_SIDE = 1;
+
+/** The wars holding at t (relationships "at war" between two that exist), as [drawn from, teeth toward]. */
+function warsAt(world: World, engine: Engine, t: Instant, teeth: FrontTeeth): Array<[string, string]> {
+  const out: Array<[string, string]> = [];
+  for (const id of engine.relationsAt(t)) {
+    const r = world.get('relation', id);
+    if (!r || r.kind !== 'war' || r.a === r.b) continue;
+    out.push(teeth === 'first' ? [r.b, r.a] : [r.a, r.b]);
+  }
+  return out.sort((x, y) => (x.join('>') < y.join('>') ? -1 : 1));
 }
 
 /**

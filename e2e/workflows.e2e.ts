@@ -1249,6 +1249,51 @@ try {
     assert.match((await page.getByTestId('relation-periods').textContent()) ?? '', /1850 – 1 January 1860; 1 January 1870 – 1 January 1871/);
     const holds = await page.evaluate(() => { const m = (window as any).__mapmaker, s = m.store, B = m.bench; const r = s.world.all('relation')[0]; return [1855, 1865, 1870.5, 1872].map((y) => s.engine.relationHolds(r.id, B.gregorian.fromCivil({ year: Math.floor(y), month: y % 1 ? 7 : 1 }))); });
     assert.deepEqual(holds, [true, false, true, false]);
+    // Front lines (D89): on the political layer, the border between the two is a front line while they are at war.
+    await page.locator('.left .row', { hasText: 'Political' }).locator('span', { hasText: 'Political' }).click();
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null, tool: 'select' }));
+    await page.getByTestId('layer-fronts').selectOption('second');
+    await h.saved();
+    const [idA, idB] = await page.evaluate(([a, b]) => { const w = (window as any).__mapmaker.store.world; const id = (n: string) => w.all('entity').find((e: any) => e.name === n).id; return [id(a), id(b)]; }, [A, B] as const);
+    // A point of their border in 1855, and whether the front's red is drawn around it.
+    const borderPoint = (await page.evaluate(([a, b]) => {
+      const m = (window as any).__mapmaker, s = m.store;
+      const t = m.bench.gregorian.fromCivil({ year: 1855 });
+      const arr = s.world.arrangement(s.spaceId);
+      const states = s.engine.partitionState(s.spaceId, s.layerId, t);
+      const own = (f: number) => states.get(f)?.value ?? null;
+      for (const sg of arr.segments.values()) {
+        const l = own(sg.left_face), r = own(sg.right_face);
+        if ((l === a && r === b) || (l === b && r === a)) { const va = arr.vertices.get(sg.a), vb = arr.vertices.get(sg.b); return [(va.lon + vb.lon) / 2e7, (va.lat + vb.lat) / 2e7]; }
+      }
+      return null;
+    }, [idA, idB] as const)) as LL | null;
+    assert.ok(borderPoint, 'the two share a border in 1855');
+    const camera = await page.evaluate(() => ({ ...(window as any).__mapmaker.store.camera }));
+    await page.evaluate((c) => (window as any).__mapmaker.store.setCamera({ lon: c[0], lat: c[1], zoom: 2.5, rotation: 0, projection: 'equirectangular' }), borderPoint);
+    const redNear = async () => {
+      const q = await h.toPage(borderPoint!);
+      return page.evaluate(([x, y]) => {
+        const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement;
+        const r = c.getBoundingClientRect(), sx = c.width / r.width, sy = c.height / r.height;
+        const d = c.getContext('2d')!.getImageData(Math.round((x - r.left) * sx) - 8, Math.round((y - r.top) * sy) - 8, 17, 17).data;
+        let n = 0;
+        for (let i = 0; i < d.length; i += 4) if (Math.hypot(d[i] - 0xd6, d[i + 1] - 0x28, d[i + 2] - 0x28) < 50) n++;
+        return n;
+      }, q);
+    };
+    await h.setDate('1855');
+    await page.waitForFunction((ids) => (window as any).__mapmaker.store.renderer.lastFronts.some((f: any) => f.from === ids[0] && f.toward === ids[1]), [idA, idB]);
+    await page.waitForTimeout(200);
+    assert.ok((await redNear()) >= 6, 'the front line is drawn on their border during the war');
+    await h.screenshot('front-line-1855');
+    await h.setDate('1865');
+    await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastFronts.length === 0);
+    await page.waitForTimeout(200);
+    assert.ok((await redNear()) < 3, 'none in peace');
+    await page.getByTestId('layer-fronts').selectOption('off');
+    await h.saved();
+    await page.evaluate((c) => (window as any).__mapmaker.store.setCamera(c), camera);
   });
 
   await h.step('Search, pictures with notes, and data export (GeoJSON of the map at a date, CSV of the record)', async () => {

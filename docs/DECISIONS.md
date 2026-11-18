@@ -60,6 +60,20 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D89. Front lines between countries at war (Stage 7)
+
+Wars are recorded as dated relationships (D72: "at war with", begun and ended at dates or by events). A territory
+layer's **Front lines** setting (under the layer in the list) draws, while a war holds, the border between the two
+countries on that layer as a front line: a line in the front's colour (red by default, chosen beside the setting)
+on a dark edge, with **teeth toward the second country** of the war as entered ("A at war with B": teeth into B),
+toward the first, or without teeth. On a layer of military control the front follows control, not ownership, and
+moves as control changes (an advancing front shows it moving). The line is found from each first country's outline
+where the land across belongs to the second, so it is exactly their shared border, coasts and enclaves included;
+outlines run with their land on the same side, so the teeth always face the other country. Front lines are part of
+the borders (drawn with them, in the borders pass of exports, and hidden with them); the kept picture of the
+territories is keyed by the wars holding, so a war beginning or ending redraws it once. Contested areas, arrows of
+advance and units are the next steps of Stage 7.
+
 ### D88. Hatching for occupied territory (Stage 7)
 
 Occupation and control are recorded on territory layers of their own ("Military control"), which leave ownership

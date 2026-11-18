@@ -14,7 +14,7 @@ import { resolvePointStyle, type LabelStyle, type CountryLabel, type PointStyle 
 import { DEFAULT_FEATURE_STYLE, isFeatureKind, type FeatureKind, type FeatureStyle } from '../render-engine/feature-style.ts';
 import { relationKind, isRelationKind, type RelationKind } from './relations.ts';
 import { cleanIcon, type CharacterIcon } from '../render-engine/icons.ts';
-import type { TerritoryFill } from '../render-engine/map-renderer.ts';
+import type { TerritoryFill, FrontTeeth } from '../render-engine/map-renderer.ts';
 export type { CharacterIcon } from '../render-engine/icons.ts';
 export { FEATURE_KINDS, DEFAULT_FEATURE_STYLE, isFeatureKind, featureStyle, type FeatureKind, type FeatureStyle } from '../render-engine/feature-style.ts';
 import { ringFromMapPoints } from '../render-engine/stroke.ts';
@@ -169,6 +169,22 @@ export function setLayerFill(world: World, id: string, fill: TerritoryFill): Com
   const style = parseJSON<Record<string, unknown>>(layer.style, {});
   if (fill === 'solid') delete style.fill; else style.fill = fill;
   return run(world, `Fill "${layer.name}" ${fill === 'solid' ? 'solid' : fill === 'dots' ? 'with dots' : 'with stripes'}`, (tx) => tx.patch('layer', id, { style: JSON.stringify(style) }));
+}
+
+/**
+ * Front lines on a territory layer (D89): the border between two countries at war, while the war
+ * holds, drawn as a front line with teeth toward the second country of the war (or the first, or none);
+ * null: none. Its colour, if given.
+ */
+export function setLayerFronts(world: World, id: string, fronts: FrontTeeth | null, color?: string): CommandResult {
+  const layer = world.get('layer', id);
+  if (!layer) throw new Error('That layer no longer exists.');
+  if (fronts !== null && !['second', 'first', 'plain'].includes(fronts)) throw new Error('Unknown kind of front line.');
+  if (color !== undefined && !/^#[0-9a-f]{6}$/i.test(color)) throw new Error('Choose a colour.');
+  const style = parseJSON<Record<string, unknown>>(layer.style, {});
+  if (fronts === null) delete style.fronts; else style.fronts = fronts;
+  if (color !== undefined) style.frontColor = color;
+  return run(world, fronts === null ? `No front lines on "${layer.name}"` : `Front lines on "${layer.name}"`, (tx) => tx.patch('layer', id, { style: JSON.stringify(style) }));
 }
 
 // ---------------------------------------------------------------- looks: label styles, entity styles
