@@ -3,7 +3,8 @@
 // disposable cache rebuilt from them whenever the world's revision changes.
 import { type Instant, compare, NEG_INF, fromStore, lerp, diffMs, fraction, stepDate } from '../core-time/index.ts';
 import type { World, HistoryStep } from '../world-model/world.ts';
-import { BASE_EVENT_ID, type EffectRow, type EventRow } from '../world-model/schema.ts';
+import { MAIN_BRANCH, isBaseEvent, type EffectRow, type EventRow } from '../world-model/schema.ts';
+import { branchCuts, seenAt, eventSeen } from './branches.ts';
 import { type Vec3, angle, e7ToVec, lonLatToVec } from '../geo-kernel/vec.ts';
 import type { Arrangement } from '../geo-kernel/arrangement.ts';
 
@@ -144,7 +145,7 @@ export function orderCmp(a: Assignment, b: Assignment): number {
 }
 
 export function eventStart(e: EventRow): Instant {
-  return e.id === BASE_EVENT_ID ? NEG_INF : fromStore(e.start_day, e.start_ms);
+  return isBaseEvent(e.id) ? NEG_INF : fromStore(e.start_day, e.start_ms);
 }
 export function eventEnd(e: EventRow): Instant | null {
   return e.end_day === null || e.end_ms === null ? null : fromStore(e.end_day, e.end_ms);
@@ -165,7 +166,7 @@ export function transitionEnd(spec: TransitionSpec | null, t: Instant, ev: Event
 export function effectTime(ef: EffectRow, ev: EventRow): Instant {
   // The starting map's changes are from the beginning, except changes made without an event, which
   // carry their own date (see isUntracked).
-  if (ev.id === BASE_EVENT_ID) return ef.at_day !== null && ef.at_ms !== null ? fromStore(ef.at_day, ef.at_ms) : NEG_INF;
+  if (isBaseEvent(ev.id)) return ef.at_day !== null && ef.at_ms !== null ? fromStore(ef.at_day, ef.at_ms) : NEG_INF;
   return ef.at_day !== null && ef.at_ms !== null ? fromStore(ef.at_day, ef.at_ms) : eventStart(ev);
 }
 
@@ -174,7 +175,7 @@ export function effectTime(ef: EffectRow, ev: EventRow): Instant {
  * shows as an event, but dated. It applies from its date until something later changes the area.
  */
 export function isUntracked(ef: Pick<EffectRow, 'event_id' | 'at_day'>): boolean {
-  return ef.event_id === BASE_EVENT_ID && ef.at_day !== null;
+  return isBaseEvent(ef.event_id) && ef.at_day !== null;
 }
 
 /**
@@ -243,13 +244,19 @@ export interface StateDelta { from: Map<number, FaceState>; changed: number[]; r
 /** The parts of an event that decide when and in what order its changes take place. */
 function sameStanding(a: EventRow, b: EventRow): boolean {
   return a.start_day === b.start_day && a.start_ms === b.start_ms && a.end_day === b.end_day && a.end_ms === b.end_ms
-    && a.precedence === b.precedence && a.created_seq === b.created_seq && a.variant_group === b.variant_group && a.variant_active === b.variant_active;
+    && a.precedence === b.precedence && a.created_seq === b.created_seq && a.variant_group === b.variant_group && a.variant_active === b.variant_active
+    && a.branch_id === b.branch_id;
 }
 
 const timeKey = (t: Instant) => `${t.day}:${t.ms}`;
 
 export class Engine {
   private compiledRevision = -1;
+  /** A number for each state of compiled history, never the same for two engines (see revision). */
+  private static serial = 0;
+  private stamp = 0;
+  /** What the branch includes (see branches.ts), as of the last compile. */
+  private cuts = new Map<string, Instant | null>([[MAIN_BRANCH, null]]);
   private timelines = new Map<string, Map<number, Assignment[]>>();
   /** Names over time: entity -> dated names in order (the entity's own name holds before the first). */
   private names = new Map<string, Array<{ t: Instant; name: string; order: [number, number, number] }>>();
@@ -298,12 +305,19 @@ export class Engine {
   }
 
   private readonly world: World;
+  /** The timeline whose history this engine compiles (D150): the main timeline or a branch. */
+  readonly branch: string;
 
-  constructor(world: World) {
+  constructor(world: World, branch: string = MAIN_BRANCH) {
     this.world = world;
+    this.branch = branch;
   }
 
-  get revision(): number { this.ensure(); return this.compiledRevision; }
+  /**
+   * Changes whenever compiled history does; different for any two engines (two branches of one world drawn side
+   * by side), so pictures kept by it are never taken for another's.
+   */
+  get revision(): number { this.ensure(); return this.stamp; }
 
   /** How compiled history was brought up to date (for tests and benchmarks): all at once, or by following changes. */
   stats = { compiled: 0, followed: 0, statesWhole: 0, statesDerived: 0 };
@@ -320,6 +334,7 @@ export class Engine {
 
   ensure(): void {
     if (this.compiledRevision === this.world.historyRevision) return;
+    this.stamp = ++Engine.serial;
     const steps = Engine.incremental && this.compiledRevision >= 0 ? this.world.historySince(this.compiledRevision) : null;
     if (steps && steps.length <= 5000 && this.follow(steps)) {
       this.stats.followed++;
@@ -331,7 +346,7 @@ export class Engine {
 
   /** For tests (see verify): history as followed must be history as compiled afresh. */
   private checkAgainstFresh(): void {
-    const fresh = new Engine(this.world);
+    const fresh = new Engine(this.world, this.branch);
     fresh.compile();
     const brief = (a: Assignment) => `${a.entry}@${a.face}:${a.t.day}.${a.t.ms}-${a.end.day}.${a.end.ms}=${a.value}/${a.precedence}/${a.eventSeq}/${a.ordinal}/${a.transition ? `${a.transition.style}~${a.transition.maxDist}` : ''}`;
     const show = (e: Engine) => [
@@ -358,10 +373,26 @@ export class Engine {
     return !ev.variant_group || ev.variant_active === 1;
   }
 
+  /**
+   * Whether a change is part of the history compiled: its event the version in use (D23) and, in a branch, of
+   * the branch's own or of the history it shares, up to the moment it split off (D150).
+   */
+  includes(ef: EffectRow, ev: EventRow): boolean {
+    return this.isActiveEvent(ev) && seenAt(this.cuts, ev.branch_id || MAIN_BRANCH, effectTime(ef, ev));
+  }
+
+  /** Whether an event is listed in this history: of the branch's own, or begun by the time the branch split off (whatever version is in use). */
+  lists(ev: EventRow): boolean {
+    this.ensure();
+    return eventSeen(this.cuts, ev);
+  }
+
   /** Compile all of history from the tables. */
   compile(): void {
     const w = this.world;
     this.stats.compiled++;
+    this.stamp = ++Engine.serial;
+    this.cuts = branchCuts(w, this.branch);
     this.timelines.clear();
     this.effectAssignments.clear();
     this.effectLayer.clear();
@@ -419,7 +450,7 @@ export class Engine {
     const problems: Conflict[] = [];
     const done = () => { if (problems.length) this.broken.set(ef.id, problems); };
     if (!ev) { problems.push({ kind: 'broken', effectId: ef.id, eventId: ef.event_id, message: 'This change belongs to an event that no longer exists.' }); return done(); }
-    if (!this.isActiveEvent(ev)) return;
+    if (!this.includes(ef, ev)) return;
     const layer = ef.layer_id ? w.get('layer', ef.layer_id) : undefined;
     const arr = ef.space_id ? w.arrangements.get(ef.space_id) : undefined;
     if (!layer || !arr) { problems.push({ kind: 'broken', effectId: ef.id, eventId: ev.id, message: 'This change refers to a layer or map that no longer exists.' }); return done(); }
@@ -521,7 +552,7 @@ export class Engine {
       const ev = events.get(ef.event_id);
       const problem = (message: string) => this.broken.set(ef.id, [{ kind: 'broken', effectId: ef.id, eventId: ev ? ev.id : ef.event_id, message }]);
       if (!ev) { problem('This change belongs to an event that no longer exists.'); continue; }
-      if (!this.isActiveEvent(ev)) continue;
+      if (!this.includes(ef, ev)) continue;
       if (ef.kind === 'lane') {
         const it = parseJSON<LaneIntent | null>(ef.intent, null);
         if (!it || !Number.isInteger(it.a) || !Number.isInteger(it.b) || it.a === it.b || !ef.space_id || !w.get('map_space', ef.space_id)) { problem('This lane between stars refers to a map that no longer exists.'); continue; }
@@ -1204,7 +1235,7 @@ export class Engine {
     for (const ef of effects) { const list = this.effectAssignments.get(ef.id); if (list) inOrder.push([ef.id, list]); }
     const groups = new Map<string, Assignment[]>();
     for (const [, list] of inOrder) for (const a of list) {
-      if (a.eventId === BASE_EVENT_ID) continue;
+      if (isBaseEvent(a.eventId)) continue;
       const k = `${a.t.day}:${a.t.ms}:${a.precedence}`;
       let g = groups.get(k);
       if (!g) groups.set(k, (g = []));
@@ -1269,7 +1300,7 @@ export class Engine {
     for (const ef of effects) {
       if (ef.kind !== 'annex') continue;
       const ev = events.get(ef.event_id);
-      if (!ev || !this.isActiveEvent(ev)) continue;
+      if (!ev || !this.includes(ef, ev)) continue;
       const intent = parseJSON<AnnexIntent | null>(ef.intent, null);
       if (!intent) continue;
       const basis = this.basisFor(ef, intent.from);

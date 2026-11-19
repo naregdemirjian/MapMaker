@@ -23,7 +23,7 @@ import type { FieldSource } from '../domain/fields.ts';
 import type { DisasterId } from '../domain/disasters.ts';
 import type { SculptTool } from '../terrain/sculpt.ts';
 import { terrainSourceOf, planetOf, isPaleoEarth } from '../world-model/world-settings.ts';
-import type { MapSpaceRow } from '../world-model/schema.ts';
+import { MAIN_BRANCH, type MapSpaceRow } from '../world-model/schema.ts';
 import { DEFAULT_PERIOD, type PeriodSpec } from '../domain/history-view.ts';
 import { setAssetBase } from '../render-engine/assets.ts';
 import { lonLatToVec, type Vec3 } from '../geo-kernel/vec.ts';
@@ -81,7 +81,34 @@ class AppStore {
   projectId: string | null = null;
   projectDir = '';
   world: World | null = null;
+  /** History as the timeline being viewed has it (see branch). */
   engine: Engine | null = null;
+  /** The timeline being viewed and edited (D150): the main timeline ('main') or a branch's id. Remembered per project. */
+  branch: string = MAIN_BRANCH;
+  /** An engine for each timeline looked at (the one viewed, a shot's, the other side of a comparison), kept while the project is open. */
+  private engines = new Map<string, Engine>();
+  /** History as a timeline has it (a branch that no longer exists: the main timeline). */
+  engineFor(branch: string | undefined | null): Engine {
+    const w = this.world;
+    if (!w) throw new Error('No project is open.');
+    const id = branch && (branch === MAIN_BRANCH || w.get('branch', branch)) ? branch : MAIN_BRANCH;
+    let e = this.engines.get(id);
+    if (!e) this.engines.set(id, (e = new Engine(w, id)));
+    return e;
+  }
+  /** View and edit another timeline (D150). */
+  setBranch(branch: string) {
+    if (!this.world) return;
+    this.useBranch(branch);
+    this.notify();
+  }
+  private useBranch(branch: string) {
+    const w = this.world!;
+    const id = branch === MAIN_BRANCH || w.get('branch', branch) ? branch : MAIN_BRANCH;
+    this.branch = id;
+    w.branch = id;
+    this.engine = this.engineFor(id);
+  }
   journal: JournalState = { head: 0, canUndo: false, canRedo: false, undoLabel: null, redoLabel: null };
   mode: Mode = 'world';
   spaceId = '';
@@ -202,7 +229,13 @@ class AppStore {
    * `time` on the right; `split` is where the line is (a fraction of the map's width). Drawn by a
    * renderer of its own, so neither side's kept pictures are thrown away by the other.
    */
-  compare: { on: boolean; time: Instant; split: number } = { on: false, time: gregorian.fromCivil({ year: 1900 }), split: 0.5 };
+  compare: { on: boolean; time: Instant; split: number; branch?: string; same?: boolean; side?: boolean } = { on: false, time: gregorian.fromCivil({ year: 1900 }), split: 0.5 };
+  /**
+   * The other side of a comparison (D150): which timeline (unless another branch is chosen, the one viewed) and
+   * which date (with `same`, the date viewed, as it moves). `side`: the two side by side instead of across a line.
+   */
+  compareEngine(): Engine | null { return this.world ? (this.compare.branch ? this.engineFor(this.compare.branch) : this.engine) : null; }
+  compareTime(): Instant { return this.compare.same ? this.time : this.compare.time; }
   readonly compareRenderer = new MapRenderer();
   /** How the working view is drawn on this computer (never part of a project or an export). */
   viewSettings: ViewSettings = loadViewSettings();
@@ -238,6 +271,8 @@ class AppStore {
   subscribe = (cb: () => void) => { this.listeners.add(cb); return () => { this.listeners.delete(cb); }; };
   /** Everything follows a change: the map at once and every panel. */
   notify() {
+    // (A branch viewed that is no longer there, deleted or undone: the main timeline is shown instead.)
+    if (this.world && this.branch !== MAIN_BRANCH && !this.world.get('branch', this.branch)) this.useBranch(MAIN_BRANCH);
     clearTimeout(this.catchUp);
     this.catchUp = undefined;
     this.version++;
@@ -285,7 +320,7 @@ class AppStore {
     this.viewTimer = setTimeout(() => {
       if (this.projectId !== id) return;
       try {
-        localStorage.setItem(`mapmaker.view.${id}`, JSON.stringify({ spaceId: this.spaceId, time: toJSONValue(this.time), cameras: [...this.cameras.entries()], eventFilter: this.eventFilter, collapsed: this.collapsed }));
+        localStorage.setItem(`mapmaker.view.${id}`, JSON.stringify({ spaceId: this.spaceId, time: toJSONValue(this.time), cameras: [...this.cameras.entries()], eventFilter: this.eventFilter, collapsed: this.collapsed, branch: this.branch }));
       } catch { /* storage may be unavailable */ }
     }, 500);
   }
@@ -298,8 +333,9 @@ class AppStore {
     this.collapsed = [];
     this.multi = null;
     try {
-      const v = JSON.parse(localStorage.getItem(`mapmaker.view.${id}`) ?? 'null') as { spaceId?: string; time?: unknown; cameras?: [string, Camera][]; eventFilter?: unknown; collapsed?: unknown } | null;
+      const v = JSON.parse(localStorage.getItem(`mapmaker.view.${id}`) ?? 'null') as { spaceId?: string; time?: unknown; cameras?: [string, Camera][]; eventFilter?: unknown; collapsed?: unknown; branch?: unknown } | null;
       if (!v) return;
+      if (typeof v.branch === 'string') this.useBranch(v.branch);
       if (v.spaceId && w.get('map_space', v.spaceId)) this.spaceId = v.spaceId;
       for (const [k, c] of v.cameras ?? []) {
         const ok = c && [c.lon, c.lat, c.zoom, c.rotation].every((n) => typeof n === 'number' && Number.isFinite(n)) && (c.projection === 'flat' || PROJECTIONS.some((p) => p.id === c.projection));
@@ -459,7 +495,8 @@ class AppStore {
       const data = await Api.open(id);
       // (The rows just read are the world's to keep: nothing else holds them.)
       this.world = World.fromSnapshot(data.snapshot, true);
-      this.engine = new Engine(this.world);
+      this.engines = new Map();
+      this.useBranch(MAIN_BRANCH);
       this.projectId = id;
       setAssetBase(`/api/projects/${encodeURIComponent(id)}/assets/`, () => this.notify());
       this.projectDir = data.dir;
@@ -576,6 +613,8 @@ class AppStore {
     this.projectId = null;
     this.world = null;
     this.engine = null;
+    this.engines = new Map();
+    this.branch = MAIN_BRANCH;
     this.selection = null;
     this.mode = 'world';
     void this.loadApp();

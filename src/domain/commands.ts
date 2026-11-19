@@ -5,9 +5,10 @@ import { World, Tx, newId } from '../world-model/world.ts';
 import {
   Engine, canonicalFaces, leafDescendants, childrenMap, hashFaces, parseJSON, effectTime, eventStart, type Resolution, type TransitionSpec, type AnnexIntent, type PlaceIntent, type RenameIntent, type ShapeIntent, type RelateIntent, type SystemIntent, type LaneIntent, laneKey, type FeatureAnimStyle, isFeatureAnim,
 } from '../temporal-engine/engine.ts';
-import { type Instant, toStore, fromStore, NEG_INF, compare } from '../core-time/index.ts';
+import { type Instant, toStore, fromStore, NEG_INF, compare, isFiniteInstant } from '../core-time/index.ts';
+import { branchAt, branchCuts, seenAt, branchName, branchAndBelow, branchLine } from '../temporal-engine/branches.ts';
 import {
-  BASE_EVENT_ID, MAIN_BRANCH, SCHEMA_VERSION, type RowDiff, type EffectRow, type EventRow, type EntityRow, type LayerKind, type FeatureRow, type RelationRow,
+  BASE_EVENT_ID, MAIN_BRANCH, SCHEMA_VERSION, baseEventOf, isBaseEvent, type RowDiff, type EffectRow, type EventRow, type EntityRow, type LayerKind, type FeatureRow, type RelationRow,
 } from '../world-model/schema.ts';
 import { type Vec3, vecToLonLat, normalize } from '../geo-kernel/vec.ts';
 import { TopologyError, type PathStep } from '../geo-kernel/arrangement.ts';
@@ -614,7 +615,7 @@ function insertEventIn(tx: Tx, e: EventInput): string {
   const [sd, sm] = toStore(e.start);
   const end = e.end ? toStore(e.end) : null;
   tx.insert('event', {
-    id, type_id: e.type_id ?? 'general', branch_id: MAIN_BRANCH, name: e.name.trim(), start_day: sd, start_ms: sm,
+    id, type_id: e.type_id ?? 'general', branch_id: branchAt(tx.world, tx.world.branch, e.start), name: e.name.trim(), start_day: sd, start_ms: sm,
     end_day: end ? end[0] : null, end_ms: end ? end[1] : null, precision: e.precision ?? 'day', precedence: e.precedence ?? 0,
     description: e.description ?? '', fields: '{}', presentation: '{}', created_seq: tx.world.nextSeq('event'), variant_group: null, variant_active: 1,
   });
@@ -632,7 +633,7 @@ export function createEvent(world: World, e: EventInput & { groups?: string[] })
 }
 
 export function updateEvent(world: World, id: string, patch: Partial<EventInput> & { variant_group?: string | null; variant_active?: number }): CommandResult {
-  if (id === BASE_EVENT_ID && (patch.start || patch.end)) throw new Error('The starting map has no date.');
+  if (isBaseEvent(id) && (patch.start || patch.end)) throw new Error('The starting map has no date.');
   return run(world, 'Edit event', (tx) => {
     const ev = world.get('event', id);
     if (!ev) throw new Error('Unknown event');
@@ -656,13 +657,13 @@ export function updateEvent(world: World, id: string, patch: Partial<EventInput>
 }
 
 export function deleteEvent(world: World, id: string): CommandResult {
-  if (id === BASE_EVENT_ID) throw new Error('The starting map cannot be deleted.');
+  if (isBaseEvent(id)) throw new Error('The starting map cannot be deleted.');
   return deleteEvents(world, [id]);
 }
 
 /** Delete many events and their changes at once (one undo step). The starting map is never deleted. */
 export function deleteEvents(world: World, ids: string[]): CommandResult {
-  const set = new Set(ids.filter((id) => id !== BASE_EVENT_ID && world.get('event', id)));
+  const set = new Set(ids.filter((id) => !isBaseEvent(id) && world.get('event', id)));
   if (!set.size) throw new Error('Choose at least one event.');
   const first = world.get('event', [...set][0])!.name;
   return run(world, set.size === 1 ? `Delete event "${first}"` : `Delete ${set.size} events`, (tx) => {
@@ -670,6 +671,110 @@ export function deleteEvents(world: World, ids: string[]): CommandResult {
     for (const m of world.all('event_group_member')) if (set.has(m.event_id)) tx.remove('event_group_member', m.id);
     for (const id of set) tx.remove('event', id);
   });
+}
+
+// ---------------------------------------------------------------- branches: alternative timelines (D150)
+
+/** Colours given to branches in turn (their mark in the title bar and lists). */
+export const BRANCH_COLORS = ['#e07a5f', '#81b29a', '#f2cc8f', '#6d9dc5', '#b07aa1', '#e15759', '#59a14f', '#edc948'];
+
+export interface BranchInput { name: string; from: Instant; parent?: string; color?: string; notes?: string }
+
+/**
+ * A branch that splits from `parent` (the timeline being viewed, unless given) at the moment `from`: its history
+ * is the parent's up to and including that moment, live, then its own (D150).
+ */
+export function createBranch(world: World, b: BranchInput): CommandResult<string> {
+  const name = b.name.trim();
+  if (!name) throw new Error('Give the branch a name.');
+  const parent = b.parent ?? world.branch;
+  if (parent !== MAIN_BRANCH && !world.get('branch', parent)) throw new Error('The timeline to branch from no longer exists.');
+  if (!isFiniteInstant(b.from)) throw new Error('A branch splits off at a date.');
+  if (name.toLowerCase() === 'main timeline' || world.all('branch').some((r) => r.name.trim().toLowerCase() === name.toLowerCase())) throw new Error(`There is already a branch called "${name}".`);
+  return run(world, `Branch "${name}" from ${branchName(world, parent)}`, (tx) => {
+    const id = newId('br');
+    const [d, ms] = toStore(b.from);
+    const n = tx.world.all('branch').length;
+    tx.insert('branch', { id, name, parent_id: parent, from_day: d, from_ms: ms, color: b.color ?? BRANCH_COLORS[n % BRANCH_COLORS.length], notes: b.notes ?? '', created_seq: tx.world.nextSeq('branch') });
+    insertBranchBase(tx, id);
+    return id;
+  });
+}
+
+/** A branch renamed, recoloured, described, or split off at another moment (what it shares changes with it, live). */
+export function updateBranch(world: World, id: string, patch: { name?: string; color?: string; notes?: string; from?: Instant }): CommandResult {
+  const row = world.get('branch', id);
+  if (!row) throw new Error('That branch no longer exists.');
+  const name = patch.name?.trim();
+  if (patch.name !== undefined && !name) throw new Error('Give the branch a name.');
+  if (name && (name.toLowerCase() === 'main timeline' || world.all('branch').some((r) => r.id !== id && r.name.trim().toLowerCase() === name.toLowerCase()))) throw new Error(`There is already a branch called "${name}".`);
+  if (patch.from && !isFiniteInstant(patch.from)) throw new Error('A branch splits off at a date.');
+  return run(world, patch.from ? `Branch "${row.name}" splits off at another date` : `Edit branch "${row.name}"`, (tx) => {
+    const next = { ...row };
+    if (name) next.name = name;
+    if (patch.color !== undefined) next.color = patch.color;
+    if (patch.notes !== undefined) next.notes = patch.notes;
+    if (patch.from) [next.from_day, next.from_ms] = toStore(patch.from);
+    tx.update('branch', next);
+  });
+}
+
+/**
+ * A branch deleted with every branch that splits from it, and their own events and changes (one step to undo).
+ * What they shared with the timeline they came from is that timeline's and stays.
+ */
+export function deleteBranch(world: World, id: string): CommandResult<number> {
+  const row = world.get('branch', id);
+  if (!row) throw new Error('That branch no longer exists.');
+  const gone = branchAndBelow(world, id);
+  return run(world, gone.size > 1 ? `Delete branch "${row.name}" and the ${gone.size - 1} branch${gone.size === 2 ? '' : 'es'} from it` : `Delete branch "${row.name}"`, (tx) => {
+    const events = new Set(world.all('event').filter((e) => gone.has(e.branch_id)).map((e) => e.id));
+    for (const ef of world.all('effect')) if (events.has(ef.event_id)) tx.remove('effect', ef.id);
+    for (const m of world.all('event_group_member')) if (events.has(m.event_id)) tx.remove('event_group_member', m.id);
+    for (const e of events) tx.remove('event', e);
+    for (const b of gone) tx.remove('branch', b);
+    return [...events].filter((e) => !isBaseEvent(e)).length;
+  });
+}
+
+/** A branch's own place for changes made without an event (see baseEventOf), made like the starting map. */
+function insertBranchBase(tx: Tx, branch: string): void {
+  const base = tx.world.get('event', BASE_EVENT_ID);
+  if (!base) throw new Error('The starting map is missing.');
+  tx.insert('event', { ...base, id: baseEventOf(branch), branch_id: branch, name: 'Changes without an event', created_seq: tx.world.nextSeq('event'), variant_group: null, variant_active: 1 });
+}
+
+/**
+ * Where a change made without an event at `t` is kept (D150): the starting map's (from the beginning, or a date
+ * of the main timeline), or that of the branch the date belongs to in the branch being edited (see branchAt).
+ */
+function correctionEvent(tx: Tx, t: Instant | null): string {
+  const w = tx.world;
+  const branch = t && t.day !== -Infinity ? branchAt(w, w.branch, t) : MAIN_BRANCH;
+  const id = baseEventOf(branch);
+  if (!w.get('event', id)) insertBranchBase(tx, branch);
+  return id;
+}
+
+/** The event a change in this edit mode goes into: the event recorded into, or the place for changes without an event (see correctionEvent). */
+function eventForMode(tx: Tx, mode: EditMode): string {
+  return mode.kind === 'new' ? mode.eventId : correctionEvent(tx, mode.t);
+}
+
+/**
+ * A change recorded into an event at `at` (null: from the event's start) must be part of the history of the
+ * branch being edited (D150), or it would vanish as it is made: an event of the history the branch shares with
+ * the timeline it split from takes no change dated after the split, and another branch's events none at all.
+ */
+function recordable(world: World, eventId: string, at: [number, number] | null): void {
+  const ev = world.get('event', eventId);
+  if (!ev || isBaseEvent(ev.id)) return;
+  const owner = ev.branch_id || MAIN_BRANCH;
+  if (owner === world.branch) return;
+  const t = at ? fromStore(at[0], at[1]) : eventStart(ev);
+  if (seenAt(branchCuts(world, world.branch), owner, t)) return;
+  if (branchLine(world, world.branch).includes(owner)) throw new Error(`"${ev.name}" is part of the history this branch shares with ${branchName(world, owner)}, up to the moment it split off. A change after that would not be part of this branch: record it in an event of this branch.`);
+  throw new Error(`"${ev.name}" is an event of ${branchName(world, owner)}, not of ${branchName(world, world.branch)}.`);
 }
 
 // ---------------------------------------------------------------- groups of countries (folders) and changes to many at once
@@ -748,7 +853,7 @@ export function setFillsShown(world: World, ids: string[], shown: boolean): Comm
 export function createVariant(world: World, eventId: string, name: string): CommandResult<string> {
   return run(world, `Create alternative "${name}"`, (tx) => {
     const ev = world.get('event', eventId);
-    if (!ev || ev.id === BASE_EVENT_ID) throw new Error('Choose an event first.');
+    if (!ev || isBaseEvent(ev.id)) throw new Error('Choose an event first.');
     const group = ev.variant_group ?? newId('alt');
     if (!ev.variant_group) tx.patch('event', ev.id, { variant_group: group, variant_active: 0 });
     for (const other of world.all('event')) if (other.variant_group === group && other.id !== ev.id) tx.patch('event', other.id, { variant_active: 0 });
@@ -843,7 +948,7 @@ export function deleteEventGroup(world: World, id: string): CommandResult {
 /** Put an event in exactly these groups (taking it out of any others). */
 export function setEventGroups(world: World, eventId: string, groupIds: string[]): CommandResult {
   const ev = world.get('event', eventId);
-  if (!ev || ev.id === BASE_EVENT_ID) throw new Error('Choose an event first.');
+  if (!ev || isBaseEvent(ev.id)) throw new Error('Choose an event first.');
   for (const g of groupIds) if (!world.get('event_group', g)) throw new Error('That group no longer exists.');
   const want = new Set(groupIds);
   return run(world, `Change the groups of "${ev.name}"`, (tx) => {
@@ -857,7 +962,7 @@ export function addEventsToGroup(world: World, eventIds: string[], groupId: stri
   const g = world.get('event_group', groupId);
   if (!g) throw new Error('That group no longer exists.');
   return run(world, `Add to "${g.name}"`, (tx) => {
-    for (const id of eventIds) if (id !== BASE_EVENT_ID && world.get('event', id)) insertMember(tx, groupId, id);
+    for (const id of eventIds) if (!isBaseEvent(id) && world.get('event', id)) insertMember(tx, groupId, id);
   });
 }
 
@@ -1257,7 +1362,7 @@ function writeAssignments(tx: Tx, engine: Engine, spaceId: string, layerId: stri
   if (!nonEmpty.length) return;
   const id = mode.kind === 'new'
     ? insertAssignEffect(tx, { eventId: mode.eventId, spaceId, layerId, faces: nonEmpty[0][0], value: nonEmpty[0][1], at: mode.at ?? null, transition: extra.transition ?? null, intent: extra.intent })
-    : insertAssignEffect(tx, { eventId: BASE_EVENT_ID, spaceId, layerId, faces: nonEmpty[0][0], value: nonEmpty[0][1], at: mode.t, intent: extra.intent });
+    : insertAssignEffect(tx, { eventId: correctionEvent(tx, mode.t), spaceId, layerId, faces: nonEmpty[0][0], value: nonEmpty[0][1], at: mode.t, intent: extra.intent });
   if (nonEmpty.length > 1) tx.patch('effect', id, { resolution: JSON.stringify({ set: nonEmpty } satisfies Resolution) });
   if (mode.kind === 'new') chainRecorded(tx, id);
 }
@@ -1271,7 +1376,7 @@ function chainRecorded(tx: Tx, effectId: string): void {
   const world = tx.world;
   const ef = world.get('effect', effectId);
   const ev = ef ? world.get('event', ef.event_id) : undefined;
-  if (!ef || !ev || ev.id === BASE_EVENT_ID || ef.kind !== 'assign') return;
+  if (!ef || !ev || isBaseEvent(ev.id) || ef.kind !== 'assign') return;
   const t = effectTime(ef, ev);
   let before: Instant | null = null, after: Instant | null = null;
   const others = world.all('effect').filter((f) => f.id !== ef.id && f.event_id === ev.id && f.kind === 'assign' && f.layer_id === ef.layer_id);
@@ -1322,6 +1427,7 @@ function nextOrdinal(world: World, eventId: string): number {
 function insertAssignEffect(tx: Tx, o: { eventId: string; spaceId: string; layerId: string; faces: number[]; value: string | null; at?: Instant | null; transition?: TransitionSpec | null; intent?: unknown }): string {
   const id = newId('eff');
   const at = o.at ? toStore(o.at) : null;
+  recordable(tx.world, o.eventId, at);
   tx.insert('effect', {
     id, event_id: o.eventId, ordinal: nextOrdinal(tx.world, o.eventId), kind: 'assign', space_id: o.spaceId, layer_id: o.layerId,
     at_day: at ? at[0] : null, at_ms: at ? at[1] : null,
@@ -1589,6 +1695,7 @@ export function annex(world: World, engine: Engine, o: { spaceId: string; layerI
     refuseLocked(world, [o.from, o.to]);
     const id = newId('eff');
     const at = o.at ? toStore(o.at) : null;
+    recordable(world, o.eventId, at);
     const row: EffectRow = {
       id, event_id: o.eventId, ordinal: nextOrdinal(world, o.eventId), kind: 'annex', space_id: o.spaceId, layer_id: o.layerId,
       at_day: at ? at[0] : null, at_ms: at ? at[1] : null, transition: o.transition ? JSON.stringify(o.transition) : '',
@@ -1656,10 +1763,11 @@ export function holdStars(world: World, o: { spaceId: string; stars: number[]; e
   if (!stars.length) throw new Error('Choose at least one star.');
   const what = o.label ?? (stars.length === 1 ? 'a star' : `${stars.length} stars`);
   return run(world, e ? `Give ${what} to ${e.name}` : `${what[0].toUpperCase()}${what.slice(1)} held by nobody`, (tx) => {
-    const eventId = o.mode.kind === 'new' ? o.mode.eventId : BASE_EVENT_ID;
-    if (o.mode.kind === 'new' && !tx.world.get('event', eventId)) throw new Error('That event no longer exists.');
+    if (o.mode.kind === 'new' && !tx.world.get('event', o.mode.eventId)) throw new Error('That event no longer exists.');
+    const eventId = eventForMode(tx, o.mode);
     const t: Instant | null = o.mode.kind === 'new' ? o.mode.at ?? null : o.mode.t;
     const at = t && t.day !== -Infinity ? toStore(t) : null;
+    recordable(tx.world, eventId, at);
     for (const star of stars) {
       const intent: SystemIntent = { op: 'system', star, entity: o.entity };
       const same = tx.world.all('effect').find((f) => f.kind === 'system' && f.space_id === o.spaceId && f.event_id === eventId && f.at_day === (at ? at[0] : null) && f.at_ms === (at ? at[1] : null) && parseJSON<SystemIntent | null>(f.intent, null)?.star === star);
@@ -1688,10 +1796,11 @@ export function setLane(world: World, o: { spaceId: string; a: number; b: number
   if (o.entity && !e) throw new Error('That country or faction no longer exists.');
   const what = o.label ?? 'a lane';
   return run(world, o.on ? `Open ${what}${e ? ` (${e.name})` : ''}` : `Close ${what}`, (tx) => {
-    const eventId = o.mode.kind === 'new' ? o.mode.eventId : BASE_EVENT_ID;
-    if (o.mode.kind === 'new' && !tx.world.get('event', eventId)) throw new Error('That event no longer exists.');
+    if (o.mode.kind === 'new' && !tx.world.get('event', o.mode.eventId)) throw new Error('That event no longer exists.');
+    const eventId = eventForMode(tx, o.mode);
     const t: Instant | null = o.mode.kind === 'new' ? o.mode.at ?? null : o.mode.t;
     const at = t && t.day !== -Infinity ? toStore(t) : null;
+    recordable(tx.world, eventId, at);
     const intent: LaneIntent = { op: 'lane', a: o.a, b: o.b, on: o.on, entity: o.entity };
     const transition = o.on && o.grow && o.mode.kind === 'new' ? JSON.stringify({ grow: true }) : '';
     const key = laneKey(o.a, o.b);
@@ -1736,10 +1845,11 @@ export function renameFrom(world: World, o: { entity: string; name: string; mode
   const name = o.name.trim();
   if (!name) throw new Error('Give the new name.');
   return run(world, `${e.name} is called ${name}`, (tx) => {
-    const eventId = o.mode.kind === 'new' ? o.mode.eventId : BASE_EVENT_ID;
-    if (o.mode.kind === 'new' && !world.get('event', eventId)) throw new Error('That event no longer exists.');
+    if (o.mode.kind === 'new' && !world.get('event', o.mode.eventId)) throw new Error('That event no longer exists.');
+    const eventId = eventForMode(tx, o.mode);
     const t: Instant | null = o.mode.kind === 'new' ? o.mode.at ?? null : o.mode.t;
     const at = t && t.day !== -Infinity ? toStore(t) : null;
+    recordable(world, eventId, at);
     const same = world.all('effect').find((f) => f.kind === 'rename' && f.event_id === eventId && f.at_day === (at ? at[0] : null) && f.at_ms === (at ? at[1] : null)
       && parseJSON<RenameIntent | null>(f.intent, null)?.entity === o.entity);
     const intent = JSON.stringify({ op: 'rename', entity: o.entity, name } satisfies RenameIntent);
@@ -1757,7 +1867,7 @@ export function renameFrom(world: World, o: { entity: string; name: string; mode
 export function placementFromBeginning(world: World, effectId: string): CommandResult {
   const ef = world.get('effect', effectId);
   if (!ef || ef.kind !== 'place') throw new Error('That placement no longer exists.');
-  if (ef.event_id !== BASE_EVENT_ID) throw new Error('This place belongs to an event; change the event instead.');
+  if (!isBaseEvent(ef.event_id)) throw new Error('This place belongs to an event; change the event instead.');
   return run(world, 'From the beginning', (tx) => tx.patch('effect', effectId, { at_day: null, at_ms: null }));
 }
 
@@ -1991,7 +2101,7 @@ export function deleteFeatures(world: World, ids: string[]): CommandResult {
 export function shapeFromBeginning(world: World, effectId: string): CommandResult {
   const ef = world.get('effect', effectId);
   if (!ef || ef.kind !== 'shape') throw new Error('That shape no longer exists.');
-  if (ef.event_id !== BASE_EVENT_ID) throw new Error('This shape belongs to an event; change the event instead.');
+  if (!isBaseEvent(ef.event_id)) throw new Error('This shape belongs to an event; change the event instead.');
   return run(world, 'From the beginning', (tx) => tx.patch('effect', effectId, { at_day: null, at_ms: null }));
 }
 
@@ -2016,10 +2126,11 @@ function correctOrWrite(tx: Tx, engine: Engine, f: FeatureRow, mode: EditMode, w
 
 function writeShape(tx: Tx, feature: string, mode: EditMode, what: { parts?: number[][]; off?: boolean; anim?: FeatureAnimStyle | null }): string {
   const world = tx.world;
-  const eventId = mode.kind === 'new' ? mode.eventId : BASE_EVENT_ID;
-  if (mode.kind === 'new' && !world.get('event', eventId)) throw new Error('That event no longer exists.');
+  if (mode.kind === 'new' && !world.get('event', mode.eventId)) throw new Error('That event no longer exists.');
+  const eventId = eventForMode(tx, mode);
   const t: Instant | null = mode.kind === 'new' ? mode.at ?? null : mode.t;
   const at = t && t.day !== -Infinity ? toStore(t) : null;
+  recordable(world, eventId, at);
   const intent: ShapeIntent = what.off ? { op: 'shape', feature, off: true } : { op: 'shape', feature, parts: what.parts };
   // The same feature, event and moment: that shape is replaced.
   const same = world.all('effect').find((f) => f.kind === 'shape' && f.event_id === eventId && f.at_day === (at ? at[0] : null) && f.at_ms === (at ? at[1] : null)
@@ -2123,10 +2234,11 @@ function eventStartOf(world: World, eventId: string): Instant | null {
 
 function writeRelate(tx: Tx, relation: string, mode: EditMode, on: boolean): string {
   const world = tx.world;
-  const eventId = mode.kind === 'new' ? mode.eventId : BASE_EVENT_ID;
-  if (mode.kind === 'new' && !world.get('event', eventId)) throw new Error('That event no longer exists.');
+  if (mode.kind === 'new' && !world.get('event', mode.eventId)) throw new Error('That event no longer exists.');
+  const eventId = eventForMode(tx, mode);
   const t: Instant | null = mode.kind === 'new' ? mode.at ?? null : mode.t;
   const at = t && t.day !== -Infinity ? toStore(t) : null;
+  recordable(world, eventId, at);
   const intent = JSON.stringify({ op: 'relate', relation, on } satisfies RelateIntent);
   // The same relationship, event and moment: that step is replaced.
   const same = world.all('effect').find((f) => f.kind === 'relate' && f.event_id === eventId && f.at_day === (at ? at[0] : null) && f.at_ms === (at ? at[1] : null)
@@ -2142,10 +2254,11 @@ function writeRelate(tx: Tx, relation: string, mode: EditMode, on: boolean): str
 
 function writePlacement(tx: Tx, spaceId: string, entity: string, mode: EditMode, what: { lon?: number; lat?: number; off?: boolean; arrive?: 'travel' | 'jump' }): string {
   const world = tx.world;
-  const eventId = mode.kind === 'new' ? mode.eventId : BASE_EVENT_ID;
-  if (mode.kind === 'new' && !world.get('event', eventId)) throw new Error('That event no longer exists.');
+  if (mode.kind === 'new' && !world.get('event', mode.eventId)) throw new Error('That event no longer exists.');
+  const eventId = eventForMode(tx, mode);
   const t: Instant | null = mode.kind === 'new' ? mode.at ?? null : mode.t;
   const at = t && t.day !== -Infinity ? toStore(t) : null;
+  recordable(world, eventId, at);
   // The same character, map, event and moment: move that placement.
   const same = world.all('effect').find((f) => {
     if (f.kind !== 'place' || f.space_id !== spaceId || f.event_id !== eventId || f.at_day !== (at ? at[0] : null) || f.at_ms !== (at ? at[1] : null)) return false;

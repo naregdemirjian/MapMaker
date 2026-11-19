@@ -80,7 +80,7 @@ test('event groups: deleting an event removes its memberships; an alternative ve
 /** Turn a project file into exactly what version 1 of Map Maker wrote. */
 function makeVersion1(file: string): void {
   const db = new DatabaseSync(file);
-  db.exec("DROP TABLE event_group; DROP TABLE event_group_member; DROP TABLE entity_group; ALTER TABLE entity DROP COLUMN style; ALTER TABLE entity DROP COLUMN group_id; UPDATE meta SET value = '1' WHERE key = 'schema_version';");
+  db.exec("DROP TABLE event_group; DROP TABLE event_group_member; DROP TABLE entity_group; DROP TABLE branch; ALTER TABLE entity DROP COLUMN style; ALTER TABLE entity DROP COLUMN group_id; UPDATE meta SET value = '1' WHERE key = 'schema_version';");
   db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
   db.close();
 }
@@ -118,6 +118,9 @@ test('a version 1 project file is upgraded when opened: backup first, content in
     db2.commit(g.label, g.diffs, db2.journalState().head);
     const m = cmd.setEventGroups(w2, war, [g.result]);
     db2.commit(m.label, m.diffs, db2.journalState().head);
+    // So do branches (format 7), which version 1 had no table for.
+    const br = cmd.createBranch(w2, { name: 'What if', from: Y(1250) });
+    db2.commit(br.label, br.diffs, db2.journalState().head);
     // Restoring the pre-upgrade backup brings back its content (no groups) but not the old file format.
     db2.restoreBackup(preUpgrade[0].file.split(/[\\/]/).pop()!);
     assert.equal(meta().schema_version, String(SCHEMA_VERSION));
@@ -129,6 +132,7 @@ test('a version 1 project file is upgraded when opened: backup first, content in
     const reg3 = new ProjectRegistry(root);
     const w3 = World.fromSnapshot(reg3.get(info.id).snapshot());
     assert.deepEqual(cmd.groupsOfEvent(w3, war), [g.result]);
+    assert.equal(w3.get('branch', br.result)?.name, 'What if');
     assert.equal(reg3.get(info.id).backups().filter((b) => versionOf(b.file) === '1').length, 1, 'opening an up-to-date file needs no further upgrade');
     reg3.closeAll();
   } finally { rmSync(root, { recursive: true, force: true }); }

@@ -54,12 +54,18 @@ export interface FeatureRow { id: string; layer_id: string; name: string; entity
  * 'relate' that begin and end it (see temporal-engine RelateIntent). Added in file format 6.
  */
 export interface RelationRow { id: string; kind: string; a: string; b: string; notes: string; created_seq: number }
+/**
+ * An alternative timeline (Stage 13, D150): it splits from `parent_id` (the main timeline, 'main', or another
+ * branch) at the moment `from_day`/`from_ms`. Its history is its parent's up to and including that moment, live,
+ * and then its own events: those whose `branch_id` is its id. Added in file format 7.
+ */
+export interface BranchRow { id: string; name: string; parent_id: string; from_day: number; from_ms: number; color: string; notes: string; created_seq: number }
 
 export interface Rows {
   meta: MetaRow; map_space: MapSpaceRow; entity_type: EntityTypeRow; entity: EntityRow; layer: LayerRow;
   event_type: EventTypeRow; event: EventRow; effect: EffectRow; sequence: SequenceRow;
   event_group: EventGroupRow; event_group_member: EventGroupMemberRow; entity_group: EntityGroupRow;
-  feature: FeatureRow; relation: RelationRow;
+  feature: FeatureRow; relation: RelationRow; branch: BranchRow;
   vertex: VertexRow; segment: SegmentRow; face: FaceRow;
 }
 export type TableName = keyof Rows;
@@ -87,6 +93,7 @@ export const TABLES: { [K in TableName]: TableDef } = {
   entity_group: { key: 'id', columns: { id: 'text', name: 'text', color: 'text', sort_order: 'int', created_seq: 'int' } },
   feature: { key: 'id', columns: { id: 'text', layer_id: 'text', name: 'text', entity_id: 'text', style: 'text', notes: 'text', created_seq: 'int' } },
   relation: { key: 'id', columns: { id: 'text', kind: 'text', a: 'text', b: 'text', notes: 'text', created_seq: 'int' } },
+  branch: { key: 'id', columns: { id: 'text', name: 'text', parent_id: 'text', from_day: 'int', from_ms: 'int', color: 'text', notes: 'text', created_seq: 'int' } },
   vertex: { key: 'id', kernel: true, columns: { id: 'int', space_id: 'text', lon: 'int', lat: 'int' } },
   segment: { key: 'id', kernel: true, columns: { id: 'int', space_id: 'text', a: 'int', b: 'int', left_face: 'int', right_face: 'int' } },
   face: { key: 'id', kernel: true, columns: { id: 'int', space_id: 'text', parent_id: 'int?', is_leaf: 'int' } },
@@ -110,9 +117,10 @@ export function invertDiffs(diffs: RowDiff[]): RowDiff[] {
  * 3: entity.style (label looks and fills). 4: groups of countries (table entity_group, entity.group_id).
  * 5: areas, lines and points on feature layers (table feature; changes of kind 'shape').
  * 6: relationships between entities (table relation; changes of kind 'relate').
+ * 7: branches, alternative timelines (table branch; events' branch_id naming one).
  * Older files are upgraded when opened (see ProjectDb.migrate), after an automatic backup.
  */
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 /** A row with values for any columns it predates (old backups, old undo history). */
 export function withDefaults<T extends AnyRow>(table: TableName, row: T): T {
@@ -128,3 +136,15 @@ export function withDefaults<T extends AnyRow>(table: TableName, row: T): T {
 }
 export const BASE_EVENT_ID = 'evt_base';
 export const MAIN_BRANCH = 'main';
+
+/**
+ * Where a branch keeps the changes made without an event in it ("correct this period" from a date after it split
+ * off, D150): an event of its own like the starting map, never listed. The main timeline's is the starting map.
+ */
+export function baseEventOf(branch: string): string {
+  return branch === MAIN_BRANCH ? BASE_EVENT_ID : `${BASE_EVENT_ID}:${branch}`;
+}
+/** The starting map, or a branch's own place for changes made without an event (see baseEventOf). */
+export function isBaseEvent(id: string): boolean {
+  return id === BASE_EVENT_ID || id.startsWith(`${BASE_EVENT_ID}:`);
+}

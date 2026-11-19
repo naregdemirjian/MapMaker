@@ -289,6 +289,7 @@ Terminology: the interface calls them **maps** (DECISIONS D24); the code and old
 | `ui/record-length.ts`, `ui/components/RecordLength.tsx` (and `commands.ts` setEffectLength, chainRecorded) | How long changes take (D86) | The recording bar's choice (kept on this computer) and the transition it gives; the length of each change in an event's panel. The engine's `transitionEnd` gives a change's end. |
 | `src/render-engine/icons.ts`, `ui/components/CharacterIcons.tsx` | Character icons (D85) | The icon set (shapes on a 64 by 64 grid, how each turns), drawing an icon; a character's icon setting (`CharacterIcon` in its style) and its section of the panel. Drawn by `MapRenderer.drawCharacterIcon`, facing `CharacterAt.ahead`. |
 | `ui/components/DatePicker.tsx`, `src/core-time/steps.ts` | Dates (D80) | The calendar of a date field; stepping a date by days, months and years. |
+| `src/temporal-engine/branches.ts` | Branches (D150) | What a branch includes of each timeline above it (the cuts), which timeline an edit at a date belongs to, the tree of branches. The engine compiles one timeline (`new Engine(world, branch)`); commands put new events and changes where their date belongs. |
 | `src/core-time/custom-calendar.ts`, `ui/calendar-now.ts`, `ui/components/CalendarDialog.tsx` | A map's calendar (D149) | Calendars from a definition (months, leap rule, epoch, day length, week, eras) and their templates; the calendar of the map being viewed, used by every date written, typed and chosen; the dialog that makes one. |
 | `src/render-engine/fill-clusters.ts` | Pictures over countries in pieces (D82) | Which pieces share a copy of a picture; how a picture is fitted. |
 | `src/domain/event-types.ts`, `ui/components/EventTypes.tsx` | Event types (D75) | A type's colour, usual way of spreading and usual length, kept in the `fields` of its row; the "Event types" dialog, the type chooser and its colour square. |
@@ -310,7 +311,7 @@ The approved roadmap has 14 stages (0–13). Where each stands (brought up to da
 | Stage | Status | Done | Still to do |
 | --- | --- | --- | --- |
 | 0 Groundwork | Mostly done | Sphere-safe kernel, two-part time, SQLite storage, transparent PNG export, pannable/zoomable/rotatable map, Natural Earth basemap, Electron shell, Windows installer built automatically, reference-image render tests (`e2e/render-compare`) | Installer test on the user's PC |
-| 1 Project, storage, world model | Done | Projects, schema with upgrades (format 5; every upgrade tested), undo journal, autosave, versions, backups with restore, crash safety, multiple maps, entities with names, colours, notes; event groups (D8); groups of countries; outliner and inspector | Automatic groups (by world, by country) if wanted |
+| 1 Project, storage, world model | Done | Projects, schema with upgrades (format 7; every upgrade tested), undo journal, autosave, versions, backups with restore, crash safety, multiple maps, entities with names, colours, notes; event groups (D8); groups of countries; outliner and inspector | Automatic groups (by world, by country) if wanted |
 | 2 Parcel map and territory editing | Done | Production kernel (faces rebuilt around an edit), territory brush, precise shape tool, border pen with drafts, border points (move, add, remove), border eraser, split along a line and merge (D76), region picker of today's countries and states (D78), snapping, smoothing, irregularity, political fills, derived borders, labels, coastline clipping, today's countries in one step, flat maps | Sub-national boundaries as permanent parcel edges if wanted (the region picker puts them in where used, D78) |
 | 3 Time and event engine | Done | Instants, Gregorian calendar and calendars of one's own (D149), events, effects with intention, compiler followed change by change, any-date reconstruction, zoomable timeline, edit prompt, record mode, History Health, precedence and overlap rules, alternative versions, names over time, changes over time, comparing two dates, event types as templates, dated border-point moves (D77) | |
 | 4 Layers, entities, lore | Done | Territory layers; area, line and point layers with lifespans and dated shapes, their tool, list and panel (D71); dated relationships (D72); search, GeoJSON and CSV export, notes with pictures (D73); cities with lifespans, characters, alternative versions of events | Layer families across maps |
@@ -327,7 +328,7 @@ The approved roadmap has 14 stages (0–13). Where each stands (brought up to da
 
 ## Tests
 
-All pass as of 19 November 2026 (428 unit and randomised tests in 78 files, 23 + 65 + 14 + 7 interface steps). The
+All pass as of 19 November 2026 (433 unit and randomised tests in 79 files, 23 + 65 + 14 + 7 interface steps). The
 interface tests run with the verify mode on (D57): everything the app works out from what was there before is also
 worked out afresh, and any difference stops the test.
 `sh scripts/check-all.sh` runs everything and prints ALL CHECKS PASSED only when every check passed.
@@ -336,6 +337,7 @@ worked out afresh, and any difference stops the test.
 | --- | --- | --- |
 | `test/core-time.test.ts` | 8 | Known Gregorian dates; calendar round trips across trillions of years; exact arithmetic; parsing and formatting |
 | `test/custom-calendar.test.ts` | 7 | Calendars of one's own (D149): the Julian, French Republican and thirteen-month calendars against known dates; one made like the Gregorian agreeing with it over trillions of years; eras, years before them, a day of 30 hours, a six-day week; definitions refused with reasons; a map given a calendar and undone |
+| `test/branches.test.ts` | 5 | Branches (D150): what each timeline holds before and after its split, early history fixed once for both, edits put where their date belongs, recordings refused with the reason, the moment of the split, branches of branches, alternative versions, deleting and undoing, saving, and random edits followed change by change against a fresh compile |
 | `test/smart-brush.test.ts` | 7 | Smart brushes (D148) on synthetic terrains with known best paths: a river followed, a meander by weight, a crest and a valley, pins, a lake shore all round, far banks, towns and passes onto your side, fast enough for live sliders |
 | `test/follow-land.test.ts` | 4 | The exact course taken along line features: a river's stretch within the tolerance, its bends, out and back along it, a shore that is a loop all the way round, the nearer of two lines |
 | `test/geo-kernel.test.ts` | 13 | Predicates; parcels across the poles and the 180° line; nested islands; snapping; randomised point location against d3; rollback; vertex edits never break validity; a parcel's area summed on plain numbers against the earlier formula and d3 |

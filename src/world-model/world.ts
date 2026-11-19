@@ -3,7 +3,7 @@
 // transaction (a command being executed) or applied from storage (load, undo, redo).
 import { Arrangement, type IdSource, type KernelTable, type KernelRow } from '../geo-kernel/arrangement.ts';
 import {
-  TABLES, TABLE_NAMES, type RowDiff, type TableName, type Rows, type AnyRow, type MapSpaceRow, rowKey, invertDiffs, withDefaults,
+  TABLES, TABLE_NAMES, MAIN_BRANCH, type RowDiff, type TableName, type Rows, type AnyRow, type MapSpaceRow, type BranchRow, rowKey, invertDiffs, withDefaults,
 } from './schema.ts';
 
 export type Snapshot = { [K in TableName]?: Rows[K][] };
@@ -34,6 +34,12 @@ export class World {
    * Restyling, renaming, shots and settings leave it alone, so they never cost a recompile.
    */
   historyRevision = 0;
+
+  /**
+   * The branch being viewed and edited (D150; not stored): new events go into it, or, for a date before it split
+   * off, into the timeline it shares that date with (see temporal-engine/branches.ts branchAt).
+   */
+  branch: string = MAIN_BRANCH;
 
   /**
    * What lay behind each step of historyRevision (the last few thousand), so that the temporal
@@ -145,6 +151,11 @@ export class World {
     if (d.after) map.set(rowKey(d.table, d.after), { ...withDefaults(d.table, d.after) });
     this.tableRevisions.set(d.table, (this.tableRevisions.get(d.table) ?? 0) + 1);
     if (d.table === 'event' || d.table === 'effect' || ((d.table === 'layer' || d.table === 'map_space' || d.table === 'entity' || d.table === 'feature' || d.table === 'relation') && (!d.before || !d.after))) this.noteHistory(d.table, d.before, d.after);
+    // A branch that came or went, or split off elsewhere or at another moment: what each branch holds changes.
+    else if (d.table === 'branch') {
+      const a = d.before as BranchRow | null, b = d.after as BranchRow | null;
+      if (!a || !b || a.parent_id !== b.parent_id || a.from_day !== b.from_day || a.from_ms !== b.from_ms) this.noteHistory(d.table, d.before, d.after);
+    }
     if (d.table === 'map_space') {
       const sp = (d.after ?? d.before) as MapSpaceRow;
       if (!d.after) this.arrangements.delete(sp.id);
@@ -205,7 +216,7 @@ export class World {
     return s;
   }
 
-  nextSeq(table: 'entity' | 'event' | 'sequence' | 'event_group' | 'entity_group' | 'feature' | 'relation'): number {
+  nextSeq(table: 'entity' | 'event' | 'sequence' | 'event_group' | 'entity_group' | 'feature' | 'relation' | 'branch'): number {
     let m = 0;
     for (const r of this.all(table)) m = Math.max(m, r.created_seq);
     return m + 1;

@@ -61,6 +61,41 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D150. Branches: alternative timelines (Stage 13)
+
+- **Asked.** Stage 13 of the approved plan: "full alternative timelines with side-by-side comparison". "A branch
+  splits from the main timeline at a date. It inherits all earlier events live, so fixing early history fixes
+  both, and it holds its own later events. You switch branches from the title bar and can compare two side by
+  side." "Both mechanisms [branches and alternative versions] just choose which events the compiler includes."
+- **What a branch is** (`temporal-engine/branches.ts`, table `branch`, file format 7): a name, a colour, notes, the
+  timeline it splits from (the main timeline or another branch) and the moment it splits. Nothing is copied.
+  Its history is its parent's up to and including that moment, live, and after it its own events (those whose
+  `branch_id` is the branch). Changes are taken one by one by their own date, so an event of the shared history
+  that runs on past the split (a war begun before it) keeps its earlier changes in the branch and loses its later
+  ones: what happens after the split is the branch's to tell. A branch of a branch shares with each timeline
+  above it the history up to the earliest split on the way (a branch can split from its parent before the parent
+  split from its own).
+- **Where edits go.** Viewing a branch, an event made, or a change made without an event, from the moment it split
+  on belongs to the branch; one dated before belongs to the history it shares, so fixing early history fixes
+  every timeline that shares it. A branch keeps its changes without an event in an event of its own like the
+  starting map (`evt_base:<branch>`), never listed. Recording into an event of the shared history after the split
+  is refused with the reason (the change would vanish from the branch as it is made), and so is recording into
+  another branch's events. Countries, factions, cities and characters belong to the project, not to a branch:
+  branches differ in what happens to them.
+- **Moving and deleting.** A branch's split can be moved to another moment (what it shares follows, live). Deleting
+  a branch deletes the branches that split from it and their own events and changes, in one step that undo
+  brings back; what they shared stays with the timeline it belongs to.
+- **The engine** compiles one timeline: an engine per timeline looked at, each following edits change by change as
+  before (D39). Its `revision` is now a number no other engine has, so pictures kept for one timeline are never
+  taken for another's.
+- **Tests.** `branches.test.ts`: what each timeline holds before and after the split, early history fixed once for
+  both, events added before and after the split, edits put where their date belongs (events, changes without an
+  event, names, relationships), recordings refused with the reason, the moment of the split shared and the
+  branch's own change at it winning, a branch of a branch split earlier than its parent, moving the split,
+  alternative versions inside and across branches, deleting a branch with the one below it and undoing it,
+  saving and reading back, and 40 random edits across both timelines with every step followed compared with
+  history compiled afresh. The upgrade test now also upgrades a file without the branch table.
+
 ### D149. Each map in a calendar of its own (Stage 13)
 
 - **Asked.** Stage 13 of the approved plan: "fictional calendars with their own day length, months and year zero
