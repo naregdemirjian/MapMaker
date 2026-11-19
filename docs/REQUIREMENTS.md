@@ -301,6 +301,7 @@ the same three benchmark projects, against the build before this stage, the two 
 | The front line never runs along a change's own edges | Tested | `front-field` (the front's own lines across the land, never along a narrow gap or round an island not yet reached), `e2e/render-compare` 'Looks' (no line along the change's edge behind the front) | D137 |
 | Fronts slowed by terrain (the item left of the transitions stage) | Tested | `front-field` (a slow band crossed late and gone round), `front-terrain` (plains as ever; flanks, crests and the sea slower, by as much as asked), `sequence` (off unless asked; the Overland look; when the heights are wanted), `e2e/render-compare` 'Fronts that mind the land' (behind over mountains, ahead over the plain; as ever without heights or when not asked) | D142. One slider in Adjust the look, and the Overland look. Rivers, roads and passes do not count yet |
 | A transition never leaves anything behind | Tested | `plane` (arcs' latitudes; boxes), `front-source` (the bow of a long border), `e2e/render-compare` 'A long straight border bows' | D144. Found by eye with a front across the Alps: a strip under a long straight border kept the old colour during the change. Fixed |
+| A front's line and glow stay on the land, like the territory | Tested | `e2e/render-compare` 'Where the terrain decides the coast' | D145. Found by eye on a generated planet: they ran on over the sea where the terrain decides the coast. Fixed |
 
 ## Maps enhanced (19 November 2026)
 

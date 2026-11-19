@@ -765,6 +765,52 @@ try {
     assert.equal(r.again, 0, 'not asked again: the picture as before');
   });
 
+  await h.step('Where the terrain decides the coast (a planet, another sea level), a front\'s line and glow end at the coast with the territory (D145)', async () => {
+    const W = 1100, H = 640;
+    const r = await page.evaluate(({ W, H }) => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const view = B.makeView({ lon: -15, lat: -15, zoom: 4, rotation: 0, projection: 'equirectangular' }, W, H);
+      const P = (lon: number, lat: number) => view.projection([lon, lat]) as [number, number];
+      const fresh = new B.MapRenderer();
+      const c = new OffscreenCanvas(W, H).getContext('2d', { willReadFrequently: true }) as OffscreenCanvasRenderingContext2D;
+      // Heights: land everywhere but a sea over the southern half of West's change (south of 15 °S).
+      const gw = 1440, gh = 720, data = new Int16Array(gw * gh);
+      for (let j = 0; j < gh; j++) for (let i = 0; i < gw; i++) {
+        const lon = -180 + (i + 0.5) * 0.25, lat = 90 - (j + 0.5) * 0.25;
+        data[j * gw + i] = lat < -15 && lat > -19.5 && lon > -22 && lon < -14 ? -800 : 300;
+      }
+      const terrain = { grid: { width: gw, height: gh, step: 1, data }, key: 'test-sea', look: null, seaLevel: 0 };
+      const base = { mode: 'recorded', style: 'border', angle: 0, timing: 'event', seconds: 1.5, easing: 'linear', restyleRecorded: false, front: { show: false, color: '#ffffff', width: 4, glow: 14 }, roughness: 0, soft: 0, wake: 0, terrain: 0, secondsSince: () => 0 };
+      const t = B.gregorian.fromCivil({ year: 2001, month: 1, day: 1 });
+      const draw = (look: Record<string, unknown>) => {
+        fresh.render(c, view, s.world, s.engine, s.spaceId, t, { passes: new Set(['background', 'fills']), transparent: false, layerIds: [s.layerId], basemap: null, show: { rivers: false }, terrain, transitions: { ...base, ...look } });
+        return c.getImageData(0, 0, W, H).data;
+      };
+      const plain = draw({});
+      const lit = draw({ front: { ...base.front, show: true }, wake: 0.8 });
+      const at = (d: Uint8ClampedArray, lon: number, lat: number) => { const [x, y] = P(lon, lat), i = (Math.round(y) * W + Math.round(x)) * 4; return [d[i], d[i + 1], d[i + 2]]; };
+      const dist = (a: number[], b: number[]) => Math.max(...a.map((v, i) => Math.abs(v - b[i])));
+      // How many pixels the line and glow change, in a box of the map.
+      const changed = (w: number, so: number, e: number, n: number) => {
+        const [x0, y0] = P(w, n), [x1, y1] = P(e, so);
+        let k = 0;
+        for (let y = Math.ceil(y0); y < y1; y++) for (let x = Math.ceil(x0); x < x1; x++) { const i = (y * W + x) * 4; if (Math.abs(plain[i] - lit[i]) > 3 || Math.abs(plain[i + 1] - lit[i + 1]) > 3 || Math.abs(plain[i + 2] - lit[i + 2]) > 3) k++; }
+        return k;
+      };
+      return {
+        drawable: !!fresh.lastTerrain,
+        // (The sea of the change, well clear of its coast along 15 °S; and its land north of it.)
+        sea: changed(-19.8, -19, -15.2, -15.6), land: changed(-19.8, -14.4, -15.2, -11.2),
+        seaIsSea: dist(at(plain, -17, -17.5), at(plain, -12, -21.3)), landIsHeld: dist(at(plain, -19, -13), at(plain, -23, -13)),
+      };
+    }, { W, H });
+    console.log(`    the line and glow change ${r.land} pixels over the change's land and ${r.sea} over its sea (the sea ${r.seaIsSea} off the open sea's colour; the land taken ${r.landIsHeld} off the new owner's)`);
+    assert.ok(r.seaIsSea <= 3, `the territory ends at the terrain's coast (${r.seaIsSea} off the open sea's colour)`);
+    assert.ok(r.landIsHeld <= 8, `its land north of the coast is taken as ever (${r.landIsHeld} off)`);
+    assert.ok(r.land > 300, `a line and a glow over the land (${r.land} pixels)`);
+    assert.equal(r.sea, 0, 'none of it over the sea');
+  });
+
   await h.step('The globe: every place where the flat map has it, lit; nothing beyond its edge or from its far side; a pole and the 180° meridian without a seam; the flat picture kept while it turns, and the whole frame between changes', async () => {
     const W = 1100, H = 640;
     const r = await page.evaluate(({ W, H }) => {

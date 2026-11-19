@@ -2246,33 +2246,37 @@ export class MapRenderer {
           // (Within the land where territory ends at the coast: cut once for all of them. Cutting each change's
           // highlight to the whole coastline took most of a frame with seventy changes under way.)
           const lit = [...tg.groups.values()].filter((g) => g.advance && g.disc && g.changing && (g.look.front.show || (!!g.field && g.look.wake > 0.01 && g.progress < 1)));
-          if (lit.length) c.save();
-          if (lit.length && clip && opts.basemap && !terrainLand) this.clip(c, land());
+          // Where the terrain decides the land (a planet, another sea level; D96, D97) there is no outline to cut
+          // to: the highlights are drawn apart and cut by the land's mask, as the fills are (D145).
+          const apart = lit.length > 0 && clip && terrainLand && !!terrain && lit.every((g) => !!g.field);
+          const hc = apart ? this.scratch(c) : c;
+          if (lit.length) hc.save();
+          if (lit.length && clip && opts.basemap && !terrainLand) this.clip(hc, land());
           for (const g of lit) {
             if (!g.disc || !g.changing) continue;
             const fr = g.look.front;
             const wake = !!g.field && g.look.wake > 0.01 && g.progress < 1;
             const color = fr.color === 'auto' ? lighten(colorOf(g.a.value) ?? colorOf(g.from) ?? style.frontGlow, 0.45) : fr.color;
-            c.save();
-            this.clip(c, g.changing);
-            if (wake) this.drawWake(c, g, fxOf(g), color);
-            if (!fr.show) { c.restore(); continue; }
+            hc.save();
+            this.clip(hc, g.changing);
+            if (wake) this.drawWake(hc, g, fxOf(g), color);
+            if (!fr.show) { hc.restore(); continue; }
             if (g.field) {
               // The front itself, within the change (D137): never along its edges.
               if (g.line) {
-                c.strokeStyle = color;
-                c.lineWidth = fr.width * view.unit;
-                c.lineJoin = 'round';
-                c.lineCap = 'round';
-                c.shadowColor = color;
-                c.shadowBlur = fr.glow * view.unit;
-                c.stroke(g.line);
+                hc.strokeStyle = color;
+                hc.lineWidth = fr.width * view.unit;
+                hc.lineJoin = 'round';
+                hc.lineCap = 'round';
+                hc.shadowColor = color;
+                hc.shadowBlur = fr.glow * view.unit;
+                hc.stroke(g.line);
               }
             } else if (g.discRule === 'nonzero') {
               // The edge of the reached area: from a border, the area minus the area reached a
               // line-width earlier; from several points, each circle's outline less every circle's inside.
               const w = Math.max(0.5, fr.width * view.unit);
-              const band = this.scratch(c);
+              const band = this.scratch(hc);
               band.fillStyle = color;
               band.strokeStyle = color;
               if (g.border) {
@@ -2286,22 +2290,29 @@ export class MapRenderer {
                 band.fill(g.disc, 'nonzero');
               }
               band.globalCompositeOperation = 'source-over';
-              c.setTransform(1, 0, 0, 1, 0, 0);
-              c.shadowColor = color;
-              c.shadowBlur = fr.glow * view.unit;
+              hc.setTransform(1, 0, 0, 1, 0, 0);
+              hc.shadowColor = color;
+              hc.shadowBlur = fr.glow * view.unit;
               // Only the part of the buffer around the change (blurring the glow over the whole frame is slow).
-              const [bx, by, bw, bh] = this.deviceBox(this.groupBox(view, arr, g, true), cm, 3 * fr.glow * view.unit + w + 4, c.canvas.width, c.canvas.height);
-              if (bw > 0 && bh > 0) c.drawImage(band.canvas as CanvasImageSource, bx, by, bw, bh, bx, by, bw, bh);
+              const [bx, by, bw, bh] = this.deviceBox(this.groupBox(view, arr, g, true), cm, 3 * fr.glow * view.unit + w + 4, hc.canvas.width, hc.canvas.height);
+              if (bw > 0 && bh > 0) hc.drawImage(band.canvas as CanvasImageSource, bx, by, bw, bh, bx, by, bw, bh);
             } else {
-              c.strokeStyle = color;
-              c.lineWidth = fr.width * view.unit;
-              c.shadowColor = color;
-              c.shadowBlur = fr.glow * view.unit;
-              c.stroke(g.disc);
+              hc.strokeStyle = color;
+              hc.lineWidth = fr.width * view.unit;
+              hc.shadowColor = color;
+              hc.shadowBlur = fr.glow * view.unit;
+              hc.stroke(g.disc);
             }
+            hc.restore();
+          }
+          if (lit.length) hc.restore();
+          if (apart) {
+            this.trimToLand(hc, view, sheet, opts.basemap ?? null, frameKey, true, terrain, seaLevel, cm);
+            c.save();
+            c.setTransform(1, 0, 0, 1, 0, 0);
+            c.drawImage(hc.canvas as CanvasImageSource, 0, 0);
             c.restore();
           }
-          if (lit.length) c.restore();
         }
         // (The device box of an animated change: lines drawn apart around it are laid on only there.)
         const boxOf = (g: TransitionGroup, pad: number): Box2 => this.deviceBox(this.groupBox(view, arr, g, false), cm, pad, c.canvas.width, c.canvas.height);

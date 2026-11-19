@@ -61,6 +61,20 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D145. A front's line and glow end at the coast where the terrain decides it
+
+- **Found** by eye, playing a front on a generated planet: the territory ended at the coast, but the front's
+  line and the glow behind it ran on over the sea, across the whole of the change's outline.
+- **Why.** Territory ends at the coast unless its layer covers the sea. On the Earth as it is, the coast is an
+  outline, and the highlights of fronts are cut to it once for all changes (D139). Where the terrain decides
+  what is land (a generated planet, D97; another sea level, D96; sculpted coasts, D98) there is no outline: the
+  fills are cut by a picture of the land made by the graphics card, and the highlights were not cut at all.
+- **What.** There the highlights of a layer's fronts are drawn apart, in a buffer, cut by the same picture of
+  the land, and laid on (`map-renderer.ts`, where `lit` is drawn). One more buffer and one more cut a frame, and
+  only on such worlds while a front with a line or a glow is under way.
+- **Tests.** render-compare 'Where the terrain decides the coast' (a sea over half of a change: the line and
+  glow change thousands of pixels over its land and none over its sea; fails without the cut, checked).
+
 ### D144. A long straight border bows on the map: boxes and fronts follow the bow
 
 - **Found** by eye, playing a front across the Alps between two countries drawn with four points each: a thin
