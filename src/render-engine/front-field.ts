@@ -128,8 +128,14 @@ export function buildFrontField(rings: Rings, source: FrontSource, shape: FrontS
   // 4. The arrival times.
   const T = new Float64Array(N).fill(Infinity);
   if (source.kind === 'scatter') {
-    // Patches: each cell when the noise says, smoothed into blobs; scaled below.
-    for (let c = 0; c < N; c++) if (inside[c]) T[c] = noise![c] + 1;
+    // Patches: each cell when the noise says, smoothed into blobs; at an even pace (D147): a cell's time is its
+    // place among the cells in the order the noise puts them, so that a quarter of the land has changed hands a
+    // quarter of the way through, whatever the pattern. (Left as the noise had them, most of a change could
+    // go in the first half of its time or the last, by the luck of its pattern.)
+    const order: number[] = [];
+    for (let c = 0; c < N; c++) if (inside[c]) order.push(c);
+    order.sort((p, q) => noise![p] - noise![q] || p - q);
+    for (let r = 0; r < order.length; r++) T[order[r]] = 1 + (order.length > 1 ? r / (order.length - 1) : 0);
   } else {
     const seeds: Array<[number, number]> = [];
     const offer = (c: number, t: number) => { if (c >= 0 && t < T[c]) T[c] = t; };

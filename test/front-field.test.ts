@@ -241,3 +241,24 @@ test('a front field is quick to make for a change of 160 cells across, and its l
   assert.ok(t1 - t0 < 400, `made in ${(t1 - t0).toFixed(0)} ms`);
   assert.ok((t2 - t1) / 10 < 40, `traced in ${((t2 - t1) / 10).toFixed(1)} ms`);
 });
+
+test('a dissolve goes at an even pace whatever its pattern (D147): the share of the land that has changed hands is the share of the time gone', () => {
+  const rings = [box(0, 0, 14, 9)];
+  for (const seed of [1, 2, 3, 7, 19, 101, 4242, 99991]) {
+    const f = buildFrontField(rings, { kind: 'scatter' }, { roughness: 0, seed })!;
+    let n = 0;
+    for (let c = 0; c < f.inside.length; c++) n += f.inside[c];
+    for (const p of [0.1, 0.25, 0.5, 0.75, 0.9]) {
+      let taken = 0;
+      for (let c = 0; c < f.inside.length; c++) if (f.inside[c] && f.at[c] <= p) taken++;
+      assert.ok(Math.abs(taken / n - p) < 0.01, `seed ${seed}: ${(100 * taken / n).toFixed(1)}% taken at ${p * 100}% of the time`);
+    }
+    // The first cell at the start, the last at the end, and none outside the span.
+    let lo = Infinity, hi = -Infinity;
+    for (let c = 0; c < f.inside.length; c++) if (f.inside[c]) { lo = Math.min(lo, f.at[c]); hi = Math.max(hi, f.at[c]); }
+    assert.ok(lo === 0 && Math.abs(hi - 1) < 1e-6, `seed ${seed}: from ${lo} to ${hi}`);
+  }
+  // Still in patches: at half time the land taken is in several pieces, not one front.
+  const f = buildFrontField(rings, { kind: 'scatter' }, { roughness: 0, seed: 7 })!;
+  assert.ok(frontRings(f, 0.5).length >= 3, `${frontRings(f, 0.5).length} pieces at half time`);
+});

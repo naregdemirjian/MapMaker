@@ -61,6 +61,49 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D147. A dissolve goes at an even pace, whatever its pattern
+
+- **Found** by the Windows run of D145, which failed in a step that change had not touched: halfway through a
+  dissolve, 88% of the land had changed hands, where the test allows 15 to 85%.
+- **Why.** A dissolve's patches come from smooth noise seeded by the change (D136), and each cell changed hands
+  when its noise said so, scaled between the lowest and the highest value in the change. Where the pattern's
+  values crowd toward one end, most of the land goes in the first half of the time, or the last. Over 400
+  patterns the share gone at half time ran from 15% to 86% (the middle tenth to ninth tenth: 33 to 66%). Each
+  change's pattern is its own, so the same test met another pattern on every run, and one run in a few hundred
+  fell outside what it allowed.
+- **What.** A cell's time is now its place among the change's cells in the order the noise puts them
+  (`front-field.ts`, the scatter source): the patches are the same patches, in the same order, but a quarter of
+  the land has changed hands a quarter of the way through, half at half time, for every pattern.
+- **Tests.** `front-field.test.ts` (eight patterns: the share taken within a hundredth of the share of the time
+  gone, at five moments; still in several patches); render-compare 'Looks' now asks for about half at half time
+  (30 to 70% of the part looked at).
+
+### D146. Close in, coasts and the lie of the land bend below the grid's cells
+
+- **Asked.** Enhance all the maps; detailed when zoomed in. Left undone by D141: a generated planet's coast
+  close in ran from cell to cell of its heights (cells of about 20 km) in smooth scallops with corners, and
+  made-up heights could not move it, since its shelves are steep.
+- **What.** With the fine ground on, the place the heights are read at wanders (`terrain-gl.ts`, `bend`): waves
+  of smooth noise two cells long move it by up to three tenths of a cell, then each wave half as long and half
+  as far, down to waves of a few pixels, the finest fading in as the view comes closer. A coast, and every line
+  of equal height with it, then bends in bays and headlands of every size down to the screen's pixels, never
+  more than about half a cell from where the heights put it. It fades in as a cell grows from four to twelve
+  pixels wide: from afar nothing is changed. Laid out in space on the planet's surface, like the fine ground:
+  no seam, the same at every visit and in every export.
+- **Everything the graphics card draws from the heights follows**: the land's colours, the relief, the sea, and
+  the picture of the land that cuts territories and their fronts (D145) to the coast, so a country still ends
+  exactly at the coast drawn. What is worked out from the heights off the card does not: a planet's rivers end
+  where the heights put the coast, so close in a river may stop a few kilometres short of the bent coast or run
+  a little past it; names and clicks likewise take the heights' own coast.
+- **The Earth.** At today's sea level its coast is Natural Earth's outline and does not move (only the lie of
+  the land bends, by fractions of a cell). At another sea level (D96) its coast is the terrain's and bends too:
+  made up, as the fine ground is, below the 10 km of the heights.
+- **One switch.** "Fine ground close in" in Show, Terrain (D141) turns both off.
+- **Tests.** render-compare 'Close in, a coast the terrain decides bends' (a straight coast in heights of a
+  quarter degree: straight with the fine ground off; with it on wandering over half a cell's width, at most a
+  third of a cell off, about the heights' coast on average, turning twenty times in the view, the same every
+  time; from afar as without). By eye on a generated planet at 50, 10 and 2 km to the scale bar.
+
 ### D145. A front's line and glow end at the coast where the terrain decides it
 
 - **Found** by eye, playing a front on a generated planet: the territory ended at the coast, but the front's
@@ -172,8 +215,8 @@ Follows from D2. The test drives the real interface exactly as a person would.
   A switch per map in Show, Terrain: "Fine ground close in", on by default.
 - **Speed.** Up to ten waves of eight lattice values each for a pixel, only where cells are large on screen; a
   terrain picture is drawn once for a view and kept while the map moves (D95).
-- **Not done.** A planet's coast still follows its cells' edges close in (its shelves are steep, so made-up
-  heights cannot move it); ground that differs by biome (dunes, forest canopy, fields).
+- **Not done.** Ground that differs by biome (dunes, forest canopy, fields). (A planet's coast close in, which
+  still followed its cells: done since, D146.)
 - **Tests.** `e2e/workflows` 'Terrain': with the bundled heights alone close in, more to see once the fine ground
   is on (spread of lightness), and the same ground when the view comes back to it. Checked by eye on a generated
   planet's mountains at 50 km and 10 km to the scale bar, satellite and natural colours.

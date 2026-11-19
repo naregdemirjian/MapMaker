@@ -716,7 +716,8 @@ try {
     assert.ok(r.longTaken <= 6, `the land taken long before as it was (${r.longTaken} off)`);
     assert.ok(r.onLine <= 30, `the line in the new owner's colour, lightened (${r.onLine} off)`);
     assert.ok(r.alongEdge > 60, `no line along the change's own edge behind the front (${r.alongEdge} off the line's colour at best)`);
-    assert.ok(r.westish > 0.15 && r.westish < 0.85, `a dissolve: part of the change taken (${(r.westish * 100).toFixed(0)}%)`);
+    // (At an even pace, D147: about half of it at half time, whatever the pattern of this run's change.)
+    assert.ok(r.westish > 0.3 && r.westish < 0.7, `a dissolve: about half of the change taken at half time (${(r.westish * 100).toFixed(0)}%)`);
     assert.ok(r.westFar > 10 && r.midNear > 10, `in patches all over, not from the zigzag (${r.westFar} taken in the far third, ${r.midNear} still held in the near third)`);
     assert.ok(r.westGlow > 0.08 && r.eastGlow < 0.01, `an event's own look: its change glows (${(r.westGlow * 100).toFixed(0)}%), the other's not (${(r.eastGlow * 100).toFixed(0)}%)`);
   });
@@ -809,6 +810,46 @@ try {
     assert.ok(r.landIsHeld <= 8, `its land north of the coast is taken as ever (${r.landIsHeld} off)`);
     assert.ok(r.land > 300, `a line and a glow over the land (${r.land} pixels)`);
     assert.equal(r.sea, 0, 'none of it over the sea');
+  });
+
+  await h.step('Close in, a coast the terrain decides bends below the grid\'s cells: within half a cell of where the heights put it, the same every time; straight as the heights have it with the fine ground off or from afar (D146)', async () => {
+    const W = 900, H = 600;
+    const r = await page.evaluate(({ W, H }) => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      // Heights with cells a quarter of a degree wide: land east of 17.5 °W, sea west of it. A straight coast.
+      const gw = 1440, gh = 720, data = new Int16Array(gw * gh);
+      for (let j = 0; j < gh; j++) for (let i = 0; i < gw; i++) data[j * gw + i] = -180 + (i + 0.5) * 0.25 > -17.5 ? 400 : -400;
+      const grid = { width: gw, height: gh, step: 1, data };
+      const look = (fine: boolean) => ({ colours: true, relief: true, overTerritories: false, seaFloor: true, strength: 1, palette: 'natural', detail: false, photo: false, fine });
+      // Where the coast is in each row of the picture: the first pixel from the west that is land (greener than blue).
+      const coast = (zoom: number, fine: boolean) => {
+        const view = B.makeView({ lon: -17.5, lat: -15, zoom, rotation: 0, projection: 'equirectangular' }, W, H);
+        const c = new OffscreenCanvas(W, H).getContext('2d', { willReadFrequently: true }) as OffscreenCanvasRenderingContext2D;
+        new B.MapRenderer().render(c, view, s.world, s.engine, s.spaceId, B.gregorian.fromCivil({ year: 1990 }), { passes: new Set(['background', 'terrain']), transparent: false, layerIds: [], basemap: null, show: { rivers: false }, terrain: { grid, key: 'test-coast', look: look(fine), seaLevel: 0 } });
+        const d = c.getImageData(0, 0, W, H).data;
+        const xs: number[] = [];
+        for (let y = 20; y < H - 20; y += 2) { let x = 0; while (x < W && !(d[(y * W + x) * 4 + 1] > d[(y * W + x) * 4 + 2])) x++; xs.push(x); }
+        const cell = Math.abs(view.projection([-17.25, -15])![0] - view.projection([-17.5, -15])![0]);
+        const mean = xs.reduce((a, b) => a + b, 0) / xs.length;
+        return { xs, cell, mean, spread: Math.max(...xs) - Math.min(...xs), off: Math.max(...xs.map((x) => Math.abs(x - W / 2))) };
+      };
+      const plain = coast(6.5, false), bent = coast(6.5, true), again = coast(6.5, true), far = coast(2, true), farPlain = coast(2, false);
+      return {
+        cell: Math.round(plain.cell), plainSpread: plain.spread, plainOff: plain.off,
+        bentSpread: bent.spread, bentOff: bent.off, bentMean: Math.round(Math.abs(bent.mean - W / 2)),
+        same: bent.xs.every((x, i) => x === again.xs[i]), turns: (() => { let n = 0, way = 0; for (let i = 1; i < bent.xs.length; i++) { const d = Math.sign(bent.xs[i] - bent.xs[i - 1]); if (d && way && d !== way) n++; if (d) way = d; } return n; })(),
+        farCell: far.cell, farSame: far.xs.every((x, i) => x === farPlain.xs[i]),
+      };
+    }, { W, H });
+    console.log(`    a cell ${r.cell} px wide: the coast straight to ${r.plainSpread} px with the fine ground off (${r.plainOff} px off the heights' coast); with it on it wanders over ${r.bentSpread} px, at most ${r.bentOff} px off (${r.bentMean} px on average), turning ${r.turns} times; the same again: ${r.same}; from afar (a cell ${r.farCell.toFixed(1)} px) as without: ${r.farSame}`);
+    assert.ok(r.cell > 40, `close in: a cell many pixels wide (${r.cell})`);
+    assert.ok(r.plainSpread <= 2 && r.plainOff <= 3, `off: the coast as the heights have it (${r.plainSpread} px, ${r.plainOff} px off)`);
+    assert.ok(r.bentSpread >= 0.15 * r.cell, `on: the coast bends (over ${r.bentSpread} px of a ${r.cell} px cell)`);
+    assert.ok(r.bentOff <= 0.62 * r.cell, `never far from where the heights put it (${r.bentOff} px of a ${r.cell} px cell)`);
+    assert.ok(r.bentMean <= 0.2 * r.cell, `and about it on average (${r.bentMean} px)`);
+    assert.ok(r.turns >= 6, `in bends of several sizes (${r.turns} turns)`);
+    assert.ok(r.same, 'the same coast every time');
+    assert.ok(r.farCell < 4 && r.farSame, 'from afar nothing is made up');
   });
 
   await h.step('The globe: every place where the flat map has it, lit; nothing beyond its edge or from its far side; a pole and the 180° meridian without a seam; the flat picture kept while it turns, and the whole frame between changes', async () => {
