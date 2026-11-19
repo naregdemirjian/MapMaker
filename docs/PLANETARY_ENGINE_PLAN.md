@@ -882,8 +882,8 @@ Each stage ends with its tests, the full check, its decision record, a commit an
 | 14.3 Tectonics II | Done (19 November 2026, D154) | Volume-keeping collisions and rifts, sutures and accretion, the Wilson cycle and plate splitting, subduction initiation, plumes and their chains, timeline events, checkpoints with exact reconstruction on the 5 Myr grid |
 | 14.4 Landscape evolution | Done (19 November 2026, D155) | Priority-Flood drainage, implicit stream power with a threshold slope and local isostatic rebound, creep, conservative sediment to basins, plains, deltas and shelves, coupled every 5 Myr; rain belts by latitude until the climate is coupled (14.8); flexural (regional) rebound left for finer levels |
 | 14.5 Planet Studio I | Done (19 November 2026, D156) | The studio's steps, presets, readouts and orbit diagram, simulation in workers, layers through time; `sim` maps whose land and sea follow the history. Session 1 complete |
-| 14.6 Climate I | Not started | |
-| 14.7 Climate II | Not started | |
+| 14.6 Climate I | Done (19 November 2026, D157) | Seasonal energy balance on the level-4 mesh: Earth 288.9 K, tropics 28.6 °C, Arctic −17 °C; continental winters too mild and deserts too cool (diffusive transport), for 14.7's winds and oceans |
+| 14.7 Climate II | Done (19 November 2026, D158) | Winds from the circulation cells, monsoons by longitude, moisture carried downwind and raised by mountains, gyres' warm and cold currents; deserts, rainforests, the monsoon and rain shadows where they belong on the real Earth |
 | 14.8 Water and ice | Not started | |
 | 14.9 Biomes | Not started | |
 | 14.10 Planet Studio II and editing | Not started | |

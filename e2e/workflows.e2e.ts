@@ -4321,6 +4321,17 @@ try {
       return seen.size;
     });
     assert.ok(colours >= 6, `plates in their colours (${colours})`);
+    // Today's climate over today's land and sea (D157): the year's mean, and the first and seventh months.
+    await page.getByTestId('studio-layer').selectOption('temperature');
+    await drawn('temperature:');
+    assert.match(await text('studio-legend'), /Temperature at the surface: -?\d+ °C to \d+ °C/);
+    await page.getByTestId('studio-layer').selectOption('temperatureMonth');
+    await page.getByTestId('studio-month').selectOption('6');
+    await drawn('temperatureMonth:6:');
+    // Rain over the year (D158).
+    await page.getByTestId('studio-layer').selectOption('precipitation');
+    await drawn('precipitation:');
+    assert.match(await text('studio-legend'), /Rain and snow over the year: \d+ to [\d,]+ mm/);
     // Used for a map: its land and sea follow the history on its timeline.
     await page.getByTestId('studio-use').click();
     await page.getByTestId('planet-studio').waitFor({ state: 'detached' });

@@ -61,6 +61,91 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D158. The climate II: winds, rain and the sea's currents (Stage 14.7)
+
+- **Asked.** Stage 14.7: "circulation cells and winds, seasonal convergence zones and monsoons, evaporation,
+  moisture transport and orographic precipitation, wind-driven gyres and ocean heat transport, cold currents", done
+  when the Earth-like statistics place deserts, rainforests and rain shadows where they belong.
+- **Winds** (`climate/hydroclimate.ts`) are diagnosed from the planet's own circulation (physics.ts: the Hadley
+  cells' width and the number of cells per hemisphere): easterly trades blowing towards the convergence zone,
+  westerlies beyond, easterlies again near the poles (one cell: surface air returning from the pole), reversed on a
+  planet turning backwards; on a tidally locked planet air flows along the surface towards the point under the star.
+  Monsoons: air is also drawn towards ground warmer than its latitude's mean.
+- **The convergence zone** follows the latitude where the star stands overhead, a month late, swinging further over
+  land than over the sea and furthest over high ground (by 30° bands of longitude: the land's share of the summer
+  hemisphere to 40°, high ground counting more). The first version took the warmest belt from the energy balance's
+  temperatures; its continents' summers are too mild (D157) and India stayed dry; following the Sun, as the energy
+  flux equator does, gives the monsoon.
+- **Rain**: precipitable water evaporates from the sea (Clausius-Clapeyron, faster in wind, reckoned from no warmer
+  than 30 °C, where deep convection holds the warmest seas), is carried downwind (at 0.7 of the surface wind, where
+  vapour lies) and rains out at a rate set by how air moves: faster where it rises (the convergence zone, the storm
+  belts, warm moist convection, and above all wind blowing up a slope), slower where it sinks (the subtropical highs)
+  and in the lee of mountains; over cold ground what the air cannot hold condenses and falls; land gives back part of
+  its rain (more where it is warm: plants). Solved to a steady state each month by upwind transport on the level-4
+  mesh, brought to the map's level. Its constants (`HYDRO`) are calibrated on the Earth.
+- **The sea's currents**: wind-driven gyres (Stommel 1948, Munk 1950) as their effect on the sea's surface: warmer
+  along the western sides of oceans in the subtropics and mid-latitudes (the Gulf Stream, the Kuroshio, the Brazil
+  current), cooler along the eastern sides (California, Canary, Humboldt, Benguela, with upwelling), warmer on the
+  eastern side at high latitudes where the drift arrives (Norway), fading over about 1,000 km from the shore (found
+  along each parallel on a 2° raster of the land); 40 per cent of it on the coast's land. The temperatures of the
+  climate include it.
+- **Results on the real Earth** (L5): the planet's mean rain 1,220 mm a year (about 1,000 measured); the Amazon
+  1,800, Borneo 2,800; the Sahara 180, the Atacama 44, inland Australia 190, Siberia 230; India 450 mm, 230 of it in
+  July and none in January; Chile at 45° S 1,180 against Patagonia's 680, Seattle 1,300 against Nevada's 240.
+  **Shortfalls**: the equatorial Pacific too wet (4,900 mm), the Congo too dry (600), Arabia and the Namib wetter
+  than they are (a few hundred mm), the Andes' and the Cascades' rain shadows weaker than measured: the level-4 mesh
+  (480 km) does not resolve narrow ranges.
+- **In the pipeline**: the `climate` stage runs the energy balance, then winds, rain and currents (about six seconds
+  for a planet); layers: rain and snow over the year and by month, the currents. In the Planet Studio too.
+- **Tests.** `planet-hydroclimate.test.ts`: on the real Earth, four deserts dry, three wet places wet, the monsoon,
+  two rain shadows, the equator wetter than the subtropics, cold currents off Peru and Namibia, warm off Brazil,
+  Florida and Japan and the drift off Norway; on simple planets the belts' winds, a ridge across the westerlies wet
+  on its windward side, a tidally locked planet raining under its star, no rain without water.
+
+### D157. The climate I: a seasonal energy balance, calibrated on the Earth (Stage 14.6)
+
+- **Asked.** Stage 14.6: "insolation for any orbit and tilt, tidal locking and several stars; the seasonal
+  energy-balance model with greenhouse, albedo, heat capacities and transport scaled for the planet; lapse rates;
+  the faint young star", done when the Earth calibration and the sensitivity tests pass.
+- **The model** (`climate/ebm.ts`), physically based with parameters calibrated on the Earth: C ∂T/∂t = S(1 − α) −
+  OLR(T) + ∇·(D∇T) on the mesh, through the year. S from the orbit (Kepler's equation, the declination, any tilt,
+  tidal locking, a pair of stars or a far companion; D152). α as the planet-wide estimate of physics.ts, cell by
+  cell: clouds over a clear sky that scatters light back over sea, land, and sea ice and snow where it is cold (the
+  ice-albedo feedback). The clouds follow the planet's own circulation (more at the equator's convergence zone and in
+  the storm belts beyond the Hadley cells, fewer over the subtropical highs), their mean the planet's cloud cover.
+  OLR = σT⁴ / (1 + ¾τ), τ the grey infrared depth of the planet's carbon dioxide, methane and water vapour (rising
+  with temperature: the water vapour feedback). C: the sea's mixed layer (50 m) or the ground, with the lowest part
+  of the air column (a third of c_p p/g), less through sea ice. Each step is implicit (the outgoing heat linearised,
+  diffusion solved by conjugate gradients), so steps of a fortnight are stable on any planet; the year is stepped
+  until it repeats (to 0.01 K). Temperatures are at sea level; on land they fall with height at the planet's lapse
+  rate.
+- **Transport** is diffusion, strongest in the storm belts beyond the Hadley cells (on Earth near 45°) and weaker
+  towards the poles and the equator (North et al. 1981 let it vary with latitude in the same way), calibrated on the
+  Earth, scaled for other planets as Williams and Kasting (1997): with the air's mass and heat capacity, and as the
+  inverse square of the rotation (slow rotators spread heat further), limited to 30 times Earth's either way.
+- **Resolution.** The model runs on the level-4 mesh (2,562 cells), the land as a share of each cell, and its
+  temperatures are brought to the map's level and lowered by height there: a planet's year in about two seconds.
+- **Calibration on the real Earth** (its land and sea and heights from the terrain grid, D94): a mean of 288.9 K
+  (288 measured), the energy in balance within 1 W/m², 28.6 °C within 10° of the equator, −17 °C beyond 70° N,
+  Antarctica colder than the Arctic, Siberia's seasons about 30 K wide against 1 K at the equator, the Tibetan
+  plateau colder than the plains beside it. **Known shortfalls**, as in all diffusive energy-balance models: the
+  continents' interiors are too mild in winter (Yakutsk −19 °C in January against −39 measured) because diffusion
+  couples them to the sea, and the subtropical deserts too cool (no sinking, warming air); western Europe is too cold
+  (no Gulf Stream). Winds, ocean currents and rain come with 14.7.
+- **Sensitivities** (tested): four times the carbon dioxide warmer by several kelvin; 8 per cent farther from the
+  star more than 5 K colder; more tilt, wider seasons at high latitudes; a slower turning planet, gentler contrasts
+  between the equator and the poles; the faint young Sun (76 per cent) with today's air much colder; a tidally locked
+  planet's night side tens of kelvin colder than its day side, without seasons; Venus over 650 K and nearly even; the
+  frozen preset mostly under ice. The faint young star (`sunFactor`, from physics.ts luminosityFactorAt) is there for
+  the history's climates (14.8).
+- **In the pipeline**: a `climate` stage reading only what the climate depends on (star, orbit, body, air, water,
+  age) and today's land and sea from the history, so changing the air re-runs the climate alone; layers: the year's
+  mean temperature, the temperature by month, ice and snow (the share of the year), in the Planet Studio too.
+- **Tests.** `planet-climate.test.ts`: the Earth (mean, balance, tropics, Arctic and Antarctic, seasons in Siberia
+  and at the equator and over the sea, months in the two hemispheres, the plateau, ice, speed); each setting moving
+  it the right way; a tidally locked planet, Venus, a frozen world. The Planet Studio's interface step shows the
+  temperature of the year and of the seventh month.
+
 ### D156. The Planet Studio, and maps of simulated planets (Stage 14.5)
 
 - **Asked.** Stage 14.5: "the workspace with steps 1 to 5 and 7 (star, orbit, planet, interior and plates, air and

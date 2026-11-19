@@ -76,6 +76,23 @@ export function colourLayer(layer: LayerId, values: Float32Array, width: number,
       put(k, ramp([[0, [18, 24, 32]], [0.4, [30, 70, 120]], [0.8, [70, 150, 230]], [1, [200, 240, 255]]], t));
     }
     legend = 'Water draining through: the brighter, the larger the river (where rain falls, by latitude)';
+  } else if (layer === 'temperature' || layer === 'temperatureMonth') {
+    const TEMP: Array<[number, RGB]> = [[-50, [60, 20, 110]], [-25, [40, 80, 190]], [-5, [120, 190, 230]], [5, [210, 235, 220]], [15, [150, 210, 90]], [25, [240, 200, 60]], [35, [230, 110, 40]], [50, [170, 30, 30]]];
+    for (let k = 0; k < values.length; k++) put(k, ramp(TEMP, values[k]));
+    legend = `Temperature at the surface: ${Math.round(range.min)} °C to ${Math.round(range.max)} °C`;
+  } else if (layer === 'precipitation' || layer === 'precipitationMonth') {
+    const yearly = layer === 'precipitation';
+    const RAIN: Array<[number, RGB]> = yearly
+      ? [[0, [196, 160, 110]], [150, [214, 196, 140]], [400, [190, 210, 140]], [800, [110, 180, 110]], [1500, [40, 140, 120]], [2500, [30, 90, 150]], [4000, [40, 40, 120]]]
+      : [[0, [196, 160, 110]], [10, [214, 196, 140]], [35, [190, 210, 140]], [70, [110, 180, 110]], [130, [40, 140, 120]], [220, [30, 90, 150]], [350, [40, 40, 120]]];
+    for (let k = 0; k < values.length; k++) put(k, ramp(RAIN, values[k]));
+    legend = `Rain and snow ${yearly ? 'over the year' : 'in the month'}: ${Math.round(range.min)} to ${Math.round(range.max).toLocaleString('en')} mm (brown dry, green, blue wet)`;
+  } else if (layer === 'currents') {
+    for (let k = 0; k < values.length; k++) put(k, ramp([[-5, [40, 90, 200]], [-1, [120, 150, 190]], [0, [60, 66, 74]], [1, [200, 150, 110]], [5, [220, 70, 40]]], values[k]));
+    legend = 'The sea\'s currents: red where they warm the surface (western sides of oceans, the high-latitude drift), blue where they cool it (eastern sides)';
+  } else if (layer === 'ice') {
+    for (let k = 0; k < values.length; k++) put(k, ramp([[0, [40, 60, 50]], [0.3, [120, 150, 170]], [0.7, [200, 220, 235]], [1, [250, 252, 255]]], values[k]));
+    legend = 'Ice and snow: the share of the year a place lies under them';
   } else {
     const span = range.max - range.min || 1;
     for (let k = 0; k < values.length; k++) put(k, ramp(HEAT, (values[k] - range.min) / span));

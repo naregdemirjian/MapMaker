@@ -18,8 +18,11 @@ type StepId = 'star' | 'planet' | 'interior' | 'air' | 'history' | 'explore';
 const STEPS: Array<[StepId, string]> = [['star', '1 Star and orbit'], ['planet', '2 Planet'], ['interior', '3 Interior and plates'], ['air', '4 Air and water'], ['history', '5 History'], ['explore', '6 Simulate and explore']];
 const LAYER_NAMES: Array<[LayerId, string]> = [
   ['elevation', 'Relief'], ['plates', 'Plates'], ['boundaries', 'Plate boundaries'], ['crust', 'Kind of crust'], ['crustAge', 'Age of the crust'],
-  ['crustThickness', 'Thickness of the crust'], ['history', 'What made the crust'], ['sediment', 'Sediment'], ['drainage', 'Rivers (water draining)'], ['insolation', 'Sunlight'],
+  ['crustThickness', 'Thickness of the crust'], ['history', 'What made the crust'], ['sediment', 'Sediment'], ['drainage', 'Rivers (water draining)'],
+  ['temperature', 'Temperature (yearly mean)'], ['temperatureMonth', 'Temperature by month'], ['precipitation', 'Rain and snow (a year)'], ['precipitationMonth', 'Rain and snow by month'],
+  ['currents', 'The sea\'s currents'], ['ice', 'Ice and snow'], ['insolation', 'Sunlight'],
 ];
+const MONTHS = ['First month', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth', 'Seventh', 'Eighth', 'Ninth', 'Tenth', 'Eleventh', 'Twelfth'];
 const EVENT_KINDS: Array<[GeoEventKind, string]> = [
   ['supercontinent', 'Continents gather into a supercontinent'], ['breakup', 'A supercontinent breaks up'], ['rift', 'A rift opens'], ['collision', 'Continents collide'],
   ['volcanic-period', 'A volcanic period'], ['lip', 'A flood basalt (large igneous province)'], ['hotspot', 'A new hotspot'], ['impact', 'An impact'], ['reorganisation', 'Plates change direction'],
@@ -97,6 +100,8 @@ export function PlanetStudio() {
   const abort = useRef<AbortController | null>(null);
   const [layer, setLayer] = useState<LayerId>('elevation');
   const [frame, setFrame] = useState(-1);
+  // (For the temperature by month: which twelfth of the year, from the time Earth's calendar starts it.)
+  const [month, setMonth] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [legend, setLegend] = useState('');
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -133,16 +138,17 @@ export function PlanetStudio() {
     if (!c) return;
     const want = run && layer !== 'insolation' ? run.def : def;
     if (layer !== 'insolation' && !run) { const g = c.getContext('2d')!; g.fillStyle = '#10171f'; g.fillRect(0, 0, c.width, c.height); setLegend('Simulate the history to see its layers.'); return; }
-    const params = { ...simParams(want), width: c.width, height: c.height, layer, frame };
+    const monthly = layer === 'temperatureMonth' || layer === 'precipitationMonth';
+    const params = { ...simParams(want), width: c.width, height: c.height, layer, frame: monthly ? month : frame };
     planetPipeline().product('raster', want, params).then((r) => {
       if (!live) return;
       const { pixels, legend: text } = colourLayer(layer, r.data.raster as Float32Array, c.width, c.height, { min: r.data.min as number, max: r.data.max as number });
       c.getContext('2d')!.putImageData(new ImageData(pixels as unknown as Uint8ClampedArray<ArrayBuffer>, c.width, c.height), 0, 0);
       setLegend(text);
-      c.dataset.drawn = `${layer}:${frame}:${r.key}`;
+      c.dataset.drawn = `${layer}:${monthly ? month : frame}:${r.key}`;
     }, (e: Error) => { if (live) s.toast(e.message, 'error'); });
     return () => { live = false; };
-  }, [run, layer, frame, layer === 'insolation' ? def : null]);
+  }, [run, layer, frame, month, layer === 'insolation' ? def : null]);
 
   // Playing the history: a picture every 0.4 s, round and round.
   useEffect(() => {
@@ -245,6 +251,9 @@ export function PlanetStudio() {
           {step === 'explore' && <>
             <label className="studio-slider"><span>Layer</span>
               <select value={layer} onChange={(e) => setLayer(e.target.value as LayerId)} data-testid="studio-layer">{LAYER_NAMES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
+            {(layer === 'temperatureMonth' || layer === 'precipitationMonth') && <label className="studio-slider"><span>Month</span>
+              <select value={month} onChange={(e) => setMonth(Number(e.target.value))} data-testid="studio-month">{MONTHS.map((l, i) => <option key={l} value={i}>{l}{i === 0 ? ' (January on an Earth-like orbit)' : i === 6 ? ' (July)' : ''}</option>)}</select></label>}
+            {['temperature', 'temperatureMonth', 'precipitation', 'precipitationMonth', 'currents', 'ice'].includes(layer) && <p className="muted">The climate of today over today's land and sea: a seasonal energy balance (D157), winds from the circulation cells, rain carried by them and raised by mountains, the sea's currents (D158).</p>}
             <label className="studio-slider"><span>Name</span><input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Aster Prime" data-testid="studio-name" /></label>
             <button className="primary" onClick={use} disabled={problems.length > 0} data-testid="studio-use">{editingId ? 'Apply to this map' : 'Use this planet for a new map'}</button>
             <p className="muted">The map's land and sea follow the planet's simulated history on its timeline: today at the present, earlier dates further back.</p>

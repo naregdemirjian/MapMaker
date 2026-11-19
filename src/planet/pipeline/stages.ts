@@ -6,7 +6,9 @@
 // The same registry runs in the interface (to work out inputs and keys, and to join parts) and in the workers (to
 // run stages). A stage that works cell by cell can be run in parts: fixed ranges of cells, whatever the number of
 // workers, joined in order, so the result is the same bytes on one worker or on many.
-import type { PlanetDefinition } from '../model/definition.ts';
+import { definitionOf, type PlanetDefinition } from '../model/definition.ts';
+import { seasonalClimate } from '../climate/ebm.ts';
+import { hydroclimate } from '../climate/hydroclimate.ts';
 import { derive } from '../model/physics.ts';
 import { cellsAt, meshAt } from '../mesh/icosphere.ts';
 import { rasterize } from '../mesh/transfer.ts';
@@ -65,6 +67,12 @@ export const LAYERS = {
   crustThickness: { stage: 'tectonics', field: 'thickness', unit: 'km', label: 'Thickness of the crust', frames: false, categories: false },
   history: { stage: 'tectonics', field: 'tags', unit: '', label: 'What made the crust', frames: false, categories: true },
   sediment: { stage: 'tectonics', field: 'sediment', unit: 'km', label: 'Sediment', frames: false, categories: false },
+  temperature: { stage: 'climate', field: 'annual', unit: '°C', label: 'Temperature (yearly mean)', frames: false, categories: false },
+  temperatureMonth: { stage: 'climate', field: 'monthly', unit: '°C', label: 'Temperature by month', frames: true, categories: false },
+  precipitation: { stage: 'climate', field: 'precipAnnual', unit: 'mm', label: 'Rain and snow (a year)', frames: false, categories: false },
+  precipitationMonth: { stage: 'climate', field: 'precipMonthly', unit: 'mm', label: 'Rain and snow by month', frames: true, categories: false },
+  currents: { stage: 'climate', field: 'currents', unit: 'K', label: 'The sea\'s currents (warmer and cooler)', frames: false, categories: false },
+  ice: { stage: 'climate', field: 'ice', unit: '', label: 'Ice and snow (share of the year)', frames: false, categories: false },
   drainage: { stage: 'tectonics', field: 'discharge', unit: 'km²', label: 'Water draining through', frames: false, categories: false },
   boundaries: { stage: 'tectonics', field: 'boundary', unit: '', label: 'Plate boundaries', frames: false, categories: true },
 } as const;
@@ -149,6 +157,39 @@ export const STAGES: Record<string, StageDef> = {
       return runHistory(params as unknown as TectonicParams, {
         durationMyr: durationMyr as number, frameEveryMyr: frameEveryMyr as number, onProgress: (d, t) => ctx.progress(d, t),
       }) as unknown as ProductData;
+    },
+  },
+
+  /**
+   * The present climate through the year (D157): the seasonal energy balance over the present land and sea of the
+   * planet's history. Reads only what the climate depends on (star, orbit, body, air, water, age), so changing the
+   * air re-runs the climate alone.
+   */
+  climate: {
+    id: 'climate',
+    version: 2,
+    deps: () => ['tectonics'],
+    inputs: (def, p) => ({
+      level: p.level,
+      def: { star: def.star, orbit: def.orbit, body: def.body, atmosphere: def.atmosphere, water: def.water, history: { ageGyr: def.history.ageGyr, events: [] }, interior: def.interior } as unknown as ProductData,
+    }),
+    run: (inputs, deps, ctx) => {
+      const def = definitionOf(inputs.def)!;
+      const mesh = meshAt(inputs.level as number), n = mesh.n;
+      const all = deps.tectonics.heights as Int16Array;
+      const heights = all.subarray(all.length - n);
+      const x = derive(def);
+      const r = seasonalClimate(mesh, def, x, heights);
+      ctx.progress(1, 2);
+      // Winds, rain and the sea's currents (D158); the currents' warmth goes into the temperatures.
+      const h = hydroclimate(mesh, def, x, heights, r.monthly);
+      const annual = new Float32Array(n);
+      for (let m = 0; m < 12; m++) for (let c = 0; c < n; c++) annual[c] += h.tempMonthly[m * n + c] / 12;
+      ctx.progress(2, 2);
+      return {
+        monthly: h.tempMonthly, annual, ice: r.ice, meanK: r.meanK, absorbed: r.absorbed, emitted: r.emitted, tropicsC: r.tropicsC, polesC: r.polesC, years: r.years,
+        precipMonthly: h.precipMonthly, precipAnnual: h.precipAnnual, currents: h.currents, windJan: h.windJan, windJul: h.windJul, meanPrecip: h.meanPrecip,
+      };
     },
   },
 
