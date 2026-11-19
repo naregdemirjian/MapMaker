@@ -11,6 +11,7 @@ import {
 import { type Vec3, vecToLonLat, normalize } from '../geo-kernel/vec.ts';
 import { TopologyError, type PathStep } from '../geo-kernel/arrangement.ts';
 import { worldSettings, terrainSourceOf, type BasemapSource, type ShowSet, type ShowSettings } from '../world-model/world-settings.ts';
+import { skyLookOf, type SkyLook } from '../space/sky-look.ts';
 import { terrainLookOf, DEFAULT_TERRAIN_LOOK, type TerrainLook } from '../terrain/look.ts';
 import { cleanSeaLevel, type SeaLevelPoint } from '../terrain/sea-level.ts';
 import { planetParamsOf, PLANET_PRESETS, type PlanetParams } from '../terrain/planet.ts';
@@ -221,6 +222,14 @@ export function setInventedStars(world: World, spaceId: string, invented: { seed
   if (!space || space.kind !== 'space' || o?.space?.catalogue !== 'invented') throw new Error('Only an invented star map can be made again.');
   if (!(invented.count >= 2 && invented.count <= 3000) || !(invented.radiusLy >= 5 && invented.radiusLy <= 5000)) throw new Error('An invented star map has between 2 and 3,000 stars, within 5 to 5,000 light-years.');
   return run(world, 'Make the stars again', (tx) => tx.update('map_space', { ...space, settings: JSON.stringify({ ...o, space: { ...o.space, radiusLy: invented.radiusLy, invented: { ...invented, seed: Math.round(invented.seed), count: Math.round(invented.count) } } }) }));
+}
+
+/** How a space map looks (D130, D131, D132): its stars, sky, grid and names, a flat chart, its realms; one undo step. */
+export function setSkyLook(world: World, spaceId: string, look: SkyLook, label = 'Change how the stars look'): CommandResult {
+  const space = world.get('map_space', spaceId);
+  if (!space || space.kind !== 'space') throw new Error('That is not a map of space.');
+  const o = worldSettings(space) as { space?: Record<string, unknown> };
+  return run(world, label, (tx) => tx.update('map_space', { ...space, settings: JSON.stringify({ ...o, space: { ...o.space, look: skyLookOf(look) } }) }));
 }
 
 /** How a solar system map draws its distances (D113): true, or compressed so the inner planets have room. */

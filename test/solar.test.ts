@@ -6,6 +6,7 @@ import { gregorian } from '../src/core-time/index.ts';
 import { World } from '../src/world-model/world.ts';
 import * as cmd from '../src/domain/commands.ts';
 import { spaceSettingsOf } from '../src/world-model/world-settings.ts';
+import { DEFAULT_SKY } from '../src/space/sky-look.ts';
 
 const T = (y: number, m = 1, d = 1) => centuriesSinceJ2000(gregorian.fromCivil({ year: y, month: m, day: d }));
 const lon = (p: number[]) => (((Math.atan2(p[1], p[0]) * 180) / Math.PI) + 360) % 360;
@@ -89,7 +90,7 @@ test('a solar system map: made, its scale chosen and undone; planets held like s
   const engine = new Engine(world);
   cmd.seedProject(world, 'Solar');
   const sp = cmd.createSpaceMap(world, 'The solar system', 'solar').result;
-  assert.deepEqual(spaceSettingsOf(world.get('map_space', sp)), { catalogue: 'solar', radiusLy: 50, scale: 'compressed' });
+  assert.deepEqual(spaceSettingsOf(world.get('map_space', sp)), { catalogue: 'solar', radiusLy: 50, scale: 'compressed', look: DEFAULT_SKY });
   const r = cmd.setSolarScale(world, sp, 'true');
   assert.equal(spaceSettingsOf(world.get('map_space', sp))!.scale, 'true');
   world.applyDiffs(invertDiffs(r.diffs));

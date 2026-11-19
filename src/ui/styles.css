@@ -358,3 +358,26 @@ input.count { width: 56px; padding: 2px 4px; }
 .planet-seed { display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap; }
 .planet-seed input { width: 110px; }
 .planet-slider { margin-top: 2px; }
+
+/* How the stars look (D130): docked at the side, the map in view and still usable behind it. */
+.modal-back.see-through { background: transparent; pointer-events: none; justify-content: flex-end; align-items: stretch; }
+.modal-back.see-through > .modal { pointer-events: auto; margin: 52px 12px 12px; max-height: calc(100vh - 64px); }
+.modal.sky-look { width: 392px; }
+.sky-presets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.sky-preset { padding: 0; display: flex; flex-direction: column; align-items: stretch; overflow: hidden; background: var(--panel2); }
+.sky-preset canvas { display: block; width: 100% !important; height: 64px; }
+.sky-preset span { font-size: 11px; padding: 3px 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sky-preset.on { outline: 2px solid var(--accent2); outline-offset: 1px; background: var(--panel2); color: var(--text); font-weight: 400; }
+.sky-actions { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.sky-seen { display: flex; margin-bottom: 6px; }
+.sky-seen button { flex: 1; }
+label.sky-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 5px 0; }
+label.sky-row > select, label.sky-row > input:not([type=color]) { display: inline-block; width: 58%; margin-top: 0; }
+label.sky-row > .slider { width: 58%; }
+label.sky-row > input[type=color] { width: 58px; height: 24px; padding: 1px 2px; }
+label.sky-row-check { justify-content: flex-start; }
+label.sky-row-check input[type=color] { margin-left: auto; width: 58px; height: 24px; padding: 1px 2px; }
+.map-hud .space-look-buttons { flex-direction: row; }
+.map-hud .space-look-buttons button { width: auto; padding: 3px 9px; }
+.space-note { background: rgba(8,12,18,0.62); padding: 2px 7px; border-radius: 4px; }
+p.small { font-size: 11.5px; }

@@ -6,6 +6,7 @@ import { starKind } from '../src/space/catalogue.ts';
 import { World } from '../src/world-model/world.ts';
 import * as cmd from '../src/domain/commands.ts';
 import { spaceSettingsOf } from '../src/world-model/world-settings.ts';
+import { DEFAULT_SKY } from '../src/space/sky-look.ts';
 
 test('invented stars: the same seed the same stars; their number, reach and shape; mostly red dwarfs; names of their own', () => {
   const o = { seed: 42, count: 400, radiusLy: 80, shape: 'sphere' as const };
@@ -32,7 +33,7 @@ test('an invented star map: made with its settings, made again from another seed
   const world = new World();
   cmd.seedProject(world, 'Invented');
   const sp = cmd.createSpaceMap(world, 'The Reach', 'invented', { seed: 7, count: 120, radiusLy: 30, shape: 'disc' }).result;
-  assert.deepEqual(spaceSettingsOf(world.get('map_space', sp)), { catalogue: 'invented', radiusLy: 30, invented: { seed: 7, count: 120, radiusLy: 30, shape: 'disc' } });
+  assert.deepEqual(spaceSettingsOf(world.get('map_space', sp)), { catalogue: 'invented', radiusLy: 30, invented: { seed: 7, count: 120, radiusLy: 30, shape: 'disc' }, look: DEFAULT_SKY });
   const again = cmd.setInventedStars(world, sp, { seed: 8, count: 200, radiusLy: 40, shape: 'sphere' });
   assert.equal(spaceSettingsOf(world.get('map_space', sp))!.invented!.seed, 8);
   assert.equal(spaceSettingsOf(world.get('map_space', sp))!.radiusLy, 40);

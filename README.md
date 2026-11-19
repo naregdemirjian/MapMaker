@@ -52,7 +52,10 @@ while Map Maker is closed. Don't keep projects inside OneDrive or Dropbox while 
 - Conditions over the map: radiation, fire, smoke, floods, destruction and heatmaps, spreading over the terrain;
   disasters (strikes, earthquakes, eruptions, impacts) in one click.
 - Space maps: the stars within 50 light-years with their known planets, the solar system on any date, the Milky Way,
-  invented stars and galaxies; star systems held by countries and factions, and lanes between them.
+  invented stars and galaxies; star systems held by countries and factions, drawn as territories with borders and
+  fronts where realms at war meet, and lanes between them. How the stars look is yours to choose: colours, shapes,
+  glows, spikes, nebulae, twinkling, fifteen presets and looks made up by chance; seen in three dimensions or as a
+  flat chart with squares or numbered hexes.
 - Undo and redo, named versions, automatic backups, and recovery of a damaged project from its latest healthy backup.
 - Built to stay fast on large projects: moving the map, scrubbing time, drawing and exporting all keep their speed with
   hundreds of countries and detailed coasts. **Settings** (top right) trades sharpness for speed on slower computers;

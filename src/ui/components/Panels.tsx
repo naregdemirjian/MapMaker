@@ -548,7 +548,10 @@ export function Outliner() {
             {sp.name}<span className="muted"> · {sp.kind === 'plane' ? `flat, ${(worldSettings(sp) as { widthKm?: number }).widthKm?.toLocaleString() ?? '?'} km wide` : `radius ${Math.round((sp.radius_m ?? 0) / 1000).toLocaleString()} km`}</span>
           </div>
         ))}
-        {currentSpace && currentSpace.kind !== 'plane' && (
+        {currentSpace && isSpaceMap(currentSpace) && (
+          <button className="link pad-link" onClick={() => s.set({ dialog: 'sky-look' })} data-testid="open-sky-look" title="The stars' colours, shapes, glows and spikes, the sky, the lines and names, a flat chart, and how realms are drawn">How the stars look…</button>
+        )}
+        {currentSpace && currentSpace.kind !== 'plane' && !isSpaceMap(currentSpace) && (
           <div className="world-options">
             <label className="check" title="Land, lakes and coastlines from Natural Earth, drawn under the territories">
               <input type="checkbox" data-testid="basemap-toggle" checked={basemapSourceOf(currentSpace) === 'natural-earth'}

@@ -952,6 +952,12 @@ export class Engine {
     return this.systems.get(spaceId)?.get(star) ?? [];
   }
 
+  /** Every star of a space map ever held by anyone (D111). */
+  systemStars(spaceId: string): number[] {
+    this.ensure();
+    return [...(this.systems.get(spaceId)?.keys() ?? [])];
+  }
+
   /** The characters on a map with a track (placed at least once). */
   trackedCharacters(spaceId: string): string[] {
     this.ensure();

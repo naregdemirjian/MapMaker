@@ -23,7 +23,7 @@ import { SpaceRenderer } from '../space/space-renderer.ts';
 import { loadNearbyStars } from '../space/catalogue.ts';
 import { loadExoplanets } from '../space/exoplanets.ts';
 import { spaceScene } from '../space/scene.ts';
-import { holdingsAt, lanesFor } from '../space/realms.ts';
+import { holdingsAt, lanesFor, warsAmong } from '../space/realms.ts';
 import { stampsAt } from '../terrain/sculpt.ts';
 import { sculpted } from '../terrain/sculpt-cache.ts';
 import { riversNow } from '../terrain/river-cache.ts';
@@ -268,7 +268,8 @@ export function drawSpaceFrame(ctx: CanvasRenderingContext2D, world: World, engi
   const t = timeAt(shot, frame);
   const settings = spaceSettingsOf(world.get('map_space', shot.spaceId));
   const scene = spaceScene(settings, t);
-  const view = makeSpaceView(cameraAt(shot, frame), width, height, scene.radius);
+  const look = settings?.look;
+  const view = makeSpaceView(cameraAt(shot, frame), width, height, scene.radius, !!look?.chart);
   const all = def.name === 'all', back = def.passes.includes('background'), names = def.passes.includes('labels');
   const realms = !all && def.passes.includes('fills'), lanes = !all && def.passes.includes('features');
   ctx.clearRect(0, 0, width, height);
@@ -279,6 +280,7 @@ export function drawSpaceFrame(ctx: CanvasRenderingContext2D, world: World, engi
       transparent: all ? shot.transparent : !def.background, grid: shot.graticule && (all || back), dropLines: all && scene.dropLines !== false, names: shot.labels && (all || names) ? 'auto' : 'none',
       only: all ? undefined : back ? 'background' : realms ? 'realms' : lanes ? 'lanes' : 'names',
       holdings: holdingsAt(world, engine, shot.spaceId, t, (t0) => screenSecondsSince(shot, frame, t0)), lanes: lanesFor(world, engine, shot.spaceId, t),
+      look, wars: warsAmong(world, engine, t), seconds: frame / shot.fps,
     });
     const ls = lookStyles(shot);
     if (finish && ls?.finish) finishLook(ctx, 0, 0, width, height, ls.look, width / 1920);

@@ -3,6 +3,7 @@ import { useStore, store } from './store.ts';
 import { TopBar, Outliner, ToolBar, Inspector, Toasts } from './components/Panels.tsx';
 import { ShowDialog } from './components/ShowDialog.tsx';
 import { SeaLevelDialog } from './components/SeaLevelDialog.tsx';
+import { SkyLookDialog } from './components/SkyLook.tsx';
 import { MapView } from './components/MapView.tsx';
 import { SpaceView } from './components/SpaceView.tsx';
 import { isSpaceMap } from '../world-model/world-settings.ts';
@@ -69,6 +70,7 @@ export function App() {
       {s.dialog === 'event-types' && <EventTypesDialog />}
       {s.dialog === 'show' && <ShowDialog />}
       {s.dialog === 'sea-level' && <SeaLevelDialog />}
+      {s.dialog === 'sky-look' && <SkyLookDialog />}
       {s.dialog === 'merge' && <MergeDialog />}
       {s.dialog === 'give-regions' && <GiveRegionsDialog />}
       {s.dialog === 'versions' && <VersionsDialog />}

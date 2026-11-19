@@ -5,7 +5,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLive, store } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
-import { makeSpaceView, orbitCamera, panSpaceCamera, type SpaceView as View3 } from '../../space/space-view.ts';
+import { makeSpaceView, orbitCamera, panSpaceCamera, turnChart, type SpaceView as View3 } from '../../space/space-view.ts';
 import { SpaceRenderer, type DrawnStar } from '../../space/space-renderer.ts';
 import { spaceScene } from '../../space/scene.ts';
 import { primaryOf as starPrimary, systemOf as starSystem } from '../../space/catalogue.ts';
@@ -16,7 +16,8 @@ import { drawShotOverlays, lookStyles } from '../../presentation/export-driver.t
 import { finishLook } from '../../presentation/looks.ts';
 import { currentShot, frameRect } from './MapView.tsx';
 import { placementMode } from './Characters.tsx';
-import { holdingsAt, lanesFor } from '../../space/realms.ts';
+import { holdingsAt, lanesFor, warsAmong } from '../../space/realms.ts';
+import { DEFAULT_SKY } from '../../space/sky-look.ts';
 import type { OverlayRect } from '../../presentation/sequence.ts';
 import type { Camera } from '../../render-engine/camera.ts';
 
@@ -57,10 +58,14 @@ export function SpaceView() {
   const time = shot ? timeAt(shot, s.shotFrame) : s.time;
   const scene = spaceScene(settings, time, () => force((n) => n + 1));
   const cat = scene.cat;
-  const view = makeSpaceView(camera, frame.w, frame.h, scene.radius);
+  // How the map looks (D130), seen as a flat chart or not (D131).
+  const look = settings?.look;
+  const chart = !!look?.chart;
+  const view = makeSpaceView(camera, frame.w, frame.h, scene.radius, chart);
   // Realms and lanes at the moment shown (in a shot, a star newly held grows into its realm).
   const holdings = space && s.engine ? holdingsAt(s.world!, s.engine, space.id, time, shot ? (t0) => screenSecondsSince(shot, s.shotFrame, t0) : undefined) : undefined;
   const lanes = space && s.engine ? lanesFor(s.world!, s.engine, space.id, time) : undefined;
+  const wars = s.world && s.engine ? warsAmong(s.world, s.engine, time) : undefined;
   // The Lanes tool: the first star clicked, waiting for the second.
   const [laneFrom, setLaneFrom] = useState<number | null>(null);
 
@@ -81,6 +86,7 @@ export function SpaceView() {
       transparent: !!shot?.transparent, grid: shot ? shot.graticule : true, dropLines: scene.dropLines !== false,
       names: shot && !shot.labels ? 'none' : 'auto', selected: shot ? null : laneFrom ?? (s.selection?.kind === 'star' ? s.selection.id : null), holdings, lanes,
       rings: scene.rings, axisLabel: scene.axisLabel, orbits: scene.orbits, realmReach: scene.realmReach, dust: scene.dust, armNames: scene.armNames, planets: scene.planets,
+      look, wars, seconds: shot ? s.shotFrame / shot.fps : undefined,
     });
     // The box being drawn with the Star systems tool.
     const d = drag.current;
@@ -125,7 +131,9 @@ export function SpaceView() {
     }
     // The Star systems tool: Ctrl and a drag draws a box around the stars to give.
     if (!presentation && e.button === 0 && store.tool === 'systems' && (e.ctrlKey || e.metaKey)) { drag.current = { kind: 'box', x: p[0], y: p[1], cx: p[0], cy: p[1] }; return; }
-    drag.current = { kind: e.button === 2 || e.shiftKey ? 'pan' : 'orbit', x: p[0], y: p[1], moved: 0, start: camera };
+    // (On a chart, D131, a drag moves the chart and a right-drag turns it; in three dimensions, a drag turns the view round and a right-drag moves it.)
+    const other = e.button === 2 || e.shiftKey;
+    drag.current = { kind: chart ? (other ? 'orbit' : 'pan') : other ? 'pan' : 'orbit', x: p[0], y: p[1], moved: 0, start: camera };
   }
   /** The primary star of a star's system (a companion sits where its primary is: a click means the system). */
   const primaryOf = (id: number) => (cat ? starPrimary(cat, id) : id);
@@ -150,8 +158,8 @@ export function SpaceView() {
     const dx = p[0] - d.x, dy = p[1] - d.y;
     d.moved = Math.max(d.moved, Math.hypot(dx, dy));
     if (d.moved < 3) return;
-    const start = makeSpaceView(d.start, frame.w, frame.h, scene.radius);
-    setCamera(d.kind === 'orbit' ? orbitCamera(d.start, dx, dy) : panSpaceCamera(d.start, start, dx, dy));
+    const start = makeSpaceView(d.start, frame.w, frame.h, scene.radius, chart);
+    setCamera(d.kind === 'orbit' ? (chart ? turnChart(d.start, start, d.x, d.y, p[0], p[1]) : orbitCamera(d.start, dx, dy)) : panSpaceCamera(d.start, start, dx, dy));
   }
   function onPointerUp(e: React.PointerEvent<HTMLCanvasElement>) {
     const d = drag.current, p = local(e);
@@ -222,6 +230,10 @@ export function SpaceView() {
           {settings?.catalogue === 'galaxy' && settings.galaxy && space && <button className="small space-scale" onClick={() => store.execute((w) => cmd.setGalaxy(w, space.id, { ...settings.galaxy!, seed: settings.galaxy!.seed + 1 }))} data-testid="galaxy-again" title={settings.galaxy.kind === 'milkyway' ? 'Star systems elsewhere along the arms, from the next seed (held systems and lanes keep their numbers)' : 'Another galaxy from the next seed (held systems and lanes keep their numbers)'}>{settings.galaxy.kind === 'milkyway' ? 'Other star systems' : 'Another galaxy'} (seed {settings.galaxy.seed + 1})</button>}
           {settings?.catalogue === 'invented' && settings.invented && space && <button className="small space-scale" onClick={() => store.execute((w) => cmd.setInventedStars(w, space.id, { ...settings.invented!, seed: settings.invented!.seed + 1 }))} data-testid="invented-again" title="Other stars from the next seed (held stars and lanes keep their numbers)">Other stars (seed {settings.invented.seed + 1})</button>}
           {scene.unit === 'au' && space && <button className="small space-scale" onClick={() => store.execute((w) => cmd.setSolarScale(w, space.id, settings?.scale === 'true' ? 'compressed' : 'true'))} data-testid="solar-scale" title="True to scale, the inner planets crowd round the Sun; compressed, every orbit has room">{settings?.scale === 'true' ? 'Compress the distances' : 'Distances true to scale'}</button>}
+          {space && <div className="hud-buttons space-look-buttons">
+            <button className={chart ? 'on' : ''} onClick={() => store.execute((w) => cmd.setSkyLook(w, space.id, { ...(look ?? DEFAULT_SKY), chart: !chart }, chart ? 'Stars in three dimensions' : 'Stars as a flat chart'))} data-testid="space-chart" title={chart ? 'Back to the stars in three dimensions' : 'A flat chart: the map seen straight down on the plane, like a map of the stars (drag to move it, right-drag to turn it)'}>Chart</button>
+            <button onClick={() => store.set({ dialog: 'sky-look' })} data-testid="space-look" title="How the stars look: colours, shapes, glows, the sky, lines and names, realms">Look…</button>
+          </div>}
           <div className="hud-buttons">
             <button title="Zoom in" onClick={() => store.setCamera({ ...camera, zoom: camera.zoom + 0.5 })}>+</button>
             <button title="Zoom out" onClick={() => store.setCamera({ ...camera, zoom: camera.zoom - 0.5 })}>−</button>

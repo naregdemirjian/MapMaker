@@ -6,7 +6,7 @@ import * as cmd from '../../domain/commands.ts';
 import { resolveLabelStyle, labelFont, labelText, LABEL_FONTS, type LabelStyle, type CountryLabel } from '../../render-engine/label-style.ts';
 
 /** A slider that previews while dragging and saves once, when let go (one undo step). */
-function Slider({ value, min, max, step, onCommit, format, testId }: { value: number; min: number; max: number; step: number; onCommit: (v: number) => void; format?: (v: number) => string; testId?: string }) {
+export function Slider({ value, min, max, step, onCommit, format, testId }: { value: number; min: number; max: number; step: number; onCommit: (v: number) => void; format?: (v: number) => string; testId?: string }) {
   const [v, setV] = useState(value);
   useEffect(() => setV(value), [value]);
   const commit = () => { if (v !== value) onCommit(v); };

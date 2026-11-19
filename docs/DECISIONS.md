@@ -61,6 +61,79 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D132. Realms across the stars as territories, with fronts, changing hands in shots
+
+- **Asked.** A way to show territories and how they move across the stars, for great science-fiction wars
+  and futures.
+- **What.** Every star a country or faction holds reaches out round it (3.2 light-years on a map of the
+  nearby stars, as before), most strongly at the star and fading to nothing a little beyond its reach; one
+  realm's reaches add up, so its stars near each other merge into one smooth space and a lone star holds a
+  round one (`territory.ts`). A place belongs to the realm reaching it most strongly, when that is strong
+  enough; where two realms reach it, the border runs between them, pushed back from the side with more stars
+  behind it. Worked out on a grid over the picture in cells of two pixels (four at 4K): who holds each cell,
+  where each border crosses between two cells (from how strongly each side holds them), and how far every cell
+  near the realms is from the nearest border (a distance transform within each realm and a little way into
+  free space). From these: the fill, with a glow along its edges and its edge smoothed (a picture of the
+  cells); the border lines, traced through the crossings as lines (sharp at any size, and lines in SVG frames):
+  a realm's edge in its own colour lightened, a border between two realms in their colours mixed, and where
+  two realms are at war (the relationships of D80), a front, hot red with a glow; each realm's name where it has
+  most room, written over the stars, which keep their names out of its way. In shots a star changing hands is
+  won gradually: the new holder's space grows out from the star over the old holder's (a front moving out),
+  and a star given up to nobody: its old holder's space shrinks back to it. Kept between frames while nothing
+  moves. The look (D130) chooses territories with borders (the default), the soft glows of D111, or none, and
+  how strongly they are filled, how wide their borders and how much they glow.
+- **Measured.** A realm of 400 stars at full HD: the field and its lines in about 80 ms (a working view of
+  1100 by 700: about 12 ms), only when the view, the holdings or the look change.
+- **Tested.** sky-look: a lone star holds a disc of about its reach, its border one line round it, its name at
+  its middle; one realm's stars near each other merge, far apart they do not; between two realms the border
+  runs half way, each side knowing who is across, and moves back from the side with more stars; changing hands
+  the new holder grows out from the star over the old, a star given up shrinks back; the fill painted with its
+  glow and nothing beyond; quick enough to follow a moving view. workflows: two realms side by side on a chart,
+  their border between them in their colours mixed; at war, a front there.
+
+### D131. A star map seen as a flat chart
+
+- **Asked.** A way to make the star map more like a map: a filter that draws it as a map of stars rather than
+  a thing in three dimensions.
+- **What.** Part of the look (D130), turned on and off with a Chart button on the map: the map seen straight down
+  on the galactic plane (or the plane of the solar system), without perspective: every star as large wherever it
+  stands, the way to the galactic centre to the right (`makeSpaceView(…, chart)`). A drag moves the chart, a
+  right-drag turns it round its middle (`turnChart`), the wheel zooms. Its grid: the rings as before, squares,
+  or hexes numbered by column and row as sector maps are, every so many light-years (or as the rings), numbered
+  at the edges; no lines down to the plane: instead each named star's height above or below the plane beside
+  its name, as a number (light-years) or as a mark (filled pointing up: above; open pointing down: below).
+  Shots and exports of the map are drawn the same way. Four chart presets: paper, blueprint, sectors (hexes),
+  night.
+- **Tested.** sky-look: seen straight down, a star's height neither moves it nor makes it larger, +x right and +y
+  up at the same scale, the camera's longitude and latitude unused; turned a quarter of the way by a drag a
+  quarter of the way round; moved with the pointer. workflows: the Chart button; the Sun in the middle, Alpha
+  Centauri right and down as far each way; moved by a drag, turned by a right-drag.
+
+### D130. How the stars look, every part of it
+
+- **Asked.** To edit how the stars of star maps look, "a very good system of how the stars could look to us",
+  to be extremely creative with.
+- **What.** A look kept with each star map (`SkyLook`, `sky-look.ts`, made whole and kept within bounds when
+  read): the stars' colours (natural, vivid, pastel, one colour, by temperature between two colours of one's
+  own, by their holders' colours with the others greyed; any of them tinted), shape (disc, soft blur, dot,
+  diamond, four- or six-pointed sparkle, ring, square, cross), size and how much larger the brighter ones are,
+  glow (reach and strength), diffraction spikes (none, 2, 4, 6 or 8, their length and angle), a halo, an
+  outline as on printed charts, twinkling in shots (each star at its own pace); the sky's colour, a glow toward
+  the middle, nebulae (soft clouds of two colours of one's own, turning with the view), the far stars beyond
+  the map; the lines' colour and strength, the names' colour and lettering, lines down to the plane; the chart
+  (D131) and the realms (D132). Fifteen presets, each shown in the dialog as a small picture drawn by the
+  renderer itself from a patch of sample sky with two realms at war: natural, telescope, deep field, sci-fi
+  display, neon, pastel, ember, imperial, heat, by realm, minimal, and the four charts; and "Surprise me": a
+  look made up by chance (`randomLook`), again for another. The dialog sits at the side, the map in view and
+  usable behind it, every change shown as it is made and undone in one step. Planets and a galaxy's places keep
+  their own colours except where the colouring replaces them (one colour, by holder).
+- **Tested.** sky-look: a look made whole and kept within bounds, every preset a whole look of its own; looks
+  by chance within bounds and all different; colours natural, one colour, by temperature (coolest to hottest),
+  by holder, tinted, vivid and pastel; kept with the map and undone in one step. workflows: the presets'
+  pictures; a preset chosen (one undo step, drawn differently); shape and spikes changed; a look by chance,
+  undone; twinkling to the full: two frames of a still shot differ, the same frame twice the same; an SVG frame
+  with its lines.
+
 ### D129. A date that stays still as it changes
 
 - **Asked.** While history played in the working view, the date shown jittered: its figures have widths of

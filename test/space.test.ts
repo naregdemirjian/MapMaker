@@ -9,6 +9,7 @@ import { makeSpaceView, orbitCamera, panSpaceCamera, spaceCamera } from '../src/
 import { World } from '../src/world-model/world.ts';
 import * as cmd from '../src/domain/commands.ts';
 import { isSpaceMap, spaceSettingsOf } from '../src/world-model/world-settings.ts';
+import { DEFAULT_SKY } from '../src/space/sky-look.ts';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const cat = decodeStars(JSON.parse(readFileSync(join(root, 'data', 'stars', 'nearby-50ly.json'), 'utf8')));
@@ -101,7 +102,7 @@ test('a star map: made with one command, a space map with an (empty) parcel map,
   const sp = world.get('map_space', r.result)!;
   assert.equal(sp.kind, 'space');
   assert.ok(isSpaceMap(sp));
-  assert.deepEqual(spaceSettingsOf(sp), { catalogue: 'nearby', radiusLy: 50 });
+  assert.deepEqual(spaceSettingsOf(sp), { catalogue: 'nearby', radiusLy: 50, look: DEFAULT_SKY });
   assert.equal(spaceSettingsOf(world.all('map_space').find((m) => m.kind === 'sphere')), null);
   assert.ok(world.arrangement(sp.id), 'a parcel map, for what asks for one');
   const again = World.fromSnapshot(world.snapshot());

@@ -12,18 +12,45 @@ import { compare } from '../core-time/index.ts';
  */
 export function holdingsAt(world: World, engine: Engine, spaceId: string, t: Instant, secondsSince?: (t0: Instant) => number): Map<number, Holding> {
   const out = new Map<number, Holding>();
+  const who = (id: string | null | undefined) => { const e = id ? world.get('entity', id) : null; return e ? { owner: e.id, name: engine.nameAt(e.id, t) ?? e.name, color: e.color } : null; };
   for (const [star, id] of engine.systemsAt(spaceId, t)) {
-    const e = world.get('entity', id);
-    if (!e) continue;
-    let fresh = 1;
+    const now = who(id);
+    if (!now) continue;
+    let fresh = 1, from: Holding['from'] = null;
     if (secondsSince) {
       const steps = engine.systemSteps(spaceId, star);
-      let since = null as Instant | null;
-      for (const st of steps) if (compare(st.t, t) <= 0) since = st.t;
-      // (Only when it passed from someone else, or nobody, to this holder.)
-      if (since && since.day !== -Infinity) fresh = Math.max(0, Math.min(1, secondsSince(since) / REALM_GROW_SECONDS));
+      let k = -1;
+      for (let i = 0; i < steps.length; i++) if (compare(steps[i].t, t) <= 0) k = i;
+      // (Only when it passed from someone else, or nobody, to this holder: the one before shrinks as it grows.)
+      if (k >= 0 && steps[k].t.day !== -Infinity) {
+        fresh = Math.max(0, Math.min(1, secondsSince(steps[k].t) / REALM_GROW_SECONDS));
+        if (fresh < 1 && k > 0) from = who(steps[k - 1].entity);
+      }
     }
-    out.set(star, { owner: id, name: engine.nameAt(id, t) ?? e.name, color: e.color, fresh });
+    out.set(star, { ...now, fresh, from });
+  }
+  // In a shot, stars just given up to nobody: their holder's space shrinks away (no holder now).
+  if (secondsSince) {
+    for (const star of engine.systemStars(spaceId)) {
+      if (out.has(star)) continue;
+      const steps = engine.systemSteps(spaceId, star);
+      let k = -1;
+      for (let i = 0; i < steps.length; i++) if (compare(steps[i].t, t) <= 0) k = i;
+      if (k <= 0 || steps[k].entity || steps[k].t.day === -Infinity) continue;
+      const fresh = Math.max(0, Math.min(1, secondsSince(steps[k].t) / REALM_GROW_SECONDS));
+      const from = fresh < 1 ? who(steps[k - 1].entity) : null;
+      if (from) out.set(star, { owner: '', name: '', color: '', fresh, from });
+    }
+  }
+  return out;
+}
+
+/** The holders at war with each other at instant t (D132: where their realms meet, the border is a front). */
+export function warsAmong(world: World, engine: Engine, t: Instant): Array<[string, string]> {
+  const out: Array<[string, string]> = [];
+  for (const id of engine.relationsAt(t)) {
+    const r = world.get('relation', id);
+    if (r && r.kind === 'war' && r.a !== r.b) out.push([r.a, r.b]);
   }
   return out;
 }

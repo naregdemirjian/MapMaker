@@ -18,6 +18,8 @@ export interface SpaceView {
   /** The camera's axes: right, up (on the picture) and forward (into it). */
   right: Vec3; up: Vec3; forward: Vec3;
   target: Vec3;
+  /** Seen as a flat chart (D131). */
+  chart?: boolean;
 }
 
 /** How far the camera stands from what it circles, in radii of the space shown. */
@@ -26,7 +28,23 @@ export const CAMERA_DISTANCE = 3;
 /** A camera for a new star map: from above the galactic plane, at an angle, the whole sphere in view. */
 export const spaceCamera = (): Camera => ({ lon: -60, lat: 28, zoom: 0, rotation: 0, projection: 'equirectangular' });
 
-export function makeSpaceView(cam: Camera, width: number, height: number, radiusLy = 50): SpaceView {
+/**
+ * A view of a space map. `chart` (D131): seen as a flat chart, straight down from above the galactic plane
+ * and without perspective (every star as large wherever it stands), the way to the galactic centre (+x) to
+ * the right; the camera's longitude and latitude are not used, its rotation turns the chart.
+ */
+export function makeSpaceView(cam: Camera, width: number, height: number, radiusLy = 50, chart = false): SpaceView {
+  if (chart) {
+    const target: Vec3 = cam.target ?? [0, 0, 0];
+    const scale = ((Math.min(width, height) * 0.46) / radiusLy) * Math.pow(2, cam.zoom);
+    const cx = width / 2, cy = height / 2;
+    const rot = (cam.rotation * Math.PI) / 180, cr = Math.cos(rot), sr = Math.sin(rot);
+    const project = (p: Vec3): [number, number, number] => {
+      const x = (p[0] - target[0]) * scale, y = -(p[1] - target[1]) * scale;
+      return [cx + x * cr - y * sr, cy + x * sr + y * cr, 1];
+    };
+    return { camera: cam, width, height, unit: width / 1920, scale, project, right: [1, 0, 0], up: [0, 1, 0], forward: [0, 0, -1], target, chart: true };
+  }
   const yaw = (cam.lon * Math.PI) / 180, pitch = (Math.max(-90, Math.min(90, cam.lat)) * Math.PI) / 180;
   const toCam: Vec3 = [Math.cos(pitch) * Math.cos(yaw), Math.cos(pitch) * Math.sin(yaw), Math.sin(pitch)];
   const forward: Vec3 = [-toCam[0], -toCam[1], -toCam[2]];
@@ -55,6 +73,13 @@ export function makeSpaceView(cam: Camera, width: number, height: number, radius
 export function orbitCamera(cam: Camera, dx: number, dy: number): Camera {
   const lon = ((((cam.lon - dx * 0.35) % 360) + 540) % 360) - 180;
   return { ...cam, lon, lat: Math.max(-89.9, Math.min(89.9, cam.lat + dy * 0.35)) };
+}
+
+/** A chart (D131) turned about its middle by a drag from (x0, y0) to (x1, y1): as far round as the pointer went round the middle. */
+export function turnChart(cam: Camera, view: SpaceView, x0: number, y0: number, x1: number, y1: number): Camera {
+  const cx = view.width / 2, cy = view.height / 2;
+  const a = (Math.atan2(y1 - cy, x1 - cx) - Math.atan2(y0 - cy, x0 - cx)) * (180 / Math.PI);
+  return { ...cam, rotation: ((((cam.rotation + a) % 360) + 540) % 360) - 180 };
 }
 
 /** The camera's target moved by a drag of (dx, dy) pixels across the picture (the picture follows the pointer). */
