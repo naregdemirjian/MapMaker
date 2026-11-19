@@ -721,6 +721,50 @@ try {
     assert.ok(r.westGlow > 0.08 && r.eastGlow < 0.01, `an event's own look: its change glows (${(r.westGlow * 100).toFixed(0)}%), the other's not (${(r.eastGlow * 100).toFixed(0)}%)`);
   });
 
+  await h.step('Fronts that mind the land (D142): slower over mountains, quicker over the plain beside them; as ever without heights or when not asked', async () => {
+    const W = 1100, H = 640;
+    const r = await page.evaluate(({ W, H }) => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const view = B.makeView({ lon: -15, lat: -15, zoom: 4, rotation: 0, projection: 'equirectangular' }, W, H);
+      const P = (lon: number, lat: number) => view.projection([lon, lat]) as [number, number];
+      const fresh = new B.MapRenderer();
+      const c = new OffscreenCanvas(W, H).getContext('2d', { willReadFrequently: true }) as OffscreenCanvasRenderingContext2D;
+      // Heights: plains everywhere; rugged mountains over the northern half of West's change (north of 15 °S).
+      const gw = 1440, gh = 720, data = new Int16Array(gw * gh);
+      for (let j = 0; j < gh; j++) for (let i = 0; i < gw; i++) {
+        const lon = -180 + (i + 0.5) * 0.25, lat = 90 - (j + 0.5) * 0.25;
+        data[j * gw + i] = lat > -15 && lat < -10 && lon > -21 && lon < -15 ? (i % 2 ? 2600 : 100) : 100;
+      }
+      const ground = { grid: { width: gw, height: gh, step: 1, data }, key: 'test-ground', seaLevel: 0 };
+      const base = { mode: 'recorded', style: 'border', angle: 0, timing: 'event', seconds: 1.5, easing: 'linear', restyleRecorded: false, front: { show: false, color: '#ffffff', width: 2.2, glow: 0 }, roughness: 0, soft: 0, wake: 0, terrain: 0, secondsSince: () => 0 };
+      const mid = B.gregorian.fromCivil({ year: 2001, month: 1, day: 1 }), early = B.gregorian.fromCivil({ year: 2000, month: 4, day: 1 });
+      const draw = (terrain: number, heights: unknown, t: unknown = mid) => {
+        fresh.render(c, view, s.world, s.engine, s.spaceId, t, { passes: new Set(['background', 'fills']), transparent: false, layerIds: [s.layerId], basemap: null, show: { rivers: false }, frontGround: heights, transitions: { ...base, terrain } });
+        return c.getImageData(0, 0, W, H).data;
+      };
+      const clean = draw(0, ground);
+      const at = (d: Uint8ClampedArray, x: number, y: number) => { const i = (Math.round(y) * W + Math.round(x)) * 4; return [d[i], d[i + 1], d[i + 2]]; };
+      const dist = (a: number[], b: number[]) => Math.max(...a.map((v, i) => Math.abs(v - b[i])));
+      const west = at(clean, ...P(-23, -15));
+      const xa = P(-19.9, -15)[0], xb = P(-15.2, -15)[0];
+      // How far West's colour has come from the zigzag, in pixels: over the mountains (13 °S) and over the plain (17 °S).
+      const come = (d: Uint8ClampedArray) => [-13, -17].map((lat) => { const y = P(-17, lat)[1]; let f = xa; for (let x = Math.ceil(xa); x < xb; x++) if (dist(at(d, x, y), west) <= 8) f = x; return Math.round(f - xa); });
+      const differ = (a: Uint8ClampedArray, b: Uint8ClampedArray) => { let n = 0; for (let i = 0; i < a.length; i += 4) if (Math.abs(a[i] - b[i]) > 2 || Math.abs(a[i + 1] - b[i + 1]) > 2 || Math.abs(a[i + 2] - b[i + 2]) > 2) n++; return n; };
+      const minding = draw(1, ground), noHeights = draw(1, null), again = draw(0, ground);
+      // (An eighth of the way through, the plain is not all taken yet: how far, by how much the land is minded.)
+      const e0 = come(draw(0, ground, early)), eh = come(draw(0.5, ground, early)), e1 = come(draw(1, ground, early));
+      return { span: Math.round(xb - xa), clean: come(clean), minding: come(minding), e0, eh, e1, noHeights: differ(noHeights, clean), again: differ(again, clean) };
+    }, { W, H });
+    console.log(`    of ${r.span} px, over the mountains and over the plain: an eighth through ${r.e0.join(' and ')} px as ever, ${r.eh.join(' and ')} minding the land by half, ${r.e1.join(' and ')} fully; halfway ${r.clean.join(' and ')} as ever, ${r.minding.join(' and ')} minding; without heights ${r.noHeights} pixels differ, not asked again ${r.again}`);
+    assert.ok(Math.abs(r.e0[0] - r.e0[1]) <= 10 && Math.abs(r.clean[0] - r.clean[1]) <= 10, `not asked: the front as far over the mountains as over the plain (${r.e0.join(' and ')}, then ${r.clean.join(' and ')} px)`);
+    assert.ok(r.e1[1] - r.e1[0] >= 25, `minding the land: behind over the mountains (${r.e1[0]} px against ${r.e1[1]} px over the plain)`);
+    assert.ok(r.e1[1] >= r.eh[1] + 8 && r.eh[1] >= r.e0[1] + 8, `the more it minds, the further over the plain meanwhile (${r.e0[1]}, ${r.eh[1]}, ${r.e1[1]} px)`);
+    assert.ok(r.e1[0] <= r.e0[0] + 4 && r.eh[0] <= r.e0[0] + 4, `and no further over the mountains (${r.e0[0]}, ${r.eh[0]}, ${r.e1[0]} px)`);
+    assert.ok(r.minding[1] >= r.clean[1] + 25 && r.minding[0] < r.span - 40, `halfway: the plain taken while the mountains hold out (${r.minding.join(' and ')} of ${r.span} px)`);
+    assert.equal(r.noHeights, 0, 'a map without heights: the front as ever');
+    assert.equal(r.again, 0, 'not asked again: the picture as before');
+  });
+
   await h.step('The globe: every place where the flat map has it, lit; nothing beyond its edge or from its far side; a pole and the 180° meridian without a seam; the flat picture kept while it turns, and the whole frame between changes', async () => {
     const W = 1100, H = 640;
     const r = await page.evaluate(({ W, H }) => {

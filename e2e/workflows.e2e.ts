@@ -2708,7 +2708,7 @@ try {
     assert.equal(await page.evaluate((id) => !!(window as any).__mapmaker.store.world.get('sequence', id), shotId), false, 'the shot is gone');
   });
 
-  await h.step('Transition looks (D137): Blitz chosen in the shot editor sets every part of it and its preview plays; a slider makes the look the shot\'s own; the glow takes the owner\'s colour; an event\'s own look from its panel; undone', async () => {
+  await h.step('Transition looks (D137): Blitz chosen in the shot editor sets every part of it and its preview plays; a slider makes the look the shot\'s own; the glow takes the owner\'s colour; Overland minds the land (D142); an event\'s own look from its panel; undone', async () => {
     await page.getByTestId('mode-world').click();
     const shotId = await page.evaluate(() => {
       const m = (window as any).__mapmaker, s = m.store, B = m.bench;
@@ -2719,9 +2719,9 @@ try {
     });
     await page.getByTestId('shot-editor').waitFor();
     const tr = () => page.evaluate((id) => JSON.parse((window as any).__mapmaker.store.world.get('sequence', id).settings).transitions ?? null, shotId);
-    // The clean look to start with, nine to choose from.
+    // The clean look to start with, ten to choose from.
     assert.equal(await page.getByTestId('transition-look').inputValue(), 'clean');
-    assert.deepEqual(await page.getByTestId('transition-look').locator('option').allInnerTexts(), ['Clean', 'Minimal', 'Soft tide', 'Ink', 'Campaign', 'Blitz', 'In their colours', 'Dissolve', 'Fade', 'Custom (your own)']);
+    assert.deepEqual(await page.getByTestId('transition-look').locator('option').allInnerTexts(), ['Clean', 'Minimal', 'Soft tide', 'Ink', 'Campaign', 'Blitz', 'Overland', 'In their colours', 'Dissolve', 'Fade', 'Custom (your own)']);
     // Blitz: every part of it set at once.
     await page.getByTestId('transition-look').selectOption('blitz');
     await page.waitForFunction((id) => JSON.parse((window as any).__mapmaker.store.world.get('sequence', id).settings).transitions?.look === 'blitz', shotId);
@@ -2756,11 +2756,28 @@ try {
     // The line and glow in the new owner's colour.
     await page.getByTestId('transition-front-colour').selectOption('auto');
     await page.waitForFunction((id) => JSON.parse((window as any).__mapmaker.store.world.get('sequence', id).settings).transitions?.front.color === 'auto', shotId);
+    // Overland: fronts that mind the land (D142); its preview shows the sample's mountains and plays on.
+    await page.getByTestId('transition-look').selectOption('overland');
+    await page.waitForFunction((id) => JSON.parse((window as any).__mapmaker.store.world.get('sequence', id).settings).transitions?.look === 'overland', shotId);
+    t = await tr();
+    assert.ok(t.terrain === 0.8 && t.style === 'border', `Overland set (${JSON.stringify(t)})`);
+    assert.match(await page.getByTestId('transition-look-note').innerText(), /minds the land/);
+    const c0 = await preview();
+    let c1 = c0;
+    for (let i = 0; i < 30 && c1 === c0; i++) { await page.waitForTimeout(100); c1 = await preview(); }
+    assert.notEqual(c0, c1, 'the preview plays in a look that minds the land');
+    await h.screenshot('transition-look-overland');
+    // How much, by its slider: the shot's own look again.
+    const land = page.getByTestId('transition-terrain');
+    await land.fill('30');
+    await land.evaluate((el: HTMLInputElement) => el.blur());
+    await page.waitForFunction((id) => JSON.parse((window as any).__mapmaker.store.world.get('sequence', id).settings).transitions?.terrain === 0.3, shotId);
+    assert.equal((await tr()).look, 'custom');
     // Choosing a look again sets every part of it.
     await page.getByTestId('transition-look').selectOption('clean');
     await page.waitForFunction((id) => JSON.parse((window as any).__mapmaker.store.world.get('sequence', id).settings).transitions?.look === 'clean', shotId);
     t = await tr();
-    assert.ok(t.soft === 0 && t.wake === 0 && t.roughness === 0 && t.front.color === '#ffe9a6', `clean again (${JSON.stringify(t)})`);
+    assert.ok(t.soft === 0 && t.wake === 0 && t.roughness === 0 && t.terrain === 0 && t.front.color === '#ffe9a6', `clean again (${JSON.stringify(t)})`);
     // An event's own look, from its panel.
     await page.evaluate(() => (window as any).__mapmaker.store.set({ mode: 'world', shotId: null }));
     const ev = await page.evaluate(() => {
@@ -2775,7 +2792,7 @@ try {
     await page.getByTestId('event-look').selectOption('');
     await page.waitForFunction((id) => !(window as any).__mapmaker.store.world.get('event', id).presentation.includes('"look"'), ev);
     // Undone: the event's look, the shot's looks and the shot.
-    for (let i = 0; i < 12 && (await page.evaluate((id) => !!(window as any).__mapmaker.store.world.get('sequence', id), shotId)); i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    for (let i = 0; i < 14 && (await page.evaluate((id) => !!(window as any).__mapmaker.store.world.get('sequence', id), shotId)); i++) { await page.getByTestId('undo').click(); await h.saved(); }
     assert.equal(await page.evaluate((id) => !!(window as any).__mapmaker.store.world.get('sequence', id), shotId), false, 'the shot is gone');
     assert.ok(!(await page.evaluate((id) => (window as any).__mapmaker.store.world.get('event', id).presentation.includes('"look"'), ev)), 'the event as it was');
   });

@@ -16,6 +16,7 @@ import { BASE_EVENT_ID } from '../world-model/schema.ts';
 import type { Vec3 } from '../geo-kernel/vec.ts';
 import { buildFrontField, frontRings, frontLines, bandBounds, bandBoxes, type FrontField, type Rings } from './front-field.ts';
 import { frontSourceOf } from './front-source.ts';
+import { terrainSlowness } from './front-terrain.ts';
 import { screenToLonLat, meridianOf, makeView, FLAT_EXTENT_DEG, type View, type Camera } from './camera.ts';
 import type { Arrangement } from '../geo-kernel/arrangement.ts';
 import { BasemapPainter, chooseScale, landMaskOf, visibleBounds, boxIntersects, drawRiverLines, DEFAULT_BASEMAP_STYLE, type Basemap, type BasemapStyle, type LandMask, type RiverSet } from './basemap.ts';
@@ -143,6 +144,8 @@ export interface RenderOptions {
   basemap?: Basemap | null;
   /** Present-day country borders over the land, as a drawing aid (never part of an export). */
   referenceBorders?: boolean;
+  /** The heights fronts mind where their look says so (D142); the terrain's when absent. */
+  frontGround?: { grid: ElevationGrid; key: string; seaLevel?: number } | null;
   /** What of the geography is shown (D84): lakes (and from what size), rivers (D99), the coastline. All shown when absent. */
   show?: { lakes?: boolean; minLakeKm2?: number; coastline?: boolean; rivers?: boolean };
   /**
@@ -244,21 +247,40 @@ export interface ShotTransitionOptions {
   front: { show: boolean; color: string; width: number; glow: number };
   /** How fronts look (D137), each 0 to 1: ragged; the new colour running softly ahead; a glow over the land just taken. */
   roughness?: number; soft?: number; wake?: number;
+  /** How much fronts mind the land (D142), 0 to 1: slowed by mountains and by water to cross. */
+  terrain?: number;
   /** Screen seconds since the frame that showed instant t (Infinity if before the shot). */
   secondsSince: (t: Instant) => number;
 }
 
 /** The events with a transition look of their own (D137), by id: the look's id. Worked out once per state of the events. */
-const ownLooksOf = new WeakMap<World, { revision: number; map: Map<string, string> }>();
-function eventLooksOf(world: World): Map<string, string> {
+const ownLooksOf = new WeakMap<World, { revision: number; map: Map<string, string>; land: boolean }>();
+function ownLooks(world: World): { map: Map<string, string>; land: boolean } {
   const revision = world.tableRevision('event');
   let kept = ownLooksOf.get(world);
   if (!kept || kept.revision !== revision) {
     const map = new Map<string, string>();
-    for (const e of world.all('event')) { if (!e.presentation?.includes('"look"')) continue; const l = eventTransitionLook(e.presentation); if (l) map.set(e.id, l); }
-    ownLooksOf.set(world, (kept = { revision, map }));
+    let land = false;
+    for (const e of world.all('event')) {
+      if (!e.presentation?.includes('"look"')) continue;
+      const l = eventTransitionLook(e.presentation);
+      if (!l) continue;
+      map.set(e.id, l);
+      land ||= (TRANSITION_LOOKS.find((x) => x.id === l)?.set.terrain ?? 0) > 0;
+    }
+    ownLooksOf.set(world, (kept = { revision, map, land }));
   }
-  return kept.map;
+  return kept;
+}
+const eventLooksOf = (world: World): Map<string, string> => ownLooks(world).map;
+
+/**
+ * Whether a front of this map may mind the land (D142): the look of the shot shown does (`tr`; none in the
+ * working view), or an event's own look. The map's heights are then wanted, shown or not.
+ */
+export function frontsMindLand(world: World, tr?: { mode?: string; terrain?: number } | null): boolean {
+  if (tr?.mode === 'instant') return false;
+  return (tr?.terrain ?? 0) > 0 || ownLooks(world).land;
 }
 
 /** The events with a time of their own on screen (D92), by id: seconds. Worked out once per state of the events. */
@@ -1945,12 +1967,16 @@ export class MapRenderer {
     // How fronts look (D137): the shot's look (the plain one in the working view), or an event's own.
     const tr = opts.transitions;
     const baseLook: FrontLookOptions = {
-      roughness: tr?.roughness ?? 0, soft: tr?.soft ?? 0, wake: tr?.wake ?? 0,
+      roughness: tr?.roughness ?? 0, soft: tr?.soft ?? 0, wake: tr?.wake ?? 0, terrain: tr?.terrain ?? 0,
       front: tr?.front ?? { show: true, color: style.frontGlow, width: 2.2, glow: 10 },
     };
+    // The heights fronts mind (D142), and what names them in pictures kept: other heights, another picture.
+    const fg = frontsMindLand(world, tr) ? opts.frontGround ?? opts.terrain ?? null : null;
+    this.frontGround = fg ? { grid: fg.grid, key: fg.key, seaLevel: Math.round((fg.seaLevel ?? 0) / 10) * 10 } : null;
+    const groundSig = this.frontGround ? `|${tr?.terrain ?? 0}|${this.frontGround.key}|${this.frontGround.seaLevel}` : '';
     const eventLooks = eventLooksOf(world);
     // (How the shot's changes look: a picture of the same moment in another look is another picture.)
-    const lookSig = tr ? `${tr.style}|${tr.easing}|${tr.roughness ?? 0}|${tr.soft ?? 0}|${tr.wake ?? 0}|${tr.front.show ? 1 : 0}|${tr.front.color}|${tr.front.width}|${tr.front.glow}` : '';
+    const lookSig = tr ? `${tr.style}|${tr.easing}|${tr.roughness ?? 0}|${tr.soft ?? 0}|${tr.wake ?? 0}|${tr.front.show ? 1 : 0}|${tr.front.color}|${tr.front.width}|${tr.front.glow}${groundSig}` : groundSig;
     const looks = new Map<string, FrontLookOptions>();
     const lookOf = (a: Assignment): FrontLookOptions => {
       const id = eventLooks.get(a.eventId);
@@ -3033,6 +3059,8 @@ export class MapRenderer {
 
   /** Fields of the changes under way, the last used last, with the cells they hold together. */
   private fieldCache = new Map<string, FrontField | null>();
+  /** The heights fronts mind in the picture being drawn (D142); null: none do, or the map has none. */
+  private frontGround: { grid: ElevationGrid; key: string; seaLevel: number } | null = null;
   private fieldCells = 0;
 
   /**
@@ -3047,15 +3075,17 @@ export class MapRenderer {
     if (!changing.length) return null;
     const kind = g.spec.style === 'advance' ? 'advance' : g.spec.style === 'dissolve' ? 'scatter' : 'border';
     const roughness = g.look.roughness;
+    // (Minding the land, D142: the heights of the map and its sea, to the nearest 10 m; patches mind nothing.)
+    const ground = kind !== 'scatter' && g.look.terrain > 0 ? this.frontGround : null;
     const origins = kind === 'advance' ? JSON.stringify(g.spec.origins ?? g.spec.origin ?? null) : '';
     const box = this.groupBox(view, arr, g, true);
     const want = Math.max(box[2], box[3]) / 2.5;
     const cells = FIELD_CELLS.find((c) => c >= want) ?? FIELD_CELLS[FIELD_CELLS.length - 1];
-    const key = `${arr.spaceId}|${arr.revision}|${g.a.effectId}|${g.a.value}|${kind}|${origins}|${changing.length}|${changing[0]}|${changing[changing.length - 1]}|${roughness}|${cells}`;
+    const key = `${arr.spaceId}|${arr.revision}|${g.a.effectId}|${g.a.value}|${kind}|${origins}|${changing.length}|${changing[0]}|${changing[changing.length - 1]}|${roughness}|${cells}${ground ? `|${g.look.terrain}|${ground.key}|${ground.seaLevel}` : ''}`;
     let f = this.fieldCache.get(key);
     if (f === undefined) {
       const src = frontSourceOf(arr, changing, g.a.value, g.spec, kind, states);
-      f = src ? buildFrontField(src.rings, src.source, { roughness, seed: seedOf(g.a.effectId), cells }) : null;
+      f = src ? buildFrontField(src.rings, src.source, { roughness, seed: seedOf(g.a.effectId), cells, slowAt: ground ? terrainSlowness(ground.grid, ground.seaLevel, g.look.terrain) : undefined }) : null;
       this.fieldCells += f ? f.nx * f.ny : 0;
     } else this.fieldCache.delete(key);
     this.fieldCache.set(key, f);
@@ -5156,6 +5186,8 @@ export interface FrontLookOptions {
   roughness: number;
   soft: number;
   wake: number;
+  /** How much the front minds the land (D142; 0: not at all). */
+  terrain: number;
   front: { show: boolean; color: string; width: number; glow: number };
 }
 
@@ -5166,7 +5198,7 @@ const FIELD_CELLS = [32, 48, 72, 108, 160];
 function lookById(id: string, base: FrontLookOptions): FrontLookOptions | null {
   const l = TRANSITION_LOOKS.find((x) => x.id === id);
   if (!l) return null;
-  return { roughness: l.set.roughness ?? 0, soft: l.set.soft ?? 0, wake: l.set.wake ?? 0, front: { ...base.front, ...(l.set.front ?? {}) } };
+  return { roughness: l.set.roughness ?? 0, soft: l.set.soft ?? 0, wake: l.set.wake ?? 0, terrain: l.set.terrain ?? 0, front: { ...base.front, ...(l.set.front ?? {}) } };
 }
 
 /** A colour mixed toward white (`k` 0 to 1), as #rrggbb; the colour unchanged when it cannot be read. */

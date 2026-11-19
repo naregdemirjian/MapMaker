@@ -95,6 +95,39 @@ test('transition looks (D137): each sets how fronts look and keeps when and how 
   assert.equal(eventTransitionLook('not json'), null);
 });
 
+test('fronts that mind the land (D142): off unless asked for; a look of its own; the map\'s heights wanted when a front may mind them', async () => {
+  const { frontsMindLand } = await import('../src/render-engine/map-renderer.ts');
+  const shot = defaultShot('space', cam, Y(1900), Y(2000));
+  const base = shotTransitions(shot);
+  assert.equal(DEFAULT_TRANSITIONS.terrain, 0);
+  assert.equal(base.terrain, 0);
+  // Kept within its range; a shot saved before it: off.
+  assert.equal(shotTransitions({ ...shot, transitions: { ...DEFAULT_TRANSITIONS, terrain: 7 } }).terrain, 1);
+  assert.equal(shotTransitions({ ...shot, transitions: { ...DEFAULT_TRANSITIONS, terrain: Number.NaN } }).terrain, 0);
+  const { terrain: _gone, ...before } = DEFAULT_TRANSITIONS;
+  assert.equal(shotTransitions({ ...shot, transitions: before }).terrain, 0);
+  // Overland minds the land; every other look does not, and choosing one after it turns it off again.
+  for (const l of TRANSITION_LOOKS) assert.equal((l.set.terrain ?? 0) > 0, l.id === 'overland', l.id);
+  const overland = withTransitionLook(base, 'overland');
+  assert.ok(overland.terrain! >= 0.5 && overland.terrain! <= 1);
+  assert.equal(withTransitionLook(overland, 'clean').terrain, 0);
+  // The map's heights are wanted when the shot's look minds the land (not when nothing is animated)...
+  const w = new World();
+  assert.equal(frontsMindLand(w, null), false);
+  assert.equal(frontsMindLand(w, base), false);
+  assert.equal(frontsMindLand(w, overland), true);
+  assert.equal(frontsMindLand(w, { ...overland, mode: 'instant' }), false);
+  // ...or an event's own look does (in the working view too).
+  const ev = cmd.createEvent(w, { name: 'Over the mountains', start: Y(1940), end: Y(1941) }).result as string;
+  cmd.setEventLook(w, ev, 'blitz');
+  assert.equal(frontsMindLand(w, base), false);
+  cmd.setEventLook(w, ev, 'overland');
+  assert.equal(frontsMindLand(w, base), true);
+  assert.equal(frontsMindLand(w, null), true);
+  cmd.setEventLook(w, ev, null);
+  assert.equal(frontsMindLand(w, null), false);
+});
+
 test('still camera: framing sets one view for the whole shot; reset gives the whole map', async () => {
   const { withStillCamera, cameraMoves, resetCamera } = await import('../src/presentation/sequence.ts');
   const shot = defaultShot('space', cam, Y(1900), Y(2000), 25, 4);

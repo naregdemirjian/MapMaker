@@ -175,7 +175,7 @@ export async function svgFrame(o: SvgFrameOptions): Promise<SvgFrame> {
     mapLayers.push(layer('stars', 'Stars, realms, lanes and names', pen.body()));
   } else {
     const basemap = await basemapFor(world, shot.spaceId);
-    const ground = await terrainFor(world, shot.spaceId);
+    const ground = await terrainFor(world, shot.spaceId, shot);
     const detail = await detailForFrame(world, shot, frame, W, H, ground);
     const setup = frameSetup(world, shot, frame, all, W, H, basemap, ground, detail);
     view = setup.view;

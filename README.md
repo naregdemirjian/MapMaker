@@ -37,8 +37,8 @@ while Map Maker is closed. Don't keep projects inside OneDrive or Dropbox while 
   are founded, moved and abandoned at dates.
 - Animate changes: fronts that travel through the land from the border (round bays, across to islands), expansions,
   dissolves or fades, in a look chosen from a list with a live preview (clean by default; soft, inky, ragged, glowing,
-  intense) and adjusted freely, a look of their own for any event; style labels, fill countries with
-  colours, flags, pictures or videos; add a current-events box to shots.
+  intense, or minding the land: slower over mountains and water) and adjusted freely, a look of their own for any
+  event; style labels, fill countries with colours, flags, pictures or videos; add a current-events box to shots.
 - Make shots and export PNG or TIFF image sequences with transparency, in separate layers for Premiere (by kind, or
   each layer on its own), at HD, 4K, 8K or any size and frame rate; or one MP4 (H.264) or WebM (VP9) video to play
   and share; or a single frame as an editable SVG file. "+ Whole history" makes a timelapse of everything in one click.

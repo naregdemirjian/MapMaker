@@ -61,6 +61,41 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D142. Fronts that mind the land: slower over mountains and water
+
+- **Asked.** The item left of the transitions stage: a front slowed by terrain, not only shaped by where the
+  land is (D136).
+- **What.** A look has one more setting, 0 to 1: how much its fronts mind the land (`ShotTransitions.terrain`;
+  Adjust the look, "Slowed by mountains and water"). A front's field (D136) is made of the time the front takes
+  to cross each cell; where the look minds the land each cell of the change is slower by what the map's heights
+  say there (`front-terrain.ts`, `terrainSlowness`):
+  - rugged country: how far the land rises and falls within about 20 km of the place (or half a cell of the
+    field, when that is longer), full at 900 m: up to three times slower;
+  - high ground: from 1,500 m, full at 4,000 m: up to one and a half times more;
+  - water to cross (below the sea of the moment, D96): two and a half times more.
+  The field is fast marching over these speeds, so a front takes the quick way: up a valley and round a range,
+  along the plain while the mountains beside it hold out, across a strait late. The change still takes the time
+  it was given: the land only decides where the front is at each moment of it.
+- **A look of its own**, "Overland" (a little ragged, a gentle glow, minding the land by 0.8). Every other look
+  is as before; a shot saved before this minds nothing. An event can take the look for itself (D137).
+- **Which heights.** The map's own, of the moment: the Earth's, a generated planet's, with sculpting (D98) and
+  the sea level of the date (to the nearest 10 m, so a rising sea does not make a front anew every frame). They
+  are loaded for a shot or an event that asks, whether or not the terrain is shown (`frontsMindLand`); until
+  they are in, and on maps without heights (flat maps, space), fronts go as ever. Dissolves and fades mind
+  nothing.
+- **Kept pictures and fields.** A field is kept by how much it minds, the heights' name and the sea level beside
+  what it was kept by before (D139); the picture of a moment likewise, so other heights give another picture.
+- **The preview** shows a sample range across the northern arm of the land taken (a few marks) when the look
+  minds the land: the front runs on along the southern arm while the range holds out.
+- **Cost.** Five heights read per cell of a field, once per field: under a millisecond for the finest.
+- **Not done.** Rivers as obstacles (they are lines, not heights); roads and passes as quick ways; a say per
+  change in how fast its own land falls.
+- **Tests.** `front-field.test.ts` (a slow band is crossed late and gone round); `front-terrain.test.ts` (plains
+  as ever, flanks and crests and the sea slower, by as much as is asked; a front minding a range takes longer
+  across it); `sequence.test.ts` (off unless asked, kept in range, the look, when heights are wanted);
+  render-compare 'Fronts that mind the land' (behind over mountains, ahead over the plain beside them, in
+  between at half; pixel for pixel as ever without heights or when not asked).
+
 ### D141. Fine ground close in: made up below the heights' own detail
 
 - **Asked.** Enhance all the maps; detailed when zoomed in.

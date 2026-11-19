@@ -4,7 +4,7 @@
 import { Api } from '../ui/api.ts';
 import type { World } from '../world-model/world.ts';
 import type { Engine } from '../temporal-engine/engine.ts';
-import { MapRenderer, DEFAULT_STYLE, EXPORT_QUALITY, type PassName, type MapStyle, type RenderOptions } from '../render-engine/map-renderer.ts';
+import { MapRenderer, DEFAULT_STYLE, EXPORT_QUALITY, frontsMindLand, type PassName, type MapStyle, type RenderOptions } from '../render-engine/map-renderer.ts';
 import { resolveLook, isPlainLook, mapStyleOf, basemapStyleOf, finishLook, type Look } from './looks.ts';
 import { makeView, viewBounds, metresPerPixel, lonLatToScreen, type View } from '../render-engine/camera.ts';
 import { type ShotSettings, type OverlayRect, EVENTS_BOX_ID, timeAt, cameraAt, overlaysAt, drawOverlays, shotTransitions, screenSecondsSince, isVideoFormat } from './sequence.ts';
@@ -118,7 +118,7 @@ export async function estimateExportBytes(world: World, engine: Engine, shot: Sh
   const w = Math.max(16, Math.round(W * k)), h = Math.max(16, Math.round(H * k));
   if (spaceSettingsOf(world.get('map_space', shot.spaceId))?.catalogue === 'nearby') await loadNearbyStars();
   const basemap = await basemapFor(world, shot.spaceId);
-  const terrain = await terrainFor(world, shot.spaceId);
+  const terrain = await terrainFor(world, shot.spaceId, shot);
   const canvas = new OffscreenCanvas(w, h);
   const ctx = canvas.getContext('2d') as unknown as CanvasRenderingContext2D;
   // One renderer for all estimates: what it has prepared (outlines, label places) serves the next estimate too.
@@ -191,7 +191,7 @@ export interface Ground { grid: ElevationGrid; key: string; cover?: TerrainCover
  * first use); Earth's (loaded on first use) when its terrain is shown (D95) or its sea level changes
  * over time (D96), with its land cover in the satellite look (D100).
  */
-export async function terrainFor(world: World, spaceId: string): Promise<Ground | null> {
+export async function terrainFor(world: World, spaceId: string, shot: ShotSettings | null = null): Promise<Ground | null> {
   const space = world.get('map_space', spaceId);
   const planet = planetOf(space);
   if (planet) return { grid: await planetTerrain(planet), key: planetKey(planet) };
@@ -200,7 +200,9 @@ export async function terrainFor(world: World, spaceId: string): Promise<Ground 
   const look = terrainLook(space), shownLook = !!look && shown(space, 'export', 'terrain');
   // (Conditions spreading over the terrain need its heights too, D103.)
   const fields = world.all('layer').some((l) => l.kind === 'field' && l.space_id === spaceId);
-  if (!shownLook && !seaLevelPoints(space).length && !sculptOf(space).length && !fields) return null;
+  // (And fronts that mind the land, D142.)
+  const fronts = !!shot && frontsMindLand(world, shotTransitions(shot));
+  if (!shownLook && !seaLevelPoints(space).length && !sculptOf(space).length && !fields && !fronts) return null;
   return { grid: await loadEarthTerrain(), key: EARTH_TERRAIN_KEY, cover: shownLook && PALETTES[look.palette].cover ? await loadEarthCover() : null };
 }
 
@@ -266,7 +268,7 @@ export function frameSetup(world: World, shot: ShotSettings, frame: number, def:
   // Sculpting (D98): the strokes holding at the frame's moment, applied to the heights.
   const strokes = stampsAt(sculptOf(space), t);
   const fieldsHere = world.all('layer').some((l) => l.kind === 'field' && l.space_id === shot.spaceId);
-  const carved = ground && (terrainShown || seaPoints.length || planetOf(space) || paleo || strokes.length || fieldsHere) ? sculpted(ground.grid, ground.key, strokes, (space?.radius_m ?? 6371008.8) / 1000) : null;
+  const carved = ground && (terrainShown || seaPoints.length || planetOf(space) || paleo || strokes.length || fieldsHere || frontsMindLand(world, shotTransitions(shot))) ? sculpted(ground.grid, ground.key, strokes, (space?.radius_m ?? 6371008.8) / 1000) : null;
   const rivers = carved && planetOf(space) && on('rivers') ? riversNow(carved.grid, carved.key) : null;
   // The land's colours in the satellite look (D100): Earth's land cover, or the planet's biomes.
   const planet = planetOf(space);
@@ -349,7 +351,7 @@ export async function runExport(o: {
   const nearbyStars = spaceMap && spaceSettingsOf(o.world.get('map_space', o.shot.spaceId))?.catalogue === 'nearby';
   if (nearbyStars) { await loadNearbyStars(); await loadExoplanets(); }
   const basemap = await basemapFor(o.world, o.shot.spaceId);
-  const terrain = await terrainFor(o.world, o.shot.spaceId);
+  const terrain = await terrainFor(o.world, o.shot.spaceId, o.shot);
   // Pictures and videos: every picture loaded, and every video sought to its frame before drawing.
   const fills = o.world.all('entity').map((e) => entityStyle(e).fill).filter((f): f is NonNullable<typeof f> => !!f?.asset);
   const videoFills = fills.filter((f) => f.kind === 'video').map((f) => ({ file: f.asset!, play: f }));

@@ -46,6 +46,12 @@ export interface FrontShape {
   seed: number;
   /** Cells across the change's longer side (default 160). */
   cells?: number;
+  /**
+   * How much slower the front is at a place than on open flat land (1: as fast; 3: a third as fast): mountains
+   * and water to cross (D142). The front then goes round them where that is quicker, and through them late.
+   * `cellDeg`: how large the cell asked about is, in degrees of latitude (what is finer than it cannot count).
+   */
+  slowAt?: (lon: number, lat: number, cellDeg: number) => number;
 }
 
 /** Cells round the change: the land reached is carried this far beyond it, less one (room for soft edges). */
@@ -109,6 +115,15 @@ export function buildFrontField(rings: Rings, source: FrontSource, shape: FrontS
   if (noise && source.kind !== 'scatter') {
     const r = Math.max(0, Math.min(1, shape.roughness)) * 1.6;
     for (let c = 0; c < N; c++) slow[c] = Math.exp(-r * noise[c]);
+  }
+  // (And slower where the land says so, D142: asked for the cells of the change only.)
+  if (shape.slowAt && source.kind !== 'scatter') {
+    for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+      const c = j * nx + i;
+      if (!inside[c]) continue;
+      const k = shape.slowAt(lonOf(i), latOf(j), dlat);
+      if (k > 1) slow[c] *= Math.min(20, k);
+    }
   }
   // 4. The arrival times.
   const T = new Float64Array(N).fill(Infinity);

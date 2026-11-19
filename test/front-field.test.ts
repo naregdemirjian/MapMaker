@@ -193,6 +193,28 @@ test('a coarser field of the same change (one seen small): the same front, ragge
   assert.ok(places > 300 && agree / places > 0.95, `${agree} of ${places} places alike`);
 });
 
+test('slowed by the land (D142): a front goes round a mountain range where that is quicker and takes it last; open land as before', () => {
+  // A square taken from its west side, a range across its middle from the south edge up to 14 degrees north.
+  const rings = [box(0, 0, 20, 20)], src = { kind: 'lines' as const, lonlat: [0, 0, 0, 20] };
+  const range = (lon: number, lat: number) => (lon > 8 && lon < 12 && lat < 14 ? 6 : 1);
+  const plain = buildFrontField(rings, src, { roughness: 0, seed: 1 })!, slowed = buildFrontField(rings, src, { roughness: 0, seed: 1, slowAt: range })!;
+  // In real time (the times are shares of the whole): before the range, the same; behind it, later than over open land.
+  const at = (f: FrontField, x: number, y: number) => timeAt(f, x, y) * f.travel;
+  assert.ok(Math.abs(at(slowed, 5, 5) - at(plain, 5, 5)) < 0.4, 'the same before the range');
+  assert.ok(at(slowed, 16, 5) > at(plain, 16, 5) + 3, `later behind the range (${at(slowed, 16, 5).toFixed(1)} against ${at(plain, 16, 5).toFixed(1)})`);
+  // Round its northern end, not through it: the land behind it is reached sooner than the range's own middle would allow.
+  const through = at(plain, 8, 5) + 4 * 6 + 4;
+  assert.ok(at(slowed, 16, 5) < through - 1, `round the end (${at(slowed, 16, 5).toFixed(1)}) rather than through (${through.toFixed(1)})`);
+  // North of the range's end the way is open: the far side there is reached as over open land.
+  assert.ok(Math.abs(at(slowed, 16, 18) - at(plain, 16, 18)) < 0.6, 'open land north of the range as before');
+  // The range's far side falls after the land on either side of it: it is closed in on from both.
+  assert.ok(timeAt(slowed, 11.5, 3) > timeAt(slowed, 13, 3) && timeAt(slowed, 11.5, 3) > timeAt(slowed, 7, 3), `the range's far side after the land on either side (${timeAt(slowed, 11.5, 3).toFixed(3)}, ${timeAt(slowed, 13, 3).toFixed(3)}, ${timeAt(slowed, 7, 3).toFixed(3)})`);
+  assert.ok(slowed.travel > plain.travel + 2, 'the whole change takes longer');
+  // Nothing slower than open land: the same field.
+  const same = buildFrontField(rings, src, { roughness: 0, seed: 1, slowAt: () => 1 })!;
+  assert.deepEqual(Array.from(same.at), Array.from(plain.at));
+});
+
 test('a change across the 180th meridian; too small or too large to be drawn', () => {
   const f = buildFrontField([[[170, 0], [-170, 0], [-170, 10], [170, 10]]], { kind: 'lines', lonlat: [170, 0, 170, 10] }, { roughness: 0, seed: 1 })!;
   assert.ok(f);

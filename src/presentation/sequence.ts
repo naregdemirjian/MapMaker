@@ -175,19 +175,22 @@ export interface ShotTransitions {
   soft?: number;
   /** A glow over the land just taken, fading behind the front (0: none; 1: a third of the way back). */
   wake?: number;
+  /** How much fronts mind the land (D142; 0: not at all; 1: mountains up to four times slower, water to cross three and a half). */
+  terrain?: number;
 }
 
 /** Transition looks to start from (D137): each a style and how its fronts look; any part can then be changed. */
 export const TRANSITION_LOOKS: Array<{ id: string; name: string; note: string; set: Partial<ShotTransitions> }> = [
-  { id: 'clean', name: 'Clean', note: 'A crisp front through the land with a fine glowing line: the default.', set: { style: 'border', roughness: 0, soft: 0, wake: 0, easing: 'smooth', front: { show: true, color: '#ffe9a6', width: 2.2, glow: 10 } } },
-  { id: 'minimal', name: 'Minimal', note: 'Only the territory moving: no line, no glow.', set: { style: 'border', roughness: 0, soft: 0, wake: 0, easing: 'smooth', front: { show: false, color: '#ffe9a6', width: 2.2, glow: 10 } } },
-  { id: 'soft', name: 'Soft tide', note: 'The colour comes in softly, with a gentle glow over the land just taken.', set: { style: 'border', roughness: 0.15, soft: 0.45, wake: 0.3, easing: 'smooth', front: { show: false, color: 'auto', width: 1.6, glow: 8 } } },
-  { id: 'ink', name: 'Ink', note: 'Spreading like ink: a ragged, soft edge and no line.', set: { style: 'border', roughness: 0.65, soft: 0.6, wake: 0, easing: 'out', front: { show: false, color: 'auto', width: 1.6, glow: 6 } } },
-  { id: 'campaign', name: 'Campaign', note: 'A ragged front line of fire, the land behind it glowing as it falls.', set: { style: 'border', roughness: 0.35, soft: 0.1, wake: 0.45, easing: 'smooth', front: { show: true, color: '#ff7a45', width: 2.6, glow: 16 } } },
-  { id: 'blitz', name: 'Blitz', note: 'Fast thrusts that slow as they go, a hot white edge and a bright wake.', set: { style: 'border', roughness: 0.5, soft: 0.05, wake: 0.7, easing: 'out', front: { show: true, color: '#fff4cc', width: 3, glow: 26 } } },
-  { id: 'owner', name: 'In their colours', note: 'The front line and glow in the new owner\'s own colour.', set: { style: 'border', roughness: 0.1, soft: 0.2, wake: 0.35, easing: 'smooth', front: { show: true, color: 'auto', width: 2.4, glow: 14 } } },
-  { id: 'dissolve', name: 'Dissolve', note: 'No front: the land changes hands in soft patches.', set: { style: 'dissolve', roughness: 0, soft: 0.5, wake: 0.2, easing: 'smooth', front: { show: false, color: '#ffe9a6', width: 2.2, glow: 10 } } },
-  { id: 'fade', name: 'Fade', note: 'The new colour fades in over the old.', set: { style: 'fade', roughness: 0, soft: 0, wake: 0, easing: 'smooth', front: { show: false, color: '#ffe9a6', width: 2.2, glow: 10 } } },
+  { id: 'clean', name: 'Clean', note: 'A crisp front through the land with a fine glowing line: the default.', set: { style: 'border', roughness: 0, soft: 0, wake: 0, terrain: 0, easing: 'smooth', front: { show: true, color: '#ffe9a6', width: 2.2, glow: 10 } } },
+  { id: 'minimal', name: 'Minimal', note: 'Only the territory moving: no line, no glow.', set: { style: 'border', roughness: 0, soft: 0, wake: 0, terrain: 0, easing: 'smooth', front: { show: false, color: '#ffe9a6', width: 2.2, glow: 10 } } },
+  { id: 'soft', name: 'Soft tide', note: 'The colour comes in softly, with a gentle glow over the land just taken.', set: { style: 'border', roughness: 0.15, soft: 0.45, wake: 0.3, terrain: 0, easing: 'smooth', front: { show: false, color: 'auto', width: 1.6, glow: 8 } } },
+  { id: 'ink', name: 'Ink', note: 'Spreading like ink: a ragged, soft edge and no line.', set: { style: 'border', roughness: 0.65, soft: 0.6, wake: 0, terrain: 0, easing: 'out', front: { show: false, color: 'auto', width: 1.6, glow: 6 } } },
+  { id: 'campaign', name: 'Campaign', note: 'A ragged front line of fire, the land behind it glowing as it falls.', set: { style: 'border', roughness: 0.35, soft: 0.1, wake: 0.45, terrain: 0, easing: 'smooth', front: { show: true, color: '#ff7a45', width: 2.6, glow: 16 } } },
+  { id: 'blitz', name: 'Blitz', note: 'Fast thrusts that slow as they go, a hot white edge and a bright wake.', set: { style: 'border', roughness: 0.5, soft: 0.05, wake: 0.7, terrain: 0, easing: 'out', front: { show: true, color: '#fff4cc', width: 3, glow: 26 } } },
+  { id: 'overland', name: 'Overland', note: 'A front that minds the land: quick over plains, slowed by mountains and by water to cross (where the map has heights).', set: { style: 'border', roughness: 0.2, soft: 0.1, wake: 0.3, terrain: 0.8, easing: 'smooth', front: { show: true, color: '#ffe9a6', width: 2.4, glow: 12 } } },
+  { id: 'owner', name: 'In their colours', note: 'The front line and glow in the new owner\'s own colour.', set: { style: 'border', roughness: 0.1, soft: 0.2, wake: 0.35, terrain: 0, easing: 'smooth', front: { show: true, color: 'auto', width: 2.4, glow: 14 } } },
+  { id: 'dissolve', name: 'Dissolve', note: 'No front: the land changes hands in soft patches.', set: { style: 'dissolve', roughness: 0, soft: 0.5, wake: 0.2, terrain: 0, easing: 'smooth', front: { show: false, color: '#ffe9a6', width: 2.2, glow: 10 } } },
+  { id: 'fade', name: 'Fade', note: 'The new colour fades in over the old.', set: { style: 'fade', roughness: 0, soft: 0, wake: 0, terrain: 0, easing: 'smooth', front: { show: false, color: '#ffe9a6', width: 2.2, glow: 10 } } },
 ];
 
 /** A look applied to transition settings: its parts set, the rest (when, how long) kept. */
@@ -199,7 +202,7 @@ export function withTransitionLook(t: ShotTransitions, id: string): ShotTransiti
 
 export const DEFAULT_TRANSITIONS: ShotTransitions = {
   mode: 'recorded', style: 'border', angle: 0, timing: 'seconds', seconds: 1.5, easing: 'smooth', restyleRecorded: false,
-  front: { show: true, color: '#ffe9a6', width: 2.2, glow: 10 }, look: 'clean', roughness: 0, soft: 0, wake: 0,
+  front: { show: true, color: '#ffe9a6', width: 2.2, glow: 10 }, look: 'clean', roughness: 0, soft: 0, wake: 0, terrain: 0,
 };
 
 export function shotTransitions(shot: ShotSettings): ShotTransitions {
@@ -207,7 +210,7 @@ export function shotTransitions(shot: ShotSettings): ShotTransitions {
   const out = { ...DEFAULT_TRANSITIONS, ...(t ?? {}), front: { ...DEFAULT_TRANSITIONS.front, ...(t?.front ?? {}) } };
   if (out.style === 'wipe') out.style = 'border';
   const unit = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0);
-  out.roughness = unit(out.roughness); out.soft = unit(out.soft); out.wake = unit(out.wake);
+  out.roughness = unit(out.roughness); out.soft = unit(out.soft); out.wake = unit(out.wake); out.terrain = unit(out.terrain);
   // A shot saved before looks (D137): the clean look if its settings are the clean look's, its own otherwise.
   if (t && t.look === undefined) {
     const clean = TRANSITION_LOOKS[0].set, f = clean.front!;

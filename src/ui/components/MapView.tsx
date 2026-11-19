@@ -3,7 +3,7 @@ import { useLive, store } from '../store.ts';
 import {
   makeView, screenToLonLat, lonLatToScreen, panCamera, zoomCameraAt, radiansPerPixel, cameraKey, shapedByMeridian, rotatePoint, viewBounds, metresPerPixel, type View, type Camera,
 } from '../../render-engine/camera.ts';
-import { DEFAULT_STYLE, type PassName } from '../../render-engine/map-renderer.ts';
+import { DEFAULT_STYLE, frontsMindLand, type PassName } from '../../render-engine/map-renderer.ts';
 import { isFeatureKind } from '../../render-engine/feature-style.ts';
 import { finishFeatureDrawing } from './Features.tsx';
 import { placementMode } from './Characters.tsx';
@@ -13,7 +13,7 @@ import { periodChangesNow, GAINED_COLOR, LOST_COLOR } from './CountryHistory.tsx
 import { processLasso, densify, orientInteriorLeft, signedArea, splitLoops, simplify, smooth, type Pt, dedupe, ringFromMapPoints } from '../../render-engine/stroke.ts';
 import { geoCentroid } from 'd3-geo';
 import { lonLatToVec, E7 } from '../../geo-kernel/vec.ts';
-import { cameraAt, timeAt, overlaysAt, drawOverlays, withStillCamera, unspun, moveOverlay, type ShotSettings, type OverlayRect } from '../../presentation/sequence.ts';
+import { cameraAt, timeAt, overlaysAt, drawOverlays, withStillCamera, unspun, moveOverlay, shotTransitions, type ShotSettings, type OverlayRect } from '../../presentation/sequence.ts';
 import { transitionOptions, drawShotOverlays, lookStyles } from '../../presentation/export-driver.ts';
 import { finishLook } from '../../presentation/looks.ts';
 import { parseJSON, slerpLonLat } from '../../temporal-engine/engine.ts';
@@ -301,7 +301,8 @@ export function MapView() {
     const strokes = stampsAt(sculptOf(space), time);
     // (Conditions spreading over the terrain need its heights too, D103.)
     const fieldsHere = s.world.all('layer').some((l) => l.kind === 'field' && l.space_id === s.spaceId);
-    const needsGrid = terrainShown || seaPoints.length > 0 || !!planetOf(space) || paleo || strokes.length > 0 || fieldsHere;
+    // (And fronts that mind the land, D142: the shot's look, or an event's own.)
+    const needsGrid = terrainShown || seaPoints.length > 0 || !!planetOf(space) || paleo || strokes.length > 0 || fieldsHere || frontsMindLand(s.world, shot ? shotTransitions(shot) : null);
     const ground = needsGrid ? s.terrainOf(space, time) : null;
     const carved = ground ? sculpted(ground.grid, ground.key, strokes, (space?.radius_m ?? 6371008.8) / 1000) : null;
     // A planet's rivers (D99), worked out a moment after its heights (drawn without them meanwhile).
