@@ -61,6 +61,92 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D152. The planetary engine's foundations (Stage 14.1)
+
+- **Asked.** A scientifically grounded planetary evolution engine (the plan: `docs/PLANETARY_ENGINE_PLAN.md`,
+  staged in two sessions). Stage 14.1 lays its foundations: "planet definition (schema, validation, presets) and
+  derived physics; the nested icosahedral mesh with operators, transfer between levels and rasterisation; the
+  worker entry, pool and protocol (build entry, cancellation, progress); the pipeline skeleton with stage hashes and
+  the MMS1 codec."
+- **The engine is its own layer** (`src/planet/`, no DOM, no React): it runs in the interface, in workers and in
+  Node alike, so every model is tested in Node and the same code runs in the app.
+- **What a planet is made from** (`model/definition.ts`): a versioned JSON description (star system of one or two
+  stars, orbit, body, interior, plates, air, water, history with events, life with custom biomes, quality), checked
+  value by value with the reason in words (`definitionProblems`), read back from storage with anything missing or
+  unreadable taken from its preset (`definitionOf`). Values the physics can work out (mass, year, tidal locking)
+  are left out unless set, and then they are overrides that say what the physics would give. Eleven presets, each a
+  coherent whole with its explanation: Earth-like, ancient supercontinent, young volcanic, highly tectonic,
+  geologically inactive (Mars-like), frozen, desert, ocean, tidally locked around a red dwarf, high-gravity
+  super-Earth, runaway hothouse (Venus-like).
+- **What follows from it** (`model/physics.ts`), each relation labelled. *Physically based*: Kepler's year,
+  gravity, density, escape velocity, the solar day (backwards turning over 90° of tilt), the orbit-averaged light,
+  scale height and lapse rates, Held and Hou's Hadley cells. *Empirical*: main-sequence luminosity, radius and
+  colour from the mass; the star brightening with age (Gough 1981, generalised by lifetime: the faint young star);
+  the habitable zone (Kopparapu et al. 2013), nearer for dry planets (Abe et al. 2011); a rocky planet's mass from
+  its size (Zeng et al. 2016 above, uncompressed rock and iron below: Mars and the Moon within a few per cent);
+  tidal locking times (Gladman et al. 1996); radiogenic heat by isotope (Turcotte and Schubert). *Calibrated*:
+  the albedo (clouds over a Rayleigh-scattering clear sky over sea, land and ice) and a grey greenhouse with the
+  water vapour and ice feedbacks, iterated to balance: Earth's settings give 287.9 K and an albedo of 0.305,
+  Mars's 212 K (g 3.66), Venus's 725 K (737 measured); a runaway greenhouse is flagged by the sunlight absorbed
+  (282 W/m² with oceans, Goldblatt et al. 2013). The tectonic regime follows heat flow and water, as a suggestion
+  explained in words ("auto"), since the science is unsettled for super-Earths. Notes in words say what the user
+  should know (a star that would have died, a year set by hand, a planet the tides have locked).
+- **The mesh** (`mesh/icosphere.ts`): a subdivided icosahedron (level L has 10·4^L + 2 cells: 10 242 at L5,
+  163 842 at L7) whose cells are the spherical Voronoi regions of its vertices, areas summing to 4π, neighbours
+  counter-clockwise with the shared edges' lengths. Levels nest exactly (a level's cells are the first cells of the
+  next; the new ones halve its edges), so prolongation and restriction are exact and cheap (`transfer.ts`), and
+  point location descends from the icosahedron's 20 faces through the subdivision, exactly (checked against brute
+  force). Finite-volume operators (`operators.ts`): Laplacian, gradient, divergence, conservative upwind transport,
+  diffusion. **Accuracy**: on this mesh the operators are first-order: the Laplacian's mean error halves with each
+  level (0.1 per cent at L6), its worst stays about 4 per cent at a few cells along the icosahedron's seams (40 of
+  40 962). Optimising the mesh (spring dynamics, centroidal Voronoi) would make them second-order but break the
+  exact nesting the transfer and point location rely on; kept as the way forward if a model needs it.
+- **Pictures** (`transfer.ts` rasterMap): the face and weights of every pixel of an equirectangular grid, found once
+  per size by scanning each face's box of pixels (about one test per pixel), then any field is a weighted gather;
+  categories take the nearest cell. Grids are read onto the mesh too (`sampleGrid`).
+- **Sunlight** (`climate/insolation.ts`, physically based): Kepler's equation, the declination and the daily mean
+  at every latitude (Berger 1978), monthly and yearly means on the mesh; tidally locked planets lit about their
+  substellar point; a circumbinary pair as one star, a far companion's share added. Earth: 416 W/m² at the equator
+  over the year, 172 at the poles, 524 at the north pole at the June solstice, the global mean S/4 exactly. The
+  year runs from the moment Earth's calendar starts it, so an Earth-like planet's January is northern winter.
+- **Products and keys** (`pipeline/`): each stage declares what it reads from the definition; a product's key is
+  the SHA-256 (synchronous, `state/hash.ts`) of the stage, its version, the engine's version, those inputs and its
+  dependencies' keys, in a canonical JSON form. So changing the number of plates reuses the sunlight, and changing
+  the tilt does not. Products are kept in a cache by size (256 MB, least recently used first); two requests for one
+  product share its making. A stage that works cell by cell runs in parts of 8 192 cells whatever the number of
+  workers, joined in order: the same bytes from one worker, four, or the interface's own thread (tested).
+- **Workers** (`worker/`): a pool of one worker fewer than the processor's threads (one to eight), made when
+  first needed; results come back by transfer, not copied; progress per part; a cancelled task that is running
+  stops its worker and a fresh one takes its place. Built as `dist/ui/planet-worker.js` (a third esbuild entry),
+  served by the data service like the interface, and working in the desktop app (tested there too).
+- **Files** (`state/codec.ts`, MMS1): a header naming each field (type, length, unit, how it is kept) and the fields'
+  byte planes, compressed with deflate (zlib in Node, CompressionStream in the browser). Integers can be kept as
+  differences, real numbers as whole multiples of a quantum (elevation to a metre); lossless otherwise. For the
+  history's checkpoints (14.3) and the products kept with a project (14.5).
+- **Measured** (this container, Node): building the mesh at L5 43 ms, L6 133 ms, L7 409 ms; the pixel map of a
+  1024 × 512 picture at L6 179 ms; the sunlight of every L6 cell 21 ms. In the browser, the first picture of a
+  planet's sunlight (L5, three workers starting) 240 ms, then reused at once.
+- **Differences from the plan, and why.**
+  - *Cells are numbered level by level*, the new cells of each level in the order of its faces (each face's
+    children follow it, as in a quadtree), not along one space-filling curve: that is what makes the levels nest.
+    Ranges of the finest cells are compact; coarser cells are spread. Enough for parts; revisited if profiling
+    shows memory locality matters.
+  - *The definition has no `edits` and `overrides` lists yet*: they come with editing (14.10), as optional fields
+    that older definitions read without.
+  - *History and checkpoints* (`state/history.ts`) come with the history itself (14.3); the codec they use is here.
+- **Tests.** `planet-physics.test.ts` (every preset valid and what it says; Earth, Mars and Venus from their
+  settings; Kepler, the Moon's and Mars's masses, the Sun, the faint young Sun, the habitable zone, early heat, tidal
+  locking; each setting moving the results the right way; definitions read back), `planet-mesh.test.ts` (cells,
+  faces, Euler's formula, areas, mutual and counter-clockwise neighbours, nesting at levels 0 to 6; point location
+  against brute force at 3 000 places, the poles and 180°; the operators' accuracy by level; conservation;
+  transfer; pictures and their round trip), `planet-insolation.test.ts` (Earth against Berger's values, polar
+  night, the orbit's perihelion and equinox, global means for five presets, the locked planet's dark side, tilt),
+  `planet-pipeline.test.ts` (SHA-256 against Node's, canonical keys, MMS1 for every type, quantised and damaged
+  files, stage keys following what each reads, the cache, real worker threads: one and four workers and the
+  interface's thread giving the same bytes, progress, errors, cancelling). Interface tests: the workflows step
+  "The planetary engine" (a stage run in workers from the interface, the same bytes from one worker and three,
+  reuse); the desktop step (workers in the app).
+
 ### D151. Stage 13's refinements: tidying unused borders, a shot's sound track, and what was not built
 
 - **Asked.** The rest of Stage 13: "the faster GPU projection method; optional reference renderer; audio reference

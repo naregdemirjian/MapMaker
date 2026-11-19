@@ -4227,6 +4227,33 @@ try {
     assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('entity').some((e: any) => e.name === 'Old Wester' || e.name === 'New Easter')), false);
   });
 
+  await h.step('The planetary engine (D152): a stage run in workers from the interface returns a picture; the same bytes from one worker as from three; made once, then reused; a change it does not read reuses it, one it reads does not', async () => {
+    const r = await page.evaluate(async () => {
+      const P = (window as any).__mapmaker.bench.planet;
+      const earth = P.definitionFromPreset('earthlike');
+      const first = await P.preview(earth, { level: 5, width: 256, height: 128 });
+      const again = await P.preview(earth, { level: 5, width: 256, height: 128 });
+      const plates = { ...earth, tectonics: { ...earth.tectonics, plates: 20 } };
+      const samePicture = await P.preview(plates, { level: 5, width: 256, height: 128 });
+      const tilted = await P.preview({ ...earth, body: { ...earth.body, tiltDeg: 60 } }, { level: 5, width: 256, height: 128 });
+      const one = await P.preview(earth, { level: 5, width: 256, height: 128, workers: 1 });
+      const three = await P.preview(earth, { level: 5, width: 256, height: 128, workers: 3 });
+      return { first, again, samePicture, tilted, one, three };
+    });
+    assert.equal(r.first.cached, false);
+    assert.ok(Math.abs(r.first.equator - 416) < 5, `the equator's yearly sunlight (${r.first.equator})`);
+    assert.ok(Math.abs(r.first.pole - 173) < 5, `the pole's (${r.first.pole})`);
+    assert.ok(Math.abs(r.first.min - r.first.pole) < 2 && Math.abs(r.first.max - 416) < 3, 'least at the poles, most at the equator');
+    assert.equal(r.again.cached, true, 'made once, then reused');
+    assert.equal(r.samePicture.cached, true, 'the number of plates does not change the sunlight');
+    assert.equal(r.tilted.cached, false, 'the tilt does');
+    assert.ok(r.tilted.pole > r.first.pole + 50, 'more tilt, more sunlight at the poles over the year');
+    assert.equal(r.one.workers, 1);
+    assert.equal(r.three.workers, 3);
+    assert.equal(r.one.hash, r.first.hash, 'one worker gives the same bytes');
+    assert.equal(r.three.hash, r.first.hash, 'three workers give the same bytes');
+  });
+
   await h.step('History Health lists the overlap, nothing else; no browser errors', async () => {
     await page.getByTestId('mode-world').click();
     await page.getByTestId('health').click();

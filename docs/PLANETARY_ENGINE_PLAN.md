@@ -877,7 +877,7 @@ Each stage ends with its tests, the full check, its decision record, a commit an
 
 | Stage | Status | Notes |
 | --- | --- | --- |
-| 14.1 Foundations | Not started | |
+| 14.1 Foundations | Done (19 November 2026, D152) | Definition, presets and derived physics; nested icosahedral mesh, operators, transfer, pictures; sunlight; MMS1; stage keys, cache, workers. Operators first-order on the unoptimised mesh (D152) |
 | 14.2 Tectonics I | Not started | |
 | 14.3 Tectonics II | Not started | |
 | 14.4 Landscape evolution | Not started | |

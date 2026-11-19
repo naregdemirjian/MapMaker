@@ -1,5 +1,5 @@
 // Builds the two runnable parts of Map Maker:
-//   dist/ui/      the browser interface (React + map engine), one bundled script
+//   dist/ui/      the browser interface (React + map engine), one bundled script, and the planet engine's worker
 //   dist/server.mjs  the local data service (Node built-ins only, no native modules)
 //   dist/desktop/main.mjs  the desktop app (Electron main process hosting the same service)
 // Both are self-contained, so the dist folder runs on any machine with Node.js >= 22.18.
@@ -25,6 +25,19 @@ await build({
   sourcemap: true,
   jsx: 'automatic',
   define: { ...define, 'process.env.NODE_ENV': '"production"' },
+  logLevel: 'warning',
+});
+
+// The planetary engine's worker (D152): its stages run off the interface's thread.
+await build({
+  entryPoints: [join(root, 'src/planet/worker/entry.ts')],
+  bundle: true,
+  format: 'esm',
+  platform: 'browser',
+  target: 'chrome120',
+  outfile: join(out, 'ui/planet-worker.js'),
+  sourcemap: true,
+  define,
   logLevel: 'warning',
 });
 
@@ -59,4 +72,4 @@ copyFileSync(join(root, 'src/ui/styles.css'), join(out, 'ui/styles.css'));
 // Map data (Natural Earth basemap and the dataset licence records) is served with the interface.
 cpSync(join(root, 'data'), join(out, 'ui/data'), { recursive: true });
 writeFileSync(join(out, 'BUILD.txt'), `Map Maker ${pkg.version}\nBuilt ${new Date().toISOString()}\n`);
-console.log('Built dist/ui/app.js, dist/server.mjs and dist/desktop/main.mjs');
+console.log('Built dist/ui/app.js, dist/ui/planet-worker.js, dist/server.mjs and dist/desktop/main.mjs');

@@ -113,6 +113,17 @@ try {
     assert.ok(r.corner[3] === 255 && r.corner[0] + r.corner[1] + r.corner[2] < 80, `space round it (${r.corner})`);
   });
 
+  await step('The planetary engine (D152) runs its stages in workers in the app: a picture of a planet\'s sunlight, the same from one worker as from two', async () => {
+    const r = await page.evaluate(async () => {
+      const P = (window as any).__mapmaker.bench.planet;
+      const one = await P.preview('earthlike', { level: 4, width: 128, height: 64, workers: 1 });
+      const two = await P.preview('earthlike', { level: 4, width: 128, height: 64, workers: 2 });
+      return { one, two };
+    });
+    assert.equal(r.two.hash, r.one.hash, 'the same bytes');
+    assert.ok(Math.abs(r.one.equator - 416) < 6 && Math.abs(r.one.pole - 173) < 6, `Earth's sunlight (${r.one.equator}, ${r.one.pole})`);
+  });
+
   await step('Only one copy runs: starting it again brings the open window forward', async () => {
     const second = spawn(electronPath, [...(process.platform === 'linux' ? ['--no-sandbox'] : []), ROOT], {
       env: { ...process.env, MAPMAKER_PROJECTS: PROJECTS, MAPMAKER_PORT: '4381' }, stdio: 'ignore',

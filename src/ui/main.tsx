@@ -16,6 +16,7 @@ import { labelStats } from '../render-engine/label-place.ts';
 import { Engine } from '../temporal-engine/engine.ts';
 import { chooseScale } from '../render-engine/basemap.ts';
 import { heightAt } from '../terrain/grid.ts';
+import { planetBench } from './planet-engine.ts';
 
 /** The working map's view as it is shown (it may hold a meridian while the map moves), or the camera's own for that size. */
 function shown(width: number, height: number) {
@@ -36,7 +37,7 @@ function shown(width: number, height: number) {
    * and any difference stops the drawing with an error. Slow; never on in normal use.
    */
   verify(on = true) { Engine.verify = on; store.renderer.verify = on; },
-  bench: { commands, gregorian, lonLatToVec, runExport, renderFrame, terrainFor, svgFrame, newTextBox, PASS_DEFS, defaultShot, cameraAt, EXPORT_QUALITY, decodeCountries, COUNTRY_GROUP_COLORS, MapRenderer, makeView, Engine, labelStats, chooseScale, heightAt },
+  bench: { commands, gregorian, lonLatToVec, runExport, renderFrame, terrainFor, svgFrame, newTextBox, PASS_DEFS, defaultShot, cameraAt, EXPORT_QUALITY, decodeCountries, COUNTRY_GROUP_COLORS, MapRenderer, makeView, Engine, labelStats, chooseScale, heightAt, planet: planetBench },
   /** A view of the map for a camera and size (for off-screen comparisons in tests). */
   viewOf(camera: Parameters<typeof makeView>[0], width: number, height: number) { return makeView(camera, width, height); },
   /** Who owns the place at (lon, lat) on the date written in `date`, on the layer being drawn on. */
