@@ -6,6 +6,7 @@ import * as cmd from '../../domain/commands.ts';
 import { fromStore, compare } from '../../core-time/index.ts';
 import { fmt } from './Panels.tsx';
 import { CharacterIconSection, UnitSection } from './CharacterIcons.tsx';
+import { isBaseEvent } from '../../world-model/schema.ts';
 
 /** How a character placement is recorded: into the event being recorded, or as a change without an event. */
 export function placementMode(): cmd.EditMode {
@@ -50,7 +51,7 @@ export function CharacterSection({ id }: { id: string }) {
                   <option value="jump">Appears here</option>
                 </select>
               )}
-              {i === 0 && wp.t.day !== -Infinity && wp.eventId === 'evt_base' && <button className="small" onClick={() => s.execute((wd) => cmd.placementFromBeginning(wd, wp.effectId))} title="On the starting map: there before any history" data-testid="place-from-beginning">From the beginning</button>}
+              {i === 0 && wp.t.day !== -Infinity && isBaseEvent(wp.eventId) && <button className="small" onClick={() => s.execute((wd) => cmd.placementFromBeginning(wd, wp.effectId))} title="On the starting map: there before any history" data-testid="place-from-beginning">From the beginning</button>}
               {wp.t.day !== -Infinity && <button className="small" onClick={() => s.setTime(wp.t)}>Go to</button>}
               <button className="small danger" onClick={() => s.execute((wd) => cmd.deleteEffect(wd, wp.effectId))}>Remove</button>
             </div>

@@ -7,6 +7,7 @@ import { countryPeriodChanges, periodAround, stepPeriod, periodLabel, type Perio
 import type { World } from '../../world-model/world.ts';
 import type { Engine } from '../../temporal-engine/engine.ts';
 import { fmt } from './Panels.tsx';
+import { isBaseEvent } from '../../world-model/schema.ts';
 
 export const GAINED_COLOR = '#5fe08a';
 export const LOST_COLOR = '#ff6b6b';
@@ -54,7 +55,7 @@ export function CountryHistorySection({ id }: { id: string }) {
             const ev = w.get('event', c.eventId);
             return (
               <div key={c.effectId} className="row" onClick={() => s.set({ time: c.t, selection: { kind: 'entity', id } })} data-testid="history-change">
-                <span className="date">{fmt(c.t)}</span> {ev && ev.id !== 'evt_base' ? ev.name : 'a change without an event'}
+                <span className="date">{fmt(c.t)}</span> {ev && !isBaseEvent(ev.id) ? ev.name : 'a change without an event'}
                 {c.gainedArea > 0 && <span className="gain"> +{km2(c.gainedArea)} from {c.from.map(name).join(', ')}</span>}
                 {c.lostArea > 0 && <span className="loss"> −{km2(c.lostArea)} to {c.to.map(name).join(', ')}</span>}
               </div>

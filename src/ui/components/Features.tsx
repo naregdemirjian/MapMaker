@@ -6,7 +6,8 @@ import { useEffect, useState } from 'react';
 import { useStore, store, type PendingEdit } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
 import { type Instant, compare, fromStore, NEG_INF } from '../../core-time/index.ts';
-import { BASE_EVENT_ID } from '../../world-model/schema.ts';
+import { isBaseEvent } from '../../world-model/schema.ts';
+import { eventsHere } from '../events-here.ts';
 import { featureStyle, featureColor, isFeatureKind, DEFAULT_FEATURE_STYLE, type FeatureKind, type FeatureStyle } from '../../render-engine/feature-style.ts';
 import { parseJSON, type FeatureAnimStyle } from '../../temporal-engine/engine.ts';
 import { DateField, fmt } from './Panels.tsx';
@@ -114,7 +115,7 @@ export function FeaturePrompt({ p }: { p: Extract<PendingEdit, { kind: 'feature'
   const [end, setEnd] = useState<Instant | null>(null);
   // How it appears over its event's length (D79): a line draws itself, an area grows, a point fades in.
   const [anim, setAnim] = useState<FeatureAnimStyle | ''>(kind === 'line' ? 'draw' : kind === 'area' ? 'grow' : 'fade');
-  const events = w.all('event').filter((x) => x.id !== BASE_EVENT_ID).sort((a, b) => a.start_day - b.start_day || a.start_ms - b.start_ms);
+  const events = eventsHere();
   const owners = w.all('entity').filter((x) => x.type_id === 'polity' || x.type_id === 'faction').sort((a, b) => a.name.localeCompare(b.name));
   // The shape in force at the date viewed (for "correct"), and when it began.
   const steps = feature ? e.featureHistory(feature.id) : [];
@@ -338,7 +339,7 @@ export function FeaturePanel({ id }: { id: string }) {
       <h4>Shapes over time</h4>
       {steps.map((x) => {
         const ev = w.get('event', x.eventId);
-        const inEvent = ev && ev.id !== BASE_EVENT_ID ? ev.name : null;
+        const inEvent = ev && !isBaseEvent(ev.id) ? ev.name : null;
         return (
           <div key={x.effectId} className="row" data-testid="feature-step">
             <span className="date">{x.t.day === -Infinity ? 'From the beginning' : fmt(x.t)}</span> {x.parts ? 'shape' : 'ends'}{inEvent ? ` · ${inEvent}` : ''}

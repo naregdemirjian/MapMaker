@@ -381,6 +381,12 @@ export class Engine {
     return this.isActiveEvent(ev) && seenAt(this.cuts, ev.branch_id || MAIN_BRANCH, effectTime(ef, ev));
   }
 
+  /** Whether a change is part of this timeline's history, whichever version of its event is in use (D150). */
+  inTimeline(ef: EffectRow, ev: EventRow): boolean {
+    this.ensure();
+    return seenAt(this.cuts, ev.branch_id || MAIN_BRANCH, effectTime(ef, ev));
+  }
+
   /** Whether an event is listed in this history: of the branch's own, or begun by the time the branch split off (whatever version is in use). */
   lists(ev: EventRow): boolean {
     this.ensure();

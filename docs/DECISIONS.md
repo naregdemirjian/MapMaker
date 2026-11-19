@@ -88,13 +88,39 @@ Follows from D2. The test drives the real interface exactly as a person would.
 - **The engine** compiles one timeline: an engine per timeline looked at, each following edits change by change as
   before (D39). Its `revision` is now a number no other engine has, so pictures kept for one timeline are never
   taken for another's.
+- **In the interface.** The ⑂ button in the title bar opens Branches: a branch is made from the date viewed (from
+  the timeline viewed, or another), named, and viewed at once; each branch can be viewed, renamed, recoloured,
+  described, split off at another moment, or deleted (saying what goes with it). Once there are branches, the title
+  bar lists the timelines to switch between, marked with the branch's colour; the choice is remembered with the
+  project's view. Everything listed follows the timeline viewed: the timeline's bars, the events list, search, the
+  event pickers (recording, splitting, relationships, features), a country's changes and the shot's current-events
+  box; the timeline marks where the branch viewed (and those it comes from) split off. An event's panel says
+  whether it is the branch's own or shared ("changing it changes every timeline that shares it").
+- **Comparing two timelines.** Compare (Stage 3) gains a bar over the map: the other side can be another timeline
+  as well as another date (choosing a timeline compares at the same date, following the date viewed), and the two
+  can be laid side by side instead of across a line: the same place twice, each labelled with its timeline and
+  date. A drag on the other side moves both; nothing is drawn there.
+- **Shots** show a timeline of their own ("Timeline" in the shot's settings; a new shot takes the one viewed): the
+  preview, every export format, SVG frames and the size estimate draw that timeline.
+- **Differences from the plan, and why.**
+  - The planned schema gives entities a branch too (`entity.branch_id`). Countries, factions, cities and
+    characters are kept the project's (the column stays 'main'): a country made while viewing a branch is often
+    needed in the shared history as well, and an entity holds nothing by itself; what a timeline does with it is
+    its events'. (Way back: the column is there to be used, with lists filtered like the events.)
+  - Two timelines side by side is a way of looking while working; a shot shows one timeline (two shots, one of
+    each, can be cut side by side in the video editor).
 - **Tests.** `branches.test.ts`: what each timeline holds before and after the split, early history fixed once for
   both, events added before and after the split, edits put where their date belongs (events, changes without an
   event, names, relationships), recordings refused with the reason, the moment of the split shared and the
   branch's own change at it winning, a branch of a branch split earlier than its parent, moving the split,
   alternative versions inside and across branches, deleting a branch with the one below it and undoing it,
   saving and reading back, and 40 random edits across both timelines with every step followed compared with
-  history compiled afresh. The upgrade test now also upgrades a file without the branch table.
+  history compiled afresh. The upgrade test now also upgrades a file without the branch table. `e2e/workflows`
+  'Branches': on a map of its own, a branch made from the date viewed keeps the land the main timeline loses after
+  the split; an event of its own is listed in it alone and the main timeline's later event not; switched from the
+  title bar; compared side by side at the same date (each side's colours where they should be, a drag on the other
+  side moving both); a shot made in it shows it, and the main timeline when its Timeline is changed; deleted with
+  its event and brought back by undo.
 
 ### D149. Each map in a calendar of its own (Stage 13)
 

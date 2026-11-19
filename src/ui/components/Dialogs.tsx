@@ -3,7 +3,8 @@ import { useStore, store, type PendingEdit } from '../store.ts';
 import { Api, type VersionInfo, type BackupInfo, type ProjectInfo } from '../api.ts';
 import * as cmd from '../../domain/commands.ts';
 import { type Instant, compare, fromStore, gregorian, PRESENT_YEAR } from '../../core-time/index.ts';
-import { BASE_EVENT_ID } from '../../world-model/schema.ts';
+import { isBaseEvent } from '../../world-model/schema.ts';
+import { eventsHere, listedHere } from '../events-here.ts';
 import type { TransitionSpec } from '../../temporal-engine/engine.ts';
 import { lonLatToVec } from '../../geo-kernel/vec.ts';
 import { DateField, fmt } from './Panels.tsx';
@@ -45,10 +46,10 @@ function PaintPrompt({ p }: { p: Extract<PendingEdit, { kind: 'paint' }> }) {
   // A new change goes into an existing event when there is an obvious one: the event the last drawing
   // went into, the selected event, or an event starting at the date being viewed.
   const [target, setTarget] = useState<string>(() => {
-    const ok = (id: string | null | undefined) => !!id && id !== BASE_EVENT_ID && !!w.get('event', id);
+    const ok = (id: string | null | undefined) => { const e = id ? w.get('event', id) : undefined; return !!e && listedHere(e); };
     if (ok(s.lastPaintEvent)) return s.lastPaintEvent!;
     if (s.selection?.kind === 'event' && ok(s.selection.id)) return s.selection.id;
-    const now = w.all('event').find((x) => x.id !== BASE_EVENT_ID && compare(fromStore(x.start_day, x.start_ms), s.time) === 0);
+    const now = w.all('event').find((x) => listedHere(x) && compare(fromStore(x.start_day, x.start_ms), s.time) === 0);
     return now?.id ?? 'new-event';
   });
   const [evName, setEvName] = useState(p.value ? `${who} gains territory` : 'Territory abandoned');
@@ -64,7 +65,7 @@ function PaintPrompt({ p }: { p: Extract<PendingEdit, { kind: 'paint' }> }) {
     if (!styleChosen) setStyle(typeSettings(w.get('event_type', id)).spread ?? 'instant');
     if (tgt === 'new-event' && !endTyped) setEnd(defaultEnd(w, ty, s.time));
   };
-  const events = w.all('event').filter((x) => x.id !== BASE_EVENT_ID).sort((a, b) => a.start_day - b.start_day || a.start_ms - b.start_ms);
+  const events = eventsHere();
 
   let periodTo = 'the end of time';
   let lasts = 'Nothing later changes this area yet, so the change lasts until you record a later one.';
@@ -471,7 +472,7 @@ export function HealthDialog() {
   const close = () => s.set({ dialog: null });
   const goto = (eventId: string) => {
     const ev = w.get('event', eventId);
-    if (ev) s.set({ selection: { kind: 'event', id: eventId }, time: eventId === BASE_EVENT_ID ? s.time : fromStore(ev.start_day, ev.start_ms), dialog: null });
+    if (ev) s.set({ selection: { kind: 'event', id: eventId }, time: isBaseEvent(eventId) ? s.time : fromStore(ev.start_day, ev.start_ms), dialog: null });
   };
   const kinds: Record<string, string> = { stale: 'Worked out from older history', simultaneous: 'Same place, same moment', overlap: 'Overlapping changes', broken: 'Broken reference' };
   return (

@@ -1,4 +1,5 @@
 import { CalendarDialog } from './components/CalendarDialog.tsx';
+import { BranchesDialog } from './components/Branches.tsx';
 import { useEffect } from 'react';
 import { useStore, store } from './store.ts';
 import { TopBar, Outliner, ToolBar, Inspector, Toasts } from './components/Panels.tsx';
@@ -72,6 +73,7 @@ export function App() {
       {s.dialog === 'show' && <ShowDialog />}
       {s.dialog === 'sea-level' && <SeaLevelDialog />}
       {s.dialog === 'calendar' && <CalendarDialog />}
+      {s.dialog === 'branches' && <BranchesDialog />}
       {s.dialog === 'sky-look' && <SkyLookDialog />}
       {s.dialog === 'merge' && <MergeDialog />}
       {s.dialog === 'give-regions' && <GiveRegionsDialog />}

@@ -4,7 +4,7 @@
 // software; the project file stays the authoritative copy.
 import type { World } from '../world-model/world.ts';
 import type { Engine } from '../temporal-engine/engine.ts';
-import { BASE_EVENT_ID } from '../world-model/schema.ts';
+import { isBaseEvent } from '../world-model/schema.ts';
 import { type Instant, gregorian, fromStore } from '../core-time/index.ts';
 import { parcelGeometry } from '../render-engine/parcel-geometry.ts';
 import type { Arrangement } from '../geo-kernel/arrangement.ts';
@@ -163,7 +163,7 @@ export function eventsCSV(world: World): string {
   const groups = new Map(world.all('event_group').map((g) => [g.id, g.name]));
   const types = new Map(world.all('event_type').map((t) => [t.id, t.name]));
   const rows: unknown[][] = [['id', 'name', 'type', 'start', 'end', 'groups', 'alternative_of', 'active', 'description']];
-  const events = world.all('event').filter((e) => e.id !== BASE_EVENT_ID).sort((a, b) => a.start_day - b.start_day || a.start_ms - b.start_ms);
+  const events = world.all('event').filter((e) => !isBaseEvent(e.id)).sort((a, b) => a.start_day - b.start_day || a.start_ms - b.start_ms);
   for (const e of events) {
     rows.push([e.id, e.name, types.get(e.type_id) ?? e.type_id, isoDate(fromStore(e.start_day, e.start_ms)), e.end_day !== null ? isoDate(fromStore(e.end_day, e.end_ms ?? 0)) : '',
       groupsOfEvent(world, e.id).map((g) => groups.get(g) ?? '').filter(Boolean).join('; '), e.variant_group ?? '', e.variant_group ? (e.variant_active ? 'yes' : 'no') : 'yes', e.description]);
@@ -198,7 +198,7 @@ export function featuresCSV(world: World, engine: Engine): string {
     const layer = world.get('layer', f.layer_id);
     for (const st of engine.featureHistory(f.id)) {
       const ev = world.get('event', st.eventId);
-      rows.push([f.id, f.name, layer?.name ?? '', featureKind(world, f) ?? '', f.entity_id ? world.get('entity', f.entity_id)?.name ?? '' : '', isoDate(st.t), st.parts ? 'shape' : 'ends', ev && ev.id !== BASE_EVENT_ID ? ev.name : '', f.notes]);
+      rows.push([f.id, f.name, layer?.name ?? '', featureKind(world, f) ?? '', f.entity_id ? world.get('entity', f.entity_id)?.name ?? '' : '', isoDate(st.t), st.parts ? 'shape' : 'ends', ev && !isBaseEvent(ev.id) ? ev.name : '', f.notes]);
     }
   }
   return csv(rows);

@@ -97,6 +97,8 @@ export function textBoxState(shot: ShotSettings, box: TextBox, frame: number, t:
 
 export interface ShotSettings {
   spaceId: string;
+  /** The timeline the shot shows (D150): a branch's id; absent (or a branch no longer there): the main timeline. */
+  branch?: string;
   width: number; height: number; fps: number; frames: number;
   time: TimeKey[];
   camera: CameraKey[];

@@ -4,7 +4,8 @@ import {
   type Instant, type Calendar, toApproxYear, fromApproxYear, gregorian, formatYear, floorTo, instant, add, compare, fromStore, MS_PER_DAY, DEEP_BEFORE_YEAR, PRESENT_YEAR,
 } from '../../core-time/index.ts';
 import { calendarNow } from '../calendar-now.ts';
-import { BASE_EVENT_ID } from '../../world-model/schema.ts';
+import { listedHere } from '../events-here.ts';
+import { branchLine, branchStart } from '../../temporal-engine/branches.ts';
 import * as cmd from '../../domain/commands.ts';
 import { GroupFilter, eventFilterSet } from './EventGroups.tsx';
 import { typeColor } from '../../domain/event-types.ts';
@@ -179,7 +180,7 @@ export function Timeline() {
     const W = Math.max(1, Math.round(w * dpr)), H = Math.max(1, Math.round(h * dpr));
     if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
     const world = s.world;
-    const key = [world.serial, world.tableRevision('event'), world.tableRevision('event_type'), world.tableRevision('event_group'), world.tableRevision('event_group_member'), world.tableRevision('map_space'), s.spaceId, s.engine!.revision, start, end, W, H, dpr,
+    const key = [world.serial, world.tableRevision('event'), world.tableRevision('event_type'), world.tableRevision('event_group'), world.tableRevision('event_group_member'), world.tableRevision('map_space'), world.tableRevision('branch'), s.branch, s.spaceId, s.engine!.revision, start, end, W, H, dpr,
       s.selection?.kind === 'event' ? s.selection.id : '', s.recordEventId ?? '', (s.eventFilter ?? ['*']).join(',')].join('|');
     if (!still.current || still.current.key !== key) {
       const canvas = still.current && still.current.canvas.width === W && still.current.canvas.height === H ? still.current.canvas : new OffscreenCanvas(W, H);
@@ -201,6 +202,25 @@ export function Timeline() {
       ctx.fillStyle = '#aab6c3';
       ctx.fillText(tk.label, x + 4, 11);
     }
+    // Where the branch viewed (and the branches it comes from) split off (D150): a line in its colour, its name on the ruler.
+    for (const id of branchLine(world, s.branch)) {
+      const b = world.get('branch', id);
+      if (!b) continue;
+      const x = xOf(toApproxYear(branchStart(b)));
+      if (x < -2 || x > w + 2) continue;
+      ctx.strokeStyle = b.color;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([2, 3]);
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.lineWidth = 1;
+      // (Its name on the ruler, on a backing of its own over the ticks.)
+      const label = `⑂ ${b.name}`, lw = labelWidth(ctx, label);
+      ctx.fillStyle = '#18212b';
+      ctx.fillRect(x + 2, 3, lw + 6, 16);
+      ctx.fillStyle = b.color;
+      ctx.fillText(label, x + 5, 11);
+    }
     // change markers
     ctx.fillStyle = 'rgba(255,209,102,0.7)';
     for (const t of s.engine!.changeInstants()) {
@@ -209,7 +229,7 @@ export function Timeline() {
     }
     // event bars in lanes
     const filter = eventFilterSet();
-    const events = s.world.all('event').filter((e) => e.id !== BASE_EVENT_ID && cmd.eventShown(s.world!, e.id, filter)).sort((a, b) => a.start_day - b.start_day || a.start_ms - b.start_ms);
+    const events = s.world.all('event').filter((e) => listedHere(e) && cmd.eventShown(s.world!, e.id, filter)).sort((a, b) => a.start_day - b.start_day || a.start_ms - b.start_ms);
     const groupColor = new Map(s.world.all('event_group').map((g) => [g.id, g.color]));
     const laneEnds: number[] = [];
     const found: Array<{ id: string; x0: number; x1: number; y: number }> = [];
@@ -247,7 +267,7 @@ export function Timeline() {
     ctx.drawImage(still.current.canvas, 0, 0);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     // The other date being compared (Stage 3): a dashed yellow line.
-    if (s.compare.on && s.mode === 'world') {
+    if (s.compare.on && s.mode === 'world' && !s.compare.same) {
       const cx = xOf(toApproxYear(s.compare.time));
       ctx.strokeStyle = '#ffd166';
       ctx.lineWidth = 2;

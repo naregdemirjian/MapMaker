@@ -5,7 +5,7 @@ import { gregorian } from '../core-time/index.ts';
 import { lonLatToVec } from '../geo-kernel/vec.ts';
 import { makeView, screenToLonLat, lonLatToScreen } from '../render-engine/camera.ts';
 import { cameraAt, timeAt, defaultShot, newTextBox } from '../presentation/sequence.ts';
-import { currentShot, frameRect, shotOverlayRects, shownMapView } from './components/MapView.tsx';
+import { currentShot, frameRect, shotOverlayRects, shownMapView, SIDE_GAP } from './components/MapView.tsx';
 import { shownSpace } from './components/SpaceView.tsx';
 import * as commands from '../domain/commands.ts';
 import { runExport, renderFrame, terrainFor, PASS_DEFS } from '../presentation/export-driver.ts';
@@ -19,6 +19,8 @@ import { heightAt } from '../terrain/grid.ts';
 
 /** The working map's view as it is shown (it may hold a meridian while the map moves), or the camera's own for that size. */
 function shown(width: number, height: number) {
+  // (Two timelines or dates side by side, D150: the map is the left half; the other side shows the same place.)
+  if (store.compare.on && store.compare.side && store.mode === 'world') width = Math.max(25, Math.floor((width - SIDE_GAP) / 2));
   const v = shownMapView();
   return v && !v.preview && v.view.width === width && v.view.height === height ? v.view : makeView(store.camera, width, height);
 }

@@ -413,7 +413,7 @@ export async function svgFrame(o: SvgFrameOptions): Promise<SvgFrame> {
   }
   // The texts: dates, titles, text boxes and the current events (D107), over everything.
   const texts = new SvgPen(W, H, 'tx');
-  withSvgPaths(() => drawShotOverlays(texts.asContext(), W, H, world, shot, frame, t, view ?? undefined));
+  withSvgPaths(() => drawShotOverlays(texts.asContext(), W, H, world, shot, frame, t, view ?? undefined, engine));
   note(texts);
   defs.push(texts.defs());
 

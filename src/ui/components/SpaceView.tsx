@@ -64,9 +64,11 @@ export function SpaceView() {
   const chart = !!look?.chart || !!scene.row;
   const view = makeSpaceView(camera, frame.w, frame.h, scene.radius, chart);
   // Realms and lanes at the moment shown (in a shot, a star newly held grows into its realm).
-  const holdings = space && s.engine ? holdingsAt(s.world!, s.engine, space.id, time, shot ? (t0) => screenSecondsSince(shot, s.shotFrame, t0) : undefined) : undefined;
-  const lanes = space && s.engine ? lanesFor(s.world!, s.engine, space.id, time) : undefined;
-  const wars = s.world && s.engine ? warsAmong(s.world, s.engine, time) : undefined;
+  // (In a shot, history as the shot's timeline has it, D150.)
+  const eng = s.engine && shot ? s.engineFor(shot.branch) : s.engine;
+  const holdings = space && eng ? holdingsAt(s.world!, eng, space.id, time, shot ? (t0) => screenSecondsSince(shot, s.shotFrame, t0) : undefined) : undefined;
+  const lanes = space && eng ? lanesFor(s.world!, eng, space.id, time) : undefined;
+  const wars = s.world && eng ? warsAmong(s.world, eng, time) : undefined;
   // The Lanes tool: the first star clicked, waiting for the second.
   const [laneFrom, setLaneFrom] = useState<number | null>(null);
 
@@ -102,7 +104,7 @@ export function SpaceView() {
       if (look?.finish) finishLook(ctx, frame.x * dpr, frame.y * dpr, frame.w * dpr, frame.h * dpr, look.look, (frame.w * dpr) / 1920);
       ctx.setTransform(dpr, 0, 0, dpr, frame.x * dpr, frame.y * dpr);
       const o = s.presentOverlay;
-      overlayRects = drawShotOverlays(ctx, frame.w, frame.h, s.world, o ? moveOverlay(shot, o.id, o.dx, o.dy, o.from) : shot, s.shotFrame, time);
+      overlayRects = drawShotOverlays(ctx, frame.w, frame.h, s.world, o ? moveOverlay(shot, o.id, o.dx, o.dy, o.from) : shot, s.shotFrame, time, undefined, s.engineFor(shot.branch));
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.strokeStyle = 'rgba(255,255,255,0.35)';
       ctx.lineWidth = 1;

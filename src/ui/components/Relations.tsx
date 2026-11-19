@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { useStore } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
 import { type Instant, compare, fromStore, NEG_INF } from '../../core-time/index.ts';
-import { BASE_EVENT_ID } from '../../world-model/schema.ts';
+import { eventsHere } from '../events-here.ts';
 import { RELATION_KINDS, relationFrom, type RelationKind } from '../../domain/relations.ts';
 import { DateField, fmt } from './Panels.tsx';
 
@@ -25,7 +25,7 @@ export function RelationsSection({ id }: { id: string }) {
   const [until, setUntil] = useState<Instant | null>(null);
   const rels = w.all('relation').filter((r) => r.a === id || r.b === id).sort((a, b) => a.created_seq - b.created_seq);
   const others = w.all('entity').filter((x) => x.id !== id && x.type_id !== 'body').sort((a, b) => a.name.localeCompare(b.name));
-  const events = w.all('event').filter((x) => x.id !== BASE_EVENT_ID).sort((a, b) => a.start_day - b.start_day || a.start_ms - b.start_ms);
+  const events = eventsHere();
   const add = () => {
     const c = CHOICES.find((x) => x.key === choice)!;
     if (!other) { s.toast('Choose who it is with.', 'error'); return; }

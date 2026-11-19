@@ -23,7 +23,7 @@ import type { FieldSource } from '../domain/fields.ts';
 import type { DisasterId } from '../domain/disasters.ts';
 import type { SculptTool } from '../terrain/sculpt.ts';
 import { terrainSourceOf, planetOf, isPaleoEarth } from '../world-model/world-settings.ts';
-import { MAIN_BRANCH, type MapSpaceRow } from '../world-model/schema.ts';
+import { MAIN_BRANCH, isBaseEvent, type MapSpaceRow } from '../world-model/schema.ts';
 import { DEFAULT_PERIOD, type PeriodSpec } from '../domain/history-view.ts';
 import { setAssetBase } from '../render-engine/assets.ts';
 import { lonLatToVec, type Vec3 } from '../geo-kernel/vec.ts';
@@ -780,11 +780,11 @@ class AppStore {
     if (!this.world) return;
     // The Earth through geological time (D134): all of its span, with the events in it.
     if (isPaleoEarth(this.world.get('map_space', this.spaceId))) {
-      const years = this.world.all('event').filter((e) => e.id !== 'evt_base').map((e) => e.start_day / 365.2425 + 1970);
+      const years = this.world.all('event').filter((e) => !isBaseEvent(e.id)).map((e) => e.start_day / 365.2425 + 1970);
       this.timeline = { start: Math.min(PRESENT_YEAR - 545e6, ...years), end: Math.max(PRESENT_YEAR + 50, ...years) };
       return;
     }
-    const ys = this.world.all('event').filter((e) => e.id !== 'evt_base').flatMap((e) => {
+    const ys = this.world.all('event').filter((e) => !isBaseEvent(e.id)).flatMap((e) => {
       const a = (e.start_day / 365.2425) + 1970;
       const b = e.end_day !== null ? (e.end_day / 365.2425) + 1970 : a;
       return [a, b];

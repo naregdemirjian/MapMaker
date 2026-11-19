@@ -12,7 +12,7 @@ import type { Engine, FaceState, Assignment, CompiledTransition } from '../tempo
 import { globeGL, globeInView } from './globe-gl.ts';
 import { parseJSON, slerpLonLat } from '../temporal-engine/engine.ts';
 import { type Instant, compare, diffMs } from '../core-time/index.ts';
-import { BASE_EVENT_ID } from '../world-model/schema.ts';
+import { isBaseEvent } from '../world-model/schema.ts';
 import type { Vec3 } from '../geo-kernel/vec.ts';
 import { buildFrontField, frontRings, frontLines, bandBounds, bandBoxes, type FrontField, type Rings } from './front-field.ts';
 import { frontSourceOf } from './front-source.ts';
@@ -2977,7 +2977,7 @@ export class MapRenderer {
         for (const [f, st] of states) {
           const a = st.assignment;
           // The starting map is never animated; changes made without an event are, like any other change.
-          if (st.transition || !a || (a.eventId === BASE_EVENT_ID && a.t.day === -Infinity)) continue;
+          if (st.transition || !a || (isBaseEvent(a.eventId) && a.t.day === -Infinity)) continue;
           let e = index.get(a.effectId);
           if (!e) index.set(a.effectId, (e = { a, faces: [], from: [] }));
           e.faces.push(f);

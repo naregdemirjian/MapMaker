@@ -945,6 +945,121 @@ try {
     await h.setDate('1 June 1901');
   });
 
+  await h.step('Branches (D150): a branch from the date viewed shares what came before, live, and has its own history after; switched from the title bar; its events listed in it alone; compared with the main timeline side by side; a shot of it; deleted and brought back', async () => {
+    // A map of its own, so nothing else is touched: Ostland holds it from the start; Westria takes the west in 1950.
+    await page.getByRole('button', { name: '+ Map' }).click();
+    await page.getByPlaceholder('e.g. Aster Prime').fill('Forks');
+    await page.locator('.modal label', { hasText: 'Radius' }).locator('input').fill('3000');
+    await page.getByRole('button', { name: 'Create map' }).click();
+    await page.waitForFunction(() => (window as any).__mapmaker.store.world.get('map_space', (window as any).__mapmaker.store.spaceId)?.name === 'Forks');
+    const ids = await page.evaluate(() => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench, cmd = B.commands;
+      const Y = (y: number) => B.gregorian.fromCivil({ year: y });
+      const sq = (w: number, so: number, e: number, n: number) => [[w, so], [e, so], [e, n], [w, n]].map(([lon, lat]) => B.lonLatToVec(lon, lat));
+      const ost = s.execute((w: any) => cmd.createEntity(w, { type_id: 'polity', name: 'Ostland', color: '#3a7bd5' }));
+      const west = s.execute((w: any) => cmd.createEntity(w, { type_id: 'polity', name: 'Westria', color: '#d55e3a' }));
+      s.execute((w: any, e: any) => cmd.paintTerritory(w, e, { spaceId: s.spaceId, layerId: s.layerId, ring: sq(0, 40, 10, 50), value: ost, snap: 1e-7, mode: { kind: 'correct', t: { day: -Infinity, ms: 0 } } }));
+      const ev = s.execute((w: any) => cmd.createEvent(w, { name: 'Westria takes the west', start: Y(1950) }));
+      s.execute((w: any, e: any) => cmd.paintTerritory(w, e, { spaceId: s.spaceId, layerId: s.layerId, ring: sq(0, 40, 5, 50), value: west, snap: 1e-7, mode: { kind: 'new', eventId: ev } }));
+      s.setCamera({ lon: 5, lat: 45, zoom: 3.2, rotation: 0, projection: 'equirectangular' });
+      return { ost, west, ev };
+    });
+    const W: LL = [2.5, 45], E: LL = [7.5, 42.5];
+    await h.setDate('1 June 1940');
+    assert.equal(await page.getByTestId('branch-select').count(), 0, 'no list of timelines while there is only the main one');
+    // A branch from the date viewed.
+    await page.getByTestId('open-branches').click();
+    await page.getByTestId('branches-dialog').waitFor();
+    assert.equal(await page.getByTestId('new-branch-date').inputValue(), '1 June 1940');
+    await page.getByTestId('new-branch-name').fill('Ostland endures');
+    await h.screenshot('branches-dialog');
+    await page.getByTestId('new-branch-make').click();
+    await page.getByTestId('branches-dialog').waitFor({ state: 'detached' });
+    const br = await page.evaluate(() => (window as any).__mapmaker.store.branch as string);
+    assert.notEqual(br, 'main');
+    assert.equal(await page.getByTestId('branch-select').inputValue(), br);
+    // After the split the branch has none of the main timeline's later history; before it, the same.
+    assert.equal(await h.ownerAt(W, '1960'), 'Ostland');
+    assert.equal(await h.ownerAt(W, '1930'), 'Ostland');
+    await h.setDate('1960');
+    await page.getByTestId('event-row-Westria takes the west').waitFor({ state: 'detached', timeout: 5000 });
+    // Something of its own: Westria takes the south-east in 1955, in an event of the branch.
+    const own = await page.evaluate(([west]) => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench, cmd = B.commands;
+      const sq = (w: number, so: number, e: number, n: number) => [[w, so], [e, so], [e, n], [w, n]].map(([lon, lat]) => B.lonLatToVec(lon, lat));
+      const ev = s.execute((w: any) => cmd.createEvent(w, { name: 'Westria rises in the east', start: B.gregorian.fromCivil({ year: 1955 }) }));
+      s.execute((w: any, e: any) => cmd.paintTerritory(w, e, { spaceId: s.spaceId, layerId: s.layerId, ring: sq(5, 40, 10, 45), value: west, snap: 1e-7, mode: { kind: 'new', eventId: ev } }));
+      return { ev, branch: s.world.get('event', ev).branch_id as string };
+    }, [ids.west]);
+    assert.equal(own.branch, br);
+    assert.equal(await h.ownerAt(E, '1956'), 'Westria');
+    await page.getByTestId('event-row-Westria rises in the east').waitFor();
+    await h.screenshot('branch-viewed');
+    // The main timeline: switched from the title bar; the branch's event is not in it.
+    await page.getByTestId('branch-select').selectOption('main');
+    assert.equal(await h.ownerAt(W, '1960'), 'Westria');
+    assert.equal(await h.ownerAt(E, '1960'), 'Ostland');
+    await page.getByTestId('event-row-Westria rises in the east').waitFor({ state: 'detached', timeout: 5000 });
+    await page.getByTestId('event-row-Westria takes the west').waitFor();
+    // Compared side by side, at the same date: the main timeline on the left, the branch on the right.
+    const px = (p: number[]) => page.evaluate(([x, y]) => { const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement; const r = c.getBoundingClientRect(), k = c.width / r.width; return Array.from(c.getContext('2d')!.getImageData(Math.round((x - r.left) * k), Math.round((y - r.top) * k), 1, 1).data).slice(0, 3); }, p);
+    // (Westria is red, Ostland blue: told apart by which is stronger. Sampled away from their names.)
+    const west = (p: number[]) => p[0] > p[2] + 50, ost = (p: number[]) => p[2] > p[0] + 50;
+    const Ws: LL = [1, 48.5], Es: LL = [9, 41];
+    await page.getByTestId('compare-toggle').click();
+    await page.getByTestId('compare-branch').selectOption(br);
+    assert.equal(await page.getByTestId('compare-same').count(), 1, 'the other side follows the date viewed');
+    await page.getByTestId('compare-side').click();
+    assert.equal(await page.getByTestId('compare-side').getAttribute('aria-label'), 'Side by side');
+    await page.waitForTimeout(300);
+    const box = (await page.getByTestId('map-canvas').boundingBox())!;
+    const half = Math.max(25, Math.floor((box.width - 3) / 2)) + 3;
+    const wl = await h.toPage(Ws), el = await h.toPage(Es);
+    assert.ok(west(await px(wl)), `left: the main timeline (${await px(wl)})`);
+    assert.ok(ost(await px([wl[0] + half, wl[1]])), `right: the branch (${await px([wl[0] + half, wl[1]])})`);
+    assert.ok(ost(await px(el)) && west(await px([el[0] + half, el[1]])), `and the south-east the other way round (${await px(el)}, ${await px([el[0] + half, el[1]])})`);
+    await h.screenshot('branches-side-by-side');
+    // A drag on the other side moves both.
+    const cam0 = await page.evaluate(() => (window as any).__mapmaker.store.camera.lon as number);
+    await page.mouse.move(el[0] + half, el[1]);
+    await page.mouse.down();
+    await page.mouse.move(el[0] + half - 60, el[1], { steps: 5 });
+    await page.mouse.up();
+    assert.ok((await page.evaluate(() => (window as any).__mapmaker.store.camera.lon as number)) > cam0 + 0.5, 'the map moved');
+    await page.evaluate((c) => (window as any).__mapmaker.store.setCamera({ lon: c, lat: 45, zoom: 3.2, rotation: 0, projection: 'equirectangular' }), cam0);
+    await page.getByTestId('compare-side').click();
+    await page.getByTestId('compare-toggle').click();
+    // A shot of the branch: made while viewing it, its timeline chosen in the shot's settings.
+    await page.getByTestId('branch-select').selectOption(br);
+    await page.getByTestId('mode-present').click();
+    await page.getByTestId('new-shot').click();
+    await page.getByTestId('shot-branch').waitFor();
+    assert.equal(await page.getByTestId('shot-branch').inputValue(), br);
+    await page.waitForTimeout(300);
+    const pv = async () => px((await h.hook<number[]>('previewToPage', Ws[0], Ws[1]))!);
+    assert.ok(ost(await pv()), `the shot shows the branch (${await pv()})`);
+    await page.getByTestId('shot-branch').selectOption('main');
+    await page.waitForTimeout(300);
+    assert.ok(west(await pv()), `then the main timeline (${await pv()})`);
+    // (The shot goes again: later steps make shots of their own.)
+    await page.evaluate(() => { const m = (window as any).__mapmaker, s = m.store; const id = s.shotId; s.set({ shotId: null }); s.execute((w: any) => m.bench.commands.deleteSequence(w, id)); });
+    await page.getByTestId('mode-world').click();
+    // Deleted (with its event), the main timeline shown; undo brings it back.
+    await page.getByTestId('open-branches').click();
+    page.once('dialog', (d) => d.accept());
+    await page.getByTestId('branch-delete-Ostland endures').click();
+    await page.waitForFunction(() => (window as any).__mapmaker.store.world.all('branch').length === 0);
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.branch), 'main');
+    assert.equal(await page.evaluate((e) => !!(window as any).__mapmaker.store.world.get('event', e), own.ev), false);
+    await page.locator('.modal .close').click();
+    await page.getByTestId('undo').click();
+    await h.saved();
+    await page.waitForFunction(() => (window as any).__mapmaker.store.world.all('branch').length === 1);
+    await page.getByTestId('branch-select').selectOption(br);
+    assert.equal(await h.ownerAt(E, '1956'), 'Westria');
+    await page.getByTestId('branch-select').selectOption('main');
+    await page.locator('header select').first().selectOption({ label: 'Earth' });
+  });
   await h.step('Event types: a type of its own with a colour, a usual length and way of spreading; used for a new event and a drawing; renamed; deleted and undone', async () => {
     const typeOf = (name: string) => page.evaluate((n) => { const w = (window as any).__mapmaker.store.world; const t = w.all('event_type').find((x: any) => x.name === n); return t ? { id: t.id as string, fields: JSON.parse(t.fields) } : null; }, name);
     // (A field shows what follows from a choice once the page has drawn it again.)

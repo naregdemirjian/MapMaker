@@ -149,7 +149,7 @@ export function visibleLayers(world: World, shot: ShotSettings): string[] {
 }
 
 /** Text overlays and the current-events box of a shot frame (the same in the preview and exports). */
-export function drawShotOverlays(ctx: CanvasRenderingContext2D, width: number, height: number, world: World, shot: ShotSettings, frame: number, t: Instant, view?: View): OverlayRect[] {
+export function drawShotOverlays(ctx: CanvasRenderingContext2D, width: number, height: number, world: World, shot: ShotSettings, frame: number, t: Instant, view?: View, engine?: Engine): OverlayRect[] {
   // (Callouts point at places on the map: where the frame's view shows them, D107.)
   const project = view ? (lon: number, lat: number) => lonLatToScreen(view, lon, lat) as [number, number] | null : undefined;
   // (Dates in the calendar of the shot's map, D149.)
@@ -158,7 +158,7 @@ export function drawShotOverlays(ctx: CanvasRenderingContext2D, width: number, h
   const box = eventsBoxOf(shot.eventsBox);
   if (!box.show) return rects;
   const groups = box.groups ? new Set(box.groups) : null;
-  const events = currentEvents(world, box, t, (t0) => screenSecondsSince(shot, frame, t0), (id) => eventShown(world, id, groups));
+  const events = currentEvents(world, box, t, (t0) => screenSecondsSince(shot, frame, t0), (id) => eventShown(world, id, groups), engine);
   const r = drawEventsBox(ctx, width, height, width / 1920, box, t, events, cal);
   if (r) rects.push({ id: EVENTS_BOX_ID, ...r });
   return rects;
@@ -247,7 +247,7 @@ export function renderFrame(ctx: CanvasRenderingContext2D, renderer: MapRenderer
     // The look's finish (D108): its grade, darker edges and paper, over the map and under the texts.
     if (ls?.finish) finishLook(ctx, 0, 0, width, height, ls.look, width / 1920);
   }
-  if (def.overlays) drawShotOverlays(ctx, width, height, world, shot, frame, t, view);
+  if (def.overlays) drawShotOverlays(ctx, width, height, world, shot, frame, t, view, engine);
 }
 
 /**
@@ -311,7 +311,7 @@ export function drawSpaceFrame(ctx: CanvasRenderingContext2D, world: World, engi
     const ls = lookStyles(shot);
     if (finish && ls?.finish) finishLook(ctx, 0, 0, width, height, ls.look, width / 1920);
   }
-  if (def.overlays) drawShotOverlays(ctx, width, height, world, shot, frame, t);
+  if (def.overlays) drawShotOverlays(ctx, width, height, world, shot, frame, t, undefined, engine);
 }
 
 /** Two 32-bit hashes of a frame's pixels: frames with the same pair are taken to be the same picture. */

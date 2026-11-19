@@ -2,7 +2,8 @@
 // time, in a box the user styles freely (or on a graphic of their own). Drawn with the text overlays.
 import { type Instant, type Calendar, compare, fromStore, gregorian, type Precision } from '../core-time/index.ts';
 import type { World } from '../world-model/world.ts';
-import { BASE_EVENT_ID } from '../world-model/schema.ts';
+import { isBaseEvent } from '../world-model/schema.ts';
+import type { Engine } from '../temporal-engine/engine.ts';
 import { imageNow, drawImageFit } from '../render-engine/assets.ts';
 
 export interface EventsBox {
@@ -60,18 +61,20 @@ export interface CurrentEvent { id: string; name: string; description: string; a
  * again and again): it shows again at each of them, as if it happened anew. `secondsSince` converts
  * history to screen time for this shot.
  */
-export function currentEvents(world: World, box: EventsBox, t: Instant, secondsSince: (t: Instant) => number, inGroups: (eventId: string) => boolean): CurrentEvent[] {
-  // The dates of changes recorded in an event after its start.
+export function currentEvents(world: World, box: EventsBox, t: Instant, secondsSince: (t: Instant) => number, inGroups: (eventId: string) => boolean, engine?: Engine): CurrentEvent[] {
+  // The dates of changes recorded in an event after its start (in the shot's timeline, D150: of an event the
+  // branch shares, only those before it split off).
   const later = new Map<string, Instant[]>();
   for (const ef of world.all('effect')) {
-    if (ef.at_day === null || ef.event_id === BASE_EVENT_ID) continue;
+    if (ef.at_day === null || isBaseEvent(ef.event_id)) continue;
+    if (engine) { const ev = world.get('event', ef.event_id); if (!ev || !engine.inTimeline(ef, ev)) continue; }
     const l = later.get(ef.event_id) ?? [];
     l.push(fromStore(ef.at_day, ef.at_ms ?? 0));
     later.set(ef.event_id, l);
   }
   const out: Array<CurrentEvent & { start: Instant }> = [];
   for (const e of world.all('event')) {
-    if (e.id === BASE_EVENT_ID || (e.variant_group && !e.variant_active) || !inGroups(e.id)) continue;
+    if (isBaseEvent(e.id) || (e.variant_group && !e.variant_active) || !inGroups(e.id) || (engine && !engine.lists(e))) continue;
     const start = fromStore(e.start_day, e.start_ms);
     if (compare(start, t) > 0) continue;
     // The latest moment of the event at or before t: its start, or a change recorded in it later.

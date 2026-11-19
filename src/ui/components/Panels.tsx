@@ -4,7 +4,8 @@ import * as cmd from '../../domain/commands.ts';
 import { SCULPT_TOOLS } from '../../terrain/sculpt.ts';
 import { type Instant, type Calendar, gregorian, fromStore, formatYear, compare, add, NEG_INF, DEEP_BEFORE_YEAR, fromApproxYear } from '../../core-time/index.ts';
 import { calendarNow } from '../calendar-now.ts';
-import { BASE_EVENT_ID, type EffectRow } from '../../world-model/schema.ts';
+import { isBaseEvent, MAIN_BRANCH, type EffectRow } from '../../world-model/schema.ts';
+import { listedHere } from '../events-here.ts';
 import { basemapSourceOf, worldSettings, terrainSourceOf, sculptOf, isSpaceMap, isPaleoEarth } from '../../world-model/world-settings.ts';
 import { parseJSON, leafDescendants, isUntracked, resolutionOf, type Resolution, type TransitionSpec } from '../../temporal-engine/engine.ts';
 import type { World } from '../../world-model/world.ts';
@@ -32,6 +33,8 @@ import { RegionToolOptions } from './Regions.tsx';
 import { typeColor } from '../../domain/event-types.ts';
 import { isFeatureKind } from '../../render-engine/feature-style.ts';
 import { StarPanel } from './Stars.tsx';
+import { BranchSwitcher } from './Branches.tsx';
+import { branchName } from '../../temporal-engine/branches.ts';
 
 /** A date as the map being viewed writes it (its own calendar, D149, or the Gregorian). */
 export const fmt = (t: Instant, precision: 'year' | 'day' | 'minute' = 'day') => calendarNow().format(t, precision);
@@ -179,6 +182,7 @@ export function TopBar() {
       <select value={s.spaceId} onChange={(e) => switchSpace(e.target.value)} title="Which map you are looking at">
         {spaces.map((sp) => <option key={sp.id} value={sp.id}>{sp.name}</option>)}
       </select>
+      {s.mode === 'world' && <BranchSwitcher />}
       {s.mode === 'world' && (
         <div className="datebar">
           <button onClick={() => stepChange(-1)} title="Previous change">◀</button>
@@ -186,10 +190,7 @@ export function TopBar() {
           <button onClick={() => stepChange(1)} title="Next change">▶</button>
           <button className={s.compare.on ? 'on' : ''} onClick={() => s.set({ compare: { ...s.compare, on: !s.compare.on, time: s.compare.on ? s.compare.time : defaultCompareTime(s) } })}
             title="Compare two dates: the date viewed on the left of a line across the map, another date on the right (drag the line)" data-testid="compare-toggle">Compare</button>
-          {s.compare.on && <>
-            <DateField value={s.compare.time} onChange={(t) => t && s.set({ compare: { ...s.compare, time: t } })} testId="compare-date" />
-            <button onClick={() => { const a = s.time; s.setTime(s.compare.time); s.set({ compare: { ...s.compare, time: a } }); }} title="Swap the two dates" data-testid="compare-swap">⇄</button>
-          </>}
+
         </div>
       )}
       <div className="spacer" />
@@ -388,12 +389,12 @@ type Ent = ReturnType<World['all']>[number] & { id: string; name: string; type_i
 type EntGroup = { id: string; name: string; color: string; sort_order: number; created_seq: number };
 type OutlinerItem = { kind: 'group'; g: EntGroup; members: string[] } | { kind: 'entity'; e: Ent; depth: number; cities: number };
 
-/** Events in order of their dates, kept until an event changes. */
-const eventLists = new WeakMap<World, { revision: number; list: ReturnType<World['all']> }>();
+/** The events of the timeline being viewed in order of their dates, kept until an event or a branch changes (D150). */
+const eventLists = new WeakMap<World, { key: string; list: ReturnType<World['all']> }>();
 function sortedEvents(w: World) {
   let kept = eventLists.get(w);
-  const revision = w.tableRevision('event');
-  if (!kept || kept.revision !== revision) eventLists.set(w, (kept = { revision, list: w.all('event').filter((e) => e.id !== BASE_EVENT_ID).sort((a, b) => a.start_day - b.start_day || a.start_ms - b.start_ms) }));
+  const key = `${w.tableRevision('event')}|${w.tableRevision('branch')}|${store.branch}`;
+  if (!kept || kept.key !== key) eventLists.set(w, (kept = { key, list: w.all('event').filter(listedHere).sort((a, b) => a.start_day - b.start_day || a.start_ms - b.start_ms) }));
   return kept.list as ReturnType<typeof w.all<'event'>>;
 }
 
@@ -530,7 +531,7 @@ export function Outliner() {
   const { political, characters, others, looseOthers } = lists;
   // Long lists are drawn again only when what they show changes (see EntityRows and EventRows).
   const entitySig = `${lists.sig}|${s.chosen('entity').join(',')}`;
-  const eventSig = [w.serial, w.tableRevision('event'), w.tableRevision('event_type'), w.tableRevision('event_group'), w.tableRevision('event_group_member'), (s.eventFilter ?? ['*']).join(','), s.chosen('event').join(',')].join('|');
+  const eventSig = [w.serial, w.tableRevision('event'), w.tableRevision('event_type'), w.tableRevision('event_group'), w.tableRevision('event_group_member'), w.tableRevision('branch'), s.branch, (s.eventFilter ?? ['*']).join(','), s.chosen('event').join(',')].join('|');
   const events = sortedEvents(w);
   const hiddenEvents = s.eventFilter ? events.reduce((n, e) => n + (eventVisible(w, e.id) ? 0 : 1), 0) : 0;
   const createEntity = () => {
@@ -722,7 +723,7 @@ function EntityPanel({ id }: { id: string }) {
     const arr = w.arrangement(s.spaceId);
     for (const [f, st] of s.engine!.partitionState(s.spaceId, s.layerId, s.time)) if (st.value === id) { areaSr += arr.faceArea(f); parcels++; }
   }
-  const changes = w.rows('effect').filter((f) => resolutionOf(f).set.some(([, v]) => v === id));
+  const changes = w.rows('effect').filter((f) => resolutionOf(f).set.some(([, v]) => v === id) && inTimelineHere(w, f));
   return (
     <div className="panel" data-testid="entity-panel">
       <h3><span className="swatch big" style={{ background: e.color }} /> {e.name}</h3>
@@ -754,6 +755,12 @@ function EntityPanel({ id }: { id: string }) {
   );
 }
 
+/** Whether a change is part of the history of the timeline being viewed (D150). */
+function inTimelineHere(w: World, f: EffectRow): boolean {
+  const ev = w.get('event', f.event_id);
+  return !!ev && (!store.engine || store.engine.inTimeline(f, ev));
+}
+
 /**
  * A country's territorial changes in date order: the starting map, each event once, and each change
  * made without an event on its own date.
@@ -762,12 +769,12 @@ function changeRows(w: World, changes: EffectRow[]): Array<{ key: string; eventI
   const rows: Array<{ key: string; eventId: string; time: Instant | null; label: string }> = [];
   const seen = new Set<string>();
   for (const f of changes) {
-    if (isUntracked(f)) { rows.push({ key: f.id, eventId: BASE_EVENT_ID, time: fromStore(f.at_day!, f.at_ms ?? 0), label: 'Change without an event' }); continue; }
+    if (isUntracked(f)) { rows.push({ key: f.id, eventId: f.event_id, time: fromStore(f.at_day!, f.at_ms ?? 0), label: 'Change without an event' }); continue; }
     if (seen.has(f.event_id)) continue;
     seen.add(f.event_id);
     const ev = w.get('event', f.event_id);
     if (!ev) continue;
-    rows.push(ev.id === BASE_EVENT_ID
+    rows.push(isBaseEvent(ev.id)
       ? { key: ev.id, eventId: ev.id, time: null, label: 'Starting map (from the beginning)' }
       : { key: ev.id, eventId: ev.id, time: fromStore(ev.start_day, ev.start_ms), label: ev.name });
   }
@@ -822,7 +829,7 @@ function EventPanel({ id }: { id: string }) {
   const [annexTo, setAnnexTo] = useState('');
   useEffect(() => { setName(e?.name ?? ''); setDesc(e?.description ?? ''); }, [id, e?.name, e?.description]);
   if (!e) return null;
-  const base = id === BASE_EVENT_ID;
+  const base = isBaseEvent(id);
   const effects = w.all('effect').filter((f) => f.event_id === id).sort((a, b) => a.ordinal - b.ordinal);
   const start = fromStore(e.start_day, e.start_ms);
   const end = e.end_day !== null ? fromStore(e.end_day, e.end_ms ?? 0) : null;
@@ -848,6 +855,15 @@ function EventPanel({ id }: { id: string }) {
   return (
     <div className="panel" data-testid="event-panel">
       <h3>{base ? 'Starting map and changes without an event' : e.name}</h3>
+      {w.all('branch').length > 0 && (() => {
+        // Which timeline it belongs to (D150): the one viewed, or the history it shares.
+        const owner = e.branch_id || MAIN_BRANCH, row = w.get('branch', owner);
+        return (
+          <div className="muted" data-testid="event-branch">
+            <span className="swatch" style={{ background: row ? row.color : '#9aa7b4' }} /> {owner === s.branch ? `In ${branchName(w, owner)}` : `Shared with ${branchName(w, owner)}: changing it changes every timeline that shares it`}
+          </div>
+        );
+      })()}
       {!base && <>
         <label>Name<input value={name} onChange={(ev) => setName(ev.target.value)} onBlur={() => name.trim() && name !== e.name && s.execute((wd) => cmd.updateEvent(wd, id, { name: name.trim() }))} /></label>
         <label>Type<span className="row-inline"><TypeDot typeId={e.type_id} /><TypeSelect value={e.type_id} onChange={(t) => s.execute((wd) => cmd.updateEvent(wd, id, { type_id: t }))} testId="event-panel-type" /><button className="small" onClick={() => s.set({ dialog: 'event-types' })} title="Make, change and delete event types">Types…</button></span></label>
@@ -977,7 +993,7 @@ function PointPanel({ lon, lat }: { lon: number; lat: number }) {
       <div className="stat" data-testid="point-owner">
         On {fmt(s.time, 'minute')}: {owner ? <><span className="swatch" style={{ background: owner.color }} /> <b>{owner.name}</b></> : <b>nobody</b>}
       </div>
-      {ev && <div>Since {ev.id === BASE_EVENT_ID
+      {ev && <div>Since {isBaseEvent(ev.id)
         ? (a!.t.day === -Infinity ? 'the starting map' : <>{fmt(a!.t, 'day')} (<a onClick={() => s.set({ selection: { kind: 'event', id: ev.id } })}>a change without an event</a>)</>)
         : <>{fmt(a!.t, 'day')} (<a onClick={() => s.set({ selection: { kind: 'event', id: ev.id } })}>{ev.name}</a>)</>}</div>}
       <div>{next ? <>Until {fmt(next, 'day')}</> : 'No later change recorded'}</div>

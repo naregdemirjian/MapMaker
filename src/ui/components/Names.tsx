@@ -6,6 +6,7 @@ import { fromStore } from '../../core-time/index.ts';
 import { parseJSON } from '../../temporal-engine/engine.ts';
 import { placementMode } from './Characters.tsx';
 import { fmt } from './Panels.tsx';
+import { isBaseEvent } from '../../world-model/schema.ts';
 
 export function NamesSection({ id }: { id: string }) {
   const s = useStore();
@@ -27,7 +28,7 @@ export function NamesSection({ id }: { id: string }) {
       {now && now !== ent.name && <div className="stat" data-testid="name-now">On {fmt(s.time)}: called <b>{now}</b></div>}
       {renames.map((r) => (
         <div key={r.f.id} className="effect" data-testid="rename-row">
-          <div><span className="date">{r.t ? fmt(r.t) : 'From the beginning'}</span> · {r.name}{r.ev && r.ev.id !== 'evt_base' ? <span className="muted"> · {r.ev.name}</span> : null}</div>
+          <div><span className="date">{r.t ? fmt(r.t) : 'From the beginning'}</span> · {r.name}{r.ev && !isBaseEvent(r.ev.id) ? <span className="muted"> · {r.ev.name}</span> : null}</div>
           <div className="effect-tools">
             {r.t && <button className="small" onClick={() => s.setTime(r.t!)}>Go to</button>}
             <button className="small danger" onClick={() => s.execute((wd) => cmd.deleteEffect(wd, r.f.id))}>Remove</button>

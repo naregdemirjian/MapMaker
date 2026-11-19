@@ -1,7 +1,7 @@
 // A star's panel on a space map (Stage 11, D110): what it is, how far, its system.
 import { useStore } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
-import { BASE_EVENT_ID } from '../../world-model/schema.ts';
+import { isBaseEvent } from '../../world-model/schema.ts';
 import { fmt } from './Panels.tsx';
 import { placementMode } from './Characters.tsx';
 import { starColour, starKind, galacticOf, systemOf } from '../../space/catalogue.ts';
@@ -63,7 +63,7 @@ export function StarPanel({ id }: { id: number }) {
       {steps.length > 0 && <div className="star-history">
         {steps.map((x) => { const e = x.entity ? s.world!.get('entity', x.entity) : null; const ev = s.world!.get('event', x.eventId); return (
           <div key={x.effectId} className="row" data-testid="star-step">
-            <span className="date">{x.t.day === -Infinity ? 'From the beginning' : fmt(x.t)}</span> {e ? <><span className="swatch" style={{ background: e.color }} />{e.name}</> : 'nobody'}{ev && ev.id !== BASE_EVENT_ID ? <span className="muted"> · {ev.name}</span> : null}
+            <span className="date">{x.t.day === -Infinity ? 'From the beginning' : fmt(x.t)}</span> {e ? <><span className="swatch" style={{ background: e.color }} />{e.name}</> : 'nobody'}{ev && !isBaseEvent(ev.id) ? <span className="muted"> · {ev.name}</span> : null}
             <span className="row-tools">
               {x.t.day !== -Infinity && <button className="small" onClick={() => s.setTime(x.t)}>Go to</button>}
               <button className="small danger" title="Take this change back out" onClick={() => s.execute((wd) => cmd.deleteEffect(wd, x.effectId))}>×</button>

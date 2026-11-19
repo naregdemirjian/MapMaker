@@ -18,6 +18,8 @@ import { parseJSON } from '../../temporal-engine/engine.ts';
 import { DateField, NumberField } from './Panels.tsx';
 import { currentShot } from './MapView.tsx';
 import { TransitionLookControls } from './TransitionLook.tsx';
+import { isBaseEvent, MAIN_BRANCH } from '../../world-model/schema.ts';
+import { branchTree, branchName } from '../../temporal-engine/branches.ts';
 
 function saveShot(id: string, next: ShotSettings) {
   store.execute((w) => cmd.updateSequence(w, id, { settings: next }));
@@ -38,6 +40,7 @@ export function ShotsPanel() {
     const years = (end.day - start.day) / 365.2425;
     const seconds = Math.max(10, Math.min(120, years / 8));
     const settings = defaultShot(s.spaceId, s.camera, start, end, 24, seconds);
+    if (s.branch !== MAIN_BRANCH) settings.branch = s.branch;
     settings.time = settings.time.map((k) => ({ ...k, ease: 'linear' as Ease }));
     const precision: Precision = years > 30 ? 'year' : years > 2 ? 'month' : 'day';
     settings.overlays = settings.overlays.map((o) => (o.kind === 'date' ? { ...o, datePrecision: precision } : o));
@@ -49,12 +52,14 @@ export function ShotsPanel() {
     let start: Instant = s.time, end: Instant = add(s.time, 365);
     if (s.selection?.kind === 'event') {
       const ev = w.get('event', s.selection.id);
-      if (ev && ev.id !== 'evt_base') {
+      if (ev && !isBaseEvent(ev.id)) {
         start = fromStore(ev.start_day, ev.start_ms);
         end = ev.end_day !== null ? fromStore(ev.end_day, ev.end_ms ?? 0) : add(start, 30);
       }
     }
     const settings = defaultShot(s.spaceId, s.camera, start, end);
+    // (A shot shows the timeline being viewed when it is made, D150.)
+    if (s.branch !== MAIN_BRANCH) settings.branch = s.branch;
     const id = s.execute((wd) => cmd.createSequence(wd, `Shot ${shots.length + 1}`, settings));
     if (id) s.set({ shotId: id, shotFrame: 0, presentCamera: null });
   };
@@ -120,7 +125,7 @@ export function ShotEditor() {
     try {
       await s.flush();
       const r = await runExport({
-        projectId: s.projectId!, world: w, engine: s.engine!, shot, shotName: row.name, passNames: passes, scale,
+        projectId: s.projectId!, world: w, engine: s.engineFor(shot.branch), shot, shotName: row.name, passNames: passes, scale,
         onProgress: (done, total) => setProgress({ done, total, label: scale === 1 ? 'Exporting' : 'Exporting preview' }), isCancelled: () => cancel.current,
       });
       setResult(r);
@@ -136,7 +141,7 @@ export function ShotEditor() {
     setSvgBusy(true);
     try {
       await s.flush();
-      const f = await svgFrame({ world: w, engine: s.engine!, shot, shotName: row.name, frame: s.shotFrame });
+      const f = await svgFrame({ world: w, engine: s.engineFor(shot.branch), shot, shotName: row.name, frame: s.shotFrame });
       const r = await Api.saveSvgFrame(s.projectId!, row.name, s.shotFrame, shot.exportDir ?? null, f.svg);
       setSvgSaved(r.file);
       s.toast(`Saved frame ${s.shotFrame + 1} as ${r.file}`);
@@ -176,6 +181,13 @@ export function ShotEditor() {
       <div className="panel shot-panel">
         <Group title="Shot">
           <label>Name<input value={name} onChange={(e) => setName(e.target.value)} onBlur={() => name.trim() && name !== row.name && s.execute((wd) => cmd.updateSequence(wd, row.id, { name: name.trim() }))} /></label>
+          {(w.all('branch').length > 0 || (shot.branch && shot.branch !== MAIN_BRANCH)) && (
+            <label title="Which history the shot shows: the main timeline or one of its branches (D150)">Timeline
+              <select value={shot.branch && w.get('branch', shot.branch) ? shot.branch : MAIN_BRANCH} onChange={(e) => update({ branch: e.target.value === MAIN_BRANCH ? undefined : e.target.value })} data-testid="shot-branch">
+                {branchTree(w).map((b) => <option key={b.id} value={b.id}>{'\u00a0\u00a0'.repeat(b.depth)}{branchName(w, b.id)}</option>)}
+              </select>
+            </label>
+          )}
         </Group>
         <Group title="Output quality">
           <label>Resolution<select value={res} onChange={(e) => { const r = RESOLUTIONS.find((x) => x.id === e.target.value); if (r) update({ width: r.width, height: r.height }); }}>
@@ -497,7 +509,7 @@ function SizeEstimate({ shot, passes, estimateKey, onEstimate }: { shot: ShotSet
     let idle = 0;
     const run = () => {
       if (stale || (!passes.length && !isVideoFormat(shot.format)) || !s.world || !s.engine) return;
-      estimateExportBytes(s.world, s.engine, shot, passes).then((bytes) => { if (!stale) onEstimate({ key: estimateKey, bytes }); }, () => undefined);
+      estimateExportBytes(s.world, s.engineFor(shot.branch), shot, passes).then((bytes) => { if (!stale) onEstimate({ key: estimateKey, bytes }); }, () => undefined);
     };
     const timer = window.setTimeout(() => {
       if (typeof window.requestIdleCallback === 'function') idle = window.requestIdleCallback(run, { timeout: 2500 });
@@ -567,5 +579,6 @@ export function ShotTimeline() {
     </div>
   );
 }
+
 
 export { compare };

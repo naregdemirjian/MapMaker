@@ -4,7 +4,7 @@
 // them, then a former name, then notes.
 import type { World } from '../world-model/world.ts';
 import type { Engine } from '../temporal-engine/engine.ts';
-import { BASE_EVENT_ID } from '../world-model/schema.ts';
+import { isBaseEvent } from '../world-model/schema.ts';
 import { describeRelation } from './commands.ts';
 
 export type SearchKind = 'entity' | 'feature' | 'event' | 'relation' | 'layer';
@@ -66,7 +66,8 @@ export function search(world: World, engine: Engine | null, text: string, limit 
     add({ kind: 'feature', id: f.id, title: f.name, what, context }, score);
   }
   for (const ev of world.all('event')) {
-    if (ev.id === BASE_EVENT_ID) continue;
+    // (Events of the timeline being looked at, D150.)
+    if (isBaseEvent(ev.id) || (engine && !engine.lists(ev))) continue;
     let score = nameScore(ev.name, q) * 10, context = '';
     if (!score) { const s = snippet(ev.description, q); if (s) { score = 2; context = s; } }
     add({ kind: 'event', id: ev.id, title: ev.name, what: ev.variant_group && !ev.variant_active ? 'Event (inactive alternative)' : 'Event', context }, score);

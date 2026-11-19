@@ -1,4 +1,6 @@
 import { calendarNow } from '../calendar-now.ts';
+import { MAIN_BRANCH } from '../../world-model/schema.ts';
+import { branchName } from '../../temporal-engine/branches.ts';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { FrameMeter } from '../frame-meter.ts';
 import { useLive, store } from '../store.ts';
@@ -36,6 +38,7 @@ import { loadBasemapDetail, pixelsPerDegree, visibleBounds, DETAIL_PIXELS_PER_DE
 import { prepareSmart, smartLine, type SmartPrepared, type SmartWeights } from '../../render-engine/smart-brush.ts';
 import { smartInputFor } from '../smart-input.ts';
 import { SmartAdjustPanel } from './SmartBrush.tsx';
+import { CompareBar } from './CompareBar.tsx';
 import type { AdjustState } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
 
@@ -178,6 +181,8 @@ export function shownMapView(): { view: View; preview: boolean } | null { return
 
 /** How long after the last movement of the view the picture is drawn afresh, sharp (milliseconds). */
 const SETTLE_MS = 110;
+/** Pixels between the two sides of a side-by-side comparison (D150). */
+export const SIDE_GAP = 3;
 /** After this long at rest, the room around the map's kept pictures is drawn (see MapRenderer.slide). */
 const FILL_AFTER_MS = 260;
 
@@ -268,7 +273,9 @@ export function MapView() {
   }, []);
 
   // The region of the canvas where the map is drawn, and the camera used.
-  const frame = shot ? frameRect(shot, size.w, size.h) : { x: 0, y: 0, w: size.w, h: size.h };
+  // Two timelines or dates side by side (D150): the map in the left half, the other in the right, the same place in both.
+  const side = !shot && s.compare.on && !!s.compare.side && s.mode === 'world';
+  const frame = shot ? frameRect(shot, size.w, size.h) : side ? { x: 0, y: 0, w: Math.max(25, Math.floor((size.w - SIDE_GAP) / 2)), h: size.h } : { x: 0, y: 0, w: size.w, h: size.h };
   const camera: Camera = shot ? (s.presentCamera ?? cameraAt(shot, s.shotFrame)) : s.camera;
   // Equal Earth and Natural Earth give everything another shape for every middle meridian, so that
   // moving such a map east or west meant preparing and drawing all of it again in every frame
@@ -306,8 +313,8 @@ export function MapView() {
     }
     const ctx = c.getContext('2d')!;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    // (The renderer clears or replaces the frame itself; only a shot's frame leaves canvas around it.)
-    if (shot) ctx.clearRect(0, 0, c.width, c.height);
+    // (The renderer clears or replaces the frame itself; only a shot's frame, or the two sides, leave canvas around it.)
+    if (shot || side) ctx.clearRect(0, 0, c.width, c.height);
     ctx.setTransform(dpr, 0, 0, dpr, frame.x * dpr, frame.y * dpr);
     const layers = s.world.all('layer').filter((l) => l.space_id === s.spaceId && (l.kind === 'partition' || l.kind === 'field' || isFeatureKind(l.kind)) && (shot ? (shot.layers.length ? shot.layers.includes(l.id) : l.visible) : l.visible)).sort((a, b) => a.sort_order - b.sort_order).map((l) => l.id);
     // What the map shows (D84): while working, or (the shot's preview) in exports.
@@ -382,7 +389,7 @@ export function MapView() {
     // A shot's look (D108): its colours, and its finish once the map is drawn.
     const shotLook = shot ? lookStyles(shot) : null;
     try {
-      s.renderer.render(ctx, view, s.world, s.engine, s.spaceId, time, { passes, transparent: !!shot?.transparent, layerIds: layers, basemap, referenceBorders: !shot && s.referenceBorders, transitions: shot ? transitionOptions(shot, s.shotFrame) : undefined, mediaSeconds: shot ? s.shotFrame / shot.fps : 0, trails: !!shot?.trails, layout: { labels: namesOn && !namesHidden, cities: citiesOn }, moving: moving && vs.whileMoving === 'carry', holdNames: moving && vs.names === 'hold', fillAround, hurried, show, terrain, style: shotLook?.style, basemapStyle: shotLook?.basemap });
+      s.renderer.render(ctx, view, s.world, shot ? s.engineFor(shot.branch) : s.engine, s.spaceId, time, { passes, transparent: !!shot?.transparent, layerIds: layers, basemap, referenceBorders: !shot && s.referenceBorders, transitions: shot ? transitionOptions(shot, s.shotFrame) : undefined, mediaSeconds: shot ? s.shotFrame / shot.fps : 0, trails: !!shot?.trails, layout: { labels: namesOn && !namesHidden, cities: citiesOn }, moving: moving && vs.whileMoving === 'carry', holdNames: moving && vs.names === 'hold', fillAround, hurried, show, terrain, style: shotLook?.style, basemapStyle: shotLook?.basemap });
     } catch (e) {
       console.error(e);
     }
@@ -405,29 +412,57 @@ export function MapView() {
     if (shot) {
       if (shotLook?.finish) finishLook(ctx, frame.x * dpr, frame.y * dpr, frame.w * dpr, frame.h * dpr, shotLook.look, (frame.w * dpr) / 1920);
       const o = s.presentOverlay;
-      overlayRects = drawShotOverlays(ctx, frame.w, frame.h, s.world, o ? moveOverlay(shot, o.id, o.dx, o.dy, o.from) : shot, s.shotFrame, time, view);
+      overlayRects = drawShotOverlays(ctx, frame.w, frame.h, s.world, o ? moveOverlay(shot, o.id, o.dx, o.dy, o.from) : shot, s.shotFrame, time, view, s.engineFor(shot.branch));
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.strokeStyle = 'rgba(255,255,255,0.35)';
       ctx.lineWidth = 1;
       ctx.strokeRect(frame.x - 0.5, frame.y - 0.5, frame.w + 1, frame.h + 1);
       return;
     }
-    // Comparing two dates: the other date drawn by its own renderer, laid on the right of the line.
+    // Comparing two dates or two timelines (D150): the other drawn by its own renderer, laid on the right of the
+    // line, or beside the map.
     if (s.compare.on && s.mode === 'world') {
+      const otherTime = s.compareTime(), otherEngine = s.compareEngine() ?? s.engine;
       const cmpCanvas = (compareCanvas.current ??= new OffscreenCanvas(c.width, c.height));
       if (cmpCanvas.width !== c.width || cmpCanvas.height !== c.height) { cmpCanvas.width = c.width; cmpCanvas.height = c.height; }
       const cc = cmpCanvas.getContext('2d') as unknown as CanvasRenderingContext2D;
       cc.setTransform(dpr, 0, 0, dpr, frame.x * dpr, frame.y * dpr);
       try {
-        s.compareRenderer.render(cc, view, s.world, s.engine, s.spaceId, s.compare.time, { passes, transparent: false, layerIds: layers, basemap, referenceBorders: s.referenceBorders, layout: { labels: namesOn && !namesHidden, cities: citiesOn }, moving: moving && vs.whileMoving === 'carry', holdNames: moving && vs.names === 'hold', fillAround, show, terrain: terrain && (paleo ? compareTerrain(terrain, s.terrainOf(space, s.compare.time), seaLevelAt(seaPoints, s.compare.time) + glacialSeaAt(ageOf(s.compare.time))) : { ...terrain, seaLevel: seaLevelAt(seaPoints, s.compare.time) }) });
+        s.compareRenderer.render(cc, view, s.world, otherEngine, s.spaceId, otherTime, { passes, transparent: false, layerIds: layers, basemap, referenceBorders: s.referenceBorders, layout: { labels: namesOn && !namesHidden, cities: citiesOn }, moving: moving && vs.whileMoving === 'carry', holdNames: moving && vs.names === 'hold', fillAround, show, terrain: terrain && (paleo ? compareTerrain(terrain, s.terrainOf(space, otherTime), seaLevelAt(seaPoints, otherTime) + glacialSeaAt(ageOf(otherTime))) : { ...terrain, seaLevel: seaLevelAt(seaPoints, otherTime) }) });
       } catch (e) {
         console.error(e);
       }
       // (Drawn roughly while moving: drawn afresh once the view rests, as the main picture is.)
       if (moving && s.compareRenderer.lastApproximate) { window.clearTimeout(mo.timer); mo.timer = window.setTimeout(() => force((n) => n + 1), SETTLE_MS + 4); }
-      const x = Math.round((frame.x + Math.max(0, Math.min(1, s.compare.split)) * frame.w) * dpr);
+      // What each side shows: its date, and its timeline when two are compared.
+      const cmpCal = calendarNow();
+      const otherBranch = s.compare.branch && s.world.get('branch', s.compare.branch) || s.compare.branch === MAIN_BRANCH ? s.compare.branch : null;
+      const leftTag = `${otherBranch ? `${branchName(s.world, s.branch)} · ` : ''}${cmpCal.format(s.time, 'day')}`;
+      const rightTag = `${otherBranch ? `${branchName(s.world, otherBranch)} · ` : ''}${cmpCal.format(otherTime, 'day')}`;
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.font = `600 ${12 * dpr}px system-ui, sans-serif`;
+      const tag = (text: string, tx: number, align: CanvasTextAlign) => {
+        ctx.textAlign = align;
+        ctx.textBaseline = 'middle';
+        const w = ctx.measureText(text).width + 14 * dpr;
+        const bx = align === 'right' ? tx - w : tx;
+        ctx.fillStyle = 'rgba(10,16,24,0.78)'; ctx.fillRect(bx, 8 * dpr, w, 22 * dpr);
+        ctx.fillStyle = '#ffd166'; ctx.fillText(text, align === 'right' ? tx - 7 * dpr : tx + 7 * dpr, 19 * dpr);
+      };
+      if (side) {
+        // Side by side: the other picture (the same view) beside the map, a gap between them.
+        const fw = Math.round(frame.w * dpr), gx = Math.round((frame.w + SIDE_GAP) * dpr);
+        ctx.drawImage(cmpCanvas as unknown as CanvasImageSource, 0, 0, fw, c.height, gx, 0, Math.min(fw, c.width - gx), c.height);
+        ctx.fillStyle = '#ffd166';
+        ctx.fillRect(fw, 0, gx - fw, c.height);
+        tag(leftTag, 8 * dpr, 'left');
+        tag(rightTag, gx + 8 * dpr, 'left');
+        ctx.restore();
+        drawEditingOverlay(ctx, view);
+        return;
+      }
+      const x = Math.round((frame.x + Math.max(0, Math.min(1, s.compare.split)) * frame.w) * dpr);
       ctx.drawImage(cmpCanvas as unknown as CanvasImageSource, x, 0, c.width - x, c.height, x, 0, c.width - x, c.height);
       // The line, its handle, and the two dates.
       ctx.fillStyle = '#ffd166';
@@ -435,15 +470,8 @@ export function MapView() {
       ctx.beginPath(); ctx.arc(x, c.height / 2, 9 * dpr, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = '#10161d'; ctx.font = `bold ${11 * dpr}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('⇔', x, c.height / 2);
       ctx.font = `600 ${12 * dpr}px system-ui, sans-serif`;
-      const tag = (text: string, tx: number, align: CanvasTextAlign) => {
-        ctx.textAlign = align;
-        const w = ctx.measureText(text).width + 14 * dpr;
-        const bx = align === 'right' ? tx - w : tx;
-        ctx.fillStyle = 'rgba(10,16,24,0.78)'; ctx.fillRect(bx, 8 * dpr, w, 22 * dpr);
-        ctx.fillStyle = '#ffd166'; ctx.fillText(text, align === 'right' ? tx - 7 * dpr : tx + 7 * dpr, 19 * dpr);
-      };
-      tag(calendarNow().format(s.time, 'day'), x - 8 * dpr, 'right');
-      tag(calendarNow().format(s.compare.time, 'day'), x + 8 * dpr, 'left');
+      tag(leftTag, x - 8 * dpr, 'right');
+      tag(rightTag, x + 8 * dpr, 'left');
       ctx.restore();
     }
     drawEditingOverlay(ctx, view);
@@ -715,8 +743,12 @@ export function MapView() {
 
   const local = (e: { clientX: number; clientY: number }): Pt => {
     const r = canvasRef.current!.getBoundingClientRect();
-    return [e.clientX - r.left - frame.x, e.clientY - r.top - frame.y];
+    const x = e.clientX - r.left - frame.x;
+    // (Side by side, D150: the right half shows the same place, so a point there is the same point on the map.)
+    return [side && x > frame.w ? x - frame.w - SIDE_GAP : x, e.clientY - r.top - frame.y];
   };
+  /** Whether a pointer is over the other side of a side-by-side comparison (it only moves the map). */
+  const onOtherSide = (e: { clientX: number }) => side && e.clientX - canvasRef.current!.getBoundingClientRect().left > frame.w;
 
   function finishShape(screenRings: Pt[][], originScreen: Pt) {
     const w = store.world!;
@@ -849,8 +881,10 @@ export function MapView() {
     }
     e.currentTarget.setPointerCapture(e.pointerId);
     const p = local(e);
+    // Side by side (D150): the other picture moves the map; nothing is drawn on it.
+    if (e.button === 0 && onOtherSide(e)) { drag.current = { kind: 'pan', x: e.clientX, y: e.clientY, moved: 0, startX: p[0], startY: p[1] }; return; }
     // Comparing two dates: the line between them is picked up (a few pixels either side).
-    if (!presentation && e.button === 0 && s.compare.on && Math.abs(p[0] - s.compare.split * frame.w) <= 8) { drag.current = { kind: 'swipe' }; return; }
+    if (!presentation && !side && e.button === 0 && s.compare.on && Math.abs(p[0] - s.compare.split * frame.w) <= 8) { drag.current = { kind: 'swipe' }; return; }
     // A callout's place (D107), chosen in its settings: this click on the preview is it.
     if (presentation && e.button === 0 && s.pickCallout) {
       const ll = screenToLonLat(view, p[0], p[1]);
@@ -1006,7 +1040,7 @@ export function MapView() {
       if (over !== overOverlay) setOverOverlay(over);
     }
     if (!presentation && d.kind === 'none') {
-      const over = s.compare.on && Math.abs(p[0] - s.compare.split * frame.w) <= 8;
+      const over = s.compare.on && !side && Math.abs(p[0] - s.compare.split * frame.w) <= 8;
       if (over !== overSplit) setOverSplit(over);
     }
     if (d.kind === 'pan') {
@@ -1295,6 +1329,7 @@ export function MapView() {
       />
       {!presentation && <MapHud view={view} />}
       {!presentation && s.adjust && <SmartAdjustPanel />}
+      {!presentation && s.compare.on && s.mode === 'world' && <CompareBar />}
       {s.viewSettings.showSpeed && (
         <div className="draw-speed" title="How long the map took to draw (the working view only), and how many frames a second the screen is getting: 60 on most screens when everything keeps up; a long wait is a hitch" data-testid="draw-speed">
           <span ref={speedRef} />

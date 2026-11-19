@@ -9,6 +9,7 @@ button { font: inherit; color: var(--text); background: var(--panel2); border: 1
 button:hover:not(:disabled) { border-color: #3d5266; background: #213041; }
 button:disabled { opacity: 0.4; cursor: default; }
 button.on { background: var(--accent); border-color: var(--accent); color: #06121e; font-weight: 600; }
+button.on:hover:not(:disabled), button.primary:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); filter: brightness(1.1); }
 button.primary { background: var(--accent); border-color: var(--accent); color: #06121e; font-weight: 600; }
 button.danger { color: #ffb3bd; border-color: #5a2a33; margin-top: 10px; }
 button.warn { border-color: var(--accent2); color: var(--accent2); }
@@ -34,7 +35,7 @@ a { color: var(--accent); cursor: pointer; }
 .date-input.bad { border-color: var(--danger); }
 
 .app { display: grid; height: 100vh; grid-template-columns: 250px 1fr 310px; grid-template-rows: 46px 1fr 150px; grid-template-areas: "top top top" "left center right" "bottom bottom bottom"; }
-.topbar { grid-area: top; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: var(--panel); border-bottom: 1px solid var(--line); }
+.topbar { grid-area: top; display: flex; align-items: center; gap: 6px; padding: 0 10px; background: var(--panel); border-bottom: 1px solid var(--line); }
 .brand { font-weight: 700; letter-spacing: 0.02em; }
 .project-name { color: var(--muted); max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .seg { display: inline-flex; }
@@ -261,8 +262,8 @@ label.file-button.small { padding: 3px 8px; font-size: 12px; }
 .relation-form { padding: 6px 8px; border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; margin: 6px 0; }
 
 /* Search (Search.tsx) */
-.search { position: relative; margin-right: 8px; }
-.search input { width: 220px; }
+.search { position: relative; margin-right: 8px; flex: 0 1 220px; min-width: 90px; }
+.search input { width: 100%; }
 .search-results { position: absolute; top: 100%; right: 0; width: 360px; max-height: 60vh; overflow: auto; z-index: 50; background: #17202b; border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); padding: 4px 0; }
 .search-result { padding: 6px 10px; cursor: pointer; }
 .search-result.on { background: rgba(255,209,102,0.12); }
@@ -400,6 +401,22 @@ p.small { font-size: 11.5px; }
 
 /* A map's calendar (CalendarDialog.tsx, D149) */
 .calendar-editor h4 { margin: 12px 0 4px; }
+/* Branches (D150) */
+.branch-switch { display: inline-flex; gap: 4px; align-items: center; }
+.branch-switch select { max-width: 150px; }
+.topbar .icon-button { padding-left: 8px; padding-right: 8px; font-size: 15px; }
+.topbar button, .topbar select { white-space: nowrap; }
+.branch-list { display: flex; flex-direction: column; gap: 2px; margin: 8px 0 12px; max-height: 40vh; overflow: auto; }
+.branch-row { padding: 4px 6px; border-radius: 4px; }
+.branch-row.sel { background: rgba(255, 209, 102, 0.10); }
+.branch-line { display: flex; align-items: center; gap: 6px; }
+.branch-line .row-tools { margin-left: auto; display: inline-flex; gap: 4px; align-items: center; }
+.branch-editor { margin: 6px 0 4px 22px; display: flex; flex-direction: column; gap: 4px; max-width: 420px; }
+.branch-new { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; align-items: end; }
+.compare-branch { max-width: 170px; }
+.compare-bar { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 5; display: flex; align-items: center; gap: 6px; white-space: nowrap;
+  background: rgba(14, 20, 28, 0.92); border: 1px solid var(--line, #2a3442); border-radius: 8px; padding: 5px 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.4); }
+.compare-bar .close { background: none; border: none; font-size: 18px; padding: 0 4px; }
 .calendar-months { border-collapse: collapse; }
 .calendar-months td, .calendar-months th { padding: 1px 4px; text-align: left; font-weight: normal; }
 .calendar-months input { width: 140px; }

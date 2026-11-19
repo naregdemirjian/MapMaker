@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react';
 import { useStore, type PendingEdit } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
 import { type Instant, compare, fromStore } from '../../core-time/index.ts';
-import { BASE_EVENT_ID } from '../../world-model/schema.ts';
+import { eventsHere } from '../events-here.ts';
 import { lonLatToVec } from '../../geo-kernel/vec.ts';
 import { lineFromMapPoints } from '../../render-engine/stroke.ts';
 import { DateField, fmt } from './Panels.tsx';
@@ -36,7 +36,7 @@ export function modeOf(when: When, t: Instant, world: ReturnType<typeof useStore
 export function WhenChooser({ when, setWhen }: { when: When; setWhen: (w: When) => void }) {
   const s = useStore();
   const w = s.world!;
-  const events = w.all('event').filter((x) => x.id !== BASE_EVENT_ID).sort((a, b) => a.start_day - b.start_day || a.start_ms - b.start_ms);
+  const events = eventsHere();
   const set = (patch: Partial<When>) => setWhen({ ...when, ...patch });
   return <>
     <div className={`choice ${when.choice === 'change' ? 'on' : ''}`} onClick={() => set({ choice: 'change' })} data-testid="when-change">
