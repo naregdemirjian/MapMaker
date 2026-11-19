@@ -99,7 +99,7 @@ try {
       }
       // A shot: stepping through its frames (as playing does), still and moving camera.
       const shots = s.world.all('sequence');
-      for (const [key, sh] of [['playStill', shots[0]], ['playMoving', shots[1]]] as const) {
+      for (const [key, sh] of [['playStill', shots[0]], ['playMoving', shots[1]], ['playAllClean', shots[2]], ['playAllBlitz', shots[3]]] as const) {
         if (!sh || !want(key)) continue;
         s.set({ mode: 'present', shotId: sh.id, shotFrame: 0, presentCamera: null });
         await raf(); await hop();

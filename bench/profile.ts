@@ -3,7 +3,8 @@
 // Usage: node --disable-warning=ExperimentalWarning bench/profile.ts <fixtures folder> "<project>" <scenario> <out.cpuprofile>
 // With an output name ending in .trace.json, a browser trace is recorded instead (everything the browser
 // does around the script: style, layout, painting, presenting the canvas); summarise with bench/trace.mjs.
-// Scenarios: idle, select, panWorld, panRegion, panDeep, zoomIn, zoomOut, scrub, scrubYears, scrubSmall, stroke, play, playMoving
+// Scenarios: idle, select, panWorld, panRegion, panDeep, zoomIn, zoomOut, scrub, scrubYears, scrubSmall, stroke, play, playMoving,
+// playAll (every change animated, the clean look), playAllBlitz (the same in an intense look)
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import { join, resolve } from 'node:path';
@@ -35,7 +36,7 @@ try {
     const raf = () => new Promise<number>((r) => requestAnimationFrame(r));
     const base = { lon: 15, lat: 48, zoom: 2.2, rotation: 0, projection: 'equirectangular' };
     s.set({ time: Y(1950) }); s.setCamera(base);
-    if (sc === 'play' || sc === 'playMoving') { const sh = s.world.all('sequence')[sc === 'play' ? 0 : 1]; s.set({ mode: 'present', shotId: sh.id, shotFrame: 0 }); }
+    if (sc === 'play' || sc === 'playMoving' || sc === 'playAll' || sc === 'playAllBlitz') { const sh = s.world.all('sequence')[sc === 'play' ? 0 : sc === 'playMoving' ? 1 : sc === 'playAll' ? 2 : 3]; s.set({ mode: 'present', shotId: sh.id, shotFrame: 0 }); }
     for (let i = 0; i < 3; i++) await raf();
     // (At rest for a moment, as before any real movement: the app then draws the room around its kept pictures.)
     await new Promise((r) => setTimeout(r, 500));
@@ -70,7 +71,7 @@ try {
           return { label: p.label, diffs: [...ev.diffs, ...p.diffs], result: null };
         });
       }
-      else if (sc === 'play' || sc === 'playMoving') s.setLive({ shotFrame: i * 4, presentCamera: null });
+      else if (sc === 'play' || sc === 'playMoving' || sc === 'playAll' || sc === 'playAllBlitz') s.setLive({ shotFrame: i * 4, presentCamera: null });
       await hop(); await hop();
     }
   }, scenario);

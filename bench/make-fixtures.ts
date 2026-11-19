@@ -13,7 +13,7 @@ import { Engine } from '../src/temporal-engine/engine.ts';
 import * as cmd from '../src/domain/commands.ts';
 import { decodeCountries, COUNTRY_GROUP_COLORS, type CountriesFile } from '../src/domain/countries.ts';
 import { gregorian, NEG_INF } from '../src/core-time/index.ts';
-import { defaultShot } from '../src/presentation/sequence.ts';
+import { defaultShot, DEFAULT_TRANSITIONS, withTransitionLook } from '../src/presentation/sequence.ts';
 import { defaultCamera } from '../src/render-engine/camera.ts';
 import { rng, ring } from '../test/helpers.ts';
 
@@ -54,6 +54,12 @@ function addShots(p: ReturnType<typeof open>, from: number, to: number) {
   const moving = defaultShot(p.space, { ...defaultCamera(), lon: 15, lat: 48, zoom: 2.2 }, Y(from), Y(to), 24, 10);
   moving.camera[1].camera = { ...defaultCamera(), lon: 70, lat: 35, zoom: 1.4 };
   p.commit(cmd.createSequence(p.world, 'Europe to Asia, moving camera', moving));
+  // Every change animated, in the clean look and in an intense one (D137): many fronts under way at once.
+  for (const look of ['clean', 'blitz']) {
+    const shot = defaultShot(p.space, { ...defaultCamera(), lon: 15, lat: 48, zoom: 2.2 }, Y(from), Y(to), 24, 10);
+    shot.transitions = withTransitionLook({ ...DEFAULT_TRANSITIONS, mode: 'all', restyleRecorded: true, seconds: 1.5 }, look);
+    p.commit(cmd.createSequence(p.world, `Europe, every change animated (${look})`, shot));
+  }
 }
 
 function earth(p: ReturnType<typeof open>) {
@@ -97,7 +103,7 @@ function heavy(name: string, N: number) {
       // Mostly over Europe, the Near East and Asia, where the film's history would be densest.
       const res = cmd.paintTerritory(p.world, p.engine, {
         spaceId: p.space, layerId: p.layer, ring: ring(blob(r, r.float(-10, 110), r.float(15, 60), r.float(0.6, 5)), 1),
-        value: r.pick(owners), snap: 1e-7, mode: { kind: 'new', eventId: ev }, transition: r.bool(0.3) ? { style: r.bool(0.5) ? 'border' : 'fade' } : null,
+        value: r.pick(owners), snap: 1e-7, mode: { kind: 'new', eventId: ev }, transition: r.bool(0.3) ? { style: r.bool(0.5) ? (i % 4 === 0 ? 'dissolve' : 'border') : 'fade' } : null,
       });
       p.commit(res);
     } catch { refused++; }

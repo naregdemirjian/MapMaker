@@ -105,7 +105,7 @@ export function buildFrontField(rings: Rings, source: FrontSource, shape: FrontS
   if (!count) return null;
   // 3. How slowly the front crosses each cell: the same everywhere, or varying smoothly (a ragged front).
   const slow = new Float32Array(N).fill(1);
-  const noise = source.kind === 'scatter' || shape.roughness > 0 ? fbm(nx, ny, cells, shape.seed) : null;
+  const noise = source.kind === 'scatter' || shape.roughness > 0 ? fbm(nx, ny, cells, PAD, shape.seed) : null;
   if (noise && source.kind !== 'scatter') {
     const r = Math.max(0, Math.min(1, shape.roughness)) * 1.6;
     for (let c = 0; c < N; c++) slow[c] = Math.exp(-r * noise[c]);
@@ -210,18 +210,22 @@ export function buildFrontField(rings: Rings, source: FrontSource, shape: FrontS
     at[c] = span > 0 ? Math.max(0, (T[c] - base) / span) : 0;
   }
   for (let c = 0; c < N; c++) if (inside[c] && !(at[c] < Infinity)) at[c] = 1;
-  // 7. Carried beyond the change by a few cells (each takes its nearest neighbour's time), so that the land
-  //    reached reaches past the change's own edges, which then cut it exactly.
-  for (let pass = 0; pass < PAD - 1; pass++) {
-    const next = at.slice();
-    for (let c = 0; c < N; c++) {
-      if (inside[c] || at[c] < Infinity) continue;
-      const i = c % nx;
-      let m = Infinity;
-      for (const n of [i > 0 ? c - 1 : -1, i < nx - 1 ? c + 1 : -1, c >= nx ? c - nx : -1, c + nx < N ? c + nx : -1]) if (n >= 0 && at[n] < m) m = at[n];
-      if (m < Infinity) next[c] = m;
+  // 7. Carried beyond the change by a few cells (each takes the time of the cell it is reached from, ring by
+  //    ring outward), so that the land reached reaches past the change's own edges, which then cut it exactly.
+  let ring: number[] = [];
+  for (let c = 0; c < N; c++) if (at[c] < Infinity) ring.push(c);
+  for (let pass = 0; pass < PAD - 1 && ring.length; pass++) {
+    const next: number[] = [];
+    for (const c of ring) {
+      const i = c % nx, t = at[c];
+      if (i > 0 && at[c - 1] === Infinity) { at[c - 1] = -1 - t; next.push(c - 1); } else if (i > 0 && at[c - 1] < -1 - t) at[c - 1] = -1 - t;
+      if (i < nx - 1 && at[c + 1] === Infinity) { at[c + 1] = -1 - t; next.push(c + 1); } else if (i < nx - 1 && at[c + 1] < -1 - t) at[c + 1] = -1 - t;
+      if (c >= nx && at[c - nx] === Infinity) { at[c - nx] = -1 - t; next.push(c - nx); } else if (c >= nx && at[c - nx] < -1 - t) at[c - nx] = -1 - t;
+      if (c + nx < N && at[c + nx] === Infinity) { at[c + nx] = -1 - t; next.push(c + nx); } else if (c + nx < N && at[c + nx] < -1 - t) at[c + nx] = -1 - t;
     }
-    at.set(next);
+    // (Marked while a ring is filled as minus one less the earliest time offered: now their times.)
+    for (const c of next) at[c] = -1 - at[c];
+    ring = next;
   }
   // (Patches have no front: as if one crossed half the change, for sizes on screen.)
   return { west: gw, north: gn, dlon, dlat, nx, ny, at, inside, travel: source.kind === 'scatter' ? (size * cells) / 2 : tmax };
@@ -273,8 +277,15 @@ export function frontLines(f: FrontField, level: number): Rings {
   return out;
 }
 
-/** Room for tracing a field's lines, kept with the field (cleared after each use). */
-const scratchOf = new WeakMap<FrontField, { link0: Int32Array; link1: Int32Array; used: Uint8Array; lo: Float32Array; hi: Float32Array; BW: number; BH: number }>();
+/** A field's lines traced at a level. */
+type Traced = { loops: number[][]; point: (id: number) => [number, number]; keep: (id: number) => boolean };
+/**
+ * What tracing keeps with a field: the earliest and latest time in each block of its squares, and the lines last
+ * traced (the land reached and the front's own lines at a moment are the same lines).
+ */
+const blocksOf = new WeakMap<FrontField, { lo: Float32Array; hi: Float32Array; BW: number; BH: number; level: number; traced: Traced | null }>();
+/** Room for tracing, shared by every field (cleared after each use): for each edge crossed, the two it is joined to. */
+let link0 = new Int32Array(0), link1 = new Int32Array(0), used = new Uint8Array(0);
 /** Squares to a block, each way. */
 const B = 8;
 
@@ -284,7 +295,9 @@ const B = 8;
  * part of the front within the change: between two cells of it, or just outside its edge where the line leaves it
  * (the edge beside one between two cells of it).
  */
-function trace(f: FrontField, level: number): { loops: number[][]; point: (id: number) => [number, number]; keep: (id: number) => boolean } {
+function trace(f: FrontField, level: number): Traced {
+  const kept = blocksOf.get(f);
+  if (kept && kept.traced && kept.level === level) return kept.traced;
   const { nx, ny, at, inside, west, north, dlon, dlat } = f;
   // Corners of the marching squares: the cells' middles, with a border of cells never reached all round.
   const W = nx + 2, H = ny + 2;
@@ -317,8 +330,9 @@ function trace(f: FrontField, level: number): { loops: number[][]; point: (id: n
   const hEdge = (i: number, j: number) => (j * W + i) * 2, vEdge = (i: number, j: number) => (j * W + i) * 2 + 1;
   // Pieces of line in each square, by the edges they join (each edge crossed joins the two squares beside it).
   const E = 2 * W * H;
-  let sc = scratchOf.get(f);
-  if (!sc || sc.link0.length !== E) {
+  if (link0.length < E) { link0 = new Int32Array(E).fill(-1); link1 = new Int32Array(E).fill(-1); used = new Uint8Array(E); }
+  let sc = blocksOf.get(f);
+  if (!sc) {
     // The squares in blocks of 8 by 8, each with the earliest and latest time at its corners: a line crosses only
     // the blocks whose times span its level (a line is long and thin; most blocks are all reached or none).
     const BW = Math.ceil((W - 1) / B), BH = Math.ceil((H - 1) / B);
@@ -333,9 +347,9 @@ function trace(f: FrontField, level: number): { loops: number[][]; point: (id: n
         if (t > hi[q]) hi[q] = t;
       }
     }
-    scratchOf.set(f, (sc = { link0: new Int32Array(E).fill(-1), link1: new Int32Array(E).fill(-1), used: new Uint8Array(E), lo, hi, BW, BH }));
+    blocksOf.set(f, (sc = { lo, hi, BW, BH, level: NaN, traced: null }));
   }
-  const { link0, link1, used, lo, hi, BW, BH } = sc;
+  const { lo, hi, BW, BH } = sc;
   const touched: number[] = [];
   const half = (a: number, b: number) => { if (link0[a] < 0) { link0[a] = b; touched.push(a); } else link1[a] = b; };
   const join = (a: number, b: number) => { half(a, b); half(b, a); };
@@ -384,7 +398,9 @@ function trace(f: FrontField, level: number): { loops: number[][]; point: (id: n
   }
   // (The scratch cleared for the next time.)
   for (const e of touched) { link0[e] = -1; link1[e] = -1; used[e] = 0; }
-  return { loops, point, keep };
+  const traced: Traced = { loops, point, keep };
+  sc.level = level; sc.traced = traced;
+  return traced;
 }
 
 /**
@@ -568,26 +584,37 @@ function heartOf(inside: Uint8Array, nx: number, ny: number, hx: Float64Array, h
 }
 
 /** Smooth noise between -1 and 1 over the grid, in patterns about a quarter of the change across, seeded. */
-function fbm(nx: number, ny: number, cells: number, seed: number): Float32Array {
+/**
+ * Smooth noise over the grid (−1 to 1): four octaves, the broadest about 3.5 waves across the change. Laid out
+ * by place within the change (`pad` cells of margin, `cells` across its longer side), not by cell: the same
+ * change has the same pattern at whatever fineness its field is made (waves finer than two cells are left out).
+ */
+function fbm(nx: number, ny: number, cells: number, pad: number, seed: number): Float32Array {
   let s = (seed >>> 0) || 1;
   const rnd = () => { s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; };
   const out = new Float32Array(nx * ny);
-  let amp = 1, total = 0, wave = cells / 3.5;
+  // Places from −0.5 to 1.5 of the change's longer side (beyond: the lattice's edge again).
+  const SPAN = 2, LOW = -0.5;
+  let amp = 1, total = 0, waves = 3.5;
   for (let o = 0; o < 4; o++) {
-    const gx = Math.ceil(nx / wave) + 2, gy = Math.ceil(ny / wave) + 2, g = new Float32Array(gx * gy);
+    const gx = Math.ceil(SPAN * waves) + 3, gy = gx, g = new Float32Array(gx * gy);
     for (let q = 0; q < g.length; q++) g[q] = rnd() * 2 - 1;
-    const ox = rnd() * wave, oy = rnd() * wave;
-    for (let j = 0; j < ny; j++) {
-      const fy = (j + oy) / wave, y0 = Math.floor(fy), ty = fy - y0, sy = ty * ty * (3 - 2 * ty);
-      for (let i = 0; i < nx; i++) {
-        const fx = (i + ox) / wave, x0 = Math.floor(fx), tx = fx - x0, sx = tx * tx * (3 - 2 * tx);
-        const a = g[y0 * gx + x0], b = g[y0 * gx + x0 + 1], c = g[(y0 + 1) * gx + x0], d = g[(y0 + 1) * gx + x0 + 1];
-        out[j * nx + i] += amp * ((a * (1 - sx) + b * sx) * (1 - sy) + (c * (1 - sx) + d * sx) * sy);
+    const ox = rnd(), oy = rnd();
+    // (Every octave's numbers are drawn, so the coarser ones are the same whether the finer are used or not.)
+    if (cells / waves >= 2) {
+      for (let j = 0; j < ny; j++) {
+        const fy = Math.max(0, Math.min(gy - 1.001, ((j - pad) / cells - LOW) * waves + oy)), y0 = Math.floor(fy), ty = fy - y0, sy = ty * ty * (3 - 2 * ty);
+        for (let i = 0; i < nx; i++) {
+          const fx = Math.max(0, Math.min(gx - 1.001, ((i - pad) / cells - LOW) * waves + ox)), x0 = Math.floor(fx), tx = fx - x0, sx = tx * tx * (3 - 2 * tx);
+          const a = g[y0 * gx + x0], b = g[y0 * gx + x0 + 1], c = g[(y0 + 1) * gx + x0], d = g[(y0 + 1) * gx + x0 + 1];
+          out[j * nx + i] += amp * ((a * (1 - sx) + b * sx) * (1 - sy) + (c * (1 - sx) + d * sx) * sy);
+        }
       }
+      total += amp;
     }
-    total += amp; amp *= 0.5; wave = Math.max(2, wave / 2);
+    amp *= 0.5; waves *= 2;
   }
-  for (let c = 0; c < out.length; c++) out[c] = Math.max(-1, Math.min(1, (out[c] / total) * 1.6));
+  for (let c = 0; c < out.length; c++) out[c] = Math.max(-1, Math.min(1, (out[c] / (total || 1)) * 1.6));
   return out;
 }
 

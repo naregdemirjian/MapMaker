@@ -27,11 +27,16 @@ export function frontSourceOf(arr: Arrangement, changing: number[], owner: strin
   const inChange = new Set(changing);
   // Who held each parcel before the change (a parcel changing in another change counts as its owner before it).
   const before = (f: number) => { const st = states.get(f); return st ? (st.transition ? st.transition.from : st.value) : null; };
+  // The change's own edges (round each of its parcels: only those are looked at, not the whole map's), with
+  // what lies across each.
+  const topo = arr.topology();
   const lines = (side: (other: number) => boolean): number[] => {
     const out: number[] = [];
-    for (const sg of arr.segments.values()) {
-      const l = sg.left_face, r = sg.right_face, li = inChange.has(l), ri = inChange.has(r);
-      if (li === ri || !side(li ? r : l)) continue;
+    for (const f of changing) for (const c of topo.facesCycles.get(f) ?? []) for (const h of topo.cycles.get(c) ?? []) {
+      const sg = arr.segments.get(h >> 1);
+      if (!sg) continue;
+      const other = sg.left_face === f ? sg.right_face : sg.left_face;
+      if (inChange.has(other) || !side(other)) continue;
       const a = arr.vertices.get(sg.a)!, b = arr.vertices.get(sg.b)!;
       out.push(a.lon / E7, a.lat / E7, b.lon / E7, b.lat / E7);
     }
