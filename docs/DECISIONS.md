@@ -61,6 +61,61 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D154. Continents over time: collisions, rifts, plumes, events, the supercontinent cycle, checkpoints (Stage 14.3)
+
+- **Asked.** Stage 14.3: "collisions and orogeny with gravity-limited thickening, sutures, terrane accretion,
+  rifting by stretching and break-up with thermal subsidence, hotspots and their tracks, large igneous provinces,
+  stagnant-lid and episodic regimes, plate reorganisations, the supercontinent cycle, timeline events driving
+  them, checkpoints and reconstruction at any moment", done when collision, rift and hotspot tests pass, a
+  supercontinent assembles and breaks up in a test history, and reconstruction between checkpoints matches a re-run.
+- **Collisions** keep the crust's volume: the continent overridden thickens the one above (shortening), up to the
+  thickest crust gravity allows (70 km at Earth's, as 1/g); the crust is marked as a suture. Arcs and oceanic
+  plateaus (oceanic crust thicker than 15 km) are too buoyant to go down: they are scraped onto the margin (marked
+  accreted). Colliding continents weld, and stay welded until the weld breaks.
+- **Rifts** (`step.ts` newCrust): where a gap opens inside a continent, the new cell takes half the thickness of the
+  continental crust beside it, which thins by as much, so the continent's volume is kept as it spreads and thins
+  step by step (stretching, McKenzie 1978), warm and marked as rifted; once the margin is thinner than about 24 km it
+  breaks and new sea floor starts between the halves. The warmth fades over about 40 million years: the margins
+  subside. (An earlier version made rift crust from nothing: continents grew to 60 per cent of the planet.)
+- **Plate reorganisations** (`reorganise.ts`): slab pull and ridge push give each plate's new direction (the loop
+  that sums them had been lost in an earlier edit of 14.2, leaving directions random; it is restored and tested by
+  the histories' results); the Wilson cycle: welded groups grown large (a quarter of the planet) or old (200 million
+  years) rift apart along their old sutures, half the time when motions are reconsidered; plates larger than 30 per
+  cent of the planet, or carrying a large continent for 150 million years (heat builds up beneath it), split along a
+  ragged line, their parts moving apart; subduction begins where old ocean (120 million years) has long bordered a
+  continent on the same plate (the ocean becomes its own plate moving towards the continent; Stern 2004), and old
+  sea floor far from any trench founders within the ocean (the plate splits across it and the parts close, as at
+  Izu-Bonin-Mariana). Plates are made and reused as needed (up to 250).
+- **Plumes** (hotspots, fixed in the mantle's frame): 0.3 km of crust a million years on the sea floor, 0.08 on
+  continents, at strength 1; a chain ageing away from the plume as the plate moves; over a plate that never moves
+  (a stagnant lid), one ever larger shield, as tall as gravity allows (on Mars about 23 km).
+- **Timeline events** (`events.ts`): supercontinent (continents move towards a centre while it lasts, weld there),
+  break-up (welds break, the largest continental plates split, continents move away from their centre while it
+  lasts), rift (a split at a place), collision (continents near a place move towards it), volcanic period (plumes
+  and arcs make 1 + strength times as much), large igneous province (up to 8 km × strength of basalt, about 800 km
+  × √strength across, over its length), hotspot (a new plume while it lasts), impact (a basin 300 km × strength^⅓
+  across, larger under weaker gravity as (g⊕/g)^¼, with a rim), reorganisation (motions reconsidered at once).
+  Ice ages, greenhouse pulses and sea-level events act through the climate and water stages (14.6 to 14.8). Events
+  without a place get one drawn for them, the same every time.
+- **Checkpoints and any moment** (`history.ts`): a checkpoint is the whole state (plates, their crust, motions,
+  welds, plumes, events, and the random generator's state, which is now kept in the state rather than a closure);
+  the history at any moment on its 5-million-year grid is rebuilt from the checkpoint before it by running on, and
+  is exactly the moment the history ran through (tested at three moments and through an event). Checkpoints stay
+  where the history runs (they are not part of a stage's product); keeping them with a project comes with 14.5.
+- **Regimes.** Stagnant lid: no motion, plumes build shields. Episodic: plates move fast a fifth of the time
+  (300-million-year cycle), slowly otherwise.
+- **Layers** added: crust thickness, and what made the crust (the history bits).
+- **Results** (Earth-like, 500 million years at L5, five seeds): crust made and consumed balance within 1 per cent;
+  the sea floor's median age 21 to 302 million years before the foundering rule, 26 to 28 after (the Earth's is
+  about 60; its oldest about 180); continental crust 42 to 49 per cent of the surface (from 40: grown at arcs and
+  spread by stretching), with stretched margins under the sea (the continents' lowest tenth 2.2 to 3.1 km down).
+- **Tests.** `planet-continents.test.ts`: continents colliding (thickened to at most gravity's limit, a suture, the
+  volume kept, welded, then moving as one; half as thick under twice the gravity); a continent rifting (stretched
+  and thinned with its volume kept, then a new ocean between its halves); a plume's chain ageing away from it at the
+  plate's speed; a Mars-like shield on a stagnant lid; a flood basalt, an impact basin (larger under weaker gravity),
+  a volcanic period doubling a new plume's output; a supercontinent gathered and broken up by timeline events; any
+  moment rebuilt from a checkpoint the same as the history's own, through an event too.
+
 ### D153. Plate tectonics: plates, crust in their frames, ridges, trenches, arcs (Stage 14.2)
 
 - **Asked.** Stage 14.2 of the planetary engine: "plate seeding and growth, Euler kinematics with rotation
@@ -100,7 +155,8 @@ Follows from D2. The test drives the real interface exactly as a person would.
   mountains add a little; a light smoothing for regional compensation. The sea is set where it covers the share of
   the surface asked for (a simplification until the water's volume decides it, Stage 14.8).
 - **Motions** are reconsidered every 40 to 90 million years: slabs pull a plate towards its trenches and ridges
-  push it away (Forsyth and Uyeda 1975), and a plate keeps half its old direction; speeds follow the share of a
+  push it away (Forsyth and Uyeda 1975), and a plate keeps half its old direction (the loop summing the pulls was
+  lost in an edit of this stage, leaving new directions random; found and restored in 14.3, D154); speeds follow the share of a
   plate's edge that is trench and its share of continent (a slab-pulled ocean plate about 9 cm a year, a continent
   with no trench about 1.5), scaled by the interior's vigour (the activity setting × √ heat flow). Continents that
   collide over a wide front (0.3 per cent of the surface consumed, about India's) are welded and move together for

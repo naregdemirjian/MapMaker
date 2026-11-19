@@ -1,4 +1,5 @@
-// The tectonic state and how a history starts (Stage 14.2, D153).
+// The tectonic state and how a history starts (Stage 14.2, D153; 14.3, D154: hotspots, events, splitting,
+// checkpoints).
 //
 // Plates are seeded across the sphere and grown by a flood whose cost is shaped by noise and by each plate's own
 // weight, so a few are large and many small, with irregular edges (Earth's plates follow such a size distribution;
@@ -9,6 +10,27 @@
 import { meshAt, type Mesh } from '../mesh/icosphere.ts';
 import { random, simplex3 } from '../../terrain/planet.ts';
 import { CRUST, newPlate, type Plate } from './plates.ts';
+import type { GeoEventKind } from '../model/definition.ts';
+
+/** A timeline event as the history sees it: its kind, when it starts and ends (Myr since the history began), how strong, where. */
+export interface TectonicEvent {
+  kind: GeoEventKind;
+  start: number;
+  end: number;
+  strength: number;
+  /** Longitude and latitude, degrees (or chosen by the history). */
+  at?: [number, number];
+}
+
+/** A mantle plume, fixed in the mantle's frame (the world's): where, how strong, and when it is active. */
+export interface Hotspot {
+  x: number; y: number; z: number;
+  strength: number;
+  start: number;
+  end: number;
+  /** The world cell above it (kept to find it again quickly). */
+  cell: number;
+}
 
 export interface TectonicParams {
   level: number;
@@ -22,6 +44,9 @@ export interface TectonicParams {
   continentalFraction: number;
   oceanFraction: number;
   regime: 'mobile-lid' | 'stagnant-lid' | 'episodic';
+  /** How many mantle plumes there are (and events that add or change things, D154). */
+  hotspots?: number;
+  events?: TectonicEvent[];
 }
 
 export interface TectonicState {
@@ -51,11 +76,22 @@ export interface TectonicState {
    * Plates welded together where their continents collided (a suture): each plate's group (the plate it was welded
    * to, as a union-find), and the area collided so far between two groups (key a·4096 + b, a < b).
    */
-  group: Int32Array;
+  group: number[];
   contact: Map<number, number>;
-  /** When each plate was welded into its group (Infinity: not welded). */
-  weldTime: Float64Array;
-  rng: () => number;
+  /** When each plate was welded into its group (Infinity: not welded), and when it was made (split off). */
+  weldTime: number[];
+  born: number[];
+  /** The random generator's state (kept with checkpoints, so a history re-run from one is the same). */
+  rngState: number;
+  hotspots: Hotspot[];
+  /** Events of the timeline, and which have begun. */
+  events: TectonicEvent[];
+  begun: boolean[];
+  /** While an event gathers continents (a point they move towards) or scatters them (a point they move from). */
+  gather: [number, number, number] | null;
+  scatter: [number, number, number] | null;
+  /** Volcanism as a multiple of usual (volcanic periods). */
+  volcanism: number;
 }
 
 export const BOUNDARY = { none: 0, divergent: 1, convergent: 2, transform: 3 } as const;
@@ -144,18 +180,104 @@ export function initialState(params: TectonicParams): TectonicState {
       p.age[c] = 180 * (0.5 + 0.5 * ageNoise(x * 2.5 + 7, y * 2.5, z * 2.5));
     }
   }
-  const state: TectonicState = {
-    mesh, params, plates, time: 0, steps: 0, owner, ref: Int32Array.from({ length: n }, (_, i) => i),
-    boundary: new Uint8Array(n), boundaryRate: new Float32Array(n), subducting: new Int32Array(n).fill(-1), trench: new Uint8Array(n),
-    height: new Float32Array(n), seaLevel: 0, nextReorganisation: 0, totals: { created: 0, consumed: 0, collided: 0 }, rng,
-    group: Int32Array.from({ length: plates.length }, (_, i) => i), contact: new Map(), weldTime: new Float64Array(plates.length).fill(Infinity),
-  };
+  const state = baseState(params, plates, owner, (params.seed * 747796405 + 2891336453) >>> 0);
+  state.nextReorganisation = 0;
+  // Plumes, spread over the sphere, each for the whole history.
+  for (let i = 0; i < Math.max(0, Math.round(params.hotspots ?? 0)); i++) {
+    const [x, y, z] = randomPole(rng);
+    state.hotspots.push({ x, y, z, strength: 0.6 + 0.8 * rng(), start: -Infinity, end: Infinity, cell: 0 });
+  }
   for (const p of plates) setMotion(state, p, randomPole(rng), 1);
   return state;
 }
 
+/** A state's common parts. */
+function baseState(params: TectonicParams, plates: Plate[], owner: Int32Array, rngState: number): TectonicState {
+  const mesh = meshAt(params.level), n = mesh.n;
+  return {
+    mesh, params, plates, time: 0, steps: 0, owner, ref: Int32Array.from({ length: n }, (_, i) => i),
+    boundary: new Uint8Array(n), boundaryRate: new Float32Array(n), subducting: new Int32Array(n).fill(-1), trench: new Uint8Array(n),
+    height: new Float32Array(n), seaLevel: 0, nextReorganisation: Infinity, totals: { created: 0, consumed: 0, collided: 0 },
+    group: plates.map((_, i) => i), contact: new Map(), weldTime: plates.map(() => Infinity), born: plates.map(() => 0),
+    rngState: rngState || 1, hotspots: [], events: (params.events ?? []).slice().sort((a, b) => a.start - b.start), begun: [],
+    gather: null, scatter: null, volcanism: 1,
+  };
+}
+
+/** The next random number of a state's generator, in [0, 1) (mulberry32, its state kept in the state). */
+export function rand(state: TectonicState): number {
+  const a = (state.rngState = (state.rngState + 0x6d2b79f5) >>> 0);
+  let t = Math.imul(a ^ (a >>> 15), a | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+
+/** The plates' total members (cells of their own frames), per plate. */
+export function memberCounts(state: TectonicState): number[] {
+  return state.plates.map((p) => { let k = 0; for (let r = 0; r < state.mesh.n; r++) k += p.member[r]; return k; });
+}
+
+/** A plate free for a new one (one that has lost all its crust, reset), or a new plate. Null at the limit (250). */
+export function freePlate(state: TectonicState): Plate | null {
+  const counts = memberCounts(state);
+  const n = state.mesh.n;
+  for (let i = 0; i < state.plates.length; i++) {
+    if (counts[i] > 0 || state.plates.some((q) => q.id !== i && groupOf(state, q.id) === i)) continue;
+    const p = state.plates[i];
+    p.kind.fill(0); p.thickness.fill(0); p.age.fill(0); p.orogeny.fill(1e4); p.sediment.fill(0); p.tags.fill(0);
+    p.q.set([1, 0, 0, 0]); p.omega.fill(0);
+    state.group[i] = i; state.weldTime[i] = Infinity; state.born[i] = state.time;
+    return p;
+  }
+  if (state.plates.length >= 250) return null;
+  const p = newPlate(state.plates.length, n);
+  state.plates.push(p); state.group.push(p.id); state.weldTime.push(Infinity); state.born.push(state.time);
+  return p;
+}
+
+/**
+ * Splits off from a plate the cells of its frame for which `take` says so, as a new plate in the same frame (so
+ * the cells keep their indices), carrying the same motion until it is given its own. Null when nothing (or
+ * everything) would move, or no plate is free.
+ */
+export function splitPlate(state: TectonicState, p: Plate, take: (r: number) => boolean): Plate | null {
+  const n = state.mesh.n;
+  let moving = 0, staying = 0;
+  for (let r = 0; r < n; r++) if (p.member[r]) { if (take(r)) moving++; else staying++; }
+  if (!moving || !staying) return null;
+  const q = freePlate(state);
+  if (!q || q === p) return null;
+  q.q.set(p.q); q.omega.set(p.omega);
+  for (let r = 0; r < n; r++) {
+    if (!p.member[r] || !take(r)) continue;
+    q.member[r] = 1; q.kind[r] = p.kind[r]; q.thickness[r] = p.thickness[r]; q.age[r] = p.age[r];
+    q.orogeny[r] = p.orogeny[r]; q.sediment[r] = p.sediment[r]; q.tags[r] = p.tags[r];
+    p.member[r] = 0; p.kind[r] = CRUST.none;
+  }
+  for (let c = 0; c < n; c++) if (state.owner[c] === p.id && q.member[state.ref[c]]) state.owner[c] = q.id;
+  // The new plate leaves any group the old one was in.
+  state.group[q.id] = q.id; state.weldTime[q.id] = Infinity; state.born[q.id] = state.time; state.born[p.id] = state.time;
+  return q;
+}
+
+/** Everything a history needs to go on from a moment, copied (a checkpoint). */
+export function checkpoint(state: TectonicState): TectonicState {
+  return {
+    ...state,
+    plates: state.plates.map((p) => ({
+      id: p.id, q: p.q.slice(), omega: p.omega.slice(), member: p.member.slice(), kind: p.kind.slice(), thickness: p.thickness.slice(),
+      age: p.age.slice(), orogeny: p.orogeny.slice(), sediment: p.sediment.slice(), tags: p.tags.slice(),
+    })),
+    owner: state.owner.slice(), ref: state.ref.slice(), boundary: state.boundary.slice(), boundaryRate: state.boundaryRate.slice(),
+    subducting: state.subducting.slice(), trench: state.trench.slice(), height: state.height.slice(), totals: { ...state.totals },
+    group: state.group.slice(), contact: new Map(state.contact), weldTime: state.weldTime.slice(), born: state.born.slice(),
+    hotspots: state.hotspots.map((h) => ({ ...h })), events: state.events.map((e) => ({ ...e })), begun: state.begun.slice(),
+    gather: state.gather ? [...state.gather] as [number, number, number] : null, scatter: state.scatter ? [...state.scatter] as [number, number, number] : null,
+  };
+}
+
 /** The group a plate is welded into (union-find, with path halving). */
-export function groupOf(state: TectonicState, p: number): number {
+export function groupOf(state: { group: number[] }, p: number): number {
   const g = state.group;
   while (g[p] !== p) { g[p] = g[g[p]]; p = g[p]; }
   return p;
@@ -291,10 +413,5 @@ export function stateFrom(params: TectonicParams, cell: (c: number, x: number, y
     p.member[c] = 1; p.kind[c] = v.kind; p.thickness[c] = v.thickness; p.age[c] = v.age;
   }
   omegas.forEach((o, i) => plates[i].omega.set(o));
-  return {
-    mesh, params, plates, time: 0, steps: 0, owner, ref: Int32Array.from({ length: n }, (_, i) => i),
-    boundary: new Uint8Array(n), boundaryRate: new Float32Array(n), subducting: new Int32Array(n).fill(-1), trench: new Uint8Array(n),
-    height: new Float32Array(n), seaLevel: 0, nextReorganisation: Infinity, totals: { created: 0, consumed: 0, collided: 0 }, rng: random(params.seed || 1),
-    group: Int32Array.from({ length: plates.length }, (_, i) => i), contact: new Map(), weldTime: new Float64Array(plates.length).fill(Infinity),
-  };
+  return baseState(params, plates, owner, params.seed || 1);
 }

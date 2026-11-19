@@ -223,7 +223,7 @@ test('regimes: a stagnant lid moves nothing; the history runs as a stage and dra
   const plates = await p.product('raster', def, { ...opts, layer: 'plates' });
   const first = await p.product('raster', def, { ...opts, layer: 'elevation', frame: 0 });
   assert.ok((elev.data.min as number) < -3000 && (elev.data.max as number) > 0, 'sea and land');
-  assert.ok(Number.isInteger(plates.data.max as number) && (plates.data.max as number) < def.tectonics.plates, 'plates drawn as whole numbers');
+  assert.ok(Number.isInteger(plates.data.max as number) && (plates.data.max as number) < 250, 'plates drawn as whole numbers');
   assert.notDeepEqual(first.data.raster, elev.data.raster, '100 million years apart, different');
   const tect = await p.product('tectonics', def, opts);
   assert.equal(tect.cached, true, 'one history for all its layers');

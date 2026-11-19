@@ -10,6 +10,9 @@ import type { Mesh } from '../mesh/icosphere.ts';
 
 /** Kinds of crust. */
 export const CRUST = { none: 0, oceanic: 1, continental: 2, arc: 3 } as const;
+/** What has happened to crust (bits): sewn into a continent at a collision, scraped onto a margin, a flood basalt,
+ * a hotspot's track, stretched in a rift, built in an arc, struck by an impact. */
+export const TAG = { suture: 1, accreted: 2, lip: 4, hotspot: 8, rift: 16, arc: 32, impact: 64 } as const;
 export type CrustKind = (typeof CRUST)[keyof typeof CRUST];
 
 export interface Plate {
@@ -29,13 +32,15 @@ export interface Plate {
   orogeny: Float32Array;
   /** Sediment on it, km. */
   sediment: Float32Array;
+  /** What has happened to it (TAG bits). */
+  tags: Uint8Array;
 }
 
 export function newPlate(id: number, n: number): Plate {
   return {
     id, q: Float64Array.from([1, 0, 0, 0]), omega: new Float64Array(3),
     member: new Uint8Array(n), kind: new Uint8Array(n), thickness: new Float32Array(n), age: new Float32Array(n),
-    orogeny: new Float32Array(n).fill(1e4), sediment: new Float32Array(n),
+    orogeny: new Float32Array(n).fill(1e4), sediment: new Float32Array(n), tags: new Uint8Array(n),
   };
 }
 

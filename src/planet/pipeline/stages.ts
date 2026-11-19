@@ -62,17 +62,24 @@ export const LAYERS = {
   plates: { stage: 'tectonics', field: 'plates', unit: '', label: 'Plates', frames: true, categories: true },
   crust: { stage: 'tectonics', field: 'kinds', unit: '', label: 'Kind of crust', frames: true, categories: true },
   crustAge: { stage: 'tectonics', field: 'age', unit: 'Myr', label: 'Age of the crust', frames: false, categories: false },
+  crustThickness: { stage: 'tectonics', field: 'thickness', unit: 'km', label: 'Thickness of the crust', frames: false, categories: false },
+  history: { stage: 'tectonics', field: 'tags', unit: '', label: 'What made the crust', frames: false, categories: true },
   boundaries: { stage: 'tectonics', field: 'boundary', unit: '', label: 'Plate boundaries', frames: false, categories: true },
 } as const;
 export type LayerId = keyof typeof LAYERS;
 
-/** What the tectonic history reads from a definition. */
-export function tectonicParams(def: PlanetDefinition, level: number): TectonicParams {
+/** What the tectonic history reads from a definition, for a history of `durationMyr` ending at the present. */
+export function tectonicParams(def: PlanetDefinition, level: number, durationMyr = 500): TectonicParams {
   const x = derive(def);
+  const D = Math.min(durationMyr, def.history.ageGyr * 1000);
+  // Timeline events, in the history's own time (Myr since it began); those wholly before it are left out.
+  const events = def.history.events
+    .map((e) => ({ kind: e.kind, start: D - e.startMa, end: D - e.startMa + Math.max(0, e.durationMyr), strength: e.strength, ...(e.at ? { at: e.at } : {}) }))
+    .filter((e) => e.end >= 0 && e.start <= D);
   return {
     level, seed: def.seed, radiusKm: def.body.radiusKm, gravity: x.gravity, plates: def.tectonics.plates,
     vigor: def.tectonics.activity * Math.sqrt(Math.max(0, x.heatFlowEarth)), continentalFraction: def.tectonics.continentalFraction,
-    oceanFraction: def.water.oceanFraction, regime: x.regime,
+    oceanFraction: def.water.oceanFraction, regime: x.regime, hotspots: def.tectonics.hotspots, events,
   };
 }
 
@@ -126,10 +133,10 @@ export const STAGES: Record<string, StageDef> = {
   /** The planet's tectonic history: plates, crust and heights through time (a preview at coarse levels). */
   tectonics: {
     id: 'tectonics',
-    version: 1,
+    version: 2,
     deps: () => [],
     inputs: (def, p) => ({
-      ...(tectonicParams(def, p.level) as unknown as ProductData),
+      ...(tectonicParams(def, p.level, p.durationMyr ?? 500) as unknown as ProductData),
       durationMyr: Math.min(p.durationMyr ?? 500, def.history.ageGyr * 1000), frameEveryMyr: p.frameEveryMyr ?? 25,
     }),
     run: (inputs, _deps, ctx) => {

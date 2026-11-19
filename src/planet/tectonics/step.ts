@@ -5,9 +5,11 @@
 // a slab reaches about 110 km depth; crust ages; heights follow the crust (isostasy.ts); sea level follows the
 // water. Every so often the plates' motions are reconsidered: slabs pull their plates towards their trenches
 // (Forsyth and Uyeda 1975), ridges push a little, and a plate keeps part of its old motion.
-import { quatRotate, velocityAt, walkNearest, advancePlate, CRUST, type Plate } from './plates.ts';
-import { BOUNDARY, maxThickness, setMotion, randomPole, groupOf, groups, type TectonicState } from './state.ts';
+import { quatRotate, velocityAt, walkNearest, advancePlate, CRUST, TAG, type Plate } from './plates.ts';
+import { BOUNDARY, maxThickness, groupOf, type TectonicState } from './state.ts';
 import { crustHeight, seaLevelFor } from './isostasy.ts';
+import { reorganise } from './reorganise.ts';
+import { applyEvents } from './events.ts';
 
 /** What one step did (areas in steradians). */
 export interface StepReport {
@@ -20,9 +22,8 @@ export interface StepReport {
 
 /** Arc magmatism: thickening at the arc's axis, km per Myr per km/Myr of convergence (0.2 km/Myr at 5 cm a year). */
 const ARC_RATE = 0.004;
-/** How long plates stay welded after their continents collide, Myr. */
-export let WELD_MYR = 100;
-export const setWeldMyr = (v: number) => { WELD_MYR = v; };
+/** Hotspot volcanism: crust added over a plume, km per Myr at strength 1, on oceanic and on continental crust. */
+const PLUME_OCEAN = 0.3, PLUME_CONTINENT = 0.08;
 /** New oceanic crust, km (thicker from a hotter mantle). */
 const oceanicThickness = (vigor: number) => 7 * Math.min(2.2, Math.max(1, vigor) ** 0.4);
 
@@ -38,7 +39,8 @@ export function hash01(a: number, b: number, c: number): number {
 function buoyancy(p: Plate, r: number): number {
   const k = p.kind[r];
   if (k === CRUST.continental) return 1e6 + p.thickness[r];
-  if (k === CRUST.arc) return 1e5 + p.thickness[r];
+  // Arcs and oceanic plateaus (thick oceanic crust) are too buoyant to go down: they are scraped onto margins.
+  if (k === CRUST.arc || p.thickness[r] > 15) return 1e5 + p.thickness[r];
   return 1e4 - p.age[r];
 }
 
@@ -48,6 +50,7 @@ export function step(state: TectonicState, dt: number): StepReport {
   const { n, xyz, area, nbrStart, nbr } = mesh;
   const R = params.radiusKm;
   const report: StepReport = { created: 0, consumed: 0, collided: 0, gaps: 0, overlaps: 0 };
+  applyEvents(state, dt);
   const vigorNow = regimeVigor(state);
   // 1. Plates turn; crust ages.
   for (const p of plates) {
@@ -146,6 +149,7 @@ export function step(state: TectonicState, dt: number): StepReport {
         upper.thickness[ru] = Math.min(vmax, upper.thickness[ru] + lower.thickness[rl]);
         if (upper.kind[ru] !== CRUST.continental && upper.thickness[ru] > 25) upper.kind[ru] = CRUST.continental;
         upper.orogeny[ru] = 0;
+        upper.tags[ru] |= lower.kind[rl] === CRUST.continental && upper.kind[ru] === CRUST.continental ? TAG.suture : TAG.accreted;
         closing[c] = Math.max(closing[c], rate);
       }
       lower.member[rl] = 0;
@@ -232,7 +236,7 @@ export function step(state: TectonicState, dt: number): StepReport {
     const r = walkNearest(mesh, v[0], v[1], v[2], hint >= 0 ? hint : c);
     owner[c] = pid; ref[c] = r;
     report.created += area[c];
-    if (!p.member[r]) { makeOceanic(p, r, thick, dt); flood.push(pid, r, c); }
+    if (!p.member[r]) { newCrust(state, p, r, c, thick, dt); flood.push(pid, r, c); }
   }
   // Cells of a plate's frame whose centres lie in its share of the gap get crust too (none is left out).
   while (flood.length) {
@@ -244,7 +248,7 @@ export function step(state: TectonicState, dt: number): StepReport {
       quatRotate(p.q, xyz[3 * r2], xyz[3 * r2 + 1], xyz[3 * r2 + 2], v);
       const g = walkNearest(mesh, v[0], v[1], v[2], c);
       if (gapPlate[g] !== pid || owner[g] !== pid) continue;
-      makeOceanic(p, r2, thick, dt);
+      copyCrust(p, r, r2);
       flood.push(pid, r2, g);
     }
   }
@@ -298,6 +302,8 @@ export function step(state: TectonicState, dt: number): StepReport {
   state.subducting = subducting;
   // 6. Arcs above the slabs.
   growArcs(state, subducting, slabAge, closing, dt, vmax);
+  // Hotspots.
+  plumes(state, dt, vmax);
   // 7. Heights and the sea.
   heights(state);
   // 8. Motions reconsidered now and then.
@@ -307,8 +313,38 @@ export function step(state: TectonicState, dt: number): StepReport {
   return report;
 }
 
-function makeOceanic(p: Plate, r: number, thickness: number, dt: number) {
-  p.member[r] = 1; p.kind[r] = CRUST.oceanic; p.thickness[r] = thickness; p.age[r] = dt / 2; p.orogeny[r] = 1e4; p.sediment[r] = 0;
+/**
+ * New crust in a gap at world cell c, for plate p at cell r of its frame. Where the plate's crust beside the gap is
+ * continental, the continent stretches (McKenzie 1978): the new cell takes half the thickness of its continental
+ * neighbours, which thin by as much, so the crust's volume is kept while it spreads and thins step by step; warm,
+ * marked as rifted. Once the margin is thinner than about 24 km it breaks, and the sea floor starts. Elsewhere new
+ * oceanic crust.
+ */
+function newCrust(state: TectonicState, p: Plate, r: number, c: number, oceanic: number, dt: number) {
+  const { mesh, owner, ref } = state;
+  const from: number[] = [];
+  let thick = 0, age = 0;
+  for (let e = mesh.nbrStart[c]; e < mesh.nbrStart[c + 1]; e++) {
+    const j = mesh.nbr[e];
+    if (owner[j] !== p.id || ref[j] < 0) continue;
+    const rj = ref[j];
+    if (!p.member[rj] || p.kind[rj] !== CRUST.continental || from.includes(rj)) continue;
+    from.push(rj); thick += p.thickness[rj]; age += p.age[rj];
+  }
+  p.member[r] = 1; p.orogeny[r] = 1e4; p.sediment[r] = 0; p.tags[r] = 0;
+  const k = from.length, mean = k ? thick / k : 0;
+  if (k >= 2 && mean >= 24) {
+    const share = 0.5 * mean;
+    for (const rj of from) { p.thickness[rj] -= share / k; p.orogeny[rj] = 0; p.tags[rj] |= TAG.rift; }
+    p.kind[r] = CRUST.continental; p.thickness[r] = share; p.age[r] = age / k; p.orogeny[r] = 0; p.tags[r] = TAG.rift;
+  } else {
+    p.kind[r] = CRUST.oceanic; p.thickness[r] = oceanic; p.age[r] = dt / 2;
+  }
+}
+
+function copyCrust(p: Plate, from: number, to: number) {
+  p.member[to] = 1; p.kind[to] = p.kind[from]; p.thickness[to] = p.thickness[from]; p.age[to] = p.age[from];
+  p.orogeny[to] = p.orogeny[from]; p.sediment[to] = p.sediment[from]; p.tags[to] = p.tags[from];
 }
 
 /**
@@ -387,9 +423,10 @@ function growArcs(state: TectonicState, subducting: Int32Array, slabAge: Float32
     const g = Math.exp(-((dist[c] - axis) ** 2) / (2 * sigma * sigma));
     if (g < 0.02) continue;
     const p = plates[owner[c]], r = ref[c];
-    const dh = ARC_RATE * closing[s] * dt * g;
+    const dh = ARC_RATE * closing[s] * dt * g * state.volcanism;
     p.thickness[r] = Math.min(vmax, p.thickness[r] + dh);
     if (dh > 0.01) p.orogeny[r] = 0;
+    if (dh > 0.01) p.tags[r] |= TAG.arc;
     if (p.kind[r] === CRUST.oceanic && p.thickness[r] > 12) p.kind[r] = CRUST.arc;
     if (p.kind[r] === CRUST.arc && p.thickness[r] > 25) p.kind[r] = CRUST.continental;
   }
@@ -419,38 +456,26 @@ export function heights(state: TectonicState) {
 }
 
 /**
- * Reconsiders every plate's motion: slabs pull a plate towards the trenches where it goes down, ridges push it away
- * from where it parts, and a plate keeps half its old direction (motions change over tens of millions of years).
+ * Mantle plumes, fixed in the mantle's frame, build volcanoes on whatever plate passes over them: on the sea floor a
+ * chain of islands and seamounts ageing away from the plume (and sinking as their crust ages), on continents
+ * volcanic provinces; over a plate that never moves (a stagnant lid), one ever larger shield, as tall as the
+ * planet's gravity lets it stand (Olympus Mons on Mars).
  */
-export function reorganise(state: TectonicState) {
-  const { mesh, plates, owner } = state;
-  // Welds last 100 million years; then the plates answer to their own slabs and ridges again, as if the old suture
-  // had rifted (rifting where the crust is weak, and lasting sutures, come with Stage 14.3).
-  const formed = new Map<number, number>();
-  for (const p of plates) { const g = groupOf(state, p.id); formed.set(g, Math.min(formed.get(g) ?? Infinity, state.weldTime[p.id])); }
-  for (const p of plates) {
-    const g = groupOf(state, p.id);
-    if (state.time - (formed.get(g) ?? state.time) > WELD_MYR) state.weldTime[p.id] = Infinity;
+function plumes(state: TectonicState, dt: number, vmax: number) {
+  const { mesh, plates, owner, ref } = state;
+  for (const h of state.hotspots) {
+    if (state.time + dt <= h.start || state.time >= h.end) continue;
+    const c = walkNearest(mesh, h.x, h.y, h.z, h.cell);
+    h.cell = c;
+    const add = (cell: number, share: number) => {
+      const p = plates[owner[cell]], r = ref[cell];
+      if (!p || r < 0 || !p.member[r]) return;
+      const rate = p.kind[r] === CRUST.continental ? PLUME_CONTINENT : PLUME_OCEAN;
+      p.thickness[r] = Math.min(vmax, p.thickness[r] + rate * h.strength * state.volcanism * dt * share);
+      p.orogeny[r] = 0;
+      p.tags[r] |= TAG.hotspot;
+    };
+    add(c, 1);
+    for (let k = mesh.nbrStart[c]; k < mesh.nbrStart[c + 1]; k++) add(mesh.nbr[k], 0.25);
   }
-  for (const p of plates) if (state.weldTime[p.id] === Infinity) state.group[p.id] = p.id;
-  for (const p of plates) if (state.group[p.id] !== p.id && state.weldTime[groupOf(state, p.id)] === Infinity) state.group[p.id] = p.id;
-  const { n, xyz, nbrStart, nbr } = mesh;
-  const torque = plates.map(() => [0, 0, 0]);
-  const edge = new Float64Array(plates.length), slab = new Float64Array(plates.length);
-  for (let c = 0; c < n; c++) {
-    const pc = owner[c];
-    if (pc >= 0 && state.boundary[c] !== BOUNDARY.none) { edge[pc]++; if (state.trench[c]) slab[pc]++; }
-  }
-  for (const [, members] of groups(state)) {
-    const t = [0, 0, 0], o = [0, 0, 0];
-    let e = 0, sl = 0;
-    for (const p of members) { e += edge[p.id]; sl += slab[p.id]; for (let i = 0; i < 3; i++) { t[i] += torque[p.id][i]; o[i] += p.omega[i]; } }
-    const tl = Math.hypot(t[0], t[1], t[2]), ol = Math.hypot(o[0], o[1], o[2]);
-    const old = ol > 0 ? [o[0] / ol, o[1] / ol, o[2] / ol] : randomPole(state.rng);
-    const pull = tl > 0 ? [t[0] / tl, t[1] / tl, t[2] / tl] : randomPole(state.rng);
-    const wobble = randomPole(state.rng);
-    const axis: [number, number, number] = [0.5 * old[0] + 0.4 * pull[0] + 0.15 * wobble[0], 0.5 * old[1] + 0.4 * pull[1] + 0.15 * wobble[1], 0.5 * old[2] + 0.4 * pull[2] + 0.15 * wobble[2]];
-    setMotion(state, members, axis, 0.8 + 0.4 * state.rng(), e > 0 ? Math.min(1, (2 * sl) / e) : 0);
-  }
-  state.nextReorganisation = state.time + 40 + 50 * state.rng();
 }

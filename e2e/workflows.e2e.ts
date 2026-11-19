@@ -4268,7 +4268,8 @@ try {
     assert.ok(r.now.min < -3000 && r.now.max > 500, `deep sea and land (${r.now.min} to ${r.now.max} m)`);
     assert.notEqual(r.then.hash, r.now.hash, 'the planet 100 million years ago is not the planet now');
     assert.equal(r.plates.cached, false);
-    assert.ok(r.plates.min >= 0 && r.plates.max < 12 && Number.isInteger(r.plates.max), `plates by number (${r.plates.min}..${r.plates.max})`);
+    // (Plates split and new ones form as the history goes on, D154.)
+    assert.ok(r.plates.min >= 0 && r.plates.max < 250 && Number.isInteger(r.plates.max), `plates by number (${r.plates.min}..${r.plates.max})`);
     assert.ok(r.crust.min >= 1 && r.crust.max <= 3, `oceanic, continental and arc crust (${r.crust.min}..${r.crust.max})`);
     assert.equal(r.one.hash, r.now.hash, 'the same history in another worker');
   });

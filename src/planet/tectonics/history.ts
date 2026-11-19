@@ -1,6 +1,6 @@
 // A planet's tectonic history (Stage 14.2, D153): from its first state, step by step, with pictures of the world
 // kept at fixed intervals (heights, plates and crust) for the timeline, and the present's crust in full.
-import { initialState, EARTH_SPEED, type TectonicParams, type TectonicState } from './state.ts';
+import { initialState, checkpoint, EARTH_SPEED, type TectonicParams, type TectonicState } from './state.ts';
 import { step, heights, regimeVigor } from './step.ts';
 
 /** The grid steps keep to, Myr. */
@@ -14,6 +14,8 @@ export interface HistoryOptions {
   /** The longest step, Myr. */
   maxStepMyr?: number;
   onProgress?: (doneMyr: number, totalMyr: number) => void;
+  /** Keep a checkpoint (the whole state) every so many Myr, on the grid, to go on from (D154). */
+  checkpointEveryMyr?: number;
 }
 
 export interface TectonicHistory {
@@ -32,6 +34,10 @@ export interface TectonicHistory {
   omega: Float64Array;
   plateCount: number;
   stats: { steps: number; created: number; consumed: number; collided: number; landShare: number; continentalShare: number; ms: number };
+  /** Checkpoints kept (when asked), by their time (Myr since the history began). Not part of a stage's product. */
+  checkpoints?: Map<number, TectonicState>;
+  /** The present's crust history (TAG bits) per cell. */
+  tags: Uint8Array;
 }
 
 /** The step that keeps every plate within a fraction of a cell per step. */
@@ -57,29 +63,23 @@ export function runHistory(params: TectonicParams, opts: HistoryOptions): Tecton
   frameTimes.push(D);
   const F = frameTimes.length;
   const H = new Int16Array(F * n), Pl = new Uint8Array(F * n), K = new Uint8Array(F * n);
-  const record = (f: number) => {
-    for (let c = 0; c < n; c++) {
-      const o = state.owner[c], p = state.plates[o];
-      H[f * n + c] = Math.max(-32_000, Math.min(32_000, Math.round((state.height[c] - state.seaLevel) * 1000)));
-      Pl[f * n + c] = o < 0 ? 255 : o;
-      K[f * n + c] = p ? p.kind[state.ref[c]] : 0;
-    }
-  };
+  const record = (f: number) => recordFrame(state, f, H, Pl, K);
   record(0);
+  const ckEvery = opts.checkpointEveryMyr ? Math.max(GRID_MYR, Math.round(opts.checkpointEveryMyr / GRID_MYR) * GRID_MYR) : 0;
+  const checkpoints = ckEvery ? new Map<number, TectonicState>([[0, checkpoint(state)]]) : undefined;
   let f = 1;
   while (state.time < D - 1e-9) {
-    const grid = Math.min(D, (Math.floor(state.time / GRID_MYR + 1e-9) + 1) * GRID_MYR);
-    const dt = Math.min(stepLength(state, opts.maxStepMyr ?? 5), grid - state.time);
-    step(state, dt);
+    advanceToGrid(state, D, opts.maxStepMyr ?? 5);
     if (f < F && state.time >= frameTimes[f] - 1e-9) { record(f); f++; opts.onProgress?.(state.time, D); }
+    if (checkpoints && Math.abs(state.time / ckEvery - Math.round(state.time / ckEvery)) < 1e-9) checkpoints.set(Math.round(state.time), checkpoint(state));
   }
   // The present in full.
-  const age = new Float32Array(n), thickness = new Float32Array(n);
+  const age = new Float32Array(n), thickness = new Float32Array(n), tags = new Uint8Array(n);
   let land = 0, cont = 0;
   for (let c = 0; c < n; c++) {
     const p = state.plates[state.owner[c]], r = state.ref[c];
     if (!p) continue;
-    age[c] = p.age[r]; thickness[c] = p.thickness[r];
+    age[c] = p.age[r]; thickness[c] = p.thickness[r]; tags[c] = p.tags[r];
     if (state.height[c] > state.seaLevel) land += state.mesh.area[c];
     if (p.kind[r] === 2) cont += state.mesh.area[c];
   }
@@ -89,5 +89,37 @@ export function runHistory(params: TectonicParams, opts: HistoryOptions): Tecton
     times: Float64Array.from(frameTimes, (t) => D - t), heights: H, plates: Pl, kinds: K, age, thickness,
     boundary: state.boundary.slice(), boundaryRate: state.boundaryRate.slice(), omega, plateCount: state.plates.length,
     stats: { steps: state.steps, ...state.totals, landShare: land / (4 * Math.PI), continentalShare: cont / (4 * Math.PI), ms: performance.now() - t0 },
+    tags, ...(checkpoints ? { checkpoints } : {}),
   };
+}
+
+/** One step, or as many as it takes, to the next whole GRID_MYR (or the end). */
+function advanceToGrid(state: TectonicState, end: number, maxStep: number) {
+  const grid = Math.min(end, (Math.floor(state.time / GRID_MYR + 1e-9) + 1) * GRID_MYR);
+  while (state.time < grid - 1e-9) step(state, Math.min(stepLength(state, maxStep), grid - state.time));
+}
+
+/** Writes the world's heights (m above the sea), plates and crust as picture f. */
+function recordFrame(state: TectonicState, f: number, H: Int16Array, Pl: Uint8Array, K: Uint8Array) {
+  const n = state.mesh.n;
+  for (let c = 0; c < n; c++) {
+    const o = state.owner[c], p = state.plates[o];
+    H[f * n + c] = Math.max(-32_000, Math.min(32_000, Math.round((state.height[c] - state.seaLevel) * 1000)));
+    Pl[f * n + c] = o < 0 ? 255 : o;
+    K[f * n + c] = p ? p.kind[state.ref[c]] : 0;
+  }
+}
+
+/**
+ * The world at any moment of a history (Myr since it began): from the last checkpoint at or before it, the history
+ * run on to that moment, exactly as it ran the first time (every step is decided by the state alone, the random
+ * generator included). Returns the state there (the checkpoint itself is not changed).
+ */
+export function reconstructAt(checkpoints: Map<number, TectonicState>, time: number, maxStepMyr = 5): TectonicState {
+  let best = -Infinity;
+  for (const t of checkpoints.keys()) if (t <= time + 1e-9 && t > best) best = t;
+  if (best === -Infinity) throw new Error('No checkpoint before that moment');
+  const state = checkpoint(checkpoints.get(best)!);
+  while (state.time < time - 1e-9) advanceToGrid(state, time, maxStepMyr);
+  return state;
 }
