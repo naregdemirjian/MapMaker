@@ -25,6 +25,8 @@ import { riversSoon } from '../../terrain/river-cache.ts';
 import { detailNeed, type DetailGrid } from '../../terrain/detail.ts';
 import { detailSoon } from '../../terrain/detail-cache.ts';
 import { PALETTES } from '../../terrain/look.ts';
+import { photoNeed, METRES_PER_DEGREE, PHOTO_CREDIT, type PhotoRegion } from '../../terrain/photo.ts';
+import { photoSoon } from '../../terrain/photo-cache.ts';
 import { seaLevelAt } from '../../terrain/sea-level.ts';
 import { ageOf, glacialSeaAt, paleoLabelAt } from '../../terrain/paleo.ts';
 import { recordTransition } from '../record-length.ts';
@@ -306,7 +308,7 @@ export function MapView() {
     const rivers = carved && planetOf(space) && on('rivers') ? riversSoon(carved.grid, carved.key, () => store.notify()) : null;
     // The land's colours in the satellite look (D100): Earth's land cover, or a planet's biomes.
     const cover = carved && terrainShown && look && PALETTES[look.palette].cover ? s.coverOf(space, carved) : null;
-    const terrain = ground && carved ? { grid: carved.grid, key: carved.key, look: terrainShown ? look : null, seaLevel, override: carved.touched && basemapSourceOf(space) === 'natural-earth' ? { data: carved.touched, key: carved.key } : null, rivers, cover, detail: null as DetailGrid | null } : null;
+    const terrain = ground && carved ? { grid: carved.grid, key: carved.key, look: terrainShown ? look : null, seaLevel, override: carved.touched && basemapSourceOf(space) === 'natural-earth' ? { data: carved.touched, key: carved.key } : null, rivers, cover, detail: null as DetailGrid | null, photo: null as PhotoRegion | null } : null;
     if (terrain?.look) passes.add('terrain');
     if (on('borders')) passes.add('borders');
     if (on('features')) passes.add('features');
@@ -332,6 +334,13 @@ export function MapView() {
       const shows = viewBounds(view), around = shows && viewBounds(view, 0.5);
       const need = around ? detailNeed(around, metresPerPixel(view, (space?.radius_m ?? 6371008.8) / 1000)) : null;
       terrain.detail = need && shows ? detailSoon(shows, need, carved, () => store.notify(), !moving) : null;
+    }
+    // Close in on the Earth as photographed (D138): the photographs of the region in view and around it,
+    // downloaded when the map rests (meanwhile the last region's, where it reaches, over the bundled picture).
+    if (terrain && cover?.photo && look?.photo && terrainSourceOf(space) === 'earth') {
+      const shows = viewBounds(view), around = shows && viewBounds(view, 0.25);
+      const need = around ? photoNeed(around, metresPerPixel(view, 6371.0088) / METRES_PER_DEGREE / dpr, 300) : null;
+      terrain.photo = need && shows ? photoSoon(shows, need, () => store.notify(), !moving) : null;
     }
     // The moment shown is being dragged along the timeline, or a shot is playing: names are placed less finely
     // until it rests (then finely again; exports always place them finely).
@@ -1111,10 +1120,14 @@ function MapHud({ view }: { view: View }) {
   // The Earth through geological time (D134): the moment's name, and whose maps they are.
   const space = s.world?.get('map_space', s.spaceId);
   const paleoNote = isPaleoEarth(space) ? (s.paleo ? `${formatYear(gregorian.toCivil(s.time).year)} · ${paleoLabelAt(s.paleo, ageOf(s.time))}${glacialSeaAt(ageOf(s.time)) <= -1 ? ` · the sea ${Math.round(-glacialSeaAt(ageOf(s.time)))} m lower than today` : ''} · PALEOMAP (Scotese and Wright, 2018)` : 'Loading the Earth through time…') : null;
+  // The Earth as photographed (D138): whose photographs they are.
+  const hudLook = terrainLook(space);
+  const photographed = !!hudLook?.colours && hudLook.photo && !!PALETTES[hudLook.palette].cover && terrainSourceOf(space) === 'earth' && shown(space, s.mode === 'present' ? 'export' : 'working', 'terrain');
   return (
     <div className="map-hud">
       <div className="scalebar"><div style={{ width: `${nice / kmPerPx}px` }} /><span>{nice >= 1 ? `${nice.toLocaleString()} km` : `${(nice * 1000).toFixed(0)} m`}</span></div>
       {paleoNote && <div className="scalebar space-note" data-testid="paleo-note">{paleoNote}</div>}
+      {photographed && <div className="scalebar space-note photo-credit" data-testid="photo-credit" title="The satellite look's photographs (Creative Commons Attribution 4.0): credit them where you publish pictures of them. See Data sources and credits.">{PHOTO_CREDIT}</div>}
       <div className="hud-buttons">
         <button title="Zoom in" onClick={() => s.setCamera({ ...s.camera, zoom: s.camera.zoom + 0.5 })}>+</button>
         <button title="Zoom out" onClick={() => s.setCamera({ ...s.camera, zoom: s.camera.zoom - 0.5 })}>−</button>

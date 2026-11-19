@@ -17,6 +17,11 @@ export interface ServerOptions {
    * projects folder), and where they come from ('none': only those kept are served, for the tests).
    */
   tileCacheDir?: string; tileSource?: string;
+  /**
+   * Satellite photographs close in (D138): where downloaded picture tiles are kept (default: a hidden folder in
+   * the projects folder), and where they come from ('none': only those kept are served, for the tests).
+   */
+  photoCacheDir?: string; photoSource?: string;
   /** Show the system's folder picker (the desktop app provides Electron's); returns the chosen path or null. */
   chooseFolder?: (start?: string) => Promise<string | null>;
 }
@@ -86,6 +91,15 @@ export function openInFileBrowser(path: string): void {
 /** The Terrain Tiles on AWS Open Data, "terrarium" encoding (the source of Earth's bundled heights, D94). */
 export const TERRAIN_TILES = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium';
 
+/**
+ * Sentinel-2 cloudless 2016 by EOX (CC BY 4.0), as tiles in longitude and latitude ("WGS84": level L has
+ * 2^(L+1) columns and 2^L rows of 256-pixel tiles from the north-west corner), the source of Earth's bundled
+ * photograph (D138).
+ */
+export const PHOTO_TILES = 'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless/default/WGS84';
+/** The finest level of picture tiles worth having (about 10 m a pixel, the photographs' own detail). */
+const PHOTO_MAX_LEVEL = 13;
+
 export function createAppServer(opts: ServerOptions): { server: Server; registry: ProjectRegistry } {
   const registry = new ProjectRegistry(opts.projectsDir);
   const jobs = new Map<string, ExportJob>();
@@ -100,6 +114,25 @@ export function createAppServer(opts: ServerOptions): { server: Server; registry
     try {
       const r = await fetch(`${tileSource}/${z}/${x}/${y}.png`, { signal: AbortSignal.timeout(20000) });
       if (!r.ok) return null;
+      const bytes = Buffer.from(await r.arrayBuffer());
+      mkdirSync(dirname(file), { recursive: true });
+      const part = `${file}.${process.pid}.part`;
+      writeFileSync(part, bytes);
+      renameSync(part, file);
+      return bytes;
+    } catch { return null; }
+  };
+
+  const photoDir = opts.photoCacheDir ?? join(opts.projectsDir, '.photo-tiles');
+  const photoSource = opts.photoSource ?? PHOTO_TILES;
+  /** A picture tile (JPEG): the one kept on this computer, else downloaded and kept; null when it cannot be had. */
+  const photoTile = async (level: number, row: number, col: number): Promise<Buffer | null> => {
+    const file = join(photoDir, String(level), String(row), `${col}.jpg`);
+    if (existsSync(file)) return readFileSync(file);
+    if (photoSource === 'none') return null;
+    try {
+      const r = await fetch(`${photoSource}/${level}/${row}/${col}.jpg`, { signal: AbortSignal.timeout(20000) });
+      if (!r.ok || !(r.headers.get('content-type') ?? 'image/jpeg').startsWith('image/')) return null;
       const bytes = Buffer.from(await r.arrayBuffer());
       mkdirSync(dirname(file), { recursive: true });
       const part = `${file}.${process.pid}.part`;
@@ -135,6 +168,15 @@ export function createAppServer(opts: ServerOptions): { server: Server; registry
       if (!png) throw new HttpError(404, 'The terrain tile could not be had (offline?).');
       res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'max-age=604800' });
       res.end(png);
+      return;
+    }
+    if (parts[1] === 'photo-tile' && method === 'GET') {
+      const [level, row, col] = parts.slice(2, 5).map((p) => (/^\d+$/.test(p ?? '') ? Number(p) : NaN));
+      if (!Number.isInteger(level) || !Number.isInteger(row) || !Number.isInteger(col) || level > PHOTO_MAX_LEVEL || row >= 2 ** level || col >= 2 ** (level + 1)) throw new HttpError(400, 'No such picture tile.');
+      const jpg = await photoTile(level, row, col);
+      if (!jpg) throw new HttpError(404, 'The picture tile could not be had (offline?).');
+      res.writeHead(200, { 'content-type': 'image/jpeg', 'cache-control': 'max-age=604800' });
+      res.end(jpg);
       return;
     }
     if (parts[1] === 'choose-folder' && method === 'POST') {

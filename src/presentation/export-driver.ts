@@ -35,6 +35,8 @@ import { loadEarthTerrain, EARTH_TERRAIN_KEY, type ElevationGrid } from '../terr
 import { loadEarthCover, coverNow, type TerrainCover } from '../terrain/cover.ts';
 import { detailNeed, type DetailGrid } from '../terrain/detail.ts';
 import { detailNow } from '../terrain/detail-cache.ts';
+import { photoNeed, METRES_PER_DEGREE, type PhotoRegion } from '../terrain/photo.ts';
+import { photoNow } from '../terrain/photo-cache.ts';
 import { climateOf } from '../terrain/biomes.ts';
 import { PALETTES } from '../terrain/look.ts';
 
@@ -202,23 +204,36 @@ export async function terrainFor(world: World, spaceId: string): Promise<Ground 
   return { grid: await loadEarthTerrain(), key: EARTH_TERRAIN_KEY, cover: shownLook && PALETTES[look.palette].cover ? await loadEarthCover() : null };
 }
 
+/** What a frame close in on the Earth is drawn with: finer heights (D101) and the photographs of the place (D138). */
+export interface CloseUp { heights: DetailGrid | null; photo: PhotoRegion | null }
+
 /**
- * Close in on the Earth (D101): the finer heights for a frame's view, once their tiles are in (null
- * where they are not wanted: another world, the look's detail turned off, or zoomed out).
+ * Close in on the Earth: the finer heights for a frame's view (D101) and, in the satellite look, its
+ * photographs (D138), once their tiles are in (each null where it is not wanted: another world, turned off
+ * in the look, or zoomed out; null when neither is).
  */
-export async function detailForFrame(world: World, shot: ShotSettings, frame: number, width: number, height: number, ground: Ground | null): Promise<DetailGrid | null> {
-  const space = world.get('map_space', shot.spaceId);
-  if (!ground || !terrainLook(space)?.detail || terrainSourceOf(space) !== 'earth') return null;
+export async function detailForFrame(world: World, shot: ShotSettings, frame: number, width: number, height: number, ground: Ground | null): Promise<CloseUp | null> {
+  const space = world.get('map_space', shot.spaceId), look = terrainLook(space);
+  if (!ground || !look || terrainSourceOf(space) !== 'earth') return null;
   const radius = (space?.radius_m ?? 6371008.8) / 1000;
-  const carved = sculpted(ground.grid, ground.key, stampsAt(sculptOf(space), timeAt(shot, frame)), radius);
   const view = makeView(cameraAt(shot, frame), width, height);
   const shows = viewBounds(view), around = shows && viewBounds(view, 0.25);
-  const need = around ? detailNeed(around, metresPerPixel(view, radius)) : null;
-  return need && shows ? detailNow(shows, need, carved) : null;
+  if (!shows || !around) return null;
+  let heights: DetailGrid | null = null, photo: PhotoRegion | null = null;
+  if (look.detail) {
+    const carved = sculpted(ground.grid, ground.key, stampsAt(sculptOf(space), timeAt(shot, frame)), radius);
+    const need = detailNeed(around, metresPerPixel(view, radius));
+    heights = need ? await detailNow(shows, need, carved) : null;
+  }
+  if (look.photo && look.colours && PALETTES[look.palette].cover && ground.cover?.photo && shown(space, 'export', 'terrain')) {
+    const need = photoNeed(around, metresPerPixel(view, 6371.0088) / METRES_PER_DEGREE, 300);
+    photo = need ? await photoNow(shows, need) : null;
+  }
+  return heights || photo ? { heights, photo } : null;
 }
 
 /** Render one frame of one pass into a 2D context of the given size (`detail`: from detailForFrame). */
-export function renderFrame(ctx: CanvasRenderingContext2D, renderer: MapRenderer, world: World, engine: Engine, shot: ShotSettings, frame: number, def: ExportPassDef, width: number, height: number, basemap: Basemap | null = null, ground: Ground | null = null, detail: DetailGrid | null = null): void {
+export function renderFrame(ctx: CanvasRenderingContext2D, renderer: MapRenderer, world: World, engine: Engine, shot: ShotSettings, frame: number, def: ExportPassDef, width: number, height: number, basemap: Basemap | null = null, ground: Ground | null = null, detail: CloseUp | null = null): void {
   const space = world.get('map_space', shot.spaceId);
   if (isSpaceMap(space)) { drawSpaceFrame(ctx, world, engine, shot, frame, def, width, height); return; }
   const { view, t, options, ls } = frameSetup(world, shot, frame, def, width, height, basemap, ground, detail);
@@ -235,7 +250,7 @@ export function renderFrame(ctx: CanvasRenderingContext2D, renderer: MapRenderer
  * What a frame of a pass is drawn with: its view, its moment and the renderer's options (the passes
  * the shot and the map show among the pass's own), and the shot's look. (Exports and SVG frames, D115.)
  */
-export function frameSetup(world: World, shot: ShotSettings, frame: number, def: ExportPassDef, width: number, height: number, basemap: Basemap | null = null, ground: Ground | null = null, detail: DetailGrid | null = null): { view: View; t: Instant; options: RenderOptions; ls: ReturnType<typeof lookStyles> } {
+export function frameSetup(world: World, shot: ShotSettings, frame: number, def: ExportPassDef, width: number, height: number, basemap: Basemap | null = null, ground: Ground | null = null, detail: CloseUp | null = null): { view: View; t: Instant; options: RenderOptions; ls: ReturnType<typeof lookStyles> } {
   const t = timeAt(shot, frame);
   const space = world.get('map_space', shot.spaceId);
   const view = makeView(cameraAt(shot, frame), width, height);
@@ -256,7 +271,7 @@ export function frameSetup(world: World, shot: ShotSettings, frame: number, def:
   // The land's colours in the satellite look (D100): Earth's land cover, or the planet's biomes.
   const planet = planetOf(space);
   const cover = carved && terrainShown && PALETTES[look.palette].cover ? (planet ? coverNow(carved.grid, carved.key, (space?.radius_m ?? 6371008.8) / 1000, climateOf(planet)) : ground?.cover ?? null) : null;
-  const terrain = carved ? { grid: carved.grid, key: carved.key, look: terrainShown ? look : null, seaLevel: seaLevelAt(seaPoints, t) + glacial, override: carved.touched && basemap ? { data: carved.touched, key: carved.key } : null, rivers, cover, detail } : null;
+  const terrain = carved ? { grid: carved.grid, key: carved.key, look: terrainShown ? look : null, seaLevel: seaLevelAt(seaPoints, t) + glacial, override: carved.touched && basemap ? { data: carved.touched, key: carved.key } : null, rivers, cover, detail: detail?.heights ?? null, photo: detail?.photo ?? null } : null;
   const passes = new Set<PassName>(def.passes.filter((p) => (p !== 'graticule' || (shot.graticule && on('graticule'))) && (p !== 'labels' || labels) && (p !== 'characters' || (shot.characters !== false && on('characters'))) && (p !== 'cities' || cities) && (p !== 'borders' || on('borders')) && (p !== 'features' || on('features')) && (p !== 'fields' || on('fields')) && (p !== 'terrain' || !!terrain?.look)));
   const transparent = def.name === 'all' ? shot.transparent : !def.background;
   const ls = lookStyles(shot);
@@ -344,7 +359,10 @@ export async function runExport(o: {
   // Credit lines for the data drawn in these frames (written into the manifest and the guide).
   // (Close-up tiles credited whenever the map may use them: the Earth with finer heights close in, D101.)
   const closeUp = !!terrain?.key.startsWith(EARTH_TERRAIN_KEY) && !!terrainLook(o.world.get('map_space', o.shot.spaceId))?.detail;
-  const drawn = new Set([...(basemap || terrain?.cover ? ['natural-earth'] : []), ...(terrain?.key.startsWith(EARTH_TERRAIN_KEY) ? ['terrain-tiles', 'copernicus-dem'] : []), ...(closeUp ? ['terrain-tiles-close'] : []), ...(nearbyStars ? ['hyg', 'oec'] : []), ...(isPaleoEarth(o.world.get('map_space', o.shot.spaceId)) ? ['paleomap', 'paleomap-plates'] : [])]);
+  // (And the photographs of the satellite look, D138, whenever the map is drawn with them.)
+  const exportLook = terrainLook(o.world.get('map_space', o.shot.spaceId));
+  const photographed = !!terrain?.cover?.photo && !!exportLook?.photo && exportLook.colours && !!PALETTES[exportLook.palette].cover && shown(o.world.get('map_space', o.shot.spaceId), 'export', 'terrain');
+  const drawn = new Set([...(basemap || terrain?.cover ? ['natural-earth'] : []), ...(terrain?.key.startsWith(EARTH_TERRAIN_KEY) ? ['terrain-tiles', 'copernicus-dem'] : []), ...(closeUp ? ['terrain-tiles-close'] : []), ...(photographed ? ['s2cloudless'] : []), ...(nearbyStars ? ['hyg', 'oec'] : []), ...(isPaleoEarth(o.world.get('map_space', o.shot.spaceId)) ? ['paleomap', 'paleomap-plates'] : [])]);
   const credits = drawn.size ? (await loadDatasetRecords()).filter((d) => drawn.has(d.id)).map((d) => `${d.name} ${d.version} (${d.licence}): ${d.credit}`) : [];
   const job = await Api.startExport(o.projectId, {
     credits,

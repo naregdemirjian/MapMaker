@@ -109,6 +109,23 @@
     "converted": "Each tile's heights (red × 256 + green + blue / 256 − 32,768 m) laid onto a longitude/latitude grid of the region in view, about as fine as the tiles, by bilinear interpolation (src/terrain/detail.ts)."
   },
   {
+    "id": "s2cloudless",
+    "name": "Sentinel-2 cloudless 2016 (EOX)",
+    "version": "2016; tiles in longitude and latitude, level 3 bundled, levels 4 to 13 downloaded as needed",
+    "source": "https://s2maps.eu (tiles from https://tiles.maps.eox.at)",
+    "licence": "Creative Commons Attribution 4.0 International (https://creativecommons.org/licenses/by/4.0/)",
+    "credit": "Sentinel-2 cloudless - https://s2maps.eu by EOX IT Services GmbH (Contains modified Copernicus Sentinel data 2016 & 2017)",
+    "usedFor": "The satellite look of maps of the Earth: the planet as photographed. A picture of the whole Earth ships with the app (data/terrain/earth-photo-4096.webp, about 10 km a pixel); close in, the photographs of the region in view (to about 10 m a pixel) are downloaded when needed through the local data service and kept on this computer; can be turned off per map",
+    "retrieved": "2026-11-19",
+    "converted": "The bundled picture: the 128 tiles of level 3 laid side by side and saved as WebP (scripts/fetch-earth-photo.mjs). Close in: tiles laid side by side into a picture of the region in view (src/terrain/photo-cache.ts). Colours unchanged; relief shading and the coast of the moment are drawn over them.",
+    "sources": [
+      {
+        "file": "level 3 tiles (128 JPEG files, in row and column order)",
+        "sha256": "3883584d075693a185f5b25c0df0927a925b00412c4e1302e022b0979a12e339"
+      }
+    ]
+  },
+  {
     "id": "copernicus-dem",
     "name": "Copernicus DEM GLO-90",
     "version": "GLO-90 (2021 release), smallest overview of each tile",

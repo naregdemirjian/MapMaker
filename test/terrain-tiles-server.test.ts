@@ -48,3 +48,44 @@ test('terrain tiles: downloaded once and kept, then served without the network; 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('picture tiles (D138): downloaded once and kept, then served without the network; bad requests refused', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mapmaker-photo-'));
+  try {
+    const asked: string[] = [];
+    const upstream = createServer((req, res) => {
+      asked.push(req.url ?? '');
+      if (req.url === '/13/1872/8299.jpg') { res.writeHead(200, { 'content-type': 'image/jpeg' }); res.end(Buffer.from('not really a jpeg')); }
+      else if (req.url === '/5/3/9.jpg') { res.writeHead(200, { 'content-type': 'text/html' }); res.end('<html>an error page</html>'); }
+      else { res.writeHead(404); res.end(); }
+    });
+    const upPort = await listen(upstream);
+    const cache = join(dir, 'photos');
+    const { server, registry } = createAppServer({ projectsDir: join(dir, 'projects'), staticDir: dir, appVersion: 'test', photoCacheDir: cache, photoSource: `http://127.0.0.1:${upPort}`, tileSource: 'none' });
+    const port = await listen(server);
+    const get = (path: string) => fetch(`http://127.0.0.1:${port}${path}`);
+    try {
+      // Level, row, column: Paris at the finest level.
+      const first = await get('/api/photo-tile/13/1872/8299');
+      assert.equal(first.status, 200);
+      assert.equal(first.headers.get('content-type'), 'image/jpeg');
+      assert.equal(Buffer.from(await first.arrayBuffer()).toString(), 'not really a jpeg');
+      assert.equal(readFileSync(join(cache, '13', '1872', '8299.jpg')).toString(), 'not really a jpeg', 'kept on this computer');
+      // Something that is not a picture is not kept as one.
+      assert.equal((await get('/api/photo-tile/5/3/9')).status, 404);
+      assert.ok(!existsSync(join(cache, '5', '3', '9.jpg')));
+      await close(upstream);
+      assert.equal((await get('/api/photo-tile/13/1872/8299')).status, 200, 'the kept tile, with the internet gone');
+      assert.equal(asked.filter((u) => u === '/13/1872/8299.jpg').length, 1, 'fetched once');
+      assert.equal((await get('/api/photo-tile/8/1/1')).status, 404);
+      // No such tile: a level too fine, a row or a column beyond the last (2^L rows, 2^(L+1) columns), not numbers.
+      for (const bad of ['/api/photo-tile/14/0/0', '/api/photo-tile/8/256/0', '/api/photo-tile/8/0/512', '/api/photo-tile/8/x/1', '/api/photo-tile/8/1/..%2F..']) assert.equal((await get(bad)).status, 400, bad);
+      assert.equal((await get('/api/photo-tile/8/255/511')).status, 404, 'the last tile of a level exists (not to be had here)');
+    } finally {
+      registry.closeAll();
+      await close(server);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

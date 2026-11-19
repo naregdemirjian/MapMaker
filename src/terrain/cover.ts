@@ -6,9 +6,13 @@
 // the sea falls or land is sculpted out of it.
 import type { ElevationGrid } from './grid.ts';
 import { biomeColours, type Climate } from './biomes.ts';
+import { loadEarthPhoto, EARTH_PHOTO_KEY } from './photo-cache.ts';
 
-/** A world's land cover: RGBA pixels (or a decoded picture), and a name for its content. */
-export interface TerrainCover { width: number; height: number; pixels: Uint8Array | ImageBitmap; key: string }
+/**
+ * A world's land cover: RGBA pixels (or a decoded picture), and a name for its content. The Earth's comes with
+ * the picture of the whole planet as photographed (D138), drawn instead of it where the look asks for photographs.
+ */
+export interface TerrainCover { width: number; height: number; pixels: Uint8Array | ImageBitmap; key: string; photo?: { pixels: ImageBitmap; key: string } | null }
 
 export const EARTH_COVER_KEY = 'earth-cover-4096';
 let earth: Promise<TerrainCover> | null = null;
@@ -20,7 +24,8 @@ export function loadEarthCover(url = 'data/terrain/earth-cover-4096.webp'): Prom
       const res = await fetch(url);
       if (!res.ok) throw new Error("Earth's land cover could not be loaded.");
       const bitmap = await createImageBitmap(await res.blob(), { colorSpaceConversion: 'none', premultiplyAlpha: 'none' });
-      return { width: bitmap.width, height: bitmap.height, pixels: bitmap, key: EARTH_COVER_KEY };
+      const photo = await loadEarthPhoto();
+      return { width: bitmap.width, height: bitmap.height, pixels: bitmap, key: EARTH_COVER_KEY, photo: photo ? { pixels: photo, key: EARTH_PHOTO_KEY } : null };
     })();
     earth.catch(() => { earth = null; });
   }

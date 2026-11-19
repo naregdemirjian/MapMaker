@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path';
 import { inflateSync, deflateSync } from 'node:zlib';
 import assert from 'node:assert/strict';
 import { tileXY, tileLonLat, TILE } from '../src/terrain/detail.ts';
+import { photoTileDegrees, PHOTO_TILE } from '../src/terrain/photo.ts';
 
 export type LL = [number, number];
 export type Pt = [number, number];
@@ -39,6 +40,29 @@ export function writeTerrainTiles(projects: string, z: number, box: [number, num
     const dir = join(projects, '.terrain-tiles', String(z), String(x));
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, `${y}.png`), encodePng(TILE, TILE, rgb));
+    n++;
+  }
+  return n;
+}
+
+/**
+ * Picture tiles of the colours `f(lon, lat)` (red, green, blue) at a level over a box [west, south, east, north],
+ * kept where the data service looks for them (D138: the tests' service serves only kept tiles; PNG files under
+ * the tiles' names, which the browser reads by their content). Returns how many.
+ */
+export function writePhotoTiles(projects: string, level: number, box: [number, number, number, number], f: (lon: number, lat: number) => [number, number, number]): number {
+  const d = photoTileDegrees(level), cols = 2 ** (level + 1);
+  const c0 = Math.floor((box[0] + 180) / d), c1 = Math.floor((box[2] + 180) / d), r0 = Math.floor((90 - box[3]) / d), r1 = Math.floor((90 - box[1]) / d);
+  let n = 0;
+  for (let c = c0; c <= c1; c++) for (let r = r0; r <= r1; r++) {
+    const rgb = new Uint8Array(PHOTO_TILE * PHOTO_TILE * 3);
+    for (let py = 0; py < PHOTO_TILE; py++) for (let px = 0; px < PHOTO_TILE; px++) {
+      const colour = f(c * d - 180 + ((px + 0.5) / PHOTO_TILE) * d, 90 - r * d - ((py + 0.5) / PHOTO_TILE) * d);
+      rgb.set(colour, (py * PHOTO_TILE + px) * 3);
+    }
+    const dir = join(projects, '.photo-tiles', String(level), String(r));
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, `${((c % cols) + cols) % cols}.jpg`), encodePng(PHOTO_TILE, PHOTO_TILE, rgb));
     n++;
   }
   return n;
@@ -87,7 +111,7 @@ export class Harness {
   }
 
   async startServer(): Promise<void> {
-    const p = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', join(ROOT, 'dist', 'server.mjs'), '--port', String(this.port), '--projects', this.projects, ...(process.env.MAPMAKER_TILES_ONLINE ? [] : ['--tile-source', 'none'])], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const p = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', join(ROOT, 'dist', 'server.mjs'), '--port', String(this.port), '--projects', this.projects, ...(process.env.MAPMAKER_TILES_ONLINE ? [] : ['--tile-source', 'none', '--photo-source', 'none'])], { stdio: ['ignore', 'pipe', 'pipe'] });
     this.server = p;
     this.baseUrl = await new Promise<string>((res, rej) => {
       let out = '';

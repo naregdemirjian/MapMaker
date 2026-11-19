@@ -35,7 +35,8 @@ if (!app.requestSingleInstanceLock()) {
     return r.canceled ? null : r.filePaths[0] ?? null;
   };
   // Downloaded terrain tiles (D101) are kept with the app's own data, not among the projects.
-  const { server, registry } = createAppServer({ projectsDir, staticDir, appVersion: version, chooseFolder, tileCacheDir: join(app.getPath('userData'), 'terrain-tiles') });
+  // (And the satellite photographs' tiles, D138.)
+  const { server, registry } = createAppServer({ projectsDir, staticDir, appVersion: version, chooseFolder, tileCacheDir: join(app.getPath('userData'), 'terrain-tiles'), photoCacheDir: join(app.getPath('userData'), 'photo-tiles') });
 
   const listen = (port: number, attempts = 20): Promise<string> => new Promise((resolve, reject) => {
     const onError = (e: NodeJS.ErrnoException) => {

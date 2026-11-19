@@ -61,6 +61,52 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D138. The Earth as photographed: the satellite look from real photographs, sharp to city scale
+
+- **Asked.** The satellite maps should be very photorealistic and detailed when zoomed in, still good at the scale
+  of a city.
+- **Found.** The satellite look coloured the land by its cover (D100): right from afar, a smear of 10 km cells
+  close in; nothing man-made, no real coasts, rivers or fields.
+- **What.** The satellite look of a map of the Earth is now the planet as photographed: **Sentinel-2 cloudless
+  2016 by EOX** (https://s2maps.eu, Creative Commons Attribution 4.0, made from Copernicus Sentinel-2 photographs
+  with the clouds taken out; about 10 m a pixel).
+  - *The whole planet* ships with the app: level 3 of its tiles laid side by side, 4096 by 2048 pixels, 919 KB
+    (`data/terrain/earth-photo-4096.webp`, made by `scripts/fetch-earth-photo.mjs`), loaded with the land cover.
+  - *Close in*, once the bundled picture's pixels are more than a pixel and a half on screen, the photographs of
+    the region in view (and a quarter of the view around it, for moving the map) are fetched as tiles through the
+    local data service (`/api/photo-tile/level/row/column`), which keeps each tile it downloads (the desktop app
+    with its own data, the browser version in a hidden folder of the projects folder) and serves kept tiles with
+    no network. The level is the one whose pixels are a screen pixel or finer (a device pixel on dense screens),
+    coarser when that would take more than 300 tiles; level 13, the photographs' own detail, is the finest. The
+    tiles are laid side by side into one picture of the region (`terrain/photo-cache.ts`; the last two kept),
+    which the shader reads inside the region, fading in over its edge. A tile that cannot be had is asked for
+    again after a minute; offline with none kept, the bundled picture is drawn.
+  - *Tiles in longitude and latitude* (the source's "WGS84" set: level L has 2^(L+1) columns and 2^L rows): they
+    are laid like the app's own grids, so nothing is re-projected before the shader, which draws them in any
+    projection as it does the heights.
+- **What stays the app's own.** Land and sea are the photograph's wherever the terrain is today's. Where the sea of
+  the moment has taken land or left it (D96), and where the terrain was sculpted (D98), the colours are the land
+  cover's and the sea's by depth as before: the shader compares the coast of the moment with today's, pixel by
+  pixel. Maps of the Earth in geological time (D134) and generated planets have no photographs. Relief shading
+  lies over the photographs at half strength from afar and not at all close in (a photograph has its own light).
+  No rivers or coastline are drawn over photographs (they show their own); lakes are the photograph's.
+- **A switch per map** in Show, Terrain (satellite colours only): "The Earth as photographed", on by default; off,
+  the land cover as before. While photographs are shown the map carries their makers' credit in its corner, and
+  exports list it with their other credits (`s2cloudless` in `data/datasets.json`, shown in Data sources and
+  credits). The licence asks for that credit wherever pictures of the photographs are published.
+- **Speed.** A terrain picture is drawn once for a view and kept while the map moves (D95): the photographs add
+  two texture reads to a shader that runs once per rest. A region's picture is put together off the drawing path
+  (tiles decoded by the browser, drawn into one canvas) and uploaded once.
+- **Not done.** Photographs for generated planets (they have none: finer procedural detail is next); the
+  photographs are of 2016 whatever the date shown; the poles beyond the satellites' reach are the source's own
+  filling.
+- **Tests.** `photo.test.ts` (the tiles' layout; which tiles a view needs at each zoom, never more than allowed,
+  across the 180th meridian and at the poles; where their picture lies; when a picture covers a view; the bundled
+  picture and its record); `terrain-tiles-server.test.ts` (a picture tile downloaded once and kept, served with
+  the network gone; something that is not a picture not kept; refused requests); `e2e/workflows` 'Terrain' (the
+  picture of the whole planet and its credit on the map; the land cover with the switch off, in other colours;
+  picture tiles made by the test, magenta and green stripes, shown close in).
+
 ### D137. Looks for transitions: soft, glowing, ragged, in patches
 
 - **Asked.** As D136: clean by default, intense when wanted, simple to use without limiting what can be made.

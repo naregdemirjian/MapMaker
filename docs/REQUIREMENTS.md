@@ -299,3 +299,9 @@ the same three benchmark projects, against the build before this stage, the two 
 | Very simple to use | Tested | `e2e/workflows` 'Transition looks' (one list of looks; its live preview plays) | D137. One choice of look, with a short note and a preview of a sample change playing in it |
 | Never limiting what can be made | Tested | `e2e/workflows` 'Transition looks' (a slider makes the look the shot's own, the rest kept; the line and glow in the owner's colour; an event's own look), `e2e/render-compare` 'Looks' (an event in the Blitz look glowing behind its front, the other change not) | D137. Ragged edge, soft edge, glow behind the front, the line's colour, width and glow; style, timing and easing; any event a look of its own, here and in every shot |
 | The front line never runs along a change's own edges | Tested | `front-field` (the front's own lines across the land, never along a narrow gap or round an island not yet reached), `e2e/render-compare` 'Looks' (no line along the change's edge behind the front) | D137 |
+
+## Maps enhanced (19 November 2026)
+
+| Request | Status | Evidence | Notes |
+| --- | --- | --- | --- |
+| Satellite maps very photorealistic and detailed when zoomed in, still good at the scale of a city | Tested | `photo` (which tiles a view needs, to 10 m a pixel; the bundled picture and its record), `terrain-tiles-server` (picture tiles kept on the computer), `e2e/workflows` 'Terrain' (the planet as photographed, its credit, picture tiles shown close in) | D138. The Earth as photographed (Sentinel-2 cloudless 2016 by EOX, CC BY 4.0): the whole planet bundled; close in, the place's photographs downloaded as needed and kept. Checked by eye on Paris, New York, Tokyo, Cairo and Sydney: streets, rivers, parks and blocks. Generated planets keep their biomes (finer detail for them is next) |

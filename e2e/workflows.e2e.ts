@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { encodePNG } from '../src/export/png.ts';
 import { gregorian } from '../src/core-time/index.ts';
 import { join } from 'node:path';
-import { Harness, ROOT, blob, readPNG, pixel, hexRGB, near, compositeOver, writeTerrainTiles, type LL } from './harness.ts';
+import { Harness, ROOT, blob, readPNG, pixel, hexRGB, near, compositeOver, writeTerrainTiles, writePhotoTiles, type LL } from './harness.ts';
 
 const h = new Harness('workflows', 4395);
 const P: Record<string, LL> = {};
@@ -1896,7 +1896,7 @@ try {
     assert.equal(await steps(), before, 'every step of this one undone');
   });
 
-  await h.step('Terrain: land coloured by height and the sea by depth, with relief; the satellite look; finer heights close in; relief over the countries; hidden while working but kept in the presentation; undone', async () => {
+  await h.step('Terrain: land coloured by height and the sea by depth, with relief; the satellite look, as photographed and by land cover; finer heights and photographs close in; relief over the countries; hidden while working but kept in the presentation; undone', async () => {
     await page.getByTestId('mode-world').click();
     // The whole world: the Himalaya, the plains of India, the Atlantic and the countries drawn over it.
     await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 20, lat: 20, zoom: 0.3, rotation: 0, projection: 'equirectangular' }));
@@ -1931,7 +1931,7 @@ try {
       await fn();
       await page.getByTestId('show-dialog').getByRole('button', { name: 'Close' }).last().click();
     };
-    const terrain = () => page.evaluate(() => (window as any).__mapmaker.store.renderer.lastTerrain) as Promise<{ colours: boolean; relief: boolean; overTerritories: boolean; seaLevel: number; cover: boolean }>;
+    const terrain = () => page.evaluate(() => (window as any).__mapmaker.store.renderer.lastTerrain) as Promise<{ colours: boolean; relief: boolean; overTerritories: boolean; seaLevel: number; cover: boolean; detail: string; photo: string }>;
     await show(async () => {
       assert.equal(await page.getByTestId('show-working-terrain').count(), 0, 'no terrain row before there is terrain');
       await page.getByTestId('terrain-on').check();
@@ -1955,7 +1955,21 @@ try {
     for (let i = 0; i < 40 && !(sand[0] > sand[2] + 40 && forest[1] > forest[0] && forest[1] > forest[2]); i++) { await page.waitForTimeout(100); sand = await mean(sahara); forest = await mean(congo); }
     assert.ok(sand[0] > sand[2] + 40 && sand[0] > 150, `the desert at ${sahara} is sand (${sand.map(Math.round)})`);
     assert.ok(forest[1] > forest[0] && forest[1] > forest[2] && forest[1] < 120, `the rainforest at ${congo} is green (${forest.map(Math.round)})`);
+    // The Earth as photographed (D138): the picture of the whole planet that ships with the app, credited on the map.
+    assert.equal((await terrain()).photo, 'world');
+    assert.match(await page.getByTestId('photo-credit').innerText(), /Sentinel-2 cloudless by EOX/);
     await h.screenshot('terrain-satellite');
+    // Without the photographs: the land's colours by its cover (D100), a desert sand and a rainforest green still.
+    const photographed = [await mean(sahara), await mean(congo)];
+    await show(() => page.getByTestId('terrain-photo').uncheck());
+    await page.waitForFunction(() => !(window as any).__mapmaker.store.renderer.lastTerrain.photo);
+    assert.equal(await page.getByTestId('photo-credit').count(), 0);
+    await page.waitForTimeout(300);
+    sand = await mean(sahara); forest = await mean(congo);
+    assert.ok(sand[0] > sand[2] + 40 && sand[0] > 150, `by its cover the desert is sand (${sand.map(Math.round)})`);
+    assert.ok(forest[1] > forest[0] && forest[1] > forest[2] && forest[1] < 120, `and the rainforest green (${forest.map(Math.round)})`);
+    assert.ok(Math.max(...sand.map((v, q) => Math.abs(v - photographed[0][q]))) + Math.max(...forest.map((v, q) => Math.abs(v - photographed[1][q]))) > 6, `not the photograph's colours (${sand.map(Math.round)} and ${forest.map(Math.round)} against ${photographed.map((c) => c.map(Math.round))})`);
+    await h.screenshot('terrain-satellite-cover');
     // Close in (D101): finer heights from Terrain Tiles kept on this computer (made here: ridges about
     // 8 km apart, which the bundled 10 km grid cannot hold), turned off again for the bundled heights.
     const tiles = [6, 7, 8].reduce((n, z) => n + writeTerrainTiles(h.projects, z, [5, 46, 15, 54], (lon) => 600 + 500 * Math.sin((2 * Math.PI * lon) / 0.11)), 0);
@@ -1971,6 +1985,17 @@ try {
     await page.waitForTimeout(300);
     const coarse = await rugged();
     assert.ok(fine > 8 && fine > 2 * coarse, `the ridges show close in (spread of lightness ${fine.toFixed(1)}, and ${coarse.toFixed(1)} with the bundled heights)`);
+    // Photographs close in (D138): picture tiles kept on this computer (made here: stripes half a degree wide,
+    // magenta and green, which no photograph has), laid over the picture of the whole planet where they are.
+    const photoTiles = [7, 8, 9].reduce((n, level) => n + writePhotoTiles(h.projects, level, [6, 47, 14, 53], (lon) => (Math.floor(lon / 0.5) % 2 ? [255, 0, 255] : [0, 255, 0])), 0);
+    assert.ok(photoTiles > 100);
+    await show(() => page.getByTestId('terrain-photo').check());
+    await page.waitForFunction(() => /^photo:/.test((window as any).__mapmaker.store.renderer.lastTerrain.photo), null, { timeout: 30000 });
+    await page.waitForTimeout(300);
+    const stripeA = await mean([10.25, 50]), stripeB = await mean([10.75, 50]);
+    assert.ok(stripeA[1] > 180 && stripeA[0] < 90 && stripeA[2] < 90, `a green stripe of the tiles at 10.25 °E (${stripeA.map(Math.round)})`);
+    assert.ok(stripeB[0] > 180 && stripeB[2] > 180 && stripeB[1] < 90, `a magenta one at 10.75 °E (${stripeB.map(Math.round)})`);
+    await h.screenshot('terrain-photo-close-up');
     await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 20, lat: 20, zoom: 0.3, rotation: 0, projection: 'equirectangular' }));
     // Relief over the countries: the shading of the sea floor shows through the country drawn over the Atlantic.
     const plain = await patch(P.a, 24);
@@ -1986,9 +2011,9 @@ try {
     await page.getByTestId('mode-present').click();
     await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastTerrain.colours);
     await page.getByTestId('mode-world').click();
-    assert.deepEqual(await terrain(), { colours: false, relief: false, overTerritories: false, seaLevel: 0, cover: false, detail: '' });
+    assert.deepEqual(await terrain(), { colours: false, relief: false, overTerritories: false, seaLevel: 0, cover: false, detail: '', photo: '' });
     // Undone, step by step, to no terrain.
-    for (let i = 0; i < 5; i++) await page.getByTestId('undo').click();
+    for (let i = 0; i < 7; i++) await page.getByTestId('undo').click();
     await h.saved();
     assert.equal(await steps(), before, 'each change was one step');
     assert.equal(await page.evaluate(() => JSON.parse((window as any).__mapmaker.store.world.get('map_space', (window as any).__mapmaker.store.spaceId).settings).terrain ?? null), null);

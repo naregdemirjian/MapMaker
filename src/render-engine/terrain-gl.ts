@@ -13,6 +13,7 @@ import type { ElevationGrid } from '../terrain/grid.ts';
 import { PALETTES, rampUniform, LIGHT, type TerrainLook } from '../terrain/look.ts';
 import type { TerrainCover } from '../terrain/cover.ts';
 import type { DetailGrid } from '../terrain/detail.ts';
+import type { PhotoRegion } from '../terrain/photo.ts';
 import type { ProjectionName } from './camera.ts';
 
 /** What a picture is of: a sheet's plane, and where it lies on the picture (picture pixels). */
@@ -124,6 +125,11 @@ uniform sampler2D u_detail;
 uniform int u_useDetail;
 uniform vec4 u_detailBox;
 uniform vec2 u_detailTex;
+uniform sampler2D u_world;
+uniform int u_useWorld;
+uniform sampler2D u_photo;
+uniform int u_usePhoto;
+uniform vec4 u_photoBox;
 out vec4 outColor;
 const float PI = 3.141592653589793;
 
@@ -169,6 +175,12 @@ void main() {
   vec2 gxD = dFdx(uvD), gyD = dFdy(uvD);
   vec2 edge = 2.0 / max(u_detailTex, vec2(1.0));
   bool inD = u_useDetail == 1 && all(greaterThan(uvD, edge)) && all(lessThan(uvD, vec2(1.0) - edge));
+  // The photographs of the region in view (D138): its place on their picture, likewise.
+  float pc = ll.x + u_lonRef - (u_photoBox.x + 0.5 * u_photoBox.z);
+  pc -= 2.0 * PI * floor((pc + PI) / (2.0 * PI));
+  vec2 uvP = vec2(pc / u_photoBox.z + 0.5, (u_photoBox.y - lat) / u_photoBox.w);
+  vec2 gxP = dFdx(uvP), gyP = dFdy(uvP);
+  bool inP = u_usePhoto == 1 && all(greaterThan(uvP, vec2(0.0))) && all(lessThan(uvP, vec2(1.0)));
   vec2 su = inD ? uvD : uv, sgx = inD ? gxD : gx, sgy = inD ? gyD : gy;
   // What one pixel covers of the grid (at least a cell): slopes are measured across that much. (A
   // grid's width and height are angles: the whole planet's, or the region's.)
@@ -224,6 +236,25 @@ void main() {
   // The land's colour: from its land cover in the satellite look (D100), else by its height.
   vec3 land = u_useCover == 1 && u_mode != 0 ? textureGrad(u_cover, uv, gx, gy).rgb : rampLand(max(rel, 0.0));
   vec3 col = u_mode == 1 ? land : u_mode == 0 ? rampSea(min(rel, 0.0)) : mix(rampSea(min(rel, 0.0)), land, landA);
+  // The Earth as photographed (D138): the picture of the whole planet, and over it the photographs of the
+  // region in view where they are in (fading in over their picture's edge). Land and sea alike are the
+  // photograph's wherever the terrain is today's: not where the sea of the moment has taken land or left it
+  // (D96), nor where the terrain was sculpted (D98); there the colours above stay.
+  if (u_useWorld == 1 || inP) {
+    vec4 ph = u_useWorld == 1 ? vec4(textureGrad(u_world, uv, gx, gy).rgb, 1.0) : vec4(0.0);
+    if (inP) {
+      vec4 p = textureGrad(u_photo, uvP, gxP, gyP);
+      vec2 fade = smoothstep(vec2(0.0), vec2(0.02), min(uvP, vec2(1.0) - uvP));
+      float a = p.a * fade.x * fade.y;
+      if (p.a > 0.003) ph = vec4(mix(ph.rgb, p.rgb / p.a, a), max(ph.a, a));
+    }
+    float landToday = clamp(h / max(perPixel, 1e-3) + 0.5, 0.0, 1.0);
+    float w = ph.a * clamp((1.0 - over) * (1.0 - abs(landA - landToday)), 0.0, 1.0);
+    col = mix(col, ph.rgb, w);
+    // (A photograph has its own light and shadow: the relief over it is gentler, and none close in.)
+    float mpp = (abs(gx.y) + abs(gy.y)) * PI * R;
+    shade *= mix(1.0, 0.5 * smoothstep(60.0, 2500.0, mpp), w);
+  }
   if (u_shadeTint > 0.0) {
     float s = shade * u_shadeTint;
     col = s < 0.0 ? col * (1.0 + max(s, -0.85)) : col + (vec3(1.0) - col) * min(s * 0.6, 0.6);
@@ -231,7 +262,7 @@ void main() {
   outColor = vec4(col, 1.0);
 }`;
 
-const UNIFORMS = ['u_elev', 'u_tex', 'u_size', 'u_offset', 'u_inv', 'u_S', 'u_origin', 'u_lonRef', 'u_proj', 'u_mode', 'u_shadeTint', 'u_exag', 'u_seaRelief', 'u_light', 'u_sea', 'u_seaN', 'u_land', 'u_landN', 'u_seaLevel', 'u_mask', 'u_useMask', 'u_override', 'u_useOverride', 'u_cover', 'u_useCover', 'u_detail', 'u_useDetail', 'u_detailBox', 'u_detailTex'] as const;
+const UNIFORMS = ['u_elev', 'u_tex', 'u_size', 'u_offset', 'u_inv', 'u_S', 'u_origin', 'u_lonRef', 'u_proj', 'u_mode', 'u_shadeTint', 'u_exag', 'u_seaRelief', 'u_light', 'u_sea', 'u_seaN', 'u_land', 'u_landN', 'u_seaLevel', 'u_mask', 'u_useMask', 'u_override', 'u_useOverride', 'u_cover', 'u_useCover', 'u_detail', 'u_useDetail', 'u_detailBox', 'u_detailTex', 'u_world', 'u_useWorld', 'u_photo', 'u_usePhoto', 'u_photoBox'] as const;
 type UniformName = (typeof UNIFORMS)[number];
 
 /** The relief's exaggeration at strength 1 (slopes ten kilometres across are gentle). */
@@ -244,6 +275,9 @@ class TerrainGL {
   private covers = new WeakMap<object, WebGLTexture>();
   /** The finer grids' textures (D101), the last few: let go explicitly as the view moves on. */
   private details: Array<{ grid: DetailGrid; tex: WebGLTexture }> = [];
+  /** The Earth as photographed (D138): the whole planet's picture, and the last few regions' (let go as the view moves on). */
+  private worlds = new WeakMap<object, WebGLTexture>();
+  private photos: Array<{ key: string; tex: WebGLTexture }> = [];
   private u: Record<UniformName, WebGLUniformLocation | null>;
   readonly canvas: OffscreenCanvas;
   readonly gl: WebGL2RenderingContext;
@@ -408,8 +442,54 @@ class TerrainGL {
     gl.activeTexture(gl.TEXTURE0);
   }
 
+  /** A picture as a texture with copies halved for zoomed-out views (made smaller first when larger than the graphics card takes). */
+  private picture(source: TexImageSource, width: number, height: number, repeat: boolean): WebGLTexture {
+    const gl = this.gl;
+    const t = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    let src = source;
+    if (width > this.max || height > this.max) {
+      const k = Math.min(this.max / width, this.max / height);
+      const small = new OffscreenCanvas(Math.max(1, Math.floor(width * k)), Math.max(1, Math.floor(height * k)));
+      small.getContext('2d')!.drawImage(source as CanvasImageSource, 0, 0, small.width, small.height);
+      src = small;
+    }
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, src);
+    gl.generateMipmap(gl.TEXTURE_2D);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, repeat ? gl.REPEAT : gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    return t;
+  }
+
+  /** The picture of the whole Earth (D138), laid like the grid. */
+  private world(pixels: ImageBitmap): void {
+    const gl = this.gl;
+    gl.activeTexture(gl.TEXTURE5);
+    let t = this.worlds.get(pixels);
+    if (!t) { t = this.picture(pixels, pixels.width, pixels.height, true); this.worlds.set(pixels, t); } else gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.activeTexture(gl.TEXTURE0);
+  }
+
+  /** The photographs of a region (D138), made a texture once; older ones are deleted. */
+  private photo(p: PhotoRegion): void {
+    const gl = this.gl;
+    gl.activeTexture(gl.TEXTURE6);
+    const have = this.photos.find((q) => q.key === p.key);
+    if (have) gl.bindTexture(gl.TEXTURE_2D, have.tex);
+    else {
+      this.photos.push({ key: p.key, tex: this.picture(p.image, p.width, p.height, false) });
+      while (this.photos.length > 2) gl.deleteTexture(this.photos.shift()!.tex);
+    }
+    gl.activeTexture(gl.TEXTURE0);
+  }
+
   /** Draws a picture of the terrain (or the part of it at `offset`, `w` × `h` pixels) on the context's canvas. */
-  draw(grid: ElevationGrid, look: TerrainLook, kind: TerrainImageKind, f: TerrainFrame, offset: [number, number], w: number, h: number, sea: TerrainSea = TODAY, over: TerrainOverride | null = null, cover: TerrainCover | null = null, detail: DetailGrid | null = null): void {
+  draw(grid: ElevationGrid, look: TerrainLook, kind: TerrainImageKind, f: TerrainFrame, offset: [number, number], w: number, h: number, sea: TerrainSea = TODAY, over: TerrainOverride | null = null, cover: TerrainCover | null = null, detail: DetailGrid | null = null, photo: PhotoRegion | null = null): void {
     const gl = this.gl, u = this.u;
     if (this.canvas.width !== w || this.canvas.height !== h) { this.canvas.width = w; this.canvas.height = h; }
     gl.viewport(0, 0, w, h);
@@ -421,6 +501,12 @@ class TerrainGL {
       gl.bindTexture(gl.TEXTURE_2D, this.detailTexture(detail));
       gl.activeTexture(gl.TEXTURE0);
     }
+    // The Earth as photographed (D138): where the look asks for it, in the pictures that show colours.
+    const colours = kind === 'sea' || kind === 'land' || kind === 'both';
+    const world = colours && look.photo && cover?.photo ? cover.photo.pixels : null;
+    const region = colours && look.photo && cover?.photo && photo ? photo : null;
+    if (world) this.world(world);
+    if (region) this.photo(region);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.texture(grid));
     const { a, b, c, d, e, f: ty } = f.m, det = a * d - b * c;
@@ -456,6 +542,11 @@ class TerrainGL {
     gl.uniform1i(u.u_useDetail, detail ? 1 : 0);
     gl.uniform4f(u.u_detailBox, detail ? detail.west * rad : 0, detail ? detail.north * rad : 0, detail ? detail.width * detail.dLon * rad : 1, detail ? detail.height * detail.dLat * rad : 1);
     gl.uniform2f(u.u_detailTex, detail ? Math.min(detail.width, this.max) : 1, detail ? Math.min(detail.height, this.max) : 1);
+    gl.uniform1i(u.u_world, 5);
+    gl.uniform1i(u.u_useWorld, world ? 1 : 0);
+    gl.uniform1i(u.u_photo, 6);
+    gl.uniform1i(u.u_usePhoto, region ? 1 : 0);
+    gl.uniform4f(u.u_photoBox, region ? region.west * rad : 0, region ? region.north * rad : 0, region ? region.widthDeg * rad : 1, region ? region.heightDeg * rad : 1);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -489,28 +580,28 @@ export class TerrainPictures {
    * A picture of the terrain for a frame (null when WebGL2 is not there): all of it, or the part
    * `part` ([x, y, width, height] in picture pixels). `gridKey` names the grid's content.
    */
-  image(grid: ElevationGrid, gridKey: string, look: TerrainLook, kind: TerrainImageKind, f: TerrainFrame, part?: [number, number, number, number], sea: TerrainSea = TODAY, over: TerrainOverride | null = null, cover: TerrainCover | null = null, detail: DetailGrid | null = null): TerrainImage | null {
+  image(grid: ElevationGrid, gridKey: string, look: TerrainLook, kind: TerrainImageKind, f: TerrainFrame, part?: [number, number, number, number], sea: TerrainSea = TODAY, over: TerrainOverride | null = null, cover: TerrainCover | null = null, detail: DetailGrid | null = null, photo: PhotoRegion | null = null): TerrainImage | null {
     const W = Math.max(1, Math.round(f.width)), H = Math.max(1, Math.round(f.height));
     const x0 = Math.max(0, Math.floor(part?.[0] ?? 0)), y0 = Math.max(0, Math.floor(part?.[1] ?? 0));
     const x1 = Math.min(W, Math.ceil(part ? part[0] + part[2] : W)), y1 = Math.min(H, Math.ceil(part ? part[1] + part[3] : H));
     if (x1 <= x0 || y1 <= y0) return null;
     const w = x1 - x0, h = y1 - y0;
     const { a, b, c, d, e } = f.m;
-    const key = `${gridKey}|${JSON.stringify(look)}|${f.kind}|${f.S}|${f.ox}|${f.oy}|${f.lonRef}|${a},${b},${c},${d},${e},${f.m.f}|${W}x${H}|${x0},${y0},${w}x${h}|${sea.level}|${sea.maskKey}|${over?.key ?? ''}|${cover?.key ?? ''}|${detail?.key ?? ''}`;
+    const key = `${gridKey}|${JSON.stringify(look)}|${f.kind}|${f.S}|${f.ox}|${f.oy}|${f.lonRef}|${a},${b},${c},${d},${e},${f.m.f}|${W}x${H}|${x0},${y0},${w}x${h}|${sea.level}|${sea.maskKey}|${over?.key ?? ''}|${cover?.key ?? ''}|${detail?.key ?? ''}|${cover?.photo?.key ?? ''}|${photo?.key ?? ''}`;
     const k = this.kept.get(kind);
     if (k && k.key === key) return k.out;
     const gl = terrainGL();
     if (!gl) return null;
     let image: ImageBitmap | OffscreenCanvas;
     if (w <= gl.max && h <= gl.max) {
-      gl.draw(grid, look, kind, f, [x0, y0], w, h, sea, over, cover, detail);
+      gl.draw(grid, look, kind, f, [x0, y0], w, h, sea, over, cover, detail, photo);
       image = gl.canvas.transferToImageBitmap();
     } else {
       // Larger than the graphics card draws at once: in tiles.
       const out = new OffscreenCanvas(w, h), ctx = out.getContext('2d')!;
       for (let y = 0; y < h; y += gl.max) for (let x = 0; x < w; x += gl.max) {
         const tw = Math.min(gl.max, w - x), th = Math.min(gl.max, h - y);
-        gl.draw(grid, look, kind, f, [x0 + x, y0 + y], tw, th, sea, over, cover, detail);
+        gl.draw(grid, look, kind, f, [x0 + x, y0 + y], tw, th, sea, over, cover, detail, photo);
         ctx.drawImage(gl.canvas, x, y);
       }
       image = out;

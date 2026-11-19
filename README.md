@@ -47,8 +47,10 @@ while Map Maker is closed. Don't keep projects inside OneDrive or Dropbox while 
 - Play history in the working view, from a month to a thousand years a second.
 - Import borders from GeoJSON files: one map for each year, or a dataset that dates each shape (such as CShapes); the
   same border drawn again in another file follows the one already on the map.
-- Earth's real geography (Natural Earth land, lakes, rivers and coastlines, terrain with relief, the sea floor, a
-  satellite look, finer heights downloaded close in); planets of your own from a seed; sculpting the terrain.
+- Earth's real geography (Natural Earth land, lakes, rivers and coastlines, terrain with relief, the sea floor,
+  finer heights downloaded close in), and a satellite look that is the Earth as photographed, sharp down to the
+  streets of a city (Sentinel-2 cloudless by EOX; downloaded close in and kept on the computer); planets of your
+  own from a seed; sculpting the terrain.
 - Countries can be painted loosely over the sea and end at the coast; today's borders can be shown as a drawing guide.
 - Wars with front lines, areas, lines and points (claims, roads, battles), relationships between countries.
 - Conditions over the map: radiation, fire, smoke, floods, destruction and heatmaps, spreading over the terrain;
