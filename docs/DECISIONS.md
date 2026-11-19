@@ -61,6 +61,27 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D135. Continents slide between the maps of geological time
+
+- **Why.** With the maps of D134 blended in place, a continent moving between two maps 5 million years apart
+  faded out where it was and in where it went, rather than moving: wrong for timelapses, the point of the map.
+- **What.** How the crust moves between each map and the next older one, worked out from the PALEOMAP plate
+  model (C. R. Scotese's rotations and plate polygons v19o_r1c, CC BY 4.0, from A. T. Kocsis and C. R. Scotese's
+  PaleoMAP PaleoCoastlines data, 2023) with pygplates (`scripts/paleo-motion.py`): points every half degree on
+  today's Earth are given their plate and carried back through time by its rotations; for each pair of maps,
+  every one-degree cell gets the mean move (east and north, in tenths of a degree of arc) of the points in it
+  that exist at both ages (continents and the older sea floor; cells with none take their neighbours'). Kept
+  with the maps (format "MMP2", 1.1 MB more). Between two maps the heights are read along that motion
+  (`morph`): the crust at a place, a fraction f of the way, was f of its move from where it is in the younger
+  map and the rest from where it is in the older one, the two blended as f says; exactly each map at its own
+  moment.
+- **Checked.** Moving each map by its motion brings it closer to the next older one for 104 of the 108 pairs
+  (land differing in 3.5% of cells on average, against 5.2% unmoved); for the other four, within a few tenths of
+  a percent.
+- **Tested.** paleo: a block moving 3 degrees east is 1.5 degrees on half way and a quarter way a quarter of it,
+  whole all the way, where blending in place melts it; with the real maps, India moves steadily north between
+  50 and 45 million years ago, as large half way as at either end; the motion packed and read back.
+
 ### D134. The Earth through geological time
 
 - **Asked.** When making a map, the choice of the Earth as it really was through geological history, changing
@@ -83,8 +104,8 @@ Follows from D2. The test drives the real interface exactly as a person would.
   million years ago · Permo-Triassic Boundary") and the sea's level when lower. Shots and exports draw each
   frame's own moment; the data is credited in exports.
 - **Limits.** One-degree cells (about 110 km): no small islands or narrow straits; between two maps 5 million
-  years apart coasts and mountains change by blending, not by the plates' motion (continents seem to melt from
-  one place to the next rather than slide); the glacial seas use today's sea floor at one degree.
+  years apart coasts and mountains changed by blending, not by the plates' motion (continents seemed to melt from
+  one place to the next rather than slide; since D135 they slide); the glacial seas use today's sea floor at one degree.
 - **Tested.** paleo: maps packed and read back exactly, damaged files refused, blended half way, kept within the
   span; the real maps: 109 from 0 to 540 million years ago, today about 30% land, the Sahara and Tibet high and
   the Pacific deep, 250 million years ago one land holding more than 85% of all land (Pangaea) against today's

@@ -9,3 +9,14 @@ licensed under the Creative Commons Attribution 4.0 International License
 Changes made for Map Maker: the 1 x 1 degree grids (109 maps, 0 to 540 million years ago) resampled to
 one-degree cells (each the mean of the four grid points at its corners) and rounded to whole metres
 (scripts/paleodem-extract.py), then packed (scripts/pack-paleodem.ts).
+
+It also holds how the crust moves between those maps, worked out from the PALEOMAP plate model:
+
+  Scotese, C. R., PALEOMAP global plate model (rotation file m06c9h_3id_forPgeog_19o_r1c.rot and plate
+  polygons PALEOMAP_PlatePolygons__forPgeog_v19o.gpml), as published in Kocsis, A. T., and Scotese, C. R.
+  (2023). PaleoMAP PaleoCoastlines data, version 7.2. https://doi.org/10.5281/zenodo.7994000
+
+licensed under the Creative Commons Attribution 4.0 International License. Changes made for Map Maker:
+points every half degree on today's Earth carried back through time by their plates' rotations; for each map
+and the next older one, the mean move of the points in each one-degree cell, in tenths of a degree of arc
+(scripts/paleo-motion.py).

@@ -203,7 +203,9 @@ Map data: `data/natural-earth/ne-110m.json` and `ne-50m.json` are committed, so 
 `node scripts/fetch-natural-earth.mjs` re-downloads Natural Earth and regenerates them and `data/datasets.json`.
 The Earth through geological time (D134): `data/paleo/paleodem-1deg.bin` is made from the PALEOMAP PaleoDEMs'
 one-degree NetCDF files (https://doi.org/10.5281/zenodo.5460860) by `python3 scripts/paleodem-extract.py <folder>
-<cells.i16>` (needs h5py and numpy) and then `node scripts/pack-paleodem.ts <cells.i16> data/paleo/paleodem-1deg.bin`.
+<cells.i16>` (needs h5py and numpy), the crust's motion between them (D135) by `python3 scripts/paleo-motion.py
+<rotation file> <plate polygons> <cells.i16>.json <motion.i8>` (needs pygplates; the PALEOMAP plate model v19o_r1c from
+https://doi.org/10.5281/zenodo.7994000), and then `node scripts/pack-paleodem.ts <cells.i16> data/paleo/paleodem-1deg.bin <motion.i8>`.
 
 TypeScript runs directly under Node's type stripping: imports carry `.ts` extensions, type-only imports use
 `import type`, and enums or constructor parameter properties are not allowed.
@@ -288,12 +290,12 @@ The approved roadmap has 14 stages (0–13). Where each stands (brought up to da
 | 9 Environment and fields | Done | Conditions: field layers of radiation, fire, smoke, floods, destruction and heat, their sources rising, lasting and fading, circles and plumes, drawn by the graphics card (D102); fires, lava and floods spreading over the terrain (D103); disasters from templates in one click (D104); heatmaps from points, three thousand strikes at 4K (D105) | Raster and numerical layers from files; arrival-time fronts slowed by terrain |
 | 10 Presentation polish | Done | Routes: campaign arrows and lines that flow (D106); text boxes and callouts (D107); looks for shots (D108); TIFF sequences (D109); SVG frames (D115) | Camera paths dropped (the camera stays still, D34) |
 | 11 Space maps | Done | The 982 stars within 50 light-years in three dimensions, with their names, kinds and systems (D110); stars held by countries and factions over time, drawn as realms (D111); lanes between stars, expeditions and fleets (D112); the solar system on any date (D113); invented star maps, stars found by search (D114); the Milky Way and galaxies of one's own (D116); the large moons on the solar system map (D117); planets of other stars (D118) | Asteroids and comets; planets of stars too faint for the star catalogues |
-| Improvement pass | In progress | History played in the working view (D119); borders imported from GeoJSON maps of their years, following the borders already there (D120), or from a dataset dating each shape (D123); videos, MP4 and WebM (D121); a shot of the whole history in one click (D122); layers' opacity and border width; each layer as its own export pass (D124); names placed quickly while a shot plays (D125); borders while fronts move and where two changes meet (D126); a globe that turns, for shots (D127); a change over before its land changes hands again (D128); a date that stays still as it changes (D129); how the stars look (D130); star maps as flat charts (D131); realms across the stars as territories with fronts (D132); the solar system side by side (D133); the Earth through geological time (D134) | Faster shot playback through many changes |
+| Improvement pass | In progress | History played in the working view (D119); borders imported from GeoJSON maps of their years, following the borders already there (D120), or from a dataset dating each shape (D123); videos, MP4 and WebM (D121); a shot of the whole history in one click (D122); layers' opacity and border width; each layer as its own export pass (D124); names placed quickly while a shot plays (D125); borders while fronts move and where two changes meet (D126); a globe that turns, for shots (D127); a change over before its land changes hands again (D128); a date that stays still as it changes (D129); how the stars look (D130); star maps as flat charts (D131); realms across the stars as territories with fronts (D132); the solar system side by side (D133); the Earth through geological time (D134), its continents sliding between its maps (D135) | Faster shot playback through many changes |
 | 12–13 | Not started | | Smart brushes, branches and calendars |
 
 ## Tests
 
-All pass as of 18 November 2026 (378 unit and randomised tests in 70 files, 23 + 62 + 9 + 7 interface steps). The
+All pass as of 18 November 2026 (380 unit and randomised tests in 70 files, 23 + 62 + 9 + 7 interface steps). The
 interface tests run with the verify mode on (D57): everything the app works out from what was there before is also
 worked out afresh, and any difference stops the test.
 `sh scripts/check-all.sh` runs everything and prints ALL CHECKS PASSED only when every check passed.
@@ -320,7 +322,7 @@ worked out afresh, and any difference stops the test.
 | `test/label-style.test.ts` | 3 | Label styles: layering, clamping, text, commands with undo |
 | `test/fills.test.ts` | 3 | Video timing; fill commands with undo; the 197 flags and their credit |
 | `test/events-box.test.ts` | 2 | Current events: started and not ended, lingering, alternatives, groups, fades, limits |
-| `test/paleo.test.ts` | 5 | The Earth through geological time (D134): maps packed and read back, blended between moments; the real PALEOMAP maps (today about 30% land; 250 million years ago one land, Pangaea); the glacial sea; deep-time dates written and read; the map made and undone |
+| `test/paleo.test.ts` | 7 | The Earth through geological time (D134): maps packed and read back, blended between moments; the real PALEOMAP maps (today about 30% land; 250 million years ago one land, Pangaea); the glacial sea; deep-time dates written and read; the map made and undone. Continents sliding (D135): a block half way along its motion and whole; India moving steadily north between 50 and 45 million years ago |
 | `test/sky-look.test.ts` | 11 | Looks of star maps (D130): made whole and within bounds, every preset its own, looks by chance, colourings, kept and undone; the flat chart (D131): straight down, turned and moved; territories (D132): a lone star's disc, merging, borders half way and pushed back, changing hands, painting, speed |
 | `test/sequence.test.ts` | 7 | Screen seconds through even and eased pacing; transition settings and styles; the still camera and its reset; moving texts and the events box; export choices and sizes; an event's own time on screen, out of sync with the clock |
 | `test/workflow.test.ts` | 4 | Groups of countries (made, renamed, moved in and out, deleted keeping members); labels and pictures of many at once; many events and countries deleted at once; one undo each |

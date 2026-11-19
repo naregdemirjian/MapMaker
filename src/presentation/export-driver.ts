@@ -344,7 +344,7 @@ export async function runExport(o: {
   // Credit lines for the data drawn in these frames (written into the manifest and the guide).
   // (Close-up tiles credited whenever the map may use them: the Earth with finer heights close in, D101.)
   const closeUp = !!terrain?.key.startsWith(EARTH_TERRAIN_KEY) && !!terrainLook(o.world.get('map_space', o.shot.spaceId))?.detail;
-  const drawn = new Set([...(basemap || terrain?.cover ? ['natural-earth'] : []), ...(terrain?.key.startsWith(EARTH_TERRAIN_KEY) ? ['terrain-tiles', 'copernicus-dem'] : []), ...(closeUp ? ['terrain-tiles-close'] : []), ...(nearbyStars ? ['hyg', 'oec'] : []), ...(isPaleoEarth(o.world.get('map_space', o.shot.spaceId)) ? ['paleomap'] : [])]);
+  const drawn = new Set([...(basemap || terrain?.cover ? ['natural-earth'] : []), ...(terrain?.key.startsWith(EARTH_TERRAIN_KEY) ? ['terrain-tiles', 'copernicus-dem'] : []), ...(closeUp ? ['terrain-tiles-close'] : []), ...(nearbyStars ? ['hyg', 'oec'] : []), ...(isPaleoEarth(o.world.get('map_space', o.shot.spaceId)) ? ['paleomap', 'paleomap-plates'] : [])]);
   const credits = drawn.size ? (await loadDatasetRecords()).filter((d) => drawn.has(d.id)).map((d) => `${d.name} ${d.version} (${d.licence}): ${d.credit}`) : [];
   const job = await Api.startExport(o.projectId, {
     credits,

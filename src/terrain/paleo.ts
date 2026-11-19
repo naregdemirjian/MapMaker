@@ -4,10 +4,17 @@
 // of one degree. Between two of them the heights are blended, so that coasts and mountains change steadily
 // from one map to the next.
 //
+// Between two maps the crust moves (D135): how far each cell's crust goes from one map to the next older one,
+// worked out from the PALEOMAP plate model, and the heights are blended along that motion, so that continents
+// slide from one place to the next rather than fade from one to the other.
+//
 // File format "MMP1" (little-endian):
 //   0  "MMP1"            4  count (uint32)     8  width (uint32)     12  height (uint32)     16  metres per step (float32)
 //   20 length of the description (uint32), then the description: JSON { ages: million years ago, youngest first; labels }
 //   then a zlib stream of every map's residual planes in turn, each as a terrain file has them (grid.ts).
+// Format "MMP2", with the motion: as "MMP1" to byte 24, then the lengths of the two zlib streams (uint32 each), the
+//   description, the maps' stream, and a stream of the motion from each map to the next older one: for each pair,
+//   every cell's move east, then every cell's move north, in tenths of a degree of arc (int8), cells as in the maps.
 import { terrainPlanes, gridFromPlanes, inflateInBrowser, type ElevationGrid } from './grid.ts';
 import type { Instant } from '../core-time/index.ts';
 
@@ -17,9 +24,11 @@ export interface PaleoSet {
   /** The name of each moment ("Late Eocene"). */
   labels: string[];
   grids: ElevationGrid[];
+  /** For each map but the oldest, how its crust moves to the next older map's (D135): east then north, tenths of a degree of arc, per cell; absent: blended in place. */
+  motion?: Int8Array[];
 }
 
-export const PALEO_MAGIC = 'MMP1';
+export const PALEO_MAGIC = 'MMP1', PALEO_MAGIC_MOTION = 'MMP2';
 
 /** A set of maps as an "MMP1" file (`deflate`: a zlib compressor). */
 export function encodePaleo(p: PaleoSet, deflate: (b: Uint8Array) => Uint8Array): Uint8Array {
@@ -32,26 +41,51 @@ export function encodePaleo(p: PaleoSet, deflate: (b: Uint8Array) => Uint8Array)
     if (g.width !== g0.width || g.height !== g0.height || g.step !== g0.step) throw new Error('Every map the same size.');
     planes.set(terrainPlanes(g), i * 2 * g0.width * g0.height);
   });
-  const z = deflate(planes), out = new Uint8Array(24 + meta.length + z.length), v = new DataView(out.buffer);
-  for (let i = 0; i < 4; i++) out[i] = PALEO_MAGIC.charCodeAt(i);
-  v.setUint32(4, p.grids.length, true); v.setUint32(8, g0.width, true); v.setUint32(12, g0.height, true); v.setFloat32(16, g0.step, true);
-  v.setUint32(20, meta.length, true);
-  out.set(meta, 24); out.set(z, 24 + meta.length);
+  const z = deflate(planes), n = g0.width * g0.height;
+  const header = (magic: string, size: number) => {
+    const out = new Uint8Array(size), v = new DataView(out.buffer);
+    for (let i = 0; i < 4; i++) out[i] = magic.charCodeAt(i);
+    v.setUint32(4, p.grids.length, true); v.setUint32(8, g0.width, true); v.setUint32(12, g0.height, true); v.setFloat32(16, g0.step, true);
+    v.setUint32(20, meta.length, true);
+    return { out, v };
+  };
+  if (!p.motion) {
+    const { out } = header(PALEO_MAGIC, 24 + meta.length + z.length);
+    out.set(meta, 24); out.set(z, 24 + meta.length);
+    return out;
+  }
+  if (p.motion.length !== p.grids.length - 1 || p.motion.some((m) => m.length !== 2 * n)) throw new Error('A motion for every pair of maps.');
+  const moves = new Int8Array(p.motion.length * 2 * n);
+  p.motion.forEach((m, i) => moves.set(m, i * 2 * n));
+  const zm = deflate(new Uint8Array(moves.buffer));
+  const { out, v } = header(PALEO_MAGIC_MOTION, 32 + meta.length + z.length + zm.length);
+  v.setUint32(24, z.length, true); v.setUint32(28, zm.length, true);
+  out.set(meta, 32); out.set(z, 32 + meta.length); out.set(zm, 32 + meta.length + z.length);
   return out;
 }
 
 /** Reads an "MMP1" file (`inflate`: a zlib inflater). */
 export async function decodePaleo(bytes: Uint8Array, inflate: (z: Uint8Array) => Uint8Array | Promise<Uint8Array>): Promise<PaleoSet> {
-  if (bytes.length < 24 || String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3]) !== PALEO_MAGIC) throw new Error('Not a Map Maker file of the Earth through time.');
+  const magic = bytes.length >= 24 ? String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3]) : '';
+  if (magic !== PALEO_MAGIC && magic !== PALEO_MAGIC_MOTION) throw new Error('Not a Map Maker file of the Earth through time.');
+  const damaged = () => new Error('Damaged file of the Earth through time.');
   const v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const withMotion = magic === PALEO_MAGIC_MOTION, start = withMotion ? 32 : 24;
+  if (bytes.length < start) throw damaged();
   const count = v.getUint32(4, true), width = v.getUint32(8, true), height = v.getUint32(12, true), step = v.getFloat32(16, true), metaLength = v.getUint32(20, true);
-  if (!count || !width || !height || width * height > 1 << 24 || 24 + metaLength > bytes.length) throw new Error('Damaged file of the Earth through time.');
-  const meta = JSON.parse(new TextDecoder().decode(bytes.subarray(24, 24 + metaLength))) as { ages: number[]; labels: string[] };
-  if (meta.ages?.length !== count || meta.labels?.length !== count) throw new Error('Damaged file of the Earth through time.');
-  const planes = await inflate(bytes.subarray(24 + metaLength)), n = 2 * width * height;
-  if (planes.length !== count * n) throw new Error('Damaged file of the Earth through time.');
+  const zLength = withMotion ? v.getUint32(24, true) : bytes.length - start - metaLength, zmLength = withMotion ? v.getUint32(28, true) : 0;
+  if (!count || !width || !height || width * height > 1 << 24 || start + metaLength + zLength + zmLength > bytes.length || zLength < 0) throw damaged();
+  const meta = JSON.parse(new TextDecoder().decode(bytes.subarray(start, start + metaLength))) as { ages: number[]; labels: string[] };
+  if (meta.ages?.length !== count || meta.labels?.length !== count) throw damaged();
+  const at = start + metaLength;
+  const planes = await inflate(bytes.subarray(at, at + zLength)), n = 2 * width * height;
+  if (planes.length !== count * n) throw damaged();
   const grids = Array.from({ length: count }, (_, i) => gridFromPlanes(width, height, step, planes.subarray(i * n, (i + 1) * n)));
-  return { ages: meta.ages, labels: meta.labels, grids };
+  if (!withMotion) return { ages: meta.ages, labels: meta.labels, grids };
+  const moves = await inflate(bytes.subarray(at + zLength, at + zLength + zmLength));
+  if (moves.length !== (count - 1) * n) throw damaged();
+  const all = new Int8Array(moves.buffer, moves.byteOffset, moves.length);
+  return { ages: meta.ages, labels: meta.labels, grids, motion: Array.from({ length: count - 1 }, (_, i) => all.subarray(i * n, (i + 1) * n)) };
 }
 
 /** The maps on either side of an age (million years ago, kept within the set's span) and how far between them. */
@@ -73,8 +107,9 @@ export function paleoGridAt(p: PaleoSet, age: number): { grid: ElevationGrid; ke
   if (kept) return { grid: kept, key, age: at };
   let grid = p.grids[a];
   if (f > 0 && b !== a) {
-    const A = p.grids[a].data, B = p.grids[b].data, out = new Int16Array(A.length);
-    for (let k = 0; k < A.length; k++) out[k] = Math.round(A[k] + (B[k] - A[k]) * f);
+    const A = p.grids[a].data, B = p.grids[b].data, out = new Int16Array(A.length), m = p.motion?.[a];
+    if (m) morph(p.grids[a], A, B, m, f, out);
+    else for (let k = 0; k < A.length; k++) out[k] = Math.round(A[k] + (B[k] - A[k]) * f);
     grid = { ...p.grids[a], data: out };
   }
   let m = blends.get(p);
@@ -84,6 +119,29 @@ export function paleoGridAt(p: PaleoSet, age: number): { grid: ElevationGrid; ke
   return { grid, key, age: at };
 }
 const blends = new WeakMap<PaleoSet, Map<string, ElevationGrid>>();
+
+/**
+ * The heights a fraction f of the way from map A to the next older map B, along the crust's motion (D135):
+ * the crust at a place then was f of its move away from where it is in A, and the rest of its move from where
+ * it is in B (each read between the four nearest cells); the two blended as f says. At f 0: A; at 1: B.
+ */
+function morph(g: ElevationGrid, A: Int16Array, B: Int16Array, m: Int8Array, f: number, out: Int16Array): void {
+  const W = g.width, H = g.height, n = W * H, sx = W / 360, sy = H / 180;
+  const read = (G: Int16Array, lon: number, lat: number) => {
+    const x = (lon + 180) * sx - 0.5, y = Math.max(0, Math.min(H - 1, (90 - lat) * sy - 0.5));
+    const x0 = Math.floor(x), y0 = Math.floor(y), tx = x - x0, ty = y - y0, y1 = Math.min(H - 1, y0 + 1);
+    const c0 = ((x0 % W) + W) % W, c1 = (c0 + 1) % W, r0 = y0 * W, r1 = y1 * W;
+    return (G[r0 + c0] * (1 - tx) + G[r0 + c1] * tx) * (1 - ty) + (G[r1 + c0] * (1 - tx) + G[r1 + c1] * tx) * ty;
+  };
+  for (let j = 0; j < H; j++) {
+    const lat = 90 - (j + 0.5) / sy, cos = Math.max(0.05, Math.cos((lat * Math.PI) / 180));
+    for (let i = 0; i < W; i++) {
+      const k = j * W + i, lon = -180 + (i + 0.5) / sx, east = m[k] / 10 / cos, north = m[n + k] / 10;
+      const ha = read(A, lon - f * east, lat - f * north), hb = read(B, lon + (1 - f) * east, lat + (1 - f) * north);
+      out[k] = Math.round(ha + (hb - ha) * f);
+    }
+  }
+}
 
 /**
  * The name of the time of an age ("Late Eocene"): the nearest map's, except over the last 2.58 million years,

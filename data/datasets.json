@@ -162,5 +162,15 @@
     "credit": "Earth through geological time: PALEOMAP PaleoDEMs, C. R. Scotese and N. Wright (2018), PALEOMAP Project, CC BY 4.0; resampled.",
     "usedFor": "The Earth's land and sea floor at 109 moments from today back 540 million years, on maps of the Earth through geological time",
     "retrieved": "2026-11-19"
+  },
+  {
+    "id": "paleomap-plates",
+    "name": "PALEOMAP plate model (rotations and plate polygons v19o_r1c)",
+    "version": "v19o_r1c, in PaleoMAP PaleoCoastlines data v7.2 (2023)",
+    "source": "https://doi.org/10.5281/zenodo.7994000 (C. R. Scotese; A. T. Kocsis and C. R. Scotese); the crust's motion between the PaleoDEMs worked out from it (scripts/paleo-motion.py, with pygplates)",
+    "licence": "CC BY 4.0",
+    "credit": "Plate motions: PALEOMAP plate model v19o_r1c, C. R. Scotese, from A. T. Kocsis and C. R. Scotese's PaleoMAP PaleoCoastlines data (2023), CC BY 4.0.",
+    "usedFor": "How the continents move between the PaleoDEMs' moments on maps of the Earth through geological time",
+    "retrieved": "2026-11-19"
   }
 ]

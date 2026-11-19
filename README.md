@@ -52,8 +52,9 @@ while Map Maker is closed. Don't keep projects inside OneDrive or Dropbox while 
 - Conditions over the map: radiation, fire, smoke, floods, destruction and heatmaps, spreading over the terrain;
   disasters (strikes, earthquakes, eruptions, impacts) in one click.
 - The Earth through geological time: its continents, seas and mountains as they were from 540 million years ago to
-  today (the PALEOMAP maps of C. R. Scotese and N. Wright), changing steadily between them, with the seas of the last
-  ice age; dates that far back written as how long ago they were ("250 million years ago").
+  today (the PALEOMAP maps of C. R. Scotese and N. Wright), the continents sliding between them along the plates'
+  motion, with the seas of the last ice age; dates that far back written as how long ago they were ("250 million
+  years ago").
 - Space maps: the stars within 50 light-years with their known planets, the solar system on any date, the Milky Way,
   invented stars and galaxies; star systems held by countries and factions, drawn as territories with borders and
   fronts where realms at war meet, and lanes between them. How the stars look is yours to choose: colours, shapes,

@@ -140,3 +140,45 @@ test('a map of the Earth through geological time: made in one step (undone), its
   world.applyDiffs(invertDiffs(r.diffs));
   assert.equal(world.get('map_space', r.result), undefined);
 });
+
+test('between two maps the crust slides along its motion (D135): a block moving 3 degrees east is 1.5 degrees on half way, whole all the way', async () => {
+  const W = 360, H = 180, n = W * H;
+  const block = (x0: number) => ({ width: W, height: H, step: 1, data: Int16Array.from({ length: n }, (_, k) => { const i = k % W, j = (k - i) / W; return i >= x0 && i < x0 + 20 && j >= 80 && j < 100 ? 1000 : -3000; }) });
+  // Map A (younger) has the block at 100 to 119 degrees east of -180; map B (older) 3 degrees further east: its crust moves +3 degrees.
+  const moves = new Int8Array(2 * n);
+  for (let k = 0; k < n; k++) { const j = Math.floor(k / W), lat = 90 - (j + 0.5); moves[k] = Math.round(30 * Math.cos((lat * Math.PI) / 180)); }
+  const set: PaleoSet = { ages: [0, 5], labels: ['A', 'B'], grids: [block(100), block(103)], motion: [moves] };
+  const back = await decodePaleo(encodePaleo(set, (b) => new Uint8Array(deflateSync(b))), inflate);
+  assert.equal(back.motion?.length, 1);
+  assert.deepEqual(Array.from(back.motion![0]), Array.from(moves));
+  // (Where the block's mass is: each cell's height above the sea floor, weighted by its place.)
+  const middle = (g: { data: Int16Array }) => { let sx = 0, c = 0; for (let k = 0; k < n; k++) { const w = g.data[k] + 3000; sx += w * (k % W); c += w; } return { x: sx / c, cells: c / 4000 }; };
+  const a = middle(back.grids[0]), b = middle(back.grids[1]), half = middle(paleoGridAt(back, 2.5).grid), quarter = middle(paleoGridAt(back, 1.25).grid);
+  assert.ok(Math.abs(half.x - (a.x + 1.5)) < 0.15, `half way: 1.5 degrees on (${a.x} to ${half.x})`);
+  assert.ok(Math.abs(quarter.x - (a.x + 0.75)) < 0.15, `a quarter of the way: 0.75 degrees on (${quarter.x})`);
+  assert.ok(Math.abs(half.cells - a.cells) < a.cells * 0.01, `whole as it goes (${half.cells} cells against ${a.cells})`);
+  assert.ok(Math.abs(b.x - a.x - 3) < 1e-9);
+  // Blended in place instead (no motion): half of each end, fading: the land half way is less than the block.
+  const faded = paleoGridAt({ ...back, motion: undefined }, 2.5).grid.data.reduce((c, h) => c + (h > 0 ? 1 : 0), 0);
+  const slid = paleoGridAt(back, 2.5).grid.data.reduce((c, h) => c + (h > 0 ? 1 : 0), 0);
+  assert.ok(slid >= 380 && faded < slid, `sliding keeps the block (${slid} land cells), blending in place melts it (${faded})`);
+});
+
+test('the real maps\' motion: India moves steadily north between 50 and 45 million years ago, without fading', async () => {
+  const p = await earth();
+  assert.equal(p.motion?.length, 108, 'a motion for every pair of maps');
+  // India's land between 40 and 110 degrees east, south of 35 north: its middle, read at five moments.
+  const india = (age: number) => {
+    const g = paleoGridAt(p, age).grid;
+    let sy = 0, c = 0;
+    for (let j = 0; j < g.height; j++) for (let i = 0; i < g.width; i++) {
+      const lon = -180 + i + 0.5, lat = 90 - j - 0.5;
+      if (lon > 40 && lon < 110 && lat < 35 && lat > -40 && g.data[j * g.width + i] > 0) { sy += lat; c++; }
+    }
+    return { lat: sy / c, cells: c };
+  };
+  const steps = [50, 48.75, 47.5, 46.25, 45].map(india);
+  for (let i = 1; i < steps.length; i++) assert.ok(steps[i].lat >= steps[i - 1].lat - 0.05, `moving north (${steps.map((s) => s.lat.toFixed(2)).join(', ')})`);
+  const ends = (steps[0].cells + steps[4].cells) / 2;
+  assert.ok(Math.abs(steps[2].cells - ends) < ends * 0.08, `whole half way (${steps.map((s) => s.cells).join(', ')})`);
+});
