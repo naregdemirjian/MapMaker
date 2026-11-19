@@ -5,6 +5,7 @@ import { step, heights, regimeVigor } from './step.ts';
 import { erodeCrust } from './erode.ts';
 import { paleoClimate, co2Factor } from '../climate/paleo.ts';
 import { oceanVolume, seaLevelForVolume } from '../water/sealevel.ts';
+import { packState, unpackState, paramsBesidesEvents, firstDifference, type Packed } from './resume.ts';
 
 /** The grid steps keep to, Myr; and how often the climate of the moment is worked out (D159). */
 export const GRID_MYR = 5;
@@ -20,6 +21,14 @@ export interface HistoryOptions {
   onProgress?: (doneMyr: number, totalMyr: number) => void;
   /** Keep a checkpoint (the whole state) every so many Myr, on the grid, to go on from (D154). */
   checkpointEveryMyr?: number;
+  /** Keep packed checkpoints in the history every so many Myr (D163; default 50; 0: none). */
+  resumeEveryMyr?: number;
+  /**
+   * An earlier history of the same planet (D163): if it ran with the same settings and through the same events up to
+   * some moment, this one continues from its last packed checkpoint before that moment (and takes its pictures from
+   * before it), arriving at exactly what running from the beginning would.
+   */
+  base?: TectonicHistory | null;
 }
 
 export interface TectonicHistory {
@@ -54,6 +63,15 @@ export interface TectonicHistory {
   meanTemps: Float32Array;
   /** Per picture: the sea's level on the heights' datum (km) it was drawn against (a moment rebuilt from a checkpoint is pictured the same against it). */
   frameSea: Float64Array;
+  /** Per picture, as the run itself had them (D163): the sea's level on the datum, the ice on land (m³), the sea's own rise (km). */
+  frameDatum: Float64Array;
+  frameIce: Float64Array;
+  frameRise: Float64Array;
+  /** The settings it ran with, and packed checkpoints by their moment (Myr since the beginning) (D163). */
+  params: TectonicParams;
+  resume: { times: number[]; states: Packed[] };
+  /** Where this history began (Myr since the beginning): 0, or the checkpoint an earlier history lent it (D163). */
+  resumedFrom: number;
 }
 
 /** The step that keeps every plate within a fraction of a cell per step. */
@@ -68,9 +86,7 @@ export function stepLength(state: TectonicState, maxStep: number): number {
 
 export function runHistory(params: TectonicParams, opts: HistoryOptions): TectonicHistory {
   const t0 = performance.now();
-  const state = initialState(params);
-  heights(state);
-  const n = state.mesh.n, D = opts.durationMyr;
+  const D = opts.durationMyr;
   // Steps never cross a whole multiple of GRID_MYR, whatever pictures are kept, so the history is the same
   // whichever interval the pictures are taken at (pictures are taken on that grid).
   const every = Math.max(GRID_MYR, Math.round(opts.frameEveryMyr / GRID_MYR) * GRID_MYR);
@@ -78,39 +94,80 @@ export function runHistory(params: TectonicParams, opts: HistoryOptions): Tecton
   for (let t = 0; t < D - 1e-9; t += every) frameTimes.push(t);
   frameTimes.push(D);
   const F = frameTimes.length;
+  const resumeEvery = opts.resumeEveryMyr === 0 ? 0 : Math.max(GRID_MYR, Math.round((opts.resumeEveryMyr ?? 50) / GRID_MYR) * GRID_MYR);
+  const packed: { times: number[]; states: Packed[] } = { times: [], states: [] };
+  // Going on from an earlier history (D163): the last of its packed checkpoints before the first moment its events
+  // and these differ, if it ran with the same settings over the same span and pictures.
+  let state: TectonicState | null = null, f = 1, from = 0;
+  const base = opts.base;
+  if (base && base.params && base.resume && paramsBesidesEvents(base.params) === paramsBesidesEvents(params) && base.times.length === F
+    && Math.abs(base.times[0] - D) < 1e-9 && resumeEvery) {
+    const T = Math.min(D, firstDifference(base.params.events ?? [], params.events ?? []));
+    let k = -1;
+    for (let i = 0; i < base.resume.times.length; i++) if (base.resume.times[i] <= T + 1e-9 && base.resume.times[i] > 0 && (k < 0 || base.resume.times[i] > base.resume.times[k])) k = i;
+    if (k >= 0) {
+      from = base.resume.times[k];
+      state = unpackState(base.resume.states[k], params);
+      // The events: those begun before this moment as they ran (places drawn for them kept), then these ones' later events.
+      const later = (params.events ?? []).filter((e) => e.start >= from - 1e-9).map((e) => ({ ...e, ...(e.at ? { at: [...e.at] as [number, number] } : {}) }));
+      const earlier = state.events.filter((e) => e.start < from - 1e-9);
+      const begun = state.begun.filter((_, i) => state!.events[i].start < from - 1e-9);
+      state.events = [...earlier, ...later].sort((a, b) => a.start - b.start);
+      state.begun = state.events.map((e) => (e.start < from - 1e-9 ? begun[earlier.indexOf(e)] : false));
+      for (let i = 0; i < base.resume.times.length; i++) if (base.resume.times[i] <= from + 1e-9) { packed.times.push(base.resume.times[i]); packed.states.push(base.resume.states[i]); }
+    }
+  }
+  if (!state) { state = initialState(params); heights(state); }
+  const st = state;
+  const n = st.mesh.n;
   const H = new Int16Array(F * n), Pl = new Uint8Array(F * n), K = new Uint8Array(F * n);
   const datumSea = new Float64Array(F), iceAt = new Float64Array(F), riseAt = new Float64Array(F), tempAt = new Float32Array(F);
   const record = (f: number) => {
-    recordFrame(state, f, H, Pl, K);
-    datumSea[f] = state.seaLevel; iceAt[f] = state.paleo?.ice ?? 0; riseAt[f] = seaRise(state); tempAt[f] = state.paleo?.meanK ?? 0;
+    recordFrame(st, f, H, Pl, K);
+    datumSea[f] = st.seaLevel; iceAt[f] = st.paleo?.ice ?? 0; riseAt[f] = seaRise(st); tempAt[f] = st.paleo?.meanK ?? 0;
   };
-  updatePaleo(state);
-  record(0);
-  const ckEvery = opts.checkpointEveryMyr ? Math.max(GRID_MYR, Math.round(opts.checkpointEveryMyr / GRID_MYR) * GRID_MYR) : 0;
-  const checkpoints = ckEvery ? new Map<number, TectonicState>([[0, checkpoint(state)]]) : undefined;
-  let f = 1;
-  while (state.time < D - 1e-9) {
-    advanceToGrid(state, D, opts.maxStepMyr ?? 5);
-    if (f < F && state.time >= frameTimes[f] - 1e-9) { record(f); f++; opts.onProgress?.(state.time, D); }
-    if (checkpoints && Math.abs(state.time / ckEvery - Math.round(state.time / ckEvery)) < 1e-9) checkpoints.set(Math.round(state.time), checkpoint(state));
+  if (from > 0) {
+    // The pictures up to the checkpoint are the earlier history's (as its run had them, before its sea was redrawn).
+    const b = base!;
+    for (f = 0; f < F && frameTimes[f] <= from + 1e-9; f++) {
+      const unshift = Math.round((b.frameSea[f] - b.frameDatum[f]) * 1000);
+      for (let c = 0; c < n; c++) H[f * n + c] = Math.max(-32_000, Math.min(32_000, b.heights[f * n + c] + unshift));
+      Pl.set(b.plates.subarray(f * n, (f + 1) * n), f * n); K.set(b.kinds.subarray(f * n, (f + 1) * n), f * n);
+      datumSea[f] = b.frameDatum[f]; iceAt[f] = b.frameIce[f]; riseAt[f] = b.frameRise[f]; tempAt[f] = b.meanTemps[f];
+    }
+  } else {
+    updatePaleo(st);
+    record(0);
+    if (resumeEvery) { packed.times.push(0); packed.states.push(packState(st)); }
   }
+  const ckEvery = opts.checkpointEveryMyr ? Math.max(GRID_MYR, Math.round(opts.checkpointEveryMyr / GRID_MYR) * GRID_MYR) : 0;
+  const checkpoints = ckEvery ? new Map<number, TectonicState>([[Math.round(st.time), checkpoint(st)]]) : undefined;
+  while (st.time < D - 1e-9) {
+    advanceToGrid(st, D, opts.maxStepMyr ?? 5);
+    if (f < F && st.time >= frameTimes[f] - 1e-9) { record(f); f++; opts.onProgress?.(st.time, D); }
+    const on = (k: number) => Math.abs(st.time / k - Math.round(st.time / k)) < 1e-9;
+    if (checkpoints && on(ckEvery)) checkpoints.set(Math.round(st.time), checkpoint(st));
+    if (resumeEvery && on(resumeEvery) && st.time < D - 1e-9) { packed.times.push(Math.round(st.time)); packed.states.push(packState(st)); }
+  }
+  const state2 = st;
   // The present in full.
   const age = new Float32Array(n), thickness = new Float32Array(n), tags = new Uint8Array(n), sediment = new Float32Array(n);
   let land = 0, cont = 0;
   for (let c = 0; c < n; c++) {
-    const p = state.plates[state.owner[c]], r = state.ref[c];
+    const p = state2.plates[state2.owner[c]], r = state2.ref[c];
     if (!p) continue;
     age[c] = p.age[r]; thickness[c] = p.thickness[r]; tags[c] = p.tags[r]; sediment[c] = p.sediment[r];
-    if (state.height[c] > state.seaLevel) land += state.mesh.area[c];
-    if (p.kind[r] === 2) cont += state.mesh.area[c];
+    if (state2.height[c] > state2.seaLevel) land += state2.mesh.area[c];
+    if (p.kind[r] === 2) cont += state2.mesh.area[c];
   }
-  const omega = new Float64Array(3 * state.plates.length);
-  state.plates.forEach((p, i) => omega.set(p.omega, 3 * i));
+  const omega = new Float64Array(3 * state2.plates.length);
+  state2.plates.forEach((p, i) => omega.set(p.omega, 3 * i));
   // The sea's level in each picture from the water's volume (D159): the present's ocean and ice together hold the
   // planet's water; at each moment the sea holds that less the ice on land then, over that moment's heights.
   const seaLevels = new Float32Array(F), iceVolumes = new Float32Array(F), frameSea = Float64Array.from(datumSea);
-  if (Number.isFinite(state.seaLevel) && params.oceanFraction > 0 && params.oceanFraction < 1) {
-    const area = state.mesh.area, Rkm = params.radiusKm, toKmSr = 1e-9 / (Rkm * Rkm);
+  const frameDatum = Float64Array.from(datumSea);
+  if (Number.isFinite(state2.seaLevel) && params.oceanFraction > 0 && params.oceanFraction < 1) {
+    const area = state2.mesh.area, Rkm = params.radiusKm, toKmSr = 1e-9 / (Rkm * Rkm);
     const datum = (f: number) => Float64Array.from({ length: n }, (_, c) => H[f * n + c] / 1000 + datumSea[f]);
     const present = datum(F - 1);
     const water = oceanVolume(present, area, datumSea[F - 1]) + iceAt[F - 1] * toKmSr;
@@ -127,9 +184,11 @@ export function runHistory(params: TectonicParams, opts: HistoryOptions): Tecton
   }
   return {
     times: Float64Array.from(frameTimes, (t) => D - t), heights: H, plates: Pl, kinds: K, age, thickness,
-    boundary: state.boundary.slice(), boundaryRate: state.boundaryRate.slice(), omega, plateCount: state.plates.length,
-    stats: { steps: state.steps, ...state.totals, landShare: land / (4 * Math.PI), continentalShare: cont / (4 * Math.PI), ms: performance.now() - t0 },
-    tags, sediment, discharge: state.discharge.slice(), seaLevels, iceVolumes, meanTemps: tempAt, frameSea, ...(checkpoints ? { checkpoints } : {}),
+    boundary: state2.boundary.slice(), boundaryRate: state2.boundaryRate.slice(), omega, plateCount: state2.plates.length,
+    stats: { steps: state2.steps, ...state2.totals, landShare: land / (4 * Math.PI), continentalShare: cont / (4 * Math.PI), ms: performance.now() - t0 },
+    tags, sediment, discharge: state2.discharge.slice(), seaLevels, iceVolumes, meanTemps: tempAt, frameSea,
+    frameDatum, frameIce: Float64Array.from(iceAt), frameRise: Float64Array.from(riseAt), params, resume: packed, resumedFrom: from,
+    ...(checkpoints ? { checkpoints } : {}),
   };
 }
 

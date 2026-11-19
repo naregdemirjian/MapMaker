@@ -4356,18 +4356,32 @@ try {
     await page.getByTestId('studio-card').waitFor({ timeout: 60_000 });
     assert.match(await text('studio-card'), /The ground[\s\S]*Plates[\s\S]*Climate/);
     await h.screenshot('planet-studio-why');
-    // An edit with its geological explanation: volcanic islands from a hotspot placed at a point 100 million years
-    // ago; what follows; everything worked out again; the crust it made shown as edited; before and after side by side.
+    // Edits with their geological explanation, gathered and then worked out together (D163): volcanic islands from a
+    // hotspot placed at a point 100 million years ago and a crater 30 million years ago wait in a list with what
+    // follows; nothing runs until the one re-run, which goes on from the history's checkpoint before the earlier of
+    // them; the crust they made shown as edited; before and after side by side.
     await page.getByTestId('studio-step-edit').click();
     await page.mouse.click(box.x + box.width * 0.62, box.y + box.height * 0.6);
     await page.waitForFunction(() => /Place: /.test(document.querySelector('[data-testid=studio-edit-place]')?.textContent ?? ''));
     await page.getByTestId('studio-edit-kind').selectOption('hotspot');
     await page.getByTestId('studio-edit-when').fill('100');
     await page.getByTestId('studio-edit-add').click();
-    assert.match(await text('studio-report'), /Volcanoes grow where the plate passes over the plume/);
-    assert.match(await text('studio-stale'), /changed since this history was simulated/);
-    await page.getByTestId('studio-recompute-all').click();
+    const placed = await text('studio-edit-place');
+    await page.mouse.click(box.x + box.width * 0.3, box.y + box.height * 0.4);
+    await page.waitForFunction((was) => (document.querySelector('[data-testid=studio-edit-place]')?.textContent ?? '') !== was, placed);
+    await page.getByTestId('studio-edit-kind').selectOption('crater');
+    await page.getByTestId('studio-edit-when').fill('30');
+    await page.getByTestId('studio-edit-add').click();
+    assert.equal(await page.getByTestId('studio-pending-edit').count(), 2);
+    assert.match(await text('studio-pending'), /Volcanoes grow where the plate passes over the plume[\s\S]*A basin with a raised rim/);
+    assert.match(await text('studio-stale'), /2 edits are waiting/);
+    assert.equal(await page.getByTestId('studio-progress').count(), 0, 'nothing is worked out before the re-run');
+    assert.match(await text('studio-rerun'), /these 2 edits/);
+    await page.getByTestId('studio-rerun').click();
     await page.waitForFunction(() => !document.querySelector('[data-testid=studio-progress]') && !document.querySelector('[data-testid=studio-stale]'), null, { timeout: 180_000 });
+    const resumedAt = Number((await text('studio-resumed')).match(/went on from (\d+) million years ago/)?.[1]);
+    assert.ok(resumedAt >= 100 && resumedAt < 150, `went on from the checkpoint before the hotspot (${resumedAt} Ma)`);
+    assert.equal(await page.getByTestId('studio-pending').count(), 0);
     await page.getByTestId('studio-step-explore').click();
     await page.getByTestId('studio-layer').selectOption('provenance');
     await drawn('provenance:');

@@ -5,13 +5,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
-import { definitionFromPreset, definitionProblems, PRESETS, type PlanetDefinition, type PresetId, type GeoEventKind } from '../../planet/model/definition.ts';
+import { definitionFromPreset, definitionProblems, PRESETS, type PlanetDefinition, type PresetId, type GeoEventKind, type GeoEvent } from '../../planet/model/definition.ts';
 import { derive, type Derived } from '../../planet/model/physics.ts';
 import { planetPipeline, simParams } from '../planet-engine.ts';
 import { colourLayer } from '../planet-colors.ts';
 import { simOf } from '../../world-model/world-settings.ts';
 import { gregorian, PRESENT_YEAR } from '../../core-time/index.ts';
-import type { LayerId as EngineLayer } from '../../planet/pipeline/stages.ts';
+import type { LayerId as EngineLayer, ProductData } from '../../planet/pipeline/stages.ts';
 import { explain, cellAt, type Explanation } from '../../planet/explain.ts';
 import { meshAt } from '../../planet/mesh/icosphere.ts';
 import { climateSnapshot, historyClimateDiffers } from '../../planet/model/definition.ts';
@@ -130,9 +130,19 @@ export function PlanetStudio() {
   const [place, setPlace] = useState<[number, number] | null>(null);
   const [editKind, setEditKind] = useState<EditKind>('hotspot');
   const [editWhen, setEditWhen] = useState(60);
-  const [report, setReport] = useState<string[] | null>(null);
   const [previous, setPrevious] = useState<{ def: PlanetDefinition; key: string } | null>(null);
   const [compare, setCompare] = useState(false);
+  // How far back (Ma) the last re-run went on from an earlier history's checkpoint (D163), or null.
+  const [resumed, setResumed] = useState<number | null>(null);
+  // Edits waiting to be worked out: events placed since the history shown was simulated, and those taken away.
+  const pending = useMemo(() => {
+    if (!run) return { added: [] as GeoEvent[], changed: [] as GeoEvent[], removed: [] as GeoEvent[], count: 0 };
+    const had = new Map(run.def.history.events.map((e) => [e.id, e])), has = new Set(def.history.events.map((e) => e.id));
+    const added = def.history.events.filter((e) => !had.has(e.id));
+    const changed = def.history.events.filter((e) => had.has(e.id) && JSON.stringify(had.get(e.id)) !== JSON.stringify(e));
+    const removed = run.def.history.events.filter((e) => !has.has(e.id));
+    return { added, changed, removed, count: added.length + changed.length + removed.length };
+  }, [run, def]);
   const close = () => { abort.current?.abort(); s.set({ dialog: null, studioSpaceId: null }); };
   const patch = (f: (d: PlanetDefinition) => void) => setDef((d) => { const n = structuredClone(d); f(n); n.preset = 'custom'; return n; });
   const choosePreset = (id: PresetId) => { setDef(definitionFromPreset(id, def.seed)); setFocus(`preset:${id}`); };
@@ -142,15 +152,19 @@ export function PlanetStudio() {
     const ac = new AbortController();
     abort.current = ac;
     setProgress(0);
-    setReport(null); setCard(null);
+    setCard(null);
     // The history keeps the climate settings it is simulated with (D161): later changes to the air or orbit then
     // recompute today's climate, water and life at once and leave the history until it is re-run with them.
     const d0: PlanetDefinition = { ...from, history: { ...from.history, climate: climateSnapshot(from) } };
     if (JSON.stringify(d0) !== JSON.stringify(def)) setDef(d0);
-    const params = simParams(d0);
+    const params = simParams(d0), pipe = planetPipeline();
     try {
-      const r = await planetPipeline().product('tectonics', d0, params, { signal: ac.signal, onProgress: (d, t) => setProgress(d / Math.max(1, t)) });
+      // The history shown so far, if it is still at hand, to go on from where the changes begin (D163): its last
+      // checkpoint before the earliest (the history itself checks that nothing else changed).
+      const base: ProductData | undefined = run ? pipe.cache.get(run.key) : undefined;
+      const r = await pipe.product('tectonics', d0, params, { signal: ac.signal, onProgress: (d, t) => setProgress(d / Math.max(1, t)), ...(base ? { hints: { base } } : {}) });
       const times = Array.from(r.data.times as Float64Array);
+      setResumed(r.cached ? null : (r.data.resumedFrom as number) > 0 ? (params.durationMyr ?? 500) - (r.data.resumedFrom as number) : null);
       if (run && run.key !== r.key) setPrevious({ def: run.def, key: run.key });
       const def = d0;
       setRun({ def, key: r.key, times, seaLevels: Array.from((r.data.seaLevels as Float32Array | undefined) ?? []), ice: Array.from((r.data.iceVolumes as Float32Array | undefined) ?? []) });
@@ -230,20 +244,15 @@ export function PlanetStudio() {
   };
 
   /** Places an edit in the history as the geological event the user chose, and says what follows (D161). */
+  /** Adds an edit to those waiting (D163): nothing is worked out until the history is re-run with all of them. */
   const addEdit = () => {
     const k = EDITS[editKind], when = Math.max(0, Math.min((def.simulation.spanMyr ?? 500) - 5, editWhen));
     patch((d) => {
       d.history.events.push({
-        id: `edit-${Date.now().toString(36)}`, kind: k.event, startMa: when, durationMyr: k.lasts(when), strength: 1,
+        id: `edit-${Date.now().toString(36)}-${d.history.events.length}`, kind: k.event, startMa: when, durationMyr: k.lasts(when), strength: 1,
         ...(k.event !== 'sea-level' && place ? { at: place } : {}), note: k.label,
       });
     });
-    setReport([
-      `${k.label} ${k.event === 'sea-level' ? '' : `at ${fmt(Math.abs(place?.[1] ?? 0), 1)}° ${(place?.[1] ?? 0) >= 0 ? 'N' : 'S'}, ${fmt(Math.abs(place?.[0] ?? 0), 1)}° ${(place?.[0] ?? 0) >= 0 ? 'E' : 'W'} `}from ${fmt(when)} million years ago.`,
-      k.follows,
-      'The history is simulated again with it (all of it, at this quality about as long as the first time), then today\'s climate, water and life on the new land.',
-      'The crust it makes is marked as edited: see the layer "Simulated or edited".',
-    ]);
   };
 
   // Playing the history: a picture every 0.4 s, round and round.
@@ -374,20 +383,31 @@ export function PlanetStudio() {
             <button className="small" data-testid="studio-add-event" onClick={() => patch((d) => { d.history.events.push({ id: `event-${Date.now().toString(36)}`, kind: 'rift', startMa: Math.min(200, (d.simulation.spanMyr ?? 500) / 2), durationMyr: 50, strength: 1 }); })}>+ Event</button>
           </>}
           {step === 'edit' && <>
-            <p className="muted">Click the planet to choose a place, then say what happened there: the engine places it in the history as the geological event that makes it, and works out what follows.</p>
+            <p className="muted">Click the planet to choose a place, then say what happened there: the engine places it in the history as the geological event that makes it. Add as many edits as you like; nothing is worked out until you re-run the history with all of them.</p>
             <div data-testid="studio-edit-place">{place ? `Place: ${fmt(Math.abs(place[1]), 1)}° ${place[1] >= 0 ? 'N' : 'S'}, ${fmt(Math.abs(place[0]), 1)}° ${place[0] >= 0 ? 'E' : 'W'}` : 'No place chosen yet.'}</div>
             <label className="studio-slider"><span>What happened</span>
               <select value={editKind} onChange={(e) => setEditKind(e.target.value as EditKind)} data-testid="studio-edit-kind">
                 {(Object.keys(EDITS) as EditKind[]).map((k) => <option key={k} value={k}>{EDITS[k].label}</option>)}
               </select></label>
             <label className="studio-slider"><span>From (million years ago)</span><input type="number" min={0} value={editWhen} onChange={(e) => setEditWhen(Math.max(0, Number(e.target.value) || 0))} data-testid="studio-edit-when" /></label>
-            <button className="primary" disabled={!run || (!place && editKind !== 'sea')} onClick={addEdit} data-testid="studio-edit-add">Place it in the history</button>
-            {report && <div className="studio-report" data-testid="studio-report">
-              <h4>What follows</h4>
-              <ul>{report.map((l) => <li key={l}>{l}</li>)}</ul>
-              <button className="primary" onClick={() => simulate()} data-testid="studio-recompute-all">Work it all out now</button>
-              <button className="small" onClick={() => setReport(null)} data-testid="studio-recompute-later">Keep the pictures as they are for now</button>
+            <button className="primary" disabled={!run || (!place && editKind !== 'sea')} onClick={addEdit} data-testid="studio-edit-add">Add this edit</button>
+            {pending.count > 0 && <div className="studio-report" data-testid="studio-pending">
+              <h4>Edits waiting to be worked out ({pending.count})</h4>
+              <ul>
+                {pending.added.map((e) => {
+                  const k = Object.values(EDITS).find((x) => x.label === e.note) ?? null;
+                  return <li key={e.id} data-testid="studio-pending-edit">
+                    <b>{e.note ?? e.kind}</b>{e.at ? ` at ${fmt(Math.abs(e.at[1]), 1)}° ${e.at[1] >= 0 ? 'N' : 'S'}, ${fmt(Math.abs(e.at[0]), 1)}° ${e.at[0] >= 0 ? 'E' : 'W'}` : ''}, from {fmt(e.startMa)} million years ago. {k?.follows}
+                    {' '}<button className="small" onClick={() => patch((d) => { d.history.events = d.history.events.filter((x) => x.id !== e.id); })} title="Take this edit away">×</button>
+                  </li>;
+                })}
+                {pending.changed.map((e) => <li key={e.id}>Changed: {e.note ?? e.kind}, now from {fmt(e.startMa)} million years ago.</li>)}
+                {pending.removed.map((e) => <li key={e.id}>Taken away: {e.note ?? e.kind}, from {fmt(e.startMa)} million years ago.</li>)}
+              </ul>
+              <p className="muted">Add as many as you like. Re-running goes on from the history's last checkpoint (one every 50 million years) before the earliest of them: what came before is kept as it was. Then today's climate, water and life are worked out on the new land; the crust edits make is marked (layer "Simulated or edited").</p>
+              <button className="primary" onClick={() => simulate()} disabled={progress !== null} data-testid="studio-rerun">Re-run the history with {pending.count === 1 ? 'this edit' : `these ${pending.count} edits`}</button>
             </div>}
+            {resumed !== null && progress === null && pending.count === 0 && <p className="muted" data-testid="studio-resumed">The last re-run went on from {fmt(resumed)} million years ago, the checkpoint before the earliest edit.</p>}
           </>}
           {step === 'explore' && <>
             <label className="studio-slider"><span>Layer</span>
@@ -417,9 +437,9 @@ export function PlanetStudio() {
               </div>
             )}
           </div>
-          {compare && previous && <div className="studio-picture"><canvas ref={before} width={720} height={360} className="studio-canvas" data-testid="studio-canvas-before" /><span className="muted">Before the last change</span></div>}
+          {compare && previous && <div className="studio-picture"><canvas ref={before} width={720} height={360} className="studio-canvas" data-testid="studio-canvas-before" /><span className="muted">Before the last re-run</span></div>}
         </div>
-        {previous && <label className="check"><input type="checkbox" checked={compare} onChange={(e) => setCompare(e.target.checked)} data-testid="studio-compare" /> Compare with the history before the last change</label>}
+        {previous && <label className="check"><input type="checkbox" checked={compare} onChange={(e) => setCompare(e.target.checked)} data-testid="studio-compare" /> Compare with the history before the last re-run</label>}
         <div className="studio-legend muted" data-testid="studio-legend">{legend}</div>
         <div className="studio-time">
           <button className="small" disabled={!run} onClick={() => setPlaying(!playing)} data-testid="studio-play">{playing ? 'Pause' : 'Play'}</button>
@@ -430,7 +450,7 @@ export function PlanetStudio() {
           {progress === null
             ? <button className="primary" onClick={() => simulate()} disabled={problems.length > 0} data-testid="studio-simulate">{run ? 'Simulate again' : 'Simulate the history'}</button>
             : <><progress value={progress} max={1} data-testid="studio-progress" /><button className="small" onClick={() => abort.current?.abort()} data-testid="studio-cancel">Cancel</button></>}
-          {stale && progress === null && <span className="warn-text" data-testid="studio-stale">The settings have changed since this history was simulated.</span>}
+          {stale && progress === null && <span className="warn-text" data-testid="studio-stale">{pending.count > 0 ? `${pending.count === 1 ? 'An edit is' : `${pending.count} edits are`} waiting: re-run the history (step 8) to work ${pending.count === 1 ? 'it' : 'them'} out.` : 'The settings have changed since this history was simulated.'}</span>}
           {!stale && run && historyClimateDiffers(def) && progress === null && <span className="muted" data-testid="studio-climate-note">Today's climate, water and life follow the new settings; the history's erosion and ice still follow those it was simulated with. <button className="small" onClick={() => simulate({ ...def, history: { ...def.history, climate: undefined } })} data-testid="studio-rerun-climate">Re-run the history with this climate</button></span>}
           <span className="muted">Simulated with simplified models: plate tectonics, isostasy, erosion and sediment where each moment's climate rains, ice on land and the sea's level from its water.</span>
         </div>

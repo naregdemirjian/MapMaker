@@ -8,10 +8,10 @@ export const TASKS: Record<string, (args: never, progress: Progress) => unknown>
   /** Answers at once (to check a worker is alive). */
   ping: () => 'pong',
   /** Runs a stage (or one part of it). */
-  stage: (args: { stage: string; inputs: ProductData; deps: Record<string, ProductData>; range?: [number, number] }, progress: Progress) => {
+  stage: (args: { stage: string; inputs: ProductData; deps: Record<string, ProductData>; range?: [number, number]; hints?: Record<string, ProductData> }, progress: Progress) => {
     const s = STAGES[args.stage];
     if (!s) throw new Error(`No stage called ${args.stage}`);
-    return s.run(args.inputs, args.deps, { progress }, args.range);
+    return s.run(args.inputs, args.deps, { progress, ...(args.hints ? { hints: args.hints } : {}) }, args.range);
   },
 };
 

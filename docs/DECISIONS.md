@@ -61,6 +61,30 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D163. Edits gathered and worked out together; a history goes on from its checkpoint before the earliest edit (Stage 15.1)
+
+- **Asked.** "Make the user able to do as many edits as he wants and then, when he is done with the edits, a re-run
+  history button that re-runs history based on his edits, instead of automatically doing it after each edit"; and,
+  from what D161 left undone, re-running from the checkpoint before an edit instead of the whole history.
+- **Built.** In the Planet Studio's Edit step "Add this edit" puts an edit in a list of edits waiting to be worked
+  out, each with its place, its time and what follows from it, and each can be taken away again; events added,
+  changed or taken away in step 6 are listed with them. Nothing is simulated until "Re-run the history with these N
+  edits". D161's choice between working everything out after each edit and later is gone: a change of the air, the
+  orbit or life still updates today at once, the history keeping its climate (D161).
+- **Going on from a checkpoint** (`src/planet/tectonics/resume.ts`). A history keeps a packed checkpoint every
+  50 Myr: each plate only the cells it holds, with their crust; the world's per-cell state; the random generator,
+  the events and which have begun (with the places drawn for them), the plumes, the welds and the moment's climate;
+  4.7 MB for a preview history of 500 Myr. Re-run with the earlier history at hand (passed to the stage as a hint,
+  which never enters a product's key), the history goes on from the earlier one's last checkpoint at or before the
+  first moment their events differ, takes the pictures before it from the earlier history, and arrives at exactly
+  what a run from the beginning makes: the tests compare every picture's bytes, with edits added, taken away,
+  starting exactly on a checkpoint, and an ice age that changes the past climates erosion follows. Any other change
+  (the plates, the climate the history keeps, the quality, the span) starts from the beginning. The studio uses the
+  earlier history only while it is still in the product cache, never working it out again just to go on from it.
+- **Speed** (preview, the Earth-like preset over 500 Myr: 3.8 s from the beginning, one thread): an edit 30 Ma is
+  worked out in 0.4 s, one 100 Ma in 0.7 s, one 300 Ma in 2.0 s. After a re-run the Edit step says where it went on
+  from.
+
 ### D162. The planetary engine validated and measured; its model card (Stage 14.11)
 
 - **Asked.** Stage 14.11: "the Earth-like validation report, benchmarks with budgets, profiling and optimisation

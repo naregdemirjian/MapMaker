@@ -851,6 +851,25 @@ Each stage ends with its tests, the full check, its decision record, a commit an
 - **14.11 Validation and performance.** The Earth-like validation report, benchmarks with budgets, profiling and
   optimisation (shared memory, GPU kernels if they pay), the model card in DEVELOPMENT, the decision records.
 
+**Stage 15: refinements asked for after Stage 14** (19 November 2026: what was missing or weak, and the
+inaccuracies the validation found).
+
+- **15.1 Edits gathered, one re-run.** Any number of edits wait in a list; one button re-runs the history with all
+  of them, going on from the checkpoint before the earliest. *Done when*: the resumed history equals a full run byte
+  for byte.
+- **15.2 Estimated consequences and overrides.** Each edit's report gives numbers (heights, areas, rain, sea level)
+  estimated before the re-run and measured after it; derived values (the star's light, the year, the mass, the
+  regime) can be set by hand.
+- **15.3 Climate accuracy.** Mid-latitude rain, the share of dry climates, Europe's warmth, Antarctica's cold and
+  the deserts' dry edges against the Earth's measurements.
+- **15.4 Lakes, mountains and the deep sea.** Lake volumes, the share of high ground at preview and the depth of
+  the ocean floor against the Earth's.
+- **15.5 Past moments by biome.** A history's past moments coloured by their own climates' biomes, in the studio
+  and on simulated maps.
+- **15.6 Climate changes under half a second.**
+- **15.7 The quick generator's drawing tools.** Coastlines, biomes and rivers drawn by hand; the generator's
+  colours from the climate and biome models.
+
 ---
 
 ## 13. Risks, limitations and honest boundaries
@@ -888,6 +907,7 @@ Each stage ends with its tests, the full check, its decision record, a commit an
 | 14.9 Biomes | Done (19 November 2026, D160) | Köppen-Geiger by Peel et al.'s rules with summer from each place's sunlight; Whittaker biomes by temperature and the aridity index, refined by water, ice and height; custom biome rules by priority; plant colours under other stars; a cover for the satellite look of simulated maps; the Earth-like validation (desert belts, equatorial forest, boreal and tundra) |
 | 14.10 Planet Studio II and editing | Done (19 November 2026, D161) | Eight steps; "why is this here?" cards from the crust, boundaries, circulation, water and biome; edits as geological events at a clicked place with a consequences report; automatic or manual recalculation, selective by the history keeping its climate; the provenance layer; before and after side by side. Not done: re-running from the checkpoint before an edit, estimated consequences, overrides of derived values, Mode A's drawing tools |
 | 14.11 Validation and performance | Done (19 November 2026, D162) | `docs/PLANET_VALIDATION.md` (the Earth-like validation, made by `bench/planet.bench.ts --validate`); benchmarks by stage and level with the plan's budgets (met but for climate changes, about 1 s against 0.5); the climate 34 % faster; the model card in DEVELOPMENT; starting sea floor ages scaled with plate speed |
+| 15.1 Edits gathered, one re-run | Done (19 November 2026, D163) | A list of waiting edits with what follows from each and one re-run; histories keep packed checkpoints every 50 Myr (4.7 MB at preview) and go on from the last before the earliest change, byte for byte as a full run; an edit 30 Ma in 0.4 s against 3.8 s |
 
 ## References
 

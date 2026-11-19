@@ -50,7 +50,13 @@ export class ProductCache {
   clear() { this.items.clear(); this.total = 0; }
 }
 
-export interface ProductOptions extends RunOptions {}
+export interface ProductOptions extends RunOptions {
+  /**
+   * Products a stage may start from (D163): e.g. an earlier history to go on from. They never change what the stage
+   * makes (its key does not depend on them), only how quickly.
+   */
+  hints?: Record<string, ProductData>;
+}
 
 export class Pipeline {
   readonly executor: Executor;
@@ -95,7 +101,7 @@ export class Pipeline {
     for (const d of s.deps(params)) deps[d] = (await this.product(d, def, params, { signal: opts.signal })).data;
     const inputs = s.inputs(def, params);
     if (!s.parts || !s.join) {
-      return (await this.executor.run('stage', { stage, inputs, deps }, opts)) as ProductData;
+      return (await this.executor.run('stage', { stage, inputs, deps, ...(opts.hints ? { hints: opts.hints } : {}) }, opts)) as ProductData;
     }
     const n = s.parts(inputs);
     const ranges: Array<[number, number]> = [];

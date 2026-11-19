@@ -18,7 +18,7 @@ import { cellsAt, meshAt } from '../mesh/icosphere.ts';
 import { rasterize } from '../mesh/transfer.ts';
 import { insolationCells, sunlightOf, type Sunlight } from '../climate/insolation.ts';
 import { rasterizeNearest } from '../mesh/transfer.ts';
-import { runHistory } from '../tectonics/history.ts';
+import { runHistory, type TectonicHistory } from '../tectonics/history.ts';
 import type { TectonicParams } from '../tectonics/state.ts';
 import type { FieldArray } from '../state/codec.ts';
 
@@ -43,6 +43,8 @@ export type ProductData = { [k: string]: ProductValue };
 
 export interface StageContext {
   progress(done: number, total: number): void;
+  /** Products the stage may start from (never changing what it makes): `base`, an earlier history (D163). */
+  hints?: Record<string, ProductData>;
 }
 
 export interface StageDef {
@@ -169,8 +171,10 @@ export const STAGES: Record<string, StageDef> = {
     }),
     run: (inputs, _deps, ctx) => {
       const { durationMyr, frameEveryMyr, ...params } = inputs;
+      // (Going on from an earlier history of the planet where it can: D163.)
       return runHistory(params as unknown as TectonicParams, {
         durationMyr: durationMyr as number, frameEveryMyr: frameEveryMyr as number, onProgress: (d, t) => ctx.progress(d, t),
+        base: (ctx.hints?.base as unknown as TectonicHistory | undefined) ?? null,
       }) as unknown as ProductData;
     },
   },
