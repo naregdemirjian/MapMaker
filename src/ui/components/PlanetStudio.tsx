@@ -277,7 +277,8 @@ export function PlanetStudio() {
     // The sea's level then against today's (D159), and the ice on land.
     const sea = run.seaLevels[k], ice = run.ice[k];
     const extra = t === 0 || sea === undefined ? '' : ` · sea ${Math.abs(sea) < 5 ? 'as today' : `${fmt(Math.abs(sea))} m ${sea > 0 ? 'higher' : 'lower'}`}`;
-    const iceText = ice ? ` · ice on land ${fmt(ice / 1e6, 1)} million km³` : '';
+    // (Only when there is a sheet's worth: 50,000 km³ is about the ice of Svalbard and Iceland together.)
+    const iceText = ice >= 5e4 ? ` · ice on land ${ice >= 1e6 ? `${fmt(ice / 1e6, 1)} million` : fmt(Math.round(ice / 1000) * 1000)} km³` : '';
     return (t === 0 ? 'Today' : `${fmt(t)} million years ago`) + extra + iceText;
   };
   const frames = run?.times.length ?? 0;
