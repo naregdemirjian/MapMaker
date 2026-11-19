@@ -8,10 +8,11 @@ import { type Vec3, angle, e7ToVec, lonLatToVec } from '../geo-kernel/vec.ts';
 import type { Arrangement } from '../geo-kernel/arrangement.ts';
 
 /**
- * How a change animates. border ("Advancing front"): from the border with the new owner's existing
- * land; advance ("Expansion"): a circle from an origin; fade; wipe: a straight sweep (old shots only).
+ * How a change animates. border ("Advancing front"): through the land from the border with the new owner's
+ * existing land (D136); advance ("Expansion"): from where it was drawn from; dissolve: in patches (D137); fade;
+ * wipe: a straight sweep (old shots only).
  */
-export type TransitionStyle = 'instant' | 'border' | 'advance' | 'fade' | 'wipe';
+export type TransitionStyle = 'instant' | 'border' | 'advance' | 'fade' | 'wipe' | 'dissolve';
 export interface TransitionSpec {
   style: TransitionStyle; origin?: [number, number]; easing?: 'linear' | 'smooth';
   /** An expansion's other starting points (D91): it spreads from all of them at once (pincers, encirclement). */

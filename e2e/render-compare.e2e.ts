@@ -641,6 +641,83 @@ try {
     assert.ok(r.seam <= 6, `no seam behind the front: the land along the old border is the new owner's colour (${r.seam} levels off ${r.own})`);
   });
 
+  await h.step('Looks (D137): a soft edge running ahead of the front, a glow over the land just taken, the line in the new owner\'s colour and only across the land, patches for a dissolve, an event\'s own look', async () => {
+    const W = 1100, H = 640;
+    const r = await page.evaluate(async ({ W, H }) => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const Y = (y: number, mo = 1) => B.gregorian.fromCivil({ year: y, month: mo, day: 1 });
+      // (The countries and changes of the step before: West takes Middle's west from the zigzag, East its east.)
+      const view = B.makeView({ lon: -15, lat: -15, zoom: 4, rotation: 0, projection: 'equirectangular' }, W, H);
+      const P = (lon: number, lat: number) => view.projection([lon, lat]) as [number, number];
+      const fresh = new B.MapRenderer();
+      const c = new OffscreenCanvas(W, H).getContext('2d', { willReadFrequently: true }) as OffscreenCanvasRenderingContext2D;
+      const base = { mode: 'recorded', style: 'border', angle: 0, timing: 'event', seconds: 1.5, easing: 'linear', restyleRecorded: false, front: { show: false, color: '#ffffff', width: 2.2, glow: 0 }, roughness: 0, soft: 0, wake: 0, secondsSince: () => 0 };
+      const draw = (look: Record<string, unknown> | null, t = Y(2001)) => {
+        fresh.render(c, view, s.world, s.engine, s.spaceId, t, { passes: new Set(['background', 'fills']), transparent: false, layerIds: [s.layerId], basemap: null, show: { rivers: false }, ...(look ? { transitions: { ...base, ...look } } : {}) });
+        const d = c.getImageData(0, 0, W, H).data;
+        return (x: number, y: number) => { const i = (Math.round(y) * W + Math.round(x)) * 4; return [d[i], d[i + 1], d[i + 2]]; };
+      };
+      const dist = (a: number[], b: number[]) => Math.max(...a.map((v, i) => Math.abs(v - b[i])));
+      const sum = (a: number[]) => a[0] + a[1] + a[2];
+      // Along 15 °S, from the zigzag eastward through West's change.
+      const y = P(-17, -15)[1], xa = P(-19.9, -15)[0], xb = P(-15.2, -15)[0];
+      const clean = draw(base);
+      const west = clean(...P(-23, -15)), middle = clean(...P(-17, -19.6)), east = clean(...P(-7, -15));
+      // 1. The front: where West's colour ends (clean: a sharp edge).
+      let front = xa;
+      for (let x = Math.ceil(xa); x < xb; x++) if (dist(clean(x, y), west) <= 8) front = x;
+      const mixed = (px: (x: number, y: number) => number[]) => { let n = 0; for (let x = Math.ceil(xa); x < xb; x++) { const q = px(x, y); if (dist(q, west) > 12 && dist(q, middle) > 12) n++; } return n; };
+      const soft = draw({ soft: 0.6 });
+      let softAhead = 0;
+      for (let x = front + 2; x < xb; x++) if (dist(soft(x, y), middle) > 12) softAhead = x - front;
+      // 2. The glow behind the front: brighter just behind it, the land long taken as it was.
+      const wake = draw({ wake: 0.8 });
+      const behind = sum(wake(front - 6, y)) - sum(west), longTaken = dist(wake(xa + 4, y), west);
+      // 3. The line in the new owner's colour (lightened), across the land only: none along the change's edge behind it.
+      const lined = draw({ front: { show: true, color: 'auto', width: 4, glow: 0 } });
+      const want = [192 + (255 - 192) * 0.45, 57 + (255 - 57) * 0.45, 43 + (255 - 43) * 0.45].map(Math.round);
+      let onLine = 255;
+      for (let x = front - 4; x <= front + 4; x++) onLine = Math.min(onLine, dist(lined(x, y), want));
+      const ye = P(-17, -11.12)[1];
+      let alongEdge = 255;
+      for (let x = Math.ceil(xa + 4); x < front - 12; x++) alongEdge = Math.min(alongEdge, dist(lined(x, ye), want));
+      // 4. A dissolve: patches all over the change, not a front from the zigzag.
+      const dis = draw({ restyleRecorded: true, style: 'dissolve' });
+      const [x0, y0] = P(-20, -11.5), [x1, y1] = P(-15.4, -18.5), third = (x1 - x0) / 3;
+      let n = 0, westish = 0, westFar = 0, midNear = 0;
+      for (let yy = Math.ceil(y0); yy < y1; yy += 2) for (let x = Math.ceil(x0); x < x1; x += 2) {
+        const q = dis(x, yy); n++;
+        const w = dist(q, west) <= 16, md = dist(q, middle) <= 16;
+        if (w) westish++;
+        if (w && x > x1 - third) westFar++;
+        if (md && x < x0 + third) midNear++;
+      }
+      // 5. An event's own look, in the working view: West's change glows behind its front, East's does not.
+      const ev = s.world.all('event').find((e: any) => e.name === 'West advances').id;
+      s.execute((w: any) => B.commands.setEventLook(w, ev, 'blitz'));
+      await s.flush();
+      const own = draw(null);
+      const glowing = (px: (x: number, y: number) => number[], colour: number[], from: number, to: number) => { let k = 0, all = 0; for (let yy = Math.ceil(y0) + 4; yy < y1 - 4; yy += 2) for (let x = Math.ceil(from); x < to; x += 2) { all++; if (sum(px(x, yy)) - sum(colour) > 30) k++; } return k / Math.max(1, all); };
+      const westGlow = glowing(own, west, xa, front);
+      const eastFront = (() => { let f = P(-10.2, -15)[0]; for (let x = Math.ceil(P(-10.2, -15)[0]); x > P(-15, -15)[0]; x--) if (dist(clean(x, y), east) <= 8) f = x; return f; })();
+      const eastGlow = glowing(own, east, eastFront + 3, P(-10.3, -15)[0]);
+      s.execute((w: any) => B.commands.setEventLook(w, ev, null));
+      await s.flush();
+      return { front: Math.round(front - xa), mixedClean: mixed(clean), mixedSoft: mixed(soft), softAhead, behind, longTaken, onLine, alongEdge, westish: westish / n, westFar, midNear, westGlow, eastGlow };
+    }, { W, H });
+    console.log(`    front ${r.front} px from the zigzag; mixed colours: clean ${r.mixedClean} px, soft ${r.mixedSoft} px (${r.softAhead} px ahead); glow behind +${r.behind}, long taken ${r.longTaken}; line ${r.onLine} off the owner's colour, along the edge ${r.alongEdge}; dissolve ${(r.westish * 100).toFixed(0)}% taken (${r.westFar} far, ${r.midNear} near still held); event look: West ${(r.westGlow * 100).toFixed(0)}% glowing, East ${(r.eastGlow * 100).toFixed(0)}%`);
+    assert.ok(r.front > 40, `the front has come some way (${r.front} px)`);
+    assert.ok(r.mixedClean <= 3, `clean: a sharp edge (${r.mixedClean} px of mixed colour)`);
+    assert.ok(r.mixedSoft >= 12 && r.softAhead >= 12, `soft: the new colour runs softly ahead (${r.mixedSoft} px mixed, ${r.softAhead} px ahead)`);
+    assert.ok(r.behind > 40, `a glow over the land just taken (+${r.behind})`);
+    assert.ok(r.longTaken <= 6, `the land taken long before as it was (${r.longTaken} off)`);
+    assert.ok(r.onLine <= 30, `the line in the new owner's colour, lightened (${r.onLine} off)`);
+    assert.ok(r.alongEdge > 60, `no line along the change's own edge behind the front (${r.alongEdge} off the line's colour at best)`);
+    assert.ok(r.westish > 0.15 && r.westish < 0.85, `a dissolve: part of the change taken (${(r.westish * 100).toFixed(0)}%)`);
+    assert.ok(r.westFar > 10 && r.midNear > 10, `in patches all over, not from the zigzag (${r.westFar} taken in the far third, ${r.midNear} still held in the near third)`);
+    assert.ok(r.westGlow > 0.08 && r.eastGlow < 0.01, `an event's own look: its change glows (${(r.westGlow * 100).toFixed(0)}%), the other's not (${(r.eastGlow * 100).toFixed(0)}%)`);
+  });
+
   await h.step('The globe: every place where the flat map has it, lit; nothing beyond its edge or from its far side; a pole and the 180° meridian without a seam; the flat picture kept while it turns, and the whole frame between changes', async () => {
     const W = 1100, H = 640;
     const r = await page.evaluate(({ W, H }) => {

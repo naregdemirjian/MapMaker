@@ -26,6 +26,7 @@ import type { TerritoryFill, FrontTeeth } from '../render-engine/map-renderer.ts
 export type { CharacterIcon } from '../render-engine/icons.ts';
 export { FEATURE_KINDS, DEFAULT_FEATURE_STYLE, isFeatureKind, featureStyle, type FeatureKind, type FeatureStyle } from '../render-engine/feature-style.ts';
 import { ringFromMapPoints } from '../render-engine/stroke.ts';
+import { TRANSITION_LOOKS } from '../presentation/sequence.ts';
 import { flatRadiusKm } from '../render-engine/camera.ts';
 
 export interface CommandResult<T = unknown> { label: string; diffs: RowDiff[]; result: T }
@@ -790,6 +791,20 @@ export function setEventScreenSeconds(world: World, id: string, seconds: number 
   const p = parseJSON<Record<string, unknown>>(e.presentation, {}) ?? {};
   if (seconds === null) delete p.screen; else p.screen = { seconds: Math.round(seconds * 100) / 100 };
   return run(world, seconds === null ? `"${e.name}" follows the clock` : `"${e.name}" takes ${seconds} s on screen`, (tx) => tx.patch('event', id, { presentation: JSON.stringify(p) }));
+}
+
+/**
+ * An event's own transition look (D137): its changes look this way wherever they animate (the working view and
+ * every shot), and take the look's style where a shot animates them; null: the shot's look.
+ */
+export function setEventLook(world: World, id: string, look: string | null): CommandResult {
+  const e = world.get('event', id);
+  if (!e) throw new Error('That event no longer exists.');
+  const l = look === null ? null : TRANSITION_LOOKS.find((x) => x.id === look);
+  if (look !== null && !l) throw new Error('There is no look of that name.');
+  const p = parseJSON<Record<string, unknown>>(e.presentation, {}) ?? {};
+  if (!l) delete p.look; else p.look = l.id;
+  return run(world, l ? `"${e.name}" looks ${l.name}` : `"${e.name}" looks as the shot does`, (tx) => tx.patch('event', id, { presentation: JSON.stringify(p) }));
 }
 
 export function updateEventGroup(world: World, id: string, patch: { name?: string; color?: string }): CommandResult {

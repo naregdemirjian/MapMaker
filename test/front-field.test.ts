@@ -2,7 +2,7 @@
 // reached at any moment traced as closed lines.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildFrontField, frontRings, reachedAt, type FrontField, type Rings } from '../src/render-engine/front-field.ts';
+import { buildFrontField, frontRings, frontLines, reachedAt, bandBounds, type FrontField, type Rings } from '../src/render-engine/front-field.ts';
 
 const box = (x0: number, y0: number, x1: number, y1: number): Array<[number, number]> => [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
 // A U: arms 0-4 and 12-16 degrees east from 10 S to 10 N, joined along the bottom (10 S to 6 S).
@@ -56,8 +56,50 @@ test('the land reached at a moment: closed lines round it, holding what is reach
   for (const [x, y] of [[2, 9], [8, -8], [14, 9], [15.8, -9.8], [0.2, 9.8]] as const) assert.ok(inRings(all, x, y), `(${x}, ${y}) reached at the end`);
   assert.ok(!inRings(all, 8, 5), 'the gap never');
   assert.deepEqual(frontRings(f, 0), []);
+  // The front itself: within the change, across the arm it has got to (about 4 degrees of it), not round the land reached.
+  const lines = frontLines(f, 0.2);
+  const across = lines.flat();
+  assert.ok(across.length > 3);
+  assert.ok(across.every(([x, y]) => x > -0.6 && x < 4.6 && y > -6.6 && y < 10.6), 'only in the near arm');
+  const ys = across.map(([, y]) => y);
+  assert.ok(Math.max(...ys) - Math.min(...ys) < 1.2, `one line across the arm (${Math.min(...ys)} to ${Math.max(...ys)})`);
   assert.equal(reachedAt(f, 2, 0, 0.5), true);
   assert.equal(reachedAt(f, 14, 9, 0.5), false);
+});
+
+test('the front\'s own lines (D137): across the land, up to its edges; never along a narrow gap or round an island not yet reached; patches closed', () => {
+  // Two arms 0.4 degrees apart (about six cells), joined along the top: the front goes up the near one first.
+  const rings: Rings = [[[0, 0], [2.4, 0], [2.4, 9.6], [2.8, 9.6], [2.8, 0], [4.8, 0], [4.8, 10], [0, 10]]];
+  const f = buildFrontField(rings, { kind: 'lines', lonlat: [0, 0, 2.4, 0] }, { roughness: 0, seed: 1 })!;
+  // A third of the way: the front is across the near block only (reaching a cell or two past its edge, which
+  // cuts it); along the gap (2.4 to 2.8) and on the far block there is no line.
+  for (const level of [0.2, 0.35]) {
+    const lines = frontLines(f, level);
+    assert.ok(lines.length >= 1, `a front at ${level}`);
+    for (const l of lines) for (const [x, y] of l) assert.ok(!(x > 2.4 + 2.5 * f.dlon && y > 0.5 && y < 9.3), `no line along the gap or the far block at ${level}: (${x.toFixed(2)}, ${y.toFixed(2)})`);
+    const xs = lines.flat().map(([x]) => x);
+    // Up to the near block's edges (within a cell or so of them).
+    assert.ok(Math.min(...xs) < 0.1 && Math.max(...xs) > 2.3, `edge to edge at ${level} (${Math.min(...xs).toFixed(2)} to ${Math.max(...xs).toFixed(2)})`);
+  }
+  // An island not yet reached: no line round it.
+  const isl = buildFrontField([box(0, 0, 10, 10), box(13, 3, 17, 7)], { kind: 'lines', lonlat: [0, 0, 0, 10] }, { roughness: 0, seed: 1 })!;
+  for (const l of frontLines(isl, 0.5)) for (const [x] of l) assert.ok(x < 10.2, `nothing round the island yet (${x.toFixed(2)})`);
+  // Patches: closed lines, all within the change.
+  const sc = buildFrontField([box(0, 0, 10, 10)], { kind: 'scatter' }, { roughness: 0, seed: 3 })!;
+  const patches = frontLines(sc, 0.3);
+  assert.ok(patches.some((l) => l.length > 3 && l[0][0] === l[l.length - 1][0] && l[0][1] === l[l.length - 1][1]), 'a patch inside the change: a closed line round it');
+  // Unrounded rings for soft edges: the same land, fewer points.
+  assert.ok(frontRings(f, 0.5, false).flat().length < frontRings(f, 0.5).flat().length);
+});
+
+test('where the land reached between two moments lies: a cell more all round; nothing when none is', () => {
+  const f = buildFrontField([box(0, 0, 10, 10)], { kind: 'lines', lonlat: [0, 0, 0, 10] }, { roughness: 0, seed: 1 })!;
+  const b = bandBounds(f, 0.4, 0.6)!;
+  const cell = f.dlon;
+  // About 4 to 6 degrees east (with a cell more), the whole height.
+  assert.ok(Math.abs(b[0] - 4) < 2.5 * cell && Math.abs(b[2] - 6) < 2.5 * cell, `west and east (${b[0].toFixed(2)}, ${b[2].toFixed(2)})`);
+  assert.ok(b[1] < 0.01 && b[3] > 9.99, `south and north (${b[1].toFixed(2)}, ${b[3].toFixed(2)})`);
+  assert.equal(bandBounds(f, 1, 2), null);
 });
 
 test('an island of the change is reached from the nearest land taken, after it, across the water between', () => {

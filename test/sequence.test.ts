@@ -1,7 +1,7 @@
 // Shots: screen-time arithmetic used by transitions timed in screen seconds.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { defaultShot, screenSecondsSince, timeAt, shotTransitions, DEFAULT_TRANSITIONS, shotProgress, eventScreenSeconds, cameraAt, withStillCamera, unspun, steadyLayout } from '../src/presentation/sequence.ts';
+import { defaultShot, screenSecondsSince, timeAt, shotTransitions, DEFAULT_TRANSITIONS, shotProgress, eventScreenSeconds, cameraAt, withStillCamera, unspun, steadyLayout, TRANSITION_LOOKS, withTransitionLook, eventTransitionLook } from '../src/presentation/sequence.ts';
 import { World } from '../src/world-model/world.ts';
 import * as cmd from '../src/domain/commands.ts';
 import { invertDiffs } from '../src/world-model/schema.ts';
@@ -39,6 +39,57 @@ test('transition styles: the advancing front from the border is the default; old
   assert.equal(shotTransitions(shot).style, 'border');
   assert.equal(shotTransitions({ ...shot, transitions: { ...DEFAULT_TRANSITIONS, style: 'wipe', angle: 90 } }).style, 'border', 'a shot saved with the old wipe');
   assert.equal(shotTransitions({ ...shot, transitions: { ...DEFAULT_TRANSITIONS, style: 'advance' } }).style, 'advance', 'the expansion stays');
+});
+
+test('transition looks (D137): each sets how fronts look and keeps when and how long; an event can have its own', () => {
+  const shot = defaultShot('space', cam, Y(1900), Y(2000));
+  const base = { ...shotTransitions(shot), mode: 'all' as const, timing: 'event' as const, seconds: 4 };
+  // The default is the clean look.
+  assert.equal(DEFAULT_TRANSITIONS.look, 'clean');
+  const clean = TRANSITION_LOOKS.find((l) => l.id === 'clean')!.set;
+  assert.equal(clean.roughness, DEFAULT_TRANSITIONS.roughness);
+  assert.deepEqual(clean.front, DEFAULT_TRANSITIONS.front);
+  // Every look: a name, a note, a style; settings within their ranges; ids not repeated.
+  assert.equal(new Set(TRANSITION_LOOKS.map((l) => l.id)).size, TRANSITION_LOOKS.length);
+  for (const l of TRANSITION_LOOKS) {
+    assert.ok(l.name && l.note && l.set.style, l.id);
+    for (const k of ['roughness', 'soft', 'wake'] as const) assert.ok((l.set[k] ?? 0) >= 0 && (l.set[k] ?? 0) <= 1, `${l.id} ${k}`);
+    const t = withTransitionLook(base, l.id);
+    assert.equal(t.look, l.id);
+    assert.equal(t.style, l.set.style);
+    // When and how long: kept.
+    assert.equal(t.mode, 'all'); assert.equal(t.timing, 'event'); assert.equal(t.seconds, 4);
+  }
+  // Intense: Blitz is rough, glows behind and has a wide glowing line; Minimal has no line.
+  const blitz = withTransitionLook(base, 'blitz');
+  assert.ok(blitz.roughness! > 0.3 && blitz.wake! > 0.5 && blitz.front.show && blitz.front.glow > 20);
+  assert.equal(withTransitionLook(base, 'minimal').front.show, false);
+  assert.equal(withTransitionLook(base, 'dissolve').style, 'dissolve');
+  assert.equal(withTransitionLook(base, 'nonsense'), base, 'an unknown look changes nothing');
+  // Saved settings are kept within their ranges.
+  const odd = shotTransitions({ ...shot, transitions: { ...DEFAULT_TRANSITIONS, roughness: 3, soft: -1, wake: Number.NaN } });
+  assert.deepEqual([odd.roughness, odd.soft, odd.wake], [1, 0, 0]);
+  // An older shot (none of these saved): the clean look's values.
+  const older = shotTransitions({ ...shot, transitions: { mode: 'all', style: 'border', angle: 0, timing: 'seconds', seconds: 1.5, easing: 'smooth', restyleRecorded: false, front: { show: true, color: '#ffe9a6', width: 2.2, glow: 10 } } });
+  assert.deepEqual([older.roughness, older.soft, older.wake], [0, 0, 0]);
+  // An event's own look, kept in its presentation settings beside its own time on screen.
+  const w = new World();
+  const ev = cmd.createEvent(w, { name: 'Blitz', start: Y(1940), end: Y(1941) }).result as string;
+  assert.equal(eventTransitionLook(w.get('event', ev)!.presentation), null);
+  cmd.setEventScreenSeconds(w, ev, 3);
+  const r = cmd.setEventLook(w, ev, 'blitz');
+  const pres = w.get('event', ev)!.presentation;
+  assert.equal(eventTransitionLook(pres), 'blitz');
+  assert.equal(eventScreenSeconds(pres), 3, 'its own time on screen kept');
+  assert.throws(() => cmd.setEventLook(w, ev, 'nonsense'));
+  w.applyDiffs(invertDiffs(r.diffs));
+  assert.equal(eventTransitionLook(w.get('event', ev)!.presentation), null, 'undone');
+  cmd.setEventLook(w, ev, 'ink');
+  cmd.setEventLook(w, ev, null);
+  assert.equal(eventTransitionLook(w.get('event', ev)!.presentation), null, 'the shot\'s look again');
+  assert.equal(eventScreenSeconds(w.get('event', ev)!.presentation), 3);
+  assert.equal(eventTransitionLook('{"look":"nonsense"}'), null);
+  assert.equal(eventTransitionLook('not json'), null);
 });
 
 test('still camera: framing sets one view for the whole shot; reset gives the whole map', async () => {

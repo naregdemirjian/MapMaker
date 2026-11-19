@@ -61,6 +61,45 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D137. Looks for transitions: soft, glowing, ragged, in patches
+
+- **Asked.** As D136: clean by default, intense when wanted, simple to use without limiting what can be made.
+- **What.** How a moving front looks is now a handful of settings, each from 0 to 1, with the line along it:
+  - *ragged edge* (`roughness`): the front's pace varies smoothly from place to place (the field's slowness, D136,
+    from a seeded noise), so it advances in fingers and bays; the same change always the same way;
+  - *soft edge* (`soft`): the new owner's look runs ahead of the front, fainter the farther ahead (over the land
+    the front reaches up to a quarter of the way later, in six steps, blurred); land given up to nobody is let go
+    of softly the same way; the moving border fades out as the edge gets soft;
+  - *glow behind* (`wake`): a glow over the land just taken, brightest at the front and fading over the land
+    reached before (up to a third of the way back), laid on lightening what is under it;
+  - *the line* (shown or not, colour, width, glow): its colour `auto` is the new owner's, lightened. The line and
+    the moving border are now the front itself only: traced where the front crosses the land, up to the change's
+    edges, never along them nor along land beside a narrow gap, nor round an island not yet reached
+    (`frontLines`: crossings between two cells of the change, or just past its edge beside one).
+- **Dissolve**, a style of its own: no front; the land changes hands in patches (each place at a time set by the
+  same noise), softened by the soft edge.
+- **Looks to start from** (`TRANSITION_LOOKS`): Clean (the default: a crisp front with a fine glowing line),
+  Minimal, Soft tide, Ink, Campaign, Blitz, In their colours, Dissolve and Fade. A look sets the style, the settings
+  above and the easing, and keeps when and how long; any part can then be changed.
+- **An event's own look** (`setEventLook`, kept in its presentation settings beside its own time on screen, D92):
+  its changes look that way wherever they animate, in the working view as in every shot, and take the look's style
+  and easing where a shot animates them. One battle can be a blitz in a film whose other changes are clean.
+- **Quick enough.** At 1920 by 1080 in the test browser (no graphics card), two changes under way: 6 ms a frame
+  clean, 10 to 12 ms with a soft edge or a glow, 25 ms with every effect at once. The lines a moment needs are traced
+  only in the blocks of cells whose times span it (0.1 ms a line, from 0.5); a front's lines are projected point by
+  point where nothing of them lies across the map's edge; soft masks are made at a quarter of the size and only
+  round the band they cover.
+- **Found and fixed on the way.** A picture of the same moment drawn again in another look (or with another colour
+  of line, before this) was the picture kept from before: the look is now part of what the kept picture is of.
+- **Tested.** front-field: the front's own lines across the near arm of two arms joined at the top, edge to edge,
+  never along the narrow gap or on the far arm; nothing round an island not yet reached; patches closed; where the
+  land reached between two moments lies. sequence: every look named, explained, within range, keeping when and how
+  long; Blitz intense, Minimal without a line; saved settings kept in range; an event's own look set, kept beside
+  its own time on screen, undone, cleared. render-compare: a clean edge 1 px of mixed colour against 34 px for a
+  soft one, ahead of the front; a glow just behind the front and none over the land taken long before; the line
+  exactly the owner's colour lightened and none along the change's edge; a dissolve in patches all over the change;
+  an event with the Blitz look glowing behind its front while the other change does not.
+
 ### D136. Fronts that follow the land
 
 - **Asked.** Transitions of borders are among the most important parts of the whole software: overhaul them to a

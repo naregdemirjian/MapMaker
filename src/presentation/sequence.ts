@@ -151,12 +151,12 @@ export interface ShotTransitions {
   /** recorded: each change as recorded (animated or not); all: every change animates; instant: none do. */
   mode: 'recorded' | 'all' | 'instant';
   /**
-   * Style for changes the shot animates. border ("Advancing front"): the new territory grows out of
-   * the border it shares with the country's land, or from the side facing the country's nearest land;
-   * advance ("Expansion"): a circle growing from where the drawing started (or the middle); fade.
-   * 'wipe' is no longer offered; shots saved with it show the advancing front.
+   * Style for changes the shot animates. border ("Advancing front"): the new territory is reached through the
+   * land from the border it shares with the country's land (D136), or from the side facing the country's
+   * nearest land; advance ("Expansion"): from where the drawing started (or the middle); dissolve: in patches;
+   * fade. 'wipe' is no longer offered; shots saved with it show the advancing front.
    */
-  style: 'border' | 'advance' | 'fade' | 'wipe';
+  style: 'border' | 'advance' | 'fade' | 'wipe' | 'dissolve';
   /** No longer used (the direction of the old wipe); kept so older shots load unchanged. */
   angle: number;
   /** seconds: each change takes `seconds` of screen time; event: the event's own length (instant events use seconds). */
@@ -165,20 +165,58 @@ export interface ShotTransitions {
   easing: TransitionEasing;
   /** Also give changes recorded with their own animation this style and timing. */
   restyleRecorded: boolean;
-  /** The moving front line of advancing fronts and expansions. */
+  /** The moving front line of advancing fronts and expansions; its colour 'auto': the new owner's, lightened. */
   front: { show: boolean; color: string; width: number; glow: number };
+  /** The look chosen (D137): a preset's id, or 'custom' once any part is changed by hand. */
+  look?: string;
+  /** How ragged fronts are (0: clean; 1: long fingers). */
+  roughness?: number;
+  /** The new owner's colour running softly ahead of the front (0: a sharp edge; 1: a quarter of the way). */
+  soft?: number;
+  /** A glow over the land just taken, fading behind the front (0: none; 1: a third of the way back). */
+  wake?: number;
+}
+
+/** Transition looks to start from (D137): each a style and how its fronts look; any part can then be changed. */
+export const TRANSITION_LOOKS: Array<{ id: string; name: string; note: string; set: Partial<ShotTransitions> }> = [
+  { id: 'clean', name: 'Clean', note: 'A crisp front through the land with a fine glowing line: the default.', set: { style: 'border', roughness: 0, soft: 0, wake: 0, easing: 'smooth', front: { show: true, color: '#ffe9a6', width: 2.2, glow: 10 } } },
+  { id: 'minimal', name: 'Minimal', note: 'Only the territory moving: no line, no glow.', set: { style: 'border', roughness: 0, soft: 0, wake: 0, easing: 'smooth', front: { show: false, color: '#ffe9a6', width: 2.2, glow: 10 } } },
+  { id: 'soft', name: 'Soft tide', note: 'The colour comes in softly, with a gentle glow over the land just taken.', set: { style: 'border', roughness: 0.15, soft: 0.45, wake: 0.3, easing: 'smooth', front: { show: false, color: 'auto', width: 1.6, glow: 8 } } },
+  { id: 'ink', name: 'Ink', note: 'Spreading like ink: a ragged, soft edge and no line.', set: { style: 'border', roughness: 0.65, soft: 0.6, wake: 0, easing: 'out', front: { show: false, color: 'auto', width: 1.6, glow: 6 } } },
+  { id: 'campaign', name: 'Campaign', note: 'A ragged front line of fire, the land behind it glowing as it falls.', set: { style: 'border', roughness: 0.35, soft: 0.1, wake: 0.45, easing: 'smooth', front: { show: true, color: '#ff7a45', width: 2.6, glow: 16 } } },
+  { id: 'blitz', name: 'Blitz', note: 'Fast thrusts that slow as they go, a hot white edge and a bright wake.', set: { style: 'border', roughness: 0.5, soft: 0.05, wake: 0.7, easing: 'out', front: { show: true, color: '#fff4cc', width: 3, glow: 26 } } },
+  { id: 'owner', name: 'In their colours', note: 'The front line and glow in the new owner\'s own colour.', set: { style: 'border', roughness: 0.1, soft: 0.2, wake: 0.35, easing: 'smooth', front: { show: true, color: 'auto', width: 2.4, glow: 14 } } },
+  { id: 'dissolve', name: 'Dissolve', note: 'No front: the land changes hands in soft patches.', set: { style: 'dissolve', roughness: 0, soft: 0.5, wake: 0.2, easing: 'smooth', front: { show: false, color: '#ffe9a6', width: 2.2, glow: 10 } } },
+  { id: 'fade', name: 'Fade', note: 'The new colour fades in over the old.', set: { style: 'fade', roughness: 0, soft: 0, wake: 0, easing: 'smooth', front: { show: false, color: '#ffe9a6', width: 2.2, glow: 10 } } },
+];
+
+/** A look applied to transition settings: its parts set, the rest (when, how long) kept. */
+export function withTransitionLook(t: ShotTransitions, id: string): ShotTransitions {
+  const look = TRANSITION_LOOKS.find((l) => l.id === id);
+  if (!look) return t;
+  return { ...t, ...look.set, front: { ...t.front, ...(look.set.front ?? {}) }, look: id };
 }
 
 export const DEFAULT_TRANSITIONS: ShotTransitions = {
   mode: 'recorded', style: 'border', angle: 0, timing: 'seconds', seconds: 1.5, easing: 'smooth', restyleRecorded: false,
-  front: { show: true, color: '#ffe9a6', width: 2.2, glow: 10 },
+  front: { show: true, color: '#ffe9a6', width: 2.2, glow: 10 }, look: 'clean', roughness: 0, soft: 0, wake: 0,
 };
 
 export function shotTransitions(shot: ShotSettings): ShotTransitions {
   const t = shot.transitions;
   const out = { ...DEFAULT_TRANSITIONS, ...(t ?? {}), front: { ...DEFAULT_TRANSITIONS.front, ...(t?.front ?? {}) } };
   if (out.style === 'wipe') out.style = 'border';
+  const unit = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0);
+  out.roughness = unit(out.roughness); out.soft = unit(out.soft); out.wake = unit(out.wake);
   return out;
+}
+
+/** An event's own transition look in presentations (D137): a look's id, from its presentation settings; null: the shot's. */
+export function eventTransitionLook(presentation: string | null | undefined): string | null {
+  try {
+    const v = (presentation ? (JSON.parse(presentation) as { look?: unknown } | null) : null)?.look;
+    return typeof v === 'string' && TRANSITION_LOOKS.some((l) => l.id === v) ? v : null;
+  } catch { return null; }
 }
 
 /**

@@ -48,7 +48,8 @@ export interface FrontShape {
   cells?: number;
 }
 
-const PAD = 4;
+/** Cells round the change: the land reached is carried this far beyond it, less one (room for soft edges). */
+const PAD = 8;
 
 /** A change's rings in longitude and latitude, each a list of points (closed or not). */
 export type Rings = Array<Array<[number, number]>>;
@@ -222,25 +223,78 @@ export function buildFrontField(rings: Rings, source: FrontSource, shape: FrontS
     }
     at.set(next);
   }
-  return { west: gw, north: gn, dlon, dlat, nx, ny, at, inside, travel: source.kind === 'scatter' ? 0 : tmax };
+  // (Patches have no front: as if one crossed half the change, for sizes on screen.)
+  return { west: gw, north: gn, dlon, dlat, nx, ny, at, inside, travel: source.kind === 'scatter' ? (size * cells) / 2 : tmax };
 }
 
 /**
- * The land reached by `level` (0 to 1): closed lines in longitude and latitude (the corners rounded), each
- * going clockwise (the land it holds on its right, as d3 draws spherical polygons). Filled together by the
- * even-odd rule they are the land reached, holes included.
+ * The land reached by `level` (0 to 1): closed lines in longitude and latitude (the corners rounded unless
+ * `smooth` is false), each going clockwise (the land it holds on its right, as d3 draws spherical polygons).
+ * Filled together by the even-odd rule they are the land reached, holes included.
  */
-export function frontRings(f: FrontField, level: number): Rings {
-  if (!(level > 0)) return [];
-  const { nx, ny, at, west, north, dlon, dlat } = f;
+export function frontRings(f: FrontField, level: number, smooth = true): Rings {
+  const out: Rings = [];
+  const { loops, point } = trace(f, level);
+  for (const ids of loops) {
+    let line = ids.map(point);
+    if (smooth) line = chaikin(line);
+    // Clockwise (the land on the right as d3 wants it).
+    let area = 0;
+    for (let q = 0, p = line.length - 1; q < line.length; p = q++) area += line[p][0] * line[q][1] - line[q][0] * line[p][1];
+    if (area > 0) line = line.reverse();
+    line.push([line[0][0], line[0][1]]);
+    out.push(line);
+  }
+  return out;
+}
+
+/**
+ * The front itself at `level`: the lines between the land reached and the land not yet reached, within the change
+ * only (open lines, in longitude and latitude; closed where a line is all within it, round a patch or a hole).
+ * Drawn as the front's line and its glows, they run up to the change's edges, never along them, and never along
+ * the land beside a narrow gap.
+ */
+export function frontLines(f: FrontField, level: number): Rings {
+  const out: Rings = [];
+  const { loops, point, keep } = trace(f, level);
+  for (const ids of loops) {
+    const k = ids.map(keep);
+    if (k.every(Boolean)) { const line = chaikin(ids.map(point)); line.push([line[0][0], line[0][1]]); out.push(line); continue; }
+    // Runs of the line within the change, starting after a piece outside it (the loop read round once).
+    const s0 = k.indexOf(false);
+    let run: number[] = [];
+    for (let q = 1; q <= ids.length; q++) {
+      const at = (s0 + q) % ids.length;
+      if (k[at]) run.push(ids[at]);
+      else { if (run.length > 1) out.push(chaikinOpen(run.map(point))); run = []; }
+    }
+    if (run.length > 1) out.push(chaikinOpen(run.map(point)));
+  }
+  return out;
+}
+
+/** Room for tracing a field's lines, kept with the field (cleared after each use). */
+const scratchOf = new WeakMap<FrontField, { link0: Int32Array; link1: Int32Array; used: Uint8Array; lo: Float32Array; hi: Float32Array; BW: number; BH: number }>();
+/** Squares to a block, each way. */
+const B = 8;
+
+/**
+ * The lines where the field crosses `level` (marching squares over the cells' middles, saddles resolved by the
+ * middle of the square), as loops of the edges they cross; where each crossing lies; and whether a crossing is
+ * part of the front within the change: between two cells of it, or just outside its edge where the line leaves it
+ * (the edge beside one between two cells of it).
+ */
+function trace(f: FrontField, level: number): { loops: number[][]; point: (id: number) => [number, number]; keep: (id: number) => boolean } {
+  const { nx, ny, at, inside, west, north, dlon, dlat } = f;
   // Corners of the marching squares: the cells' middles, with a border of cells never reached all round.
   const W = nx + 2, H = ny + 2;
   const v = (i: number, j: number) => (i <= 0 || j <= 0 || i > nx || j > ny ? Infinity : at[(j - 1) * nx + (i - 1)]);
+  const ins = (i: number, j: number) => i > 0 && j > 0 && i <= nx && j <= ny && inside[(j - 1) * nx + (i - 1)] === 1;
   const X = (i: number) => west + (i - 0.5) * dlon, Y = (j: number) => north - (j - 0.5) * dlat;
   // Where the level crosses the edge between two corners (one reached, one not).
   const cross = (va: number, vb: number) => (va === Infinity || vb === Infinity ? 0.5 : Math.max(0.02, Math.min(0.98, (level - va) / (vb - va))));
   const pts = new Map<number, [number, number]>();
-  const at2 = (id: number): [number, number] => {
+  const point = (id: number): [number, number] => {
     let p = pts.get(id);
     if (p) return p;
     const e = id >> 1, i = e % W, j = (e - i) / W;
@@ -248,17 +302,53 @@ export function frontRings(f: FrontField, level: number): Rings {
     pts.set(id, p);
     return p;
   };
-  const hEdge = (i: number, j: number) => (j * W + i) * 2, vEdge = (i: number, j: number) => (j * W + i) * 2 + 1;
-  // Pieces of line in each square, by the edges they join.
-  const links = new Map<number, number[]>();
-  const join = (a: number, b: number) => {
-    let l = links.get(a); if (!l) links.set(a, (l = [])); l.push(b);
-    let m = links.get(b); if (!m) links.set(b, (m = [])); m.push(a);
+  const keep = (id: number) => {
+    const e = id >> 1, i = e % W, j = (e - i) / W;
+    if (id & 1) {
+      const a = ins(i, j), b = ins(i, j + 1);
+      if (a || b) return a && b;
+      return (ins(i - 1, j) && ins(i - 1, j + 1)) || (ins(i + 1, j) && ins(i + 1, j + 1));
+    }
+    const a = ins(i, j), b = ins(i + 1, j);
+    if (a || b) return a && b;
+    return (ins(i, j - 1) && ins(i + 1, j - 1)) || (ins(i, j + 1) && ins(i + 1, j + 1));
   };
-  for (let j = 0; j < H - 1; j++) for (let i = 0; i < W - 1; i++) {
-    const a = v(i, j) <= level, b = v(i + 1, j) <= level, c = v(i + 1, j + 1) <= level, d = v(i, j + 1) <= level;
-    const code = (a ? 8 : 0) | (b ? 4 : 0) | (c ? 2 : 0) | (d ? 1 : 0);
-    if (code === 0 || code === 15) continue;
+  if (!(level > 0)) return { loops: [], point, keep };
+  const hEdge = (i: number, j: number) => (j * W + i) * 2, vEdge = (i: number, j: number) => (j * W + i) * 2 + 1;
+  // Pieces of line in each square, by the edges they join (each edge crossed joins the two squares beside it).
+  const E = 2 * W * H;
+  let sc = scratchOf.get(f);
+  if (!sc || sc.link0.length !== E) {
+    // The squares in blocks of 8 by 8, each with the earliest and latest time at its corners: a line crosses only
+    // the blocks whose times span its level (a line is long and thin; most blocks are all reached or none).
+    const BW = Math.ceil((W - 1) / B), BH = Math.ceil((H - 1) / B);
+    const lo = new Float32Array(BW * BH).fill(Infinity), hi = new Float32Array(BW * BH).fill(-Infinity);
+    for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
+      const t = v(i, j);
+      // (A corner belongs to the blocks of the squares round it.)
+      for (const bj of j % B === 0 && j > 0 ? [j / B - 1, j / B] : [Math.floor(j / B)]) for (const bi of i % B === 0 && i > 0 ? [i / B - 1, i / B] : [Math.floor(i / B)]) {
+        if (bi >= BW || bj >= BH) continue;
+        const q = bj * BW + bi;
+        if (t < lo[q]) lo[q] = t;
+        if (t > hi[q]) hi[q] = t;
+      }
+    }
+    scratchOf.set(f, (sc = { link0: new Int32Array(E).fill(-1), link1: new Int32Array(E).fill(-1), used: new Uint8Array(E), lo, hi, BW, BH }));
+  }
+  const { link0, link1, used, lo, hi, BW, BH } = sc;
+  const touched: number[] = [];
+  const half = (a: number, b: number) => { if (link0[a] < 0) { link0[a] = b; touched.push(a); } else link1[a] = b; };
+  const join = (a: number, b: number) => { half(a, b); half(b, a); };
+  for (let bj = 0; bj < BH; bj++) for (let bi = 0; bi < BW; bi++) {
+    const q = bj * BW + bi;
+    if (!(lo[q] <= level && hi[q] > level)) continue;
+    const i1 = Math.min(W - 1, (bi + 1) * B), j1 = Math.min(H - 1, (bj + 1) * B);
+    for (let j = bj * B; j < j1; j++) for (let i = bi * B; i < i1; i++) square(i, j);
+  }
+  function square(i: number, j: number): void {
+    const va = v(i, j), vb = v(i + 1, j), vc = v(i + 1, j + 1), vd = v(i, j + 1);
+    const code = (va <= level ? 8 : 0) | (vb <= level ? 4 : 0) | (vc <= level ? 2 : 0) | (vd <= level ? 1 : 0);
+    if (code === 0 || code === 15) return;
     const top = hEdge(i, j), right = vEdge(i + 1, j), bottom = hEdge(i, j + 1), left = vEdge(i, j);
     switch (code) {
       case 1: case 14: join(left, bottom); break;
@@ -269,39 +359,51 @@ export function frontRings(f: FrontField, level: number): Rings {
       case 7: case 8: join(left, top); break;
       case 5: case 10: {
         // A saddle: joined as the middle of the square says.
-        const mid = (v(i, j) + v(i + 1, j) + v(i + 1, j + 1) + v(i, j + 1)) / 4 <= level;
+        const mid = (va + vb + vc + vd) / 4 <= level;
         if ((code === 5) === mid) { join(left, top); join(bottom, right); } else { join(left, bottom); join(top, right); }
         break;
       }
     }
   }
-  // The pieces joined into closed lines.
-  const out: Rings = [];
-  const used = new Set<number>();
-  for (const start of links.keys()) {
-    if (used.has(start)) continue;
+  // The pieces joined into closed loops.
+  const loops: number[][] = [];
+  for (const start of touched) {
+    if (used[start]) continue;
     const ring: number[] = [start];
-    used.add(start);
+    used[start] = 1;
     let prev = -1, cur = start;
     for (;;) {
-      const next = links.get(cur)!.find((n) => n !== prev && !used.has(n)) ?? links.get(cur)!.find((n) => n !== prev);
-      if (next === undefined || next === start) break;
-      if (used.has(next)) break;
+      const a = link0[cur], b = link1[cur];
+      const next = a !== prev && a >= 0 && !used[a] ? a : b !== prev && b >= 0 && !used[b] ? b : -1;
+      if (next < 0) break;
       ring.push(next);
-      used.add(next);
+      used[next] = 1;
       prev = cur; cur = next;
     }
-    if (ring.length < 3) continue;
-    let line = ring.map(at2);
-    line = chaikin(line);
-    // Clockwise (the land on the right as d3 wants it).
-    let area = 0;
-    for (let q = 0, p = line.length - 1; q < line.length; p = q++) area += line[p][0] * line[q][1] - line[q][0] * line[p][1];
-    if (area > 0) line.reverse();
-    line.push([line[0][0], line[0][1]]);
-    out.push(line);
+    if (ring.length >= 3) loops.push(ring);
   }
-  return out;
+  // (The scratch cleared for the next time.)
+  for (const e of touched) { link0[e] = -1; link1[e] = -1; used[e] = 0; }
+  return { loops, point, keep };
+}
+
+/**
+ * Where the land reached between two levels lies (`lo` exclusive, `hi` inclusive): west, south, east, north in
+ * degrees (longitudes may run past 180), a cell more all round; null when none of the change is.
+ */
+export function bandBounds(f: FrontField, lo: number, hi: number): [number, number, number, number] | null {
+  const { nx, ny, at, inside } = f;
+  let i0 = Infinity, i1 = -Infinity, j0 = Infinity, j1 = -Infinity;
+  for (let j = 0; j < ny; j++) {
+    const row = j * nx;
+    for (let i = 0; i < nx; i++) {
+      const c = row + i;
+      if (!inside[c] || !(at[c] > lo && at[c] <= hi)) continue;
+      if (i < i0) i0 = i; if (i > i1) i1 = i; if (j < j0) j0 = j; if (j > j1) j1 = j;
+    }
+  }
+  if (i1 < i0) return null;
+  return [f.west + (i0 - 1) * f.dlon, f.north - (j1 + 2) * f.dlat, f.west + (i1 + 2) * f.dlon, f.north - (j0 - 1) * f.dlat];
 }
 
 /** Whether a place has been reached by `level` (read between the four nearest cells). */
@@ -490,6 +592,18 @@ function fbm(nx: number, ny: number, cells: number, seed: number): Float32Array 
 }
 
 /** One round of corner cutting (Chaikin) of a closed line: its staircase from the grid rounded off. */
+/** One round of corner cutting of an open line, its ends kept. */
+function chaikinOpen(p: Array<[number, number]>): Array<[number, number]> {
+  if (p.length < 3) return p;
+  const out: Array<[number, number]> = [p[0]];
+  for (let q = 0; q + 1 < p.length; q++) {
+    const a = p[q], b = p[q + 1];
+    out.push([a[0] * 0.75 + b[0] * 0.25, a[1] * 0.75 + b[1] * 0.25], [a[0] * 0.25 + b[0] * 0.75, a[1] * 0.25 + b[1] * 0.75]);
+  }
+  out.push(p[p.length - 1]);
+  return out;
+}
+
 function chaikin(p: Array<[number, number]>): Array<[number, number]> {
   if (p.length < 4) return p;
   const out: Array<[number, number]> = [];

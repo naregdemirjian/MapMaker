@@ -6,7 +6,7 @@
 // panning and zooming cost no geometry work, only drawing; an edit prepares only the parcels it
 // changed; and what stays the same through a stretch of time (who holds what, which borders show)
 // is worked out once for the stretch (LayerSnap), not once per frame.
-import { geoPath, geoCircle, geoCentroid, geoArea, type GeoPermissibleObjects } from 'd3-geo';
+import { geoPath, geoCircle, geoCentroid, geoArea, type GeoPermissibleObjects, type GeoProjection } from 'd3-geo';
 import type { World } from '../world-model/world.ts';
 import type { Engine, FaceState, Assignment, CompiledTransition } from '../temporal-engine/engine.ts';
 import { globeGL, globeInView } from './globe-gl.ts';
@@ -14,7 +14,7 @@ import { parseJSON, slerpLonLat } from '../temporal-engine/engine.ts';
 import { type Instant, compare, diffMs } from '../core-time/index.ts';
 import { BASE_EVENT_ID } from '../world-model/schema.ts';
 import type { Vec3 } from '../geo-kernel/vec.ts';
-import { buildFrontField, frontRings, type FrontField } from './front-field.ts';
+import { buildFrontField, frontRings, frontLines, bandBounds, type FrontField, type Rings } from './front-field.ts';
 import { frontSourceOf } from './front-source.ts';
 import { screenToLonLat, meridianOf, makeView, FLAT_EXTENT_DEG, type View, type Camera } from './camera.ts';
 import type { Arrangement } from '../geo-kernel/arrangement.ts';
@@ -29,7 +29,7 @@ import { Kept as Weighed } from './kept.ts';
 import { parcelGeometry, type ParcelGeometry, type CycleGeom } from './parcel-geometry.ts';
 import { featureStyle, featureColor, isFeatureKind, type FeatureKind, type FeatureStyle } from './feature-style.ts';
 import { campaignArrow, smoothLine, lineLength, arrowBodyLength, marksAlong, cutLineBetween, mixColor } from './routes.ts';
-import { shotProgress, eventScreenSeconds } from '../presentation/sequence.ts';
+import { shotProgress, eventScreenSeconds, eventTransitionLook, TRANSITION_LOOKS } from '../presentation/sequence.ts';
 import { iconById, iconOfStyle, unitOfStyle, drawIcon, type CharacterIcon, type RouteStyle } from './icons.ts';
 import { TerrainPictures, terrainDrawable, type TerrainFrame, type TerrainImageKind, type TerrainSea, type TerrainOverride } from './terrain-gl.ts';
 import type { ElevationGrid } from '../terrain/grid.ts';
@@ -231,15 +231,31 @@ export type TransitionEase = 'linear' | 'smooth' | 'in' | 'out';
 /** Shot transition settings as the renderer needs them (see presentation/sequence.ts ShotTransitions). */
 export interface ShotTransitionOptions {
   mode: 'recorded' | 'all' | 'instant';
-  style: 'border' | 'advance' | 'fade' | 'wipe';
+  style: 'border' | 'advance' | 'fade' | 'wipe' | 'dissolve';
   angle: number;
   timing: 'seconds' | 'event';
   seconds: number;
   easing: TransitionEase;
   restyleRecorded: boolean;
+  /** The line along moving fronts; its colour 'auto': the new owner's, lightened (D137). */
   front: { show: boolean; color: string; width: number; glow: number };
+  /** How fronts look (D137), each 0 to 1: ragged; the new colour running softly ahead; a glow over the land just taken. */
+  roughness?: number; soft?: number; wake?: number;
   /** Screen seconds since the frame that showed instant t (Infinity if before the shot). */
   secondsSince: (t: Instant) => number;
+}
+
+/** The events with a transition look of their own (D137), by id: the look's id. Worked out once per state of the events. */
+const ownLooksOf = new WeakMap<World, { revision: number; map: Map<string, string> }>();
+function eventLooksOf(world: World): Map<string, string> {
+  const revision = world.tableRevision('event');
+  let kept = ownLooksOf.get(world);
+  if (!kept || kept.revision !== revision) {
+    const map = new Map<string, string>();
+    for (const e of world.all('event')) { if (!e.presentation?.includes('"look"')) continue; const l = eventTransitionLook(e.presentation); if (l) map.set(e.id, l); }
+    ownLooksOf.set(world, (kept = { revision, map }));
+  }
+  return kept.map;
 }
 
 /** The events with a time of their own on screen (D92), by id: seconds. Worked out once per state of the events. */
@@ -349,6 +365,12 @@ interface LayerSnap {
 /** The border chains an owner draws: `take` are positions in `b` (see boundaryOf); `key` says which lines those are. */
 interface OwnerBorder { key: string; b: Int32Array; take: number[]; /** Of those, the chains against nobody. */ open: Set<number> }
 
+/**
+ * Where a change is on the picture (device pixels, with room round it), where a part of it is (its west, south,
+ * east, north in degrees), and the pixels to a unit of the view.
+ */
+interface FrontFx { view: View; k: number; box: (pad: number) => Box2; part: (deg: readonly [number, number, number, number], pad: number) => Box2 }
+
 interface TransitionGroup {
   a: Assignment;
   faces: number[];
@@ -367,6 +389,12 @@ interface TransitionGroup {
   border: BorderFront | null;
   /** A front that follows the land (D136): its field of arrival times. */
   field?: FrontField | null;
+  /** How its front looks (D137). */
+  look: FrontLookOptions;
+  /** Who held the land before (the first parcel's previous owner). */
+  from: string | null;
+  /** The front itself (with a field): the lines between the land reached and not yet reached, within the change, on screen. */
+  line?: Path2D | null;
   /** All the parcels of the change, and those changing owner (null: none of it is on the sheet). */
   region: Shape | null;
   changing: Shape | null;
@@ -1904,6 +1932,23 @@ export class MapRenderer {
     const placesText = opts.passes.has('labels') || opts.passes.has('cities');
     const drawsLayers = opts.passes.has('fills') || opts.passes.has('borders') || (placesText && layout.labels);
     type LayerStyle = { fillOpacity?: number; borderWidth?: number; clipToLand?: boolean; fill?: TerritoryFill; fronts?: FrontTeeth; frontColor?: string };
+    // How fronts look (D137): the shot's look (the plain one in the working view), or an event's own.
+    const tr = opts.transitions;
+    const baseLook: FrontLookOptions = {
+      roughness: tr?.roughness ?? 0, soft: tr?.soft ?? 0, wake: tr?.wake ?? 0,
+      front: tr?.front ?? { show: true, color: style.frontGlow, width: 2.2, glow: 10 },
+    };
+    const eventLooks = eventLooksOf(world);
+    // (How the shot's changes look: a picture of the same moment in another look is another picture.)
+    const lookSig = tr ? `${tr.style}|${tr.easing}|${tr.roughness ?? 0}|${tr.soft ?? 0}|${tr.wake ?? 0}|${tr.front.show ? 1 : 0}|${tr.front.color}|${tr.front.width}|${tr.front.glow}` : '';
+    const looks = new Map<string, FrontLookOptions>();
+    const lookOf = (a: Assignment): FrontLookOptions => {
+      const id = eventLooks.get(a.eventId);
+      if (!id) return baseLook;
+      let l = looks.get(id);
+      if (!l) looks.set(id, (l = lookById(id, baseLook) ?? baseLook));
+      return l;
+    };
     const prepared: Array<{ ls: LayerStyle; states: Map<number, FaceState>; snap: LayerSnap; tg: { groups: Map<string, TransitionGroup>; of: Map<number, TransitionGroup> }; clip: boolean; wars: Array<[string, string]> }> = [];
     this.lastFronts = [];
     let landKey = '', layerSig = '', animated = false;
@@ -1913,7 +1958,7 @@ export class MapRenderer {
       let states = engine.partitionState(spaceId, layerId, t);
       let changing = engine.partitionChanging(spaceId, layerId, t);
       let sig = '';
-      if (opts.transitions) ({ states, changing, sig } = this.shotStates(engine, spaceId, layerId, t, states, changing, opts.transitions, eventSecondsOf(world)));
+      if (opts.transitions) ({ states, changing, sig } = this.shotStates(engine, spaceId, layerId, t, states, changing, opts.transitions, eventSecondsOf(world), eventLooks));
       const snap = this.snapFor(`${engine.revision}|${arr.revision}|${spaceId}|${layerId}|${engine.stretchOf(t)}|${sig}`, arr, states, changing, engine);
       const ls = parseJSON<LayerStyle>(layer.style, {});
       // Coastline clipping: territory ends at the coast unless the layer is set to cover the sea.
@@ -1925,7 +1970,7 @@ export class MapRenderer {
         if (coast === 'land') clip = false;
         else if (coast === 'sea') continue;
       }
-      const tg = this.transitionGroups(view, sheet, sp, arr, snap, states);
+      const tg = this.transitionGroups(view, sheet, sp, arr, snap, states, lookOf);
       // Front lines (D89): the wars holding now, each as the side it is drawn from and the side its teeth face.
       const wars = ls.fronts ? warsAt(world, engine, t, ls.fronts) : [];
       for (const [from, toward] of wars) this.lastFronts.push({ layerId, from, toward });
@@ -1942,7 +1987,9 @@ export class MapRenderer {
 
     // ---- Territories and borders. The same picture while nothing changes hands (and nothing animates).
     if ((wantsFills || wantsBorders) && prepared.length) {
-      const front = opts.transitions?.front ?? { show: true, color: style.frontGlow, width: 2.2, glow: 10 };
+      // (The widest line and glow of any front in use, for the room drawn again round the changes.)
+      let frontGlow = baseLook.front.glow, frontWidth = baseLook.front.width;
+      for (const p of prepared) for (const g of p.tg.groups.values()) { frontGlow = Math.max(frontGlow, g.look.front.glow); frontWidth = Math.max(frontWidth, g.look.front.width); }
       // A change under way looks different at every instant (and in a shot, at every frame, which is
       // drawn afresh); so do videos. Pictures are kept until one loads.
       // While a change animates, everything outside its area stays as it is throughout the stretch of
@@ -1951,14 +1998,14 @@ export class MapRenderer {
       const widestLine = Math.max(...prepared.map((p) => p.ls.borderWidth ?? style.borderWidth));
       let renew: Renew | null = null;
       const terrName = `territory:${wantsFills ? 'f' : ''}${wantsBorders ? 'b' : ''}`;
-      const moment = `${t.day}:${t.ms}|${opts.mediaSeconds ?? 0}`;
+      const moment = `${t.day}:${t.ms}|${opts.mediaSeconds ?? 0}|${lookSig}`;
       const keptNow = this.kept.get(terrName);
       // The kept picture is of this very moment (the view moves while the date stays): none of it is
       // drawn again for the animation, so the rectangles around the changes are not needed.
       // (The rectangles are the same for as long as the view and the changes animating stay the
       // same: finding them again in every frame, parcel by parcel, cost 9 ms a frame on a map
       // with many changes under way, in frames that changed nothing.)
-      const animPad = 3 * front.glow * u + (front.width + widestLine) * u + 6;
+      const animPad = 3 * frontGlow * u + (frontWidth + widestLine) * u + 6;
       const rk = animated ? `${frameKey}|${animPad}|${prepared.map((p) => `${p.snap.key}:${[...p.tg.groups.keys()].join(',')}`).join('|')}` : '';
       if (animated && !anyMedia && m.b === 0 && m.c === 0 && keptNow?.canvas && keptNow.key && keptNow.moment === moment) renew = { rects: [], moment };
       else if (animated && !anyMedia && m.b === 0 && m.c === 0) {
@@ -1975,7 +2022,7 @@ export class MapRenderer {
         if (this.renewRects.rects) renew = { rects: this.renewRects.rects, moment };
       }
       const reliefKey = (tLook?.overTerritories && wantsFills ? `|r:${terrain!.key}|${JSON.stringify(tLook)}` : '') + (terrainLand && prepared.some((p) => p.clip) ? `|sea:${terrain!.key}|${seaLevel}` : '') + (reliefKeyNeedsDetail(tLook, wantsFills, terrainLand) ? `|d:${terrain?.detail?.key ?? ''}` : '');
-      const key = animated && !renew && opts.transitions ? null : partKey(`${animated && !renew ? `${t.day}:${t.ms}|` : ''}${renew ? 'animated|' : ''}${wantsFills ? 'f' : ''}${wantsBorders ? 'b' : ''}|${world.revision}|${style.border}|${style.borderWidth}|${opts.basemap ? `${opts.basemap.scales.length}|${lakeKey}` : ''}${landKey}${reliefKey}${anyMedia ? `|${assetEpoch()}|${this.mediaSeconds}|${this.mediaChannel}` : ''}`);
+      const key = animated && !renew && opts.transitions ? null : partKey(`${animated && !renew ? `${t.day}:${t.ms}|` : ''}${renew ? 'animated|' : ''}${lookSig}|${wantsFills ? 'f' : ''}${wantsBorders ? 'b' : ''}|${world.revision}|${style.border}|${style.borderWidth}|${opts.basemap ? `${opts.basemap.scales.length}|${lakeKey}` : ''}${landKey}${reliefKey}${anyMedia ? `|${assetEpoch()}|${this.mediaSeconds}|${this.mediaChannel}` : ''}`);
       // The working view, after an edit or a step in time that changed few parcels: only where they lie is drawn again.
       // A change under way looks different at every moment, and different again once it is over: where
       // the picture before showed one, and where this one does, is drawn again along with the parcels
@@ -2013,6 +2060,23 @@ export class MapRenderer {
       const terrDraw = (c: CanvasRenderingContext2D) => {
         // (Where the frame lies on what is drawn on: the canvas itself, or a kept picture with room around the frame.)
         const cm = c.getTransform();
+        // (Where a change is on the picture, and how many of its pixels to a unit of the view: for soft edges and glows.)
+        const fxOf = (g: TransitionGroup): FrontFx => ({
+          view, k: Math.hypot(cm.a, cm.b) || 1,
+          box: (pad) => this.deviceBox(this.screenBox(view, arr, g.changingFaces), cm, pad, c.canvas.width, c.canvas.height),
+          part: (deg, pad) => {
+            // (Where whole outlines are needed, the projection bends boxes: the change's own box then.)
+            if (parcelGeometry(arr).needsOutline(g.changingFaces[0] ?? -1)) return this.deviceBox(this.screenBox(view, arr, g.changingFaces), cm, pad, c.canvas.width, c.canvas.height);
+            const acc: Box2 = [Infinity, Infinity, -Infinity, -Infinity];
+            this.boxOnScreen(view, deg, acc);
+            if (!(acc[2] > acc[0] && acc[3] > acc[1])) return [0, 0, 0, 0];
+            const own = this.deviceBox(this.screenBox(view, arr, g.changingFaces), cm, pad, c.canvas.width, c.canvas.height);
+            const part = this.deviceBox([acc[0], acc[1], acc[2] - acc[0], acc[3] - acc[1]], cm, pad, c.canvas.width, c.canvas.height);
+            // (Within the change's own box.)
+            const x0 = Math.max(own[0], part[0]), y0 = Math.max(own[1], part[1]), x1 = Math.min(own[0] + own[2], part[0] + part[2]), y1 = Math.min(own[1] + own[3], part[1] + part[3]);
+            return x1 > x0 && y1 > y0 ? [x0, y0, x1 - x0, y1 - y0] : [0, 0, 0, 0];
+          },
+        });
         c.save();
         clipPlanet(c);
         if (wantsFills) for (const { ls, snap, tg, clip } of prepared) {
@@ -2110,7 +2174,7 @@ export class MapRenderer {
           }
           // (A new owner of one colour paints its own land beside the change too: no seam between them.)
           const solidLook = !ls.fill || ls.fill === 'solid';
-          for (const [id, g] of tg.groups) this.drawTransition(lc, g, paint, solidLook && g.a.value && !fillOf(g.a.value) ? this.withOwnLand(sp, sheet, arr, snap, id, g) : null);
+          for (const [id, g] of tg.groups) this.drawTransition(lc, g, paint, solidLook && g.a.value && !fillOf(g.a.value) ? this.withOwnLand(sp, sheet, arr, snap, id, g) : null, fxOf(g));
           // Relief over the territories (D95): shadows and light laid on the layer's colours only.
           if (tLook?.overTerritories) {
             lc.save();
@@ -2124,19 +2188,37 @@ export class MapRenderer {
           c.globalAlpha = ls.fillOpacity ?? 0.78;
           c.drawImage(lc.canvas as CanvasImageSource, 0, 0);
           c.restore();
-          // The advancing front is highlighted on top, at full strength.
-          if (front.show) for (const g of tg.groups.values()) {
+          // The advancing front is highlighted on top, at full strength: the glow over the land just taken (D137),
+          // then the line along the front.
+          for (const g of tg.groups.values()) {
             if (!g.advance || !g.disc || !g.changing) continue;
+            const fr = g.look.front;
+            const wake = !!g.field && g.look.wake > 0.01 && g.progress < 1;
+            if (!fr.show && !wake) continue;
+            const color = fr.color === 'auto' ? lighten(colorOf(g.a.value) ?? colorOf(g.from) ?? style.frontGlow, 0.45) : fr.color;
             c.save();
             if (clip && opts.basemap && !terrainLand) this.clip(c, land());
             this.clip(c, g.changing);
-            if (g.discRule === 'nonzero') {
+            if (wake) this.drawWake(c, g, fxOf(g), color);
+            if (!fr.show) { c.restore(); continue; }
+            if (g.field) {
+              // The front itself, within the change (D137): never along its edges.
+              if (g.line) {
+                c.strokeStyle = color;
+                c.lineWidth = fr.width * view.unit;
+                c.lineJoin = 'round';
+                c.lineCap = 'round';
+                c.shadowColor = color;
+                c.shadowBlur = fr.glow * view.unit;
+                c.stroke(g.line);
+              }
+            } else if (g.discRule === 'nonzero') {
               // The edge of the reached area: from a border, the area minus the area reached a
               // line-width earlier; from several points, each circle's outline less every circle's inside.
-              const w = Math.max(0.5, front.width * view.unit);
+              const w = Math.max(0.5, fr.width * view.unit);
               const band = this.scratch(c);
-              band.fillStyle = front.color;
-              band.strokeStyle = front.color;
+              band.fillStyle = color;
+              band.strokeStyle = color;
               if (g.border) {
                 band.fill(g.disc, 'nonzero');
                 band.globalCompositeOperation = 'destination-out';
@@ -2149,16 +2231,16 @@ export class MapRenderer {
               }
               band.globalCompositeOperation = 'source-over';
               c.setTransform(1, 0, 0, 1, 0, 0);
-              c.shadowColor = front.color;
-              c.shadowBlur = front.glow * view.unit;
+              c.shadowColor = color;
+              c.shadowBlur = fr.glow * view.unit;
               // Only the part of the buffer around the change (blurring the glow over the whole frame is slow).
-              const [bx, by, bw, bh] = this.deviceBox(this.screenBox(view, arr, g.changingFaces), cm, 3 * front.glow * view.unit + w + 4, c.canvas.width, c.canvas.height);
+              const [bx, by, bw, bh] = this.deviceBox(this.screenBox(view, arr, g.changingFaces), cm, 3 * fr.glow * view.unit + w + 4, c.canvas.width, c.canvas.height);
               if (bw > 0 && bh > 0) c.drawImage(band.canvas as CanvasImageSource, bx, by, bw, bh, bx, by, bw, bh);
             } else {
-              c.strokeStyle = front.color;
-              c.lineWidth = front.width * view.unit;
-              c.shadowColor = front.color;
-              c.shadowBlur = front.glow * view.unit;
+              c.strokeStyle = color;
+              c.lineWidth = fr.width * view.unit;
+              c.shadowColor = color;
+              c.shadowBlur = fr.glow * view.unit;
               c.stroke(g.disc);
             }
             c.restore();
@@ -2762,11 +2844,23 @@ export class MapRenderer {
    * Only the parcels in a change being animated get states of their own; `sig` says which changes
    * those are (so that what stays the same between frames can be kept).
    */
-  private shotStates(engine: Engine, spaceId: string, layerId: string, t: Instant, states: Map<number, FaceState>, changing: number[], o: ShotTransitionOptions, eventSeconds: ReadonlyMap<string, number> = new Map()): { states: Map<number, FaceState>; changing: number[]; sig: string } {
+  private shotStates(engine: Engine, spaceId: string, layerId: string, t: Instant, states: Map<number, FaceState>, changing: number[], o: ShotTransitionOptions, eventSeconds: ReadonlyMap<string, number> = new Map(), eventLooks: ReadonlyMap<string, string> = new Map()): { states: Map<number, FaceState>; changing: number[]; sig: string } {
     // Events with a time of their own on screen (D92) animate in any shot that animates at all.
     const own = (a: Assignment | null | undefined) => (a ? eventSeconds.get(a.eventId) : undefined);
     if (o.mode === 'recorded' && !o.restyleRecorded && !eventSeconds.size) return { states, changing, sig: '' };
     const spec: CompiledTransition = { style: o.style, origin: null, maxDist: 0, easing: o.easing, angle: o.angle, shot: true };
+    // An event with a look of its own (D137): the changes the shot animates take that look's style and easing.
+    const specs = new Map<string, CompiledTransition>();
+    const specOf = (a: Assignment): CompiledTransition => {
+      const id = eventLooks.get(a.eventId);
+      if (!id) return spec;
+      let sp = specs.get(id);
+      if (!sp) {
+        const l = TRANSITION_LOOKS.find((x) => x.id === id)?.set;
+        specs.set(id, (sp = l ? { ...spec, style: l.style ?? spec.style, easing: l.easing ?? spec.easing } : spec));
+      }
+      return sp;
+    };
     const progressOf = (a: Assignment): number => shotProgress(a, t, o, own(a));
     /** How far a change has come when it must be over by `next` (its progress `p` otherwise). */
     const endingBy = (a: Assignment, next: Instant, p: number): number => {
@@ -2797,7 +2891,7 @@ export class MapRenderer {
       if (!o.restyleRecorded) { now.push(f); active.add(a!.effectId); continue; }
       const p = progressOf(a!);
       if (p >= 1 || !(p >= 0)) put(f, { value: st.value, assignment: a });
-      else { put(f, { ...st, transition: { ...st.transition!, progress: p, spec } }); now.push(f); active.add(a!.effectId); }
+      else { put(f, { ...st, transition: { ...st.transition!, progress: p, spec: specOf(a!) } }); now.push(f); active.add(a!.effectId); }
     }
     // Every other change, animated by the shot ('all'), or by its event's own time on screen (D92): only
     // those under way at this frame.
@@ -2828,7 +2922,7 @@ export class MapRenderer {
         if (e.next) p = endingBy(e.a, e.next, p);
         if (!(p >= 0 && p < 1)) continue;
         // (A change recorded with an animation of its own keeps it when its event takes its own time.)
-        const tspec = own(e.a) && e.a.transition ? e.a.transition : spec;
+        const tspec = own(e.a) && e.a.transition ? e.a.transition : specOf(e.a);
         for (let i = 0; i < e.faces.length; i++) {
           const f = e.faces[i], st = states.get(f)!;
           let was = e.from[i];
@@ -2844,17 +2938,18 @@ export class MapRenderer {
   }
 
   /** The animated changes at this moment: the parcels of each (from the snapshot) and how far each has come. */
-  private transitionGroups(view: View, sheet: Sheet, sp: SheetParcels, arr: Arrangement, snap: LayerSnap, states: Map<number, FaceState>, look: FrontLookOptions = NO_FRONT_LOOK): { groups: Map<string, TransitionGroup>; of: Map<number, TransitionGroup> } {
+  private transitionGroups(view: View, sheet: Sheet, sp: SheetParcels, arr: Arrangement, snap: LayerSnap, states: Map<number, FaceState>, lookOf: (a: Assignment) => FrontLookOptions): { groups: Map<string, TransitionGroup>; of: Map<number, TransitionGroup> } {
     const groups = new Map<string, TransitionGroup>(), of = new Map<number, TransitionGroup>();
     for (const cg of snap.groups.values()) {
       const st = states.get(cg.region.faces[0])!;
       const spec = st.transition!.spec;
-      const advance = spec.style === 'advance' || spec.style === 'wipe' || spec.style === 'border';
+      const advance = spec.style === 'advance' || spec.style === 'wipe' || spec.style === 'border' || spec.style === 'dissolve';
       // Shot-made animations use the shot's easing; recorded fronts their own; recorded fades stay even.
-      const progress = spec.shot || spec.style === 'advance' || spec.style === 'border' ? ease(spec.easing, st.transition!.progress) : st.transition!.progress;
+      const progress = spec.shot || spec.style === 'advance' || spec.style === 'border' || spec.style === 'dissolve' ? ease(spec.easing, st.transition!.progress) : st.transition!.progress;
       const g: TransitionGroup = {
         a: st.assignment!, faces: cg.region.faces, changingFaces: cg.changing.faces, advance, spec, progress, disc: null, discRule: 'evenodd', border: null,
         region: this.setPath(sp, sheet, arr, cg.region), changing: cg.changing.faces.length ? this.setPath(sp, sheet, arr, cg.changing) : null,
+        look: lookOf(st.assignment!), from: st.transition!.from,
       };
       groups.set(cg.id, g);
       for (const f of cg.region.faces) of.set(f, g);
@@ -2864,13 +2959,16 @@ export class MapRenderer {
     for (const g of groups.values()) {
       if (!g.advance || g.progress <= 0) continue;
       if (g.spec.style === 'wipe') { g.disc = this.wipeShape(view, arr, g); continue; }
-      const field = this.frontField(arr, g, states, look);
+      const field = this.frontField(arr, g, states);
       if (field) {
         g.field = field;
         g.disc = this.reachedPath(view, field, g.progress);
         g.discRule = 'evenodd';
+        g.line = g.progress < 1 ? this.linesPath(view, frontLines(field, g.progress), field) : null;
         continue;
       }
+      // (Patches need the field: without one, the change fades.)
+      if (g.spec.style === 'dissolve') { g.advance = false; continue; }
       if (g.spec.style === 'border') {
         const bf = this.borderFront(view, arr, g, states);
         if (bf) {
@@ -2901,16 +2999,17 @@ export class MapRenderer {
    * The field of a moving front (D136): worked out once for the change (kept while it is under way), from
    * where its front starts (front-source.ts). Null when the change cannot have one (round the whole planet).
    */
-  private frontField(arr: Arrangement, g: TransitionGroup, states: Map<number, FaceState>, look: FrontLookOptions): FrontField | null {
+  private frontField(arr: Arrangement, g: TransitionGroup, states: Map<number, FaceState>): FrontField | null {
     const changing = g.changingFaces;
     if (!changing.length) return null;
-    const kind = g.spec.style === 'advance' ? 'advance' : 'border';
+    const kind = g.spec.style === 'advance' ? 'advance' : g.spec.style === 'dissolve' ? 'scatter' : 'border';
+    const roughness = g.look.roughness;
     const origins = kind === 'advance' ? JSON.stringify(g.spec.origins ?? g.spec.origin ?? null) : '';
-    const key = `${arr.spaceId}|${arr.revision}|${g.a.effectId}|${g.a.value}|${kind}|${origins}|${changing.length}|${changing[0]}|${changing[changing.length - 1]}|${look.roughness}`;
+    const key = `${arr.spaceId}|${arr.revision}|${g.a.effectId}|${g.a.value}|${kind}|${origins}|${changing.length}|${changing[0]}|${changing[changing.length - 1]}|${roughness}`;
     let f = this.fieldCache.get(key);
     if (f === undefined) {
       const src = frontSourceOf(arr, changing, g.a.value, g.spec, kind, states);
-      f = src ? buildFrontField(src.rings, src.source, { roughness: look.roughness, seed: seedOf(g.a.effectId) }) : null;
+      f = src ? buildFrontField(src.rings, src.source, { roughness, seed: seedOf(g.a.effectId) }) : null;
       if (this.fieldCache.size > 96) this.fieldCache.delete(this.fieldCache.keys().next().value!);
       this.fieldCache.set(key, f);
     }
@@ -2918,12 +3017,59 @@ export class MapRenderer {
   }
 
   /** The land a front has reached by `level` (0 to 1) on screen: its closed lines, filled by the even-odd rule; null when none. */
-  private reachedPath(view: View, f: FrontField, level: number): Path2D | null {
-    const rings = frontRings(f, level);
+  private reachedPath(view: View, f: FrontField, level: number, smooth = true): Path2D | null {
+    const rings = frontRings(f, level, smooth);
     if (!rings.length) return null;
-    // (d3 wants each line round the land it holds on its right: one the other way round would hold the whole planet.)
-    const polys = rings.map((r) => (geoArea({ type: 'Polygon', coordinates: [r] }) > 2 * Math.PI ? [r.slice().reverse()] : [r]));
-    return new Path2D(geoPath(view.projection)({ type: 'MultiPolygon', coordinates: polys }) ?? '');
+    const direct = this.directProjection(view, f);
+    if (direct) {
+      const path = new Path2D();
+      for (const r of rings) this.trail(path, r, direct, true);
+      return path;
+    }
+    // (d3 wants each line round the land it holds on its right: one the other way round would hold the whole
+    // planet. The lines go round clockwise in longitude and latitude, which is the right way unless one is huge.)
+    const polys = rings.map((r) => {
+      let w = Infinity, e = -Infinity, s = Infinity, n = -Infinity;
+      for (const [x, y] of r) { if (x < w) w = x; if (x > e) e = x; if (y < s) s = y; if (y > n) n = y; }
+      return e - w < 90 && n - s < 60 ? [r] : geoArea({ type: 'Polygon', coordinates: [r] }) > 2 * Math.PI ? [r.slice().reverse()] : [r];
+    });
+    // (Drawn straight into the path: no text made and read again.)
+    const path = new Path2D();
+    geoPath(view.projection, path as unknown as CanvasRenderingContext2D)({ type: 'MultiPolygon', coordinates: polys });
+    return path;
+  }
+
+  /** Open lines (longitude and latitude) on screen; null when none. */
+  private linesPath(view: View, lines: Rings, f: FrontField): Path2D | null {
+    if (!lines.length) return null;
+    const path = new Path2D();
+    const direct = this.directProjection(view, f);
+    if (direct) { for (const l of lines) this.trail(path, l, direct, false); return path; }
+    geoPath(view.projection, path as unknown as CanvasRenderingContext2D)({ type: 'MultiLineString', coordinates: lines });
+    return path;
+  }
+
+  /**
+   * The view's projection used point by point for a front's lines, when nothing of the field lies across the edge
+   * of the map (where d3 cuts lines in two) and the map is not the globe: much quicker than d3's paths, which
+   * also cut and bend long lines (a front's lines are made of short pieces). Null: use d3's paths.
+   */
+  private directProjection(view: View, f: FrontField): GeoProjection | null {
+    if (view.camera.projection === 'globe') return null;
+    const mid = -(view.projection.rotate?.()[0] ?? 0);
+    const a = ((((f.west - mid) % 360) + 540) % 360) - 180;
+    return a > -179.9 && a + f.nx * f.dlon < 179.9 ? view.projection : null;
+  }
+
+  /** A line (longitude and latitude) added to a path through the projection, closed or not. */
+  private trail(path: Path2D, line: Array<[number, number]>, project: GeoProjection, closed: boolean): void {
+    let first = true;
+    for (const p of line) {
+      const q = project(p);
+      if (!q) continue;
+      if (first) { path.moveTo(q[0], q[1]); first = false; } else path.lineTo(q[0], q[1]);
+    }
+    if (closed && !first) path.closePath();
   }
 
   private reachCache = new Map<string, { origin: Vec3; maxDist: number }>();
@@ -2992,9 +3138,11 @@ export class MapRenderer {
    * buffer: an advancing front fills the reached area with the new owner; a fade mixes the new
    * owner in. Territory that becomes nobody's is erased from the layer, never from the map below.
    */
-  private drawTransition(lc: CanvasRenderingContext2D, g: TransitionGroup, paint: (c: CanvasRenderingContext2D, v: string | null, shape: Shape) => void, within: Shape | null = null): void {
+  private drawTransition(lc: CanvasRenderingContext2D, g: TransitionGroup, paint: (c: CanvasRenderingContext2D, v: string | null, shape: Shape) => void, within: Shape | null = null, fx: FrontFx | null = null): void {
     if (!g.changing) return; // nothing changes owner, or none of it is in view
-    if (g.advance && !g.disc) return; // the front has not reached anything yet
+    // A soft edge (D137): the new owner's look running ahead of the front, even before it has reached anything.
+    const soft = g.advance && !!g.field && !!fx && g.look.soft > 0.01 && g.progress < 1;
+    if (g.advance && !g.disc && !soft) return; // the front has not reached anything yet
     // Painted over the changing parcels, or over them and the new owner's own parcels beside them
     // taken as one shape (see withOwnLand): two shapes painted apart leave a hairline of what was
     // under them along the edge they share (each covers its side of an edge pixel only in part).
@@ -3003,13 +3151,134 @@ export class MapRenderer {
     if (g.advance) {
       // The area the front has reached (a union of shapes for a front from a border), within the changing parcels.
       this.clip(lc, area);
-      if (g.discRule === 'nonzero') { lc.clip(g.disc!, 'nonzero'); paint(lc, g.a.value, area); }
-      else paint(lc, g.a.value, { path: g.disc!, onSheet: false });
+      if (g.disc) {
+        if (g.discRule === 'nonzero') { lc.save(); lc.clip(g.disc, 'nonzero'); paint(lc, g.a.value, area); lc.restore(); }
+        else paint(lc, g.a.value, { path: g.disc, onSheet: false });
+      }
+      if (soft) this.softEdge(lc, g, paint, area, fx!);
     } else {
       lc.globalAlpha = Math.min(1, Math.max(0, g.progress));
       paint(lc, g.a.value, area);
     }
     lc.restore();
+  }
+
+  /** Device pixels a front travels from 0 to 1 (`f.travel` degrees of arc at the view's scale). */
+  private levelPixels(f: FrontField, fx: FrontFx): number {
+    return ((f.travel * Math.PI) / 180) * fx.view.projection.scale() * fx.k;
+  }
+
+  /**
+   * A soft mask over `box` (device pixels of `ref`): what `draw` lays on (with `ref`'s transform), blurred by `sigma`
+   * device pixels. Made at a fraction of the size when the blur is wide (`s` device pixels to one of it): cheaper,
+   * and the same to the eye. The part of the buffer used is `w` by `h`.
+   */
+  private softMask(ref: CanvasRenderingContext2D, box: Box2, sigma: number, draw: (m: CanvasRenderingContext2D) => void): { c: CanvasRenderingContext2D; w: number; h: number; s: number } {
+    const [bx, by, bw, bh] = box;
+    const s = Math.max(1, Math.min(4, Math.floor(sigma / 2)));
+    const w = Math.max(1, Math.ceil(bw / s)), h = Math.max(1, Math.ceil(bh / s));
+    const m = this.boxBuffer(ref, [bx, by, w, h]);
+    const t = ref.getTransform();
+    m.setTransform(t.a / s, t.b / s, t.c / s, t.d / s, (t.e - bx) / s, (t.f - by) / s);
+    draw(m);
+    const b = this.boxBuffer(ref, [bx, by, w, h]);
+    b.setTransform(1, 0, 0, 1, 0, 0);
+    b.filter = `blur(${(sigma / s).toFixed(2)}px)`;
+    b.drawImage(m.canvas as CanvasImageSource, 0, 0, w, h, 0, 0, w, h);
+    b.filter = 'none';
+    return { c: b, w, h, s };
+  }
+
+  /**
+   * The new owner's look running softly ahead of the front (D137): over the land the front reaches a little later,
+   * the later the fainter (six steps, softened), within the change (`lc` is clipped to it). Land given up to
+   * nobody is let go of softly instead.
+   */
+  private softEdge(lc: CanvasRenderingContext2D, g: TransitionGroup, paint: (c: CanvasRenderingContext2D, v: string | null, shape: Shape) => void, area: Shape, fx: FrontFx): void {
+    const f = g.field!, p = g.progress, span = g.look.soft * 0.25, K = 6;
+    const sigma = Math.min(48, Math.max(0.6, (span / K) * this.levelPixels(f, fx) * 0.6));
+    // (Only round the land the soft edge covers.)
+    const deg = bandBounds(f, p, p + span);
+    if (!deg) return;
+    const box = fx.part(deg, (3 * sigma) / fx.k + 2);
+    const [bx, by, bw, bh] = box;
+    if (bw <= 0 || bh <= 0) return;
+    let any = false;
+    const mask = this.softMask(lc, box, sigma, (m) => {
+      m.globalCompositeOperation = 'lighter';
+      m.fillStyle = '#000';
+      m.globalAlpha = 1 / (K + 1);
+      for (let i = 1; i <= K; i++) {
+        const path = this.reachedPath(fx.view, f, Math.min(1, p + (span * i) / K), false);
+        if (path) { m.fill(path, 'evenodd'); any = true; }
+      }
+    });
+    if (!any) return;
+    const { c: mc, w, h, s } = mask;
+    if (g.a.value) {
+      const o = this.boxBuffer(lc, box);
+      o.save();
+      this.clip(o, area);
+      paint(o, g.a.value, area);
+      o.restore();
+      o.save();
+      o.setTransform(1, 0, 0, 1, 0, 0);
+      o.globalCompositeOperation = 'destination-in';
+      o.drawImage(mc.canvas as CanvasImageSource, 0, 0, w, h, 0, 0, w * s, h * s);
+      o.restore();
+      this.layOn(lc, o, 1, box);
+    } else {
+      lc.save();
+      lc.setTransform(1, 0, 0, 1, 0, 0);
+      lc.globalCompositeOperation = 'destination-out';
+      lc.drawImage(mc.canvas as CanvasImageSource, 0, 0, w, h, bx, by, w * s, h * s);
+      lc.restore();
+    }
+  }
+
+  /**
+   * A glow over the land a front has just taken (D137): brightest at the front, fading over the land reached
+   * before (five steps back, softened), cut sharply at the front, laid on lightening what is under it. `c` is
+   * clipped to the change.
+   */
+  private drawWake(c: CanvasRenderingContext2D, g: TransitionGroup, fx: FrontFx, color: string): void {
+    const f = g.field!, p = g.progress, span = g.look.wake * 0.35, K = 5;
+    const disc = g.disc;
+    if (!disc) return;
+    const sigma = Math.min(48, Math.max(0.6, (span / K) * this.levelPixels(f, fx) * 0.6));
+    // (Only round the land the glow covers.)
+    const deg = bandBounds(f, p - span, Math.min(1, p + 0.1));
+    if (!deg) return;
+    const box = fx.part(deg, (3 * sigma) / fx.k + 2);
+    if (box[2] <= 0 || box[3] <= 0) return;
+    // (The glow is laid a little past the front before it is softened, then cut at the front: brightest there.)
+    const ahead = Math.min(0.1, (2 * sigma) / Math.max(1, this.levelPixels(f, fx)));
+    const outer = this.reachedPath(fx.view, f, Math.min(1, p + ahead), false) ?? disc;
+    const { c: mc, w, h, s } = this.softMask(c, box, sigma, (m) => {
+      m.globalCompositeOperation = 'lighter';
+      m.fillStyle = color;
+      m.globalAlpha = 1 / K;
+      for (let i = 1; i <= K; i++) {
+        // The land reached since a little earlier: what is reached now less what was reached then.
+        const band = new Path2D();
+        band.addPath(outer);
+        const back = this.reachedPath(fx.view, f, p - (span * i) / K, false);
+        if (back) band.addPath(back);
+        m.fill(band, 'evenodd');
+      }
+    });
+    const o = this.boxBuffer(c, box);
+    o.save();
+    o.setTransform(1, 0, 0, 1, 0, 0);
+    o.drawImage(mc.canvas as CanvasImageSource, 0, 0, w, h, 0, 0, w * s, h * s);
+    o.restore();
+    o.globalCompositeOperation = 'destination-in';
+    o.fill(disc, 'evenodd');
+    o.globalCompositeOperation = 'source-over';
+    c.save();
+    c.globalCompositeOperation = 'screen';
+    this.layOn(c, o, 0.3 + 0.6 * g.look.wake, box);
+    c.restore();
   }
 
   /**
@@ -3763,6 +4032,17 @@ export class MapRenderer {
    */
   private frontLine(ctx: CanvasRenderingContext2D, g: TransitionGroup, width: number, boxOf: ((g: TransitionGroup, pad: number) => Box2) | null): void {
     if (!g.disc || !g.changing) return;
+    if (g.field) {
+      // The front itself, within the change (D137); a soft edge has none, a little soft a fainter one.
+      const alpha = Math.max(0, 1 - g.look.soft / 0.3);
+      if (!g.line || alpha <= 0) return;
+      ctx.save();
+      this.clip(ctx, g.changing);
+      ctx.globalAlpha *= alpha;
+      ctx.stroke(g.line);
+      ctx.restore();
+      return;
+    }
     ctx.save();
     this.clip(ctx, g.changing);
     if (g.discRule === 'evenodd') { ctx.stroke(g.disc); ctx.restore(); return; }
@@ -4712,8 +4992,32 @@ const MEASURE_AT = 100;
 interface BorderFront { maxDist: number; reach: (r: number) => Path2D }
 
 /** How a shot's fronts look (D136): how ragged they are. */
-export interface FrontLookOptions { roughness: number }
-const NO_FRONT_LOOK: FrontLookOptions = { roughness: 0 };
+/**
+ * How a change's front looks (D137): how ragged it is, the new owner's colour running softly ahead of it, a glow
+ * over the land just taken, fading behind it (each 0 to 1), and the line along it.
+ */
+export interface FrontLookOptions {
+  roughness: number;
+  soft: number;
+  wake: number;
+  front: { show: boolean; color: string; width: number; glow: number };
+}
+
+/** A look by its id (presentation/sequence.ts TRANSITION_LOOKS), its front line's width and glow as in `base` unless set. */
+function lookById(id: string, base: FrontLookOptions): FrontLookOptions | null {
+  const l = TRANSITION_LOOKS.find((x) => x.id === id);
+  if (!l) return null;
+  return { roughness: l.set.roughness ?? 0, soft: l.set.soft ?? 0, wake: l.set.wake ?? 0, front: { ...base.front, ...(l.set.front ?? {}) } };
+}
+
+/** A colour mixed toward white (`k` 0 to 1), as #rrggbb; the colour unchanged when it cannot be read. */
+function lighten(color: string, k: number): string {
+  const m = /^#?([0-9a-f]{6}|[0-9a-f]{3})$/i.exec(color.trim());
+  if (!m) return color;
+  const h = m[1].length === 3 ? m[1].split('').map((c) => c + c).join('') : m[1];
+  const ch = (i: number) => Math.round(parseInt(h.slice(i, i + 2), 16) + (255 - parseInt(h.slice(i, i + 2), 16)) * k);
+  return `#${[0, 2, 4].map((i) => ch(i).toString(16).padStart(2, '0')).join('')}`;
+}
 
 /** A number from a change's id, seeding its front's pattern. */
 function seedOf(id: string): number {
