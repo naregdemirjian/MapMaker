@@ -1776,6 +1776,10 @@ try {
     await page.getByTestId('settings-close').click();
     await page.getByTestId('draw-speed').waitFor();
     await page.waitForFunction(() => /\d+ ms/.test(document.querySelector('[data-testid=draw-speed]')?.textContent ?? ''));
+    // (And the frames a second the screen is getting, D143.)
+    await page.waitForFunction(() => /^\d+ frames a second \(longest wait \d+ ms\)$/.test(document.querySelector('[data-testid=frame-rate]')?.textContent ?? ''));
+    const rate = Number(/^(\d+)/.exec(await page.getByTestId('frame-rate').innerText())![1]);
+    assert.ok(rate >= 1 && rate <= 500, `a rate a screen can have (${rate} frames a second)`);
     const fast = await state();
     assert.equal(fast.width, Math.round(before.shown * 0.75), 'three quarters of the pixels, shown at the same size');
     assert.equal(fast.shown, before.shown);

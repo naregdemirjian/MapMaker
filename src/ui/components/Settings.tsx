@@ -55,7 +55,7 @@ export function SettingsDialog() {
         <Choice label="Coastlines close up" testId="setting-coast" value={v.coast} onChange={(coast) => set({ coast })}
           about="The most detailed coastlines take longer to draw when zoomed far in."
           options={[{ value: 'full', name: 'Most detailed' }, { value: 'medium', name: 'Medium at every zoom' }]} />
-        <label className="check setting-check"><input type="checkbox" checked={v.showSpeed} onChange={(e) => set({ showSpeed: e.target.checked })} data-testid="setting-speed" /> Show how long the map takes to draw (in a corner of the map)</label>
+        <label className="check setting-check"><input type="checkbox" checked={v.showSpeed} onChange={(e) => set({ showSpeed: e.target.checked })} data-testid="setting-speed" /> Show how long the map takes to draw, and the frames a second the screen gets (in a corner of the map)</label>
         <div className="modal-actions"><button className="primary" onClick={() => s.set({ dialog: null })} data-testid="settings-close">Done</button></div>
       </div>
     </div>

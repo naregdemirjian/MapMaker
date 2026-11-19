@@ -61,6 +61,49 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D144. A long straight border bows on the map: boxes and fronts follow the bow
+
+- **Found** by eye, playing a front across the Alps between two countries drawn with four points each: a thin
+  strip of the old owner's colour stayed under the border the front started from, all through the change.
+- **Why.** A border between two points is an arc of a great circle. On the map a long one bows toward the pole
+  past both its ends: by a fifth of a degree over 14° of longitude at 48° N, by 4° over 60° at 50° N. Two things
+  took it for the straight line between its ends:
+  1. *Boxes.* A parcel's box (`parcel-geometry.ts`) held its points only. Since changes under way are drawn
+     again inside their boxes alone (D139, D140), the land between the line and the arc was outside the box: it
+     kept the picture's earlier colour. The same box decides what of a kept picture is patched after an edit and
+     what is looked at when moving the map, so a long-edged parcel could also be cut there. Lines and areas drawn
+     as features had the same box (`makeRing`).
+  2. *Fronts.* A front's field (D136) took the change's outline and the border it starts from as straight
+     pieces in longitude and latitude; the land under a large bow (more than the few cells a field reaches past
+     its outline) was not part of the field at all.
+- **What.** `arcLatitudes` (plane.ts) gives the lowest and highest latitude an arc reaches (the great circle's
+  own highest point, when it lies between the ends); a parcel's and a feature's box takes it in for every piece
+  spanning more than 0.05° of longitude (below that the bow is under a metre). A front's outline and source
+  (`front-source.ts`) get points along long borders, about a degree apart.
+- **Who it touched.** Territories drawn with few points over a large area (a quick sketch, a box, borders
+  imported as coarse polygons). Borders drawn freehand or following coasts have points every few kilometres and
+  were never affected.
+- **Tests.** `plane.test.ts` (the latitudes of arcs, against points along them; boxes of rings and parcels);
+  `front-source.test.ts` (outline and source along the bow; the land under it in the field); render-compare 'A
+  long straight border bows' (the new owner's colour under the bow, drawn afresh and frame after frame; fails
+  without the box, checked).
+
+### D143. Frames a second, read on the computer itself
+
+- **Why.** "Everything at a solid 60 frames a second" cannot be measured where the app is built: the test
+  machines draw in software, without a graphics card, and what is left of a frame there is the browser's own
+  painting, which a graphics card does many times faster (see "Performance, 19 November" in DEVELOPMENT.md).
+  The readout in Settings told only how long the app's own drawing took.
+- **What.** With "Show how long the map takes to draw" on, the corner of the map also tells the frames a second
+  the screen is getting, counted over the last second from every frame the browser offers the app
+  (`ui/frame-meter.ts`), and the longest wait between two frames in that second: a single hitch shows there even
+  when the count hardly moves. A wait of a second or more (the window hidden) starts the count again.
+- **Reading it.** 60 on most screens (120 or 144 on faster ones) with a longest wait near 17 ms means everything
+  keeps up: moving the map, playing history, a shot's preview. A lower count or a long wait while doing
+  something says where it does not, on that computer, and is worth reporting with what was being done.
+- **Tests.** `frame-meter.test.ts` (a steady screen, a faster one, a hitch, a pause); `e2e/workflows` 'Settings'
+  (the readout appears with a rate a screen can have).
+
 ### D142. Fronts that mind the land: slower over mountains and water
 
 - **Asked.** The item left of the transitions stage: a front slowed by terrain, not only shaped by where the

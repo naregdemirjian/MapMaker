@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { FrameMeter } from '../frame-meter.ts';
 import { useLive, store } from '../store.ts';
 import {
   makeView, screenToLonLat, lonLatToScreen, panCamera, zoomCameraAt, radiansPerPixel, cameraKey, shapedByMeridian, rotatePoint, viewBounds, metresPerPixel, type View, type Camera,
@@ -200,8 +201,27 @@ export function MapView() {
   const held = useRef({ cam: '', at: -Infinity, meridian: Number.NaN });
   /** Filling the room around the map's kept pictures once the view rests: the view it was last done for, the timer, and whether the next frame does it. */
   const filling = useRef({ sig: '', timer: 0, due: false });
-  const speedRef = useRef<HTMLDivElement | null>(null);
+  const speedRef = useRef<HTMLSpanElement | null>(null);
   const frameTimes = useRef<number[]>([]);
+  // Frames a second (D143), beside the draw times: every frame the screen offers while the readout is shown,
+  // written four times a second.
+  const rateRef = useRef<HTMLSpanElement | null>(null);
+  const showSpeed = s.viewSettings.showSpeed;
+  useEffect(() => {
+    if (!showSpeed) return;
+    const meter = new FrameMeter();
+    let raf = 0, written = 0;
+    const tick = (now: number) => {
+      raf = requestAnimationFrame(tick);
+      meter.frame(now);
+      if (now - written < 250 || !rateRef.current) return;
+      written = now;
+      const r = meter.read();
+      rateRef.current.textContent = r ? `${r.perSecond} frames a second (longest wait ${r.longest.toFixed(0)} ms)` : '';
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [showSpeed]);
   // The picture of the other date being compared (Stage 3), drawn by its own renderer.
   const compareCanvas = useRef<OffscreenCanvas | null>(null);
   useEffect(() => () => { window.clearTimeout(motion.current.timer); window.clearTimeout(filling.current.timer); }, []);
@@ -1107,7 +1127,12 @@ export function MapView() {
         data-testid="map-canvas"
       />
       {!presentation && <MapHud view={view} />}
-      {s.viewSettings.showSpeed && <div className="draw-speed" ref={speedRef} title="How long the map took to draw (the working view only)" data-testid="draw-speed" />}
+      {s.viewSettings.showSpeed && (
+        <div className="draw-speed" title="How long the map took to draw (the working view only), and how many frames a second the screen is getting: 60 on most screens when everything keeps up; a long wait is a hitch" data-testid="draw-speed">
+          <span ref={speedRef} />
+          <span ref={rateRef} data-testid="frame-rate" />
+        </div>
+      )}
     </div>
   );
 }
