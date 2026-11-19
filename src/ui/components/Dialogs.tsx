@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useStore, store, type PendingEdit } from '../store.ts';
 import { Api, type VersionInfo, type BackupInfo, type ProjectInfo } from '../api.ts';
 import * as cmd from '../../domain/commands.ts';
-import { type Instant, compare, fromStore } from '../../core-time/index.ts';
+import { type Instant, compare, fromStore, gregorian, PRESENT_YEAR } from '../../core-time/index.ts';
 import { BASE_EVENT_ID } from '../../world-model/schema.ts';
 import type { TransitionSpec } from '../../temporal-engine/engine.ts';
 import { lonLatToVec } from '../../geo-kernel/vec.ts';
@@ -208,7 +208,7 @@ export function NewWorldDialog() {
   const [name, setName] = useState('');
   const [km, setKm] = useState('6371');
   const [earth, setEarth] = useState(false);
-  const [kind, setKind] = useState<'round' | 'planet' | 'flat' | 'stars' | 'solar' | 'invented' | 'milkyway' | 'galaxy'>('round');
+  const [kind, setKind] = useState<'round' | 'paleo' | 'planet' | 'flat' | 'stars' | 'solar' | 'invented' | 'milkyway' | 'galaxy'>('round');
   const [inv, setInv] = useState({ seed: newSeed(), count: 300, radiusLy: 50, shape: 'sphere' as 'sphere' | 'disc' });
   const [gal, setGal] = useState({ seed: newSeed(), systems: 600, arms: 4, pitch: 14, radiusLy: 50000, bar: true });
   const flat = kind === 'flat';
@@ -222,6 +222,8 @@ export function NewWorldDialog() {
       ? s.execute((w) => cmd.createSpaceMap(w, name.trim() || (kind === 'solar' ? 'The solar system' : kind === 'invented' ? 'Invented stars' : 'Nearby stars'), kind === 'stars' ? 'nearby' : kind, kind === 'invented' ? inv : undefined))
       : flat
       ? s.execute((w) => cmd.createFlatMap(w, name.trim() || 'New flat map', Number(widthKm)))
+      : kind === 'paleo'
+      ? s.execute((w) => cmd.createPaleoEarth(w, name.trim() || 'The Earth through time'))
       : kind === 'planet'
         ? s.execute((w) => cmd.createPlanet(w, name.trim() || 'New planet', Number(km), planet))
         : s.execute((w) => cmd.createWorld(w, name.trim() || 'New map', Number(km), earth ? 'natural-earth' : 'none'));
@@ -230,6 +232,8 @@ export function NewWorldDialog() {
       s.set({ spaceId: id, layerId: s.world!.all('layer').find((l) => l.space_id === id)?.id ?? '', selection: null, ...(space ? { tool: 'select' as const } : {}) });
       // A map of space opens looking down at its plane at an angle, all of it in view.
       if (space) s.setCamera(spaceCamera());
+      // The Earth through geological time (D134): its timeline from 540 million years ago to today, at Pangaea.
+      if (kind === 'paleo') { s.fitTimeline(); s.setTime(gregorian.fromCivil({ year: PRESENT_YEAR - 250_000_000 })); }
       close();
     }
   };
@@ -238,6 +242,7 @@ export function NewWorldDialog() {
       <p className="muted">Each map has its own geography, layers and territorial history; events and countries are shared by the whole project.</p>
       <div className="choice-row">
         <label className="check"><input type="radio" name="map-kind" checked={kind === 'round'} onChange={() => setKind('round')} /> Round: a planet or moon (Earth, another real body, or a blank one of your own)</label>
+        <label className="check"><input type="radio" name="map-kind" checked={kind === 'paleo'} onChange={() => setKind('paleo')} data-testid="new-map-paleo" /> The Earth through geological time: its continents, seas and mountains as they were, from 540 million years ago to today</label>
         <label className="check"><input type="radio" name="map-kind" checked={kind === 'planet'} onChange={() => setKind('planet')} data-testid="new-map-planet" /> A planet of your own, generated: continents, seas and mountains from a seed</label>
         <label className="check"><input type="radio" name="map-kind" checked={flat} onChange={() => setKind('flat')} data-testid="new-map-flat" /> Flat: a city, a battlefield, a region (a plan, true to scale)</label>
         <label className="check"><input type="radio" name="map-kind" checked={kind === 'stars'} onChange={() => setKind('stars')} data-testid="new-map-stars" /> The stars around the Sun: every known star within 50 light-years, in three dimensions</label>
@@ -269,7 +274,7 @@ export function NewWorldDialog() {
           <label>Shape<select value={inv.shape} onChange={(e) => setInv({ ...inv, shape: e.target.value as 'sphere' | 'disc' })}><option value="sphere">A sphere round the home star</option><option value="disc">A flat disc</option></select></label>
         </div>
         <p className="muted" data-testid="new-map-invented-note">Stars round a home star, most of them red dwarfs as around the Sun, with names of their own (the faintest numbered). The same seed gives the same stars; held stars and lanes work as on the real map.</p>
-      </> : kind === 'solar' ? <p className="muted" data-testid="new-map-solar-note">The planets and Pluto on their orbits, where they are on any date from their orbital elements (JPL): they move as the date changes. Give them to countries and factions, join them with lanes, as on a star map.</p> : kind === 'stars' ? <p className="muted" data-testid="new-map-stars-note">982 stars from the HYG database: real positions, colours by type, names. Drag to turn the view, scroll to zoom, click a star to see what it is.</p> : flat ? <>
+      </> : kind === 'paleo' ? <p className="muted" data-testid="new-map-paleo-note">The Earth's land and sea floor at 109 moments from 540 million years ago to today (the PALEOMAP PaleoDEMs of C. R. Scotese and N. Wright, 2018), changing steadily between them: Pangaea coming together and breaking up, oceans opening and closing, mountains rising; over the last 128,000 years the seas of the ice ages (land bridges where the sea was lower). Coasts are where the land meets the sea of each moment. Dates before 10,000 BCE are written as how long ago they were: type "250 Ma" or "21,000 years ago".</p> : kind === 'solar' ? <p className="muted" data-testid="new-map-solar-note">The planets and Pluto on their orbits, where they are on any date from their orbital elements (JPL): they move as the date changes. Give them to countries and factions, join them with lanes, as on a star map.</p> : kind === 'stars' ? <p className="muted" data-testid="new-map-stars-note">982 stars from the HYG database: real positions, colours by type, names. Drag to turn the view, scroll to zoom, click a star to see what it is.</p> : flat ? <>
         <label>Width (km)<input type="number" min={0.01} max={5000} value={widthKm} onChange={(e) => setWidthKm(e.target.value)} data-testid="new-map-width" /></label>
         <p className="muted">Borders on a flat map are straight lines; the scale bar reads in metres and kilometres.</p>
       </> : <>

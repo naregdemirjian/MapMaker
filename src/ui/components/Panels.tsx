@@ -2,9 +2,9 @@ import { useState, useEffect, memo } from 'react';
 import { useStore, useLive, store, type Tool } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
 import { SCULPT_TOOLS } from '../../terrain/sculpt.ts';
-import { type Instant, gregorian, fromStore, formatYear, compare, add, NEG_INF, MONTHS } from '../../core-time/index.ts';
+import { type Instant, gregorian, fromStore, formatYear, compare, add, NEG_INF, MONTHS, DEEP_BEFORE_YEAR } from '../../core-time/index.ts';
 import { BASE_EVENT_ID, type EffectRow } from '../../world-model/schema.ts';
-import { basemapSourceOf, worldSettings, terrainSourceOf, sculptOf, isSpaceMap } from '../../world-model/world-settings.ts';
+import { basemapSourceOf, worldSettings, terrainSourceOf, sculptOf, isSpaceMap, isPaleoEarth } from '../../world-model/world-settings.ts';
 import { parseJSON, leafDescendants, isUntracked, resolutionOf, type Resolution, type TransitionSpec } from '../../temporal-engine/engine.ts';
 import type { World } from '../../world-model/world.ts';
 import { lonLatToVec } from '../../geo-kernel/vec.ts';
@@ -46,7 +46,8 @@ export function DateField({ value, onChange, placeholder, allowEmpty, testId, su
   const [open, setOpen] = useState(false);
   const [focused, setFocused] = useState(false);
   // Shown steady (see SteadyDate) while the field is not being typed in.
-  const steadyShown = !!steady && !focused && !!value && Number.isFinite(value.day) && text === show(value);
+  // (Deep time, D134, is written as how long ago: no cells of day, month and year.)
+  const steadyShown = !!steady && !focused && !!value && Number.isFinite(value.day) && text === show(value) && gregorian.toCivil(value).year >= DEEP_BEFORE_YEAR;
   useEffect(() => { setText(value ? show(value) : ''); setBad(false); }, [value?.day, value?.ms]);
   const suggested = !value && suggest ? show(suggest) : null;
   const commit = (t = text) => {
@@ -153,7 +154,9 @@ export function TopBar() {
     // (A star map has only the Select tool, D110.)
     // (Leaving one for another kind of map, a tool of the other kind gives way to Select.)
     const space = isSpaceMap(w.get('map_space', id));
+    const before = s.spaceId;
     s.set({ spaceId: id, layerId: layer?.id ?? '', selection: null, presentCamera: null, ...(space !== SPACE_TOOLS.includes(s.tool) || s.tool === 'select' ? { tool: 'select' as const } : {}) });
+    s.mapChanged(before);
   };
   return (
     <header className="topbar">
@@ -544,7 +547,7 @@ export function Outliner() {
     <aside className="left">
       <Section title="Maps" onAdd={() => s.set({ dialog: 'new-world' })} addLabel="Map">
         {w.all('map_space').sort((a, b) => a.sort_order - b.sort_order).map((sp) => (
-          <div key={sp.id} className={`row ${sp.id === s.spaceId ? 'sel' : ''}`} onClick={() => s.set({ spaceId: sp.id, layerId: w.all('layer').find((l) => l.space_id === sp.id && l.kind === 'partition')?.id ?? '' })}>
+          <div key={sp.id} className={`row ${sp.id === s.spaceId ? 'sel' : ''}`} onClick={() => { const before = s.spaceId; s.set({ spaceId: sp.id, layerId: w.all('layer').find((l) => l.space_id === sp.id && l.kind === 'partition')?.id ?? '' }); s.mapChanged(before); }}>
             {sp.name}<span className="muted"> · {sp.kind === 'plane' ? `flat, ${(worldSettings(sp) as { widthKm?: number }).widthKm?.toLocaleString() ?? '?'} km wide` : `radius ${Math.round((sp.radius_m ?? 0) / 1000).toLocaleString()} km`}</span>
           </div>
         ))}
@@ -553,10 +556,10 @@ export function Outliner() {
         )}
         {currentSpace && currentSpace.kind !== 'plane' && !isSpaceMap(currentSpace) && (
           <div className="world-options">
-            <label className="check" title="Land, lakes and coastlines from Natural Earth, drawn under the territories">
+            {!isPaleoEarth(currentSpace) && <label className="check" title="Land, lakes and coastlines from Natural Earth, drawn under the territories">
               <input type="checkbox" data-testid="basemap-toggle" checked={basemapSourceOf(currentSpace) === 'natural-earth'}
                 onChange={(e) => s.execute((wd) => cmd.setWorldBasemap(wd, currentSpace.id, e.target.checked ? 'natural-earth' : 'none'))} /> Earth's geography
-            </label>
+            </label>}
             {basemapSourceOf(currentSpace) === 'natural-earth' && (
               <label className="check" title="Today's country borders as a drawing aid. Never exported.">
                 <input type="checkbox" data-testid="reference-borders-toggle" checked={s.referenceBorders} onChange={(e) => s.set({ referenceBorders: e.target.checked })} /> Present-day borders (guide)

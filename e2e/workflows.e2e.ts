@@ -3471,6 +3471,76 @@ try {
     assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.kind === 'space')), false);
   });
 
+  await h.step('The Earth through geological time (D134): made from the New map dialog; Pangaea 250 million years ago, its moment named; dates as how long ago; the seas of the last ice age lower, more land; a frame of it exported; undone', async () => {
+    await page.getByTestId('mode-world').click();
+    await page.getByRole('button', { name: '+ Map' }).click();
+    await page.getByTestId('new-map-paleo').check();
+    assert.match((await page.getByTestId('new-map-paleo-note').textContent()) ?? '', /540 million years ago to today/);
+    await page.getByRole('button', { name: 'Create map' }).click();
+    // At Pangaea, its moment named; the timeline over all of deep time.
+    await page.waitForFunction(() => /250 million years ago · Permo-Triassic Boundary/.test(document.querySelector('[data-testid=paleo-note]')?.textContent ?? ''));
+    assert.equal(await page.getByTestId('current-date').inputValue(), '250 million years ago');
+    assert.ok(await page.evaluate(() => (window as any).__mapmaker.store.timeline.start < -5e8), 'the timeline reaches 540 million years back');
+    // Land and sea as they were: the cells PALEOMAP has highest and deepest then, drawn as land and as sea.
+    const colours = (when: string) => page.evaluate((when) => {
+      const m = (window as any).__mapmaker, s = m.store;
+      const t = m.bench.gregorian.parse(when).instant, g = s.terrainOf(s.world.get('map_space', s.spaceId), t).grid;
+      let hi = 0, lo = 0;
+      for (let k = 0; k < g.data.length; k++) { if (g.data[k] > g.data[hi]) hi = k; if (g.data[k] < g.data[lo]) lo = k; }
+      const ll = (k: number) => [-180 + ((k % g.width) + 0.5) * (360 / g.width), 90 - (Math.floor(k / g.width) + 0.5) * (180 / g.height)];
+      const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement, r = c.getBoundingClientRect(), k = c.width / r.width, ctx = c.getContext('2d')!;
+      const px = (lonlat: number[]) => { const p = m.lonLatToPage(lonlat[0], lonlat[1]); return p ? Array.from(ctx.getImageData(Math.round((p[0] - r.left) * k), Math.round((p[1] - r.top) * k), 1, 1).data) : null; };
+      return { land: px(ll(hi)), sea: px(ll(lo)) };
+    }, when);
+    const pangaea = await colours('250 Ma');
+    assert.ok(pangaea.sea && pangaea.sea[2] > pangaea.sea[0] + 20, `the deepest sea drawn blue (${pangaea.sea})`);
+    assert.ok(pangaea.land && pangaea.land[0] + pangaea.land[1] > pangaea.sea![0] + pangaea.sea![1] + 60, `the highest land drawn as land (${pangaea.land})`);
+    await h.screenshot('paleo-pangaea');
+    // Dates read and written as how long ago; the seas of the last ice age: lower, so more of the map is land.
+    const seaShare = () => page.evaluate(() => {
+      const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement, d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+      let sea = 0;
+      for (let i = 0; i < d.length; i += 16) if (d[i + 2] > d[i] + 25 && d[i + 2] >= d[i + 1]) sea++;
+      return sea / (d.length / 16);
+    });
+    await h.setDate('2000');
+    await page.waitForFunction(() => /Holocene/.test(document.querySelector('[data-testid=paleo-note]')?.textContent ?? ''));
+    await page.waitForTimeout(300);
+    const today = await seaShare();
+    await h.setDate('21 ka');
+    await page.waitForFunction(() => /21,000 years ago · Pleistocene, the Last Glacial Maximum · the sea 130 m lower than today/.test(document.querySelector('[data-testid=paleo-note]')?.textContent ?? ''));
+    assert.equal(await page.getByTestId('current-date').inputValue(), '21,000 years ago');
+    await page.waitForTimeout(300);
+    const iceAge = await seaShare();
+    assert.ok(iceAge < today - 0.004, `less sea 21,000 years ago (${(iceAge * 100).toFixed(1)}% of the picture against ${(today * 100).toFixed(1)}%)`);
+    await h.screenshot('paleo-ice-age');
+    // Frames of shots, as exported: each drawn at its own moment (today's Earth, the Cretaceous, Pangaea differ).
+    const frames = await page.evaluate(async () => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const ground = await B.terrainFor(s.world, s.spaceId);
+      const draw = (when: string) => {
+        const t = B.gregorian.parse(when).instant;
+        const shot = B.defaultShot(s.spaceId, { lon: 0, lat: 0, zoom: 0, rotation: 0, projection: 'equirectangular' }, t, t, 24, 1);
+        const canvas = document.createElement('canvas');
+        canvas.width = 640; canvas.height = 320;
+        const ctx = canvas.getContext('2d')!;
+        B.renderFrame(ctx, new B.MapRenderer(), s.world, s.engine, shot, 0, B.PASS_DEFS.find((d: any) => d.name === 'all'), 640, 320, null, ground);
+        return Array.from(ctx.getImageData(0, 0, 640, 320).data);
+      };
+      const sea = (d: number[]) => { let n = 0; for (let i = 0; i < d.length; i += 4) if (d[i + 2] > d[i] + 25 && d[i + 2] >= d[i + 1]) n++; return n / (d.length / 4); };
+      const differ = (a: number[], b: number[]) => { let n = 0; for (let i = 0; i < a.length; i += 4) if (Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]) > 60) n++; return n / (a.length / 4); };
+      const now = draw('2000'), cretaceous = draw('100 Ma'), pangaea = draw('250 Ma');
+      return { sea: [sea(now), sea(cretaceous), sea(pangaea)], d1: differ(now, cretaceous), d2: differ(cretaceous, pangaea) };
+    });
+    assert.ok(frames.sea.every((x) => x > 0.45 && x < 0.85), `mostly sea at every moment (${frames.sea.map((x) => x.toFixed(2))})`);
+    assert.ok(frames.d1 > 0.05 && frames.d2 > 0.05, `each moment its own Earth (${frames.d1.toFixed(3)}, ${frames.d2.toFixed(3)} of the picture differs)`);
+    // Undone; back to Earth.
+    await page.locator('header select').first().selectOption({ label: 'Earth' });
+    for (let i = 0; i < 8 && (await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => JSON.parse(m.settings).paleo))); i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => JSON.parse(m.settings).paleo)), false);
+    await h.setDate('1900');
+  });
+
   await h.step('Playing history: the date moves on at the speed chosen, pauses where it is, Space plays and pauses, going round at the end; the date shown stays still as it changes', async () => {
     await page.getByTestId('mode-world').click();
     const year = () => page.evaluate(() => { const s = (window as any).__mapmaker.store; return s.time.day / 365.2425 + 1970; }) as Promise<number>;

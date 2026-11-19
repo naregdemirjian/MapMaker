@@ -10,7 +10,7 @@ import {
 } from '../world-model/schema.ts';
 import { type Vec3, vecToLonLat, normalize } from '../geo-kernel/vec.ts';
 import { TopologyError, type PathStep } from '../geo-kernel/arrangement.ts';
-import { worldSettings, terrainSourceOf, type BasemapSource, type ShowSet, type ShowSettings } from '../world-model/world-settings.ts';
+import { worldSettings, terrainSourceOf, EARTH_RADIUS_KM, type BasemapSource, type ShowSet, type ShowSettings } from '../world-model/world-settings.ts';
 import { skyLookOf, type SkyLook } from '../space/sky-look.ts';
 import { terrainLookOf, DEFAULT_TERRAIN_LOOK, type TerrainLook } from '../terrain/look.ts';
 import { cleanSeaLevel, type SeaLevelPoint } from '../terrain/sea-level.ts';
@@ -130,6 +130,19 @@ export function createPlanet(world: World, name: string, radiusKm: number, param
     const id = createWorldIn(tx, name, radiusKm, 'none');
     const space = tx.world.get('map_space', id)!;
     tx.update('map_space', { ...space, settings: JSON.stringify({ ...worldSettings(space), planet, terrain: terrainLookOf({ palette: preset.palette, relief: preset.relief }) }) });
+    return id;
+  });
+}
+
+/**
+ * A map of the Earth through geological time (D134): the Earth's radius, no present-day geography; its land
+ * and sea, mountains and sea floor at the moment shown, from 540 million years ago to today, drawn with relief.
+ */
+export function createPaleoEarth(world: World, name: string): CommandResult<string> {
+  return run(world, `Create map "${name}"`, (tx) => {
+    const id = createWorldIn(tx, name, EARTH_RADIUS_KM, 'none');
+    const space = tx.world.get('map_space', id)!;
+    tx.update('map_space', { ...space, settings: JSON.stringify({ ...worldSettings(space), paleo: true, terrain: terrainLookOf({ palette: 'natural', relief: true, detail: false }) }) });
     return id;
   });
 }

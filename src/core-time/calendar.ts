@@ -64,8 +64,23 @@ function groupDigits(n: number): string {
   return s.length > 5 ? s.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : s;
 }
 
-/** Year label for display: "1203", "500 BCE", "1 BCE" (= astronomical year 0). */
+/** Years before this (astronomical) year are written as how long ago they were (D134): before 10,000 BCE. */
+export const DEEP_BEFORE_YEAR = -9999;
+/** Ages are counted back from the start of this year. */
+export const PRESENT_YEAR = 2000;
+
+/** How long ago, written out (D134): "21,000 years ago", "2.58 million years ago", "250 million years ago". */
+export function formatYearsAgo(years: number): string {
+  if (years >= 1e6) {
+    const m = years / 1e6, v = m >= 10 ? Math.round(m * 10) / 10 : Math.round(m * 100) / 100;
+    return `${v.toLocaleString('en-GB', { maximumFractionDigits: 2 })} million years ago`;
+  }
+  return `${Math.round(years).toLocaleString('en-GB')} years ago`;
+}
+
+/** Year label for display: "1203", "500 BCE", "1 BCE" (= astronomical year 0); before 10,000 BCE how long ago ("21,000 years ago"). */
 export function formatYear(year: number): string {
+  if (year < DEEP_BEFORE_YEAR) return formatYearsAgo(PRESENT_YEAR - year);
   return year <= 0 ? `${groupDigits(1 - year)} BCE` : groupDigits(year);
 }
 
@@ -98,6 +113,8 @@ export const gregorian: Calendar = {
     if (t.day === Infinity) return 'the end of time';
     const c = this.toCivil(t);
     const y = formatYear(c.year);
+    // (Deep time, D134: no days or months, only how long ago.)
+    if (c.year < DEEP_BEFORE_YEAR) return precision === 'circa' ? `c. ${y}` : y;
     switch (precision) {
       case 'millennium': return `${formatYear(c.year)} (millennium)`;
       case 'century':
@@ -118,6 +135,14 @@ export const gregorian: Calendar = {
     let circa = false;
     const circaMatch = /^(c\.|ca\.|circa|about)\s*/i.exec(s);
     if (circaMatch) { circa = true; s = s.slice(circaMatch[0].length); }
+    // How long ago (D134): "250 million years ago", "250 Ma", "2.6 mya", "21 ka", "21,000 years ago".
+    const ago = /^([\d][\d,]*(?:\.\d+)?)\s*(million years ago|million years|m\.?y\.?a\.?|ma|thousand years ago|ka|kya|years ago|yrs ago|years bp|bp)$/i.exec(s);
+    if (ago) {
+      const n = Number(ago[1].replace(/,/g, '')), unit = ago[2].toLowerCase();
+      const years = Math.round(n * (/^(million|m\.?y|ma)/.test(unit) ? 1e6 : /^(thousand|ka|kya)/.test(unit) ? 1e3 : 1));
+      if (!Number.isFinite(years) || years < 0 || years > 1e12) return null;
+      return { instant: this.fromCivil({ year: PRESENT_YEAR - years }), precision: circa ? 'circa' : 'year' };
+    }
     let era: 'BCE' | 'CE' | null = null;
     const eraMatch = /\s*\b(BCE|BC|B\.C\.|CE|AD|A\.D\.)$/i.exec(s);
     if (eraMatch) { era = /^B/i.test(eraMatch[1]) ? 'BCE' : 'CE'; s = s.slice(0, eraMatch.index).trim(); }

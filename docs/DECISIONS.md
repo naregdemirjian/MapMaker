@@ -61,6 +61,36 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D134. The Earth through geological time
+
+- **Asked.** When making a map, the choice of the Earth as it really was through geological history, changing
+  over tens of thousands and millions of years, accurate to how the Earth actually looked.
+- **What.** A kind of map in the New map dialog: "The Earth through geological time" (`createPaleoEarth`: the
+  Earth's radius, no present-day geography; `settings.paleo`, terrain source 'paleo'). Its land and sea floor at
+  the moment shown come from the PALEOMAP PaleoDEMs (C. R. Scotese and N. Wright, 2018, CC BY 4.0): 109 maps
+  from today back 540 million years, every 5 million years (two Devonian maps a little off), each relative to the
+  sea of its time, here in cells of one degree (`data/paleo/paleodem-1deg.bin`, 3.3 MB, the "MMP1" format of
+  `src/terrain/paleo.ts`; made by `scripts/paleodem-extract.py` and `scripts/pack-paleodem.ts`). Between two maps
+  every height is blended (`paleoGridAt`), so that coasts, mountains and seas change steadily; the coasts are
+  where the land meets the sea of the moment, as on generated planets (D97), and territory that ends at the coast
+  follows them. Over the last 128,000 years the sea of the glacial cycle is added (`GLACIAL_SEA`: a smoothed,
+  rounded reconstruction after Lambeck and others, 2014, and Spratt and Lisiecki, 2016, good to some tens of
+  metres: about 130 m lower 21,000 years ago, so that Beringia, Doggerland and Sundaland are land); the user's own
+  sea level points (D96) still apply on top. Dates before 10,000 BCE are written as how long ago they were
+  ("21,000 years ago", "2.58 million years ago", "250 million years ago", counted from 2000), and read so too
+  ("250 Ma", "2.6 mya", "21 ka", "21,000 years ago"); the timeline of such a map spans 545 million years with ticks
+  at round ages, and history plays at up to 20 million years a second. The map's note names the moment ("250
+  million years ago · Permo-Triassic Boundary") and the sea's level when lower. Shots and exports draw each
+  frame's own moment; the data is credited in exports.
+- **Limits.** One-degree cells (about 110 km): no small islands or narrow straits; between two maps 5 million
+  years apart coasts and mountains change by blending, not by the plates' motion (continents seem to melt from
+  one place to the next rather than slide); the glacial seas use today's sea floor at one degree.
+- **Tested.** paleo: maps packed and read back exactly, damaged files refused, blended half way, kept within the
+  span; the real maps: 109 from 0 to 540 million years ago, today about 30% land, the Sahara and Tibet high and
+  the Pacific deep, 250 million years ago one land holding more than 85% of all land (Pangaea) against today's
+  several; the glacial sea (130 m lower 21,000 years ago, 6 m higher 125,000 years ago, today's before 128,000);
+  ages of instants and back; dates written and read as how long ago; the map made in one step, undone.
+
 ### D133. The solar system side by side
 
 - **Asked.** A way to show the solar system side by side: organised, less about the planets' movements and

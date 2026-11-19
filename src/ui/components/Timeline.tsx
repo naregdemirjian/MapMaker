@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useStore, useLive, store } from '../store.ts';
 import {
-  type Instant, toApproxYear, fromApproxYear, gregorian, formatYear, floorTo, instant, add, compare, fromStore, MS_PER_DAY,
+  type Instant, toApproxYear, fromApproxYear, gregorian, formatYear, floorTo, instant, add, compare, fromStore, MS_PER_DAY, DEEP_BEFORE_YEAR, PRESENT_YEAR,
 } from '../../core-time/index.ts';
 import { BASE_EVENT_ID } from '../../world-model/schema.ts';
 import * as cmd from '../../domain/commands.ts';
@@ -46,7 +46,9 @@ function ticks(start: number, end: number, u: Unit): Array<{ t: number; label: s
   const out: Array<{ t: number; label: string }> = [];
   if (u.kind === 'year') {
     for (let y = Math.ceil(start / u.step) * u.step; y <= end && out.length < 400; y += u.step) {
-      const yr = Math.round(y);
+      let yr = Math.round(y);
+      // (Deep time, D134: ticks at round numbers of years ago, as they are written.)
+      if (yr < DEEP_BEFORE_YEAR && u.step >= 1000) yr = PRESENT_YEAR - Math.round((PRESENT_YEAR - yr) / u.step) * u.step;
       out.push({ t: toApproxYear(gregorian.fromCivil({ year: yr })), label: formatYear(yr) });
     }
     return out;
@@ -284,6 +286,8 @@ export const HISTORY_SPEEDS: Array<{ yps: number; label: string }> = [
   { yps: 2, label: '2 years/s' }, { yps: 5, label: '5 years/s' }, { yps: 10, label: '10 years/s' },
   { yps: 25, label: '25 years/s' }, { yps: 50, label: '50 years/s' }, { yps: 100, label: '100 years/s' },
   { yps: 250, label: '250 years/s' }, { yps: 1000, label: '1,000 years/s' },
+  // (Deep time, D134.)
+  { yps: 10_000, label: '10,000 years/s' }, { yps: 100_000, label: '100,000 years/s' }, { yps: 1e6, label: '1 million years/s' }, { yps: 5e6, label: '5 million years/s' }, { yps: 2e7, label: '20 million years/s' },
 ];
 
 /**

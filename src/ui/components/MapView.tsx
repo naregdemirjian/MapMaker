@@ -17,8 +17,8 @@ import { cameraAt, timeAt, overlaysAt, drawOverlays, withStillCamera, unspun, mo
 import { transitionOptions, drawShotOverlays, lookStyles } from '../../presentation/export-driver.ts';
 import { finishLook } from '../../presentation/looks.ts';
 import { parseJSON, slerpLonLat } from '../../temporal-engine/engine.ts';
-import { compare, fromStore, gregorian } from '../../core-time/index.ts';
-import { basemapSourceOf, shown, minLakeKm2, terrainLook, seaLevelPoints, planetOf, sculptOf, terrainSourceOf } from '../../world-model/world-settings.ts';
+import { compare, fromStore, gregorian, formatYear } from '../../core-time/index.ts';
+import { basemapSourceOf, shown, minLakeKm2, terrainLook, seaLevelPoints, planetOf, sculptOf, terrainSourceOf, isPaleoEarth } from '../../world-model/world-settings.ts';
 import { stampsAt } from '../../terrain/sculpt.ts';
 import { sculpted } from '../../terrain/sculpt-cache.ts';
 import { riversSoon } from '../../terrain/river-cache.ts';
@@ -26,6 +26,7 @@ import { detailNeed, type DetailGrid } from '../../terrain/detail.ts';
 import { detailSoon } from '../../terrain/detail-cache.ts';
 import { PALETTES } from '../../terrain/look.ts';
 import { seaLevelAt } from '../../terrain/sea-level.ts';
+import { ageOf, glacialSeaAt, paleoLabelAt } from '../../terrain/paleo.ts';
 import { recordTransition } from '../record-length.ts';
 import { loadBasemapDetail, pixelsPerDegree, visibleBounds, DETAIL_PIXELS_PER_DEGREE, type Basemap } from '../../render-engine/basemap.ts';
 import * as cmd from '../../domain/commands.ts';
@@ -180,6 +181,11 @@ function withoutDetail(b: Basemap): Basemap {
   return m.basemap;
 }
 
+/** The compared date's terrain on the Earth through geological time (D134): its own heights and sea. */
+function compareTerrain<T extends { grid: unknown; key: string; seaLevel?: number }>(now: T, other: { grid: T['grid']; key: string } | null, seaLevel: number): T {
+  return other ? { ...now, grid: other.grid, key: other.key, seaLevel } : { ...now, seaLevel };
+}
+
 export function MapView() {
   const s = useLive();
   /** The view last drawn and when it last changed; the timer that sharpens the picture once it rests. */
@@ -286,13 +292,15 @@ export function MapView() {
     // Terrain (D95), the sea level of the moment (D96) and generated planets (D97, whose land and sea
     // are their terrain's): Earth's heights loaded, a planet's made, on first use.
     const look = terrainLook(space), terrainShown = !!look && on('terrain');
-    const seaPoints = seaLevelPoints(space), seaLevel = seaLevelAt(seaPoints, time);
+    // (The Earth through geological time, D134: the heights of the moment shown, and the sea of the last glacial cycle.)
+    const paleo = isPaleoEarth(space);
+    const seaPoints = seaLevelPoints(space), seaLevel = seaLevelAt(seaPoints, time) + (paleo ? glacialSeaAt(ageOf(time)) : 0);
     // Sculpting (D98): the strokes holding at the date viewed, applied to the heights.
     const strokes = stampsAt(sculptOf(space), time);
     // (Conditions spreading over the terrain need its heights too, D103.)
     const fieldsHere = s.world.all('layer').some((l) => l.kind === 'field' && l.space_id === s.spaceId);
-    const needsGrid = terrainShown || seaPoints.length > 0 || !!planetOf(space) || strokes.length > 0 || fieldsHere;
-    const ground = needsGrid ? s.terrainOf(space) : null;
+    const needsGrid = terrainShown || seaPoints.length > 0 || !!planetOf(space) || paleo || strokes.length > 0 || fieldsHere;
+    const ground = needsGrid ? s.terrainOf(space, time) : null;
     const carved = ground ? sculpted(ground.grid, ground.key, strokes, (space?.radius_m ?? 6371008.8) / 1000) : null;
     // A planet's rivers (D99), worked out a moment after its heights (drawn without them meanwhile).
     const rivers = carved && planetOf(space) && on('rivers') ? riversSoon(carved.grid, carved.key, () => store.notify()) : null;
@@ -376,7 +384,7 @@ export function MapView() {
       const cc = cmpCanvas.getContext('2d') as unknown as CanvasRenderingContext2D;
       cc.setTransform(dpr, 0, 0, dpr, frame.x * dpr, frame.y * dpr);
       try {
-        s.compareRenderer.render(cc, view, s.world, s.engine, s.spaceId, s.compare.time, { passes, transparent: false, layerIds: layers, basemap, referenceBorders: s.referenceBorders, layout: { labels: namesOn && !namesHidden, cities: citiesOn }, moving: moving && vs.whileMoving === 'carry', holdNames: moving && vs.names === 'hold', fillAround, show, terrain: terrain && { ...terrain, seaLevel: seaLevelAt(seaPoints, s.compare.time) } });
+        s.compareRenderer.render(cc, view, s.world, s.engine, s.spaceId, s.compare.time, { passes, transparent: false, layerIds: layers, basemap, referenceBorders: s.referenceBorders, layout: { labels: namesOn && !namesHidden, cities: citiesOn }, moving: moving && vs.whileMoving === 'carry', holdNames: moving && vs.names === 'hold', fillAround, show, terrain: terrain && (paleo ? compareTerrain(terrain, s.terrainOf(space, s.compare.time), seaLevelAt(seaPoints, s.compare.time) + glacialSeaAt(ageOf(s.compare.time))) : { ...terrain, seaLevel: seaLevelAt(seaPoints, s.compare.time) }) });
       } catch (e) {
         console.error(e);
       }
@@ -1100,9 +1108,13 @@ function MapHud({ view }: { view: View }) {
   const kmPerPx = (radius / 1000) * radiansPerPixel(view);
   const target = kmPerPx * 120;
   const nice = [1, 2, 5].flatMap((m) => [0.01, 0.1, 1, 10, 100, 1000, 10000].map((e) => m * e)).sort((a, b) => a - b).filter((x) => x <= target).pop() ?? target;
+  // The Earth through geological time (D134): the moment's name, and whose maps they are.
+  const space = s.world?.get('map_space', s.spaceId);
+  const paleoNote = isPaleoEarth(space) ? (s.paleo ? `${formatYear(gregorian.toCivil(s.time).year)} · ${paleoLabelAt(s.paleo, ageOf(s.time))}${glacialSeaAt(ageOf(s.time)) <= -1 ? ` · the sea ${Math.round(-glacialSeaAt(ageOf(s.time)))} m lower than today` : ''} · PALEOMAP (Scotese and Wright, 2018)` : 'Loading the Earth through time…') : null;
   return (
     <div className="map-hud">
       <div className="scalebar"><div style={{ width: `${nice / kmPerPx}px` }} /><span>{nice >= 1 ? `${nice.toLocaleString()} km` : `${(nice * 1000).toFixed(0)} m`}</span></div>
+      {paleoNote && <div className="scalebar space-note" data-testid="paleo-note">{paleoNote}</div>}
       <div className="hud-buttons">
         <button title="Zoom in" onClick={() => s.setCamera({ ...s.camera, zoom: s.camera.zoom + 0.5 })}>+</button>
         <button title="Zoom out" onClick={() => s.setCamera({ ...s.camera, zoom: s.camera.zoom - 0.5 })}>−</button>

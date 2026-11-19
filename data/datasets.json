@@ -152,5 +152,15 @@
         "sha256": "1d3a0ec64f00f269fffe6be43a080d45bddcd05ef156c3012780c29f38b3b701"
       }
     ]
+  },
+  {
+    "id": "paleomap",
+    "name": "PALEOMAP Paleodigital Elevation Models (PaleoDEMs)",
+    "version": "2018, 1 x 1 degree (v2 files)",
+    "source": "https://doi.org/10.5281/zenodo.5460860 (C. R. Scotese and N. Wright, PALEOMAP Project); resampled to one-degree cells, heights in whole metres (scripts/paleodem-extract.py, scripts/pack-paleodem.ts)",
+    "licence": "CC BY 4.0",
+    "credit": "Earth through geological time: PALEOMAP PaleoDEMs, C. R. Scotese and N. Wright (2018), PALEOMAP Project, CC BY 4.0; resampled.",
+    "usedFor": "The Earth's land and sea floor at 109 moments from today back 540 million years, on maps of the Earth through geological time",
+    "retrieved": "2026-11-19"
   }
 ]

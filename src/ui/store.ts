@@ -6,13 +6,14 @@ import { Api, ApiError, type JournalState, type ProjectInfo, type BorderDraft } 
 import { World } from '../world-model/world.ts';
 import { Engine } from '../temporal-engine/engine.ts';
 import { takeLockedSkipped, type CommandResult } from '../domain/commands.ts';
-import { type Instant, gregorian, toJSONValue, fromJSONValue } from '../core-time/index.ts';
+import { type Instant, gregorian, toJSONValue, fromJSONValue, PRESENT_YEAR } from '../core-time/index.ts';
 import { type Camera, defaultCamera, flatCamera, PROJECTIONS } from '../render-engine/camera.ts';
 import { MapRenderer, VIEW_QUALITY } from '../render-engine/map-renderer.ts';
 import { loadViewSettings, saveViewSettings, DETAIL_TOLERANCE, type ViewSettings } from './view-settings.ts';
 import { loadRecordLength, type RecordLength } from './record-length.ts';
 import { loadBasemap, loadBasemapDetail, type Basemap } from '../render-engine/basemap.ts';
 import { loadEarthTerrain, EARTH_TERRAIN_KEY, type ElevationGrid } from '../terrain/grid.ts';
+import { loadPaleo, paleoGridAt, ageOf, type PaleoSet } from '../terrain/paleo.ts';
 import { planetKey, type PlanetParams } from '../terrain/planet.ts';
 import { planetTerrain } from '../terrain/planet-cache.ts';
 import { loadEarthCover, coverSoon, type TerrainCover } from '../terrain/cover.ts';
@@ -20,7 +21,7 @@ import { climateOf } from '../terrain/biomes.ts';
 import type { FieldSource } from '../domain/fields.ts';
 import type { DisasterId } from '../domain/disasters.ts';
 import type { SculptTool } from '../terrain/sculpt.ts';
-import { terrainSourceOf, planetOf } from '../world-model/world-settings.ts';
+import { terrainSourceOf, planetOf, isPaleoEarth } from '../world-model/world-settings.ts';
 import type { MapSpaceRow } from '../world-model/schema.ts';
 import { DEFAULT_PERIOD, type PeriodSpec } from '../domain/history-view.ts';
 import { setAssetBase } from '../render-engine/assets.ts';
@@ -316,8 +317,14 @@ class AppStore {
    * The terrain a map has, if it is ready: Earth's (D94) or a generated planet's (D97). What is not
    * ready yet is loaded or made, and everything is drawn again when it is.
    */
-  terrainOf(space: Pick<MapSpaceRow, 'settings' | 'radius_m' | 'kind'> | null | undefined): { grid: ElevationGrid; key: string } | null {
+  terrainOf(space: Pick<MapSpaceRow, 'settings' | 'radius_m' | 'kind'> | null | undefined, t: Instant = this.time): { grid: ElevationGrid; key: string } | null {
     const source = terrainSourceOf(space);
+    // The Earth through geological time (D134): the heights of the moment shown.
+    if (source === 'paleo') {
+      if (!this.paleo) { this.needPaleo(); return null; }
+      const at = paleoGridAt(this.paleo, ageOf(t));
+      return { grid: at.grid, key: at.key };
+    }
     if (source === 'earth') {
       if (!this.earthTerrain) this.needEarthTerrain();
       return this.earthTerrain ? { grid: this.earthTerrain, key: EARTH_TERRAIN_KEY } : null;
@@ -357,6 +364,15 @@ class AppStore {
   }
 
   /** Loads Earth's terrain unless it is there or on its way (everything is drawn again when it arrives). */
+  /** The maps of the Earth through geological time (D134), once loaded. */
+  paleo: PaleoSet | null = null;
+  private paleoLoading = false;
+  needPaleo(): void {
+    if (this.paleo || this.paleoLoading) return;
+    this.paleoLoading = true;
+    loadPaleo().then((p) => { this.paleoLoading = false; this.set({ paleo: p }); }, (e: Error) => { this.paleoLoading = false; this.toast(e.message, 'error'); });
+  }
+
   needEarthTerrain(): void {
     if (this.earthTerrain || this.terrainLoading) return;
     this.terrainLoading = true;
@@ -682,8 +698,20 @@ class AppStore {
   timeDraggedAt = -Infinity;
   setTime(t: Instant, live = false) { this.time = t; if (live) { this.timeDraggedAt = performance.now(); this.notifyLive(); } else this.notify(); }
 
+  /** After the map shown changed: the timeline fitted again when the Earth through geological time comes or goes (D134). */
+  mapChanged(before: string): void {
+    const was = isPaleoEarth(this.world?.get('map_space', before)), now = isPaleoEarth(this.world?.get('map_space', this.spaceId));
+    if (was !== now) { this.fitTimeline(); this.notify(); }
+  }
+
   fitTimeline() {
     if (!this.world) return;
+    // The Earth through geological time (D134): all of its span, with the events in it.
+    if (isPaleoEarth(this.world.get('map_space', this.spaceId))) {
+      const years = this.world.all('event').filter((e) => e.id !== 'evt_base').map((e) => e.start_day / 365.2425 + 1970);
+      this.timeline = { start: Math.min(PRESENT_YEAR - 545e6, ...years), end: Math.max(PRESENT_YEAR + 50, ...years) };
+      return;
+    }
     const ys = this.world.all('event').filter((e) => e.id !== 'evt_base').flatMap((e) => {
       const a = (e.start_day / 365.2425) + 1970;
       const b = e.end_day !== null ? (e.end_day / 365.2425) + 1970 : a;

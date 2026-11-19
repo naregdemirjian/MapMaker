@@ -37,6 +37,8 @@ export interface WorldSettings {
   planet?: PlanetParams;
   /** Strokes of the sculpting brush (D98), in the order drawn. */
   sculpt?: TerrainStamp[];
+  /** The Earth through geological time (D134): its land and sea at the moment shown, from the PALEOMAP PaleoDEMs. */
+  paleo?: boolean;
 }
 
 /** Whether something is shown, while working or in exports. */
@@ -71,11 +73,16 @@ export function basemapSourceOf(space: Pick<MapSpaceRow, 'settings' | 'radius_m'
  * The terrain a world has: Earth's elevation for worlds showing Earth's geography (D95), its own for a
  * generated planet (D97); none otherwise.
  */
-export function terrainSourceOf(space: Pick<MapSpaceRow, 'settings' | 'radius_m' | 'kind'> | null | undefined): 'earth' | 'planet' | null {
+export function terrainSourceOf(space: Pick<MapSpaceRow, 'settings' | 'radius_m' | 'kind'> | null | undefined): 'earth' | 'planet' | 'paleo' | null {
   if (!space || space.kind === 'plane') return null;
+  // (The Earth through geological time, D134: its land and sea at the moment shown.)
+  if (worldSettings(space).paleo === true && space.kind === 'sphere') return 'paleo';
   if (basemapSourceOf(space) === 'natural-earth') return 'earth';
   return planetParamsOf(worldSettings(space).planet) ? 'planet' : null;
 }
+
+/** Whether a map is the Earth through geological time (D134). */
+export const isPaleoEarth = (space: Pick<MapSpaceRow, 'settings' | 'radius_m' | 'kind'> | null | undefined): boolean => terrainSourceOf(space) === 'paleo';
 
 /** A generated planet's settings (D97), or null. */
 export function planetOf(space: Pick<MapSpaceRow, 'settings' | 'radius_m' | 'kind'> | null | undefined): PlanetParams | null {
