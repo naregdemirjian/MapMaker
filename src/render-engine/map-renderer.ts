@@ -396,6 +396,8 @@ interface TransitionGroup {
   look: FrontLookOptions;
   /** Who held the land before (the first parcel's previous owner). */
   from: string | null;
+  /** Where it is on screen, for a view (see groupBox): kept with the change from frame to frame. */
+  boxes: { key: string; changing: Box2 | null; all: Box2 | null };
   /** The front itself (with a field): the lines between the land reached and not yet reached, within the change, on screen. */
   line?: Path2D | null;
   /** All the parcels of the change, and those changing owner (null: none of it is on the sheet). */
@@ -2071,14 +2073,14 @@ export class MapRenderer {
         // (Where a change is on the picture, and how many of its pixels to a unit of the view: for soft edges and glows.)
         const fxOf = (g: TransitionGroup): FrontFx => ({
           view, k: Math.hypot(cm.a, cm.b) || 1,
-          box: (pad) => this.deviceBox(this.screenBox(view, arr, g.changingFaces), cm, pad, c.canvas.width, c.canvas.height),
+          box: (pad) => this.deviceBox(this.groupBox(view, arr, g, true), cm, pad, c.canvas.width, c.canvas.height),
           part: (deg, pad) => {
             // (Where whole outlines are needed, the projection bends boxes: the change's own box then.)
-            if (parcelGeometry(arr).needsOutline(g.changingFaces[0] ?? -1)) return this.deviceBox(this.screenBox(view, arr, g.changingFaces), cm, pad, c.canvas.width, c.canvas.height);
+            if (parcelGeometry(arr).needsOutline(g.changingFaces[0] ?? -1)) return this.deviceBox(this.groupBox(view, arr, g, true), cm, pad, c.canvas.width, c.canvas.height);
             const acc: Box2 = [Infinity, Infinity, -Infinity, -Infinity];
             this.boxOnScreen(view, deg, acc);
             if (!(acc[2] > acc[0] && acc[3] > acc[1])) return [0, 0, 0, 0];
-            const own = this.deviceBox(this.screenBox(view, arr, g.changingFaces), cm, pad, c.canvas.width, c.canvas.height);
+            const own = this.deviceBox(this.groupBox(view, arr, g, true), cm, pad, c.canvas.width, c.canvas.height);
             const part = this.deviceBox([acc[0], acc[1], acc[2] - acc[0], acc[3] - acc[1]], cm, pad, c.canvas.width, c.canvas.height);
             // (Within the change's own box.)
             const x0 = Math.max(own[0], part[0]), y0 = Math.max(own[1], part[1]), x1 = Math.min(own[0] + own[2], part[0] + part[2]), y1 = Math.min(own[1] + own[3], part[1] + part[3]);
@@ -2198,14 +2200,17 @@ export class MapRenderer {
           c.restore();
           // The advancing front is highlighted on top, at full strength: the glow over the land just taken (D137),
           // then the line along the front.
-          for (const g of tg.groups.values()) {
-            if (!g.advance || !g.disc || !g.changing) continue;
+          // (Within the land where territory ends at the coast: cut once for all of them. Cutting each change's
+          // highlight to the whole coastline took most of a frame with seventy changes under way.)
+          const lit = [...tg.groups.values()].filter((g) => g.advance && g.disc && g.changing && (g.look.front.show || (!!g.field && g.look.wake > 0.01 && g.progress < 1)));
+          if (lit.length) c.save();
+          if (lit.length && clip && opts.basemap && !terrainLand) this.clip(c, land());
+          for (const g of lit) {
+            if (!g.disc || !g.changing) continue;
             const fr = g.look.front;
             const wake = !!g.field && g.look.wake > 0.01 && g.progress < 1;
-            if (!fr.show && !wake) continue;
             const color = fr.color === 'auto' ? lighten(colorOf(g.a.value) ?? colorOf(g.from) ?? style.frontGlow, 0.45) : fr.color;
             c.save();
-            if (clip && opts.basemap && !terrainLand) this.clip(c, land());
             this.clip(c, g.changing);
             if (wake) this.drawWake(c, g, fxOf(g), color);
             if (!fr.show) { c.restore(); continue; }
@@ -2242,7 +2247,7 @@ export class MapRenderer {
               c.shadowColor = color;
               c.shadowBlur = fr.glow * view.unit;
               // Only the part of the buffer around the change (blurring the glow over the whole frame is slow).
-              const [bx, by, bw, bh] = this.deviceBox(this.screenBox(view, arr, g.changingFaces), cm, 3 * fr.glow * view.unit + w + 4, c.canvas.width, c.canvas.height);
+              const [bx, by, bw, bh] = this.deviceBox(this.groupBox(view, arr, g, true), cm, 3 * fr.glow * view.unit + w + 4, c.canvas.width, c.canvas.height);
               if (bw > 0 && bh > 0) c.drawImage(band.canvas as CanvasImageSource, bx, by, bw, bh, bx, by, bw, bh);
             } else {
               c.strokeStyle = color;
@@ -2253,9 +2258,10 @@ export class MapRenderer {
             }
             c.restore();
           }
+          if (lit.length) c.restore();
         }
         // (The device box of an animated change: lines drawn apart around it are laid on only there.)
-        const boxOf = (g: TransitionGroup, pad: number): Box2 => this.deviceBox(this.screenBox(view, arr, g.faces), cm, pad, c.canvas.width, c.canvas.height);
+        const boxOf = (g: TransitionGroup, pad: number): Box2 => this.deviceBox(this.groupBox(view, arr, g, false), cm, pad, c.canvas.width, c.canvas.height);
         if (wantsBorders) for (const { ls, states, snap, tg, clip, wars } of prepared) {
           const width = (ls.borderWidth ?? style.borderWidth) * u;
           const fronts = (on: CanvasRenderingContext2D) => { if (wars.length) this.drawFronts(on, sheet, sp, arr, snap, states, wars, ls.fronts === 'plain', ls.frontColor ?? FRONT_COLOR, Math.max(2.5, 4 * u)); };
@@ -2958,6 +2964,7 @@ export class MapRenderer {
         a: st.assignment!, faces: cg.region.faces, changingFaces: cg.changing.faces, advance, spec, progress, disc: null, discRule: 'evenodd', border: null,
         region: this.setPath(sp, sheet, arr, cg.region), changing: cg.changing.faces.length ? this.setPath(sp, sheet, arr, cg.changing) : null,
         look: lookOf(st.assignment!), from: st.transition!.from,
+        boxes: this.groupBoxes.get(cg) ?? (() => { const b = { key: '', changing: null, all: null }; this.groupBoxes.set(cg, b); return b; })(),
       };
       groups.set(cg.id, g);
       for (const f of cg.region.faces) of.set(f, g);
@@ -2967,7 +2974,7 @@ export class MapRenderer {
     for (const g of groups.values()) {
       if (!g.advance || g.progress <= 0) continue;
       if (g.spec.style === 'wipe') { g.disc = this.wipeShape(view, arr, g); continue; }
-      const field = this.frontField(arr, g, states);
+      const field = this.frontField(view, arr, g, states);
       if (field) {
         g.field = field;
         g.disc = this.reachedPath(view, field, g.progress);
@@ -3001,25 +3008,39 @@ export class MapRenderer {
     return { groups, of };
   }
 
+  /** Fields of the changes under way, the last used last, with the cells they hold together. */
   private fieldCache = new Map<string, FrontField | null>();
+  private fieldCells = 0;
 
   /**
    * The field of a moving front (D136): worked out once for the change (kept while it is under way), from
    * where its front starts (front-source.ts). Null when the change cannot have one (round the whole planet).
+   * As fine as the change is large on screen (a cell about two and a half pixels, in a few steps of fineness:
+   * a small change far away takes a ninth of the work of one filling the view); a ragged front keeps its
+   * pattern at every fineness.
    */
-  private frontField(arr: Arrangement, g: TransitionGroup, states: Map<number, FaceState>): FrontField | null {
+  private frontField(view: View, arr: Arrangement, g: TransitionGroup, states: Map<number, FaceState>): FrontField | null {
     const changing = g.changingFaces;
     if (!changing.length) return null;
     const kind = g.spec.style === 'advance' ? 'advance' : g.spec.style === 'dissolve' ? 'scatter' : 'border';
     const roughness = g.look.roughness;
     const origins = kind === 'advance' ? JSON.stringify(g.spec.origins ?? g.spec.origin ?? null) : '';
-    const key = `${arr.spaceId}|${arr.revision}|${g.a.effectId}|${g.a.value}|${kind}|${origins}|${changing.length}|${changing[0]}|${changing[changing.length - 1]}|${roughness}`;
+    const box = this.groupBox(view, arr, g, true);
+    const want = Math.max(box[2], box[3]) / 2.5;
+    const cells = FIELD_CELLS.find((c) => c >= want) ?? FIELD_CELLS[FIELD_CELLS.length - 1];
+    const key = `${arr.spaceId}|${arr.revision}|${g.a.effectId}|${g.a.value}|${kind}|${origins}|${changing.length}|${changing[0]}|${changing[changing.length - 1]}|${roughness}|${cells}`;
     let f = this.fieldCache.get(key);
     if (f === undefined) {
       const src = frontSourceOf(arr, changing, g.a.value, g.spec, kind, states);
-      f = src ? buildFrontField(src.rings, src.source, { roughness, seed: seedOf(g.a.effectId) }) : null;
-      if (this.fieldCache.size > 96) this.fieldCache.delete(this.fieldCache.keys().next().value!);
-      this.fieldCache.set(key, f);
+      f = src ? buildFrontField(src.rings, src.source, { roughness, seed: seedOf(g.a.effectId), cells }) : null;
+      this.fieldCells += f ? f.nx * f.ny : 0;
+    } else this.fieldCache.delete(key);
+    this.fieldCache.set(key, f);
+    // (Kept: as many as hold four million cells together, 600 at most; the longest unused go first.)
+    while (this.fieldCache.size > 1 && (this.fieldCells > 4_000_000 || this.fieldCache.size > 600)) {
+      const [old, gone] = this.fieldCache.entries().next().value!;
+      this.fieldCache.delete(old);
+      this.fieldCells -= gone ? gone.nx * gone.ny : 0;
     }
     return f;
   }
@@ -3156,6 +3177,9 @@ export class MapRenderer {
     // under them along the edge they share (each covers its side of an edge pixel only in part).
     const area = within ?? g.changing;
     lc.save();
+    // (Only round the change: the shapes cut to below can be far larger than it, a whole empire beside a village,
+    // and cutting to them over the whole picture for each change under way took most of a frame.)
+    if (fx) this.clipBox(lc, fx.box(2));
     if (g.advance) {
       // The area the front has reached (a union of shapes for a front from a border), within the changing parcels.
       this.clip(lc, area);
@@ -4019,6 +4043,12 @@ export class MapRenderer {
     const on = box ? this.boxBuffer(ctx, box) : ctx;
     on.save();
     if (on !== ctx) { on.strokeStyle = ctx.strokeStyle; on.lineJoin = ctx.lineJoin; on.lineCap = ctx.lineCap; on.lineWidth = ctx.lineWidth; }
+    else if (boxOf && near.length) {
+      // (Only round the changes: "everywhere a front has not come" is the whole picture less a shape.)
+      const round = this.unionBox(ctx, near.map((g) => boxOf(g, width + 2)));
+      if (!round) { on.restore(); return; }
+      this.clipBox(on, round);
+    }
     for (const g of inside) on.clip(g.disc!, g.discRule);
     for (const g of out) if (g.discRule === 'evenodd') on.clip(outsideOf(g.disc!), 'evenodd');
     if (on === ctx) on.globalAlpha *= alpha;
@@ -4073,6 +4103,25 @@ export class MapRenderer {
     band.globalCompositeOperation = 'source-over';
     this.layOn(ctx, band, 1, box);
     ctx.restore();
+  }
+
+  private groupBoxes = new WeakMap<object, { key: string; changing: Box2 | null; all: Box2 | null }>();
+
+  /** Where a change under way is on screen (the parcels changing hands, or all its parcels): found once for the view. */
+  private groupBox(view: View, arr: Arrangement, g: TransitionGroup, changing: boolean): Box2 {
+    if (g.boxes.key !== view.key) { g.boxes.key = view.key; g.boxes.changing = null; g.boxes.all = null; }
+    if (changing) return (g.boxes.changing ??= this.screenBox(view, arr, g.changingFaces));
+    return (g.boxes.all ??= this.screenBox(view, arr, g.faces));
+  }
+
+  /** Cuts what is drawn next to a box of the picture (device pixels), whatever the transform. */
+  private clipBox(ctx: CanvasRenderingContext2D, box: Box2): void {
+    const m = ctx.getTransform();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.beginPath();
+    ctx.rect(box[0], box[1], Math.max(0, box[2]), Math.max(0, box[3]));
+    ctx.clip();
+    ctx.setTransform(m);
   }
 
   /** The box (device pixels) around the boxes given, within the picture; all of it for none; null when empty. */
@@ -5010,6 +5059,9 @@ export interface FrontLookOptions {
   wake: number;
   front: { show: boolean; color: string; width: number; glow: number };
 }
+
+/** How many cells across a change's longer side its front's field may have (D136): the coarsest that suits its size on screen. */
+const FIELD_CELLS = [32, 48, 72, 108, 160];
 
 /** A look by its id (presentation/sequence.ts TRANSITION_LOOKS), its front line's width and glow as in `base` unless set. */
 function lookById(id: string, base: FrontLookOptions): FrontLookOptions | null {

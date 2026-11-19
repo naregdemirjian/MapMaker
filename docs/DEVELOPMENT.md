@@ -298,12 +298,12 @@ The approved roadmap has 14 stages (0–13). Where each stands (brought up to da
 | 9 Environment and fields | Done | Conditions: field layers of radiation, fire, smoke, floods, destruction and heat, their sources rising, lasting and fading, circles and plumes, drawn by the graphics card (D102); fires, lava and floods spreading over the terrain (D103); disasters from templates in one click (D104); heatmaps from points, three thousand strikes at 4K (D105) | Raster and numerical layers from files; arrival-time fronts slowed by terrain |
 | 10 Presentation polish | Done | Routes: campaign arrows and lines that flow (D106); text boxes and callouts (D107); looks for shots (D108); TIFF sequences (D109); SVG frames (D115) | Camera paths dropped (the camera stays still, D34) |
 | 11 Space maps | Done | The 982 stars within 50 light-years in three dimensions, with their names, kinds and systems (D110); stars held by countries and factions over time, drawn as realms (D111); lanes between stars, expeditions and fleets (D112); the solar system on any date (D113); invented star maps, stars found by search (D114); the Milky Way and galaxies of one's own (D116); the large moons on the solar system map (D117); planets of other stars (D118) | Asteroids and comets; planets of stars too faint for the star catalogues |
-| Improvement pass | In progress | History played in the working view (D119); borders imported from GeoJSON maps of their years, following the borders already there (D120), or from a dataset dating each shape (D123); videos, MP4 and WebM (D121); a shot of the whole history in one click (D122); layers' opacity and border width; each layer as its own export pass (D124); names placed quickly while a shot plays (D125); borders while fronts move and where two changes meet (D126); a globe that turns, for shots (D127); a change over before its land changes hands again (D128); a date that stays still as it changes (D129); how the stars look (D130); star maps as flat charts (D131); realms across the stars as territories with fronts (D132); the solar system side by side (D133); the Earth through geological time (D134), its continents sliding between its maps (D135); fronts that follow the land (D136), and looks for them: soft, glowing, ragged, in patches, an event's own (D137); the Earth as photographed, sharp to city scale (D138) | Faster shot playback through many changes |
+| Improvement pass | In progress | History played in the working view (D119); borders imported from GeoJSON maps of their years, following the borders already there (D120), or from a dataset dating each shape (D123); videos, MP4 and WebM (D121); a shot of the whole history in one click (D122); layers' opacity and border width; each layer as its own export pass (D124); names placed quickly while a shot plays (D125); borders while fronts move and where two changes meet (D126); a globe that turns, for shots (D127); a change over before its land changes hands again (D128); a date that stays still as it changes (D129); how the stars look (D130); star maps as flat charts (D131); realms across the stars as territories with fronts (D132); the solar system side by side (D133); the Earth through geological time (D134), its continents sliding between its maps (D135); fronts that follow the land (D136), and looks for them: soft, glowing, ragged, in patches, an event's own (D137); the Earth as photographed, sharp to city scale (D138); fronts at scale, a hundred changes under way at once (D139) | Faster shot playback through many changes |
 | 12–13 | Not started | | Smart brushes, branches and calendars |
 
 ## Tests
 
-All pass as of 19 November 2026 (400 unit and randomised tests in 73 files, 23 + 63 + 10 + 7 interface steps). The
+All pass as of 19 November 2026 (401 unit and randomised tests in 73 files, 23 + 63 + 10 + 7 interface steps). The
 interface tests run with the verify mode on (D57): everything the app works out from what was there before is also
 worked out afresh, and any difference stops the test.
 `sh scripts/check-all.sh` runs everything and prints ALL CHECKS PASSED only when every check passed.
@@ -332,7 +332,7 @@ worked out afresh, and any difference stops the test.
 | `test/events-box.test.ts` | 2 | Current events: started and not ended, lingering, alternatives, groups, fades, limits |
 | `test/photo.test.ts` | 5 | The Earth as photographed (D138): the tiles' layout; which tiles a view needs at each zoom, never more than allowed, across the 180th meridian and at the poles; where their picture lies and when it covers a view; the bundled picture and its record |
 | `test/front-source.test.ts` | 3 | Where a front starts (D136): the border shared with the new owner's land, found from the change's own edges exactly as from every edge of the map; the side facing its nearest land; the middle; the outer edges of land given up; an expansion's points; a dissolve |
-| `test/front-field.test.ts` | 10 | Fronts that follow the land (D136): a U taken from the tip of one arm, a straight border, the land reached as closed lines, islands, pincers, the middle, across the sea, across the 180th meridian, speed; the front's own lines across the land only, never along a narrow gap or round an island not yet reached; where the land reached between two moments lies (D137) |
+| `test/front-field.test.ts` | 11 | Fronts that follow the land (D136): a U taken from the tip of one arm, a straight border, the land reached as closed lines, islands, pincers, the middle, across the sea, across the 180th meridian, speed; the front's own lines across the land only, never along a narrow gap or round an island not yet reached; where the land reached between two moments lies (D137); a coarser field of the same change gives the same ragged front (D139) |
 | `test/paleo.test.ts` | 7 | The Earth through geological time (D134): maps packed and read back, blended between moments; the real PALEOMAP maps (today about 30% land; 250 million years ago one land, Pangaea); the glacial sea; deep-time dates written and read; the map made and undone. Continents sliding (D135): a block half way along its motion and whole; India moving steadily north between 50 and 45 million years ago |
 | `test/sky-look.test.ts` | 11 | Looks of star maps (D130): made whole and within bounds, every preset its own, looks by chance, colourings, kept and undone; the flat chart (D131): straight down, turned and moved; territories (D132): a lone star's disc, merging, borders half way and pushed back, changing hands, painting, speed |
 | `test/sequence.test.ts` | 11 | Screen seconds through even and eased pacing; transition settings and styles; transition looks and an event's own look (D137); the still camera and its reset; moving texts and the events box; export choices and sizes; each layer on its own; an event's own time on screen, out of sync with the clock; a turning globe; a steady date |
@@ -365,6 +365,51 @@ worked out afresh, and any difference stops the test.
 | `e2e/workflows.e2e.ts` | 63 steps | Precise shapes; occupation layer (drawn with stripes: both countries' colours in the pixels); hiding layers; alternative versions; annexation; deleting and undoing events; fades; a second world; a camera move at 2.39:1 and 25 fps with frame timing (an event out of sync with the clock animated in its own 0.4 s), history in the pixels and pass stacking checked; layers of lines, points and areas made with "+ Layer", drawn freehand, by a click and click by click, chosen by clicking, restyled (a claim contested with another country), given a new shape from a date, ended and undone; a war added from a country's panel, read from both sides, resumed and ended, drawn as a front line on their border during the war and not in peace; two dates compared across a dragged line and swapped; an event's end shown from its start, chosen on a calendar, the date viewed stepped with arrow keys; an event type made with a colour, a way of spreading and a length, used by a new event and a drawing, renamed, deleted and undone; a country split along a dragged line (the part clicked named by its side), a point of the new border moved from a date, today's states chosen by clicks and a box and given to a new country, a line in an event drawing itself (half drawn half way through, then set to appear at once), and the two merged into a new country in a new event, undone and redone; search (a country, an event, a point), a picture kept with a country's notes, the data exported as GeoJSON and CSV and read back; square size, Natural Earth projection, 23.976 fps, transparency; the preview of that shot dragged with the mouse (carried while its meridian is held, laid out afresh at rest); names, lakes and rivers hidden while working but kept in the presentation, lakes from about 1,000 km², undone; a character's icon (a ship facing the way it sails and flipped on the way back, an airliner turned, on a disc, three times the size); the character as a unit of a country, in its colour, with an arrow of advance while it travels; changes recorded into an event each spreading until the next (half faded in half way), the last given two years of its own and made an expansion from two points, the second clicked on the map; a country locked, drawn over and kept, unlocked, all the others locked at once; a radiation layer of conditions, a source placed with a click and a plume carried east, there while they last, hidden while working, undone; a fire spreading over the West Siberian Plain day by day; a meteor impact placed with one click, its crater and blast, undone in one step; a heatmap from the battles, and three thousand strikes drawn in a 4K export frame and the working view; routes with campaign arrows and flowing lines; text boxes and callouts; looks; a shot played; TIFF sequences; SVG frames; a star map with a realm, a lane and planets; the solar system and its moons, side by side with a planet's holder over it; an invented star map; the Milky Way and a galaxy of one's own; history played in the working view; borders imported from GeoJSON maps of two years, and from a dataset dating each shape; a shot as MP4 and WebM videos, played back by the browser against the PNG frames; each layer exported on its own; a shot on the globe, turned by dragging its preview, set turning on its own, exported as frames and an SVG frame; a star map's looks: a preset from its picture, any part changed, a look by chance undone, the map as a flat chart moved and turned, two realms' border and a front when they go to war, stars twinkling in a still shot, an SVG frame of it; the Earth through geological time: Pangaea 250 million years ago drawn and named, dates as how long ago, more land in the last ice age, frames of three moments each its own; transition looks (D137): Blitz chosen with its preview playing, a slider making the look the shot's own, the glow in the owner's colour, an event's own look |
 
 Checked by hand: 4K and 8K exports; the unzipped package starts and works; requests from other hosts are refused.
+
+## Performance, 19 November 2026 (`bench/render.bench.ts`; large-scale runs with the new transitions)
+
+The benchmark projects rebuilt (`bench/make-fixtures.ts`: Earth 242 with 1,623 parcels, Heavy with 500 border changes
+and 10,845 parcels, Random 1000 with 24,504 parcels), Chrome in software (no graphics card, four shared processors),
+1920 by 1080. Milliseconds a frame (median; the slowest tenth in brackets). 60 frames a second is 16.7 ms.
+
+| Step | Earth 242 | Heavy | Random 1000 |
+| --- | --- | --- | --- |
+| A click that changes nothing | 17 (23) | 17 (26) | 14 (15) |
+| Choosing a country | 17 (22) | 22 (29) | 21 (25) |
+| Moving the whole world | 10 (13) | 11 (14) | 20 (23) |
+| Zooming | 17 (97) | 22 (99) | 18 (96) |
+| Moving a region | 9.2 (16) | 8.4 (12) | 6.5 (8) |
+| Moving close in | 7.2 (9) | 6.6 (9) | 6.7 (14) |
+| Moving very close in | 6.6 (8) | 6.7 (11) | 6.4 (9) |
+| Dragging the timeline, 25 years a frame | 10 (12) | 109 (137) | 193 (229) |
+| Dragging the timeline, a year a frame | 9.0 (10) | 16 (51) | 39 (99) |
+| Dragging the timeline, a month a frame, close in | 8.3 (10) | 8.4 (19) | 16 (20) |
+| A brush stroke | 31 (70) | 45 (55) | 126 (143) |
+| Playing a shot, still camera | 10 (15) | 93 (119) | 157 (250) |
+| Playing a shot, moving camera | 62 (91) | 246 (318) | 252 (345) |
+| Export, 1080p, PNG | 116 | 159 | 225 |
+| Export, 1080p, MP4 (H.264) | 42 | 91 | 115 |
+
+Moving the map, zooming and stepping the date a year at a time are within a frame or two on every project; a zoom
+step in ten redraws the picture at the new size (about 100 ms). What is slow is what redraws the whole map of a heavy
+project at once: dragging the timeline 25 years a frame, playing through its changes, the moving camera.
+
+**Every change animated (D136, D137), measured for the first time.** The heavy project's thousand years played in
+ten seconds has about a hundred changes under way in every frame, covering the whole view:
+
+| Shot | Before | After (D139) |
+| --- | --- | --- |
+| Heavy, every change animated, clean look | 2,855 (3,826) | 585 (721) |
+| Heavy, every change animated, Blitz look | 3,420 (4,896) | 815 (1,166) |
+| Random 1000, every change animated, clean look | 386 (573) | 314 (434) |
+| Random 1000, every change animated, Blitz look | 451 (918) | 328 (532) |
+
+At the pace of a film (the heavy project's thousand years in 100 seconds: eleven changes under way at once, five
+starting each second) a frame takes 62 ms in the clean look and 84 ms in Blitz; in 30 seconds (36 under way) 299 ms.
+Where the rest goes (a profile at the film's pace): the changes themselves are now a few milliseconds; two thirds
+is the browser painting again every country and border that reaches into the rectangles round the changes, which
+on this project is half the frame. On a computer with a graphics card the browser paints several times faster than
+here; the next step for this is to redraw only the band a front has crossed since the frame before.
 
 ## Performance in the improvement pass (measured 18 November 2026, `bench/render.bench.ts`)
 

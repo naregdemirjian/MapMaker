@@ -512,7 +512,10 @@ export class MapRenderer {
       // Fronts that follow the land (D136), as the renderer has them.
       const changing = g.faces.filter((_, i) => (g.states[i].transition!.from ?? '') !== (g.states[i].value ?? ''));
       const src = changing.length ? frontSourceOf(arr, changing, g.a.value, g.spec, g.spec.style === 'advance' ? 'advance' : 'border', states) : null;
-      const field = src ? buildFrontField(src.rings, src.source, { roughness: 0, seed: 0 }) : null;
+      // (As fine as the change is large on screen, as the renderer's own: see its frontField.)
+      const box = changing.length ? this.screenBox(view, arr, changing) : [0, 0, 0, 0];
+      const cells = [32, 48, 72, 108, 160].find((c) => c >= Math.max(box[2], box[3]) / 2.5) ?? 160;
+      const field = src ? buildFrontField(src.rings, src.source, { roughness: 0, seed: 0, cells }) : null;
       if (field) {
         const rings = frontRings(field, g.progress);
         if (rings.length) {

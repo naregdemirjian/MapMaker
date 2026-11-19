@@ -139,6 +139,32 @@ test('a ragged front: the same for the same seed, another for another, still fro
   assert.ok(lo < 0.15 && hi > 0.85, `scattered over the whole span (${lo}, ${hi})`);
 });
 
+test('a coarser field of the same change (one seen small): the same front, ragged the same way, for a fraction of the work', () => {
+  const ring: Array<[number, number]> = [];
+  for (let i = 0; i < 240; i++) { const a = (i / 240) * Math.PI * 2, r = 8 + 2 * Math.sin(a * 5); ring.push([20 + r * Math.cos(a), 10 + r * Math.sin(a) * 0.8]); }
+  const src = { kind: 'lines' as const, lonlat: [10, 6, 10, 14] };
+  const fine = buildFrontField([ring], src, { roughness: 0.6, seed: 5, cells: 160 })!, coarse = buildFrontField([ring], src, { roughness: 0.6, seed: 5, cells: 48 })!;
+  const other = buildFrontField([ring], src, { roughness: 0.6, seed: 6, cells: 160 })!;
+  assert.ok(coarse.nx * coarse.ny < (fine.nx * fine.ny) / 6, `${coarse.nx}x${coarse.ny} against ${fine.nx}x${fine.ny}`);
+  let same = 0, differs = 0, n = 0;
+  for (let x = 14; x <= 26; x += 1.5) for (let y = 5; y <= 15; y += 1.5) {
+    const a = timeAt(fine, x, y), b = timeAt(coarse, x, y), c = timeAt(other, x, y);
+    if (!(a < Infinity && b < Infinity && c < Infinity)) continue;
+    same += Math.abs(a - b); differs += Math.abs(a - c); n++;
+  }
+  assert.ok(n > 30);
+  assert.ok(same / n < 0.035, `the same times at either fineness (${(same / n).toFixed(3)} apart on average)`);
+  assert.ok(differs / n > 2 * (same / n), `nearer each other than another seed's (${(differs / n).toFixed(3)})`);
+  // The land reached half way: the same places at either fineness, but for a few along the front.
+  let agree = 0, places = 0;
+  for (let x = 13; x <= 27; x += 0.5) for (let y = 4; y <= 16; y += 0.5) {
+    if (!(timeAt(fine, x, y) < Infinity) || !inRings([ring], x, y)) continue;
+    places++;
+    if (reachedAt(fine, x, y, 0.5) === reachedAt(coarse, x, y, 0.5)) agree++;
+  }
+  assert.ok(places > 300 && agree / places > 0.95, `${agree} of ${places} places alike`);
+});
+
 test('a change across the 180th meridian; too small or too large to be drawn', () => {
   const f = buildFrontField([[[170, 0], [-170, 0], [-170, 10], [170, 10]]], { kind: 'lines', lonlat: [170, 0, 170, 10] }, { roughness: 0, seed: 1 })!;
   assert.ok(f);

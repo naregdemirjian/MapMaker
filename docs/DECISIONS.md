@@ -61,6 +61,35 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D139. Fronts at scale: a hundred changes under way at once
+
+- **Asked.** Large-scale and stress tests of the transitions, and their optimisation.
+- **Measured** (`bench/render.bench.ts` playAllClean and playAllBlitz, new: the benchmark projects' history played
+  with every change animated). On the heavy project (500 border changes, a thousand years in ten seconds: about a
+  hundred changes under way in every frame) a frame took 2.9 s in the clean look and 3.4 s in Blitz. A profile
+  (`bench/profile.ts playAll`): half in making fields, a fifth in cutting each change's drawing to shapes as large
+  as the picture.
+- **What.**
+  - *Where a front starts* was found by looking at every edge of the map (127,000 on that project) for each
+    change: now the change's own edges are walked (`front-source.ts`; `front-source.test.ts` compares the two).
+  - *A field is as fine as its change is large on screen*: a cell about two and a half pixels, 32 to 160 cells
+    across in five steps (`FIELD_CELLS`); a small change far away takes a ninth of the work. A ragged front's noise
+    is laid out by place within the change, not by cell, so it is ragged the same way at every fineness
+    (`front-field.test.ts`: the same times within 0.035 and 95% of places alike at 48 and 160 cells).
+  - *Lighter fields*: carried beyond the change by a queue instead of seven passes over the grid; the land reached
+    and the front's own lines traced once for both; tracing shares its working room between fields; the fields
+    kept are limited by the cells they hold together (four million), not by their number.
+  - *Each change's drawing is cut to its own box first*: the shapes it is cut to ("everywhere this front has not
+    come", "this change with its new owner's whole land") cover the picture, and cutting to them cost the whole
+    picture for every change. The highlight of all changes is cut to the coastline once, not once each.
+  - Where a change is on screen is found once for a view, not for each use.
+- **Result.** 2,855 to 585 ms a frame (clean) and 3,420 to 815 ms (Blitz) with a hundred changes under way; at a
+  film's pace (eleven under way) 62 ms and 84 ms, in software. The changes themselves are now a few milliseconds;
+  the rest is the browser painting again what lies in the rectangles round them (see DEVELOPMENT.md, Performance,
+  19 November).
+- **Not done.** Redrawing only the band a front has crossed since the frame before (most of a change's rectangle
+  is the same from frame to frame); painting by the graphics card.
+
 ### D138. The Earth as photographed: the satellite look from real photographs, sharp to city scale
 
 - **Asked.** The satellite maps should be very photorealistic and detailed when zoomed in, still good at the scale
