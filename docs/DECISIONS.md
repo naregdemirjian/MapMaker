@@ -61,6 +61,50 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D160. Biomes: Köppen-Geiger climates, biomes by warmth and dryness, the planet's own, plants under other stars (Stage 14.9)
+
+- **Asked.** Stage 14.9: "Köppen-Geiger and Whittaker classes with alpine, wetland and ice zones, custom biome rules
+  and vegetation palettes, the satellite look fed by them, recalculated on any change", done when the classification
+  tests and the Earth-like validation pass.
+- **Köppen-Geiger** (`life/biomes.ts`) from the twelve months' temperature and precipitation by the rules of Peel,
+  Finlayson and McMahon (2007): E where the warmest month stays under 10 °C (EF under 0); B where the year's
+  precipitation falls under ten times the threshold (twice the mean temperature, plus 28 mm when 70 per cent falls in
+  summer, plus 14 unless 70 per cent falls in winter; BW under five times; h at 18 °C or more); A where the coldest
+  month is 18 °C or more (f, m by 100 − P/25, w); C above 0 °C, D at 0 or below, with s, w or f for the dry season and
+  a, b, c or d for the summer. Summer is the half-year of most sunlight at each place (from the insolation), so the
+  rules hold on any orbit; without it, the half-year centred a month before the warmest month (Peel takes April to
+  September in the north). Fifteen reference stations, one per class, classify as they are measured (Singapore Af,
+  Miami Am, Darwin Aw, Cairo and Khartoum BWh, Denver BSk, Rome Csa, San Francisco Csb, Hong Kong Cwa, Shanghai Cfa,
+  London Cfb, Moscow Dfb, Yakutsk Dfd, Utqiaġvik ET, Vostok EF).
+- **Biomes** as Whittaker's diagram places them, by the year's mean temperature and wetness, the wetness as the
+  aridity index (precipitation over the potential evaporation of the water stage, as the UN's dryland classes):
+  tropical rainforest, seasonal forest, savanna, desert; temperate rainforest, forest, Mediterranean woodland and
+  shrub (Cs or Ds climates with the index 0.5 to 0.75), grassland, steppe; boreal forest; tundra and polar desert where
+  the warmest month stays under 10 °C (alpine tundra and rock on high ground), ice where it stays under 0 or an ice
+  sheet lies; lakes, salt flats, wetlands and tropical swamps from the water stage. Twenty biomes with the satellite
+  look's colours (D100).
+- **The planet's own biomes**: the definition's rules (ranges of yearly temperature, precipitation, its seasonality
+  and height), first match by priority; the Earth's biome where none fits. In the Studio's step 4 (now "Air, water
+  and life") with a small editor.
+- **Plants under other stars** (Kiang et al. 2007): green under a Sun-like star; dark red to near black under a red
+  dwarf (taking all the dim red light they can); yellow to orange under a hot white star (shading from the blue);
+  bare ground with no life. Applied to each biome by its plant cover (a rainforest fully, a desert hardly).
+- **In the pipeline**: a `biomes` stage (Köppen class, biome, the planet's own where it applies, and the colour from
+  space per cell; 40 ms at preview) reading only the life settings and the climate, water and heights, so changing
+  plants or rules re-runs it alone (the Studio redraws at once: "recalculated on any change"); a `cover` stage paints
+  the colours smoothly as a picture. Layers: Köppen-Geiger climates, biomes, seen from space. A map of a simulated
+  planet takes today's cover in the satellite look (earlier moments are drawn by height: the biomes of a moment are
+  not kept with the history).
+- **Earth-like validation** (the real Earth's heights, this engine's climate and water, L5): deserts and steppe 62 per
+  cent of land at 15-35° against 12 within 10° of the equator; tropical forest most at the equator; boreal forest 50
+  per cent of land at 50-65°; tundra, polar desert and ice 94 per cent beyond 65°. Köppen's classes as shares of land:
+  A 13 % (measured 19), B 42 % (30), C 12 % (13), D 13 % (25), E 20 % (12, ice caps counted): too dry at mid-
+  latitudes, as the rain is (D159), so steppe stands where the Earth has its prairies and forest steppe.
+- **Tests.** `planet-biomes.test.ts` (3): the fifteen stations and a southern-hemisphere summer; biomes by warmth
+  and dryness and their refinements, the planet's own by priority, plants under other stars; the Earth-like
+  validation. The Studio's interface test draws the climates, the land seen from space, and redraws it when the
+  plants become a red dwarf's.
+
 ### D159. Water and ice: runoff, lakes, rivers, ice sheets, the sea's level; the climate revisited (Stage 14.8)
 
 - **Asked.** Stage 14.8: "runoff, Fill-Spill-Merge lakes and closed basins, rivers by discharge, deltas, floodplains

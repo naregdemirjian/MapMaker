@@ -102,3 +102,9 @@ export async function simTerrain(def: PlanetDefinition, opts: { onProgress?: (sh
   const labels = ages.map((a) => (a === 0 ? 'Today' : `${a.toLocaleString('en')} million years ago`));
   return { set: { ages, labels, grids }, key };
 }
+
+/** A simulated planet's land seen from space today (D160): its biomes' colours, laid like its heights' pictures. */
+export async function simCover(def: PlanetDefinition, opts: { signal?: AbortSignal } = {}): Promise<{ width: number; height: number; pixels: Uint8Array }> {
+  const r = await planetPipeline().product('cover', def, { ...simParams(def), width: SIM_WIDTH, height: SIM_HEIGHT }, { signal: opts.signal });
+  return { width: r.data.width as number, height: r.data.height as number, pixels: r.data.pixels as Uint8Array };
+}

@@ -4337,6 +4337,19 @@ try {
     await page.getByTestId('studio-layer').selectOption('water');
     await drawn('water:');
     assert.match(await text('studio-legend'), /salt lakes/);
+    // Today's biomes (D160): Köppen's climates, the biomes, the land seen from space; plants after a red dwarf's light.
+    await page.getByTestId('studio-layer').selectOption('koppen');
+    await drawn('koppen:');
+    assert.match(await text('studio-legend'), /Köppen-Geiger climates: .*Af/);
+    await page.getByTestId('studio-layer').selectOption('satellite');
+    await drawn('satellite:');
+    const green = await page.evaluate(() => (document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement).dataset.drawn);
+    await page.getByTestId('studio-step-air').click();
+    await page.getByTestId('studio-control-vegetation').selectOption('red-dwarf');
+    await page.waitForFunction((was) => { const d = (document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement).dataset.drawn ?? ''; return d.startsWith('satellite:') && d !== was; }, green, { timeout: 60_000 });
+    assert.match(await text('studio-legend'), /a red dwarf: dark red/);
+    await page.getByTestId('studio-control-vegetation').selectOption('earth');
+    await page.getByTestId('studio-step-explore').click();
     // Used for a map: its land and sea follow the history on its timeline.
     await page.getByTestId('studio-use').click();
     await page.getByTestId('planet-studio').waitFor({ state: 'detached' });

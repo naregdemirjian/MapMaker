@@ -11,6 +11,7 @@ import { seasonalClimate } from '../climate/ebm.ts';
 import { hydroclimate } from '../climate/hydroclimate.ts';
 import { hydrology } from '../water/hydrology.ts';
 import { iceSheets } from '../water/ice.ts';
+import { BIOME_IDS, KOPPEN, biomeColour, biomeOf, customBiomeOf, koppen, type Place } from '../life/biomes.ts';
 import { toLevel } from '../mesh/transfer.ts';
 import { derive } from '../model/physics.ts';
 import { cellsAt, meshAt } from '../mesh/icosphere.ts';
@@ -81,6 +82,8 @@ export const LAYERS = {
   rivers: { stage: 'water', field: 'discharge', unit: 'm³/s', label: 'Rivers (discharge)', frames: false, categories: false },
   water: { stage: 'water', field: 'kind', unit: '', label: 'Lakes, rivers, wetlands and ice', frames: false, categories: true },
   iceThickness: { stage: 'water', field: 'ice', unit: 'm', label: 'Ice sheets (thickness)', frames: false, categories: false },
+  koppen: { stage: 'biomes', field: 'koppen', unit: '', label: 'Köppen-Geiger climates', frames: false, categories: true },
+  biome: { stage: 'biomes', field: 'biome', unit: '', label: 'Biomes', frames: false, categories: true },
   boundaries: { stage: 'tectonics', field: 'boundary', unit: '', label: 'Plate boundaries', frames: false, categories: true },
 } as const;
 export type LayerId = keyof typeof LAYERS;
@@ -242,11 +245,69 @@ export const STAGES: Record<string, StageDef> = {
       });
       ctx.progress(2, 2);
       return {
-        runoff: Float32Array.from(w.balance.runoff), discharge: w.discharge, kind: w.kind, order: w.order, lakeDepth: w.lakeDepth,
+        runoff: Float32Array.from(w.balance.runoff), pet: Float32Array.from(w.balance.pet), discharge: w.discharge, kind: w.kind, order: w.order, lakeDepth: w.lakeDepth,
         ice: Float32Array.from(thickness), riverMin: w.riverMin, depressions: w.depressions,
         budget: w.budget as unknown as ProductData,
         iceVolume: ice ? ice.volume : 0, iceArea: ice ? ice.area : 0, seaLevelEquivalent: ice ? ice.seaLevelEquivalent : 0, iceYears: ice ? ice.years : 0,
       };
+    },
+  },
+
+  /**
+   * Biomes (D160): the Köppen-Geiger class, the biome (the Earth's rules, or the planet's own where they match) and
+   * its colour seen from space, per cell; summer as the six months of most sunlight at each place.
+   */
+  biomes: {
+    id: 'biomes',
+    version: 1,
+    deps: () => ['tectonics', 'climate', 'water', 'insolation'],
+    inputs: (def, p) => ({ level: p.level, life: def.life as unknown as ProductData }),
+    run: (inputs, deps, ctx) => {
+      const level = inputs.level as number, n = cellsAt(level);
+      const life = inputs.life as unknown as PlanetDefinition['life'];
+      const all = deps.tectonics.heights as Int16Array, heights = all.subarray(all.length - n);
+      const temp = deps.climate.monthly as Float32Array, precip = deps.climate.precipMonthly as Float32Array;
+      const sun = deps.insolation.monthly as Float32Array;
+      const kind = deps.water.kind as Uint8Array, ice = deps.water.ice as Float32Array, pet = deps.water.pet as Float32Array;
+      const koppenOut = new Uint8Array(n), biome = new Uint8Array(n), custom = new Uint8Array(n), colour = new Uint8Array(3 * n);
+      const rules = life.biomeSet === 'custom' ? [...life.customBiomes].sort((a, b) => a.priority - b.priority) : [];
+      const T = new Float64Array(12), P = new Float64Array(12);
+      const place: Place = { temp: T, precip: P, pet: 0, height: 0, water: 0, ice: 0 };
+      for (let c = 0; c < n; c++) {
+        let most = 0;
+        for (let m = 0; m < 12; m++) { T[m] = temp[m * n + c]; P[m] = precip[m * n + c]; if (sun[m * n + c] > sun[most * n + c]) most = m; }
+        place.pet = pet[c]; place.height = heights[c]; place.water = kind[c]; place.ice = ice[c];
+        const b = biomeOf(place);
+        biome[c] = BIOME_IDS.indexOf(b);
+        if (kind[c] !== 1) koppenOut[c] = 1 + KOPPEN.findIndex(([k]) => k === koppen(T, P, (most - 2 + 12) % 12));
+        const own = rules.length && b !== 'sea' && b !== 'lake' ? customBiomeOf(place, rules) : null;
+        const rgb = own ? own.color : biomeColour(b, life);
+        if (own) custom[c] = 1 + rules.indexOf(own);
+        colour[3 * c] = rgb[0]; colour[3 * c + 1] = rgb[1]; colour[3 * c + 2] = rgb[2];
+      }
+      ctx.progress(1, 1);
+      return { koppen: koppenOut, biome, custom, colour, customNames: rules.map((r) => r.name) };
+    },
+  },
+
+  /** The land's colours seen from space as a picture (RGBA, smooth between cells): a map's satellite look (D160). */
+  cover: {
+    id: 'cover',
+    version: 1,
+    deps: () => ['biomes'],
+    inputs: (_def, p) => ({ level: p.level, width: p.width ?? 1024, height: p.height ?? 512 }),
+    run: (inputs, deps, ctx) => {
+      const mesh = meshAt(inputs.level as number), n = mesh.n, w = inputs.width as number, h = inputs.height as number;
+      const colour = deps.biomes.colour as Uint8Array, out = new Uint8Array(4 * w * h);
+      for (let k = 0; k < 3; k++) {
+        const ch = new Float32Array(n);
+        for (let c = 0; c < n; c++) ch[c] = colour[3 * c + k];
+        const r = rasterize(mesh, ch, w, h);
+        for (let i = 0; i < w * h; i++) out[4 * i + k] = Math.max(0, Math.min(255, Math.round(r[i])));
+      }
+      for (let i = 0; i < w * h; i++) out[4 * i + 3] = 255;
+      ctx.progress(1, 1);
+      return { pixels: out, width: w, height: h };
     },
   },
 

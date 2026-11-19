@@ -23,7 +23,7 @@ import type { FieldSource } from '../domain/fields.ts';
 import type { DisasterId } from '../domain/disasters.ts';
 import type { SculptTool } from '../terrain/sculpt.ts';
 import { terrainSourceOf, planetOf, isGeologicalMap, simOf } from '../world-model/world-settings.ts';
-import { simTerrain, simParams } from './planet-engine.ts';
+import { simTerrain, simParams, simCover } from './planet-engine.ts';
 import { keyOf as contentKey } from '../planet/state/hash.ts';
 import type { PlanetDefinition } from '../planet/model/definition.ts';
 import { MAIN_BRANCH, isBaseEvent, type MapSpaceRow } from '../world-model/schema.ts';
@@ -433,8 +433,29 @@ class AppStore {
       }
       return this.earthCover;
     }
+    // A simulated planet's land seen from space (D160): its biomes today; earlier moments are drawn by height.
+    if (source === 'sim') {
+      const def = simOf(space);
+      return def && ground.key.endsWith(':paleo:0.0000') ? this.simCoverFor(def) : null;
+    }
     const params = source === 'planet' ? planetOf(space) : null;
     return params ? coverSoon(ground.grid, ground.key, (space?.radius_m ?? 6371008.8) / 1000, climateOf(params), () => this.notify()) : null;
+  }
+
+  private simCovers = new Map<string, TerrainCover | 'making'>();
+  /** A simulated planet's land cover today, if it is ready (otherwise it is started, and everything drawn again when it is). */
+  simCoverFor(def: PlanetDefinition): TerrainCover | null {
+    const k = `sim-cover:${contentKey({ def, params: simParams(def) })}`;
+    const have = this.simCovers.get(k);
+    if (have && have !== 'making') return have;
+    if (!have) {
+      this.simCovers.set(k, 'making');
+      simCover(def).then(
+        (c) => { this.simCovers.set(k, { ...c, key: k }); this.notify(); },
+        (e: Error) => { this.simCovers.delete(k); this.toast(e.message, 'error'); },
+      );
+    }
+    return null;
   }
 
   /** Loads Earth's terrain unless it is there or on its way (everything is drawn again when it arrives). */

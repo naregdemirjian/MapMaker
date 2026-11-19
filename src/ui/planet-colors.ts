@@ -1,6 +1,7 @@
 // How the Planet Studio colours its layers (Stage 14.5, D156): a picture of a layer's values on an
 // equirectangular grid turned into pixels, with a short legend.
 import type { LayerId } from '../planet/pipeline/stages.ts';
+import { BIOME, BIOME_IDS, KOPPEN } from '../planet/life/biomes.ts';
 
 type RGB = [number, number, number];
 const mix = (a: RGB, b: RGB, t: number): RGB => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
@@ -108,6 +109,15 @@ export function colourLayer(layer: LayerId, values: Float32Array, width: number,
   } else if (layer === 'iceThickness') {
     for (let k = 0; k < values.length; k++) put(k, values[k] < 1 ? [40, 48, 56] : ramp([[1, [170, 200, 225]], [500, [205, 225, 242]], [2000, [235, 244, 252]], [4000, [255, 255, 255]]], values[k]));
     legend = `Ice sheets: up to ${Math.round(range.max).toLocaleString('en')} m thick`;
+  } else if (layer === 'koppen') {
+    for (let k = 0; k < values.length; k++) { const i = values[k] | 0; put(k, i ? (KOPPEN[i - 1][2] as unknown as RGB) : [16, 30, 52]); }
+    const seen = new Set<number>();
+    for (let k = 0; k < values.length; k += 7) if (values[k] | 0) seen.add(values[k] | 0);
+    legend = `Köppen-Geiger climates: ${[...seen].sort((a, b) => a - b).map((i) => KOPPEN[i - 1][0]).join(' ')} (A tropical, B dry, C temperate, D cold, E polar)`;
+  } else if (layer === 'biome') {
+    const counts = new Map<number, number>();
+    for (let k = 0; k < values.length; k++) { const i = values[k] | 0, id = BIOME_IDS[i] ?? 'sea'; put(k, BIOME[id].colour as unknown as RGB); if (id !== 'sea') counts.set(i, (counts.get(i) ?? 0) + 1); }
+    legend = `Biomes: ${[...counts].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([i]) => BIOME[BIOME_IDS[i]].name.toLowerCase()).join(', ')}…`;
   } else if (layer === 'ice') {
     for (let k = 0; k < values.length; k++) put(k, ramp([[0, [40, 60, 50]], [0.3, [120, 150, 170]], [0.7, [200, 220, 235]], [1, [250, 252, 255]]], values[k]));
     legend = 'Ice and snow: the share of the year a place lies under them';

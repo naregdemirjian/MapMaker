@@ -11,17 +11,20 @@ import { planetPipeline, simParams } from '../planet-engine.ts';
 import { colourLayer } from '../planet-colors.ts';
 import { simOf } from '../../world-model/world-settings.ts';
 import { gregorian, PRESENT_YEAR } from '../../core-time/index.ts';
-import type { LayerId } from '../../planet/pipeline/stages.ts';
+import type { LayerId as EngineLayer } from '../../planet/pipeline/stages.ts';
+/** The studio's layers: the engine's, and the land seen from space (the cover stage's picture, D160). */
+type LayerId = EngineLayer | 'satellite';
 import { CancelledError } from '../../planet/worker/pool.ts';
 
 type StepId = 'star' | 'planet' | 'interior' | 'air' | 'history' | 'explore';
-const STEPS: Array<[StepId, string]> = [['star', '1 Star and orbit'], ['planet', '2 Planet'], ['interior', '3 Interior and plates'], ['air', '4 Air and water'], ['history', '5 History'], ['explore', '6 Simulate and explore']];
+const STEPS: Array<[StepId, string]> = [['star', '1 Star and orbit'], ['planet', '2 Planet'], ['interior', '3 Interior and plates'], ['air', '4 Air, water and life'], ['history', '5 History'], ['explore', '6 Simulate and explore']];
 const LAYER_NAMES: Array<[LayerId, string]> = [
   ['elevation', 'Relief'], ['plates', 'Plates'], ['boundaries', 'Plate boundaries'], ['crust', 'Kind of crust'], ['crustAge', 'Age of the crust'],
   ['crustThickness', 'Thickness of the crust'], ['history', 'What made the crust'], ['sediment', 'Sediment'], ['drainage', 'Rivers (water draining)'],
   ['temperature', 'Temperature (yearly mean)'], ['temperatureMonth', 'Temperature by month'], ['precipitation', 'Rain and snow (a year)'], ['precipitationMonth', 'Rain and snow by month'],
   ['currents', 'The sea\'s currents'], ['ice', 'Ice and snow'], ['water', 'Lakes, rivers, wetlands and ice sheets'], ['rivers', 'Rivers (discharge)'],
-  ['runoff', 'Water running off'], ['iceThickness', 'Ice sheets (thickness)'], ['insolation', 'Sunlight'],
+  ['runoff', 'Water running off'], ['iceThickness', 'Ice sheets (thickness)'], ['koppen', 'Köppen-Geiger climates'], ['biome', 'Biomes'],
+  ['satellite', 'Seen from space'], ['insolation', 'Sunlight'],
 ];
 const MONTHS = ['First month', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth', 'Seventh', 'Eighth', 'Ninth', 'Tenth', 'Eleventh', 'Twelfth'];
 const EVENT_KINDS: Array<[GeoEventKind, string]> = [
@@ -138,11 +141,22 @@ export function PlanetStudio() {
     let live = true;
     const c = canvas.current;
     if (!c) return;
-    const want = run && layer !== 'insolation' ? run.def : def;
+    // (The biome layers follow the life settings as they are now: only the biomes are worked out again, D160.)
+    const lifeLayer = layer === 'koppen' || layer === 'biome' || layer === 'satellite';
+    const want = run && layer !== 'insolation' ? (lifeLayer ? { ...run.def, life: def.life } : run.def) : def;
     if (layer !== 'insolation' && !run) { const g = c.getContext('2d')!; g.fillStyle = '#10171f'; g.fillRect(0, 0, c.width, c.height); setLegend('Simulate the history to see its layers.'); return; }
     const monthly = layer === 'temperatureMonth' || layer === 'precipitationMonth';
-    const params = { ...simParams(want), width: c.width, height: c.height, layer, frame: monthly ? month : frame };
-    planetPipeline().product('raster', want, params).then((r) => {
+    const base = { ...simParams(want), width: c.width, height: c.height };
+    if (layer === 'satellite') {
+      planetPipeline().product('cover', want, base).then((r) => {
+        if (!live) return;
+        c.getContext('2d')!.putImageData(new ImageData(new Uint8ClampedArray(r.data.pixels as Uint8Array), c.width, c.height), 0, 0);
+        setLegend(`Today's land seen from space: its biomes, its plants coloured after its star's light${def.life.vegetation === 'red-dwarf' ? ' (a red dwarf: dark red)' : def.life.vegetation === 'blue-star' ? ' (a hot star: yellow to orange)' : def.life.vegetation === 'none' ? ' (no plants: bare ground)' : ''}`);
+        c.dataset.drawn = `${layer}:-1:${r.key}`;
+      }, (e: Error) => { if (live) s.toast(e.message, 'error'); });
+      return () => { live = false; };
+    }
+    planetPipeline().product('raster', want, { ...base, layer, frame: monthly ? month : frame }).then((r) => {
       if (!live) return;
       const { pixels, legend: text } = colourLayer(layer, r.data.raster as Float32Array, c.width, c.height, { min: r.data.min as number, max: r.data.max as number });
       c.getContext('2d')!.putImageData(new ImageData(pixels as unknown as Uint8ClampedArray<ArrayBuffer>, c.width, c.height), 0, 0);
@@ -150,7 +164,7 @@ export function PlanetStudio() {
       c.dataset.drawn = `${layer}:${monthly ? month : frame}:${r.key}`;
     }, (e: Error) => { if (live) s.toast(e.message, 'error'); });
     return () => { live = false; };
-  }, [run, layer, frame, month, layer === 'insolation' ? def : null]);
+  }, [run, layer, frame, month, layer === 'insolation' ? def : null, layer === 'koppen' || layer === 'biome' || layer === 'satellite' ? JSON.stringify(def.life) : null]);
 
   // Playing the history: a picture every 0.4 s, round and round.
   useEffect(() => {
@@ -234,6 +248,29 @@ export function PlanetStudio() {
             {control('co2', 'Carbon dioxide (share)', Math.max(1e-6, def.atmosphere.co2), (v) => patch((d) => { d.atmosphere.co2 = v; }), { min: 1e-6, max: 0.97, log: true, digits: 5 })}
             {control('clouds', 'Cloud cover', def.atmosphere.clouds, (v) => patch((d) => { d.atmosphere.clouds = v; }), { min: 0, max: 1, digits: 2 })}
             {control('ocean', 'Sea (share of the surface)', def.water.oceanFraction, (v) => patch((d) => { d.water.oceanFraction = v; }), { min: 0, max: 1, digits: 2 })}
+            <h4>Life</h4>
+            <label className="studio-slider"><span>Plants</span>
+              <select value={def.life.vegetation} onChange={(e) => patch((d) => { d.life.vegetation = e.target.value as PlanetDefinition['life']['vegetation']; })} onFocus={() => setFocus('vegetation')} data-testid="studio-control-vegetation">
+                <option value="earth">Green, as under the Sun</option><option value="red-dwarf">Dark red to black (under a red dwarf)</option>
+                <option value="blue-star">Yellow to orange (under a hot white star)</option><option value="none">None: bare ground</option>
+              </select></label>
+            <label className="studio-slider"><span>Biomes</span>
+              <select value={def.life.biomeSet} onChange={(e) => patch((d) => { d.life.biomeSet = e.target.value as PlanetDefinition['life']['biomeSet']; })} onFocus={() => setFocus('biomes')} data-testid="studio-control-biomes">
+                <option value="earth">The Earth's</option><option value="custom">The planet's own (below), else the Earth's</option>
+              </select></label>
+            {def.life.biomeSet === 'custom' && <>
+              {def.life.customBiomes.map((b, i) => (
+                <div key={b.id} className="studio-event" data-testid={`studio-biome-${i}`}>
+                  <input value={b.name} onChange={(e) => patch((d) => { d.life.customBiomes[i].name = e.target.value; })} placeholder="Name" />
+                  <input type="color" value={`#${b.color.map((v) => v.toString(16).padStart(2, '0')).join('')}`} onChange={(e) => patch((d) => { const h = e.target.value; d.life.customBiomes[i].color = [1, 3, 5].map((k) => parseInt(h.slice(k, k + 2), 16)) as [number, number, number]; })} title="Its colour from space" />
+                  <label>°C<input type="number" value={b.tempC?.[0] ?? -50} onChange={(e) => patch((d) => { d.life.customBiomes[i].tempC = [Number(e.target.value) || 0, d.life.customBiomes[i].tempC?.[1] ?? 60]; })} />to<input type="number" value={b.tempC?.[1] ?? 60} onChange={(e) => patch((d) => { d.life.customBiomes[i].tempC = [d.life.customBiomes[i].tempC?.[0] ?? -50, Number(e.target.value) || 0]; })} /></label>
+                  <label>mm<input type="number" value={b.precipMm?.[0] ?? 0} onChange={(e) => patch((d) => { d.life.customBiomes[i].precipMm = [Number(e.target.value) || 0, d.life.customBiomes[i].precipMm?.[1] ?? 10_000]; })} />to<input type="number" value={b.precipMm?.[1] ?? 10_000} onChange={(e) => patch((d) => { d.life.customBiomes[i].precipMm = [d.life.customBiomes[i].precipMm?.[0] ?? 0, Number(e.target.value) || 0]; })} /></label>
+                  <button className="small" onClick={() => patch((d) => { d.life.customBiomes.splice(i, 1); d.life.customBiomes.forEach((x, k) => { x.priority = k; }); })} title="Remove this biome">×</button>
+                </div>
+              ))}
+              <button className="small" data-testid="studio-add-biome" onClick={() => patch((d) => { d.life.customBiomes.push({ id: `biome-${Date.now().toString(36)}`, name: 'New biome', color: [180, 90, 160], tempC: [10, 30], precipMm: [500, 2000], priority: d.life.customBiomes.length }); })}>+ Biome</button>
+              <p className="muted">Earlier biomes win where several fit; where none fits, the Earth's biome is kept.</p>
+            </>}
           </>}
           {step === 'history' && <>
             {control('age', 'Age (billion years)', def.history.ageGyr, (v) => patch((d) => { d.history.ageGyr = v; }), { min: 0.1, max: 10, log: true, digits: 2 })}
@@ -260,6 +297,7 @@ export function PlanetStudio() {
             {(layer === 'temperatureMonth' || layer === 'precipitationMonth') && <label className="studio-slider"><span>Month</span>
               <select value={month} onChange={(e) => setMonth(Number(e.target.value))} data-testid="studio-month">{MONTHS.map((l, i) => <option key={l} value={i}>{l}{i === 0 ? ' (January on an Earth-like orbit)' : i === 6 ? ' (July)' : ''}</option>)}</select></label>}
             {['temperature', 'temperatureMonth', 'precipitation', 'precipitationMonth', 'currents', 'ice'].includes(layer) && <p className="muted">The climate of today over today's land and sea: a seasonal energy balance (D157), winds from the circulation cells, rain carried by them and raised by mountains, the sea's currents (D158, D159).</p>}
+            {['koppen', 'biome', 'satellite'].includes(layer) && <p className="muted">Today's biomes (D160): Köppen-Geiger climates by Peel and others' rules; biomes by warmth and dryness (rain over the evaporation the warmth and sunlight allow), with wetlands, ice and mountains from the water and the heights; the planet's own biomes where they fit. Changing plants or biomes in step 4 redraws them at once.</p>}
             {['water', 'rivers', 'runoff', 'iceThickness'].includes(layer) && <p className="muted">Today's water (D159): what the rain leaves after evaporation runs off; hollows fill until they spill or their lakes evaporate all they get (salt lakes); rivers by how much water they carry; ice sheets grown in today's climate.</p>}
             <label className="studio-slider"><span>Name</span><input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Aster Prime" data-testid="studio-name" /></label>
             <button className="primary" onClick={use} disabled={problems.length > 0} data-testid="studio-use">{editingId ? 'Apply to this map' : 'Use this planet for a new map'}</button>
