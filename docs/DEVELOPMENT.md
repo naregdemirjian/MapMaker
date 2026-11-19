@@ -434,6 +434,12 @@ Moving the map, zooming and stepping the date a year at a time are within a fram
 step in ten redraws the picture at the new size (about 100 ms). What is slow is what redraws the whole map of a heavy
 project at once: dragging the timeline 25 years a frame, playing through its changes, the moving camera.
 
+**Branches and tidying (D150, D151), on the heavy project** (500 events, 10,845 parcels, 127,282 border sections;
+Node in the development container). Making a branch at its middle year: 3 ms; compiling the branch's history: 22 ms
+(the main timeline's: 29 ms); an event of the shared history moved: each timeline follows it change by change in
+about 1 ms. With a tenth of the events (50) deleted, tidying took 135 ms and made 474 parcels whole, taking away
+597 border sections and 353 points; the parcel map stays valid.
+
 **Every change animated (D136, D137), measured for the first time.** The heavy project's thousand years played in
 ten seconds has about a hundred changes under way in every frame, covering the whole view:
 
