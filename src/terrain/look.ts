@@ -26,8 +26,8 @@ export interface TerrainLook {
   photo: boolean;
   /**
    * Close in, below the heights' own detail, ground made up by the graphics card (D141): fine relief, rougher
-   * where the land is steep, and a faint mottling of the colours; the same at every visit. Off: the heights as
-   * they are, soft close in.
+   * where the land is steep, a faint mottling of the colours, and coasts that bend below the grid's cells
+   * (D146); the same at every visit. Off: the heights as they are, soft close in.
    */
   fine: boolean;
 }

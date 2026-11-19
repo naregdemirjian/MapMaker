@@ -199,6 +199,31 @@ void main() {
   vec2 gxP = dFdx(uvP), gyP = dFdy(uvP);
   bool inP = u_usePhoto == 1 && all(greaterThan(uvP, vec2(0.0))) && all(lessThan(uvP, vec2(1.0)));
   vec2 su = inD ? uvD : uv, sgx = inD ? gxD : gx, sgy = inD ? gyD : gy;
+  const float R = 6371008.8;
+  // Metres to a pixel, and to a cell of the grid read here.
+  float mpp = (abs(gx.y) + abs(gy.y)) * PI * R;
+  float cell = (inD ? u_detailBox.w / max(u_detailTex.y, 1.0) : PI / u_tex.y) * R;
+  // Close in, below the grid's cells (D146): the place the heights are read at wanders by smooth noise, so that
+  // coasts and the lie of the land bend as real ones do instead of running straight from cell to cell: waves
+  // two cells long moving it by up to three tenths of a cell, then each half as long and half as far, down to
+  // waves of a few pixels (the finest fading in as the view comes closer). Laid out in space on the planet's
+  // surface (the same at every visit); it fades in as a cell grows from four to twelve pixels, so views from
+  // afar are as before.
+  float bend = u_fine == 1 && ok ? smoothstep(4.0, 12.0, cell / max(mpp, 1e-6)) : 0.0;
+  if (bend > 0.0) {
+    float lonB = ll.x + u_lonRef;
+    vec3 PB = vec3(cos(lat) * cos(lonB), cos(lat) * sin(lonB), sin(lat));
+    vec2 shift = vec2(0.0);
+    float lamB = 4.0 * cell, amp = 0.3;
+    for (int o = 0; o < 9; o++) {
+      lamB *= 0.5;
+      if (lamB < 3.0 * mpp) break;
+      vec3 q = PB * (R / lamB);
+      shift += amp * smoothstep(3.0 * mpp, 6.0 * mpp, lamB) * vec2(noised(q + 31.7).x, noised(q + 71.3).x);
+      amp *= 0.5;
+    }
+    su += bend * shift / (inD ? u_detailTex : u_tex);
+  }
   // What one pixel covers of the grid (at least a cell): slopes are measured across that much. (A
   // grid's width and height are angles: the whole planet's, or the region's.)
   vec2 span = inD ? u_detailBox.zw : vec2(2.0 * PI, PI);
@@ -234,7 +259,6 @@ void main() {
   if (!ok) { outColor = vec4(0.0); return; }
   if (u_mode == 4) { outColor = vec4(landA); return; }
   if (u_mode == 5) { outColor = vec4(over); return; }
-  const float R = 6371008.8;
   float dxm = 2.0 * foot.x * span.x * R * max(cos(lat), 0.05);
   float dym = 2.0 * foot.y * span.y * R;
   // Seen from farther away, slopes are measured over longer distances and come out gentler: the
@@ -247,8 +271,6 @@ void main() {
   // the sea, and a faint mottling. Laid out in space, on the planet's surface: no seam, the same at every visit.
   vec2 fineSlope = vec2(0.0);
   float mottle = 0.0;
-  float mpp = (abs(gx.y) + abs(gy.y)) * PI * R;
-  float cell = (inD ? u_detailBox.w / max(u_detailTex.y, 1.0) : PI / u_tex.y) * R;
   if (u_fine == 1 && ok && 4.0 * mpp < cell) {
     float lon = ll.x + u_lonRef;
     vec3 P = vec3(cos(lat) * cos(lon), cos(lat) * sin(lon), sin(lat));
