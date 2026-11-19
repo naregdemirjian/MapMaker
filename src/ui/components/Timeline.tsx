@@ -1,8 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useStore, useLive, store } from '../store.ts';
 import {
-  type Instant, toApproxYear, fromApproxYear, gregorian, formatYear, floorTo, instant, add, compare, fromStore, MS_PER_DAY, DEEP_BEFORE_YEAR, PRESENT_YEAR,
+  type Instant, type Calendar, toApproxYear, fromApproxYear, gregorian, formatYear, floorTo, instant, add, compare, fromStore, MS_PER_DAY, DEEP_BEFORE_YEAR, PRESENT_YEAR,
 } from '../../core-time/index.ts';
+import { calendarNow } from '../calendar-now.ts';
 import { BASE_EVENT_ID } from '../../world-model/schema.ts';
 import * as cmd from '../../domain/commands.ts';
 import { GroupFilter, eventFilterSet } from './EventGroups.tsx';
@@ -42,7 +43,68 @@ function chooseUnit(yearsPerPx: number): Unit {
   return best;
 }
 
-function ticks(start: number, end: number, u: Unit): Array<{ t: number; label: string }> {
+/** A calendar's average year, in Gregorian years (its ticks are spaced by its own years). */
+const yearShare = new WeakMap<Calendar, number>();
+function yearsPerYear(cal: Calendar): number {
+  let v = yearShare.get(cal);
+  if (v === undefined) {
+    let days = 0;
+    for (let y = 1; y <= 400; y++) for (let m = 1; m <= cal.monthsIn(y); m++) days += cal.daysIn(y, m);
+    v = (days / 400 / 365.2425) * (cal.hoursPerDay / 24);
+    yearShare.set(cal, v);
+  }
+  return v;
+}
+
+/** Ticks along the timeline in a calendar of one's own (D149): its years, its months, its days. */
+function ownTicks(start: number, end: number, u: Unit, cal: Calendar): Array<{ t: number; label: string }> {
+  const out: Array<{ t: number; label: string }> = [];
+  const s0 = fromApproxYear(start);
+  if (u.kind === 'year') {
+    const step = Math.max(1, Math.round(u.step / yearsPerYear(cal)));
+    const y0 = cal.toCivil(s0).year;
+    for (let y = Math.ceil(y0 / step) * step; out.length < 400; y += step) {
+      const ty = toApproxYear(cal.fromCivil({ year: y }));
+      if (ty > end) break;
+      if (ty >= start) out.push({ t: ty, label: cal.yearLabel(y) });
+    }
+    return out;
+  }
+  if (u.kind === 'month') {
+    // (Counted from each year's first month, which always has a tick, with the year.)
+    const c = cal.toCivil(s0);
+    let y = c.year, m = 1, n = 0;
+    for (let i = 0; i < 800 && out.length < 400; i++) {
+      if (cal.daysIn(y, m) > 0) {
+        const t = cal.fromCivil({ year: y, month: m });
+        const ty = toApproxYear(t);
+        if (ty > end) break;
+        const firstMonth = m === 1 || (m === 2 && cal.daysIn(y, 1) === 0);
+        if (ty >= start && n % u.step === 0) out.push({ t: ty, label: firstMonth ? cal.yearLabel(y) : cal.monthName(y, m, true) });
+        n++;
+      }
+      m++;
+      if (m > cal.monthsIn(y)) { m = 1; y++; n = 0; }
+    }
+    return out;
+  }
+  const base = floorTo(s0, u.kind === 'ms' ? 'second' : u.kind, 1, cal);
+  for (let i = 0; i < 2000 && out.length <= 300; i++) {
+    const t = u.kind === 'day' ? cal.addDays(base, i * u.step) : add(base, 0, i * u.step * (u.kind === 'hour' ? 3_600_000 : u.kind === 'minute' ? 60_000 : u.kind === 'second' ? 1000 : 1));
+    const ty = toApproxYear(t);
+    if (ty > end) break;
+    if (ty < start) continue;
+    const c = cal.toCivil(t);
+    const label = u.kind === 'day' ? `${c.day} ${cal.monthName(c.year, c.month, true)}${c.day === 1 && c.month === 1 ? ' ' + cal.yearLabel(c.year) : ''}`
+      : u.kind === 'ms' ? `${String(c.second).padStart(2, '0')}.${String(c.millisecond).padStart(3, '0')}`
+      : `${String(c.hour).padStart(2, '0')}:${String(c.minute).padStart(2, '0')}${u.kind === 'second' ? ':' + String(c.second).padStart(2, '0') : ''}`;
+    out.push({ t: ty, label });
+  }
+  return out;
+}
+
+function ticks(start: number, end: number, u: Unit, cal: Calendar = gregorian): Array<{ t: number; label: string }> {
+  if (cal !== gregorian) return ownTicks(start, end, u, cal);
   const out: Array<{ t: number; label: string }> = [];
   if (u.kind === 'year') {
     for (let y = Math.ceil(start / u.step) * u.step; y <= end && out.length < 400; y += u.step) {
@@ -117,7 +179,7 @@ export function Timeline() {
     const W = Math.max(1, Math.round(w * dpr)), H = Math.max(1, Math.round(h * dpr));
     if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
     const world = s.world;
-    const key = [world.serial, world.tableRevision('event'), world.tableRevision('event_type'), world.tableRevision('event_group'), world.tableRevision('event_group_member'), s.engine!.revision, start, end, W, H, dpr,
+    const key = [world.serial, world.tableRevision('event'), world.tableRevision('event_type'), world.tableRevision('event_group'), world.tableRevision('event_group_member'), world.tableRevision('map_space'), s.spaceId, s.engine!.revision, start, end, W, H, dpr,
       s.selection?.kind === 'event' ? s.selection.id : '', s.recordEventId ?? '', (s.eventFilter ?? ['*']).join(',')].join('|');
     if (!still.current || still.current.key !== key) {
       const canvas = still.current && still.current.canvas.width === W && still.current.canvas.height === H ? still.current.canvas : new OffscreenCanvas(W, H);
@@ -130,7 +192,7 @@ export function Timeline() {
     const u = chooseUnit((end - start) / w);
     ctx.font = '11px "Segoe UI", Inter, Arial, sans-serif';
     ctx.textBaseline = 'middle';
-    for (const tk of ticks(start, end, u)) {
+    for (const tk of ticks(start, end, u, calendarNow())) {
       const x = xOf(tk.t);
       ctx.strokeStyle = 'rgba(255,255,255,0.10)';
       ctx.beginPath(); ctx.moveTo(x + 0.5, RULER); ctx.lineTo(x + 0.5, h); ctx.stroke();

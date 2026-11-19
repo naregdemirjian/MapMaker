@@ -1,6 +1,6 @@
 // The "current events" box of a shot: the events happening at the frame's date, with the date and
 // time, in a box the user styles freely (or on a graphic of their own). Drawn with the text overlays.
-import { type Instant, compare, fromStore, gregorian, type Precision } from '../core-time/index.ts';
+import { type Instant, type Calendar, compare, fromStore, gregorian, type Precision } from '../core-time/index.ts';
 import type { World } from '../world-model/world.ts';
 import { BASE_EVENT_ID } from '../world-model/schema.ts';
 import { imageNow, drawImageFit } from '../render-engine/assets.ts';
@@ -126,14 +126,14 @@ function withAlpha(color: string, a: number): string {
 }
 
 /** Draw the box. `unit` = frame width / 1920. Returns the box rectangle (for tests), or null. */
-export function drawEventsBox(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, width: number, height: number, unit: number, box: EventsBox, t: Instant, events: CurrentEvent[]): { x: number; y: number; w: number; h: number } | null {
+export function drawEventsBox(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, width: number, height: number, unit: number, box: EventsBox, t: Instant, events: CurrentEvent[], cal: Calendar = gregorian): { x: number; y: number; w: number; h: number } | null {
   if (!box.show) return null;
   const u = unit, pad = box.padding * u, w = box.width * u;
   const inner = w - 2 * pad;
   // Lay out first, to know the height.
   const rows: Array<{ kind: 'title' | 'date' | 'event' | 'desc'; text: string; size: number; alpha: number }> = [];
   if (box.title.trim()) rows.push({ kind: 'title', text: box.title.trim().toLocaleUpperCase(), size: box.titleSize * u, alpha: 1 });
-  if (box.showDate) rows.push({ kind: 'date', text: gregorian.format(t, box.datePrecision), size: box.dateSize * u, alpha: 1 });
+  if (box.showDate) rows.push({ kind: 'date', text: cal.format(t, box.datePrecision), size: box.dateSize * u, alpha: 1 });
   ctx.save();
   for (const e of events) {
     ctx.font = fontOf(box.font, 600, box.textSize * u);

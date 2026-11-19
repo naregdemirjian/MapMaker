@@ -1,3 +1,4 @@
+import { calendarNow } from '../calendar-now.ts';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { FrameMeter } from '../frame-meter.ts';
 import { useLive, store } from '../store.ts';
@@ -441,8 +442,8 @@ export function MapView() {
         ctx.fillStyle = 'rgba(10,16,24,0.78)'; ctx.fillRect(bx, 8 * dpr, w, 22 * dpr);
         ctx.fillStyle = '#ffd166'; ctx.fillText(text, align === 'right' ? tx - 7 * dpr : tx + 7 * dpr, 19 * dpr);
       };
-      tag(gregorian.format(s.time, 'day'), x - 8 * dpr, 'right');
-      tag(gregorian.format(s.compare.time, 'day'), x + 8 * dpr, 'left');
+      tag(calendarNow().format(s.time, 'day'), x - 8 * dpr, 'right');
+      tag(calendarNow().format(s.compare.time, 'day'), x + 8 * dpr, 'left');
       ctx.restore();
     }
     drawEditingOverlay(ctx, view);

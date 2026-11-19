@@ -1,7 +1,7 @@
 // A country's borders as they changed over time: for a period (a day, a month, a year or several
 // years), which land it gained and lost, from and to whom, and the changes that did it. Read-only:
 // nothing here changes the project. Shown by the "changes over time" selection mode.
-import { type Instant, compare, addMs, gregorian, floorTo, add } from '../core-time/index.ts';
+import { type Instant, type Calendar, compare, addMs, gregorian, floorTo, stepDate } from '../core-time/index.ts';
 import type { World } from '../world-model/world.ts';
 import { type Engine, leafDescendants } from '../temporal-engine/engine.ts';
 
@@ -11,36 +11,36 @@ export interface PeriodSpec { unit: PeriodUnit; years: number }
 
 export const DEFAULT_PERIOD: PeriodSpec = { unit: 'year', years: 10 };
 
-/** The period of the given kind that contains instant t: [from, to). */
-export function periodAround(t: Instant, spec: PeriodSpec): { from: Instant; to: Instant } {
-  const c = gregorian.toCivil(t);
+/** The period of the given kind that contains instant t: [from, to), in a calendar (the map's, D149). */
+export function periodAround(t: Instant, spec: PeriodSpec, cal: Calendar = gregorian): { from: Instant; to: Instant } {
+  const c = cal.toCivil(t);
   switch (spec.unit) {
-    case 'day': { const from = floorTo(t, 'day'); return { from, to: add(from, 1) }; }
+    case 'day': { const from = floorTo(t, 'day', 1, cal); return { from, to: cal.addDays(from, 1) }; }
     case 'month': {
-      const from = gregorian.fromCivil({ year: c.year, month: c.month });
-      return { from, to: c.month === 12 ? gregorian.fromCivil({ year: c.year + 1, month: 1 }) : gregorian.fromCivil({ year: c.year, month: c.month + 1 }) };
+      const from = cal.fromCivil({ year: c.year, month: c.month });
+      return { from, to: stepDate(from, 'month', 1, cal) };
     }
-    case 'year': return { from: gregorian.fromCivil({ year: c.year }), to: gregorian.fromCivil({ year: c.year + 1 }) };
+    case 'year': return { from: cal.fromCivil({ year: c.year }), to: cal.fromCivil({ year: c.year + 1 }) };
     default: {
       const n = Math.max(1, Math.round(spec.years));
       const y0 = Math.floor(c.year / n) * n;
-      return { from: gregorian.fromCivil({ year: y0 }), to: gregorian.fromCivil({ year: y0 + n }) };
+      return { from: cal.fromCivil({ year: y0 }), to: cal.fromCivil({ year: y0 + n }) };
     }
   }
 }
 
 /** The start of the period before (-1) or after (+1) the one containing t. */
-export function stepPeriod(t: Instant, spec: PeriodSpec, dir: -1 | 1): Instant {
-  const p = periodAround(t, spec);
-  return dir > 0 ? p.to : periodAround(addMs(p.from, -1), spec).from;
+export function stepPeriod(t: Instant, spec: PeriodSpec, dir: -1 | 1, cal: Calendar = gregorian): Instant {
+  const p = periodAround(t, spec, cal);
+  return dir > 0 ? p.to : periodAround(addMs(p.from, -1), spec, cal).from;
 }
 
 /** How a period is written: "1450", "March 1450", "4 March 1450", "1450–1459". */
-export function periodLabel(from: Instant, to: Instant, spec: PeriodSpec): string {
-  if (spec.unit === 'day') return gregorian.format(from, 'day');
-  if (spec.unit === 'month') return gregorian.format(from, 'month');
-  if (spec.unit === 'year') return gregorian.format(from, 'year');
-  return `${gregorian.format(from, 'year')}–${gregorian.format(addMs(to, -1), 'year')}`;
+export function periodLabel(from: Instant, to: Instant, spec: PeriodSpec, cal: Calendar = gregorian): string {
+  if (spec.unit === 'day') return cal.format(from, 'day');
+  if (spec.unit === 'month') return cal.format(from, 'month');
+  if (spec.unit === 'year') return cal.format(from, 'year');
+  return `${cal.format(from, 'year')}–${cal.format(addMs(to, -1), 'year')}`;
 }
 
 export interface CountryChange {

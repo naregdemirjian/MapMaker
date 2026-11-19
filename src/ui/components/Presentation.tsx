@@ -10,7 +10,7 @@ import { planVideo } from '../../presentation/video-encoder.ts';
 import { VIDEO_QUALITIES, formatBitrate, type VideoQuality } from '../../export/video-codecs.ts';
 import { eventsBoxOf, type EventsBox } from '../../presentation/events-box.ts';
 import { LOOKS, LOOK_IDS, GRADES, resolveLook, type LookId, type GradeId, type ShotLook } from '../../presentation/looks.ts';
-import { isSpaceMap } from '../../world-model/world-settings.ts';
+import { isSpaceMap, calendarOfSpace } from '../../world-model/world-settings.ts';
 import { spaceCamera } from '../../space/space-view.ts';
 import { LABEL_FONTS } from '../../render-engine/label-style.ts';
 import { PROJECTIONS, type ProjectionName, type Camera } from '../../render-engine/camera.ts';
@@ -562,7 +562,7 @@ export function ShotTimeline() {
         <button onClick={() => s.set({ shotFrame: 0, presentCamera: null, playing: false })}>⏮</button>
         <input type="range" min={0} max={shot.frames - 1} value={s.shotFrame} onChange={(e) => s.setLive({ shotFrame: Number(e.target.value), presentCamera: null, playing: false })} className="frame-slider" data-testid="frame-slider" />
         <button onClick={() => s.set({ shotFrame: shot.frames - 1, presentCamera: null, playing: false })}>⏭</button>
-        <span className="frame-info" data-testid="frame-info">Frame {s.shotFrame + 1} / {shot.frames} · {(s.shotFrame / shot.fps).toFixed(2)} s · <b>{gregorian.format(t, 'minute')}</b></span>
+        <span className="frame-info" data-testid="frame-info">Frame {s.shotFrame + 1} / {shot.frames} · {(s.shotFrame / shot.fps).toFixed(2)} s · <b>{calendarOfSpace(s.world?.get('map_space', shot.spaceId)).format(t, 'minute')}</b></span>
       </div>
     </div>
   );

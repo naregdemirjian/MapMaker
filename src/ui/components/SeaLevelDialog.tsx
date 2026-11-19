@@ -1,5 +1,6 @@
 // Sea level over time (Stage 8, D96): a map's sea at given dates, rising or falling steadily between
 // them; the coasts, and territory that ends at the coast, follow it.
+import { calendarNow } from '../calendar-now.ts';
 import { useStore } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
 import { seaLevelPoints } from '../../world-model/world-settings.ts';
@@ -41,7 +42,7 @@ export function SeaLevelDialog() {
           coasts are where Earth's terrain then meets the sea (heights about 10 km apart), and territory that ends at the
           coast ends there.
         </p>
-        <p data-testid="sea-level-now">On {gregorian.format(s.time, 'day')}: <b>{seaLevelText(now)}</b></p>
+        <p data-testid="sea-level-now">On {calendarNow().format(s.time, 'day')}: <b>{seaLevelText(now)}</b></p>
         {points.length > 0 && (
           <table className="sea-level-table">
             <thead><tr><th>Date</th><th>Sea level (m)</th><th /></tr></thead>

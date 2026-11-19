@@ -10,14 +10,14 @@ import { makeView, viewBounds, metresPerPixel, lonLatToScreen, type View } from 
 import { type ShotSettings, type OverlayRect, EVENTS_BOX_ID, timeAt, cameraAt, overlaysAt, drawOverlays, shotTransitions, screenSecondsSince, isVideoFormat } from './sequence.ts';
 import { planVideo, VideoFileEncoder, UploadSink, type VideoPlan } from './video-encoder.ts';
 import { videoBytes } from '../export/video-codecs.ts';
-import { gregorian, type Instant } from '../core-time/index.ts';
+import type { Instant } from '../core-time/index.ts';
 import { encodeTiff, deflateInBrowser } from '../export/tiff.ts';
 import { eventsBoxOf, currentEvents, drawEventsBox } from './events-box.ts';
 import { eventShown, entityStyle } from '../domain/commands.ts';
 import { isFeatureKind } from '../render-engine/feature-style.ts';
 import { preloadImages, prepareVideos } from '../render-engine/assets.ts';
 import { basemapSourceOf, loadBasemap, loadBasemapDetail, loadDatasetRecords, DEFAULT_BASEMAP_STYLE, type Basemap, type BasemapStyle } from '../render-engine/basemap.ts';
-import { shown, minLakeKm2, terrainLook, seaLevelPoints, planetOf, sculptOf, terrainSourceOf, isSpaceMap, spaceSettingsOf, isPaleoEarth } from '../world-model/world-settings.ts';
+import { shown, minLakeKm2, terrainLook, seaLevelPoints, planetOf, sculptOf, terrainSourceOf, isSpaceMap, spaceSettingsOf, isPaleoEarth, calendarOfSpace } from '../world-model/world-settings.ts';
 import { makeSpaceView } from '../space/space-view.ts';
 import { SpaceRenderer } from '../space/space-renderer.ts';
 import { loadNearbyStars } from '../space/catalogue.ts';
@@ -152,12 +152,14 @@ export function visibleLayers(world: World, shot: ShotSettings): string[] {
 export function drawShotOverlays(ctx: CanvasRenderingContext2D, width: number, height: number, world: World, shot: ShotSettings, frame: number, t: Instant, view?: View): OverlayRect[] {
   // (Callouts point at places on the map: where the frame's view shows them, D107.)
   const project = view ? (lon: number, lat: number) => lonLatToScreen(view, lon, lat) as [number, number] | null : undefined;
-  const rects = drawOverlays(ctx, width, height, overlaysAt(shot, frame, t), width / 1920, DEFAULT_STYLE.font, project);
+  // (Dates in the calendar of the shot's map, D149.)
+  const cal = calendarOfSpace(world.get('map_space', shot.spaceId));
+  const rects = drawOverlays(ctx, width, height, overlaysAt(shot, frame, t, cal), width / 1920, DEFAULT_STYLE.font, project);
   const box = eventsBoxOf(shot.eventsBox);
   if (!box.show) return rects;
   const groups = box.groups ? new Set(box.groups) : null;
   const events = currentEvents(world, box, t, (t0) => screenSecondsSince(shot, frame, t0), (id) => eventShown(world, id, groups));
-  const r = drawEventsBox(ctx, width, height, width / 1920, box, t, events);
+  const r = drawEventsBox(ctx, width, height, width / 1920, box, t, events, cal);
   if (r) rects.push({ id: EVENTS_BOX_ID, ...r });
   return rects;
 }
@@ -373,7 +375,7 @@ export async function runExport(o: {
     format: plan ? plan.format : tiff ? 'tiff' : 'png',
     ...(plan ? { video: { codec: plan.config.codec, bitrate: plan.bitrate, quality: plan.quality } } : {}),
     passes: defs.map((d) => ({ name: d.name, label: d.label, blend: d.blend, note: d.note })), transparent: plan ? false : o.shot.transparent,
-    historicalRange: [gregorian.format(timeAt(o.shot, f0), 'minute'), gregorian.format(timeAt(o.shot, f1), 'minute')],
+    historicalRange: [timeAt(o.shot, f0), timeAt(o.shot, f1)].map((t) => calendarOfSpace(o.world.get('map_space', o.shot.spaceId)).format(t, 'minute')),
   });
   // A fresh renderer per export: no state shared with the interface, so output never depends on it
   // (nor on the working view's performance settings: exports always draw at their own, finest quality).

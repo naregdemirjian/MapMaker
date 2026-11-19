@@ -144,3 +144,34 @@ test('a definition that cannot be a calendar is told why', () => {
   assert.ok(calendarProblems({ ...ok, eras: [{ name: 'B', abbr: 'B', start: 10 }, { name: 'A', abbr: 'A', start: 5 }] }).length, 'eras out of order');
   assert.ok(calendarProblems({ ...ok, dayHours: 0.5 }).length);
 });
+
+test('a map given a calendar of its own: kept in its settings, one undo step, refused when it cannot be one; the Gregorian otherwise', async () => {
+  const { World } = await import('../src/world-model/world.ts');
+  const cmd = await import('../src/domain/commands.ts');
+  const { calendarOfSpace, calendarDefOf } = await import('../src/world-model/world-settings.ts');
+  const { invertDiffs } = await import('../src/world-model/schema.ts');
+  const w = new World();
+  const space = cmd.seedProject(w, 'Calendars').result.spaceId;
+  assert.equal(calendarOfSpace(w.get('map_space', space)), gregorian);
+  const def = { ...CALENDAR_TEMPLATES.find((t) => t.id === 'world')!.def, id: 'cal_test' };
+  const keysBefore = Object.keys(JSON.parse(w.get('map_space', space)!.settings)).sort();
+  const r = cmd.setMapCalendar(w, space, def);
+  assert.deepEqual(calendarDefOf(w.get('map_space', space)), def);
+  const cal = calendarOfSpace(w.get('map_space', space));
+  assert.equal(cal.name, 'Calendar of the Founding');
+  assert.equal(cal.format(instant(daysFromCivil(1000, 1, 1)), 'day'), '1 Firstmonth 1 AF');
+  // Its other settings kept.
+  assert.deepEqual(Object.keys(JSON.parse(w.get('map_space', space)!.settings)).sort(), [...keysBefore, 'calendar'].sort());
+  // Refused when it cannot be a calendar; the map keeps the one it has.
+  assert.throws(() => cmd.setMapCalendar(w, space, { ...def, months: [] }), /month/);
+  assert.equal(calendarOfSpace(w.get('map_space', space)).name, 'Calendar of the Founding');
+  // Undone: the Gregorian again. Set to none: the Gregorian.
+  w.applyDiffs(invertDiffs(r.diffs));
+  assert.equal(calendarOfSpace(w.get('map_space', space)), gregorian);
+  cmd.setMapCalendar(w, space, def);
+  cmd.setMapCalendar(w, space, null);
+  assert.equal(calendarOfSpace(w.get('map_space', space)), gregorian);
+  // Settings that cannot be read as a calendar (written by hand, say): the Gregorian.
+  assert.equal(calendarOfSpace({ settings: '{"calendar":{"months":"twelve"}}' }), gregorian);
+  assert.equal(calendarOfSpace({ settings: 'not json' }), gregorian);
+});

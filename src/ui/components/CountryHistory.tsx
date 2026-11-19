@@ -1,6 +1,7 @@
 // "Changes over time": a selection mode for a country. The whole country is shown lightly; the land it
 // gained and lost during a chosen period (a day, a month, a year, several years) around the date
 // being viewed is shown strongly, with the changes that did it listed. Nothing is changed.
+import { calendarNow } from '../calendar-now.ts';
 import { useStore, store } from '../store.ts';
 import { countryPeriodChanges, periodAround, stepPeriod, periodLabel, type PeriodChanges, type PeriodSpec } from '../../domain/history-view.ts';
 import type { World } from '../../world-model/world.ts';
@@ -14,7 +15,7 @@ let memo: { key: string; value: PeriodChanges } | null = null;
 
 /** The changes for a country in the period around the date being viewed (kept until anything changes). */
 export function periodChangesNow(world: World, engine: Engine, spaceId: string, layerId: string, entity: string): PeriodChanges {
-  const { from, to } = periodAround(store.time, store.historyView.period);
+  const { from, to } = periodAround(store.time, store.historyView.period, calendarNow());
   const key = `${world.revision}|${spaceId}|${layerId}|${entity}|${from.day}:${from.ms}|${to.day}:${to.ms}`;
   if (memo?.key !== key) memo = { key, value: countryPeriodChanges(world, engine, spaceId, layerId, entity, from, to) };
   return memo.value;
@@ -42,9 +43,9 @@ export function CountryHistorySection({ id }: { id: string }) {
         </div>
         {pc && <>
           <div className="period-nav">
-            <button className="small" onClick={() => s.setTime(stepPeriod(s.time, hv.period, -1))} title="The period before" data-testid="history-prev">◀</button>
-            <b data-testid="history-period">{periodLabel(pc.from, pc.to, hv.period)}</b>
-            <button className="small" onClick={() => s.setTime(stepPeriod(s.time, hv.period, 1))} title="The period after" data-testid="history-next">▶</button>
+            <button className="small" onClick={() => s.setTime(stepPeriod(s.time, hv.period, -1, calendarNow()))} title="The period before" data-testid="history-prev">◀</button>
+            <b data-testid="history-period">{periodLabel(pc.from, pc.to, hv.period, calendarNow())}</b>
+            <button className="small" onClick={() => s.setTime(stepPeriod(s.time, hv.period, 1, calendarNow()))} title="The period after" data-testid="history-next">▶</button>
           </div>
           <div className="stat" data-testid="history-summary">
             <span className="swatch" style={{ background: GAINED_COLOR }} /> Gained {km2(pc.gainedArea)} · <span className="swatch" style={{ background: LOST_COLOR }} /> lost {km2(pc.lostArea)}

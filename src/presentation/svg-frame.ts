@@ -13,7 +13,6 @@ import { geoPath, type GeoProjection } from 'd3-geo';
 import type { World } from '../world-model/world.ts';
 import type { Engine } from '../temporal-engine/engine.ts';
 import type { Instant } from '../core-time/index.ts';
-import { gregorian } from '../core-time/index.ts';
 import { MapRenderer, DEFAULT_STYLE, EXPORT_QUALITY, FRONT_COLOR, FRONT_SIDE, mediaBox, drawTeeth, warsAt, type PassName, type TerritoryFill, type RenderOptions, type FrontTeeth } from '../render-engine/map-renderer.ts';
 import { SvgPen, SvgPath, withSvgPaths, esc, num } from '../export/svg-pen.ts';
 import { frameSetup, basemapFor, terrainFor, detailForFrame, drawShotOverlays, drawSpaceFrame, lookStyles, PASS_DEFS, type ExportPassDef } from './export-driver.ts';
@@ -25,7 +24,7 @@ import { preloadImages, prepareVideos, imageNow, videoNow, drawImageFit } from '
 import { eventsBoxOf } from './events-box.ts';
 import { timeAt, type ShotSettings } from './sequence.ts';
 import { GRADES, drawPaper, vignetteOf } from './looks.ts';
-import { isSpaceMap, spaceSettingsOf } from '../world-model/world-settings.ts';
+import { isSpaceMap, spaceSettingsOf, calendarOfSpace } from '../world-model/world-settings.ts';
 import { loadNearbyStars } from '../space/catalogue.ts';
 import { loadExoplanets } from '../space/exoplanets.ts';
 import { parseJSON } from '../temporal-engine/engine.ts';
@@ -418,7 +417,7 @@ export async function svgFrame(o: SvgFrameOptions): Promise<SvgFrame> {
   note(texts);
   defs.push(texts.defs());
 
-  const when = gregorian.format(t, 'day');
+  const when = calendarOfSpace(world.get('map_space', shot.spaceId)).format(t, 'day');
   const title = `${o.shotName}: ${when}`;
   const svg = [
     '<?xml version="1.0" encoding="UTF-8"?>',

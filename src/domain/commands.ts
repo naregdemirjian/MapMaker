@@ -1,5 +1,6 @@
 // Domain commands: every user action is one of these. Each runs inside a transaction against the
 // in-memory world and returns the exact row diffs to save (and to undo). Commands never draw anything.
+import { calendarProblems, type CalendarDef } from '../core-time/index.ts';
 import { World, Tx, newId } from '../world-model/world.ts';
 import {
   Engine, canonicalFaces, leafDescendants, childrenMap, hashFaces, parseJSON, effectTime, eventStart, type Resolution, type TransitionSpec, type AnnexIntent, type PlaceIntent, type RenameIntent, type ShapeIntent, type RelateIntent, type SystemIntent, type LaneIntent, laneKey, type FeatureAnimStyle, isFeatureAnim,
@@ -302,6 +303,19 @@ export function setWorldTerrain(world: World, spaceId: string, patch: Partial<Te
   const { terrain: _old, ...rest } = settings;
   const label = !patch ? `Hide the terrain of "${space.name}"` : cur ? `Change the terrain of "${space.name}"` : `Show the terrain of "${space.name}"`;
   return run(world, label, (tx) => { tx.update('map_space', { ...space, settings: JSON.stringify(next ? { ...rest, terrain: next } : rest) }); });
+}
+
+/** Gives a map a calendar of its own (D149), or (null) the Gregorian again. Nothing stored is changed: only how its dates are written. */
+export function setMapCalendar(world: World, spaceId: string, def: CalendarDef | null): CommandResult {
+  const space = world.get('map_space', spaceId);
+  if (!space) throw new Error('That map no longer exists.');
+  if (def) {
+    const problems = calendarProblems(def);
+    if (problems.length) throw new Error(problems[0]);
+  }
+  const { calendar: _old, ...rest } = worldSettings(space);
+  const label = def ? `Give "${space.name}" the ${def.name} calendar` : `Use the Gregorian calendar for "${space.name}"`;
+  return run(world, label, (tx) => { tx.update('map_space', { ...space, settings: JSON.stringify(def ? { ...rest, calendar: def } : rest) }); });
 }
 
 /** Sets a world's sea level over time (D96): the whole list of dated levels, in one step; none for today's. */

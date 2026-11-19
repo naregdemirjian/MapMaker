@@ -61,6 +61,44 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D149. Each map in a calendar of its own (Stage 13)
+
+- **Asked.** Stage 13 of the approved plan: "fictional calendars with their own day length, months and year zero
+  … Each world can have its own."
+- **What a calendar is** (`core-time/custom-calendar.ts`): a definition stored with the map (its settings, under
+  `calendar`): months with their days (and days more in a leap year; a month of no days is a day outside the
+  months, like the Thirteen-month calendar's Leap Day), a leap rule like the Gregorian one (every n years, except
+  every m, but every k, counted from an offset), the Gregorian day whose midnight begins its year 1, the hours in
+  its day (a world turning faster or slower than the Earth), its week (or none; running on, or beginning again
+  with each month like the Republican décade), and its eras (named, abbreviated, from a year of its own count; a
+  quiet era is written without its abbreviation), with a word for the years before the first, or a year zero
+  instead. It only translates the stored moments to and from readable dates, exactly over the whole range of
+  instants (a whole cycle of leap years at once; whole numbers beyond 2^53 for days that are not 24 hours long),
+  so giving a map a calendar, changing it or taking it away changes nothing stored and is one step to undo.
+- **Templates.** The Julian calendar (its leap day every fourth year, dated AD and BC), the French Republican
+  calendar (its twelve months of 30 days, the Sansculottides and the ten-day décade), a thirteen-month calendar
+  of 28-day months with a Leap Day and a Year Day outside the weeks, and an invented world's calendar (ten months
+  of 36 days and the Turning; six weekdays; its years "AF", after the Founding) to start one's own from.
+- **Where it shows.** On the map in the calendar, every date is written, typed and chosen in it: the timeline's
+  ticks (its years, its months, with the year at each year's first month, its days and hours), the date viewed
+  and every date field (typed in it, "14 Frostmoon 20 TA"; the arrow keys step its days, months and years), the
+  calendar to choose a day (its months, its week across), the country history's periods, the compare tags, the
+  sea level dialog, and in shots: the date shown on the frame, the events box and SVG frames, and the dates of
+  an export's notes. "Calendar: …" under the map settings opens the dialog: start from the Gregorian or a
+  template, change any part, see what the date viewed is in it (and in the Gregorian), use it; problems are
+  named in words and the calendar cannot be used until they are put right.
+- **Differences from the plan.** None in what was asked. The ice-age presets of the sea level dialog stay dated
+  in the Gregorian (they are the Earth's).
+- **Tests.** `custom-calendar.test.ts` (each template against known dates: the Julian against the Gregorian
+  reform and the October Revolution, BC years and the same weekdays as ever; the Republican's 9 Thermidor Year II
+  and 18 Brumaire Year VIII, its festival days and décade; the thirteen months' Leap Day and Year Day; a calendar
+  made like the Gregorian one agreeing with it day for day over trillions of years; an invented world's eras,
+  the years before them, a day of 30 hours and a week of six days, with round trips everywhere; definitions that
+  cannot be calendars told why; a map given a calendar, refused, undone and given the Gregorian again);
+  `e2e/workflows` 'A map's own calendar' (a template, an era added; the date viewed written in it, a
+  date typed, stepped with the arrow keys and chosen on a six-day week, the shot's preview written in it; the
+  Gregorian again in one step).
+
 ### D148. Smart brushes: the geography-aware brush and the strategic brush (Stage 12)
 
 - **Asked.** Stage 12 of the approved plan: "the geography-aware brush and the strategic brush, with feature

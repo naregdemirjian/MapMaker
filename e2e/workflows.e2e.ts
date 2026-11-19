@@ -5,7 +5,7 @@ import { readFileSync, readdirSync, existsSync, rmSync, writeFileSync, statSync 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { encodePNG } from '../src/export/png.ts';
-import { gregorian } from '../src/core-time/index.ts';
+import { gregorian, calendarOf, daysFromCivil, CALENDAR_TEMPLATES } from '../src/core-time/index.ts';
 import { join } from 'node:path';
 import { Harness, ROOT, blob, readPNG, pixel, hexRGB, near, compositeOver, writeTerrainTiles, writePhotoTiles, type LL } from './harness.ts';
 
@@ -1062,6 +1062,61 @@ try {
     assert.equal(await cur.inputValue(), '11 June 1929');
     assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.time.day), gregorian.fromCivil({ year: 1929, month: 6, day: 11 }).day, 'the date viewed moved with the keys');
     await h.setDate('1930');
+  });
+
+  await h.step('A map\'s own calendar (D149): started from a template, an era added; dates written, typed, stepped and chosen in it, in the shot preview too; the Gregorian again in one step', async () => {
+    const keep = await page.evaluate(() => (window as any).__mapmaker.store.time);
+    await h.setDate('1 January 1100');
+    assert.equal(await page.getByTestId('open-calendar').innerText(), 'Calendar: Gregorian…');
+    await page.getByTestId('open-calendar').click();
+    await page.getByTestId('calendar-template').selectOption('world');
+    assert.equal(await page.getByTestId('calendar-preview').innerText(), 'The date viewed: 6 Turning 100 AF (Gregorian: 1 January 1100; a Starday). Its year 1 began on 1 January 1000.');
+    // An era of its own: the Third Age, from its year 101.
+    await page.getByTestId('calendar-add-era').click();
+    await page.getByTestId('calendar-era-name-1').fill('Third Age');
+    await page.getByTestId('calendar-era-abbr-1').fill('TA');
+    await page.getByTestId('calendar-era-start-1').fill('101');
+    assert.equal(await page.getByTestId('calendar-problems').count(), 0);
+    await page.getByTestId('calendar-use').click();
+    await page.getByTestId('calendar-dialog').waitFor({ state: 'detached' });
+    assert.equal(await page.getByTestId('open-calendar').innerText(), 'Calendar: Calendar of the Founding…');
+    assert.equal(await page.getByTestId('current-date').inputValue(), '6 Turning 100 AF');
+    // The same calendar, worked out here: what is typed is that day.
+    const W = calendarOf({ ...CALENDAR_TEMPLATES.find((t) => t.id === 'world')!.def, eras: [{ name: 'After the Founding', abbr: 'AF', start: 1 }, { name: 'Third Age', abbr: 'TA', start: 101 }] });
+    await h.setDate('14 Frostmoon 20 TA');
+    assert.deepEqual(await page.evaluate(() => (window as any).__mapmaker.store.time), W.fromCivil({ year: 120, month: 8, day: 14 }));
+    assert.equal(await page.getByTestId('current-date').inputValue(), '14 Frostmoon 20 TA');
+    assert.equal(W.fromCivil({ year: 1 }).day, daysFromCivil(1000, 1, 1));
+    // Stepped a day with the arrow keys; chosen on its calendar (a week of six days, 36 to the month).
+    await page.getByTestId('current-date').focus();
+    await page.keyboard.press('ArrowUp');
+    assert.equal(await page.getByTestId('current-date').inputValue(), '15 Frostmoon 20 TA');
+    await page.getByTestId('current-date-calendar').click();
+    assert.equal(await page.locator('.date-popover .date-weekday').count(), 6);
+    assert.equal(await page.getByTestId('cal-month').inputValue(), '8');
+    await page.getByTestId('cal-day-36').click();
+    await page.waitForFunction(() => (document.querySelector('[data-testid=current-date]') as HTMLInputElement).value === '36 Frostmoon 20 TA');
+    await h.screenshot('calendar-own');
+    // In a shot's preview, the frame's date written in it too.
+    const shotId = await page.evaluate(() => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const settings = B.defaultShot(s.spaceId, s.camera, s.time, s.time, 24, 1);
+      const id = s.execute((w: any) => B.commands.createSequence(w, 'In its calendar', settings));
+      s.set({ shotId: id, shotFrame: 0, presentCamera: null, mode: 'present' });
+      return id as string;
+    });
+    await page.getByTestId('frame-info').waitFor();
+    assert.match(await page.getByTestId('frame-info').innerText(), /36 Frostmoon 20 TA/);
+    await page.getByTestId('mode-world').click();
+    await page.getByTestId('undo').click();
+    await h.saved();
+    assert.equal(await page.evaluate((id) => !!(window as any).__mapmaker.store.world.get('sequence', id), shotId), false);
+    // The Gregorian again (one step); the date as it was, written as ever.
+    await page.getByTestId('open-calendar').click();
+    await page.getByTestId('calendar-use-gregorian').click();
+    assert.equal(await page.getByTestId('open-calendar').innerText(), 'Calendar: Gregorian…');
+    assert.equal(await page.getByTestId('current-date').inputValue(), gregorian.format(W.fromCivil({ year: 120, month: 8, day: 36 }), 'day'));
+    await page.evaluate((t) => (window as any).__mapmaker.store.setTime(t), keep);
   });
 
   await h.step('Recording into an event: each change spreads until the next one recorded; the last then given two years of its own in the event\'s panel', async () => {

@@ -2,7 +2,8 @@ import { useState, useEffect, memo } from 'react';
 import { useStore, useLive, store, type Tool } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
 import { SCULPT_TOOLS } from '../../terrain/sculpt.ts';
-import { type Instant, gregorian, fromStore, formatYear, compare, add, NEG_INF, MONTHS, DEEP_BEFORE_YEAR } from '../../core-time/index.ts';
+import { type Instant, type Calendar, gregorian, fromStore, formatYear, compare, add, NEG_INF, DEEP_BEFORE_YEAR, fromApproxYear } from '../../core-time/index.ts';
+import { calendarNow } from '../calendar-now.ts';
 import { BASE_EVENT_ID, type EffectRow } from '../../world-model/schema.ts';
 import { basemapSourceOf, worldSettings, terrainSourceOf, sculptOf, isSpaceMap, isPaleoEarth } from '../../world-model/world-settings.ts';
 import { parseJSON, leafDescendants, isUntracked, resolutionOf, type Resolution, type TransitionSpec } from '../../temporal-engine/engine.ts';
@@ -32,7 +33,8 @@ import { typeColor } from '../../domain/event-types.ts';
 import { isFeatureKind } from '../../render-engine/feature-style.ts';
 import { StarPanel } from './Stars.tsx';
 
-export const fmt = (t: Instant, precision: 'year' | 'day' | 'minute' = 'day') => gregorian.format(t, precision);
+/** A date as the map being viewed writes it (its own calendar, D149, or the Gregorian). */
+export const fmt = (t: Instant, precision: 'year' | 'day' | 'minute' = 'day') => calendarNow().format(t, precision);
 
 /**
  * A date: typed ("14 May 1203", "500 BCE"), chosen on a calendar (the button at its end), or stepped
@@ -40,32 +42,34 @@ export const fmt = (t: Instant, precision: 'year' | 'day' | 'minute' = 'day') =>
  * (an event's end at its start): shown greyed in it, and where the arrows and the calendar begin. `live`: arrow steps apply at once
  * (the date viewed); otherwise on Enter or on leaving the field, as typing does.
  */
-export function DateField({ value, onChange, placeholder, allowEmpty, testId, suggest, live, steady }: { value: Instant | null; onChange: (t: Instant | null) => void; placeholder?: string; allowEmpty?: boolean; testId?: string; suggest?: Instant | null; live?: boolean; steady?: { yearSizer: string; dayOnly: boolean } }) {
-  const show = (t: Instant) => fmt(t, t.ms ? 'minute' : 'day');
+export function DateField({ value, onChange, placeholder, allowEmpty, testId, suggest, live, steady, cal: calendar }: { cal?: Calendar; value: Instant | null; onChange: (t: Instant | null) => void; placeholder?: string; allowEmpty?: boolean; testId?: string; suggest?: Instant | null; live?: boolean; steady?: { yearSizer: string; dayOnly: boolean } }) {
+  // (In the calendar of the map being viewed, D149, unless another is given: written, read, stepped and chosen in it.)
+  const cal = calendar ?? calendarNow();
+  const show = (t: Instant) => cal.format(t, t.ms ? 'minute' : 'day');
   const [text, setText] = useState(value ? show(value) : '');
   const [bad, setBad] = useState(false);
   const [open, setOpen] = useState(false);
   const [focused, setFocused] = useState(false);
   // Shown steady (see SteadyDate) while the field is not being typed in.
   // (Deep time, D134, is written as how long ago: no cells of day, month and year.)
-  const steadyShown = !!steady && !focused && !!value && Number.isFinite(value.day) && text === show(value) && gregorian.toCivil(value).year >= DEEP_BEFORE_YEAR;
-  useEffect(() => { setText(value ? show(value) : ''); setBad(false); }, [value?.day, value?.ms]);
+  const steadyShown = !!steady && !focused && !!value && Number.isFinite(value.day) && text === show(value) && (cal !== gregorian || gregorian.toCivil(value).year >= DEEP_BEFORE_YEAR);
+  useEffect(() => { setText(value ? show(value) : ''); setBad(false); }, [value?.day, value?.ms, cal]);
   const suggested = !value && suggest ? show(suggest) : null;
   const commit = (t = text) => {
     if (!t.trim()) { if (allowEmpty) onChange(null); else setBad(true); return; }
-    const p = gregorian.parse(t);
+    const p = cal.parse(t);
     if (!p) { setBad(true); return; }
     setBad(false);
     onChange(p.instant);
   };
-  const current = (): Instant | null => { const typed = text.trim() ? gregorian.parse(text)?.instant : undefined; return typed ?? value ?? suggest ?? null; };
+  const current = (): Instant | null => { const typed = text.trim() ? cal.parse(text)?.instant : undefined; return typed ?? value ?? suggest ?? null; };
   const key = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') { commit(); return; }
     if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
     const t = current();
     if (!t || t.day === -Infinity || t.day === Infinity) return;
     e.preventDefault();
-    const next = stepDate(t, e.altKey ? 'year' : e.shiftKey ? 'month' : 'day', e.key === 'ArrowUp' ? 1 : -1);
+    const next = stepDate(t, e.altKey ? 'year' : e.shiftKey ? 'month' : 'day', e.key === 'ArrowUp' ? 1 : -1, cal);
     setText(show(next));
     setBad(false);
     if (live) onChange(next);
@@ -73,9 +77,9 @@ export function DateField({ value, onChange, placeholder, allowEmpty, testId, su
   return (
     <span className="date-field">
       <input
-        className={`${bad ? 'date-input bad' : 'date-input'}${steadyShown ? ' steady-under' : ''}`} value={text} placeholder={suggested ?? placeholder ?? 'e.g. 14 May 1203, 500 BCE, 2241-03-02'}
+        className={`${bad ? 'date-input bad' : 'date-input'}${steadyShown ? ' steady-under' : ''}`} value={text} placeholder={suggested ?? placeholder ?? (cal === gregorian ? 'e.g. 14 May 1203, 500 BCE, 2241-03-02' : `e.g. ${cal.format(cal.fromCivil({ year: 1, month: 1, day: 1 }), 'day')}`)}
         onChange={(e) => setText(e.target.value)} onFocus={() => setFocused(true)} onBlur={() => { setFocused(false); commit(); }} onKeyDown={key}
-        title="Dates: 14 May 1203 · May 1203 · 1203 · 500 BCE · 2241-03-02T04:05 · c. 3000 BCE. Arrow keys: a day (Shift: a month, Alt: a year)" data-testid={testId}
+        title={cal === gregorian ? 'Dates: 14 May 1203 · May 1203 · 1203 · 500 BCE · 2241-03-02T04:05 · c. 3000 BCE. Arrow keys: a day (Shift: a month, Alt: a year)' : `Dates in the ${cal.name} calendar: ${cal.format(cal.fromCivil({ year: 12, month: 1, day: 3 }), 'day')} · ${cal.format(cal.fromCivil({ year: 12 }), 'month')} · ${cal.yearLabel(12)} · 12-1-3 (its own year, month and day numbers). Arrow keys: a day (Shift: a month, Alt: a year)`} data-testid={testId}
       />
       {steadyShown && <SteadyDate t={value!} yearSizer={steady!.yearSizer} dayOnly={steady!.dayOnly} />}
       <button type="button" className="date-calendar-button" title="Choose on a calendar" onClick={() => setOpen(!open)} data-testid={testId ? `${testId}-calendar` : undefined} tabIndex={-1}>
@@ -84,7 +88,7 @@ export function DateField({ value, onChange, placeholder, allowEmpty, testId, su
       {open && (() => {
         const start = current();
         const at = start && Number.isFinite(start.day) ? start : gregorian.fromCivil({ year: 1900 });
-        return <CalendarPopover value={at} onClose={() => setOpen(false)} onPick={(t) => { setOpen(false); setText(show(t)); setBad(false); onChange(t); }} testId={testId ? `${testId}-popover` : undefined} />;
+        return <CalendarPopover cal={cal} value={at} onClose={() => setOpen(false)} onPick={(t) => { setOpen(false); setText(show(t)); setBad(false); onChange(t); }} testId={testId ? `${testId}-popover` : undefined} />;
       })()}
     </span>
   );
@@ -97,22 +101,27 @@ export function DateField({ value, onChange, placeholder, allowEmpty, testId, su
  * the right of their cells, so their digits never move sideways.
  */
 function SteadyDate({ t, yearSizer, dayOnly }: { t: Instant; yearSizer: string; dayOnly: boolean }) {
-  const c = gregorian.toCivil(t);
+  const cal = calendarNow();
+  const c = cal.toCivil(t);
+  // (As wide as its longest month's name.)
+  let longest = '';
+  for (let m = 1; m <= cal.monthsIn(c.year); m++) { const n = cal.monthName(c.year, m); if (n.length > longest.length) longest = n; }
   const cell = (cls: string, text: string, sizer: string) => <span className={`sd-cell ${cls}`}><span className="sd-text">{text}</span><span className="sd-size">{sizer}</span></span>;
   const two = (n: number) => String(n).padStart(2, '0');
   return (
     <span className="steady-date" aria-hidden="true" data-testid="steady-date">
       {cell('sd-day', String(c.day), '00')}
-      {cell('sd-month', MONTHS[c.month - 1], 'September')}
-      {cell('sd-year', formatYear(c.year), yearSizer)}
+      {cell('sd-month', cal.monthName(c.year, c.month), longest)}
+      {cell('sd-year', cal.yearLabel(c.year), yearSizer)}
       {!dayOnly && t.ms ? cell('sd-time', `${two(c.hour)}:${two(c.minute)}`, '00:00') : null}
     </span>
   );
 }
 
 /** The widest a year of the timeline can be written (its digits as 0s: all figures are the same width). */
-export function yearSizer(startYear: number, endYear: number): string {
-  const a = formatYear(Math.floor(startYear)), b = formatYear(Math.ceil(endYear));
+export function yearSizer(startYear: number, endYear: number, cal: Calendar = gregorian): string {
+  const label = (y: number) => (cal === gregorian ? formatYear(y) : cal.yearLabel(cal.toCivil(fromApproxYear(y)).year));
+  const a = label(Math.floor(startYear)), b = label(Math.ceil(endYear));
   return (a.length >= b.length ? a : b).replace(/\d/g, '0');
 }
 
@@ -133,7 +142,7 @@ export function NumberField({ value, onCommit, min, max, step, testId, title }: 
 /** The date being viewed (follows the timeline as it is scrubbed). */
 function CurrentDate() {
   const s = useLive();
-  return <DateField value={s.time} onChange={(t) => t && s.setTime(t)} testId="current-date" live steady={{ yearSizer: yearSizer(s.timeline.start, s.timeline.end), dayOnly: s.historyPlay.on }} />;
+  return <DateField value={s.time} onChange={(t) => t && s.setTime(t)} testId="current-date" live steady={{ yearSizer: yearSizer(s.timeline.start, s.timeline.end, calendarNow()), dayOnly: s.historyPlay.on }} />;
 }
 
 /** A first date to compare with: the day before the last change up to the date viewed (the map as it
@@ -141,8 +150,8 @@ function CurrentDate() {
 function defaultCompareTime(s: ReturnType<typeof useStore>): Instant {
   const last = s.engine?.lastChangeStart(s.time);
   if (last) return add(last, -1);
-  const c = gregorian.toCivil(s.time);
-  return gregorian.fromCivil({ year: c.year - 100, month: c.month, day: c.day });
+  const cal = calendarNow(), c = cal.toCivil(s.time);
+  try { return cal.fromCivil({ year: c.year - 100, month: c.month, day: Math.min(c.day, cal.daysIn(c.year - 100, c.month)) }); } catch { return cal.fromCivil({ year: c.year - 100 }); }
 }
 
 export function TopBar() {
@@ -571,6 +580,7 @@ export function Outliner() {
             {basemapSourceOf(currentSpace) === 'natural-earth' && (
               <button className="link" onClick={() => s.set({ dialog: 'sea-level' })} data-testid="open-sea-level" title="The sea higher or lower than today's at dates you choose; the coasts follow it">Sea level over time…</button>
             )}
+            <button className="link" onClick={() => s.set({ dialog: 'calendar' })} data-testid="open-calendar" title="The calendar this map's dates are written, typed and chosen in: the Gregorian, or one of its own">Calendar: {calendarNow().name}…</button>
             <button className="link" onClick={() => s.set({ dialog: 'data-sources' })} data-testid="data-sources">Data sources and credits</button>
           </div>
         )}

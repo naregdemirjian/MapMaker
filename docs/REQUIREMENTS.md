@@ -91,7 +91,7 @@ status. Last updated: 18 November 2026 (Stage 4; see DEVELOPMENT.md).
 | Full alternative timelines | Not implemented | | Stage 13 |
 | Comparing two dates (a line across the map, dragged) | Tested | `temporal-engine` (when the last change began), `e2e/workflows` 'Compare two dates' (both sides by their colours, the line dragged both ways, the dates swapped) | D74 |
 | Custom event types (templates: colour, way of spreading, usual length) | Tested | `event-types` (3 tests), `e2e/workflows` 'Event types' | D75. Type-specific fields wait for a use |
-| Fictional calendars | Not implemented | | Stage 13 |
+| Fictional calendars | Tested | `custom-calendar` (templates against known dates, round trips, eras, day lengths, weeks, refusals, a map given one), `e2e/workflows` 'A map's own calendar' | D149: per map; months, leap rules, epoch, hours in a day, week, eras or a year zero; Julian, French Republican, thirteen months and an invented world's calendar as templates; dates written, typed, stepped and chosen in it everywhere |
 | Timeline navigation (zoom, scrub, next/previous change) | Tested | `e2e/vertical-slice` step 8 | |
 | Timeline playback in world-building mode | Tested | `e2e/workflows` 'Playing history' | D119. Play and pause (Space), a month to a thousand years a second, going round at the end |
 

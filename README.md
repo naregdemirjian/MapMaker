@@ -35,6 +35,8 @@ while Map Maker is closed. Don't keep projects inside OneDrive or Dropbox while 
 - Record history as dated events, or change the map from a date on without an event; move through time and see the
   map exactly as it was on any date, from millennia down to milliseconds. See what a country gained and lost in any
   day, month, year or span of years.
+- Give a map a calendar of its own (its months, leap years, eras, week and day length; or the Julian, the French
+  Republican and others to start from): every date on that map is written, typed and chosen in it.
 - Characters are points that travel between their places over time (with their routes in shots, if you like); cities
   are founded, moved and abandoned at dates.
 - Animate changes: fronts that travel through the land from the border (round bays, across to islands), expansions,

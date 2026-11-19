@@ -5,6 +5,7 @@ import { cleanSeaLevel, type SeaLevelPoint } from '../terrain/sea-level.ts';
 import { planetParamsOf, type PlanetParams } from '../terrain/planet.ts';
 import { cleanStamps, type TerrainStamp } from '../terrain/sculpt.ts';
 import { skyLookOf, type SkyLook } from '../space/sky-look.ts';
+import { calendarOf, calendarProblems, gregorian, type Calendar, type CalendarDef } from '../core-time/index.ts';
 
 /** The reference geography a world shows under its territories. */
 export type BasemapSource = 'natural-earth' | 'none';
@@ -39,6 +40,21 @@ export interface WorldSettings {
   sculpt?: TerrainStamp[];
   /** The Earth through geological time (D134): its land and sea at the moment shown, from the PALEOMAP PaleoDEMs. */
   paleo?: boolean;
+  /** The world's own calendar (D149); absent: the Gregorian. */
+  calendar?: CalendarDef;
+}
+
+/** A map's own calendar (D149), if it has one that can be a calendar. */
+export function calendarDefOf(space: Pick<MapSpaceRow, 'settings'> | null | undefined): CalendarDef | null {
+  const d = space ? worldSettings(space).calendar : undefined;
+  if (!d || typeof d !== 'object' || !Array.isArray(d.months) || !Array.isArray(d.eras)) return null;
+  try { return calendarProblems(d).length ? null : d; } catch { return null; }
+}
+
+/** The calendar a map's dates are shown, typed and stepped in (D149): its own, or the Gregorian. */
+export function calendarOfSpace(space: Pick<MapSpaceRow, 'settings'> | null | undefined): Calendar {
+  const d = calendarDefOf(space);
+  return d ? calendarOf(d) : gregorian;
 }
 
 /** Whether something is shown, while working or in exports. */
