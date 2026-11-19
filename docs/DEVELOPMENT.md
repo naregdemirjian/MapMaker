@@ -7,8 +7,12 @@ Companion files: [REQUIREMENTS.md](REQUIREMENTS.md) (checklist against the maste
 The approved architecture is the Claude Doc "Map Maker — Technical Architecture & Development Plan"
 (https://claude.ai/artifact/2JShAV3AWt6iECtNgBTsJN). All twelve of its decisions were approved on 15 November 2026.
 
-## Status at a glance (19 November 2026, Stages 2, 3, 4, 6, 8 to 13 done; Stage 7 mostly done)
+## Status at a glance (19 November 2026, Stages 2, 3, 4, 6, 8 to 13 done; Stage 7 mostly done; Stage 14 planned)
 
+- **Stage 14 planned, 19 November**: a planetary evolution engine (simulated planets: plates, crust, erosion,
+  climate, oceans, water, ice and biomes over geological time, in a Planet Studio). The assessment of what exists
+  and the plan, with its models, architecture, interface, performance, validation and stages, are in
+  `docs/PLANETARY_ENGINE_PLAN.md`.
 - **Stage 13, refinements, 19 November** (D151): History Health › Upkeep tidies a map's unused borders (those no
   change tells apart, left by deleted or drawn-over changes), history unchanged; a shot can have a sound track to
   time it to, heard while it plays (its clock moving the frames), its waveform under the frames, copied beside
@@ -334,6 +338,7 @@ The approved roadmap has 14 stages (0–13). Where each stands (brought up to da
 | 11 Space maps | Done | The 982 stars within 50 light-years in three dimensions, with their names, kinds and systems (D110); stars held by countries and factions over time, drawn as realms (D111); lanes between stars, expeditions and fleets (D112); the solar system on any date (D113); invented star maps, stars found by search (D114); the Milky Way and galaxies of one's own (D116); the large moons on the solar system map (D117); planets of other stars (D118) | Asteroids and comets; planets of stars too faint for the star catalogues |
 | Improvement pass | In progress | History played in the working view (D119); borders imported from GeoJSON maps of their years, following the borders already there (D120), or from a dataset dating each shape (D123); videos, MP4 and WebM (D121); a shot of the whole history in one click (D122); layers' opacity and border width; each layer as its own export pass (D124); names placed quickly while a shot plays (D125); borders while fronts move and where two changes meet (D126); a globe that turns, for shots (D127); a change over before its land changes hands again (D128); a date that stays still as it changes (D129); how the stars look (D130); star maps as flat charts (D131); realms across the stars as territories with fronts (D132); the solar system side by side (D133); the Earth through geological time (D134), its continents sliding between its maps (D135); fronts that follow the land (D136), and looks for them: soft, glowing, ragged, in patches, an event's own (D137); the Earth as photographed, sharp to city scale (D138); fronts at scale, a hundred changes under way at once (D139); only the strip a front has crossed drawn again, and two faults of partial redraws fixed (D140); fine ground close in, made up below the heights' own detail (D141) | Faster shot playback through many changes |
 | 12 Smart brushes | Done | The geography-aware brush and the strategic brush, with feature weights and live preview, in the brush, the border pen, the Split tool and the features tool (D148) | Forest edges, roads and railways from data |
+| 14 Planetary evolution engine | Planned | The technical assessment and plan: `docs/PLANETARY_ENGINE_PLAN.md` (19 November 2026) | Stages 14.1 to 14.11 in two sessions: foundations, tectonics, landscape evolution, Planet Studio; climate, oceans, water and ice, biomes, editing, validation |
 | 13 Branches, calendars and refinement | Done | Each map in a calendar of its own (D149); branches, alternative timelines, compared side by side, in shots (D150); tidying unused borders, a shot's sound track (D151) | Sound mixed into exported videos; projection on the graphics card (D151) |
 
 ## Tests
