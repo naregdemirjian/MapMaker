@@ -72,6 +72,9 @@ test('transition looks (D137): each sets how fronts look and keeps when and how 
   // An older shot (none of these saved): the clean look's values.
   const older = shotTransitions({ ...shot, transitions: { mode: 'all', style: 'border', angle: 0, timing: 'seconds', seconds: 1.5, easing: 'smooth', restyleRecorded: false, front: { show: true, color: '#ffe9a6', width: 2.2, glow: 10 } } });
   assert.deepEqual([older.roughness, older.soft, older.wake], [0, 0, 0]);
+  assert.equal(older.look, 'clean', 'saved before looks, with the clean look\'s settings');
+  const olderOwn = shotTransitions({ ...shot, transitions: { mode: 'all', style: 'border', angle: 0, timing: 'seconds', seconds: 1.5, easing: 'smooth', restyleRecorded: false, front: { show: true, color: '#ff0000', width: 2.2, glow: 10 } } });
+  assert.equal(olderOwn.look, 'custom', 'saved before looks with a line of its own: its own look');
   // An event's own look, kept in its presentation settings beside its own time on screen.
   const w = new World();
   const ev = cmd.createEvent(w, { name: 'Blitz', start: Y(1940), end: Y(1941) }).result as string;

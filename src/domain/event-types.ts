@@ -9,11 +9,12 @@ import type { EventTypeRow } from '../world-model/schema.ts';
 import { add, instant, daysInMonth, type Instant, gregorian } from '../core-time/index.ts';
 import { run, type CommandResult } from './commands.ts';
 
-export type Spread = 'instant' | 'border' | 'advance' | 'fade';
+export type Spread = 'instant' | 'border' | 'advance' | 'dissolve' | 'fade';
 export const SPREADS: Array<{ id: Spread; name: string }> = [
   { id: 'instant', name: 'At once' },
-  { id: 'border', name: "Advancing front, out of the country's existing border" },
-  { id: 'advance', name: 'Expansion, a circle from where you started drawing' },
+  { id: 'border', name: "Advancing front, through the land from the country's existing border" },
+  { id: 'advance', name: 'Expansion, from where you started drawing' },
+  { id: 'dissolve', name: 'Dissolve, changing hands in patches' },
   { id: 'fade', name: "Fade over the event's duration" },
 ];
 export type LengthUnit = 'day' | 'month' | 'year';

@@ -48,8 +48,9 @@ export function RecordLengthControls() {
       {r.when !== 'instant' && (
         <label className="inline">as
           <select value={r.style} onChange={(e) => set({ style: e.target.value as RecordLength['style'] })} data-testid="record-style">
-            <option value="border" title="Out of the country's border, as a front advancing">an advancing front</option>
-            <option value="advance" title="A circle growing from where you start drawing">an expansion</option>
+            <option value="border" title="Through the land from the country's border, as a front advancing">an advancing front</option>
+            <option value="advance" title="Spreading through the land from where you start drawing">an expansion</option>
+            <option value="dissolve" title="No front: the land changes hands in patches">a dissolve</option>
             <option value="fade">a fade</option>
           </select>
         </label>

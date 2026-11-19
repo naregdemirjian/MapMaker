@@ -17,6 +17,7 @@ import { PROJECTIONS, type ProjectionName, type Camera } from '../../render-engi
 import { parseJSON } from '../../temporal-engine/engine.ts';
 import { DateField, NumberField } from './Panels.tsx';
 import { currentShot } from './MapView.tsx';
+import { TransitionLookControls } from './TransitionLook.tsx';
 
 function saveShot(id: string, next: ShotSettings) {
   store.execute((w) => cmd.updateSequence(w, id, { settings: next }));
@@ -229,11 +230,14 @@ export function ShotEditor() {
             <option value="instant">No animation: change instantly</option>
           </select></label>
           {tr.mode !== 'instant' && <>
+            <TransitionLookControls tr={tr} onChange={(t) => update({ transitions: t })} />
+            {tr.mode === 'recorded' && !tr.restyleRecorded && <p className="muted">Changes keep the animation recorded for them (front, expansion, dissolve or fade) and take this look's edges, glow and line.</p>}
             <label className="check"><input type="checkbox" checked={tr.restyleRecorded} onChange={(e) => setTr({ restyleRecorded: e.target.checked })} data-testid="transition-restyle" /> {tr.mode === 'all' ? 'Changes recorded with their own animation use these settings too' : 'Use the settings below for recorded animations too'}</label>
             {(tr.mode === 'all' || tr.restyleRecorded) && <>
-              <label>Style<select value={tr.style} onChange={(e) => setTr({ style: e.target.value as ShotTransitions['style'] })} data-testid="transition-style-shot">
-                <option value="border">Advancing front (grows out of the country's existing border)</option>
-                <option value="advance">Expansion (a circle from where the drawing started, or the middle)</option>
+              <label>Style<select value={tr.style} onChange={(e) => setTr({ style: e.target.value as ShotTransitions['style'], look: 'custom' })} data-testid="transition-style-shot">
+                <option value="border">Advancing front (through the land from the country's border)</option>
+                <option value="advance">Expansion (from where the drawing started, or the middle)</option>
+                <option value="dissolve">Dissolve (changing hands in patches)</option>
                 <option value="fade">Fade</option>
               </select></label>
               <label>Length<select value={tr.timing} onChange={(e) => setTr({ timing: e.target.value as ShotTransitions['timing'] })}>
@@ -241,17 +245,10 @@ export function ShotEditor() {
                 <option value="event">The event's length (events without an end use screen time)</option>
               </select></label>
               <label>Screen time per change (seconds)<NumberField min={0.05} max={120} step={0.25} value={tr.seconds} onCommit={(n) => setTr({ seconds: n })} testId="transition-seconds" /></label>
-              <label>Easing<select value={tr.easing} onChange={(e) => setTr({ easing: e.target.value as ShotTransitions['easing'] })}>
+              <label>Easing<select value={tr.easing} onChange={(e) => setTr({ easing: e.target.value as ShotTransitions['easing'], look: 'custom' })} data-testid="transition-easing">
                 <option value="smooth">Ease in and out</option><option value="linear">Even</option><option value="in">Ease in (start slow)</option><option value="out">Ease out (end slow)</option>
               </select></label>
             </>}
-            <h4>Front line</h4>
-            <label className="check"><input type="checkbox" checked={tr.front.show} onChange={(e) => setTr({ front: { ...tr.front, show: e.target.checked } })} /> Show the moving front</label>
-            {tr.front.show && <div className="two">
-              <label>Colour<input type="color" value={tr.front.color} onChange={(e) => setTr({ front: { ...tr.front, color: e.target.value } })} /></label>
-              <label>Line width<NumberField min={0} max={40} step={0.5} value={tr.front.width} onCommit={(n) => setTr({ front: { ...tr.front, width: n } })} /></label>
-              <label>Glow<NumberField min={0} max={80} step={1} value={tr.front.glow} onCommit={(n) => setTr({ front: { ...tr.front, glow: n } })} /></label>
-            </div>}
           </>}
         </Group>
         <Group title="Current events box" open={box.show}>

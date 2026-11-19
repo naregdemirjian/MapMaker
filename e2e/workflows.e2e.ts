@@ -2669,6 +2669,78 @@ try {
     assert.equal(await page.evaluate((id) => !!(window as any).__mapmaker.store.world.get('sequence', id), shotId), false, 'the shot is gone');
   });
 
+  await h.step('Transition looks (D137): Blitz chosen in the shot editor sets every part of it and its preview plays; a slider makes the look the shot\'s own; the glow takes the owner\'s colour; an event\'s own look from its panel; undone', async () => {
+    await page.getByTestId('mode-world').click();
+    const shotId = await page.evaluate(() => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const settings = B.defaultShot(s.spaceId, { lon: 0, lat: 20, zoom: 1, rotation: 0, projection: 'equirectangular' }, s.time, s.time, 24, 1);
+      const id = s.execute((w: any) => B.commands.createSequence(w, 'Transition looks', settings));
+      s.set({ shotId: id, shotFrame: 0, presentCamera: null, mode: 'present' });
+      return id as string;
+    });
+    await page.getByTestId('shot-editor').waitFor();
+    const tr = () => page.evaluate((id) => JSON.parse((window as any).__mapmaker.store.world.get('sequence', id).settings).transitions ?? null, shotId);
+    // The clean look to start with, nine to choose from.
+    assert.equal(await page.getByTestId('transition-look').inputValue(), 'clean');
+    assert.deepEqual(await page.getByTestId('transition-look').locator('option').allInnerTexts(), ['Clean', 'Minimal', 'Soft tide', 'Ink', 'Campaign', 'Blitz', 'In their colours', 'Dissolve', 'Fade', 'Custom (your own)']);
+    // Blitz: every part of it set at once.
+    await page.getByTestId('transition-look').selectOption('blitz');
+    await page.waitForFunction((id) => JSON.parse((window as any).__mapmaker.store.world.get('sequence', id).settings).transitions?.look === 'blitz', shotId);
+    let t = await tr();
+    assert.ok(t.roughness === 0.5 && t.wake === 0.7 && t.soft === 0.05 && t.easing === 'out' && t.front.show && t.front.glow === 26, `Blitz set (${JSON.stringify(t)})`);
+    assert.match(await page.getByTestId('transition-look-note').innerText(), /hot white edge/);
+    // Its preview plays: the sample at two moments differs.
+    const preview = () => page.getByTestId('transition-preview').evaluate((c: HTMLCanvasElement) => c.toDataURL());
+    await page.getByTestId('transition-preview').scrollIntoViewIfNeeded();
+    const a = await preview();
+    let b = a;
+    for (let i = 0; i < 30 && b === a; i++) { await page.waitForTimeout(100); b = await preview(); }
+    assert.notEqual(a, b, 'the preview plays');
+    const coloured = await page.getByTestId('transition-preview').evaluate((c: HTMLCanvasElement) => {
+      const d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+      let red = 0, blue = 0;
+      // (The countries at the layer's opacity over the sea.)
+      for (let i = 0; i < d.length; i += 16) { if (d[i] > 110 && d[i] > d[i + 2] + 50) red++; if (d[i + 2] > d[i] + 50) blue++; }
+      return { red, blue };
+    });
+    assert.ok(coloured.red > 50, `the sample drawn (${JSON.stringify(coloured)})`);
+    await h.screenshot('transition-look-blitz');
+    // A slider: the look becomes the shot's own, the rest of Blitz kept.
+    await page.getByTestId('transition-adjust').locator('summary').click();
+    const soft = page.getByTestId('transition-soft');
+    await soft.fill('40');
+    await soft.evaluate((el: HTMLInputElement) => el.blur());
+    await page.waitForFunction((id) => JSON.parse((window as any).__mapmaker.store.world.get('sequence', id).settings).transitions?.soft === 0.4, shotId);
+    t = await tr();
+    assert.ok(t.look === 'custom' && t.wake === 0.7 && t.roughness === 0.5, `the shot's own look, the rest kept (${JSON.stringify(t)})`);
+    assert.equal(await page.getByTestId('transition-look').inputValue(), 'custom');
+    // The line and glow in the new owner's colour.
+    await page.getByTestId('transition-front-colour').selectOption('auto');
+    await page.waitForFunction((id) => JSON.parse((window as any).__mapmaker.store.world.get('sequence', id).settings).transitions?.front.color === 'auto', shotId);
+    // Choosing a look again sets every part of it.
+    await page.getByTestId('transition-look').selectOption('clean');
+    await page.waitForFunction((id) => JSON.parse((window as any).__mapmaker.store.world.get('sequence', id).settings).transitions?.look === 'clean', shotId);
+    t = await tr();
+    assert.ok(t.soft === 0 && t.wake === 0 && t.roughness === 0 && t.front.color === '#ffe9a6', `clean again (${JSON.stringify(t)})`);
+    // An event's own look, from its panel.
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ mode: 'world', shotId: null }));
+    const ev = await page.evaluate(() => {
+      const s = (window as any).__mapmaker.store;
+      const e = s.world.all('event').find((x: any) => x.id !== 'base' && x.type_id !== 'base');
+      s.set({ selection: { kind: 'event', id: e.id } });
+      return e.id as string;
+    });
+    await page.getByTestId('event-look').selectOption('ink');
+    await page.waitForFunction((id) => (window as any).__mapmaker.store.world.get('event', id).presentation.includes('"look":"ink"'), ev);
+    assert.deepEqual(await page.getByTestId('event-look').locator('option').first().innerText(), "As the shot's look");
+    await page.getByTestId('event-look').selectOption('');
+    await page.waitForFunction((id) => !(window as any).__mapmaker.store.world.get('event', id).presentation.includes('"look"'), ev);
+    // Undone: the event's look, the shot's looks and the shot.
+    for (let i = 0; i < 12 && (await page.evaluate((id) => !!(window as any).__mapmaker.store.world.get('sequence', id), shotId)); i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await page.evaluate((id) => !!(window as any).__mapmaker.store.world.get('sequence', id), shotId), false, 'the shot is gone');
+    assert.ok(!(await page.evaluate((id) => (window as any).__mapmaker.store.world.get('event', id).presentation.includes('"look"'), ev)), 'the event as it was');
+  });
+
   await h.step('Playing a shot: Play runs through its frames at its pace and stops at its end; Pause and the frame slider', async () => {
     await page.getByTestId('mode-world').click();
     const shotId = await page.evaluate(() => {

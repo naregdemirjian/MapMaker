@@ -81,7 +81,8 @@ function PaintPrompt({ p }: { p: Extract<PendingEdit, { kind: 'paint' }> }) {
   const confirm = () => {
     const transition: TransitionSpec | null = style === 'instant' ? null
       : style === 'border' ? { style: 'border', easing: 'smooth' }
-      : style === 'advance' ? { style: 'advance', origin: p.origin, easing: 'smooth' } : { style: 'fade' };
+      : style === 'advance' ? { style: 'advance', origin: p.origin, easing: 'smooth' }
+      : style === 'dissolve' ? { style: 'dissolve', easing: 'smooth' } : { style: 'fade' };
     const base = { spaceId: p.spaceId, layerId: p.layerId, rings: p.rings, value: p.value, snap: p.snap };
     if (choice === 'correct') {
       // From the date being viewed on, without an event (earlier dates stay as they are).
@@ -144,8 +145,9 @@ function PaintPrompt({ p }: { p: Extract<PendingEdit, { kind: 'paint' }> }) {
               <label>How it spreads
                 <select value={style} onChange={(ev) => { setStyle(ev.target.value as typeof style); setStyleChosen(true); }} data-testid="spread-style">
                   <option value="instant">At once</option>
-                  <option value="border">Advancing front, out of the country's existing border</option>
-                  <option value="advance">Expansion, a circle from where you started drawing</option>
+                  <option value="border">Advancing front, through the land from the country's existing border</option>
+                  <option value="advance">Expansion, from where you started drawing</option>
+                  <option value="dissolve">Dissolve, changing hands in patches</option>
                   <option value="fade">Fade over the event's duration</option>
                 </select>
               </label>

@@ -84,6 +84,14 @@ Follows from D2. The test drives the real interface exactly as a person would.
 - **An event's own look** (`setEventLook`, kept in its presentation settings beside its own time on screen, D92):
   its changes look that way wherever they animate, in the working view as in every shot, and take the look's style
   and easing where a shot animates them. One battle can be a blitz in a film whose other changes are clean.
+- **In the shot editor** (`TransitionLook.tsx`): one list of looks, each with a line saying what it is like, and a
+  live preview below it: a sample change (a country taking its neighbour's land, round a bay and across to an
+  island) drawn by the map's own renderer in the look, again and again. "Adjust the look" opens the settings above
+  as sliders (shown in the preview while dragged, kept when let go) and the line's colour (the new owner's, or one
+  chosen), width and glow; changing any of them makes the look the shot's own ("Custom"); choosing a look again
+  sets every part of it. An event's panel has "Look of its changes" (as the shot's, or a look of its own), and
+  every place a change's animation is chosen (the event's panel, recording, the dialog after drawing, event types)
+  offers Dissolve.
 - **Quick enough.** At 1920 by 1080 in the test browser (no graphics card), two changes under way: 6 ms a frame
   clean, 10 to 12 ms with a soft edge or a glow, 25 ms with every effect at once. The lines a moment needs are traced
   only in the blocks of cells whose times span it (0.1 ms a line, from 0.5); a front's lines are projected point by
@@ -98,7 +106,9 @@ Follows from D2. The test drives the real interface exactly as a person would.
   its own time on screen, undone, cleared. render-compare: a clean edge 1 px of mixed colour against 34 px for a
   soft one, ahead of the front; a glow just behind the front and none over the land taken long before; the line
   exactly the owner's colour lightened and none along the change's edge; a dissolve in patches all over the change;
-  an event with the Blitz look glowing behind its front while the other change does not.
+  an event with the Blitz look glowing behind its front while the other change does not. workflows: Blitz chosen in
+  the shot editor sets every part of it and its preview plays; a slider makes the look the shot's own, the rest
+  kept; the glow in the owner's colour; Clean again resets every part; an event's own look from its panel; undone.
 
 ### D136. Fronts that follow the land
 

@@ -208,6 +208,12 @@ export function shotTransitions(shot: ShotSettings): ShotTransitions {
   if (out.style === 'wipe') out.style = 'border';
   const unit = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0);
   out.roughness = unit(out.roughness); out.soft = unit(out.soft); out.wake = unit(out.wake);
+  // A shot saved before looks (D137): the clean look if its settings are the clean look's, its own otherwise.
+  if (t && t.look === undefined) {
+    const clean = TRANSITION_LOOKS[0].set, f = clean.front!;
+    const same = out.style === clean.style && out.easing === clean.easing && out.front.show === f.show && out.front.color === f.color && out.front.width === f.width && out.front.glow === f.glow;
+    out.look = same ? 'clean' : 'custom';
+  }
   return out;
 }
 

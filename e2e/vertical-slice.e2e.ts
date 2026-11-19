@@ -576,8 +576,8 @@ try {
     await page.getByTestId('transition-mode').selectOption('all');
     await page.getByTestId('transition-restyle').check();
     assert.deepEqual(await page.getByTestId('transition-style-shot').locator('option').allInnerTexts(), [
-      "Advancing front (grows out of the country's existing border)", 'Expansion (a circle from where the drawing started, or the middle)', 'Fade',
-    ], 'no wipe; the advancing front and the expansion');
+      "Advancing front (through the land from the country's border)", 'Expansion (from where the drawing started, or the middle)', 'Dissolve (changing hands in patches)', 'Fade',
+    ], 'no wipe; the advancing front, the expansion and the dissolve');
     await page.getByTestId('transition-style-shot').selectOption('border');
     await page.locator('label', { hasText: 'Length' }).locator('select').selectOption('event');
     await page.waitForTimeout(100);

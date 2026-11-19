@@ -14,7 +14,7 @@ import { CountryLabelSection } from './LabelStyles.tsx';
 import { CountryFillSection, FillSwatch } from './CountryFill.tsx';
 import { CharacterSection } from './Characters.tsx';
 import { RecordLengthControls, ChangeLength } from './RecordLength.tsx';
-import { eventScreenSeconds } from '../../presentation/sequence.ts';
+import { eventScreenSeconds, eventTransitionLook, TRANSITION_LOOKS } from '../../presentation/sequence.ts';
 import { openMenu, entityMenu, groupMenu, eventMenu } from './ContextMenu.tsx';
 import { CountryHistorySection } from './CountryHistory.tsx';
 import { NamesSection } from './Names.tsx';
@@ -821,6 +821,7 @@ function EventPanel({ id }: { id: string }) {
     let spec: TransitionSpec | null = null;
     if (style === 'advance') spec = { style: 'advance', origin: old?.origin ?? regionCentre(s, f), easing: 'smooth' };
     else if (style === 'border') spec = { style: 'border', easing: 'smooth' };
+    else if (style === 'dissolve') spec = { style: 'dissolve', easing: 'smooth' };
     else if (style === 'fade') spec = { style: 'fade' };
     // How long it takes is kept (D86); in an event without an end, a change that starts to spread takes a year until chosen otherwise.
     if (spec) {
@@ -855,6 +856,12 @@ function EventPanel({ id }: { id: string }) {
             </label>
           );
         })()}
+        <label title="How its changes look when they animate, here and in every shot: as the shot's look, or a look of their own (a blitz in a film otherwise clean)">Look of its changes
+          <select value={eventTransitionLook(e.presentation) ?? ''} onChange={(ev) => s.execute((wd) => cmd.setEventLook(wd, id, ev.target.value || null))} data-testid="event-look">
+            <option value="">As the shot's look</option>
+            {TRANSITION_LOOKS.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+          </select>
+        </label>
         <label title="When two events change the same place at the same instant, the higher precedence wins">Precedence<NumberField value={e.precedence} step={1} onCommit={(n) => s.execute((wd) => cmd.updateEvent(wd, id, { precedence: Math.round(n) }))} /></label>
         <label>Description<textarea rows={4} value={desc} onChange={(ev) => setDesc(ev.target.value)} onBlur={() => desc !== e.description && s.execute((wd) => cmd.updateEvent(wd, id, { description: desc }))} /></label>
         <PicturesSection holder={{ kind: 'event', id }} />
@@ -878,8 +885,9 @@ function EventPanel({ id }: { id: string }) {
               <label className="inline">Animation
                 <select value={parseJSON<TransitionSpec | null>(f.transition, null)?.style ?? 'instant'} onChange={(ev) => setTransition(f, ev.target.value)} data-testid="transition-style">
                   <option value="instant">Instant</option>
-                  <option value="border">Advancing front (from the border)</option>
-                  <option value="advance">Expansion (a circle)</option>
+                  <option value="border">Advancing front (through the land from the border)</option>
+                  <option value="advance">Expansion (from where it was drawn)</option>
+                  <option value="dissolve">Dissolve (in patches)</option>
                   <option value="fade">Fade</option>
                 </select>
               </label>

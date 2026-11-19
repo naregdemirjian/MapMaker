@@ -381,3 +381,8 @@ label.sky-row-check input[type=color] { margin-left: auto; width: 58px; height: 
 .map-hud .space-look-buttons button { width: auto; padding: 3px 9px; }
 .space-note { background: rgba(8,12,18,0.62); padding: 2px 7px; border-radius: 4px; }
 p.small { font-size: 11.5px; }
+/* How changes look in a shot (D137): the live preview and the amounts. */
+.transition-preview { display: block; width: 100%; aspect-ratio: 100 / 42; border: 1px solid var(--line); border-radius: 6px; margin: 4px 0 6px; background: var(--panel2); }
+.amount { display: flex; align-items: center; gap: 8px; }
+.amount input[type=range] { flex: 1; min-width: 0; }
+.amount-value { width: 2.2em; text-align: right; font-variant-numeric: tabular-nums; }
