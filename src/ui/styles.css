@@ -293,6 +293,14 @@ label.indent { margin-left: 24px; }
 /* Date fields: a calendar to choose from (D80) */
 .date-field { position: relative; display: inline-flex; align-items: center; width: 100%; }
 .date-field .date-input { flex: 1; min-width: 0; padding-right: 26px; }
+/* A date that stays still as it changes (SteadyDate): the field's own text hidden under it until it is typed in. */
+.date-field .date-input.steady-under { color: transparent; }
+.steady-date { position: absolute; left: 8px; top: 0; bottom: 0; display: flex; align-items: center; gap: 0.32em; pointer-events: none; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--text); }
+.steady-date .sd-cell { display: inline-grid; }
+.steady-date .sd-cell > span { grid-area: 1 / 1; }
+.steady-date .sd-size { visibility: hidden; }
+.steady-date .sd-day .sd-text, .steady-date .sd-year .sd-text, .steady-date .sd-time .sd-text { justify-self: end; }
+.steady-date .sd-month .sd-text { justify-self: center; }
 .date-calendar-button { position: absolute; right: 3px; top: 50%; transform: translateY(-50%); border: none; background: transparent; color: var(--muted, #8a97a6); padding: 2px 4px; cursor: pointer; line-height: 0; }
 .date-calendar-button:hover { color: #ffd166; }
 .date-popover { position: absolute; top: calc(100% + 4px); right: 0; z-index: 80; width: 244px; background: var(--panel, #18212b); border: 1px solid var(--line, #2a3542); border-radius: 8px; padding: 8px; box-shadow: 0 12px 32px rgba(0,0,0,0.5); outline: none; }

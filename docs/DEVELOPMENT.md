@@ -290,7 +290,7 @@ The approved roadmap has 14 stages (0–13). Where each stands (brought up to da
 
 ## Tests
 
-All pass as of 18 November 2026 (359 unit and randomised tests in 68 files, 23 + 60 + 9 + 7 interface steps). The
+All pass as of 18 November 2026 (360 unit and randomised tests in 68 files, 23 + 60 + 9 + 7 interface steps). The
 interface tests run with the verify mode on (D57): everything the app works out from what was there before is also
 worked out afresh, and any difference stops the test.
 `sh scripts/check-all.sh` runs everything and prints ALL CHECKS PASSED only when every check passed.

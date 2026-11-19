@@ -1,7 +1,7 @@
 // Shots: screen-time arithmetic used by transitions timed in screen seconds.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { defaultShot, screenSecondsSince, timeAt, shotTransitions, DEFAULT_TRANSITIONS, shotProgress, eventScreenSeconds, cameraAt, withStillCamera, unspun } from '../src/presentation/sequence.ts';
+import { defaultShot, screenSecondsSince, timeAt, shotTransitions, DEFAULT_TRANSITIONS, shotProgress, eventScreenSeconds, cameraAt, withStillCamera, unspun, steadyLayout } from '../src/presentation/sequence.ts';
 import { World } from '../src/world-model/world.ts';
 import * as cmd from '../src/domain/commands.ts';
 import { invertDiffs } from '../src/world-model/schema.ts';
@@ -150,4 +150,18 @@ test('a globe turning on its own (D127): its middle moves west at the speed set,
   // A flat map's camera never turns.
   const flatShot = { ...shot, camera: shot.camera.map((k) => ({ ...k, camera: { ...k.camera, projection: 'equirectangular' as const } })) };
   assert.equal(cameraAt(flatShot, 48).lon, 170);
+});
+
+test('a date laid out steady keeps its day and its year in their places as it changes (shot overlays)', () => {
+  // A stand-in for a canvas: proportional widths (1 is narrow, 0 wide; letters of their own widths).
+  const widths: Record<string, number> = { '0': 10, '1': 5, '2': 9, '3': 9, '4': 9.5, '5': 9, '6': 9.5, '7': 8, '8': 9.5, '9': 9.5, ' ': 4 };
+  const ctx = { measureText: (t: string) => ({ width: [...t].reduce((w, ch) => w + (widths[ch] ?? (ch === ch.toUpperCase() ? 11 : 7)), 0) }) } as unknown as CanvasRenderingContext2D;
+  const a = steadyLayout(ctx, '1 May 1833'), b = steadyLayout(ctx, '28 September 1866');
+  assert.equal(a.width, b.width, 'the same width for every date');
+  const yearAt = (l: ReturnType<typeof steadyLayout>) => l.runs.filter((r) => r.cell !== null && /\d/.test(r.text)).slice(-4)[0].x;
+  assert.equal(yearAt(a), yearAt(b), 'the year starts at the same place');
+  const dayEnd = (l: ReturnType<typeof steadyLayout>, digits: number) => { const r = l.runs.filter((q) => q.cell !== null)[digits - 1]; return r.x + r.cell!; };
+  assert.equal(dayEnd(a, 1), dayEnd(b, 2), 'the day ends at the same place, one figure or two (two figures\' room, set right)');
+  // Other text is drawn as it is.
+  assert.deepEqual(steadyLayout(ctx, 'The Hundred Years').runs.map((r) => r.cell), [null]);
 });

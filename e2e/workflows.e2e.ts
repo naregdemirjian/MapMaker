@@ -3295,7 +3295,7 @@ try {
     assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.kind === 'space')), false);
   });
 
-  await h.step('Playing history: the date moves on at the speed chosen, pauses where it is, Space plays and pauses, going round at the end', async () => {
+  await h.step('Playing history: the date moves on at the speed chosen, pauses where it is, Space plays and pauses, going round at the end; the date shown stays still as it changes', async () => {
     await page.getByTestId('mode-world').click();
     const year = () => page.evaluate(() => { const s = (window as any).__mapmaker.store; return s.time.day / 365.2425 + 1970; }) as Promise<number>;
     const was = await page.evaluate(() => (window as any).__mapmaker.store.time);
@@ -3327,6 +3327,23 @@ try {
     await page.waitForFunction((st) => { const s = (window as any).__mapmaker.store; const y = s.time.day / 365.2425 + 1970; return y < st + 60; }, span.start, { timeout: 5000 });
     await page.getByTestId('history-play').click();
     await page.getByTestId('history-loop').click();
+    // The date shown stays still as it changes: the day's and the year's digits keep their places
+    // (a short month and a long one, a one-digit day and a two-digit one), and while playing no time of day.
+    const placed = async (date: string) => {
+      await page.evaluate((d) => { const s = (window as any).__mapmaker.store, B = (window as any).__mapmaker.bench; s.setTime(B.gregorian.parse(d).instant); }, date);
+      await page.getByTestId('steady-date').waitFor();
+      return page.evaluate(() => {
+        const r = (sel: string) => document.querySelector(`[data-testid=steady-date] ${sel} .sd-text`)!.getBoundingClientRect();
+        return { dayRight: r('.sd-day').right, yearRight: r('.sd-year').right, year: document.querySelector('[data-testid=steady-date] .sd-year .sd-text')!.textContent };
+      });
+    };
+    const p1 = await placed('1 May 1833'), p2 = await placed('28 September 1866');
+    assert.ok(Math.abs(p1.dayRight - p2.dayRight) < 0.5 && Math.abs(p1.yearRight - p2.yearRight) < 0.5, `the day and the year stay where they are (${JSON.stringify([p1, p2])})`);
+    await page.evaluate(() => (window as any).__mapmaker.store.setTime({ day: -40000, ms: 3_600_000 * 5 }));
+    await page.getByTestId('history-play').click();
+    await page.waitForTimeout(200);
+    assert.equal(await page.locator('[data-testid=steady-date] .sd-time').count(), 0, 'no time of day while playing');
+    await page.getByTestId('history-play').click();
     // Leaving world-building stops it.
     await page.getByTestId('history-play').click();
     await page.getByTestId('mode-present').click();

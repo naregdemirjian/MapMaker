@@ -2,7 +2,7 @@ import { useState, useEffect, memo } from 'react';
 import { useStore, useLive, store, type Tool } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
 import { SCULPT_TOOLS } from '../../terrain/sculpt.ts';
-import { type Instant, gregorian, fromStore, formatYear, compare, add, NEG_INF } from '../../core-time/index.ts';
+import { type Instant, gregorian, fromStore, formatYear, compare, add, NEG_INF, MONTHS } from '../../core-time/index.ts';
 import { BASE_EVENT_ID, type EffectRow } from '../../world-model/schema.ts';
 import { basemapSourceOf, worldSettings, terrainSourceOf, sculptOf, isSpaceMap } from '../../world-model/world-settings.ts';
 import { parseJSON, leafDescendants, isUntracked, resolutionOf, type Resolution, type TransitionSpec } from '../../temporal-engine/engine.ts';
@@ -39,11 +39,14 @@ export const fmt = (t: Instant, precision: 'year' | 'day' | 'minute' = 'day') =>
  * (an event's end at its start): shown greyed in it, and where the arrows and the calendar begin. `live`: arrow steps apply at once
  * (the date viewed); otherwise on Enter or on leaving the field, as typing does.
  */
-export function DateField({ value, onChange, placeholder, allowEmpty, testId, suggest, live }: { value: Instant | null; onChange: (t: Instant | null) => void; placeholder?: string; allowEmpty?: boolean; testId?: string; suggest?: Instant | null; live?: boolean }) {
+export function DateField({ value, onChange, placeholder, allowEmpty, testId, suggest, live, steady }: { value: Instant | null; onChange: (t: Instant | null) => void; placeholder?: string; allowEmpty?: boolean; testId?: string; suggest?: Instant | null; live?: boolean; steady?: { yearSizer: string; dayOnly: boolean } }) {
   const show = (t: Instant) => fmt(t, t.ms ? 'minute' : 'day');
   const [text, setText] = useState(value ? show(value) : '');
   const [bad, setBad] = useState(false);
   const [open, setOpen] = useState(false);
+  const [focused, setFocused] = useState(false);
+  // Shown steady (see SteadyDate) while the field is not being typed in.
+  const steadyShown = !!steady && !focused && !!value && Number.isFinite(value.day) && text === show(value);
   useEffect(() => { setText(value ? show(value) : ''); setBad(false); }, [value?.day, value?.ms]);
   const suggested = !value && suggest ? show(suggest) : null;
   const commit = (t = text) => {
@@ -68,10 +71,11 @@ export function DateField({ value, onChange, placeholder, allowEmpty, testId, su
   return (
     <span className="date-field">
       <input
-        className={bad ? 'date-input bad' : 'date-input'} value={text} placeholder={suggested ?? placeholder ?? 'e.g. 14 May 1203, 500 BCE, 2241-03-02'}
-        onChange={(e) => setText(e.target.value)} onBlur={() => commit()} onKeyDown={key}
+        className={`${bad ? 'date-input bad' : 'date-input'}${steadyShown ? ' steady-under' : ''}`} value={text} placeholder={suggested ?? placeholder ?? 'e.g. 14 May 1203, 500 BCE, 2241-03-02'}
+        onChange={(e) => setText(e.target.value)} onFocus={() => setFocused(true)} onBlur={() => { setFocused(false); commit(); }} onKeyDown={key}
         title="Dates: 14 May 1203 · May 1203 · 1203 · 500 BCE · 2241-03-02T04:05 · c. 3000 BCE. Arrow keys: a day (Shift: a month, Alt: a year)" data-testid={testId}
       />
+      {steadyShown && <SteadyDate t={value!} yearSizer={steady!.yearSizer} dayOnly={steady!.dayOnly} />}
       <button type="button" className="date-calendar-button" title="Choose on a calendar" onClick={() => setOpen(!open)} data-testid={testId ? `${testId}-calendar` : undefined} tabIndex={-1}>
         <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="12" rx="2" fill="none" stroke="currentColor" strokeWidth="1.4" /><path d="M1.5 6.5h13M5 1v3M11 1v3" stroke="currentColor" strokeWidth="1.4" /></svg>
       </button>
@@ -82,6 +86,32 @@ export function DateField({ value, onChange, placeholder, allowEmpty, testId, su
       })()}
     </span>
   );
+}
+
+/**
+ * A date that stays still as it changes (history playing, the timeline dragged): the day, the month and
+ * the year each in a cell of its own, as wide as the widest it can be (the day's two digits, "September",
+ * the longest year of the timeline), with figures all the same width; the day and the year are set to
+ * the right of their cells, so their digits never move sideways.
+ */
+function SteadyDate({ t, yearSizer, dayOnly }: { t: Instant; yearSizer: string; dayOnly: boolean }) {
+  const c = gregorian.toCivil(t);
+  const cell = (cls: string, text: string, sizer: string) => <span className={`sd-cell ${cls}`}><span className="sd-text">{text}</span><span className="sd-size">{sizer}</span></span>;
+  const two = (n: number) => String(n).padStart(2, '0');
+  return (
+    <span className="steady-date" aria-hidden="true" data-testid="steady-date">
+      {cell('sd-day', String(c.day), '00')}
+      {cell('sd-month', MONTHS[c.month - 1], 'September')}
+      {cell('sd-year', formatYear(c.year), yearSizer)}
+      {!dayOnly && t.ms ? cell('sd-time', `${two(c.hour)}:${two(c.minute)}`, '00:00') : null}
+    </span>
+  );
+}
+
+/** The widest a year of the timeline can be written (its digits as 0s: all figures are the same width). */
+export function yearSizer(startYear: number, endYear: number): string {
+  const a = formatYear(Math.floor(startYear)), b = formatYear(Math.ceil(endYear));
+  return (a.length >= b.length ? a : b).replace(/\d/g, '0');
 }
 
 /** A number box that saves when you press Enter or leave it, not on every keystroke. */
@@ -101,7 +131,7 @@ export function NumberField({ value, onCommit, min, max, step, testId, title }: 
 /** The date being viewed (follows the timeline as it is scrubbed). */
 function CurrentDate() {
   const s = useLive();
-  return <DateField value={s.time} onChange={(t) => t && s.setTime(t)} testId="current-date" live />;
+  return <DateField value={s.time} onChange={(t) => t && s.setTime(t)} testId="current-date" live steady={{ yearSizer: yearSizer(s.timeline.start, s.timeline.end), dayOnly: s.historyPlay.on }} />;
 }
 
 /** A first date to compare with: the day before the last change up to the date viewed (the map as it

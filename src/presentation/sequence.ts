@@ -1,7 +1,7 @@
 // Shots (sequences): presentation recipes that point at the world and never copy it.
 // A shot maps screen time (frames) to historical time through its time-remap keys, and to a camera
 // through its camera keys. Shot data lives in the `sequence` table, apart from the world data.
-import { type Instant, lerp, fromJSONValue, toJSONValue, gregorian, compare, diffMs, type Precision } from '../core-time/index.ts';
+import { type Instant, lerp, fromJSONValue, toJSONValue, gregorian, compare, diffMs, MONTHS as MONTH_NAMES, type Precision } from '../core-time/index.ts';
 import { type Camera, interpolateCamera } from '../render-engine/camera.ts';
 
 export type Ease = 'linear' | 'smooth' | 'hold';
@@ -442,6 +442,39 @@ function drawTextBox(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingCon
  * Draw overlays onto a frame. Sizes are design pixels, scaled by `unit` (output width / 1920). Returns
  * where each went. `project` places a callout's point (D107) on the frame.
  */
+/**
+ * A text laid out steady, so that a date in it keeps its places as it changes from frame to frame:
+ * every figure in a cell as wide as the widest figure, every month name centred in a cell as wide as the
+ * widest month name; the rest as it is. The width is that of the steady layout (it does not change as the
+ * figures and months do), and the runs are where each piece is drawn from the text's left end.
+ */
+export function steadyLayout(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, text: string): { width: number; runs: Array<{ text: string; x: number; cell: number | null }> } {
+  let digit = 0;
+  for (const d of '0123456789') digit = Math.max(digit, ctx.measureText(d).width);
+  let month = 0;
+  for (const m of MONTH_NAMES) month = Math.max(month, ctx.measureText(m).width);
+  const runs: Array<{ text: string; x: number; cell: number | null }> = [];
+  let x = 0;
+  const months = MONTH_NAMES.join('|');
+  // (A day of the month, the number before a month's name, always takes two figures' room, set right.)
+  const re = new RegExp(`(\\d{1,2})(?=\\s+(?:${months})\\b)|\\d|\\b(?:${months})\\b`, 'g');
+  let last = 0;
+  for (let m = re.exec(text); m; m = re.exec(text)) {
+    if (m.index > last) { const t = text.slice(last, m.index); runs.push({ text: t, x, cell: null }); x += ctx.measureText(t).width; }
+    if (m[1] !== undefined) {
+      x += (2 - m[1].length) * digit;
+      for (const d of m[1]) { runs.push({ text: d, x, cell: digit }); x += digit; }
+    } else {
+      const cell = /\d/.test(m[0]) ? digit : month;
+      runs.push({ text: m[0], x, cell });
+      x += cell;
+    }
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) { const t = text.slice(last); runs.push({ text: t, x, cell: null }); x += ctx.measureText(t).width; }
+  return { width: x, runs };
+}
+
 export function drawOverlays(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, width: number, height: number, items: OverlayDraw[], unit: number, font: string, project?: (lon: number, lat: number) => [number, number] | null): OverlayRect[] {
   const rects: OverlayRect[] = [];
   for (const it of items) {
@@ -452,21 +485,24 @@ export function drawOverlays(ctx: CanvasRenderingContext2D | OffscreenCanvasRend
     ctx.globalAlpha = it.alpha;
     ctx.font = `600 ${size}px ${font}`;
     ctx.textBaseline = 'middle';
-    ctx.textAlign = o.align;
     const x = o.x * width, y = o.y * height;
-    const w = ctx.measureText(it.text).width;
+    // (Steady: a date's day and year keep their places, and the box its size, as the date changes.)
+    const lay = steadyLayout(ctx, it.text);
+    const w = lay.width;
+    const left = o.align === 'left' ? x : o.align === 'center' ? x - w / 2 : x - w;
     if (o.background) {
       const pad = size * 0.35;
-      const left = o.align === 'left' ? x : o.align === 'center' ? x - w / 2 : x - w;
       ctx.fillStyle = o.background;
       ctx.beginPath();
       ctx.roundRect(left - pad, y - size * 0.75, w + pad * 2, size * 1.5, size * 0.2);
       ctx.fill();
     }
     ctx.fillStyle = o.color;
-    ctx.fillText(it.text, x, y);
+    for (const r of lay.runs) {
+      ctx.textAlign = r.cell === null ? 'left' : 'center';
+      ctx.fillText(r.text, r.cell === null ? left + r.x : left + r.x + r.cell / 2, y);
+    }
     ctx.restore();
-    const left = o.align === 'left' ? x : o.align === 'center' ? x - w / 2 : x - w;
     rects.push({ id: o.id, x: left - size * 0.35, y: y - size * 0.75, w: w + size * 0.7, h: size * 1.5 });
   }
   return rects;

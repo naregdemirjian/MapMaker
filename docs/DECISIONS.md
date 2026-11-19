@@ -61,6 +61,21 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D129. A date that stays still as it changes
+
+- **Asked.** While history played in the working view, the date shown jittered: its figures have widths of
+  their own (a 1 is narrower than a 0) and month names too ("May", "September"), so the year moved sideways
+  with every day, and a time of day appeared and ticked.
+- **What.** The date viewed is shown in cells (`SteadyDate`): the day set right in two figures' room, the month
+  centred in the room of "September", the year set right in the room of the widest year of the timeline, every
+  figure as wide as the others; while history plays, no time of day. Clicked, it is the field to type in as
+  before. A shot's date overlay is laid out the same way (`steadyLayout`: every figure in a cell of the widest
+  figure, a day in two figures' room, a month's name centred in the room of the widest), so in exported videos
+  the day and the year keep their places and the box its size.
+- **Tested.** sequence: "1 May 1833" and "28 September 1866" laid out steady have the same width, the year at the
+  same place, the day ending at the same place; other text as it is. workflows: the day's and the year's digits
+  in the same places for those two dates in the working view; no time of day while playing.
+
 ### D128. In a shot animating every change, a change is over before its land changes hands again (improvement pass)
 
 - **Found.** A shot that animates every change (as "+ Whole history" does) gives each one the same time on screen

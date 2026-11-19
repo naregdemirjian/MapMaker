@@ -56,7 +56,7 @@ export function daysInMonth(y: number, m: number): number {
   return [31, isLeapYear(y) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][m - 1];
 }
 
-const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+export const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const pad = (n: number, w = 2) => String(Math.abs(n)).padStart(w, '0');
 
 function groupDigits(n: number): string {
