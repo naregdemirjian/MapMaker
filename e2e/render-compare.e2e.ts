@@ -889,6 +889,62 @@ try {
     assert.ok(r.after.length === 1 && r.after[0] < 0.5, `then only the next under way (${r.after})`);
   });
 
+  await h.step('A long straight border bows on the map: a front that starts along it leaves nothing of the old owner under the bow, drawn afresh or frame after frame (D144)', async () => {
+    const W = 1100, H = 640;
+    const r = await page.evaluate(async ({ W, H }) => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const Y = (y: number, mo = 1) => B.gregorian.fromCivil({ year: y, month: mo, day: 1 });
+      const V = (lon: number, lat: number) => B.lonLatToVec(lon, lat);
+      // Two countries in the open North Atlantic drawn with four points each: their border, 14° of longitude
+      // along 48.2 °N, is an arc that rises a fifth of a degree above its ends halfway.
+      const box = (w: number, so: number, e: number, n: number) => [V(w, so), V(e, so), V(e, n), V(w, n)];
+      for (const [name, color] of [['Bow North', '#8e44ad'], ['Bow South', '#27ae60']]) s.execute((w: any) => B.commands.createEntity(w, { type_id: 'polity', name, color }));
+      const id = (name: string) => s.world.all('entity').find((e: any) => e.name === name).id;
+      const always = { kind: 'correct', t: { day: -Infinity, ms: 0 } };
+      const paint = (ring: unknown, owner: string, mode: unknown = always, transition: unknown = null) => s.execute((w: any, e: any) => B.commands.paintTerritory(w, e, { spaceId: s.spaceId, layerId: s.layerId, ring, value: id(owner), snap: 1e-7, mode, transition }));
+      paint(box(-52, 48.2, -38, 50.5), 'Bow North');
+      paint(box(-52, 43.6, -38, 48.2), 'Bow South');
+      s.execute((w: any, e: any) => {
+        const ev = B.commands.createEvent(w, { name: 'Under the bow', start: Y(2040), end: Y(2042) });
+        const p = B.commands.paintTerritory(w, e, { spaceId: s.spaceId, layerId: s.layerId, ring: box(-52, 43.6, -38, 48.2), value: id('Bow North'), snap: 1e-7, mode: { kind: 'new', eventId: ev.result }, transition: { style: 'border', easing: 'linear' } });
+        return { label: p.label, diffs: [...ev.diffs, ...p.diffs], result: null };
+      });
+      await s.flush();
+      const view = B.makeView({ lon: -45, lat: 47, zoom: 5, rotation: 0, projection: 'equirectangular' }, W, H);
+      const P = (lon: number, lat: number) => view.projection([lon, lat]) as [number, number];
+      const opts = () => ({ passes: new Set(['background', 'fills']), transparent: false, layerIds: [s.layerId], basemap: null, show: { rivers: false } });
+      const shot = (renderer: any, t: unknown) => {
+        const c = new OffscreenCanvas(W, H).getContext('2d', { willReadFrequently: true }) as OffscreenCanvasRenderingContext2D;
+        renderer.render(c, view, s.world, s.engine, s.spaceId, t, opts());
+        return c.getImageData(0, 0, W, H).data;
+      };
+      const at = (d: Uint8ClampedArray, lon: number, lat: number) => { const [x, y] = P(lon, lat), i = (Math.round(y) * W + Math.round(x)) * 4; return [d[i], d[i + 1], d[i + 2]]; };
+      const dist = (a: number[], b: number[]) => Math.max(...a.map((v, i) => Math.abs(v - b[i])));
+      const before = shot(new B.MapRenderer(), Y(2039));
+      const north = at(before, -45, 49.5), south = at(before, -45, 46);
+      // Halfway, drawn afresh: under the bow (48.3 °N at 45 °W, between the straight line and the arc) and just
+      // south of it the new owner's colour; the far south still the old owner's.
+      const mid = shot(new B.MapRenderer(), Y(2041));
+      const under = [-50, -47, -45, -43, -40].map((lon) => dist(at(mid, lon, 48.2 + 0.5 * (0.21 * (1 - ((lon + 45) / 7) ** 2))), north));
+      // Frame after frame on one renderer (kept pictures, strips drawn again), each against the frame drawn afresh.
+      const kept = new B.MapRenderer();
+      kept.caching = 'always';
+      const worst: number[] = [];
+      for (const t of [Y(2040, 2), Y(2040, 7), Y(2041), Y(2041, 7), Y(2041, 12), Y(2042, 2)]) {
+        const a = shot(kept, t), b = shot(new B.MapRenderer(), t);
+        let n = 0;
+        for (let i = 0; i < a.length; i += 4) if (Math.abs(a[i] - b[i]) > 2 || Math.abs(a[i + 1] - b[i + 1]) > 2 || Math.abs(a[i + 2] - b[i + 2]) > 2) n++;
+        worst.push(n);
+      }
+      return { under, justSouth: dist(at(mid, -45, 48.0), north), farSouth: dist(at(mid, -45, 44.5), south), apart: dist(north, south), worst };
+    }, { W, H });
+    console.log(`    halfway, under the bow: ${r.under.join(', ')} off the new owner's colour (just south of it ${r.justSouth}; the far south ${r.farSouth} off the old owner's; the two colours ${r.apart} apart); frame after frame ${r.worst.join(', ')} pixels unlike the frame drawn afresh`);
+    assert.ok(r.apart > 60, 'two colours to tell apart');
+    assert.ok(Math.max(...r.under) <= 6, `under the bow the new owner's colour (${r.under.join(', ')} off)`);
+    assert.ok(r.justSouth <= 6 && r.farSouth <= 6, `the front below it, the far south not yet taken (${r.justSouth}, ${r.farSouth})`);
+    assert.ok(Math.max(...r.worst) === 0, `frame after frame the picture drawn afresh (${r.worst.join(', ')} pixels differ)`);
+  });
+
   await h.finish();
 } catch (e) {
   await h.finish(e);

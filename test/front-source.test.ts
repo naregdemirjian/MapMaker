@@ -9,7 +9,8 @@ import { Engine } from '../src/temporal-engine/engine.ts';
 import * as cmd from '../src/domain/commands.ts';
 import { gregorian, NEG_INF } from '../src/core-time/index.ts';
 import { frontSourceOf } from '../src/render-engine/front-source.ts';
-import { E7 } from '../src/geo-kernel/vec.ts';
+import { buildFrontField, reachedAt } from '../src/render-engine/front-field.ts';
+import { E7, lonLatToVec } from '../src/geo-kernel/vec.ts';
 import { ring } from './helpers.ts';
 
 const Y = (y: number, m = 1) => gregorian.fromCivil({ year: y, month: m });
@@ -112,4 +113,50 @@ test('a country that held nothing grows from the middle; land given up is let go
   if (exp.src.source.kind === 'points') assert.ok(Math.abs(exp.src.source.points[0][0] - 10.5) < 1e-6 && Math.abs(exp.src.source.points[0][1] - 5) < 1e-6);
   // A dissolve has no front.
   assert.equal(sourceAt(p, 2020, p.west, 'scatter').src.source.kind, 'scatter');
+});
+
+test('a long straight border bows toward the pole on the map: the change\'s outline and the border its front starts at follow the bow, and the land under it is in the field (D144)', () => {
+  const world = new World();
+  const space = cmd.seedProject(world, 'Bow').result.spaceId;
+  const layer = world.all('layer')[0].id;
+  const engine = new Engine(world);
+  const north = cmd.createEntity(world, { type_id: 'polity', name: 'North' }).result as string;
+  const south = cmd.createEntity(world, { type_id: 'polity', name: 'South' }).result as string;
+  const always = { kind: 'correct' as const, t: NEG_INF };
+  const base = { spaceId: space, layerId: layer, snap: 1e-7 };
+  // Two countries drawn with four points each, sharing a border from 0 to 60 °E at 50 °N: an arc of a great
+  // circle that rises to 54 °N halfway.
+  const four = (w: number, so: number, e: number, n: number) => box(w, so, e, n).map(([lon, lat]) => lonLatToVec(lon, lat));
+  cmd.paintTerritory(world, engine, { ...base, ring: four(0, 50, 60, 58), value: north, mode: always });
+  cmd.paintTerritory(world, engine, { ...base, ring: four(0, 30, 60, 50), value: south, mode: always });
+  const ev = cmd.createEvent(world, { name: 'North takes the south', start: Y(2000), end: Y(2002) }).result as string;
+  cmd.paintTerritory(world, engine, { ...base, ring: four(0, 30, 60, 50), value: north, mode: { kind: 'new', eventId: ev }, transition: { style: 'border', easing: 'linear' } });
+  assert.equal(world.arrangement(space).vertices.size, 6, 'six points in all: nothing along the borders');
+  const t = Y(2001);
+  const states = engine.partitionState(space, layer, t);
+  const changing = engine.partitionChanging(space, layer, t).filter((f) => states.get(f)?.transition);
+  assert.equal(changing.length, 1);
+  const src = frontSourceOf(world.arrangement(space), changing, north, states.get(changing[0])!.transition!.spec, 'border', states)!;
+  const peak = (Math.atan(Math.tan((50 * Math.PI) / 180) / Math.cos((30 * Math.PI) / 180)) * 180) / Math.PI;
+  assert.ok(Math.abs(peak - 54) < 0.05);
+  // The outline: up to the bow's highest point, in pieces of about a degree.
+  const top = Math.max(...src.rings.flat().map((q) => q[1]));
+  assert.ok(Math.abs(top - peak) < 0.02, `the outline rises to ${top.toFixed(2)} °N (the arc to ${peak.toFixed(2)})`);
+  for (const r of src.rings) for (let i = 0; i < r.length; i++) { const a = r[i], b = r[(i + 1) % r.length]; assert.ok(Math.abs(b[0] - a[0]) <= 1.5, `no piece much longer than a degree of longitude (${a} to ${b})`); }
+  // The source: the border itself, along the bow, end to end.
+  assert.equal(src.source.kind, 'lines');
+  if (src.source.kind !== 'lines') return;
+  const L = src.source.lonlat;
+  assert.ok(L.length / 4 >= 55, `${L.length / 4} pieces`);
+  let high = -Infinity, west = Infinity, east = -Infinity;
+  for (let q = 0; q + 3 < L.length; q += 4) { high = Math.max(high, L[q + 1], L[q + 3]); west = Math.min(west, L[q], L[q + 2]); east = Math.max(east, L[q], L[q + 2]); assert.ok(L[q + 1] >= 50 - 1e-6 && L[q + 3] >= 50 - 1e-6, 'never below its ends'); }
+  assert.ok(Math.abs(high - peak) < 0.02 && Math.abs(west) < 1e-6 && Math.abs(east - 60) < 1e-6);
+  // The field: the land under the bow is the change's, reached first (the front starts at 54 °N there and has
+  // 24° to go); the far south last.
+  const f = buildFrontField(src.rings, src.source, { roughness: 0, seed: 1 })!;
+  assert.ok(reachedAt(f, 30, 53.5, 0.06), 'just under the bow: reached as the change begins');
+  for (const lat of [50.5, 52, 53.5]) assert.ok(reachedAt(f, 30, lat, 0.2), `30 °E ${lat} °N, under the bow, reached early`);
+  assert.ok(!reachedAt(f, 30, 44, 0.2) && reachedAt(f, 30, 44, 0.7), 'the middle of the change later');
+  // (The southern border bows north too, to 33.7 °N halfway: 31 °N there is outside the change.)
+  assert.ok(!reachedAt(f, 30, 35, 0.7) && reachedAt(f, 30, 35, 1), 'its far side last');
 });

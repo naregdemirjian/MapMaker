@@ -130,10 +130,47 @@ export function rankPoints(x: ArrayLike<number>, y: ArrayLike<number>, i0: numbe
   }
 }
 
+/** Degrees of longitude an arc must span for its bow to count (below it the bow is under a metre). */
+export const ARC_BOWS = 0.05;
+
+/**
+ * The lowest and highest latitude on the arc of a great circle between two places (degrees; the shorter way
+ * round). A long arc bows toward the pole past both its ends: between 4 and 18 °E along 48 °N by a fifth of a
+ * degree. A box made of a border's points alone would miss that.
+ */
+export function arcLatitudes(lon1: number, lat1: number, lon2: number, lat2: number): [number, number] {
+  let lo = Math.min(lat1, lat2), hi = Math.max(lat1, lat2);
+  const c1 = Math.cos(lat1 * RAD), c2 = Math.cos(lat2 * RAD);
+  const ax = c1 * Math.cos(lon1 * RAD), ay = c1 * Math.sin(lon1 * RAD), az = Math.sin(lat1 * RAD);
+  const bx = c2 * Math.cos(lon2 * RAD), by = c2 * Math.sin(lon2 * RAD), bz = Math.sin(lat2 * RAD);
+  // The circle's pole, and the circle's own highest point: where it comes nearest the north pole.
+  let nx = ay * bz - az * by, ny = az * bx - ax * bz, nz = ax * by - ay * bx;
+  const len = Math.hypot(nx, ny, nz);
+  if (len < 1e-12) return [lo, hi];
+  nx /= len; ny /= len; nz /= len;
+  const top = Math.sqrt(Math.max(0, 1 - nz * nz));
+  if (top < 1e-9) return [lo, hi];
+  const px = (-nz * nx) / top, py = (-nz * ny) / top, pz = top;
+  // Whether the highest point (or the lowest, opposite it) lies on the arc: after its start and before its end.
+  const after = (ay * pz - az * py) * nx + (az * px - ax * pz) * ny + (ax * py - ay * px) * nz;
+  const before = (py * bz - pz * by) * nx + (pz * bx - px * bz) * ny + (px * by - py * bx) * nz;
+  const peak = Math.asin(Math.min(1, pz)) / RAD;
+  if (after >= 0 && before >= 0) hi = Math.max(hi, peak);
+  else if (after <= 0 && before <= 0) lo = Math.min(lo, -peak);
+  return [lo, hi];
+}
+
 /** A ring or line from points, with its box and winding; importance is worked out on first use. */
 export function makeRing(lon: Float64Array, lat: Float64Array, closed: boolean, arcs: boolean): Ring {
   let w = Infinity, s = Infinity, e = -Infinity, n = -Infinity;
   for (let i = 0; i < lon.length; i++) { const x = lon[i], y = lat[i]; if (x < w) w = x; if (x > e) e = x; if (y < s) s = y; if (y > n) n = y; }
+  // (Joined by arcs of great circles: a long one bows past its ends.)
+  if (arcs) for (let i = closed ? 0 : 1, m = lon.length; i < m; i++) {
+    const j = (i + m - 1) % m;
+    if (Math.abs(lon[i] - lon[j]) <= ARC_BOWS) continue;
+    const b = arcLatitudes(lon[j], lat[j], lon[i], lat[i]);
+    if (b[0] < s) s = b[0]; if (b[1] > n) n = b[1];
+  }
   return { lon, lat, imp: null, closed, arcs, box: [w, s, e, n], wind: 0 };
 }
 

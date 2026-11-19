@@ -8,7 +8,7 @@
 // so both parcels simplify it identically and never part or overlap at any level of detail.
 import type { Arrangement, Topology } from '../geo-kernel/arrangement.ts';
 import { E7 } from '../geo-kernel/vec.ts';
-import { rankPoints, type Ring } from './plane.ts';
+import { rankPoints, arcLatitudes, ARC_BOWS, type Ring } from './plane.ts';
 
 const RAD = Math.PI / 180;
 
@@ -223,6 +223,8 @@ export class ParcelGeometry {
       const j = (i + 1) % n, lj = j === 0 ? closing : lon[j];
       under += (1 + (Math.sin(lat[i] * RAD) + Math.sin(lat[j] * RAD)) / 2) * (lj - lon[i]) * RAD;
       if (lon[i] < w) w = lon[i]; if (lon[i] > e) e = lon[i]; if (lat[i] < s) s = lat[i]; if (lat[i] > nn) nn = lat[i];
+      // (A border between two points is an arc of a great circle: a long one bows past both, toward the pole.)
+      if (Math.abs(lj - lon[i]) > ARC_BOWS) { const b = arcLatitudes(lon[i], lat[i], lj, lat[j]); if (b[0] < s) s = b[0]; if (b[1] > nn) nn = b[1]; }
     }
     if (wind !== 0) { w = Math.min(w, closing); e = Math.max(e, closing); s = -90; }
 

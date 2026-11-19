@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { Arrangement, type IdSource, type KernelTable } from '../src/geo-kernel/arrangement.ts';
 import { lonLatToVec, type Vec3 } from '../src/geo-kernel/vec.ts';
 import { makeView, lonLatToScreen, screenToLonLat, rotatePoint, type Camera, type ProjectionName } from '../src/render-engine/camera.ts';
-import { Sheet, projectPoint, rankPoints, makeRing, rankRing, type PathSink } from '../src/render-engine/plane.ts';
+import { Sheet, projectPoint, rankPoints, makeRing, rankRing, arcLatitudes, type PathSink } from '../src/render-engine/plane.ts';
 import { parcelGeometry } from '../src/render-engine/parcel-geometry.ts';
 import { rng, ring, square } from './helpers.ts';
 
@@ -281,4 +281,44 @@ test('parcels taken together are drawn as their joint outline: exactly the parce
   }
   // The rest of the planet, or a band round it, cannot be joined this way (they are drawn parcel by parcel).
   assert.equal(geom.dissolve([arr.rootFace, leaves[0]], t), null);
+});
+
+test('a long border bows toward the pole: the latitudes its arc reaches, and the boxes of rings and parcels hold them (D144)', () => {
+  const peakOf = (lat: number, span: number) => (Math.atan(Math.tan((lat * Math.PI) / 180) / Math.cos(((span / 2) * Math.PI) / 180)) * 180) / Math.PI;
+  // Between 4 and 18 °E along 48.2 °N: a fifth of a degree further north halfway; mirrored in the south.
+  let [lo, hi] = arcLatitudes(4, 48.2, 18, 48.2);
+  assert.ok(Math.abs(lo - 48.2) < 1e-9 && Math.abs(hi - peakOf(48.2, 14)) < 1e-9 && hi > 48.4, `${lo} to ${hi}`);
+  [lo, hi] = arcLatitudes(18, -48.2, 4, -48.2);
+  assert.ok(Math.abs(hi + 48.2) < 1e-9 && Math.abs(lo + peakOf(48.2, 14)) < 1e-9);
+  // Across the 180th meridian the shorter way round.
+  [lo, hi] = arcLatitudes(170, 60, -170, 60);
+  assert.ok(Math.abs(hi - peakOf(60, 20)) < 1e-9 && lo === 60);
+  // Nothing past its ends: along a meridian, along the equator, and where the circle's highest point is not on the arc.
+  assert.deepEqual(arcLatitudes(10, -20, 10, 35), [-20, 35]);
+  assert.deepEqual(arcLatitudes(0, 0, 90, 0), [0, 0]);
+  assert.deepEqual(arcLatitudes(0, 10, 10, 40), [10, 40]);
+  // Checked against points along the arc.
+  const r = rng(11);
+  for (let k = 0; k < 200; k++) {
+    const a: [number, number] = [r.float(-180, 180), r.float(-85, 85)], b: [number, number] = [a[0] + r.float(-60, 60), r.float(-85, 85)];
+    const va = lonLatToVec(a[0], a[1]), vb = lonLatToVec(b[0], b[1]);
+    let min = Infinity, max = -Infinity;
+    for (let q = 0; q <= 400; q++) { const t = q / 400, v = [va[0] * (1 - t) + vb[0] * t, va[1] * (1 - t) + vb[1] * t, va[2] * (1 - t) + vb[2] * t], z = v[2] / Math.hypot(v[0], v[1], v[2]), lat = (Math.asin(z) * 180) / Math.PI; min = Math.min(min, lat); max = Math.max(max, lat); }
+    const [l, h] = arcLatitudes(a[0], a[1], b[0], b[1]);
+    assert.ok(l <= min + 1e-9 && h >= max - 1e-9 && l > min - 0.01 && h < max + 0.01, `${a} to ${b}: ${l}..${h} against ${min}..${max}`);
+  }
+  // A ring joined by arcs holds the bow in its box; joined by straight lines in longitude and latitude, not.
+  const lon = Float64Array.of(4, 18, 18, 4), lat = Float64Array.of(43.6, 43.6, 48.2, 48.2);
+  assert.ok(Math.abs(makeRing(lon, lat, true, true).box[3] - peakOf(48.2, 14)) < 1e-9);
+  assert.equal(makeRing(lon, lat, true, false).box[3], 48.2);
+  // (An open line: its last point is not joined to its first.)
+  assert.equal(makeRing(Float64Array.of(4, 4, 18), Float64Array.of(48.2, 40, 48.2), false, true).box[3], 48.2);
+  // A parcel's box likewise.
+  const arr = mapWith([[[4, 43.6], [18, 43.6], [18, 48.2], [4, 48.2]]], 180);
+  assert.equal(arr.vertices.size, 4);
+  const t = arr.topology(), geom = parcelGeometry(arr);
+  let north = -Infinity, south = Infinity;
+  for (const c of t.cycles.keys()) { const b = geom.cycle(c, t).box; north = Math.max(north, b[3]); south = Math.min(south, b[1]); }
+  assert.ok(Math.abs(north - peakOf(48.2, 14)) < 1e-6, `north to ${north}`);
+  assert.ok(Math.abs(south - 43.6) < 1e-6, `south to ${south} (the southern border bows north, inside the box)`);
 });

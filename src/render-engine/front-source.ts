@@ -17,7 +17,7 @@ export type FrontKind = 'border' | 'advance' | 'scatter';
 export function frontSourceOf(arr: Arrangement, changing: number[], owner: string | null, spec: Pick<CompiledTransition, 'origin' | 'origins'>, kind: FrontKind, states: ReadonlyMap<number, FaceState>): { rings: Rings; source: FrontSource } | null {
   if (!changing.length) return null;
   const rings: Rings = [];
-  for (const f of changing) for (const r of arr.faceRingsLonLat(f)) if (r.length >= 3) rings.push(r);
+  for (const f of changing) for (const r of arr.faceRingsLonLat(f)) if (r.length >= 3) rings.push(bowed(r));
   if (!rings.length) return null;
   if (kind === 'scatter') return { rings, source: { kind: 'scatter' } };
   if (kind === 'advance') {
@@ -38,7 +38,10 @@ export function frontSourceOf(arr: Arrangement, changing: number[], owner: strin
       const other = sg.left_face === f ? sg.right_face : sg.left_face;
       if (inChange.has(other) || !side(other)) continue;
       const a = arr.vertices.get(sg.a)!, b = arr.vertices.get(sg.b)!;
-      out.push(a.lon / E7, a.lat / E7, b.lon / E7, b.lat / E7);
+      let from: [number, number] = [a.lon / E7, a.lat / E7];
+      const to: [number, number] = [b.lon / E7, b.lat / E7];
+      for (const p of between(from, to)) { out.push(from[0], from[1], p[0], p[1]); from = p; }
+      out.push(from[0], from[1], to[0], to[1]);
     }
     return out;
   };
@@ -64,6 +67,44 @@ export function frontSourceOf(arr: Arrangement, changing: number[], owner: strin
   return { rings, source: { kind: 'heart' } };
 }
 
+/** A place (longitude, latitude) as a direction. */
+function dirOf(p: [number, number]): Vec3 {
+  const x = (p[0] * Math.PI) / 180, y = (p[1] * Math.PI) / 180;
+  return [Math.cos(y) * Math.cos(x), Math.cos(y) * Math.sin(x), Math.sin(y)];
+}
+
+/**
+ * The points between two ends of a border, about a degree of longitude apart (none when the ends are nearer).
+ * A border is an arc of a great circle, which the front's field takes as straight in longitude and latitude:
+ * a long one bows toward the pole (by a fifth of a degree over 14° of longitude at 48° N; by degrees over a
+ * continent), and the land between the arc and the straight line would be left out of the field.
+ */
+function between(a: [number, number], b: [number, number]): Array<[number, number]> {
+  const span = Math.abs(((b[0] - a[0] + 540) % 360) - 180);
+  const n = Math.min(90, Math.ceil(span));
+  if (n < 2) return [];
+  const va = dirOf(a), vb = dirOf(b);
+  const w = Math.acos(Math.max(-1, Math.min(1, va[0] * vb[0] + va[1] * vb[1] + va[2] * vb[2]))), sw = Math.sin(w);
+  if (!(sw > 1e-9)) return [];
+  const out: Array<[number, number]> = [];
+  for (let q = 1; q < n; q++) {
+    const ka = Math.sin(((n - q) / n) * w) / sw, kb = Math.sin((q / n) * w) / sw;
+    out.push(lonLatOf([ka * va[0] + kb * vb[0], ka * va[1] + kb * vb[1], ka * va[2] + kb * vb[2]]));
+  }
+  return out;
+}
+
+/** A parcel's ring with points put along its long borders (see `between`); the ring itself when none is long. */
+function bowed(r: Array<[number, number]>): Array<[number, number]> {
+  let out: Array<[number, number]> | null = null;
+  for (let i = 0; i < r.length; i++) {
+    const more = between(r[i], r[(i + 1) % r.length]);
+    if (more.length && !out) out = r.slice(0, i);
+    if (out) { out.push(r[i]); for (const p of more) out.push(p); }
+  }
+  return out ?? r;
+}
+
 /** A place (longitude, latitude) of a direction. */
 function lonLatOf(v: Vec3): [number, number] {
   return [(Math.atan2(v[1], v[0]) * 180) / Math.PI, (Math.asin(Math.max(-1, Math.min(1, v[2]))) * 180) / Math.PI];
@@ -79,8 +120,7 @@ function nearestOf(arr: Arrangement, changing: number[], held: number[]): [numbe
   };
   const cs = sample(changing, 300), hs = sample(held, 3000);
   if (!cs.length || !hs.length) return null;
-  const dir = (p: [number, number]): Vec3 => { const x = (p[0] * Math.PI) / 180, y = (p[1] * Math.PI) / 180; return [Math.cos(y) * Math.cos(x), Math.cos(y) * Math.sin(x), Math.sin(y)]; };
-  const vc = cs.map(dir), vh = hs.map(dir);
+  const vc = cs.map(dirOf), vh = hs.map(dirOf);
   let best = -Infinity, ih = 0;
   for (const a of vc) for (let j = 0; j < vh.length; j++) { const b = vh[j], d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; if (d > best) { best = d; ih = j; } }
   return hs[ih];
