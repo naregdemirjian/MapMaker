@@ -1080,17 +1080,22 @@ try {
     await page.getByTestId('calendar-use').click();
     await page.getByTestId('calendar-dialog').waitFor({ state: 'detached' });
     assert.equal(await page.getByTestId('open-calendar').innerText(), 'Calendar: Calendar of the Founding…');
-    assert.equal(await page.getByTestId('current-date').inputValue(), '6 Turning 100 AF');
+    // (The date field writes its date afresh just after the calendar or the date changes: waited for, not read at once.)
+    const dateIs = async (v: string) => {
+      await page.waitForFunction((x) => (document.querySelector('[data-testid=current-date]') as HTMLInputElement).value === x, v, { timeout: 5000 }).catch(() => undefined);
+      assert.equal(await page.getByTestId('current-date').inputValue(), v);
+    };
+    await dateIs('6 Turning 100 AF');
     // The same calendar, worked out here: what is typed is that day.
     const W = calendarOf({ ...CALENDAR_TEMPLATES.find((t) => t.id === 'world')!.def, eras: [{ name: 'After the Founding', abbr: 'AF', start: 1 }, { name: 'Third Age', abbr: 'TA', start: 101 }] });
     await h.setDate('14 Frostmoon 20 TA');
     assert.deepEqual(await page.evaluate(() => (window as any).__mapmaker.store.time), W.fromCivil({ year: 120, month: 8, day: 14 }));
-    assert.equal(await page.getByTestId('current-date').inputValue(), '14 Frostmoon 20 TA');
+    await dateIs('14 Frostmoon 20 TA');
     assert.equal(W.fromCivil({ year: 1 }).day, daysFromCivil(1000, 1, 1));
     // Stepped a day with the arrow keys; chosen on its calendar (a week of six days, 36 to the month).
     await page.getByTestId('current-date').focus();
     await page.keyboard.press('ArrowUp');
-    assert.equal(await page.getByTestId('current-date').inputValue(), '15 Frostmoon 20 TA');
+    await dateIs('15 Frostmoon 20 TA');
     await page.getByTestId('current-date-calendar').click();
     assert.equal(await page.locator('.date-popover .date-weekday').count(), 6);
     assert.equal(await page.getByTestId('cal-month').inputValue(), '8');
@@ -1115,7 +1120,7 @@ try {
     await page.getByTestId('open-calendar').click();
     await page.getByTestId('calendar-use-gregorian').click();
     assert.equal(await page.getByTestId('open-calendar').innerText(), 'Calendar: Gregorian…');
-    assert.equal(await page.getByTestId('current-date').inputValue(), gregorian.format(W.fromCivil({ year: 120, month: 8, day: 36 }), 'day'));
+    await dateIs(gregorian.format(W.fromCivil({ year: 120, month: 8, day: 36 }), 'day'));
     await page.evaluate((t) => (window as any).__mapmaker.store.setTime(t), keep);
   });
 
