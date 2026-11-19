@@ -816,9 +816,10 @@ export function MapView() {
     const a = store.adjust;
     if (!a) return;
     const at = a.pins.findIndex((q) => { const sp = lonLatToScreen(view, q[0], q[1]); return !!sp && Math.hypot(sp[0] - p[0], sp[1] - p[1]) < 9; });
-    if (at >= 0) { store.set({ adjust: { ...a, pins: a.pins.filter((_, i) => i !== at) } }); return; }
+    // (The line shown is worked out again for the new pins: until then there is none to use, D148.)
+    if (at >= 0) { store.set({ adjust: { ...a, pins: a.pins.filter((_, i) => i !== at), result: null } }); return; }
     const ll = screenToLonLat(view, p[0], p[1]);
-    if (ll) store.set({ adjust: { ...a, pins: [...a.pins, ll] } });
+    if (ll) store.set({ adjust: { ...a, pins: [...a.pins, ll], result: null } });
   }
   // Lines adjusted: worked out a moment after anything they depend on changes (the weights, the pins, the side,
   // the view); what does not depend on the weights is kept while only they move.
