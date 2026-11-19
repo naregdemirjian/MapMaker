@@ -38,13 +38,17 @@ export interface PreviewResult {
 }
 
 /** A picture of a layer of a planet (for the tests: a stage run in workers from the interface). */
-async function preview(def: PlanetDefinition | PresetId, opts: { level?: number; width?: number; height?: number; layer?: LayerId; workers?: number } = {}): Promise<PreviewResult> {
+async function preview(def: PlanetDefinition | PresetId, opts: { level?: number; width?: number; height?: number; layer?: LayerId; workers?: number; frame?: number; durationMyr?: number; frameEveryMyr?: number } = {}): Promise<PreviewResult> {
   const d = typeof def === 'string' ? definitionFromPreset(def) : def;
   const own = opts.workers ? new Pipeline(new WorkerPool(newWorker, opts.workers)) : null;
   const p = own ?? planetPipeline();
   try {
     const width = opts.width ?? 256, height = opts.height ?? 128;
-    const r = await p.product('raster', d, { level: opts.level ?? 5, width, height, layer: opts.layer ?? 'insolation' });
+    const r = await p.product('raster', d, {
+      level: opts.level ?? 5, width, height, layer: opts.layer ?? 'insolation',
+      ...(opts.frame !== undefined ? { frame: opts.frame } : {}), ...(opts.durationMyr !== undefined ? { durationMyr: opts.durationMyr } : {}),
+      ...(opts.frameEveryMyr !== undefined ? { frameEveryMyr: opts.frameEveryMyr } : {}),
+    });
     const raster = r.data.raster as Float32Array;
     return {
       key: r.key, width, height, min: r.data.min as number, max: r.data.max as number,

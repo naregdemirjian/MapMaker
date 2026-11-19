@@ -878,7 +878,7 @@ Each stage ends with its tests, the full check, its decision record, a commit an
 | Stage | Status | Notes |
 | --- | --- | --- |
 | 14.1 Foundations | Done (19 November 2026, D152) | Definition, presets and derived physics; nested icosahedral mesh, operators, transfer, pictures; sunlight; MMS1; stage keys, cache, workers. Operators first-order on the unoptimised mesh (D152) |
-| 14.2 Tectonics I | Not started | |
+| 14.2 Tectonics I | Done (19 November 2026, D153) | Plates with crust in their frames, real-motion ridges and trenches, arcs, boundaries, isostasy, slab-pull motions, welding; a 500 Myr history at L5 in 1.7 s. Old sea floor that never meets a trench survives: subduction initiation and plate splitting in 14.3 |
 | 14.3 Tectonics II | Not started | |
 | 14.4 Landscape evolution | Not started | |
 | 14.5 Planet Studio I | Not started | |

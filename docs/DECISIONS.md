@@ -61,6 +61,75 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D153. Plate tectonics: plates, crust in their frames, ridges, trenches, arcs (Stage 14.2)
+
+- **Asked.** Stage 14.2 of the planetary engine: "plate seeding and growth, Euler kinematics with rotation
+  histories, crust in plate frames, assembling the global surface, boundary classification, ridge accretion with
+  age-depth, subduction with trenches and arcs, isostatic elevation", done when synthetic boundary and
+  conservation tests pass and a 500-million-year preview history runs.
+- **Plates** (`tectonics/plates.ts`, `state.ts`): rigid caps turning about Euler poles, rotations kept as
+  quaternions. Each plate keeps its crust on a copy of the mesh in its own frame (Cortial et al. 2019): which
+  cells are its own, and their kind (oceanic, continental, arc), thickness, age, time since thickening, sediment.
+  Moving a plate changes only its rotation, so its crust never smears however far it travels. Plates are seeded
+  apart and grown by a flood whose cost is shaped by noise and each plate's weight (a few large, many small).
+  Continental crust is laid inside plates (on Earth most boundaries run through oceans), to the share asked for.
+- **Each step** (`step.ts`): plates turn; every cell of the world asks the plates around it (last step's owners
+  of it and its neighbours) whether the cell lies in their crust, by turning its position into their frames and
+  walking to the nearest cell there (a few steps from last time's). Where two plates claim a cell and really
+  close, the less buoyant goes under (continents float, then arcs, then young ocean before old): oceanic crust is
+  consumed at a trench, an accretionary wedge scraped off; continents collide and the crust above thickens with
+  the volume overridden, up to the thickest crust gravity lets a planet hold (70 km at Earth's gravity, as 1/g).
+  Where no plate claims a cell and plates really part, new oceanic crust fills the gap (7 km, thicker from a
+  hotter mantle), each step's crust going to one side of each ridge in turn, so both sides get half, in stripes,
+  and every cell of the plate's frame whose centre falls in the gap gets crust too.
+- **Ragged edges.** A plate's edge sampled cell by cell is ragged, so as plates move a fraction of a cell, cells
+  along every boundary seem to open or overlap. Counting those made and consumed crust 8 times too fast and ate
+  the continents. Crust is now made only where the plates around a gap really part, and consumed only where they
+  really close (the boundary's direction from where each plate lies around the cell, the relative motion more
+  than a quarter towards it); elsewhere the cell stays with the plate that held it. Over 500 million years an
+  Earth-like planet now renews about twice its surface, as the Earth would at its spreading rates.
+- **Boundaries** are classified by the relative motion of the plates across them (divergent, convergent,
+  transform), with rates. **Arcs**: on the plate above a slab, crust is added around the arc's axis where the slab
+  reaches about 110 km depth, 110 km / tan(dip), the dip steeper for older slabs (30° young to 60° at 100 million
+  years); 0.2 km a million years at the axis at 5 cm a year of convergence. Oceanic crust thickened past 12 km
+  becomes an arc, past 25 km continental: continents grow at their edges. **Trenches**: the cells of the plate
+  going down next to where it goes down, 2.5 km deeper.
+- **Heights** (`isostasy.ts`, physically based, Earth-calibrated constants): oceanic crust by its age (GDH1,
+  Stein and Stein 1992: 2.6 km at a ridge, 5.65 km for old floor), continental crust by Airy isostasy (35 km
+  stands 0.5 km up; deeper under water by the water's weight), arcs between; sediment and the warmth of young
+  mountains add a little; a light smoothing for regional compensation. The sea is set where it covers the share of
+  the surface asked for (a simplification until the water's volume decides it, Stage 14.8).
+- **Motions** are reconsidered every 40 to 90 million years: slabs pull a plate towards its trenches and ridges
+  push it away (Forsyth and Uyeda 1975), and a plate keeps half its old direction; speeds follow the share of a
+  plate's edge that is trench and its share of continent (a slab-pulled ocean plate about 9 cm a year, a continent
+  with no trench about 1.5), scaled by the interior's vigour (the activity setting × √ heat flow). Continents that
+  collide over a wide front (0.3 per cent of the surface consumed, about India's) are welded and move together for
+  100 million years, as their convergence would slow and stop. Regimes: a stagnant lid moves nothing; an episodic
+  regime moves fast a fifth of the time.
+- **The history** (`history.ts`): steps short enough that no plate moves more than 0.6 of a cell, never crossing a
+  5-million-year grid, so the history is the same whichever pictures are kept; a picture (heights above the sea,
+  plates, crust) every chosen interval, and the present's crust age, thickness and boundaries. A pipeline stage
+  (`tectonics`) with layers `elevation`, `plates`, `crust` (per picture), `crustAge` and `boundaries`.
+- **Measured** (this container): 500 million years at L5 (10 242 cells) 1.7 s; 100 million years at L6 2.8 s.
+  The sea level was found by sorting every step (a third of the time); a histogram by area made it O(n).
+- **Results for an Earth-like planet after 500 million years** (four seeds): the sea floor's median depth 4.4 to
+  4.9 km, continents' median height 1.0 to 1.6 km, mountains to 5 or 6 km, trenches to 7 or 8 km; continental crust
+  from 40 per cent of the surface to 30 to 34 (some consumed in collisions, some grown at arcs).
+- **Limits, for Stage 14.3.** Ocean floor that never meets a trench stays: about a tenth of the sea floor keeps its
+  starting crust (older than 500 million years, where the Earth has none older than about 200). New subduction
+  zones starting at old passive margins, plates splitting where they rift, lasting sutures, hotspots and the
+  supercontinent cycle come with 14.3, and will renew it. Collisions consume the lower continent at the convergence
+  rate until welded, keeping its volume as thickening.
+- **Tests.** `planet-tectonics.test.ts`: the relations (age-depth, Airy, the gravity limit, sea level, quaternions,
+  the walk to the nearest cell); two oceanic plates parting (crust made at about the expected rate, both sides
+  getting half, age growing with distance at about the half rate, depth following age, the ridge divergent); ocean
+  going under a continent (consumed, a trench deeper than the floor of its age, an arc within three cells of the
+  trench, the continent kept); old ocean under young making an island arc on the young plate only; a transform
+  making and consuming next to nothing, classified as one; a 500-million-year Earth-like history (every cell
+  held, with crust, at every moment; crust made balancing crust consumed within 8 per cent; continents kept; the sea
+  where asked; Earth-like heights; young floor at ridges; the same bytes whichever pictures are kept, another seed
+  another planet); a stagnant lid; the stage and its layers. Interface: the workflows step "Plate tectonics".
+
 ### D152. The planetary engine's foundations (Stage 14.1)
 
 - **Asked.** A scientifically grounded planetary evolution engine (the plan: `docs/PLANETARY_ENGINE_PLAN.md`,

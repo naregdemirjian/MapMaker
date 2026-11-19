@@ -11,6 +11,9 @@ import { derive } from '../model/physics.ts';
 import { cellsAt, meshAt } from '../mesh/icosphere.ts';
 import { rasterize } from '../mesh/transfer.ts';
 import { insolationCells, sunlightOf, type Sunlight } from '../climate/insolation.ts';
+import { rasterizeNearest } from '../mesh/transfer.ts';
+import { runHistory } from '../tectonics/history.ts';
+import type { TectonicParams } from '../tectonics/state.ts';
 import type { FieldArray } from '../state/codec.ts';
 
 /** Changes whenever any model changes its results, so nothing made before is reused. */
@@ -19,10 +22,14 @@ export const ENGINE_VERSION = 1;
 export interface StageParams {
   /** The mesh level to work at. */
   level: number;
-  /** For pictures: the size and the layer. */
+  /** For pictures: the size and the layer, and which of a history's pictures (default: the present). */
   width?: number;
   height?: number;
   layer?: LayerId;
+  frame?: number;
+  /** For histories: how long (Myr, ending at the present) and how often a picture is kept (Myr). */
+  durationMyr?: number;
+  frameEveryMyr?: number;
 }
 
 export type ProductValue = FieldArray | number | string | boolean | null | ProductValue[] | { [k: string]: ProductValue };
@@ -45,11 +52,29 @@ export interface StageDef {
   join?(parts: ProductData[], inputs: ProductData): ProductData;
 }
 
-/** The layers a picture can show: which stage and field, and the unit. */
+/**
+ * The layers a picture can show: which stage and field, the unit, whether the field has one picture per moment of a
+ * history (`frames`), and whether its values are categories (drawn by the nearest cell, never blended).
+ */
 export const LAYERS = {
-  insolation: { stage: 'insolation', field: 'annual', unit: 'W/m²', label: 'Sunlight (yearly mean)' },
+  insolation: { stage: 'insolation', field: 'annual', unit: 'W/m²', label: 'Sunlight (yearly mean)', frames: false, categories: false },
+  elevation: { stage: 'tectonics', field: 'heights', unit: 'm', label: 'Height above the sea', frames: true, categories: false },
+  plates: { stage: 'tectonics', field: 'plates', unit: '', label: 'Plates', frames: true, categories: true },
+  crust: { stage: 'tectonics', field: 'kinds', unit: '', label: 'Kind of crust', frames: true, categories: true },
+  crustAge: { stage: 'tectonics', field: 'age', unit: 'Myr', label: 'Age of the crust', frames: false, categories: false },
+  boundaries: { stage: 'tectonics', field: 'boundary', unit: '', label: 'Plate boundaries', frames: false, categories: true },
 } as const;
 export type LayerId = keyof typeof LAYERS;
+
+/** What the tectonic history reads from a definition. */
+export function tectonicParams(def: PlanetDefinition, level: number): TectonicParams {
+  const x = derive(def);
+  return {
+    level, seed: def.seed, radiusKm: def.body.radiusKm, gravity: x.gravity, plates: def.tectonics.plates,
+    vigor: def.tectonics.activity * Math.sqrt(Math.max(0, x.heatFlowEarth)), continentalFraction: def.tectonics.continentalFraction,
+    oceanFraction: def.water.oceanFraction, regime: x.regime,
+  };
+}
 
 const concat = (parts: Float32Array[]): Float32Array => {
   const out = new Float32Array(parts.reduce((s, p) => s + p.length, 0));
@@ -98,20 +123,44 @@ export const STAGES: Record<string, StageDef> = {
     },
   },
 
+  /** The planet's tectonic history: plates, crust and heights through time (a preview at coarse levels). */
+  tectonics: {
+    id: 'tectonics',
+    version: 1,
+    deps: () => [],
+    inputs: (def, p) => ({
+      ...(tectonicParams(def, p.level) as unknown as ProductData),
+      durationMyr: Math.min(p.durationMyr ?? 500, def.history.ageGyr * 1000), frameEveryMyr: p.frameEveryMyr ?? 25,
+    }),
+    run: (inputs, _deps, ctx) => {
+      const { durationMyr, frameEveryMyr, ...params } = inputs;
+      return runHistory(params as unknown as TectonicParams, {
+        durationMyr: durationMyr as number, frameEveryMyr: frameEveryMyr as number, onProgress: (d, t) => ctx.progress(d, t),
+      }) as unknown as ProductData;
+    },
+  },
+
   /** A picture of a layer: the field drawn on an equirectangular grid, with its range. */
   raster: {
     id: 'raster',
-    version: 1,
+    version: 2,
     deps: (p) => [LAYERS[p.layer ?? 'insolation'].stage],
-    inputs: (_def, p) => ({ level: p.level, width: p.width ?? 512, height: p.height ?? 256, layer: p.layer ?? 'insolation' }),
+    inputs: (_def, p) => ({ level: p.level, width: p.width ?? 512, height: p.height ?? 256, layer: p.layer ?? 'insolation', frame: p.frame ?? -1 }),
     run: (inputs, deps, ctx) => {
       const layer = LAYERS[inputs.layer as LayerId];
-      const field = deps[layer.stage][layer.field] as Float32Array;
-      const raster = rasterize(meshAt(inputs.level as number), field, inputs.width as number, inputs.height as number);
+      const mesh = meshAt(inputs.level as number), n = mesh.n;
+      let field = deps[layer.stage][layer.field] as Float32Array | Int16Array | Uint8Array;
+      if (layer.frames) {
+        const frames = field.length / n, f = inputs.frame as number;
+        const k = f < 0 || f >= frames ? frames - 1 : f;
+        field = field.subarray(k * n, (k + 1) * n);
+      }
+      const w = inputs.width as number, h = inputs.height as number;
+      const raster = layer.categories ? rasterizeNearest(mesh, field, w, h, new Float32Array(w * h)) : rasterize(mesh, field, w, h);
       let min = Infinity, max = -Infinity;
       for (let i = 0; i < raster.length; i++) { const v = raster[i]; if (v < min) min = v; if (v > max) max = v; }
       ctx.progress(1, 1);
-      return { raster, width: inputs.width as number, height: inputs.height as number, min, max, unit: layer.unit };
+      return { raster, width: w, height: h, min, max, unit: layer.unit };
     },
   },
 };

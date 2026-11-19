@@ -151,4 +151,4 @@ try {
 } finally {
   await app.close().catch(() => undefined);
 }
-console.log(`\n${passed} of 7 steps passed. Screenshots: ${OUT}`);
+console.log(`\n${passed} of 8 steps passed. Screenshots: ${OUT}`);

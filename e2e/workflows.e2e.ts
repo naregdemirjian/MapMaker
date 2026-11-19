@@ -4254,6 +4254,25 @@ try {
     assert.equal(r.three.hash, r.first.hash, 'three workers give the same bytes');
   });
 
+  await h.step('Plate tectonics (D153): a planet\'s history run in a worker from the interface; its heights now and 100 million years ago, its plates; the same from one worker as from two', async () => {
+    const r = await page.evaluate(async () => {
+      const P = (window as any).__mapmaker.bench.planet;
+      const o = { level: 4, width: 192, height: 96, durationMyr: 100, frameEveryMyr: 50 };
+      const now = await P.preview('earthlike', { ...o, layer: 'elevation' });
+      const then = await P.preview('earthlike', { ...o, layer: 'elevation', frame: 0 });
+      const plates = await P.preview('earthlike', { ...o, layer: 'plates' });
+      const crust = await P.preview('earthlike', { ...o, layer: 'crust' });
+      const one = await P.preview('earthlike', { ...o, layer: 'elevation', workers: 1 });
+      return { now, then, plates, crust, one };
+    });
+    assert.ok(r.now.min < -3000 && r.now.max > 500, `deep sea and land (${r.now.min} to ${r.now.max} m)`);
+    assert.notEqual(r.then.hash, r.now.hash, 'the planet 100 million years ago is not the planet now');
+    assert.equal(r.plates.cached, false);
+    assert.ok(r.plates.min >= 0 && r.plates.max < 12 && Number.isInteger(r.plates.max), `plates by number (${r.plates.min}..${r.plates.max})`);
+    assert.ok(r.crust.min >= 1 && r.crust.max <= 3, `oceanic, continental and arc crust (${r.crust.min}..${r.crust.max})`);
+    assert.equal(r.one.hash, r.now.hash, 'the same history in another worker');
+  });
+
   await h.step('History Health lists the overlap, nothing else; no browser errors', async () => {
     await page.getByTestId('mode-world').click();
     await page.getByTestId('health').click();
