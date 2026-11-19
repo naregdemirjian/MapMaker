@@ -4274,6 +4274,85 @@ try {
     assert.equal(r.one.hash, r.now.hash, 'the same history in another worker');
   });
 
+  await h.step('The Planet Studio (D156): a simulated planet from the New map dialog; a preset explained; a slider moved and what follows; its history simulated in workers, its relief and plates through time; used for a map whose land and sea follow the history on its timeline; undone', async () => {
+    await page.getByTestId('mode-world').click();
+    await page.getByRole('button', { name: '+ Map' }).click();
+    await page.getByTestId('new-map-sim').check();
+    assert.match((await page.getByTestId('new-map-sim-note').textContent()) ?? '', /Planet Studio opens/);
+    await page.getByTestId('new-map-name').fill('Testa Prime');
+    await page.getByTestId('new-map-create').click();
+    await page.getByTestId('planet-studio').waitFor();
+    const text = async (id: string) => (await page.getByTestId(id).textContent()) ?? '';
+    // A preset, explained; what follows from it.
+    await page.getByTestId('studio-preset-young-volcanic').click();
+    assert.match(await text('studio-explain'), /billion years old/);
+    assert.match(await text('studio-readout-year'), /^365\.\d days$/);
+    assert.match(await text('studio-readout-interior'), /moving plates/);
+    // Farther from the star: less sunlight, colder; the slider says why.
+    const degrees = async () => Number((await text('studio-readout-temperature')).match(/^(-?[\d,]+) °C/)![1].replace(',', ''));
+    const warm = await degrees();
+    await page.getByTestId('studio-step-star').click();
+    await page.getByTestId('studio-control-distance').fill('700');
+    assert.match(await text('studio-explain'), /Farther from the star, less light/);
+    assert.ok(await degrees() < warm - 10, `colder farther out (${await degrees()} °C from ${warm})`);
+    assert.match(await text('studio-readout-year'), /days$/);
+    assert.ok(await page.getByTestId('studio-orbit').isVisible(), 'the orbit over the habitable zone');
+    await page.getByTestId('studio-control-distance').fill('630');
+    // A shorter history, for the test: 200 million years.
+    await page.getByTestId('studio-step-history').click();
+    await page.getByTestId('studio-control-span').fill('408');
+    assert.equal(await text('studio-value-span'), '200');
+    // Simulated in workers: the relief of today, then the plates, then the plates 200 million years ago.
+    await page.getByTestId('studio-simulate').click();
+    const drawn = (prefix: string) => page.waitForFunction((p) => ((document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement)?.dataset.drawn ?? '').startsWith(p), prefix, { timeout: 180_000 });
+    await drawn('elevation:');
+    assert.equal(await text('studio-when'), 'Today');
+    assert.match(await text('studio-legend'), /Height above the sea/);
+    await h.screenshot('planet-studio-relief');
+    await page.getByTestId('studio-layer').selectOption('plates');
+    await drawn('plates:');
+    await page.getByTestId('studio-frame').fill('0');
+    await drawn('plates:0:');
+    assert.equal(await text('studio-when'), '200 million years ago');
+    const colours = await page.evaluate(() => {
+      const c = document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement, d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+      const seen = new Set<string>();
+      for (let k = 0; k < d.length; k += 4 * 97) seen.add(`${d[k]},${d[k + 1]},${d[k + 2]}`);
+      return seen.size;
+    });
+    assert.ok(colours >= 6, `plates in their colours (${colours})`);
+    // Used for a map: its land and sea follow the history on its timeline.
+    await page.getByTestId('studio-use').click();
+    await page.getByTestId('planet-studio').waitFor({ state: 'detached' });
+    await page.waitForFunction(() => { const s = (window as any).__mapmaker.store; return !!s.terrainOf(s.world.get('map_space', s.spaceId)); }, null, { timeout: 180_000 });
+    await page.waitForFunction(() => /Today · Testa Prime, simulated/.test(document.querySelector('[data-testid=sim-note]')?.textContent ?? ''));
+    const r = await page.evaluate(() => {
+      const m = (window as any).__mapmaker, s = m.store, space = s.world.get('map_space', s.spaceId);
+      const now = s.terrainOf(space, m.bench.gregorian.parse('2000').instant), then = s.terrainOf(space, m.bench.gregorian.parse('150 Ma').instant);
+      let differ = 0;
+      for (let k = 0; k < now.grid.data.length; k += 13) if (now.grid.data[k] !== then.grid.data[k]) differ++;
+      let land = 0;
+      for (let k = 0; k < now.grid.data.length; k++) if (now.grid.data[k] > 0) land++;
+      return { name: space.name, radius: space.radius_m, keys: [now.key, then.key], differ, land: land / now.grid.data.length, start: s.timeline.start };
+    });
+    assert.equal(r.name, 'Testa Prime');
+    assert.equal(r.radius, 6371000);
+    assert.notEqual(r.keys[0], r.keys[1], 'another moment, other land and sea');
+    assert.ok(r.differ > 100, 'the planet 150 million years ago differs');
+    assert.ok(Math.abs(r.land - 0.2) < 0.08, `the sea where the planet has it (${r.land.toFixed(2)} land)`);
+    assert.ok(r.start < -1.9e8, 'the timeline reaches back over the history');
+    await h.screenshot('planet-studio-map');
+    // Opened again, its settings are the map's.
+    await page.getByTestId('open-planet-studio').click();
+    await page.getByTestId('planet-studio').waitFor();
+    await page.getByTestId('studio-step-air').click();
+    assert.equal(await text('studio-value-ocean'), '0.80');
+    await page.getByTestId('studio-close').click();
+    await page.getByTestId('undo').click();
+    await h.saved();
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.name === 'Testa Prime')), false);
+  });
+
   await h.step('History Health lists the overlap, nothing else; no browser errors', async () => {
     await page.getByTestId('mode-world').click();
     await page.getByTestId('health').click();

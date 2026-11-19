@@ -61,7 +61,7 @@ export function linesOnScreen(view: View, lines: number[][][], kind: SmartLineKi
 const lakeShores = new WeakMap<object, number[][][]>();
 
 /** What a map offers a smart brush: the Earth of today its rivers, coasts and lakes, and today's borders; a planet its rivers; any map with heights its ridges and valleys. */
-export function followOffered(earthToday: boolean, heights: 'earth' | 'planet' | 'paleo' | null): { rivers: boolean; coasts: boolean; today: boolean; heights: boolean } {
+export function followOffered(earthToday: boolean, heights: 'earth' | 'planet' | 'paleo' | 'sim' | null): { rivers: boolean; coasts: boolean; today: boolean; heights: boolean } {
   return { rivers: earthToday || heights === 'planet', coasts: earthToday, today: earthToday, heights: heights !== null };
 }
 

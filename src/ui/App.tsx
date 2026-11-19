@@ -11,6 +11,7 @@ import { SpaceView } from './components/SpaceView.tsx';
 import { isSpaceMap } from '../world-model/world-settings.ts';
 import { Timeline } from './components/Timeline.tsx';
 import { EditPrompt, NewWorldDialog, NewEventDialog, VersionsDialog, HealthDialog, DataSourcesDialog, ProjectPicker, OfflineNotice, AskDialog } from './components/Dialogs.tsx';
+import { PlanetStudio } from './components/PlanetStudio.tsx';
 import { ShotsPanel, ShotEditor, ShotTimeline } from './components/Presentation.tsx';
 import { LabelStyleDialog } from './components/LabelStyles.tsx';
 import { AddCountriesDialog } from './components/AddCountries.tsx';
@@ -66,6 +67,7 @@ export function App() {
       <AskDialog />
       <ContextMenu />
       {s.dialog === 'new-world' && <NewWorldDialog />}
+      {s.dialog === 'planet-studio' && <PlanetStudio />}
       {s.dialog === 'new-event' && <NewEventDialog />}
       {s.dialog === 'new-layer' && <NewLayerDialog />}
       {s.dialog === 'data-export' && <DataExportDialog />}

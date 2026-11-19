@@ -211,7 +211,7 @@ export function NewWorldDialog() {
   const [name, setName] = useState('');
   const [km, setKm] = useState('6371');
   const [earth, setEarth] = useState(false);
-  const [kind, setKind] = useState<'round' | 'paleo' | 'planet' | 'flat' | 'stars' | 'solar' | 'invented' | 'milkyway' | 'galaxy'>('round');
+  const [kind, setKind] = useState<'round' | 'paleo' | 'planet' | 'sim' | 'flat' | 'stars' | 'solar' | 'invented' | 'milkyway' | 'galaxy'>('round');
   const [inv, setInv] = useState({ seed: newSeed(), count: 300, radiusLy: 50, shape: 'sphere' as 'sphere' | 'disc' });
   const [gal, setGal] = useState({ seed: newSeed(), systems: 600, arms: 4, pitch: 14, radiusLy: 50000, bar: true });
   const flat = kind === 'flat';
@@ -219,6 +219,8 @@ export function NewWorldDialog() {
   const [planet, setPlanet] = useState<PlanetParams>(() => planetParamsOf({ seed: newSeed(), preset: 'earthlike' })!);
   const close = () => s.set({ dialog: null });
   const create = () => {
+    // A simulated planet (D156) is described in the Planet Studio, which makes its map.
+    if (kind === 'sim') { s.set({ dialog: 'planet-studio', studioSpaceId: null, studioName: name.trim() }); return; }
     const id = kind === 'milkyway' || kind === 'galaxy'
       ? s.execute((w) => cmd.createSpaceMap(w, name.trim() || (kind === 'milkyway' ? 'The Milky Way' : 'A galaxy'), 'galaxy', undefined, { ...gal, kind: kind === 'milkyway' ? 'milkyway' : 'invented', seed: kind === 'milkyway' ? 1 : gal.seed }))
       : kind === 'stars' || kind === 'solar' || kind === 'invented'
@@ -247,6 +249,7 @@ export function NewWorldDialog() {
         <label className="check"><input type="radio" name="map-kind" checked={kind === 'round'} onChange={() => setKind('round')} /> Round: a planet or moon (Earth, another real body, or a blank one of your own)</label>
         <label className="check"><input type="radio" name="map-kind" checked={kind === 'paleo'} onChange={() => setKind('paleo')} data-testid="new-map-paleo" /> The Earth through geological time: its continents, seas and mountains as they were, from 540 million years ago to today</label>
         <label className="check"><input type="radio" name="map-kind" checked={kind === 'planet'} onChange={() => setKind('planet')} data-testid="new-map-planet" /> A planet of your own, generated: continents, seas and mountains from a seed</label>
+        <label className="check"><input type="radio" name="map-kind" checked={kind === 'sim'} onChange={() => setKind('sim')} data-testid="new-map-sim" /> A simulated planet: its star, orbit, interior, air and water described, its continents shaped by plate tectonics and erosion over its history (the Planet Studio)</label>
         <label className="check"><input type="radio" name="map-kind" checked={flat} onChange={() => setKind('flat')} data-testid="new-map-flat" /> Flat: a city, a battlefield, a region (a plan, true to scale)</label>
         <label className="check"><input type="radio" name="map-kind" checked={kind === 'stars'} onChange={() => setKind('stars')} data-testid="new-map-stars" /> The stars around the Sun: every known star within 50 light-years, in three dimensions</label>
         <label className="check"><input type="radio" name="map-kind" checked={kind === 'solar'} onChange={() => setKind('solar')} data-testid="new-map-solar" /> The solar system: the Sun and the planets where they are on the date viewed</label>
@@ -277,7 +280,7 @@ export function NewWorldDialog() {
           <label>Shape<select value={inv.shape} onChange={(e) => setInv({ ...inv, shape: e.target.value as 'sphere' | 'disc' })}><option value="sphere">A sphere round the home star</option><option value="disc">A flat disc</option></select></label>
         </div>
         <p className="muted" data-testid="new-map-invented-note">Stars round a home star, most of them red dwarfs as around the Sun, with names of their own (the faintest numbered). The same seed gives the same stars; held stars and lanes work as on the real map.</p>
-      </> : kind === 'paleo' ? <p className="muted" data-testid="new-map-paleo-note">The Earth's land and sea floor at 109 moments from 540 million years ago to today (the PALEOMAP PaleoDEMs of C. R. Scotese and N. Wright, 2018), changing steadily between them: Pangaea coming together and breaking up, oceans opening and closing, mountains rising; over the last 128,000 years the seas of the ice ages (land bridges where the sea was lower). Coasts are where the land meets the sea of each moment. Dates before 10,000 BCE are written as how long ago they were: type "250 Ma" or "21,000 years ago".</p> : kind === 'solar' ? <p className="muted" data-testid="new-map-solar-note">The planets and Pluto on their orbits, where they are on any date from their orbital elements (JPL): they move as the date changes. Give them to countries and factions, join them with lanes, as on a star map.</p> : kind === 'stars' ? <p className="muted" data-testid="new-map-stars-note">982 stars from the HYG database: real positions, colours by type, names. Drag to turn the view, scroll to zoom, click a star to see what it is.</p> : flat ? <>
+      </> : kind === 'sim' ? <p className="muted" data-testid="new-map-sim-note">The Planet Studio opens: choose a starting point (Earth-like, a supercontinent, a young volcanic world, a frozen or desert world, an ocean world, a tidally locked planet, a super-Earth, a hothouse…), change what you like step by step, see what follows (its year, gravity, sunlight, temperature, winds, interior) and why, simulate its history and explore it, then use it for a map whose land and sea follow its history through time.</p> : kind === 'paleo' ? <p className="muted" data-testid="new-map-paleo-note">The Earth's land and sea floor at 109 moments from 540 million years ago to today (the PALEOMAP PaleoDEMs of C. R. Scotese and N. Wright, 2018), changing steadily between them: Pangaea coming together and breaking up, oceans opening and closing, mountains rising; over the last 128,000 years the seas of the ice ages (land bridges where the sea was lower). Coasts are where the land meets the sea of each moment. Dates before 10,000 BCE are written as how long ago they were: type "250 Ma" or "21,000 years ago".</p> : kind === 'solar' ? <p className="muted" data-testid="new-map-solar-note">The planets and Pluto on their orbits, where they are on any date from their orbital elements (JPL): they move as the date changes. Give them to countries and factions, join them with lanes, as on a star map.</p> : kind === 'stars' ? <p className="muted" data-testid="new-map-stars-note">982 stars from the HYG database: real positions, colours by type, names. Drag to turn the view, scroll to zoom, click a star to see what it is.</p> : flat ? <>
         <label>Width (km)<input type="number" min={0.01} max={5000} value={widthKm} onChange={(e) => setWidthKm(e.target.value)} data-testid="new-map-width" /></label>
         <p className="muted">Borders on a flat map are straight lines; the scale bar reads in metres and kilometres.</p>
       </> : <>
@@ -288,7 +291,7 @@ export function NewWorldDialog() {
         </>}
         {kind === 'planet' && <PlanetChooser value={planet} onChange={setPlanet} />}
       </>}
-      <div className="modal-actions"><button onClick={close}>Cancel</button><button className="primary" onClick={create} data-testid="new-map-create">Create map</button></div>
+      <div className="modal-actions"><button onClick={close}>Cancel</button><button className="primary" onClick={create} data-testid="new-map-create">{kind === 'sim' ? 'Open the Planet Studio' : 'Create map'}</button></div>
     </Modal>
   );
 }

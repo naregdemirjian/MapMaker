@@ -22,7 +22,7 @@ import { transitionOptions, drawShotOverlays, lookStyles } from '../../presentat
 import { finishLook } from '../../presentation/looks.ts';
 import { parseJSON, slerpLonLat } from '../../temporal-engine/engine.ts';
 import { compare, fromStore, gregorian, formatYear } from '../../core-time/index.ts';
-import { basemapSourceOf, shown, minLakeKm2, terrainLook, seaLevelPoints, planetOf, sculptOf, terrainSourceOf, isPaleoEarth } from '../../world-model/world-settings.ts';
+import { basemapSourceOf, shown, minLakeKm2, terrainLook, seaLevelPoints, planetOf, sculptOf, terrainSourceOf, isPaleoEarth, simOf } from '../../world-model/world-settings.ts';
 import { stampsAt } from '../../terrain/sculpt.ts';
 import { sculpted } from '../../terrain/sculpt-cache.ts';
 import { riversSoon } from '../../terrain/river-cache.ts';
@@ -328,17 +328,19 @@ export function MapView() {
     const look = terrainLook(space), terrainShown = !!look && on('terrain');
     // (The Earth through geological time, D134: the heights of the moment shown, and the sea of the last glacial cycle.)
     const paleo = isPaleoEarth(space);
+    // (A simulated planet, D156: its land and sea through its own history.)
+    const simulated = !!simOf(space);
     const seaPoints = seaLevelPoints(space), seaLevel = seaLevelAt(seaPoints, time) + (paleo ? glacialSeaAt(ageOf(time)) : 0);
     // Sculpting (D98): the strokes holding at the date viewed, applied to the heights.
     const strokes = stampsAt(sculptOf(space), time);
     // (Conditions spreading over the terrain need its heights too, D103.)
     const fieldsHere = s.world.all('layer').some((l) => l.kind === 'field' && l.space_id === s.spaceId);
     // (And fronts that mind the land, D142: the shot's look, or an event's own.)
-    const needsGrid = terrainShown || seaPoints.length > 0 || !!planetOf(space) || paleo || strokes.length > 0 || fieldsHere || frontsMindLand(s.world, shot ? shotTransitions(shot) : null);
+    const needsGrid = terrainShown || seaPoints.length > 0 || !!planetOf(space) || paleo || simulated || strokes.length > 0 || fieldsHere || frontsMindLand(s.world, shot ? shotTransitions(shot) : null);
     const ground = needsGrid ? s.terrainOf(space, time) : null;
     const carved = ground ? sculpted(ground.grid, ground.key, strokes, (space?.radius_m ?? 6371008.8) / 1000) : null;
     // A planet's rivers (D99), worked out a moment after its heights (drawn without them meanwhile).
-    const rivers = carved && planetOf(space) && on('rivers') ? riversSoon(carved.grid, carved.key, () => store.notify()) : null;
+    const rivers = carved && (planetOf(space) || simulated) && on('rivers') ? riversSoon(carved.grid, carved.key, () => store.notify()) : null;
     // The land's colours in the satellite look (D100): Earth's land cover, or a planet's biomes.
     const cover = carved && terrainShown && look && PALETTES[look.palette].cover ? s.coverOf(space, carved) : null;
     const terrain = ground && carved ? { grid: carved.grid, key: carved.key, look: terrainShown ? look : null, seaLevel, override: carved.touched && basemapSourceOf(space) === 'natural-earth' ? { data: carved.touched, key: carved.key } : null, rivers, cover, detail: null as DetailGrid | null, photo: null as PhotoRegion | null } : null;
@@ -428,7 +430,7 @@ export function MapView() {
       const cc = cmpCanvas.getContext('2d') as unknown as CanvasRenderingContext2D;
       cc.setTransform(dpr, 0, 0, dpr, frame.x * dpr, frame.y * dpr);
       try {
-        s.compareRenderer.render(cc, view, s.world, otherEngine, s.spaceId, otherTime, { passes, transparent: false, layerIds: layers, basemap, referenceBorders: s.referenceBorders, layout: { labels: namesOn && !namesHidden, cities: citiesOn }, moving: moving && vs.whileMoving === 'carry', holdNames: moving && vs.names === 'hold', fillAround, show, terrain: terrain && (paleo ? compareTerrain(terrain, s.terrainOf(space, otherTime), seaLevelAt(seaPoints, otherTime) + glacialSeaAt(ageOf(otherTime))) : { ...terrain, seaLevel: seaLevelAt(seaPoints, otherTime) }) });
+        s.compareRenderer.render(cc, view, s.world, otherEngine, s.spaceId, otherTime, { passes, transparent: false, layerIds: layers, basemap, referenceBorders: s.referenceBorders, layout: { labels: namesOn && !namesHidden, cities: citiesOn }, moving: moving && vs.whileMoving === 'carry', holdNames: moving && vs.names === 'hold', fillAround, show, terrain: terrain && (paleo || simulated ? compareTerrain(terrain, s.terrainOf(space, otherTime), seaLevelAt(seaPoints, otherTime) + (paleo ? glacialSeaAt(ageOf(otherTime)) : 0)) : { ...terrain, seaLevel: seaLevelAt(seaPoints, otherTime) }) });
       } catch (e) {
         console.error(e);
       }
@@ -1350,6 +1352,9 @@ function MapHud({ view }: { view: View }) {
   // The Earth through geological time (D134): the moment's name, and whose maps they are.
   const space = s.world?.get('map_space', s.spaceId);
   const paleoNote = isPaleoEarth(space) ? (s.paleo ? `${formatYear(gregorian.toCivil(s.time).year)} · ${paleoLabelAt(s.paleo, ageOf(s.time))}${glacialSeaAt(ageOf(s.time)) <= -1 ? ` · the sea ${Math.round(-glacialSeaAt(ageOf(s.time)))} m lower than today` : ''} · PALEOMAP (Scotese and Wright, 2018)` : 'Loading the Earth through time…') : null;
+  // A simulated planet (D156): how long ago, and that it is simulated (or how far its history has got).
+  const sim = simOf(space), simSet = sim ? s.simFor(sim) : null;
+  const simNote = sim ? (simSet ? `${ageOf(s.time) < 0.5 ? 'Today' : `${Math.round(ageOf(s.time)).toLocaleString('en')} million years ago`} · ${sim.name}, simulated with simplified models` : `Simulating ${sim.name}'s history… ${Math.round((s.simProgress ?? 0) * 100)}%`) : null;
   // The Earth as photographed (D138): whose photographs they are.
   const hudLook = terrainLook(space);
   const photographed = !!hudLook?.colours && hudLook.photo && !!PALETTES[hudLook.palette].cover && terrainSourceOf(space) === 'earth' && shown(space, s.mode === 'present' ? 'export' : 'working', 'terrain');
@@ -1357,6 +1362,7 @@ function MapHud({ view }: { view: View }) {
     <div className="map-hud">
       <div className="scalebar"><div style={{ width: `${nice / kmPerPx}px` }} /><span>{nice >= 1 ? `${nice.toLocaleString()} km` : `${(nice * 1000).toFixed(0)} m`}</span></div>
       {paleoNote && <div className="scalebar space-note" data-testid="paleo-note">{paleoNote}</div>}
+      {simNote && <div className="scalebar space-note" data-testid="sim-note">{simNote}</div>}
       {photographed && <div className="scalebar space-note photo-credit" data-testid="photo-credit" title="The satellite look's photographs (Creative Commons Attribution 4.0): credit them where you publish pictures of them. See Data sources and credits.">{PHOTO_CREDIT}</div>}
       <div className="hud-buttons">
         <button title="Zoom in" onClick={() => s.setCamera({ ...s.camera, zoom: s.camera.zoom + 0.5 })}>+</button>

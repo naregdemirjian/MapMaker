@@ -6,7 +6,7 @@ import { type Instant, type Calendar, gregorian, fromStore, formatYear, compare,
 import { calendarNow } from '../calendar-now.ts';
 import { isBaseEvent, MAIN_BRANCH, type EffectRow } from '../../world-model/schema.ts';
 import { listedHere } from '../events-here.ts';
-import { basemapSourceOf, worldSettings, terrainSourceOf, sculptOf, isSpaceMap, isPaleoEarth } from '../../world-model/world-settings.ts';
+import { basemapSourceOf, worldSettings, terrainSourceOf, sculptOf, isSpaceMap, isGeologicalMap, simOf } from '../../world-model/world-settings.ts';
 import { parseJSON, leafDescendants, isUntracked, resolutionOf, type Resolution, type TransitionSpec } from '../../temporal-engine/engine.ts';
 import type { World } from '../../world-model/world.ts';
 import { lonLatToVec } from '../../geo-kernel/vec.ts';
@@ -566,9 +566,12 @@ export function Outliner() {
         {currentSpace && isSpaceMap(currentSpace) && (
           <button className="link pad-link" onClick={() => s.set({ dialog: 'sky-look' })} data-testid="open-sky-look" title="The stars' colours, shapes, glows and spikes, the sky, the lines and names, a flat chart, and how realms are drawn">How the stars look…</button>
         )}
+        {currentSpace && simOf(currentSpace) && (
+          <button className="link pad-link" onClick={() => s.set({ dialog: 'planet-studio', studioSpaceId: currentSpace.id })} data-testid="open-planet-studio" title="The planet's star, orbit, interior, air, water and history: change them and simulate its history again">Open in the Planet Studio…</button>
+        )}
         {currentSpace && currentSpace.kind !== 'plane' && !isSpaceMap(currentSpace) && (
           <div className="world-options">
-            {!isPaleoEarth(currentSpace) && <label className="check" title="Land, lakes and coastlines from Natural Earth, drawn under the territories">
+            {!isGeologicalMap(currentSpace) && <label className="check" title="Land, lakes and coastlines from Natural Earth, drawn under the territories">
               <input type="checkbox" data-testid="basemap-toggle" checked={basemapSourceOf(currentSpace) === 'natural-earth'}
                 onChange={(e) => s.execute((wd) => cmd.setWorldBasemap(wd, currentSpace.id, e.target.checked ? 'natural-earth' : 'none'))} /> Earth's geography
             </label>}

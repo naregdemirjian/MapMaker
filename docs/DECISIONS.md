@@ -61,6 +61,65 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D156. The Planet Studio, and maps of simulated planets (Stage 14.5)
+
+- **Asked.** Stage 14.5: "the workspace with steps 1 to 5 and 7 (star, orbit, planet, interior and plates, air and
+  water basics, history timeline, simulate and explore with tectonic and relief layers), presets with explanations
+  and diagrams, progressive simulation in workers, scrubbing the history, 'use this planet' making a `sim` map whose
+  terrain follows the history on the map's time axis", done when the interface test of the flow passes and the map
+  shows the simulated planet through time.
+- **The Planet Studio** (`components/PlanetStudio.tsx`): a workspace over the whole window, from New map › "A
+  simulated planet", or "Open in the Planet Studio…" on a simulated planet's map. Across the top, the eleven presets
+  (each explained when chosen). On the left, the steps, each a few plain sliders (logarithmic where the range is
+  wide) and choices, with "More settings": 1 the star's mass, the distance, the eccentricity (and the season at the
+  nearest point); 2 the radius, the tilt (to 180° with more settings), the day, tidal locking; 3 the heat from
+  radioactivity, plates, activity, continental crust, hotspots, the regime (and the core's share); 4 the air's
+  pressure, carbon dioxide, clouds, the sea's share; 5 the age, how much of the history to simulate, the detail
+  (preview or standard), and the timeline's events (kind, from, for how long, strength; added and removed); 6 the
+  layer shown, a name, and "Use this planet for a new map" (or "Apply to this map"). The seed under every step.
+- **What follows** is worked out as anything moves (`physics.ts`, instant): the star (class, temperature, light),
+  the sunlight, the habitable zone and where the planet is in it, drawn as a diagram (the orbit over the zone, the
+  star in its colour), the year, the day from noon to noon (or none when locked), gravity, mass and density, the mean
+  temperature with what the air and greenhouse add and the albedo, the circulation cells, the interior's heat flow
+  and regime with its reason, the physics' own notes (a runaway greenhouse, a star that would have died, a year set
+  by hand, tidal locking) and any problem with the settings. Moving a control explains in a sentence what it changes
+  and why.
+- **Simulating** runs the history in the workers (`tectonics` stage), with progress and a Cancel that stops the
+  worker; the picture shows any layer (relief with light from the north-west, plates, plate boundaries, kind of
+  crust, its age, its thickness, what made it, sediment, rivers, sunlight) at any moment, scrubbed or played (a
+  picture every 0.4 s, round and round); every picture is a cached product, so going back is instant. When the
+  settings change after a simulation, the studio says the picture is of the earlier settings. Sunlight is shown
+  before any simulation.
+- **Maps of simulated planets** (`world-settings.ts` `sim`, `commands.ts` createSimPlanet, setSimDefinition): a
+  round map of the planet's radius holding its definition (checked as given, with the reason when refused), drawn
+  with relief. Its land and sea at the moment shown come from the simulated history (`planet-engine.ts`
+  simTerrain): heights every 25 million years, youngest first, each relative to the sea of its moment, rasterised at
+  1024 × 512 in the workers and kept as the Earth's geological maps are (D134), blended between moments; the
+  timeline spans the history, today at the present (the map's date of the planet's present is the same as the
+  Earth's geological maps' present). Rivers are worked out from the heights as on generated planets (D99); comparing
+  two dates side by side compares two moments of the history; exports take each frame's moment. A note on the map
+  says how long ago the moment shown is and that the planet is simulated with simplified models (or how far its
+  history has got). The Natural Earth choice is hidden on these maps, as on the Earth through time.
+- **Detail and length.** Preview detail (about 240 km cells on an Earth-sized planet, the default) simulates 500
+  million years in about 4 s here; standard detail (110 km) is several times slower. The last `spanMyr` million
+  years are simulated (500 by default, 50 to 4,500; the definition's new `simulation.spanMyr`).
+- **Differences from the plan, and why.**
+  - *The picture is a flat map*, not the turning globe: the studio's own canvas is fast and shows every layer; the
+    globe (D127) shows the planet once it is a map.
+  - *Air and water are basic here*: the climate's own layers (temperature, rain, winds, currents) and steps 4 to 6
+    in full come with 14.10, after the climate (14.6, 14.7).
+  - *The history's checkpoints are not kept with the project*: the history is made again from the definition
+    when the project is opened (the same every time; the workers' cache keeps it while the app is open). Keeping its
+    pictures as project files is the way to skip that wait for large planets.
+  - *The diagrams* are the orbit over the habitable zone; the tilt and circulation diagrams come with the climate.
+- **Tests.** `planet-sim-map.test.ts` (a simulated planet's map: radius, definition kept, geological time; changed
+  with its radius and undone in one step; refusals with reasons; other maps have none; the span read back). The
+  workflows step "The Planet Studio": New map › simulated planet; a preset explained, its year and regime; the
+  planet moved farther out, colder, the slider explained, the orbit drawn; 200 million years simulated in workers;
+  relief today, then the plates, then the plates 200 million years ago (in their colours); used for a map whose
+  land and sea differ between today and 150 million years ago, the sea where the planet has it, the timeline over
+  the history; opened again with the map's settings; undone.
+
 ### D155. Landscape evolution: rivers, creep and sediment on the moving crust (Stage 14.4)
 
 - **Asked.** Stage 14.4: "drainage on the mesh, implicit stream-power incision with flexural isostatic rebound,

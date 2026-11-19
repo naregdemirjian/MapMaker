@@ -12,7 +12,8 @@ import {
 } from '../world-model/schema.ts';
 import { type Vec3, vecToLonLat, normalize } from '../geo-kernel/vec.ts';
 import { TopologyError, type PathStep } from '../geo-kernel/arrangement.ts';
-import { worldSettings, terrainSourceOf, EARTH_RADIUS_KM, type BasemapSource, type ShowSet, type ShowSettings } from '../world-model/world-settings.ts';
+import { worldSettings, terrainSourceOf, simOf, EARTH_RADIUS_KM, type BasemapSource, type ShowSet, type ShowSettings } from '../world-model/world-settings.ts';
+import { definitionOf, definitionProblems, canonicalDefinition, type PlanetDefinition } from '../planet/model/definition.ts';
 import { skyLookOf, type SkyLook } from '../space/sky-look.ts';
 import { terrainLookOf, DEFAULT_TERRAIN_LOOK, type TerrainLook } from '../terrain/look.ts';
 import { cleanSeaLevel, type SeaLevelPoint } from '../terrain/sea-level.ts';
@@ -134,6 +135,37 @@ export function createPlanet(world: World, name: string, radiusKm: number, param
     const space = tx.world.get('map_space', id)!;
     tx.update('map_space', { ...space, settings: JSON.stringify({ ...worldSettings(space), planet, terrain: terrainLookOf({ palette: preset.palette, relief: preset.relief }) }) });
     return id;
+  });
+}
+
+/**
+ * A simulated planet (D156): a round map of the planet's radius whose land and sea, mountains and sea floor at
+ * the moment shown come from the simulated history of its definition (the same every time), drawn with relief.
+ */
+export function createSimPlanet(world: World, name: string, definition: PlanetDefinition): CommandResult<string> {
+  // (Checked as given: reading it back would bring values into their ranges silently.)
+  const problems = definitionProblems(definition);
+  if (problems.length) throw new Error(problems[0]);
+  const def = definitionOf(definition);
+  if (!def) throw new Error('That is not a planet that can be simulated.');
+  return run(world, `Create planet "${name}"`, (tx) => {
+    const id = createWorldIn(tx, name, def.body.radiusKm, 'none');
+    const space = tx.world.get('map_space', id)!;
+    tx.update('map_space', { ...space, settings: JSON.stringify({ ...worldSettings(space), sim: { definition: canonicalDefinition({ ...def, name }) }, terrain: terrainLookOf({ palette: 'natural', relief: true, detail: false }) }) });
+    return id;
+  });
+}
+
+/** A simulated planet's definition changed (D156): its history is simulated again from it. */
+export function setSimDefinition(world: World, spaceId: string, definition: PlanetDefinition): CommandResult<void> {
+  const space = world.get('map_space', spaceId);
+  if (!space || !simOf(space)) throw new Error('Only a simulated planet has a definition.');
+  const problems = definitionProblems(definition);
+  if (problems.length) throw new Error(problems[0]);
+  const def = definitionOf(definition);
+  if (!def) throw new Error('That is not a planet that can be simulated.');
+  return run(world, `Change the planet "${space.name}"`, (tx) => {
+    tx.update('map_space', { ...space, radius_m: def.body.radiusKm * 1000, settings: JSON.stringify({ ...worldSettings(space), sim: { definition: canonicalDefinition(def) } }) });
   });
 }
 

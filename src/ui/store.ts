@@ -22,7 +22,10 @@ import { climateOf } from '../terrain/biomes.ts';
 import type { FieldSource } from '../domain/fields.ts';
 import type { DisasterId } from '../domain/disasters.ts';
 import type { SculptTool } from '../terrain/sculpt.ts';
-import { terrainSourceOf, planetOf, isPaleoEarth } from '../world-model/world-settings.ts';
+import { terrainSourceOf, planetOf, isGeologicalMap, simOf } from '../world-model/world-settings.ts';
+import { simTerrain, simParams } from './planet-engine.ts';
+import { keyOf as contentKey } from '../planet/state/hash.ts';
+import type { PlanetDefinition } from '../planet/model/definition.ts';
 import { MAIN_BRANCH, isBaseEvent, type MapSpaceRow } from '../world-model/schema.ts';
 import { DEFAULT_PERIOD, type PeriodSpec } from '../domain/history-view.ts';
 import { setAssetBase } from '../render-engine/assets.ts';
@@ -217,6 +220,9 @@ class AppStore {
    */
   historyPlay = { on: false, yearsPerSecond: 10, loop: false };
   dialog: string | null = null;
+  /** The Planet Studio (D156): the simulated planet's map it edits (null: a new planet), and a name to start with. */
+  studioSpaceId: string | null = null;
+  studioName = '';
   /** The event the last drawing went into, offered first for the next one (several border changes, one event). */
   lastPaintEvent: string | null = null;
   /** Event groups the timeline shows (null: every event). Remembered per project. */
@@ -386,6 +392,13 @@ class AppStore {
       const at = paleoGridAt(this.paleo, ageOf(t));
       return { grid: at.grid, key: at.key };
     }
+    // A simulated planet (D156): the heights of the moment shown, from its history.
+    if (source === 'sim') {
+      const def = simOf(space), sim = def ? this.simFor(def) : null;
+      if (!sim) return null;
+      const at = paleoGridAt(sim.set, ageOf(t));
+      return { grid: at.grid, key: `sim:${sim.key}:${at.key}` };
+    }
     if (source === 'earth') {
       if (!this.earthTerrain) this.needEarthTerrain();
       return this.earthTerrain ? { grid: this.earthTerrain, key: EARTH_TERRAIN_KEY } : null;
@@ -425,6 +438,26 @@ class AppStore {
   }
 
   /** Loads Earth's terrain unless it is there or on its way (everything is drawn again when it arrives). */
+  /** Simulated planets' land and sea through their histories (D156), by their definitions, made on first use. */
+  private sims = new Map<string, { set: PaleoSet; key: string } | 'making'>();
+  /** A simulated history being made: how far along (0 to 1), for the interface. */
+  simProgress: number | null = null;
+  /** A simulated planet's history, if it is ready (otherwise it is started, and everything drawn again when it is). */
+  simFor(def: PlanetDefinition): { set: PaleoSet; key: string } | null {
+    const k = contentKey({ def, params: simParams(def) });
+    const have = this.sims.get(k);
+    if (have && have !== 'making') return have;
+    if (!have) {
+      this.sims.set(k, 'making');
+      this.simProgress = 0;
+      simTerrain(def, { onProgress: (f) => { this.simProgress = f; this.notifyLive(); } }).then(
+        (r) => { this.sims.set(k, r); this.simProgress = null; this.notify(); },
+        (e: Error) => { this.sims.delete(k); this.simProgress = null; this.toast(e.message, 'error'); },
+      );
+    }
+    return null;
+  }
+
   /** The maps of the Earth through geological time (D134), once loaded. */
   paleo: PaleoSet | null = null;
   private paleoLoading = false;
@@ -770,18 +803,20 @@ class AppStore {
   timeDraggedAt = -Infinity;
   setTime(t: Instant, live = false) { this.time = t; if (live) { this.timeDraggedAt = performance.now(); this.notifyLive(); } else this.notify(); }
 
-  /** After the map shown changed: the timeline fitted again when the Earth through geological time comes or goes (D134). */
+  /** After the map shown changed: the timeline fitted again when geological time (D134, D156) comes or goes. */
   mapChanged(before: string): void {
-    const was = isPaleoEarth(this.world?.get('map_space', before)), now = isPaleoEarth(this.world?.get('map_space', this.spaceId));
-    if (was !== now) { this.fitTimeline(); this.notify(); }
+    const was = isGeologicalMap(this.world?.get('map_space', before)), now = isGeologicalMap(this.world?.get('map_space', this.spaceId));
+    if (was !== now || (now && before !== this.spaceId)) { this.fitTimeline(); this.notify(); }
   }
 
   fitTimeline() {
     if (!this.world) return;
-    // The Earth through geological time (D134): all of its span, with the events in it.
-    if (isPaleoEarth(this.world.get('map_space', this.spaceId))) {
+    // The Earth through geological time (D134), or a simulated planet's history (D156): all of its span, with the events in it.
+    const here = this.world.get('map_space', this.spaceId);
+    if (isGeologicalMap(here)) {
+      const sim = simOf(here), span = sim ? (simParams(sim).durationMyr ?? 500) * 1e6 : 540e6;
       const years = this.world.all('event').filter((e) => !isBaseEvent(e.id)).map((e) => e.start_day / 365.2425 + 1970);
-      this.timeline = { start: Math.min(PRESENT_YEAR - 545e6, ...years), end: Math.max(PRESENT_YEAR + 50, ...years) };
+      this.timeline = { start: Math.min(PRESENT_YEAR - span * 1.01 - 5e6, ...years), end: Math.max(PRESENT_YEAR + 50, ...years) };
       return;
     }
     const ys = this.world.all('event').filter((e) => !isBaseEvent(e.id)).flatMap((e) => {

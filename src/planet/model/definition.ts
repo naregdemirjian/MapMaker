@@ -148,7 +148,8 @@ export interface PlanetDefinition {
   water: WaterSpec;
   history: HistorySpec;
   life: LifeSpec;
-  simulation: { quality: 'preview' | 'standard' | 'high' };
+  /** How finely and how much of its history is simulated: the last `spanMyr` million years (default 500). */
+  simulation: { quality: 'preview' | 'standard' | 'high'; spanMyr?: number };
 }
 
 /** The limits of every number (and whether it is whole). */
@@ -160,7 +161,7 @@ const LIMITS = {
   'tectonics.plates': [2, 40], 'tectonics.activity': [0, 4], 'tectonics.continentalFraction': [0, 1], 'tectonics.hotspots': [0, 60],
   'atmosphere.pressureBar': [0, 300], 'atmosphere.co2': [0, 1], 'atmosphere.ch4': [0, 1], 'atmosphere.o2': [0, 1], 'atmosphere.ar': [0, 1],
   'atmosphere.clouds': [0, 1], 'atmosphere.cloudAlbedo': [0, 1],
-  'water.oceanFraction': [0, 1], 'history.ageGyr': [0.05, 13],
+  'water.oceanFraction': [0, 1], 'history.ageGyr': [0.05, 13], 'simulation.spanMyr': [50, 4500],
 } as const;
 
 const EARTH: Omit<PlanetDefinition, 'name' | 'seed' | 'preset'> = {
@@ -174,7 +175,7 @@ const EARTH: Omit<PlanetDefinition, 'name' | 'seed' | 'preset'> = {
   water: { oceanFraction: 0.71 },
   history: { ageGyr: 4.54, events: [] },
   life: { biomeSet: 'earth', vegetation: 'earth', customBiomes: [] },
-  simulation: { quality: 'standard' },
+  simulation: { quality: 'preview' },
 };
 
 type Patch = { [K in keyof typeof EARTH]?: Partial<(typeof EARTH)[K]> };
@@ -303,6 +304,7 @@ export function definitionProblems(d: PlanetDefinition): string[] {
   check('atmosphere.cloudAlbedo', a.cloudAlbedo, 'The clouds\' brightness');
   check('water.oceanFraction', d.water.oceanFraction, 'The ocean share');
   check('history.ageGyr', d.history.ageGyr, 'The age (billion years)');
+  check('simulation.spanMyr', d.simulation.spanMyr, 'The span simulated (million years)');
   for (const e of d.history.events) {
     if (!(e.startMa >= 0 && e.startMa <= d.history.ageGyr * 1000)) out.push(`The event "${e.note ?? e.kind}" must begin within the planet's history.`);
     if (!(e.durationMyr >= 0)) out.push(`The event "${e.note ?? e.kind}" cannot last less than nothing.`);
@@ -375,6 +377,7 @@ export function definitionOf(raw: unknown): PlanetDefinition | null {
     }));
   }
   if (isObj(raw.simulation) && (raw.simulation.quality === 'preview' || raw.simulation.quality === 'standard' || raw.simulation.quality === 'high')) out.simulation.quality = raw.simulation.quality;
+  if (isObj(raw.simulation) && num(raw.simulation.spanMyr) !== undefined) out.simulation.spanMyr = num(raw.simulation.spanMyr);
   // Out-of-range values are brought within their limits rather than refused, so an old or hand-edited file opens.
   const fit = (v: number, path: keyof typeof LIMITS) => Math.min(LIMITS[path][1], Math.max(LIMITS[path][0], v));
   out.orbit.semiMajorAu = fit(out.orbit.semiMajorAu, 'orbit.semiMajorAu');

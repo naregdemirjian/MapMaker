@@ -3,6 +3,7 @@ import type { MapSpaceRow } from './schema.ts';
 import { terrainLookOf, type TerrainLook } from '../terrain/look.ts';
 import { cleanSeaLevel, type SeaLevelPoint } from '../terrain/sea-level.ts';
 import { planetParamsOf, type PlanetParams } from '../terrain/planet.ts';
+import { definitionOf, type PlanetDefinition } from '../planet/model/definition.ts';
 import { cleanStamps, type TerrainStamp } from '../terrain/sculpt.ts';
 import { skyLookOf, type SkyLook } from '../space/sky-look.ts';
 import { calendarOf, calendarProblems, gregorian, type Calendar, type CalendarDef } from '../core-time/index.ts';
@@ -40,6 +41,8 @@ export interface WorldSettings {
   sculpt?: TerrainStamp[];
   /** The Earth through geological time (D134): its land and sea at the moment shown, from the PALEOMAP PaleoDEMs. */
   paleo?: boolean;
+  /** A simulated planet (D156): its definition; its land and sea at the moment shown come from its simulated history. */
+  sim?: { definition: unknown };
   /** The world's own calendar (D149); absent: the Gregorian. */
   calendar?: CalendarDef;
 }
@@ -89,16 +92,29 @@ export function basemapSourceOf(space: Pick<MapSpaceRow, 'settings' | 'radius_m'
  * The terrain a world has: Earth's elevation for worlds showing Earth's geography (D95), its own for a
  * generated planet (D97); none otherwise.
  */
-export function terrainSourceOf(space: Pick<MapSpaceRow, 'settings' | 'radius_m' | 'kind'> | null | undefined): 'earth' | 'planet' | 'paleo' | null {
+export function terrainSourceOf(space: Pick<MapSpaceRow, 'settings' | 'radius_m' | 'kind'> | null | undefined): 'earth' | 'planet' | 'paleo' | 'sim' | null {
   if (!space || space.kind === 'plane') return null;
   // (The Earth through geological time, D134: its land and sea at the moment shown.)
   if (worldSettings(space).paleo === true && space.kind === 'sphere') return 'paleo';
+  // (A simulated planet, D156: its own history.)
+  if (space.kind === 'sphere' && definitionOf(worldSettings(space).sim?.definition)) return 'sim';
   if (basemapSourceOf(space) === 'natural-earth') return 'earth';
   return planetParamsOf(worldSettings(space).planet) ? 'planet' : null;
 }
 
 /** Whether a map is the Earth through geological time (D134). */
 export const isPaleoEarth = (space: Pick<MapSpaceRow, 'settings' | 'radius_m' | 'kind'> | null | undefined): boolean => terrainSourceOf(space) === 'paleo';
+
+/** A simulated planet's definition (D156), or null. */
+export function simOf(space: Pick<MapSpaceRow, 'settings' | 'radius_m' | 'kind'> | null | undefined): PlanetDefinition | null {
+  return space && terrainSourceOf(space) === 'sim' ? definitionOf(worldSettings(space).sim?.definition) : null;
+}
+
+/** Whether a map's time is geological time (the Earth's, D134, or a simulated planet's, D156): its land and sea change with the date. */
+export const isGeologicalMap = (space: Pick<MapSpaceRow, 'settings' | 'radius_m' | 'kind'> | null | undefined): boolean => {
+  const s = terrainSourceOf(space);
+  return s === 'paleo' || s === 'sim';
+};
 
 /** A generated planet's settings (D97), or null. */
 export function planetOf(space: Pick<MapSpaceRow, 'settings' | 'radius_m' | 'kind'> | null | undefined): PlanetParams | null {

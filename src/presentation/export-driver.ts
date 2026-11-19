@@ -17,7 +17,8 @@ import { eventShown, entityStyle } from '../domain/commands.ts';
 import { isFeatureKind } from '../render-engine/feature-style.ts';
 import { preloadImages, prepareVideos } from '../render-engine/assets.ts';
 import { basemapSourceOf, loadBasemap, loadBasemapDetail, loadDatasetRecords, DEFAULT_BASEMAP_STYLE, type Basemap, type BasemapStyle } from '../render-engine/basemap.ts';
-import { shown, minLakeKm2, terrainLook, seaLevelPoints, planetOf, sculptOf, terrainSourceOf, isSpaceMap, spaceSettingsOf, isPaleoEarth, calendarOfSpace } from '../world-model/world-settings.ts';
+import { shown, minLakeKm2, terrainLook, seaLevelPoints, planetOf, sculptOf, terrainSourceOf, isSpaceMap, spaceSettingsOf, isPaleoEarth, calendarOfSpace, simOf } from '../world-model/world-settings.ts';
+import { simTerrain } from '../ui/planet-engine.ts';
 import { makeSpaceView } from '../space/space-view.ts';
 import { SpaceRenderer } from '../space/space-renderer.ts';
 import { loadNearbyStars } from '../space/catalogue.ts';
@@ -186,7 +187,7 @@ export async function basemapFor(world: World, spaceId: string): Promise<Basemap
 }
 
 /** Terrain heights and a name for them (for what pictures of them are kept by); Earth's land cover when the look needs it (D100). */
-export interface Ground { grid: ElevationGrid; key: string; cover?: TerrainCover | null; paleo?: PaleoSet }
+export interface Ground { grid: ElevationGrid; key: string; cover?: TerrainCover | null; paleo?: PaleoSet; /** A simulated planet's history (D156): the key its pictures are kept by. */ sim?: string }
 
 /**
  * The terrain a shot's world needs in exports, or null: a generated planet's always (D97, made on
@@ -199,6 +200,9 @@ export async function terrainFor(world: World, spaceId: string, shot: ShotSettin
   if (planet) return { grid: await planetTerrain(planet), key: planetKey(planet) };
   // (The Earth through geological time, D134: each frame takes the heights of its moment, see frameSetup.)
   if (isPaleoEarth(space)) { const p = await loadPaleo(); return { grid: p.grids[0], key: paleoGridAt(p, 0).key, paleo: p }; }
+  // A simulated planet (D156): its history, made in workers (or reused), each frame taking its moment's heights.
+  const sim = simOf(space);
+  if (sim) { const r = await simTerrain(sim); return { grid: r.set.grids[0], key: `sim:${r.key}:${paleoGridAt(r.set, 0).key}`, paleo: r.set, sim: r.key }; }
   const look = terrainLook(space), shownLook = !!look && shown(space, 'export', 'terrain');
   // (Conditions spreading over the terrain need its heights too, D103.)
   const fields = world.all('layer').some((l) => l.kind === 'field' && l.space_id === spaceId);
@@ -260,8 +264,10 @@ export function frameSetup(world: World, shot: ShotSettings, frame: number, def:
   const view = makeView(cameraAt(shot, frame), width, height);
   // The Earth through geological time (D134): the heights of the frame's moment, and the sea of the last glacial cycle.
   const paleo = ground?.paleo ? paleoGridAt(ground.paleo, ageOf(t)) : null;
-  if (paleo && ground) ground = { grid: paleo.grid, key: paleo.key };
-  const glacial = paleo ? glacialSeaAt(ageOf(t)) : 0;
+  const simKey = ground?.sim;
+  if (paleo && ground) ground = { grid: paleo.grid, key: simKey ? `sim:${simKey}:${paleo.key}` : paleo.key };
+  // (The seas of the ice ages are the Earth's; a simulated planet's sea is in its own heights.)
+  const glacial = paleo && !simKey ? glacialSeaAt(ageOf(t)) : 0;
   // What the map shows in exports (D84), on top of the shot's own choices.
   const on = (k: Parameters<typeof shown>[2]) => shown(space, 'export', k);
   const labels = !!shot.labels && on('names'), cities = shot.cities !== false && on('cities');
@@ -271,7 +277,7 @@ export function frameSetup(world: World, shot: ShotSettings, frame: number, def:
   const strokes = stampsAt(sculptOf(space), t);
   const fieldsHere = world.all('layer').some((l) => l.kind === 'field' && l.space_id === shot.spaceId);
   const carved = ground && (terrainShown || seaPoints.length || planetOf(space) || paleo || strokes.length || fieldsHere || frontsMindLand(world, shotTransitions(shot))) ? sculpted(ground.grid, ground.key, strokes, (space?.radius_m ?? 6371008.8) / 1000) : null;
-  const rivers = carved && planetOf(space) && on('rivers') ? riversNow(carved.grid, carved.key) : null;
+  const rivers = carved && (planetOf(space) || simKey) && on('rivers') ? riversNow(carved.grid, carved.key) : null;
   // The land's colours in the satellite look (D100): Earth's land cover, or the planet's biomes.
   const planet = planetOf(space);
   const cover = carved && terrainShown && PALETTES[look.palette].cover ? (planet ? coverNow(carved.grid, carved.key, (space?.radius_m ?? 6371008.8) / 1000, climateOf(planet)) : ground?.cover ?? null) : null;
