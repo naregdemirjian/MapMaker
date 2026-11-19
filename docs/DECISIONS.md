@@ -61,6 +61,40 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D136. Fronts that follow the land
+
+- **Asked.** Transitions of borders are among the most important parts of the whole software: overhaul them to a
+  professional standard, simple to use, clean by default, intense when wanted, and above all working out the borders
+  and the borders round them so that they never get in the way.
+- **Found.** An advancing front reached every place within a straight-line distance of the border it started from
+  (D33): through a U-shaped territory taken from the tip of one arm, it jumped the gap and coloured the other arm's
+  tip before it had gone down the first arm; it crossed bays and lakes the same way. An expansion was a circle,
+  whatever the land's shape.
+- **What.** A front now travels through the land itself (`front-field.ts`). For each change, once, a field of
+  arrival times is worked out on a grid in longitude and latitude over it (160 cells across its longer side, so
+  the same whatever the camera does), by the fast marching method: from where the front starts, outward through
+  the cells of the change only, each reached at the earliest time a front could get there; parts of the change cut
+  off from the rest (islands) are reached from the nearest land already taken, as the front would cross the water.
+  Times are scaled so that the last place is reached at 1, and carried a few cells beyond the change so that its
+  own edges stay exact. At any moment the land reached is traced as smooth closed lines (marching squares, the
+  corners rounded), projected like any other shape, and handed to the drawing as before: the new owner's colour
+  within it, borders inside and outside it (D9, D126), the moving border and its highlight along its edge.
+- **Where a front starts** (`front-source.ts`), worked out from the parcels round the change: from the border it
+  shares with the new owner's land as it was; failing that (the owner's land across the sea or beyond another
+  country), as a straight front from the side facing the owner's nearest land; a country that held no land before
+  grows from the middle (the place farthest from every edge, not the centroid, which may lie outside); land given up
+  to nobody is let go from its outer edges inward, toward what its old owners keep; an expansion from the points it
+  was drawn from (several at once still close on the middle, D91), or the middle.
+- **Measured.** A change of 160 by 162 cells: its field in 20 to 45 ms, once; its line at a moment in under 1 ms.
+- **Tested.** front-field: a U taken from the tip of one arm: down it, along the bottom, up the other, later all
+  the way, half way at the bottom's middle, about 40.5 degrees travelled round the inside corners; from a straight
+  border each place when its distance says; the land reached as closed clockwise lines holding what is reached and
+  not the gap, all of it at the end; an island reached after the shore facing it, its far corner last; pincers
+  meeting in the middle; from the middle; from the side facing a place across the sea; across the 180th meridian;
+  a band round the planet refused; quick enough. render-compare: the reference renderer draws fronts the same way;
+  the zigzag front still at one distance from where it started (within 6 px of 120), no old border behind it, no
+  seam, no border where two changes meet before a front gets there.
+
 ### D135. Continents slide between the maps of geological time
 
 - **Why.** With the maps of D134 blended in place, a continent moving between two maps 5 million years apart

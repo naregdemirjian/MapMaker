@@ -24,6 +24,8 @@ import { BasemapPainter, landMaskOf, visibleBounds, type Basemap, type LandMask 
 import { planeShape, placeLabel, lineChoices, textWidthEm, blockHeightEm, LINE_HEIGHT, type PlaneShape } from '../../src/render-engine/label-place.ts';
 import { resolveLabelStyle, resolvePointStyle, labelSize, labelFont, labelText, type LabelStyle, type CountryLabel } from '../../src/render-engine/label-style.ts';
 import { imageNow, videoNow, drawImageFit, type MediaChannel } from '../../src/render-engine/assets.ts';
+import { buildFrontField, frontRings } from '../../src/render-engine/front-field.ts';
+import { frontSourceOf } from '../../src/render-engine/front-source.ts';
 
 type LabelEntity = { name: string; style?: string; color?: string; type_id?: string };
 
@@ -507,6 +509,19 @@ export class MapRenderer {
     for (const g of groups.values()) {
       if (!g.advance || g.progress <= 0) continue;
       if (g.spec.style === 'wipe') { g.disc = this.wipeShape(view, arr, g); continue; }
+      // Fronts that follow the land (D136), as the renderer has them.
+      const changing = g.faces.filter((_, i) => (g.states[i].transition!.from ?? '') !== (g.states[i].value ?? ''));
+      const src = changing.length ? frontSourceOf(arr, changing, g.a.value, g.spec, g.spec.style === 'advance' ? 'advance' : 'border', states) : null;
+      const field = src ? buildFrontField(src.rings, src.source, { roughness: 0, seed: 0 }) : null;
+      if (field) {
+        const rings = frontRings(field, g.progress);
+        if (rings.length) {
+          const polys = rings.map((r) => (geoArea({ type: 'Polygon', coordinates: [r] }) > 2 * Math.PI ? [r.slice().reverse()] : [r]));
+          g.disc = new Path2D(geoPath(view.projection)({ type: 'MultiPolygon', coordinates: polys }) ?? '');
+          g.discRule = 'evenodd';
+        }
+        continue;
+      }
       if (g.spec.style === 'border') {
         const bf = this.borderFront(view, arr, g, states);
         if (bf) {

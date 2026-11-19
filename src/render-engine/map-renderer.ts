@@ -14,6 +14,8 @@ import { parseJSON, slerpLonLat } from '../temporal-engine/engine.ts';
 import { type Instant, compare, diffMs } from '../core-time/index.ts';
 import { BASE_EVENT_ID } from '../world-model/schema.ts';
 import type { Vec3 } from '../geo-kernel/vec.ts';
+import { buildFrontField, frontRings, type FrontField } from './front-field.ts';
+import { frontSourceOf } from './front-source.ts';
 import { screenToLonLat, meridianOf, makeView, FLAT_EXTENT_DEG, type View, type Camera } from './camera.ts';
 import type { Arrangement } from '../geo-kernel/arrangement.ts';
 import { BasemapPainter, chooseScale, landMaskOf, visibleBounds, boxIntersects, drawRiverLines, DEFAULT_BASEMAP_STYLE, type Basemap, type BasemapStyle, type LandMask, type RiverSet } from './basemap.ts';
@@ -363,6 +365,8 @@ interface TransitionGroup {
   discRule: CanvasFillRule;
   /** For a front from a border: the reach builder, to draw the front line as a band. */
   border: BorderFront | null;
+  /** A front that follows the land (D136): its field of arrival times. */
+  field?: FrontField | null;
   /** All the parcels of the change, and those changing owner (null: none of it is on the sheet). */
   region: Shape | null;
   changing: Shape | null;
@@ -2840,7 +2844,7 @@ export class MapRenderer {
   }
 
   /** The animated changes at this moment: the parcels of each (from the snapshot) and how far each has come. */
-  private transitionGroups(view: View, sheet: Sheet, sp: SheetParcels, arr: Arrangement, snap: LayerSnap, states: Map<number, FaceState>): { groups: Map<string, TransitionGroup>; of: Map<number, TransitionGroup> } {
+  private transitionGroups(view: View, sheet: Sheet, sp: SheetParcels, arr: Arrangement, snap: LayerSnap, states: Map<number, FaceState>, look: FrontLookOptions = NO_FRONT_LOOK): { groups: Map<string, TransitionGroup>; of: Map<number, TransitionGroup> } {
     const groups = new Map<string, TransitionGroup>(), of = new Map<number, TransitionGroup>();
     for (const cg of snap.groups.values()) {
       const st = states.get(cg.region.faces[0])!;
@@ -2855,11 +2859,18 @@ export class MapRenderer {
       groups.set(cg.id, g);
       for (const f of cg.region.faces) of.set(f, g);
     }
-    // The area each moving front has reached: grown from the border with the new owner's land, a
-    // circle from its origin, or a straight wipe (older shots).
+    // The area each moving front has reached: through the land from where it starts (D136); failing that, grown
+    // from the border with the new owner's land, a circle from its origin, or a straight wipe (older shots).
     for (const g of groups.values()) {
       if (!g.advance || g.progress <= 0) continue;
       if (g.spec.style === 'wipe') { g.disc = this.wipeShape(view, arr, g); continue; }
+      const field = this.frontField(arr, g, states, look);
+      if (field) {
+        g.field = field;
+        g.disc = this.reachedPath(view, field, g.progress);
+        g.discRule = 'evenodd';
+        continue;
+      }
       if (g.spec.style === 'border') {
         const bf = this.borderFront(view, arr, g, states);
         if (bf) {
@@ -2882,6 +2893,37 @@ export class MapRenderer {
       if (centres.length > 1) g.discRule = 'nonzero';
     }
     return { groups, of };
+  }
+
+  private fieldCache = new Map<string, FrontField | null>();
+
+  /**
+   * The field of a moving front (D136): worked out once for the change (kept while it is under way), from
+   * where its front starts (front-source.ts). Null when the change cannot have one (round the whole planet).
+   */
+  private frontField(arr: Arrangement, g: TransitionGroup, states: Map<number, FaceState>, look: FrontLookOptions): FrontField | null {
+    const changing = g.changingFaces;
+    if (!changing.length) return null;
+    const kind = g.spec.style === 'advance' ? 'advance' : 'border';
+    const origins = kind === 'advance' ? JSON.stringify(g.spec.origins ?? g.spec.origin ?? null) : '';
+    const key = `${arr.spaceId}|${arr.revision}|${g.a.effectId}|${g.a.value}|${kind}|${origins}|${changing.length}|${changing[0]}|${changing[changing.length - 1]}|${look.roughness}`;
+    let f = this.fieldCache.get(key);
+    if (f === undefined) {
+      const src = frontSourceOf(arr, changing, g.a.value, g.spec, kind, states);
+      f = src ? buildFrontField(src.rings, src.source, { roughness: look.roughness, seed: seedOf(g.a.effectId) }) : null;
+      if (this.fieldCache.size > 96) this.fieldCache.delete(this.fieldCache.keys().next().value!);
+      this.fieldCache.set(key, f);
+    }
+    return f;
+  }
+
+  /** The land a front has reached by `level` (0 to 1) on screen: its closed lines, filled by the even-odd rule; null when none. */
+  private reachedPath(view: View, f: FrontField, level: number): Path2D | null {
+    const rings = frontRings(f, level);
+    if (!rings.length) return null;
+    // (d3 wants each line round the land it holds on its right: one the other way round would hold the whole planet.)
+    const polys = rings.map((r) => (geoArea({ type: 'Polygon', coordinates: [r] }) > 2 * Math.PI ? [r.slice().reverse()] : [r]));
+    return new Path2D(geoPath(view.projection)({ type: 'MultiPolygon', coordinates: polys }) ?? '');
   }
 
   private reachCache = new Map<string, { origin: Vec3; maxDist: number }>();
@@ -4668,6 +4710,17 @@ const MEASURE_AT = 100;
 
 /** An advancing front from a border: how far it must travel, and the area reached at a distance. */
 interface BorderFront { maxDist: number; reach: (r: number) => Path2D }
+
+/** How a shot's fronts look (D136): how ragged they are. */
+export interface FrontLookOptions { roughness: number }
+const NO_FRONT_LOOK: FrontLookOptions = { roughness: 0 };
+
+/** A number from a change's id, seeding its front's pattern. */
+function seedOf(id: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 16777619);
+  return h >>> 0;
+}
 
 function segDist(x: number, y: number, ax: number, ay: number, bx: number, by: number): number {
   const dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy;
