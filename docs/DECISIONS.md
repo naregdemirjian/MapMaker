@@ -61,6 +61,51 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D151. Stage 13's refinements: tidying unused borders, a shot's sound track, and what was not built
+
+- **Asked.** The rest of Stage 13: "the faster GPU projection method; optional reference renderer; audio reference
+  track; optimisation; long-term maintenance tools such as tidying unused parcel edges."
+- **Tidying unused borders** (`geo-kernel/arrangement.ts` mergeUnreferenced, command `tidyParcels`, History Health
+  › Upkeep › "Tidy this map"). Every border ever drawn cuts the parcels it crosses for good, also when the change
+  that drew it is deleted or drawn over (D15): on a long project such borders pile up and every redraw pays for
+  them. A piece of a parcel inherits its parent's history, so a piece no change refers to is held exactly as its
+  parent is, in every layer, at every moment, in every branch and every version of an event. Where every piece of
+  a parcel is undivided and referred to by nothing, the borders between them are taken away and the parcel is
+  undivided again, then the same is asked of its own parent; points no border runs through any more go too. No
+  change refers to anything that goes, so history is untouched (the row changes are those an undo of the
+  dividing strokes would make). One step to undo.
+- **A shot's sound** ("Sound" in the shot's settings): music or a narration the shot is timed to. Sound files
+  (MP3, WAV, OGG, M4A, AAC, FLAC) are kept with the project like pictures. While the shot plays in the preview
+  the track is heard from the frame played from, and its clock moves the frames, so picture and sound stay
+  together; its waveform is drawn under the frames, with the frame shown. The second of the track heard at the
+  first frame and its volume are set in the shot. Every export writes a copy beside the frames
+  (`audio-reference.<ext>`), named in the manifest with the second heard at the first frame written, and the
+  guide says how to line it up.
+- **Differences from the plan, and why.**
+  - *The sound is not mixed into exported videos*: it is a reference for timing, and the film's sound is made in
+    the editor. (Way back: the browser's audio encoder, Opus into WebM and AAC into MP4, with the muxers of D121.)
+  - *The faster GPU projection method* was not built. The Canvas renderer projects shapes once for a window
+    around the view and moves them by a transform (sheets, D49), in blocks (D50), and redraws only what changed
+    (D54, D140); terrain, fields and the photographed Earth are drawn by the graphics card (D95, D102, D138). The
+    measurements (DEVELOPMENT, Performance) are within a frame or two of 60 a second for moving, zooming and
+    stepping the date; what is still slow is redrawing whole projects at once (dragging the timeline 25 years a
+    frame on the heavy project), which projection on the graphics card would not change, since the time goes to
+    working out history and filling shapes. (Way back: the sheets' transform is the place to hand projection to a
+    shader.)
+  - *The optional reference renderer* exists as the reference the interface tests compare the renderer with
+    (`e2e/render-compare`, 35 scenes): the earlier, simpler renderer, kept for that.
+  - *Optimisation* went on through the stages (D136 to D147: fronts at scale, partial redraws, even dissolves);
+    this stage's own: an engine per timeline, following edits change by change, and revisions that are never the
+    same for two engines (D150).
+- **Tests.** `tidy.test.ts` (borders left by four deleted events taken away while a branch's event and an
+  inactive alternative version keep theirs; the main timeline and the branch the same at a grid of places at six
+  dates; a valid parcel map; nothing left the second time; undo bringing back every row; three random histories
+  with half their events deleted, tidied and compared, followed change by change against a fresh compile);
+  `storage.test.ts` (the track copied beside the frames, the manifest and guide naming it, sound files accepted,
+  only the project's own files copied); `e2e/workflows` 'Upkeep and sound' (a deleted event's borders tidied away
+  with the owners of a dozen places at three dates unchanged, undone; a sound file chosen for a shot, its
+  waveform drawn, its offset set, a preview exported with the track beside it).
+
 ### D150. Branches: alternative timelines (Stage 13)
 
 - **Asked.** Stage 13 of the approved plan: "full alternative timelines with side-by-side comparison". "A branch

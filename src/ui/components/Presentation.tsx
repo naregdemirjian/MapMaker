@@ -20,6 +20,8 @@ import { currentShot } from './MapView.tsx';
 import { TransitionLookControls } from './TransitionLook.tsx';
 import { isBaseEvent, MAIN_BRANCH } from '../../world-model/schema.ts';
 import { branchTree, branchName } from '../../temporal-engine/branches.ts';
+import { audioPlayer, audioPeaks, drawWaveform } from '../audio-track.ts';
+import type { ShotAudio } from '../../presentation/sequence.ts';
 
 function saveShot(id: string, next: ShotSettings) {
   store.execute((w) => cmd.updateSequence(w, id, { settings: next }));
@@ -219,6 +221,22 @@ export function ShotEditor() {
             <option value="linear">Even</option><option value="smooth">Ease in and out</option>
           </select></label>
           <label>Screen time (seconds)<NumberField min={0.1} max={3600} step={0.5} value={Number(seconds.toFixed(3))} onCommit={(n) => setFrames(shot.fps, n)} testId="shot-seconds" /></label>
+        </Group>
+        <Group title="Sound" open={!!shot.audio}>
+          <p className="muted small-text">Music or a narration to time the shot to (D151): heard while the shot plays here, its waveform under the frames, a copy written beside every export to line up in your editor. It is not mixed into exported videos.</p>
+          {shot.audio ? <>
+            <div className="row-inline"><span data-testid="shot-audio-name">♪ {shot.audio.name}</span>
+              <button className="small" onClick={() => update({ audio: undefined })} data-testid="shot-audio-remove">Remove</button></div>
+            <label title="The second of the track heard at the shot's first frame">Track second at the first frame<NumberField min={0} max={36000} step={0.1} value={shot.audio.offset} onCommit={(n) => update({ audio: { ...shot.audio!, offset: Math.max(0, n) } })} testId="shot-audio-offset" /></label>
+            <label>Volume (%)<span className="row-inline amount"><input type="range" min={0} max={100} step={5} value={Math.round(shot.audio.volume * 100)} onChange={(e) => update({ audio: { ...shot.audio!, volume: Number(e.target.value) / 100 } })} data-testid="shot-audio-volume" /><span className="muted amount-value">{Math.round(shot.audio.volume * 100)}</span></span></label>
+          </> : (
+            <label className="file-button">Choose a sound file…<input type="file" accept="audio/*,.mp3,.wav,.ogg,.m4a,.aac,.flac,.opus" data-testid="shot-audio-file" onChange={async (e) => {
+              const file = e.target.files?.[0];
+              e.target.value = '';
+              if (!file) return;
+              try { const a = await Api.uploadAsset(s.projectId!, file); update({ audio: { asset: a.file, name: file.name, offset: 0, volume: 0.8 } }); } catch (err) { s.toast((err as Error).message, 'error'); }
+            }} /></label>
+          )}
         </Group>
         <Group title="Camera">
           <p className="muted">Drag and scroll the preview to frame the shot. The view stays still for the whole shot.</p>
@@ -556,14 +574,28 @@ export function ShotTimeline() {
     if (!s.playing || !shot) return;
     const startWall = performance.now();
     const startFrame = s.shotFrame >= shot.frames - 1 ? 0 : s.shotFrame;
+    // The audio reference track (D151), heard from the frame the shot plays from; while it sounds, its own
+    // clock moves the frames, so picture and sound stay together.
+    const au = shot.audio ? audioPlayer(shot.audio.asset) : null;
+    let heard = false;
+    if (au && shot.audio) {
+      const at = shot.audio.offset + startFrame / shot.fps;
+      au.volume = Math.max(0, Math.min(1, shot.audio.volume));
+      if (at >= 0 && (!Number.isFinite(au.duration) || at < au.duration)) {
+        au.currentTime = at;
+        au.play().then(() => { heard = true; }, () => undefined);
+      }
+    }
     const tick = () => {
-      const f = startFrame + Math.floor(((performance.now() - startWall) / 1000) * shot.fps);
+      const f = au && heard && !au.paused && shot.audio
+        ? Math.floor((au.currentTime - shot.audio.offset) * shot.fps)
+        : startFrame + Math.floor(((performance.now() - startWall) / 1000) * shot.fps);
       if (f >= shot.frames - 1) { store.set({ shotFrame: shot.frames - 1, playing: false, presentCamera: null }); return; }
-      store.setLive({ shotFrame: f, presentCamera: null });
+      store.setLive({ shotFrame: Math.max(startFrame, f), presentCamera: null });
       raf.current = requestAnimationFrame(tick);
     };
     raf.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf.current);
+    return () => { cancelAnimationFrame(raf.current); au?.pause(); };
   }, [s.playing, s.shotId]);
   if (!shot) return <div className="timeline shot-timeline"><div className="muted pad">No shot selected.</div></div>;
   const t = timeAt(shot, s.shotFrame);
@@ -576,9 +608,22 @@ export function ShotTimeline() {
         <button onClick={() => s.set({ shotFrame: shot.frames - 1, presentCamera: null, playing: false })}>⏭</button>
         <span className="frame-info" data-testid="frame-info">Frame {s.shotFrame + 1} / {shot.frames} · {(s.shotFrame / shot.fps).toFixed(2)} s · <b>{calendarOfSpace(s.world?.get('map_space', shot.spaceId)).format(t, 'minute')}</b></span>
       </div>
+      {shot.audio && <Waveform audio={shot.audio} seconds={shot.frames / shot.fps} at={s.shotFrame / shot.fps} />}
     </div>
   );
 }
 
+/** The audio reference track under the frames (D151): the part of it the shot covers, where the frame shown is. */
+function Waveform({ audio, seconds, at }: { audio: ShotAudio; seconds: number; at: number }) {
+  const ref = useRef<HTMLCanvasElement | null>(null);
+  const [wave, setWave] = useState<{ duration: number; data: Float32Array } | null | undefined>(undefined);
+  useEffect(() => { let live = true; setWave(undefined); audioPeaks(audio.asset).then((w) => { if (live) setWave(w); }); return () => { live = false; }; }, [audio.asset]);
+  useEffect(() => { if (ref.current && wave) drawWaveform(ref.current, wave, audio.offset, seconds, audio.offset + at); }, [wave, audio.offset, seconds, at]);
+  return (
+    <div className="shot-waveform" data-testid="shot-waveform" title={`${audio.name}: from ${audio.offset.toFixed(2)} s of it at the first frame`}>
+      {wave === null ? <span className="muted">The sound of "{audio.name}" could not be read here; it still goes beside the exports.</span> : <canvas ref={ref} />}
+    </div>
+  );
+}
 
 export { compare };

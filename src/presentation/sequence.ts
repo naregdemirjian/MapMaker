@@ -95,8 +95,22 @@ export function textBoxState(shot: ShotSettings, box: TextBox, frame: number, t:
   return { enter: k(screenSecondsSince(shot, frame, from)), exit: to ? k(-screenSecondsSince(shot, frame, to)) : 1 };
 }
 
+/** A shot's audio reference track (D151): see ui/audio-track.ts. */
+export interface ShotAudio {
+  /** The project's asset file (content hash + extension). */
+  asset: string;
+  /** The file's own name, as chosen. */
+  name: string;
+  /** The second of the track heard at the shot's first frame. */
+  offset: number;
+  /** 0 to 1. */
+  volume: number;
+}
+
 export interface ShotSettings {
   spaceId: string;
+  /** Music or a narration the shot is timed to (D151): heard while it plays here, copied beside its exports. */
+  audio?: ShotAudio;
   /** The timeline the shot shows (D150): a branch's id; absent (or a branch no longer there): the main timeline. */
   branch?: string;
   width: number; height: number; fps: number; frames: number;

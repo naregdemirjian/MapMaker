@@ -376,6 +376,8 @@ export async function runExport(o: {
     ...(plan ? { video: { codec: plan.config.codec, bitrate: plan.bitrate, quality: plan.quality } } : {}),
     passes: defs.map((d) => ({ name: d.name, label: d.label, blend: d.blend, note: d.note })), transparent: plan ? false : o.shot.transparent,
     historicalRange: [timeAt(o.shot, f0), timeAt(o.shot, f1)].map((t) => calendarOfSpace(o.world.get('map_space', o.shot.spaceId)).format(t, 'minute')),
+    // (The audio reference track, D151: the second of it heard at the first frame written.)
+    ...(o.shot.audio ? { audio: { file: o.shot.audio.asset, name: o.shot.audio.name, offset: o.shot.audio.offset + f0 / o.shot.fps } } : {}),
   });
   // A fresh renderer per export: no state shared with the interface, so output never depends on it
   // (nor on the working view's performance settings: exports always draw at their own, finest quality).

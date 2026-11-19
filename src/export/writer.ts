@@ -1,7 +1,7 @@
 // Export jobs on the data-service side: frames rendered by the map engine arrive as raw RGBA pixels,
 // are encoded here and written as numbered image sequences with a manifest and a compositing guide.
 import { existsSync, mkdirSync, writeFileSync, copyFileSync, openSync, writeSync, readSync, closeSync, statSync } from 'node:fs';
-import { join, isAbsolute, resolve, basename } from 'node:path';
+import { join, isAbsolute, resolve, basename, extname } from 'node:path';
 import { createHash } from 'node:crypto';
 import { encodePNG, tagSRGB } from './png.ts';
 
@@ -28,6 +28,11 @@ export interface ExportSettings {
   format?: 'png' | 'tiff' | 'mp4' | 'webm';
   /** A video's codec (as the browser names it), bit rate and quality (D121). */
   video?: { codec: string; bitrate: number; quality: string };
+  /**
+   * The shot's audio reference track (D151): an asset of the project (its file name), the name it was given, and
+   * the second of it heard at the shot's first frame. A copy is written beside the frames, for lining up.
+   */
+  audio?: { file: string; name: string; offset: number };
 }
 
 /** The folder a project's exports go into, unless a shot chooses another. */
@@ -45,6 +50,8 @@ export interface ExportJob {
   startedAt: string;
   /** A video export's file (D121) and how many bytes it holds so far. */
   video?: { file: string; bytes: number };
+  /** The copy of the shot's audio reference track written beside the frames (D151), if any. */
+  audioFile?: string;
 }
 
 const isVideo = (s: ExportSettings) => s.format === 'mp4' || s.format === 'webm';
@@ -89,7 +96,32 @@ export function startJob(projectDir: string, settings: ExportSettings): ExportJo
   } catch (e) {
     throw Object.assign(new Error(`Map Maker cannot write to ${root} (${(e as Error).message.split(':')[0]}). Choose another folder.`), { status: 400 });
   }
-  return { id, dir, settings, checksums: {}, startedAt: new Date().toISOString(), video };
+  // The audio reference track (D151), copied beside the frames for lining up in the editor.
+  let audioFile: string | undefined;
+  const a = settings.audio;
+  if (a && /^[a-f0-9]{24}\.[a-z0-9]{2,5}$/.test(a.file)) {
+    const from = join(projectDir, 'assets', a.file);
+    if (existsSync(from)) {
+      audioFile = `audio-reference${extname(a.file)}`;
+      try { copyFileSync(from, join(dir, audioFile)); } catch { audioFile = undefined; }
+    }
+  }
+  return { id, dir, settings, checksums: {}, startedAt: new Date().toISOString(), video, audioFile };
+}
+
+/** What the manifest says of the audio reference track (D151), and the guide's lines about it. */
+function audioNotes(job: ExportJob): { manifest: Record<string, unknown>; lines: string[] } {
+  const a = job.settings.audio;
+  if (!job.audioFile || !a) return { manifest: {}, lines: [] };
+  const off = Math.max(0, a.offset);
+  return {
+    manifest: { audioReference: { file: job.audioFile, name: a.name, secondAtFirstFrame: off } },
+    lines: [
+      `Audio reference: ${job.audioFile} ("${a.name}"), the track the shot was timed to.`,
+      off > 0 ? `  Its second ${off.toFixed(2)} is heard at the first frame: on its track, trim its first ${off.toFixed(2)} s and start it with the frames.` : '  It starts with the first frame.',
+      '',
+    ],
+  };
 }
 
 /**
@@ -220,6 +252,7 @@ export function finishJob(job: ExportJob): { manifest: string; guide: string; vi
     passes: s.passes,
     dataCredits: s.credits ?? [],
     checksums: job.checksums,
+    ...audioNotes(job).manifest,
   };
   const manifestPath = join(job.dir, 'manifest.json');
   writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
@@ -238,6 +271,7 @@ export function finishJob(job: ExportJob): { manifest: string; guide: string; vi
     '',
     'The "All" pass, if present, is everything combined: use it to check your composite.',
     '',
+    ...audioNotes(job).lines,
     ...(s.credits?.length ? ['Map data (credit in your film where the licence asks for it):', ...s.credits.map((c) => `  ${c}`), ''] : []),
     `Rendered from project version ${s.projectHead} with Map Maker ${s.appVersion}.`,
   ];
@@ -270,6 +304,7 @@ function finishVideo(job: ExportJob): { manifest: string; guide: string; video: 
     video: { file: basename(v.file), container, codec: s.video?.codec ?? codec, bitrate: s.video?.bitrate ?? null, quality: s.video?.quality ?? null, bytes, seconds, sha256: fileChecksum(v.file) },
     dataCredits: s.credits ?? [],
     checksums: {},
+    ...audioNotes(job).manifest,
   };
   const manifestPath = join(job.dir, 'manifest.json');
   writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
@@ -284,6 +319,7 @@ function finishVideo(job: ExportJob): { manifest: string; guide: string; video: 
     'In Premiere Pro: File > Import and choose the file; it keeps its frame rate.',
     s.format === 'webm' ? 'WebM plays in browsers, VLC and most players; editors that do not read it take the MP4 version.' : 'MP4 with H.264 plays on every computer, phone and website.',
     '',
+    ...audioNotes(job).lines,
     ...(s.credits?.length ? ['Map data (credit in your film where the licence asks for it):', ...s.credits.map((c) => `  ${c}`), ''] : []),
     `Rendered from project version ${s.projectHead} with Map Maker ${s.appVersion}.`,
   ];

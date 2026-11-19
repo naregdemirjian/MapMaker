@@ -2171,6 +2171,71 @@ export class Arrangement {
     this.incident.delete(vid);
   }
 
+  // ---------------------------------------------------------------- tidying (D151)
+
+  /**
+   * Parcels made whole again where nothing tells their pieces apart (D151). Every border ever drawn cuts the
+   * parcels it crosses for good (D15), and a piece inherits its parent's history: a piece no change refers to is
+   * always held as its parent is, in every layer, at every moment. Where every piece of a parcel is undivided and
+   * referred to by nothing (`referenced`), the borders between the pieces are taken away and the parcel is
+   * undivided again; then the same is asked of its own parent. History is unchanged: no change refers to what goes.
+   */
+  mergeUnreferenced(referenced: (face: number) => boolean): { parcels: number; borders: number; points: number } {
+    // Segments by the faces on either side (kept up to date as pieces are joined).
+    const bySide = new Map<number, Set<number>>();
+    const note = (f: number, sid: number) => { const l = bySide.get(f); if (l) l.add(sid); else bySide.set(f, new Set([sid])); };
+    for (const s of this.segments.values()) { note(s.left_face, s.id); note(s.right_face, s.id); }
+    const mergeable = (p: number) => {
+      const kids = this.kids.get(p);
+      if (!kids || !kids.length || !this.faces.has(p)) return false;
+      for (const k of kids) { const f = this.faces.get(k); if (!f || !f.is_leaf || referenced(k)) return false; }
+      return true;
+    };
+    const work = [...this.kids.keys()].filter(mergeable);
+    let parcels = 0, borders = 0, points = 0;
+    const ends = new Set<number>();
+    while (work.length) {
+      const p = work.pop()!;
+      if (!mergeable(p)) continue;
+      const kids = [...this.kids.get(p)!];
+      const set = new Set(kids);
+      const segs = new Set<number>();
+      for (const k of kids) for (const sid of bySide.get(k) ?? []) segs.add(sid);
+      for (const sid of segs) {
+        const s = this.segments.get(sid);
+        if (!s) continue;
+        const l = set.has(s.left_face), r = set.has(s.right_face);
+        if (l && r) { ends.add(s.a); ends.add(s.b); this.deleteSegment(sid); borders++; continue; }
+        const next = { ...s, left_face: l ? p : s.left_face, right_face: r ? p : s.right_face };
+        this.putSegment(next);
+        note(p, sid);
+      }
+      for (const k of kids) {
+        bySide.delete(k);
+        const row = this.faces.get(k)!;
+        this.record('face', k, { ...row }, null);
+        this.setFace(k, null);
+        this.revision++;
+        parcels++;
+      }
+      const row = this.faces.get(p)!;
+      this.putFace({ ...row, is_leaf: 1 });
+      if (row.parent_id !== null && mergeable(row.parent_id)) work.push(row.parent_id);
+    }
+    // Points no border runs through any more go too.
+    for (const v of ends) {
+      if ((this.incident.get(v)?.size ?? 0) > 0 || !this.vertices.has(v)) continue;
+      const row = this.vertices.get(v)!;
+      this.record('vertex', v, { ...row }, null);
+      this.unindexVertex(v);
+      this.incident.delete(v);
+      this.revision++;
+      points++;
+    }
+    if (borders) this.reshaped = true;
+    return { parcels, borders, points };
+  }
+
   // ---------------------------------------------------------------- validation (tests and health checks)
 
   validate(): string[] {

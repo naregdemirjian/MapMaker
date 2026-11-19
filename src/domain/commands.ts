@@ -2310,6 +2310,19 @@ export function setEffectTransition(world: World, effectId: string, spec: Transi
 
 // ---------------------------------------------------------------- border geometry ("correct for all time")
 
+/**
+ * Tidy a map's parcels (D151): borders that no change tells apart on either side, left by edits since undone or
+ * changed, are taken away and their parcels made whole again. History is unchanged in every layer, every branch
+ * and every version; one step to undo. Returns what went.
+ */
+export function tidyParcels(world: World, spaceId: string): CommandResult<{ parcels: number; borders: number; points: number }> {
+  if (!world.get('map_space', spaceId)) throw new Error('That map no longer exists.');
+  return run(world, 'Tidy unused borders', (tx) => {
+    const referenced = world.referencedFaces(spaceId);
+    return tx.kernel(spaceId, (arr) => arr.mergeUnreferenced(referenced));
+  });
+}
+
 export function moveVertex(world: World, o: { spaceId: string; vertexId: number; to: Vec3; snap: number; guard?: LockGuard }): CommandResult {
   if (o.guard) refuseLockedAround(world, o.spaceId, o.vertexId, o.guard);
   return run(world, 'Move border point (all time)', (tx) => tx.kernel(o.spaceId, (arr) => arr.moveVertex(o.vertexId, o.to, o.snap)));

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, existsSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -213,6 +213,30 @@ test('PNG encoder round-trips pixels exactly, including transparency', () => {
     }
   }
   assert.deepEqual(out, px);
+});
+
+test('a shot\'s audio reference track is copied beside its frames and named in the manifest and guide (D151)', async () => {
+  const { startJob, finishJob, writeFrame } = await import('../src/export/writer.ts');
+  const { saveAsset } = await import('../src/server/assets.ts');
+  const root = temp();
+  try {
+    const projectDir = join(root, 'P.mapmaker');
+    const sound = Buffer.from('RIFF....WAVEfmt fake sound bytes');
+    const asset = saveAsset(projectDir, 'Overture.wav', sound);
+    assert.equal(asset.type, 'audio/wav');
+    assert.throws(() => saveAsset(projectDir, 'notes.txt', Buffer.from('x')), /sound \(MP3, WAV/);
+    const base = { shotName: 'Scored', width: 2, height: 2, fps: 24, frameStart: 0, frameEnd: 0, passes: [{ name: 'all', label: 'All', blend: 'Normal' }], transparent: false, projectHead: 1, appVersion: 'test' };
+    const job = startJob(projectDir, { ...base, audio: { file: asset.file, name: 'Overture.wav', offset: 12.5 } });
+    writeFrame(job, 'all', 0, 2, 2, new Uint8Array(16));
+    const fin = finishJob(job);
+    assert.deepEqual(readFileSync(join(job.dir, 'audio-reference.wav')), sound);
+    const manifest = JSON.parse(readFileSync(fin.manifest, 'utf8'));
+    assert.deepEqual(manifest.audioReference, { file: 'audio-reference.wav', name: 'Overture.wav', secondAtFirstFrame: 12.5 });
+    assert.match(readFileSync(fin.guide, 'utf8'), /Its second 12\.50 is heard at the first frame/);
+    // Only the project's own assets are copied: any other name is ignored.
+    const other = startJob(projectDir, { ...base, audio: { file: '../../secret.wav', name: 'x', offset: 0 } });
+    assert.equal(other.audioFile, undefined);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test('exports go to the chosen folder, or the project folder when none is chosen; relative paths are refused', async () => {

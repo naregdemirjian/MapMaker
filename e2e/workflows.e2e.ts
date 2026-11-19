@@ -1060,6 +1060,63 @@ try {
     await page.getByTestId('branch-select').selectOption('main');
     await page.locator('header select').first().selectOption({ label: 'Earth' });
   });
+  await h.step('Upkeep and sound (D151): borders left by a deleted event tidied away, history unchanged, undone; a shot timed to a sound file, its waveform under the frames, the track copied beside its export', async () => {
+    // On the map of the branches step: a stroke in an event, then the event deleted; its borders stay behind.
+    await page.locator('header select').first().selectOption({ label: 'Forks' });
+    const count = () => page.evaluate(() => { const s = (window as any).__mapmaker.store; const arr = s.world.arrangement(s.spaceId); return { faces: arr.leafFaces().length as number, segments: arr.segments.size as number, problems: arr.validate() as string[] }; });
+    await page.evaluate(() => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench, cmd = B.commands;
+      const sq = (w: number, so: number, e: number, n: number) => [[w, so], [e, so], [e, n], [w, n]].map(([lon, lat]) => B.lonLatToVec(lon, lat));
+      const ev = s.execute((w: any) => cmd.createEvent(w, { name: 'Soon gone', start: B.gregorian.fromCivil({ year: 1970 }) }));
+      const west = s.world.all('entity').find((e: any) => e.name === 'Westria').id;
+      s.execute((w: any, e: any) => cmd.paintTerritory(w, e, { spaceId: s.spaceId, layerId: s.layerId, ring: sq(3, 43, 7, 47), value: west, snap: 1e-7, mode: { kind: 'new', eventId: ev } }));
+      s.execute((w: any) => cmd.deleteEvent(w, ev));
+    });
+    await h.saved();
+    const before = await count();
+    const owners = async () => { const out: Array<string | null> = []; for (const ll of [[1, 48.5], [9, 41], [5, 45], [2, 42], [4, 44], [6.5, 46.5]] as LL[]) for (const d of ['1930', '1960', '1980']) out.push(await h.ownerAt(ll, d)); return out; };
+    const was = await owners();
+    await page.getByTestId('health').click();
+    await page.getByTestId('tidy-parcels').click();
+    await page.getByTestId('toast-info').filter({ hasText: 'unused border section' }).waitFor();
+    const after = await count();
+    assert.ok(after.faces < before.faces && after.segments < before.segments, `${JSON.stringify(before)} -> ${JSON.stringify(after)}`);
+    assert.deepEqual(after.problems, []);
+    assert.deepEqual(await owners(), was, 'history unchanged');
+    await page.locator('.modal .close').first().click();
+    await h.saved();
+    await page.getByTestId('undo').click();
+    await h.saved();
+    assert.deepEqual((await count()).segments, before.segments, 'undo brings the borders back');
+    assert.deepEqual(await owners(), was);
+    // A sound file to time a shot to: two seconds of a tone, louder in the second.
+    const rate = 8000, n = 2 * rate, wav = Buffer.alloc(44 + 2 * n);
+    wav.write('RIFF', 0); wav.writeUInt32LE(36 + 2 * n, 4); wav.write('WAVE', 8); wav.write('fmt ', 12); wav.writeUInt32LE(16, 16);
+    wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22); wav.writeUInt32LE(rate, 24); wav.writeUInt32LE(2 * rate, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34);
+    wav.write('data', 36); wav.writeUInt32LE(2 * n, 40);
+    for (let i = 0; i < n; i++) wav.writeInt16LE(Math.round(Math.sin((2 * Math.PI * 440 * i) / rate) * (i < rate ? 6000 : 26000)), 44 + 2 * i);
+    await page.getByTestId('mode-present').click();
+    await page.getByTestId('new-shot').click();
+    await page.getByTestId('shot-editor').waitFor();
+    await page.locator('summary', { hasText: 'Sound' }).click();
+    await page.getByTestId('shot-audio-file').setInputFiles({ name: 'Overture.wav', mimeType: 'audio/wav', buffer: wav });
+    assert.equal(await page.getByTestId('shot-audio-name').innerText(), '♪ Overture.wav');
+    await page.locator('[data-testid=shot-waveform] canvas').waitFor();
+    await page.waitForFunction(() => { const c = document.querySelector('[data-testid=shot-waveform] canvas') as HTMLCanvasElement | null; if (!c || !c.width) return false; const d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data; let lit = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 0) lit++; return lit > 50; });
+    await h.screenshot('shot-sound');
+    await page.getByTestId('shot-audio-offset').fill('0.5');
+    await page.getByTestId('shot-audio-offset').press('Enter');
+    await page.waitForFunction(() => { const s = (window as any).__mapmaker.store; return JSON.parse(s.world.get('sequence', s.shotId).settings).audio?.offset === 0.5; });
+    // Exported: the track beside the frames, named in the manifest with the second heard at the first frame.
+    const ex = await exportShot('export-preview');
+    assert.deepEqual(ex.manifest.audioReference, { file: 'audio-reference.wav', name: 'Overture.wav', secondAtFirstFrame: 0.5 });
+    assert.deepEqual(readFileSync(join(ex.dir, 'audio-reference.wav')), wav);
+    // (The shot goes again: later steps make shots of their own.)
+    await page.evaluate(() => { const m = (window as any).__mapmaker, s = m.store; const id = s.shotId; s.set({ shotId: null }); s.execute((w: any) => m.bench.commands.deleteSequence(w, id)); });
+    await page.getByTestId('mode-world').click();
+    await page.locator('header select').first().selectOption({ label: 'Earth' });
+  });
+
   await h.step('Event types: a type of its own with a colour, a usual length and way of spreading; used for a new event and a drawing; renamed; deleted and undone', async () => {
     const typeOf = (name: string) => page.evaluate((n) => { const w = (window as any).__mapmaker.store.world; const t = w.all('event_type').find((x: any) => x.name === n); return t ? { id: t.id as string, fields: JSON.parse(t.fields) } : null; }, name);
     // (A field shows what follows from a choice once the page has drawn it again.)

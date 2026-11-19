@@ -35,6 +35,8 @@ while Map Maker is closed. Don't keep projects inside OneDrive or Dropbox while 
 - Record history as dated events, or change the map from a date on without an event; move through time and see the
   map exactly as it was on any date, from millennia down to milliseconds. See what a country gained and lost in any
   day, month, year or span of years.
+- Time a shot to music or a narration: heard while it plays, its waveform under the frames, a copy beside every
+  export. History Health also tidies away borders no change uses any more.
 - Branch history: an alternative timeline splits off at a date, shares everything before it and has its own
   events after; switch between them in the title bar, compare two side by side, and make shots of either.
 - Give a map a calendar of its own (its months, leap years, eras, week and day length; or the Julian, the French

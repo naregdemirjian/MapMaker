@@ -9,6 +9,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 export const ASSET_TYPES: Record<string, string> = {
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif', '.svg': 'image/svg+xml',
   '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime',
+  // A shot's audio reference track (D151).
+  '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.oga': 'audio/ogg', '.opus': 'audio/ogg', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.flac': 'audio/flac',
 };
 
 const NAME = /^[a-f0-9]{24}\.[a-z0-9]{2,5}$/;
@@ -19,7 +21,7 @@ export function assetDir(projectDir: string): string { return join(projectDir, '
 export function saveAsset(projectDir: string, originalName: string, bytes: Buffer): { file: string; bytes: number; type: string } {
   const ext = extname(originalName).toLowerCase();
   const type = ASSET_TYPES[ext];
-  if (!type) throw Object.assign(new Error(`Map Maker can use pictures (PNG, JPEG, WebP, GIF, SVG) and videos (MP4, WebM, MOV), not ${ext || 'this file'}.`), { status: 400 });
+  if (!type) throw Object.assign(new Error(`Map Maker can use pictures (PNG, JPEG, WebP, GIF, SVG), videos (MP4, WebM, MOV) and sound (MP3, WAV, OGG, M4A, AAC, FLAC), not ${ext || 'this file'}.`), { status: 400 });
   if (!bytes.length) throw Object.assign(new Error('The file is empty.'), { status: 400 });
   const file = createHash('sha256').update(bytes).digest('hex').slice(0, 24) + (ext === '.jpeg' ? '.jpg' : ext === '.m4v' ? '.mp4' : ext);
   const dir = assetDir(projectDir);

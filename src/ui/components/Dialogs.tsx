@@ -500,6 +500,15 @@ export function HealthDialog() {
           </div>
         </div>
       ))}
+      <h3>Upkeep</h3>
+      <div className="conflict upkeep" data-testid="tidy-section">
+        <div><b>Tidy unused borders</b>{(() => { const space = w.get('map_space', s.spaceId); return space ? <> · {space.name}</> : null; })()}</div>
+        <div className="muted">Every border ever drawn stays in the map's parcels, also when the change that drew it was deleted or drawn over. Those that no change tells apart on either side are taken away, so the map stays quick on long projects. History stays exactly as it is, in every branch and every version of an event; undo brings them back.</div>
+        <div className="buttons"><button onClick={() => {
+          const r = s.execute((wd) => cmd.tidyParcels(wd, s.spaceId));
+          if (r) s.toast(r.borders ? `Took away ${r.borders} unused border section${r.borders === 1 ? '' : 's'}: ${r.parcels} parcel${r.parcels === 1 ? '' : 's'} made whole again. History is unchanged.` : 'Nothing to tidy: every border is one some change tells apart.');
+        }} data-testid="tidy-parcels">Tidy this map</button></div>
+      </div>
       <div className="modal-actions"><button onClick={close}>Close</button></div>
     </Modal>
   );
