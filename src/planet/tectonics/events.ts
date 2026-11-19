@@ -18,6 +18,17 @@ import { rand, randomPole, groups, maxThickness, type TectonicEvent, type Tecton
 import { continentalCentre, plateStats, riftPlate } from './reorganise.ts';
 
 type V3 = [number, number, number];
+
+/** A rift's parts move apart at twice this (each way this), km/Myr per unit of strength (D154). */
+export const RIFT_SPEED = 25;
+/** A large igneous province: basalt `centreKm` thick at its centre, thinning over `radiusKm` (to 1/e), out to 1.5 × that. */
+export const plateauSize = (strength: number) => ({ centreKm: 8 * strength, radiusKm: 800 * Math.sqrt(Math.max(0.1, strength)) });
+/** An impact basin: its radius and how far its floor is lowered at the centre (km), larger under weaker gravity. */
+export function craterSize(strength: number, gravity: number) {
+  const radiusKm = 300 * Math.cbrt(strength) * (9.81 / Math.max(0.5, gravity)) ** 0.25;
+  return { radiusKm, depthKm: Math.min(12, radiusKm / 100) };
+}
+
 const unit = (at: [number, number]): V3 => {
   const lo = (at[0] * Math.PI) / 180, la = (at[1] * Math.PI) / 180;
   return [Math.cos(la) * Math.cos(lo), Math.cos(la) * Math.sin(lo), Math.sin(la)];
@@ -74,7 +85,7 @@ function begin(state: TectonicState, e: TectonicEvent) {
         const p = state.plates[id], through = s.contCentroid[id];
         const t = randomPole(() => rand(state));
         const normal: V3 = [through[1] * t[2] - through[2] * t[1], through[2] * t[0] - through[0] * t[2], through[0] * t[1] - through[1] * t[0]];
-        riftPlate(state, p, through, normal, 25 * Math.max(0.5, e.strength));
+        riftPlate(state, p, through, normal, RIFT_SPEED * Math.max(0.5, e.strength));
       }
       break;
     }
@@ -83,7 +94,7 @@ function begin(state: TectonicState, e: TectonicEvent) {
       const c = nearestCell(state, at), o = state.owner[c];
       if (o >= 0) {
         const t = randomPole(() => rand(state));
-        riftPlate(state, state.plates[o], at, [at[1] * t[2] - at[2] * t[1], at[2] * t[0] - at[0] * t[2], at[0] * t[1] - at[1] * t[0]], 25 * Math.max(0.5, e.strength));
+        riftPlate(state, state.plates[o], at, [at[1] * t[2] - at[2] * t[1], at[2] * t[0] - at[0] * t[2], at[0] * t[1] - at[1] * t[0]], RIFT_SPEED * Math.max(0.5, e.strength));
         mark(state, at, 400 / state.params.radiusKm);
       }
       break;
@@ -133,8 +144,8 @@ function around(state: TectonicState, at: V3, radius: number, km: (d: number) =>
 function floodBasalt(state: TectonicState, e: TectonicEvent, myr: number) {
   if (!e.at) return;
   const share = e.end > e.start ? myr / (e.end - e.start) : 1;
-  const R = (800 * Math.sqrt(Math.max(0.1, e.strength))) / state.params.radiusKm;
-  around(state, unit(e.at), 1.5 * R, (d) => 8 * e.strength * share * Math.exp(-((d / R) ** 2)), TAG.lip | TAG.edited);
+  const size = plateauSize(e.strength), R = size.radiusKm / state.params.radiusKm;
+  around(state, unit(e.at), 1.5 * R, (d) => size.centreKm * share * Math.exp(-((d / R) ** 2)), TAG.lip | TAG.edited);
 }
 
 /**
@@ -143,9 +154,8 @@ function floodBasalt(state: TectonicState, e: TectonicEvent, myr: number) {
  * around it.
  */
 function crater(state: TectonicState, at: V3, strength: number) {
-  const g = state.params.gravity;
-  const Rkm = 300 * Math.cbrt(strength) * (9.81 / Math.max(0.5, g)) ** 0.25;
-  const R = Rkm / state.params.radiusKm, depth = Math.min(12, Rkm / 100);
+  const { radiusKm: Rkm, depthKm: depth } = craterSize(strength, state.params.gravity);
+  const R = Rkm / state.params.radiusKm;
   // Thickness changes that lower (or raise) the surface by the amounts wanted, through isostasy (about 0.15 km of
   // height per km of crust).
   around(state, at, 1.4 * R, (d) => {

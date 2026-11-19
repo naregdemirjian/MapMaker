@@ -23,7 +23,7 @@ export interface StepReport {
 /** Arc magmatism: thickening at the arc's axis, km per Myr per km/Myr of convergence (0.2 km/Myr at 5 cm a year). */
 const ARC_RATE = 0.004;
 /** Hotspot volcanism: crust added over a plume, km per Myr at strength 1, on oceanic and on continental crust. */
-const PLUME_OCEAN = 0.3, PLUME_CONTINENT = 0.08;
+export const PLUME_OCEAN = 0.3, PLUME_CONTINENT = 0.08;
 /** New oceanic crust, km (thicker from a hotter mantle). */
 const oceanicThickness = (vigor: number) => 7 * Math.min(2.2, Math.max(1, vigor) ** 0.4);
 

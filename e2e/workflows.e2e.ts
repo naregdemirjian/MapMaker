@@ -4298,6 +4298,15 @@ try {
     assert.match(await text('studio-readout-year'), /days$/);
     assert.ok(await page.getByTestId('studio-orbit').isVisible(), 'the orbit over the habitable zone');
     await page.getByTestId('studio-control-distance').fill('630');
+    // A value the physics works out, set by hand (D164): the year, with Kepler's beside it; then given back.
+    const kepler = await text('studio-readout-year');
+    await page.getByTestId('studio-override-year-on').check();
+    await page.getByTestId('studio-override-year-value').fill('400');
+    assert.match(await text('studio-readout-year'), /^400\.0 days \(set by hand; Kepler's law gives [\d,]+\.\d\)$/);
+    assert.match(await text('studio-override-year-natural'), /^the physics gives [\d,]+\.\d days$/);
+    assert.match(await text('studio-override-year'), /set by hand/);
+    await page.getByTestId('studio-override-year-on').uncheck();
+    assert.equal(await text('studio-readout-year'), kepler);
     // A shorter history, for the test: 200 million years.
     await page.getByTestId('studio-step-history').click();
     await page.getByTestId('studio-control-span').fill('408');
@@ -4374,6 +4383,11 @@ try {
     await page.getByTestId('studio-edit-add').click();
     assert.equal(await page.getByTestId('studio-pending-edit').count(), 2);
     assert.match(await text('studio-pending'), /Volcanoes grow where the plate passes over the plume[\s\S]*A basin with a raised rim/);
+    // The crater is made on the crust clicked on today's map, where its plate had it 30 million years ago (D164).
+    if (await page.getByTestId('studio-edit-moved').count()) assert.match(await text('studio-edit-moved'), /^ Made where the crust clicked on the map of today was 30 million years ago: [\d.]+° [NS], [\d.]+° [EW], [\d,]+ km from there/);
+    // Each with its consequences estimated in numbers from the history shown (D164).
+    assert.equal(await page.getByTestId('studio-estimate').count(), 2);
+    assert.match(await text('studio-pending'), /The plate there moves[\s\S]*Volcanic rockabout [\d,.]+( million)? km³[\s\S]*A basinabout [\d,]+ km across and [\d,]+ m deep at first/);
     assert.match(await text('studio-stale'), /2 edits are waiting/);
     assert.equal(await page.getByTestId('studio-progress').count(), 0, 'nothing is worked out before the re-run');
     assert.match(await text('studio-rerun'), /these 2 edits/);
@@ -4382,6 +4396,12 @@ try {
     const resumedAt = Number((await text('studio-resumed')).match(/went on from (\d+) million years ago/)?.[1]);
     assert.ok(resumedAt >= 100 && resumedAt < 150, `went on from the checkpoint before the hotspot (${resumedAt} Ma)`);
     assert.equal(await page.getByTestId('studio-pending').count(), 0);
+    // What the edits made, measured against the history before them (D164).
+    await page.getByTestId('studio-consequences').waitFor({ timeout: 180_000 });
+    assert.equal(await page.getByTestId('studio-consequence').count(), 2);
+    assert.match(await text('studio-consequences'), /Highest ground within [\d,]+ km( of [\d.]+° [NS], [\d.]+° [EW])?-?[\d,]+ m → -?[\d,]+ m/);
+    assert.match(await text('studio-consequences'), /\(estimated\)/);
+    assert.match(await text('studio-consequences-planet'), /Land today[\d.]+ → [\d.]+ % of the surface[\s\S]*Crust the edits made, today[\d,.]+( million)? km²/);
     await page.getByTestId('studio-step-explore').click();
     await page.getByTestId('studio-layer').selectOption('provenance');
     await drawn('provenance:');

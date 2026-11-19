@@ -15,6 +15,9 @@ const same = (x: TectonicHistory, y: TectonicHistory, what: string) => {
     assert.equal(hash(y[k]), hash(x[k]), `${what}: ${k}`);
   }
   assert.equal(y.plateCount, x.plateCount);
+  // The plates' rotations with each picture too (D164).
+  assert.equal(y.frameRotations.length, x.frameRotations.length);
+  x.frameRotations.forEach((r, f) => assert.equal(hash(y.frameRotations[f]), hash(r), `${what}: rotations in picture ${f}`));
   assert.deepEqual(y.resume.times, x.resume.times, `${what}: checkpoints at the same moments`);
 };
 

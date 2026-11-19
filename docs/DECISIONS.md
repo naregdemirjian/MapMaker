@@ -61,6 +61,43 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D164. Edits' consequences in numbers, edits made on the crust clicked, values set by hand (Stage 15.2)
+
+- **Asked.** Numbers instead of words in the consequences reports, and derived values that can be set by hand.
+- **Estimates before the re-run** (`src/planet/consequences.ts`), under each waiting edit, from the engine's own rules
+  (the constants now exported by the tectonics, so the two cannot drift apart) and the history shown: the place at
+  that moment (height and crust); for a hotspot the plate's speed there from the checkpoint before it, the chain's
+  length, the volcanic rock and the rise along the track, and whether islands rise above the sea at this quality;
+  for a collision the thickest crust the gravity allows and the peaks it gives; for a rift the opening rate, the
+  width of new sea floor and its depth; for a flood basalt its thickness, extent and volume (the Siberian Traps for
+  scale); for an impact the basin's width, depth, rim and the water it would hold under the planet's gravity; for a
+  higher sea the land it floods at that moment; for an ice age or a greenhouse the carbon dioxide's factor.
+- **Measurements after it**, against the history before: around each edit (where its crust is today) the highest
+  ground, the land, the rain on the land, the water in lakes and the biomes changed with the largest change; for
+  edits of the sea and the air, while they were under way: the sea's level, the mean temperature and the ice on
+  land; over the planet: the land, how much of it the plates now cover differently, the crust the edits made and
+  the biomes changed.
+- **Edits made on the crust clicked** (`src/planet/reconstruct.ts`). A history now keeps each plate's rotation
+  with each picture. A place clicked on a picture (today's, or a past moment's on the layers that go through time)
+  is followed with its plate, picture by picture (through splits and welds), back to when the edit begins, and the
+  edit is made there: a crater clicked on today's map and dated 30 Ma is made where that crust was then, and today
+  lies where it was clicked (the test: carried 1,530 km, found 223 km from the click on its coarse grid). A plume
+  stays where it is put (it is fixed in the mantle; the plates pass over it). The Edit step says where an edit was
+  made when that differs from the click. A click in the Edit step only chooses the place now (no "why" card).
+- **Set by hand**: the star's light and surface temperature, the year and the mass, each with a "set by hand" badge
+  and the value the physics gives beside it; a regime or tidal locking chosen by hand says what the physics would
+  choose and why; the readouts mark what is set by hand. The definitions already stored these overrides (D152).
+- **Found on the way.** (1) Volcanic islands are narrower than a preview cell (about 220 km): a typical hotspot in
+  open ocean raises its track about 200 m at preview, and the estimate says so; resolution-independent plume volumes
+  and the support narrow volcanoes get from the plate's stiffness belong with 15.4's heights. (2) A history is
+  sensitive to small changes: an edit can tip a later collision, split or river's course, through the climate,
+  erosion and the sea's level, which reach everywhere. Over ten seeds of a hotspot added 100 Ma, heights changed by
+  more than 50 m beyond 4,000 km on no cells (median) for the Earth-like preset and on 28 for the young volcanic
+  world, but about one history in ten tipped into another course over a fifth of the planet. Drawing each plate
+  decision's random number from the seed, the moment, the decision and the plate (instead of one stream) was tried,
+  to rule out the stream as the cause: no improvement over the same seeds, so it was not kept. The report says how
+  much of the planet's plates are on another course.
+
 ### D163. Edits gathered and worked out together; a history goes on from its checkpoint before the earliest edit (Stage 15.1)
 
 - **Asked.** "Make the user able to do as many edits as he wants and then, when he is done with the edits, a re-run

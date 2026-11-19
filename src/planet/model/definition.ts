@@ -100,6 +100,11 @@ export interface GeoEvent {
   /** Where, if it is somewhere (longitude, latitude in degrees). */
   at?: [number, number];
   note?: string;
+  /**
+   * Where the user clicked for it, and on the picture of which moment (Ma): the crust there, followed with its plate
+   * back to the event's start, gives `at` (D164). Kept to say so; the history reads only `at`.
+   */
+  clicked?: { at: [number, number]; ma: number };
 }
 
 export interface HistorySpec {
@@ -380,6 +385,8 @@ export function definitionOf(raw: unknown): PlanetDefinition | null {
       startMa: num(e.startMa) ?? 0, durationMyr: num(e.durationMyr) ?? 0, strength: num(e.strength) ?? 1,
       ...(Array.isArray(e.at) && e.at.length === 2 && num(e.at[0]) !== undefined && num(e.at[1]) !== undefined ? { at: [num(e.at[0])!, num(e.at[1])!] as [number, number] } : {}),
       ...(typeof e.note === 'string' ? { note: e.note } : {}),
+      ...(isObj(e.clicked) && Array.isArray(e.clicked.at) && e.clicked.at.length === 2 && num(e.clicked.at[0]) !== undefined && num(e.clicked.at[1]) !== undefined && num(e.clicked.ma) !== undefined
+        ? { clicked: { at: [num(e.clicked.at[0])!, num(e.clicked.at[1])!] as [number, number], ma: num(e.clicked.ma)! } } : {}),
     }));
     if (isObj(h.climate)) {
       // Kept as it was simulated with (each part read as a definition's own, so it is valid).

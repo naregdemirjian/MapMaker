@@ -70,6 +70,11 @@ export interface TectonicHistory {
   /** The settings it ran with, and packed checkpoints by their moment (Myr since the beginning) (D163). */
   params: TectonicParams;
   resume: { times: number[]; states: Packed[] };
+  /**
+   * Per picture, each plate's rotation (D164): for plate id i, [q (4), ω (3, rad/Myr), 1 if it exists] at 8·i, so a
+   * place can be followed with its crust from one moment to another.
+   */
+  frameRotations: Float64Array[];
   /** Where this history began (Myr since the beginning): 0, or the checkpoint an earlier history lent it (D163). */
   resumedFrom: number;
 }
@@ -100,7 +105,7 @@ export function runHistory(params: TectonicParams, opts: HistoryOptions): Tecton
   // and these differ, if it ran with the same settings over the same span and pictures.
   let state: TectonicState | null = null, f = 1, from = 0;
   const base = opts.base;
-  if (base && base.params && base.resume && paramsBesidesEvents(base.params) === paramsBesidesEvents(params) && base.times.length === F
+  if (base && base.params && base.resume && base.frameRotations && paramsBesidesEvents(base.params) === paramsBesidesEvents(params) && base.times.length === F
     && Math.abs(base.times[0] - D) < 1e-9 && resumeEvery) {
     const T = Math.min(D, firstDifference(base.params.events ?? [], params.events ?? []));
     let k = -1;
@@ -122,8 +127,12 @@ export function runHistory(params: TectonicParams, opts: HistoryOptions): Tecton
   const n = st.mesh.n;
   const H = new Int16Array(F * n), Pl = new Uint8Array(F * n), K = new Uint8Array(F * n);
   const datumSea = new Float64Array(F), iceAt = new Float64Array(F), riseAt = new Float64Array(F), tempAt = new Float32Array(F);
+  const rotations: Float64Array[] = new Array(F);
   const record = (f: number) => {
     recordFrame(st, f, H, Pl, K);
+    const r = new Float64Array(8 * st.plates.length);
+    st.plates.forEach((p, i) => { r.set(p.q, 8 * i); r.set(p.omega, 8 * i + 4); r[8 * i + 7] = 1; });
+    rotations[f] = r;
     datumSea[f] = st.seaLevel; iceAt[f] = st.paleo?.ice ?? 0; riseAt[f] = seaRise(st); tempAt[f] = st.paleo?.meanK ?? 0;
   };
   if (from > 0) {
@@ -134,6 +143,7 @@ export function runHistory(params: TectonicParams, opts: HistoryOptions): Tecton
       for (let c = 0; c < n; c++) H[f * n + c] = Math.max(-32_000, Math.min(32_000, b.heights[f * n + c] + unshift));
       Pl.set(b.plates.subarray(f * n, (f + 1) * n), f * n); K.set(b.kinds.subarray(f * n, (f + 1) * n), f * n);
       datumSea[f] = b.frameDatum[f]; iceAt[f] = b.frameIce[f]; riseAt[f] = b.frameRise[f]; tempAt[f] = b.meanTemps[f];
+      rotations[f] = b.frameRotations[f];
     }
   } else {
     updatePaleo(st);
@@ -187,7 +197,7 @@ export function runHistory(params: TectonicParams, opts: HistoryOptions): Tecton
     boundary: state2.boundary.slice(), boundaryRate: state2.boundaryRate.slice(), omega, plateCount: state2.plates.length,
     stats: { steps: state2.steps, ...state2.totals, landShare: land / (4 * Math.PI), continentalShare: cont / (4 * Math.PI), ms: performance.now() - t0 },
     tags, sediment, discharge: state2.discharge.slice(), seaLevels, iceVolumes, meanTemps: tempAt, frameSea,
-    frameDatum, frameIce: Float64Array.from(iceAt), frameRise: Float64Array.from(riseAt), params, resume: packed, resumedFrom: from,
+    frameDatum, frameIce: Float64Array.from(iceAt), frameRise: Float64Array.from(riseAt), params, resume: packed, resumedFrom: from, frameRotations: rotations,
     ...(checkpoints ? { checkpoints } : {}),
   };
 }

@@ -163,7 +163,7 @@ export const STAGES: Record<string, StageDef> = {
   /** The planet's tectonic history: plates, crust and heights through time (a preview at coarse levels). */
   tectonics: {
     id: 'tectonics',
-    version: 5,
+    version: 6,
     deps: () => [],
     inputs: (def, p) => ({
       ...(tectonicParams(def, p.level, p.durationMyr ?? 500) as unknown as ProductData),
