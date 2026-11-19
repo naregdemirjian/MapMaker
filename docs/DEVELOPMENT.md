@@ -420,6 +420,30 @@ here. Since then only the strip each front has crossed since the frame before is
 frame instead of half at the film's pace, 56 ms a frame in software (the time left is in handing whole pictures to the
 canvas, which a graphics card does not pay).
 
+**Stress sessions on the build with D136 to D144** (`bench/stress.ts`: random work in the real interface with the
+app's verify mode on, so everything worked out from what was there before is also worked out afresh, and every
+tenth step the picture on screen is compared with one drawn afresh). None failed; no picture differed.
+
+| Session | Steps | Pictures compared | Frame, median (slowest tenth) | Memory, start to end |
+| --- | --- | --- | --- | --- |
+| Earth 242 | 300 | 30, none differ | 16.7 (51) ms | 232 to 222 MB |
+| Heavy (11,028 parcels, 507 events) | 300 | 30, none differ | 23.7 (177) ms | 288 to 339 MB |
+| Random 1000 (25,098 parcels, 1,009 events) | 300 | 30, none differ | 25.8 (276) ms | 365 to 404 MB |
+| Earth 242, a computer four times slower | 250 | 25, none differ | 47 (314) ms | 139 to 222 MB |
+| Earth 242, twice the pixels, Equal Earth | 250 | 25, none differ | 22.7 (142) ms | 211 to 245 MB |
+
+(The sessions draw, undo, move events and step through time: memory on the two large projects grows with the
+strokes made, about 0.15 MB a step; on Earth 242 it does not grow.) The animated shots measured again
+on this build: Heavy 625 ms (clean) and 826 ms (Blitz), Random 1000 330 and 320 ms: as after D139, within the
+machine's noise, so minding the land (D142) and the bowed borders (D144) cost nothing where they are not used.
+The frames a second on a real computer can be read in Settings (D143).
+
+The slowest single frames of those sessions are zoom steps (on the computer four times slower, one of five seconds).
+A profile of eighty zoom steps alone: 30% is the browser drawing kept pictures at their new size, 22% its other own
+work, 6% collecting memory, 4% finding where names sit (`signedDistance`); nothing else of the app's own is above
+1%. Nothing there to make faster in the app's code: a zoom step's cost is the browser's painting, done by the
+graphics card where there is one.
+
 ## Performance in the improvement pass (measured 18 November 2026, `bench/render.bench.ts`)
 
 The benchmark projects rebuilt with `bench/make-fixtures.ts` (Earth 242 and Heavy), Chrome in software, as below.
