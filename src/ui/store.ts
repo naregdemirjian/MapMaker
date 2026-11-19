@@ -1,6 +1,7 @@
 // Interface state and the bridge between the interface, the in-memory world and the data service.
 // Commands run locally first (so the map updates immediately), then are saved in order; if saving
 // fails, the local change is reversed and the project reloaded from disk.
+import { loadSmart, saveSmart, type SmartSettings } from './smart-settings.ts';
 import { useSyncExternalStore } from 'react';
 import { Api, ApiError, type JournalState, type ProjectInfo, type BorderDraft } from './api.ts';
 import { World } from '../world-model/world.ts';
@@ -53,6 +54,23 @@ export type PendingEdit =
   | { kind: 'split'; spaceId: string; layerId: string; line: Array<[number, number]>; pick: [number, number]; snap: number };
 
 export interface Toast { id: number; text: string; kind: 'info' | 'error' }
+
+/** A line just drawn, shown adjusted by the smart brush before it is used (D148). */
+export interface AdjustState {
+  /** What it was drawn with. */
+  tool: 'lasso' | 'pen' | 'split' | 'feature';
+  /** The lines as drawn (an outline closed; the brush may give several), in longitude and latitude. */
+  lines: Array<{ stroke: Array<[number, number]>; closed: boolean }>;
+  /** Points the adjusted line must pass through (clicked, or drawn with Alt held). */
+  pins: Array<[number, number]>;
+  /** The strategic brush: your side, left (1) or right (-1) of a line as drawn; an outline's inside is always yours. */
+  side: 1 | -1;
+  /** The adjusted lines, in longitude and latitude (null while being worked out). */
+  result: Array<Array<[number, number]>> | null;
+  /** How many stretches of line the adjusted lines follow, and what could not be had yet. */
+  followed: number;
+  missing: string[];
+}
 
 class AppStore {
   version = 0;
@@ -139,6 +157,13 @@ class AppStore {
   recordLength: RecordLength = loadRecordLength();
   cameras = new Map<string, Camera>();
   stroke: StrokeSettings = { smoothness: 1, irregularity: 0, precision: 1.2, seed: 1 };
+  /** The smart brushes (D148): whether lines drawn are adjusted, how, and how strongly each feature draws them (kept on this computer). */
+  smart: SmartSettings = loadSmart();
+  setSmart(v: SmartSettings) { this.smart = v; saveSmart(v); this.notify(); }
+  /** A line just drawn, shown adjusted by the smart brush before it is used (D148). */
+  adjust: AdjustState | null = null;
+  /** The adjusted line used, the line kept as drawn, or the drawing dropped (set by the map view). */
+  adjustFinish: (choice: 'adjusted' | 'drawn' | 'cancel') => void = () => { this.set({ adjust: null }); };
   /** The sculpting brush (D98): which, how large (km), how strong (m), and whether a stroke changes the base world or holds from the date viewed. */
   sculpt: { tool: SculptTool; radiusKm: number; strength: number; dated: boolean } = { tool: 'raise', radiusKm: 300, strength: 500, dated: false };
   pending: PendingEdit | null = null;
@@ -502,6 +527,14 @@ class AppStore {
     const id = this.draft && this.draft.spaceId === this.spaceId ? this.draftId! : this.newDraft();
     if (newPiece) this.penRedo = []; // a new piece ends what can be put back
     this.changeDraft(id, (d) => ({ ...d, points: [...d.points, ll], pieces: newPiece ? [...d.pieces, d.points.length] : d.pieces }));
+  }
+
+  /** The points of the last piece drawn, replaced (by the piece made to follow the land, D148). */
+  penReplaceLastPiece(points: Array<[number, number]>) {
+    const d = this.draft;
+    if (!d || !d.pieces.length || points.length < 1) return;
+    const from = d.pieces[d.pieces.length - 1];
+    this.changeDraft(d.id, (x) => ({ ...x, points: [...x.points.slice(0, from), ...points] }));
   }
 
   /** Take back the last piece drawn (it can be put back with penRedoPiece until a new piece is drawn). */

@@ -28,7 +28,9 @@ while Map Maker is closed. Don't keep projects inside OneDrive or Dropbox while 
 ## What it can do now (version 0.2.0 and later)
 
 - Create projects and maps (Earth, the Moon, planets or your own), countries and factions, and characters.
-- Draw territory freehand, point by point or with the border pen, and correct borders by dragging their points.
+- Draw territory freehand, point by point or with the border pen, and correct borders by dragging their points. The
+  smart brushes pull what you draw onto rivers, coasts, ridges, valleys and borders near it (or, the strategic brush,
+  keep rivers, towns and passes on your side), shown beside your stroke before it is used.
 - Add today's countries (all 242, or by continent or name), as countries of their own or into a country of yours.
 - Record history as dated events, or change the map from a date on without an event; move through time and see the
   map exactly as it was on any date, from millennia down to milliseconds. See what a country gained and lost in any

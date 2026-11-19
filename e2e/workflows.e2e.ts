@@ -421,6 +421,183 @@ try {
     await page.getByTestId('tool-select').click();
   });
 
+  await h.step('Smart brushes (D148): the geography-aware brush pulls a stroke beside the Rhine onto it, weights moved live, a pin, the line used; ridges for the pen in the Pyrenees; the strategic brush pulls a town onto your side, sides swapped; undone', async () => {
+    const keep = await page.evaluate(() => (window as any).__mapmaker.store.camera);
+    const adjust = () => page.evaluate(() => (window as any).__mapmaker.store.adjust);
+    const weight = async (key: string, v: number) => { await page.getByTestId('smart-adjust').getByTestId(`smart-${key}`).fill(String(v)); };
+    // The Upper Rhine, close enough for Natural Earth's detailed rivers.
+    await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 7.9, lat: 48.7, zoom: 6.2, rotation: 0, projection: 'equirectangular' }));
+    await page.waitForFunction(() => (window as any).__mapmaker.store.basemap?.scales.some((b: any) => b.scale === '10m' && b.rivers), null, { timeout: 60000 });
+    await page.waitForTimeout(300);
+    // The Rhine: the river nearest the bank at Strasbourg.
+    const rhine = await page.evaluate(() => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const r = document.querySelector('[data-testid=map-canvas]')!.getBoundingClientRect();
+      const sc = B.chooseScale(s.basemap, B.makeView(s.camera, r.width, r.height));
+      let best: number[][] = [], bd = Infinity;
+      for (const l of sc.rivers.lines.coordinates) for (const p of l) { const d = Math.hypot(p[0] - 7.8, p[1] - 48.58); if (d < bd) { bd = d; best = l; } }
+      // (And every river near it: the brush follows whichever runs nearest the stroke.)
+      const near = sc.rivers.lines.coordinates.filter((l: number[][]) => l.some((p) => p[0] > 7 && p[0] < 9 && p[1] > 48 && p[1] < 49.3));
+      return { near: bd, line: best, all: near };
+    });
+    assert.ok(rhine.near < 0.02, `the Rhine found (${rhine.near.toFixed(3)}° from its bank)`);
+    const along = rhine.line.filter((p) => p[1] > 48.3 && p[1] < 49.0);
+    const onPage: Array<[number, number]> = [];
+    for (const p of along) onPage.push(await h.toPage([p[0], p[1]]));
+    onPage.sort((u, v) => u[1] - v[1]);
+    // A brush stroke on the German bank (tributaries join it across, none runs alongside): down the river 9 px
+    // east of it, then back north 170 px further east.
+    const top = onPage[0], bottom = onPage[onPage.length - 1];
+    const stroke: Array<[number, number]> = [...onPage.map(([x, y]) => [x + 9, y] as [number, number]), [bottom[0] + 170, bottom[1]], [top[0] + 170, top[1]]];
+    const distTo = (lines: number[][][]) => (p: number[]) => {
+      let b = Infinity;
+      for (const line of lines) for (let i = 0; i + 1 < line.length; i++) {
+        const u = line[i], v = line[i + 1], dx = v[0] - u[0], dy = v[1] - u[1], l2 = dx * dx + dy * dy;
+        const k = l2 ? Math.max(0, Math.min(1, ((p[0] - u[0]) * dx + (p[1] - u[1]) * dy) / l2)) : 0;
+        b = Math.min(b, Math.hypot(p[0] - u[0] - k * dx, p[1] - u[1] - k * dy));
+      }
+      return b;
+    };
+    const distToRhine = distTo([rhine.line]), distToRiver = distTo(rhine.all);
+    // (The side drawn beside the river: what lies near it, away from the corners.)
+    const eastSide = (line: number[][]) => line.filter((p) => p[1] > 48.45 && p[1] < 48.85 && distToRhine(p) < 0.12);
+    await page.getByTestId('tool-lasso').click();
+    await page.getByTestId('paint-owner').selectOption({ label: A });
+    assert.equal(await page.getByTestId('smart-brush').locator('summary').innerText(), 'Smart brush ▾');
+    await page.getByTestId('smart-brush').locator('summary').click();
+    await page.getByTestId('smart-on').check();
+    await page.getByTestId('smart-geography').check();
+    // (Rivers only, for now.)
+    for (const k of ['coasts', 'ridges', 'borders', 'lines']) await page.getByTestId('smart-brush').getByTestId(`smart-${k}`).fill('0');
+    await page.getByTestId('smart-brush').getByTestId('smart-rivers').fill('80');
+    await page.getByTestId('smart-brush').locator('summary').click();
+    assert.equal(await page.getByTestId('smart-brush').locator('summary').innerText(), 'Geography-aware brush ▾');
+    await h.drawLasso(stroke);
+    // Shown adjusted, the stroke beside it, before anything is asked.
+    await page.getByTestId('smart-adjust').waitFor();
+    await page.waitForFunction(() => { const a = (window as any).__mapmaker.store.adjust; return a?.result && a.followed > 0; });
+    assert.equal(await page.getByTestId('confirm-edit').count(), 0, 'nothing asked yet');
+    let a = await adjust();
+    const followed = eastSide(a.result[0]);
+    assert.ok(followed.length >= 10, `${followed.length} points beside the river`);
+    const worst = Math.max(...followed.map(distToRiver));
+    assert.ok(worst < 1e-5, `the side drawn beside the river is a river's course (${worst.toExponential(1)}° off at worst)`);
+    const drawnOff = eastSide(a.lines[0].stroke).map(distToRhine).sort((u: number, v: number) => u - v);
+    assert.ok(drawnOff[Math.floor(drawnOff.length / 2)] > 0.02, 'the stroke itself, beside it, kept as the ghost');
+    await h.screenshot('smart-brush-rhine');
+    // The river's weight to nothing, live: the line as drawn; and back.
+    await weight('rivers', 0);
+    await page.waitForFunction(() => { const a = (window as any).__mapmaker.store.adjust; return a?.result && a.followed === 0; });
+    a = await adjust();
+    const loose = eastSide(a.result[0]).map(distToRhine).sort((u: number, v: number) => u - v);
+    assert.ok(loose[Math.floor(loose.length / 2)] > 0.02, `no pull: beside the river as drawn (${loose[Math.floor(loose.length / 2)].toFixed(3)}°)`);
+    await weight('rivers', 80);
+    await page.waitForFunction(() => { const a = (window as any).__mapmaker.store.adjust; return a?.result && a.followed > 0; });
+    // A pin 30 px east of the river, halfway down: the line passes through it; clicked again, gone.
+    const mid = along.reduce((b, p) => (Math.abs(p[1] - 48.65) < Math.abs(b[1] - 48.65) ? p : b), along[0]);
+    const midPage = await h.toPage([mid[0], mid[1]]);
+    await page.mouse.click(midPage[0] + 30, midPage[1]);
+    await page.waitForFunction(() => { const a = (window as any).__mapmaker.store.adjust; return a?.pins.length === 1 && a.result; });
+    a = await adjust();
+    const pin = a.pins[0];
+    assert.ok(a.result[0].some((p: number[]) => Math.hypot(p[0] - pin[0], p[1] - pin[1]) < 1e-6), 'through the pin');
+    await page.mouse.click(midPage[0] + 30, midPage[1]);
+    await page.waitForFunction(() => { const a = (window as any).__mapmaker.store.adjust; return a?.pins.length === 0 && a.result; });
+    // Used: then the usual question, and the land is held up to the river and not across it.
+    await page.getByTestId('smart-use').click();
+    await page.getByTestId('choice-correct').click();
+    await page.getByTestId('confirm-edit').click();
+    await h.saved();
+    assert.equal(await h.ownerAt([mid[0] + 0.025, mid[1]], '1985'), A, 'up to the river');
+    assert.notEqual(await h.ownerAt([mid[0] - 0.03, mid[1]], '1985'), A, 'and not across it');
+    await page.getByTestId('undo').click();
+    await h.saved();
+    // Ridges, for the border pen along the Pyrenees, a little north of the main ridge.
+    await page.evaluate(() => { const s = (window as any).__mapmaker.store; s.setCamera({ lon: 0.5, lat: 42.75, zoom: 5, rotation: 0, projection: 'equirectangular' }); s.terrainOf(s.world.get('map_space', s.spaceId)); });
+    await page.waitForFunction(() => !!(window as any).__mapmaker.store.earthTerrain, null, { timeout: 60000 });
+    await page.getByTestId('tool-pen').click();
+    await page.getByTestId('smart-brush').locator('summary').click();
+    await page.getByTestId('smart-brush').getByTestId('smart-rivers').fill('0');
+    await page.getByTestId('smart-brush').getByTestId('smart-ridges').fill('100');
+    await page.getByTestId('smart-brush').getByTestId('smart-radius').fill('26');
+    await page.getByTestId('smart-brush').locator('summary').click();
+    const drawLine = async (u: [number, number], v: [number, number]) => {
+      await page.mouse.move(u[0], u[1]);
+      await page.mouse.down();
+      for (let i = 1; i <= 30; i++) await page.mouse.move(u[0] + ((v[0] - u[0]) * i) / 30, u[1] + ((v[1] - u[1]) * i) / 30);
+      await page.mouse.up();
+    };
+    await drawLine(await h.toPage([-0.6, 42.86]), await h.toPage([1.6, 42.86]));
+    await page.waitForFunction(() => { const a = (window as any).__mapmaker.store.adjust; return a?.result && !a.missing.length; });
+    await page.getByTestId('smart-use').click();
+    const pen = await page.evaluate(() => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const pts = s.draft.points as number[][];
+      const mean = (v: number[]) => v.reduce((x, y) => x + y, 0) / v.length;
+      const drawn: number[] = [];
+      for (let i = 0; i <= 20; i++) drawn.push(B.heightAt(s.earthTerrain, -0.6 + (2.2 * i) / 20, 42.86));
+      return { lat: mean(pts.map((p) => p[1])), h: mean(pts.map((p) => B.heightAt(s.earthTerrain, p[0], p[1]))), drawnH: mean(drawn), ends: [pts[0], pts[pts.length - 1]] };
+    });
+    console.log(`    the pen's line on the ridges: from ${pen.drawnH.toFixed(0)} m on average as drawn to ${pen.h.toFixed(0)} m, its mean latitude ${pen.lat.toFixed(3)}° (drawn at 42.86°)`);
+    assert.ok(pen.lat < 42.84 && pen.h > pen.drawnH + 80, 'onto the crest: further south, higher');
+    assert.ok(Math.abs(pen.ends[0][1] - 42.86) < 0.03 && Math.abs(pen.ends[1][1] - 42.86) < 0.03, 'its ends where they were drawn');
+    await h.screenshot('smart-brush-pyrenees');
+    page.once('dialog', (d) => d.accept());
+    await page.getByTestId('draft-discard').click();
+    await page.waitForFunction(() => (window as any).__mapmaker.store.drafts.length === 0);
+    // The strategic brush: a town 8 px below a line drawn left to right; your side the left (above).
+    const townAt = await h.toLL([(await h.centre()).cx, (await h.centre()).cy + 8]);
+    await page.evaluate((ll) => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const id = s.execute((w: any) => B.commands.createEntity(w, { type_id: 'settlement', name: 'Strategoburg' }));
+      s.execute((w: any) => B.commands.placeCharacter(w, { spaceId: s.spaceId, entity: id, lon: ll[0], lat: ll[1], mode: { kind: 'correct', t: { day: -Infinity, ms: 0 } } }));
+    }, townAt);
+    await h.saved();
+    await page.getByTestId('smart-brush').locator('summary').click();
+    await page.getByTestId('smart-strategic').check();
+    for (const k of ['rivers', 'ridges', 'rough', 'points', 'passes', 'borders', 'lines']) { const f = page.getByTestId('smart-brush').getByTestId(`smart-${k}`); if (await f.count()) await f.fill('0'); }
+    await page.getByTestId('smart-brush').getByTestId('smart-towns').fill('100');
+    await page.getByTestId('smart-brush').getByTestId('smart-radius').fill('24');
+    await page.getByTestId('smart-brush').locator('summary').click();
+    assert.equal(await page.getByTestId('smart-brush').locator('summary').innerText(), 'Strategic brush ▾');
+    const { cx, cy } = await h.centre();
+    await drawLine([cx - 200, cy], [cx + 200, cy]);
+    await page.waitForFunction(() => !!(window as any).__mapmaker.store.adjust?.result);
+    // Where the line passes the town, on the page.
+    const passAt = async () => {
+      const r = await adjust();
+      const pts: Array<[number, number]> = [];
+      for (const q of r.result[0]) pts.push(await h.toPage([q[0], q[1]]));
+      for (let i = 0; i + 1 < pts.length; i++) { const [u, v] = [pts[i], pts[i + 1]]; if ((u[0] - cx) * (v[0] - cx) <= 0 && u[0] !== v[0]) return u[1] + ((v[1] - u[1]) * (cx - u[0])) / (v[0] - u[0]); }
+      return NaN;
+    };
+    const below = await passAt();
+    assert.ok(below > cy + 10, `pulled onto your side: the line passes below the town (${(below - cy).toFixed(1)} px below the stroke)`);
+    assert.match(await page.getByTestId('smart-side').innerText(), /left of the line as you drew it/);
+    await h.screenshot('smart-brush-strategic');
+    // Your side the right (below), where the town already is: the line as drawn.
+    await page.getByTestId('smart-swap').click();
+    await page.waitForFunction(() => { const a = (window as any).__mapmaker.store.adjust; return a?.side === -1 && a.result; });
+    const asDrawn = await passAt();
+    assert.ok(Math.abs(asDrawn - cy) < 4, `swapped: the town already on your side, the line as drawn (${(asDrawn - cy).toFixed(1)} px off)`);
+    // Esc drops the drawing (the pen's piece taken back).
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => !(window as any).__mapmaker.store.adjust && !((window as any).__mapmaker.store.draft?.points.length));
+    if (await page.evaluate(() => (window as any).__mapmaker.store.drafts.length)) { page.once('dialog', (d) => d.accept()); await page.getByTestId('draft-discard').click(); }
+    // The town taken away again (two undo steps); the smart brush off (the choice is kept on this computer).
+    await page.getByTestId('tool-select').click();
+    for (let i = 0; i < 2; i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('entity').some((e: any) => e.name === 'Strategoburg')), false);
+    await page.getByTestId('tool-lasso').click();
+    await page.getByTestId('smart-brush').locator('summary').click();
+    await page.getByTestId('smart-geography').check();
+    await page.getByTestId('smart-on').uncheck();
+    await page.getByTestId('smart-brush').locator('summary').click();
+    assert.equal(await page.getByTestId('smart-brush').locator('summary').innerText(), 'Smart brush ▾');
+    await page.getByTestId('tool-select').click();
+    await page.evaluate((c) => (window as any).__mapmaker.store.setCamera(c), keep);
+  });
+
   let colours: Record<string, string> = {};
   await h.step('A character: a point that travels between places over time, moved by dragging, leaves the map; never territory', async () => {
     await page.getByTestId('mode-world').click();

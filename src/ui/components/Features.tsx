@@ -1,6 +1,7 @@
 // Areas, lines and points on feature layers (D71): the tool's options above the map, the question
 // asked once something is drawn, the panel of a chosen feature, the list of features, and the dialog
 // that makes a layer of any kind.
+import { SmartBrushControls } from './SmartBrush.tsx';
 import { useEffect, useState } from 'react';
 import { useStore, store, type PendingEdit } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
@@ -64,6 +65,7 @@ export function FeatureToolOptions() {
           : kind === 'point' ? 'Click the map to put a point there.'
           : s.featureDraw === 'clicks' ? `Click the ${kind === 'area' ? 'corners' : 'points'}; double-click or Enter to finish; Esc to cancel.`
           : kind === 'area' ? 'Draw around an area.' : 'Draw the line.'}</span>}
+      {kind && kind !== 'point' && s.featureDraw === 'freehand' && <SmartBrushControls />}
     </div>
   );
 }

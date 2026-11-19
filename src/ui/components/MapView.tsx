@@ -32,11 +32,15 @@ import { seaLevelAt } from '../../terrain/sea-level.ts';
 import { ageOf, glacialSeaAt, paleoLabelAt } from '../../terrain/paleo.ts';
 import { recordTransition } from '../record-length.ts';
 import { loadBasemapDetail, pixelsPerDegree, visibleBounds, DETAIL_PIXELS_PER_DEGREE, type Basemap } from '../../render-engine/basemap.ts';
+import { prepareSmart, smartLine, type SmartPrepared, type SmartWeights } from '../../render-engine/smart-brush.ts';
+import { smartInputFor } from '../smart-input.ts';
+import { SmartAdjustPanel } from './SmartBrush.tsx';
+import type { AdjustState } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
 
 type Drag =
   | { kind: 'none' }
-  | { kind: 'pan'; x: number; y: number; moved: number; startX: number; startY: number }
+  | { kind: 'pan'; x: number; y: number; moved: number; startX: number; startY: number; pin?: boolean }
   // Brush points are kept as map positions (longitude, latitude), so zooming or panning in the
   // middle of a stroke never changes the shape being drawn.
   | { kind: 'lasso'; points: Pt[] }
@@ -637,6 +641,39 @@ export function MapView() {
         ctx.restore();
       }
     }
+    // A line shown adjusted by the smart brush (D148): the stroke as a ghost, the line adjusted solid, its pins, and
+    // (the strategic brush) ticks on your side.
+    const adj = s.adjust;
+    if (adj) {
+      const trace = (q: Pt[], closed: boolean) => { ctx.beginPath(); q.forEach((r, i) => (i ? ctx.lineTo(r[0], r[1]) : ctx.moveTo(r[0], r[1]))); if (closed) ctx.closePath(); };
+      ctx.save();
+      ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      ctx.setLineDash([6, 5]); ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 1.5;
+      for (const l of adj.lines) { trace(toScreen(l.stroke), l.closed); ctx.stroke(); }
+      ctx.setLineDash([]);
+      const strategic = s.smart.mode === 'strategic';
+      for (let i = 0; i < (adj.result?.length ?? 0); i++) {
+        const q = toScreen(adj.result![i]), closed = adj.lines[i]?.closed ?? false;
+        trace(q, closed); ctx.strokeStyle = 'rgba(10,16,24,0.8)'; ctx.lineWidth = 5; ctx.stroke();
+        ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 2.5; ctx.stroke();
+        if (strategic && q.length > 1) {
+          // (Your side: the left of the line as drawn, times its side; an outline's inside.)
+          const side = closed ? 1 : adj.side;
+          let run = 0;
+          ctx.beginPath();
+          for (let k = 1; k < q.length; k++) {
+            const a = q[k - 1], b = q[k], len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+            if (!(len > 0)) continue;
+            const nx = (side * (b[1] - a[1])) / len, ny = (-side * (b[0] - a[0])) / len;
+            for (let t = 14 - run; t < len; t += 14) { const x = a[0] + ((b[0] - a[0]) * t) / len, y = a[1] + ((b[1] - a[1]) * t) / len; ctx.moveTo(x, y); ctx.lineTo(x + nx * 6, y + ny * 6); }
+            run = (run + len) % 14;
+          }
+          ctx.lineWidth = 2; ctx.stroke();
+        }
+      }
+      for (const pin of toScreen(adj.pins)) { ctx.beginPath(); ctx.arc(pin[0], pin[1], 5, 0, Math.PI * 2); ctx.fillStyle = '#ffffff'; ctx.fill(); ctx.strokeStyle = '#0a1018'; ctx.lineWidth = 2; ctx.stroke(); }
+      ctx.restore();
+    }
     // The Split tool's line: being drawn, or waiting for the click on the part that changes hands.
     const cutLine = drag.current.kind === 'cut' && drag.current.moved >= 4 ? toScreen(drag.current.points) : s.tool === 'split' && s.splitLine ? toScreen(s.splitLine) : null;
     if (cutLine && cutLine.length > 1) {
@@ -710,9 +747,105 @@ export function MapView() {
   }
 
   const snapRadians = () => Math.max(5e-9, 4 * radiansPerPixel(view));
+  // (What a line adjusted by the smart brush is finished with: the view and the functions of the latest drawing.)
+  const act = useRef({ view, finishShape });
+  act.current = { view, finishShape };
+
+  // The smart brushes (D148): a line just drawn is shown adjusted (the stroke as a ghost beside it) before it is
+  // used; points drawn with Alt held, and points clicked meanwhile, are pins the adjusted line passes through.
+  const altPins = useRef<Array<[number, number]>>([]);
+  const adjustDone = useRef<((lines: Array<Array<[number, number]>> | null, choice: 'adjusted' | 'drawn' | 'cancel') => void) | null>(null);
+  /** Lines just drawn: shown adjusted (or, with the smart brush off, used as drawn at once). */
+  function startAdjust(tool: AdjustState['tool'], lines: Array<{ stroke: Array<[number, number]>; closed: boolean }>, done: (lines: Array<Array<[number, number]>> | null, choice: 'adjusted' | 'drawn' | 'cancel') => void) {
+    // (Pins drawn with Alt: a few pixels apart at most, so that a stretch drawn so is kept as drawn.)
+    const pins: Array<[number, number]> = [];
+    for (const q of altPins.current) {
+      const a = lonLatToScreen(view, q[0], q[1]), b = pins.length ? lonLatToScreen(view, pins[pins.length - 1][0], pins[pins.length - 1][1]) : null;
+      if (a && (!b || Math.hypot(a[0] - b[0], a[1] - b[1]) >= 6)) pins.push(q);
+    }
+    altPins.current = [];
+    lines = lines.filter((l) => l.stroke.length >= 2);
+    if (!store.smart.on || !lines.length) { done(lines.map((l) => l.stroke), 'drawn'); return; }
+    adjustDone.current = done;
+    store.set({ adjust: { tool, lines, pins, side: 1, result: null, followed: 0, missing: [] } });
+  }
+  store.adjustFinish = (choice) => {
+    const a = store.adjust, done = adjustDone.current;
+    adjustDone.current = null;
+    store.set({ adjust: null });
+    if (!a || !done) return;
+    if (choice === 'adjusted' && a.result) done(a.result, 'adjusted');
+    else if (choice === 'cancel') done(null, 'cancel');
+    else done(a.lines.map((l) => l.stroke), 'drawn');
+  };
+  /** A click while a line is shown adjusted: a pin there, or the pin under it taken away. */
+  function togglePin(p: Pt) {
+    const a = store.adjust;
+    if (!a) return;
+    const at = a.pins.findIndex((q) => { const sp = lonLatToScreen(view, q[0], q[1]); return !!sp && Math.hypot(sp[0] - p[0], sp[1] - p[1]) < 9; });
+    if (at >= 0) { store.set({ adjust: { ...a, pins: a.pins.filter((_, i) => i !== at) } }); return; }
+    const ll = screenToLonLat(view, p[0], p[1]);
+    if (ll) store.set({ adjust: { ...a, pins: [...a.pins, ll] } });
+  }
+  // Lines adjusted: worked out a moment after anything they depend on changes (the weights, the pins, the side,
+  // the view); what does not depend on the weights is kept while only they move.
+  const viewKey = `${view.width}x${view.height}|${cameraKey(view.camera, view.width, view.height)}`;
+  const adjustCalc = useRef<{ lines: unknown; prepKey: string; prepared: Array<SmartPrepared | null>; missing: string[]; doneKey: string } | null>(null);
+  useEffect(() => {
+    const a = s.adjust;
+    if (!a) { adjustCalc.current = null; return; }
+    const sm = s.smart, strategic = sm.mode === 'strategic';
+    const nonzero = (Object.keys(sm.weights) as Array<keyof SmartWeights>).filter((k) => sm.weights[k] > 0).join(',');
+    // (While heights or a planet's rivers are still coming, worked out again as the app hears of anything new.)
+    const prepKey = `${viewKey}|${sm.radius}|${sm.mode}|${a.side}|${nonzero}${a.missing.length ? `|${s.version}` : ''}`;
+    const doneKey = `${prepKey}|${JSON.stringify(sm.weights)}|${JSON.stringify(a.pins)}`;
+    const c = adjustCalc.current;
+    if (c && c.lines === a.lines && c.doneKey === doneKey && a.result) return;
+    const id = requestAnimationFrame(() => {
+      const cur = store.adjust;
+      if (!cur || cur.lines !== a.lines) return;
+      let calc = adjustCalc.current;
+      if (!calc || calc.lines !== a.lines || calc.prepKey !== prepKey) {
+        const missing: string[] = [];
+        const prepared = a.lines.map((l) => {
+          const screen = l.stroke.map((q) => lonLatToScreen(view, q[0], q[1]));
+          if (screen.length < 2 || screen.some((q) => !q)) return null;
+          const r = smartInputFor(view, screen as Pt[], l.closed, strategic ? (l.closed ? 1 : cur.side) : 0, sm);
+          for (const m of r.missing) if (!missing.includes(m)) missing.push(m);
+          return prepareSmart(r.input);
+        });
+        calc = adjustCalc.current = { lines: a.lines, prepKey, prepared, missing, doneKey: '' };
+      }
+      const strokes = a.lines.map((l) => l.stroke.map((q) => lonLatToScreen(view, q[0], q[1])).filter((q): q is Pt => !!q));
+      const nearestLine = (p: Pt) => { let best = 0, bd = Infinity; strokes.forEach((st, i) => { for (const q of st) { const d = Math.hypot(q[0] - p[0], q[1] - p[1]); if (d < bd) { bd = d; best = i; } } }); return best; };
+      const pins = cur.pins.map((q) => lonLatToScreen(view, q[0], q[1])).filter((q): q is Pt => !!q);
+      let followed = 0;
+      const result = a.lines.map((l, i) => {
+        const P = calc!.prepared[i];
+        if (!P) return l.stroke;
+        const r = smartLine(P, sm.weights, pins.filter((p) => nearestLine(p) === i));
+        followed += r.followed;
+        const ll = r.pts.map((q) => screenToLonLat(view, q[0], q[1]));
+        return ll.every(Boolean) ? (ll as Array<[number, number]>) : l.stroke;
+      });
+      calc.doneKey = doneKey;
+      store.set({ adjust: { ...cur, result, followed, missing: calc.missing } });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [s.adjust, s.smart, viewKey, s.adjust?.missing.length ? s.version : 0]);
+  // (Another tool or another map: the line being adjusted is dropped.)
+  useEffect(() => {
+    const a = store.adjust;
+    if (a && (a.tool !== s.tool || store.mode !== 'world')) store.adjustFinish('cancel');
+  }, [s.tool, s.spaceId, s.mode]);
 
   function onPointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
     if (!s.world) return;
+    if (store.adjust && !presentation && e.button === 0) {
+      const q = local(e);
+      drag.current = { kind: 'pan', x: e.clientX, y: e.clientY, moved: 0, startX: q[0], startY: q[1], pin: true };
+      return;
+    }
     e.currentTarget.setPointerCapture(e.pointerId);
     const p = local(e);
     // Comparing two dates: the line between them is picked up (a few pixels either side).
@@ -864,7 +997,7 @@ export function MapView() {
       const ll = screenToLonLat(view, p[0], p[1]);
       const last = d.points[d.points.length - 1];
       const ls = lonLatToScreen(view, last[0], last[1]);
-      if (ll && (!ls || Math.hypot(p[0] - ls[0], p[1] - ls[1]) > 2)) { d.points.push(ll); force((n) => n + 1); }
+      if (ll && (!ls || Math.hypot(p[0] - ls[0], p[1] - ls[1]) > 2)) { d.points.push(ll); force((n) => n + 1); if (e.altKey && (d.kind === 'feature' || d.kind === 'cut')) altPins.current.push(ll); }
       return;
     }
     if (presentation && d.kind === 'none') {
@@ -886,7 +1019,7 @@ export function MapView() {
       const last = d.points[d.points.length - 1];
       const lastScreen = lonLatToScreen(view, last[0], last[1]);
       const ll = screenToLonLat(view, p[0], p[1]);
-      if (ll && (!lastScreen || Math.hypot(p[0] - lastScreen[0], p[1] - lastScreen[1]) > 2)) { d.points.push(ll); force((n) => n + 1); }
+      if (ll && (!lastScreen || Math.hypot(p[0] - lastScreen[0], p[1] - lastScreen[1]) > 2)) { d.points.push(ll); force((n) => n + 1); if (e.altKey) altPins.current.push(ll); }
       return;
     }
     if (d.kind === 'vertex') { d.moved = Math.max(d.moved, Math.hypot(p[0] - d.x, p[1] - d.y)); setCursor(p); return; }
@@ -895,7 +1028,7 @@ export function MapView() {
       const last = pts[pts.length - 1];
       const lastScreen = last ? lonLatToScreen(view, last[0], last[1]) : null;
       const ll = screenToLonLat(view, p[0], p[1]);
-      if (ll && (!lastScreen || Math.hypot(p[0] - lastScreen[0], p[1] - lastScreen[1]) > 2)) store.penAdd(ll, false);
+      if (ll && (!lastScreen || Math.hypot(p[0] - lastScreen[0], p[1] - lastScreen[1]) > 2)) { store.penAdd(ll, false); if (e.altKey) altPins.current.push(ll); }
       return;
     }
     if (s.tool === 'pen' && !presentation) setCursor(p);
@@ -914,6 +1047,8 @@ export function MapView() {
     const p = local(e);
     // Framing the shot: the view dragged to becomes the shot's camera (still for the whole shot).
     if (presentation && d.kind === 'pan') { if (d.moved >= 1) commitShotCamera(); return; }
+    // While a line is shown adjusted (D148): a click pins a point (or takes a pin away); a drag only moves the map.
+    if (d.kind === 'pan' && d.pin) { if (d.moved < 4) togglePin(p); return; }
     if (d.kind === 'erase') { eraseBorders(d.points, view); force((n) => n + 1); return; }
     if (d.kind === 'sculpt') { sculptStroke(d.points); force((n) => n + 1); return; }
     // A character dropped: it is there from the date being viewed (a click just selects it).
@@ -942,7 +1077,23 @@ export function MapView() {
       if (ll) store.set({ selection: { kind: 'point', lon: ll[0], lat: ll[1] } });
       return;
     }
-    if (d.kind === 'pen') return; // the draft is saved; carry on whenever you like
+    if (d.kind === 'pen') {
+      // (The piece just drawn is shown adjusted by the smart brush, D148: used, kept as drawn, or taken back; the
+      // draft is saved; carry on whenever you like.)
+      const dr = store.draft;
+      if (dr && dr.pieces.length && store.smart.on) {
+        const piece = dr.points.slice(dr.pieces[dr.pieces.length - 1]);
+        if (piece.length >= 2) {
+          startAdjust('pen', [{ stroke: piece, closed: false }], (lines, choice) => {
+            if (choice === 'adjusted' && lines) store.penReplaceLastPiece(lines[0]);
+            else if (choice === 'cancel') store.penUndoPiece();
+          });
+          return;
+        }
+      }
+      altPins.current = [];
+      return;
+    }
     if (d.kind === 'pickbox') {
       force((n) => n + 1);
       const ix = regionIndex(store.regionLevel);
@@ -977,7 +1128,7 @@ export function MapView() {
       const clean = simplify(smooth(dedupe(screen, 1), Math.min(2, store.stroke.smoothness), false), 0.6);
       const line = clean.map((q) => screenToLonLat(view, q[0], q[1])).filter((q): q is [number, number] => !!q);
       if (line.length < 2) return;
-      store.set({ splitLine: line });
+      startAdjust('split', [{ stroke: line, closed: false }], (lines) => { if (lines?.[0]?.length) store.set({ splitLine: lines[0] }); });
       return;
     }
     if (d.kind === 'feature') {
@@ -992,11 +1143,11 @@ export function MapView() {
         const loops = processLasso(screen, store.stroke);
         const parts = loops.map(back).filter((r) => r.length >= 3);
         if (!parts.length) { store.toast('The shape is too small. Zoom in or draw a larger area.', 'error'); return; }
-        finishFeatureDrawing(layer.id, parts);
+        startAdjust('feature', parts.map((r) => ({ stroke: r, closed: true })), (lines) => { if (lines) finishFeatureDrawing(layer.id, lines.filter((r) => r.length >= 3)); });
       } else {
         const line = simplify(smooth(dedupe(screen, 1), Math.min(2, store.stroke.smoothness), false), 0.6);
         if (line.length < 2 || Math.hypot(line[line.length - 1][0] - line[0][0], line[line.length - 1][1] - line[0][1]) < 3) return;
-        finishFeatureDrawing(layer.id, [back(line)]);
+        startAdjust('feature', [{ stroke: back(line), closed: false }], (lines) => { if (lines) finishFeatureDrawing(layer.id, lines); });
       }
       return;
     }
@@ -1005,7 +1156,15 @@ export function MapView() {
       const screen = d.points.map((q) => lonLatToScreen(view, q[0], q[1])).filter((q): q is Pt => !!q);
       if (screen.length < 4) { force((n) => n + 1); return; }
       const loops = processLasso(screen, store.stroke);
-      finishShape(loops, screen[0]);
+      if (!store.smart.on) { altPins.current = []; finishShape(loops, screen[0]); force((n) => n + 1); return; }
+      const origin = d.points[0];
+      const back = (r: Pt[]) => r.map((q) => screenToLonLat(view, q[0], q[1])).filter((q): q is [number, number] => !!q);
+      startAdjust('lasso', loops.map((l) => ({ stroke: back(l), closed: true })), (lines) => {
+        if (!lines) return;
+        const now = act.current;
+        const rings = lines.map((l) => l.map((q) => lonLatToScreen(now.view, q[0], q[1])).filter((q): q is Pt => !!q));
+        now.finishShape(rings, lonLatToScreen(now.view, origin[0], origin[1]) ?? rings[0][0]);
+      });
       force((n) => n + 1);
       return;
     }
@@ -1080,6 +1239,13 @@ export function MapView() {
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
+      // (A line shown adjusted by the smart brush: Enter uses it, Esc drops the drawing.)
+      if (store.adjust && (e.key === 'Enter' || e.key === 'Escape')) {
+        if (tag === 'TEXTAREA') return;
+        e.preventDefault();
+        store.adjustFinish(e.key === 'Enter' ? (store.adjust.result ? 'adjusted' : 'drawn') : 'cancel');
+        return;
+      }
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       if (e.key === 'Escape') { setPolygon([]); setCursor(null); drag.current = { kind: 'none' }; if (store.splitLine && !store.pending) store.set({ splitLine: null }); if (store.tool === 'regions' && !store.dialog && store.regionPicks.length) store.set({ regionPicks: [] }); if (store.pickOrigin) store.set({ pickOrigin: null }); force((n) => n + 1); }
       if (e.key === 'Enter' && store.tool === 'regions' && !store.dialog && store.regionPicks.length) store.set({ dialog: 'give-regions' });
@@ -1127,6 +1293,7 @@ export function MapView() {
         data-testid="map-canvas"
       />
       {!presentation && <MapHud view={view} />}
+      {!presentation && s.adjust && <SmartAdjustPanel />}
       {s.viewSettings.showSpeed && (
         <div className="draw-speed" title="How long the map took to draw (the working view only), and how many frames a second the screen is getting: 60 on most screens when everything keeps up; a long wait is a hitch" data-testid="draw-speed">
           <span ref={speedRef} />

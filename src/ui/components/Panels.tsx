@@ -26,6 +26,7 @@ import { PicturesSection } from './Pictures.tsx';
 import { TypeDot, TypeSelect } from './EventTypes.tsx';
 import { CalendarPopover, stepDate } from './DatePicker.tsx';
 import { SplitToolOptions } from './SplitMerge.tsx';
+import { SmartBrushControls } from './SmartBrush.tsx';
 import { RegionToolOptions } from './Regions.tsx';
 import { typeColor } from '../../domain/event-types.ts';
 import { isFeatureKind } from '../../render-engine/feature-style.ts';
@@ -291,6 +292,7 @@ export function ToolBar() {
             </select>
           </label>
           {s.tool === 'pen' && <PenControls />}
+          {(s.tool === 'pen' || s.tool === 'lasso') && <SmartBrushControls />}
           {s.tool === 'lasso' && (
             <details className="brush-settings">
               <summary title="How freehand outlines are cleaned up">Brush settings ▾</summary>

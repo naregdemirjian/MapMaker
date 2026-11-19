@@ -1,6 +1,7 @@
 // Splitting a country along a line and merging countries (Stage 2, D76): the question after a split
 // line is drawn and its part clicked, the "Merge into one" dialog, and the choice of when a change
 // holds that both share (from the date viewed, as a correction, or in an event).
+import { SmartBrushControls } from './SmartBrush.tsx';
 import { useEffect, useState } from 'react';
 import { useStore, type PendingEdit } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
@@ -206,6 +207,7 @@ export function SplitToolOptions() {
       {s.splitLine
         ? <><span className="muted">Now click the part that changes hands.</span><button className="small" onClick={() => s.set({ splitLine: null })} data-testid="split-again">Draw the line again <span className="key">Esc</span></button></>
         : <span className="muted">Drag a line right across a country (from outside it to outside it, or from border to border).</span>}
+      <SmartBrushControls />
     </div>
   );
 }

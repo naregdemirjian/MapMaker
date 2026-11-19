@@ -61,6 +61,65 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D148. Smart brushes: the geography-aware brush and the strategic brush (Stage 12)
+
+- **Asked.** Stage 12 of the approved plan: "the geography-aware brush and the strategic brush, with feature
+  weights and live preview", tested on "synthetic terrains with known best paths". The plan's own description:
+  a magnetic lasso drawn to rivers and ridges instead of the edges in a picture.
+- **How it works** (`render-engine/smart-brush.ts`), in screen pixels at the zoom the stroke is drawn at:
+  1. A corridor is built round the stroke, as wide as the search radius (6 to 60 px, 18 by default), on a grid
+     of a tenth of the radius (coarser for very long strokes).
+  2. A cost map inside it: each place's pull is the strongest of the features near it, times its weight (a line
+     pulls within a couple of pixels of it, falling off smoothly; ridges and valleys by how far the ground stands
+     above or below the ground round it, against how much it varies there). The cost is cheaper by up to 95% for
+     the pull, and dearer away from the stroke (twice as dear at the corridor's edge).
+  3. The cheapest path from the stroke's start to its end, through any points pinned (Dijkstra on the grid, each
+     stretch between pins among the cells near its own part of the stroke). An outline is split at two places
+     where nothing pulls, each put where the corridor is cheapest across, so following a shore all round has no
+     seam.
+  4. The stretches of the path that run along a line feature take its exact course (`follow-land.ts`): the
+     river's own line, its bends included, not the grid's steps. The rest is simplified and its corners rounded.
+     The ends of a line and the pins stay exactly where they are.
+- **Features that pull** (each with a weight, 0 to 100): rivers (the Earth's from Natural Earth at the detail
+  shown; a generated planet's own), coasts and lakes, ridges and valleys (from the map's heights, sculpting and
+  the sea of the date included), the map's own borders as they are at the date viewed (on the layer drawn on),
+  today's borders (the Earth's), and the lines drawn on the map's layers of lines (roads, railways, canals) as
+  they are at the date viewed: features with lifespans are read at that date.
+- **The strategic brush**: the same with a military cost model and a side that is yours (an outline's inside; for
+  a line, the left of the line as drawn, swapped with a button). Rivers draw the line to their far bank, the river
+  kept on your side; ridges to the crest; rough ground draws it in as a buffer; towns (the map's cities at the
+  date), the points placed on the map's layers of points (objectives, installations) and mountain passes within
+  reach (saddles found in the heights) are pulled onto your side: each is walled off from the line on your side,
+  as strongly as its weight, so the line goes round it on the other.
+- **Live preview.** After a stroke with the brush, the border pen, the Split tool or the features tool (areas and
+  lines drawn freehand), with "Adjust the lines I draw" on: the stroke as a ghost, the adjusted line solid, a
+  panel of the weights beside the map. Moving a weight or the radius works the line out again at once (what does
+  not depend on the weights is kept, so a weight moved costs a few milliseconds). A click on the map pins a point
+  the line must pass through, a click on a pin takes it away; points drawn with Alt held are pins, so a stretch
+  can be kept exactly as drawn. "Use this line" (Enter) goes on as the tool always does (the brush: the question
+  of what the drawing means); "Keep my line" uses the stroke; Esc drops it (for the pen, the piece is taken back).
+  The settings are kept on this computer.
+- **Differences from the plan, and why.**
+  - *Forest edges* (land cover) are not offered: the Earth's land cover here is a picture (Natural Earth I), not
+    classes; a planet's biomes could be (way back: classes from the biome map).
+  - *Roads, railways, bridges and crossings* from data are not offered: none are bundled (Natural Earth's roads
+    and railways could be, about 5 MB). The lines drawn on the map's own layers stand in, at the date viewed.
+  - *Rivers' left or right banks*: Natural Earth's rivers are centrelines; the strategic brush's far bank is the
+    centreline moved a little to the far side.
+  - *Dragging a segment back* is done with pins (and Alt while drawing), which also covers "turn it off
+    mid-stroke".
+  - *Towns* pull only for the strategic brush (onto your side); for the geography-aware brush a town is not a line
+    to follow.
+- **Tests.** `smart-brush.test.ts` (synthetic lines and terrains with known best paths: a stroke beside a winding
+  river is drawn onto it and ends where drawn, the stroke itself without the pull or beyond the radius; a
+  meander followed round with a strong pull, cut across with a weak one; a crest and a valley floor; a pin; a lake
+  shore all round; the far bank on each side; a town and a pass pulled onto your side; fast enough to move the
+  sliders live); `follow-land.test.ts` (the exact course taken along rivers, round a loop, two lines near each
+  other); `e2e/workflows` 'Smart brushes' (the brush beside the Rhine onto a river's own course, the weight moved
+  live, a pin, the line used and the land held up to the river and not across it; the pen's line on the
+  Pyrenees' crest, 1,452 m on average as drawn, 2,001 m adjusted; a town pulled onto your side, the sides
+  swapped; Esc taking the piece back).
+
 ### D147. A dissolve goes at an even pace, whatever its pattern
 
 - **Found** by the Windows run of D145, which failed in a step that change had not touched: halfway through a
