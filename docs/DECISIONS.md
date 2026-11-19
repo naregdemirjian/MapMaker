@@ -61,6 +61,31 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D141. Fine ground close in: made up below the heights' own detail
+
+- **Asked.** Enhance all the maps; detailed when zoomed in.
+- **Found.** Close in, every terrain look went soft where the heights ended: a planet's cells are about 20 km, the
+  Earth's 10 km (or about 40 m where finer heights are downloaded, D101), and below a cell the land was one flat
+  colour. Generated planets have no photographs to fall back on (D138).
+- **What.** Below the grid's own cells the graphics card makes up the ground (`terrain-gl.ts`, `u_fine`): waves
+  of smooth noise, each half the size of the last, from the cell's size down to two pixels, the finest fading in
+  as the view comes closer. They give slopes of their own, added to the terrain's before it is lit: steeper where
+  the land itself is steep (folded into ridges and valleys there), all but flat on plains and under the sea; and a
+  faint mottling of the colours (4% on land, 1% at sea). The noise is laid out in space on the planet's surface
+  (value noise with its slopes, after Inigo Quilez): no seam at the 180th meridian or the poles, and the same
+  ground at every visit and in every export. Nothing is made up until a cell is more than four pixels wide, so
+  views from afar are as before.
+- **For every terrain look** (natural, atlas, satellite and the planets' own), on generated planets and on the
+  Earth; over photographs (D138) only the terrain's part shows, since close in a photograph is not shaded.
+  A switch per map in Show, Terrain: "Fine ground close in", on by default.
+- **Speed.** Up to ten waves of eight lattice values each for a pixel, only where cells are large on screen; a
+  terrain picture is drawn once for a view and kept while the map moves (D95).
+- **Not done.** A planet's coast still follows its cells' edges close in (its shelves are steep, so made-up
+  heights cannot move it); ground that differs by biome (dunes, forest canopy, fields).
+- **Tests.** `e2e/workflows` 'Terrain': with the bundled heights alone close in, more to see once the fine ground
+  is on (spread of lightness), and the same ground when the view comes back to it. Checked by eye on a generated
+  planet's mountains at 50 km and 10 km to the scale bar, satellite and natural colours.
+
 ### D140. Only the strip a front has crossed is drawn again; two faults of partial redraws fixed
 
 - **Why.** While a change animates, only the rectangles round it are drawn again in the kept picture (D58). They

@@ -1896,7 +1896,7 @@ try {
     assert.equal(await steps(), before, 'every step of this one undone');
   });
 
-  await h.step('Terrain: land coloured by height and the sea by depth, with relief; the satellite look, as photographed and by land cover; finer heights and photographs close in; relief over the countries; hidden while working but kept in the presentation; undone', async () => {
+  await h.step('Terrain: land coloured by height and the sea by depth, with relief; the satellite look, as photographed and by land cover; finer heights, photographs and made-up fine ground close in; relief over the countries; hidden while working but kept in the presentation; undone', async () => {
     await page.getByTestId('mode-world').click();
     // The whole world: the Himalaya, the plains of India, the Atlantic and the countries drawn over it.
     await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 20, lat: 20, zoom: 0.3, rotation: 0, projection: 'equirectangular' }));
@@ -1974,6 +1974,8 @@ try {
     // 8 km apart, which the bundled 10 km grid cannot hold), turned off again for the bundled heights.
     const tiles = [6, 7, 8].reduce((n, z) => n + writeTerrainTiles(h.projects, z, [5, 46, 15, 54], (lon) => 600 + 500 * Math.sin((2 * Math.PI * lon) / 0.11)), 0);
     assert.ok(tiles > 40);
+    // (Without the ground made up below the heights' own detail, D141: what the heights themselves show.)
+    await show(() => page.getByTestId('terrain-fine').uncheck());
     const rugged = async () => { const px = await patch([10, 50], 30), l: number[] = []; for (let i = 0; i < px.length; i += 4) l.push(px[i] + px[i + 1] + px[i + 2]); const m = l.reduce((a, b) => a + b, 0) / l.length; return Math.sqrt(l.reduce((a, b) => a + (b - m) ** 2, 0) / l.length); };
     await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 10, lat: 50, zoom: 6.5, rotation: 0, projection: 'equirectangular' }));
     await page.waitForFunction(() => /^detail:/.test((window as any).__mapmaker.store.renderer.lastTerrain.detail), null, { timeout: 30000 });
@@ -1985,6 +1987,18 @@ try {
     await page.waitForTimeout(300);
     const coarse = await rugged();
     assert.ok(fine > 8 && fine > 2 * coarse, `the ridges show close in (spread of lightness ${fine.toFixed(1)}, and ${coarse.toFixed(1)} with the bundled heights)`);
+    // The ground made up below the heights' own detail (D141): with the bundled heights alone, soft close in,
+    // there is more to see once it is on (fine relief and a faint mottling); the same picture each time.
+    await show(() => page.getByTestId('terrain-fine').check());
+    await page.waitForTimeout(400);
+    const madeUp = await rugged(), madeUpPixels = await patch([10, 50], 30);
+    assert.ok(madeUp > coarse + 1, `fine ground close in (spread of lightness ${madeUp.toFixed(1)} against ${coarse.toFixed(1)} without)`);
+    await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 10.2, lat: 50.1, zoom: 6.5, rotation: 0, projection: 'equirectangular' }));
+    await page.waitForTimeout(300);
+    await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 10, lat: 50, zoom: 6.5, rotation: 0, projection: 'equirectangular' }));
+    await page.waitForTimeout(500);
+    assert.ok(meanDiff(madeUpPixels, await patch([10, 50], 30)) < 1.5, 'the same ground when the view comes back to it');
+    await h.screenshot('terrain-fine-ground');
     // Photographs close in (D138): picture tiles kept on this computer (made here: stripes half a degree wide,
     // magenta and green, which no photograph has), laid over the picture of the whole planet where they are.
     const photoTiles = [7, 8, 9].reduce((n, level) => n + writePhotoTiles(h.projects, level, [6, 47, 14, 53], (lon) => (Math.floor(lon / 0.5) % 2 ? [255, 0, 255] : [0, 255, 0])), 0);
@@ -2013,7 +2027,7 @@ try {
     await page.getByTestId('mode-world').click();
     assert.deepEqual(await terrain(), { colours: false, relief: false, overTerritories: false, seaLevel: 0, cover: false, detail: '', photo: '' });
     // Undone, step by step, to no terrain.
-    for (let i = 0; i < 7; i++) await page.getByTestId('undo').click();
+    for (let i = 0; i < 9; i++) await page.getByTestId('undo').click();
     await h.saved();
     assert.equal(await steps(), before, 'each change was one step');
     assert.equal(await page.evaluate(() => JSON.parse((window as any).__mapmaker.store.world.get('map_space', (window as any).__mapmaker.store.spaceId).settings).terrain ?? null), null);

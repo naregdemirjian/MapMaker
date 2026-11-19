@@ -125,6 +125,7 @@ uniform sampler2D u_detail;
 uniform int u_useDetail;
 uniform vec4 u_detailBox;
 uniform vec2 u_detailTex;
+uniform int u_fine;
 uniform sampler2D u_world;
 uniform int u_useWorld;
 uniform sampler2D u_photo;
@@ -156,6 +157,22 @@ vec3 rampLand(float e) {
     c = b.yzw;
   }
   return c;
+}
+
+// Smooth noise in space (−1 to 1) with its slope each way (after Inigo Quilez's value noise with derivatives).
+float hash3(vec3 p) {
+  p = fract(p * 0.3183099 + 0.1);
+  p *= 17.0;
+  return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
+vec4 noised(vec3 x) {
+  vec3 p = floor(x), w = fract(x);
+  vec3 u = w * w * w * (w * (w * 6.0 - 15.0) + 10.0), du = 30.0 * w * w * (w * (w - 2.0) + 1.0);
+  float a = hash3(p), b = hash3(p + vec3(1.0, 0.0, 0.0)), c = hash3(p + vec3(0.0, 1.0, 0.0)), d = hash3(p + vec3(1.0, 1.0, 0.0));
+  float e = hash3(p + vec3(0.0, 0.0, 1.0)), f = hash3(p + vec3(1.0, 0.0, 1.0)), g = hash3(p + vec3(0.0, 1.0, 1.0)), h = hash3(p + vec3(1.0));
+  float k0 = a, k1 = b - a, k2 = c - a, k3 = e - a, k4 = a - b - c + d, k5 = a - c - e + g, k6 = a - b - e + f, k7 = -a + b + c - d + e - f - g + h;
+  return vec4(-1.0 + 2.0 * (k0 + k1 * u.x + k2 * u.y + k3 * u.z + k4 * u.x * u.y + k5 * u.y * u.z + k6 * u.z * u.x + k7 * u.x * u.y * u.z),
+    2.0 * du * vec3(k1 + k4 * u.y + k6 * u.z + k7 * u.y * u.z, k2 + k5 * u.z + k4 * u.x + k7 * u.z * u.x, k3 + k6 * u.x + k5 * u.y + k7 * u.x * u.y));
 }
 
 void main() {
@@ -224,7 +241,34 @@ void main() {
   // relief is exaggerated more, so it reads the same at every zoom. Close in on finer heights (D101)
   // the slopes are nearer their true steepness and are exaggerated less.
   float exag = u_exag * max(0.25, sqrt(dym / 20000.0));
-  vec3 n = normalize(vec3(-(eE - eW) / dxm * exag, -(eN - eS) / dym * exag, 1.0));
+  // Finer than the heights (D141): below the grid's own cells the ground is made up, wave upon wave each half
+  // the size of the last, from the cells' size down to two pixels (the finest fading in as the view comes
+  // closer): slopes of its own, steeper where the land itself is steep and all but flat on plains and under
+  // the sea, and a faint mottling. Laid out in space, on the planet's surface: no seam, the same at every visit.
+  vec2 fineSlope = vec2(0.0);
+  float mottle = 0.0;
+  float mpp = (abs(gx.y) + abs(gy.y)) * PI * R;
+  float cell = (inD ? u_detailBox.w / max(u_detailTex.y, 1.0) : PI / u_tex.y) * R;
+  if (u_fine == 1 && ok && 4.0 * mpp < cell) {
+    float lon = ll.x + u_lonRef;
+    vec3 P = vec3(cos(lat) * cos(lon), cos(lat) * sin(lon), sin(lat));
+    vec3 E = vec3(-sin(lon), cos(lon), 0.0), N = vec3(-sin(lat) * cos(lon), -sin(lat) * sin(lon), cos(lat));
+    float steep = length(vec2((eE - eW) / dxm, (eN - eS) / dym));
+    float rough = clamp(steep * 4.0, 0.04, 1.0) * (rel < 0.0 ? 0.06 : 1.0);
+    float ridged = smoothstep(0.08, 0.5, rough);
+    float lam = cell;
+    for (int o = 0; o < 10; o++) {
+      lam *= 0.5;
+      if (lam < 2.0 * mpp) break;
+      vec4 nz = noised(P * (R / lam) + float(o) * 17.3);
+      float w = smoothstep(2.0 * mpp, 4.0 * mpp, lam);
+      // (In steep country the waves are folded into ridges and valleys, as water cuts them; rolling elsewhere.)
+      vec3 slope = mix(nz.yzw, -sign(nz.x) * nz.yzw * 1.6, ridged);
+      fineSlope += w * 0.11 * rough * vec2(dot(slope, E), dot(slope, N));
+      mottle += w * mix(nz.x, 1.0 - 2.0 * abs(nz.x), ridged) * (o < 2 ? 0.5 : 0.3);
+    }
+  }
+  vec3 n = normalize(vec3((-(eE - eW) / dxm - fineSlope.x) * exag, (-(eN - eS) / dym - fineSlope.y) * exag, 1.0));
   float shade = dot(n, u_light) - u_light.z;
   if (rel < 0.0) shade *= u_seaRelief;
   if (u_mode == 3) {
@@ -236,6 +280,8 @@ void main() {
   // The land's colour: from its land cover in the satellite look (D100), else by its height.
   vec3 land = u_useCover == 1 && u_mode != 0 ? textureGrad(u_cover, uv, gx, gy).rgb : rampLand(max(rel, 0.0));
   vec3 col = u_mode == 1 ? land : u_mode == 0 ? rampSea(min(rel, 0.0)) : mix(rampSea(min(rel, 0.0)), land, landA);
+  // (The made-up ground's mottling, D141: the land a little lighter and darker in patches, the sea hardly.)
+  col *= 1.0 + clamp(mottle, -1.5, 1.5) * (u_mode == 0 ? 0.012 : mix(0.012, 0.04, u_mode == 1 ? 1.0 : landA));
   // The Earth as photographed (D138): the picture of the whole planet, and over it the photographs of the
   // region in view where they are in (fading in over their picture's edge). Land and sea alike are the
   // photograph's wherever the terrain is today's: not where the sea of the moment has taken land or left it
@@ -252,7 +298,6 @@ void main() {
     float w = ph.a * clamp((1.0 - over) * (1.0 - abs(landA - landToday)), 0.0, 1.0);
     col = mix(col, ph.rgb, w);
     // (A photograph has its own light and shadow: the relief over it is gentler, and none close in.)
-    float mpp = (abs(gx.y) + abs(gy.y)) * PI * R;
     shade *= mix(1.0, 0.5 * smoothstep(60.0, 2500.0, mpp), w);
   }
   if (u_shadeTint > 0.0) {
@@ -262,7 +307,7 @@ void main() {
   outColor = vec4(col, 1.0);
 }`;
 
-const UNIFORMS = ['u_elev', 'u_tex', 'u_size', 'u_offset', 'u_inv', 'u_S', 'u_origin', 'u_lonRef', 'u_proj', 'u_mode', 'u_shadeTint', 'u_exag', 'u_seaRelief', 'u_light', 'u_sea', 'u_seaN', 'u_land', 'u_landN', 'u_seaLevel', 'u_mask', 'u_useMask', 'u_override', 'u_useOverride', 'u_cover', 'u_useCover', 'u_detail', 'u_useDetail', 'u_detailBox', 'u_detailTex', 'u_world', 'u_useWorld', 'u_photo', 'u_usePhoto', 'u_photoBox'] as const;
+const UNIFORMS = ['u_elev', 'u_tex', 'u_size', 'u_offset', 'u_inv', 'u_S', 'u_origin', 'u_lonRef', 'u_proj', 'u_mode', 'u_shadeTint', 'u_exag', 'u_seaRelief', 'u_light', 'u_sea', 'u_seaN', 'u_land', 'u_landN', 'u_seaLevel', 'u_mask', 'u_useMask', 'u_override', 'u_useOverride', 'u_cover', 'u_useCover', 'u_detail', 'u_useDetail', 'u_detailBox', 'u_detailTex', 'u_world', 'u_useWorld', 'u_photo', 'u_usePhoto', 'u_photoBox', 'u_fine'] as const;
 type UniformName = (typeof UNIFORMS)[number];
 
 /** The relief's exaggeration at strength 1 (slopes ten kilometres across are gentle). */
@@ -542,6 +587,7 @@ class TerrainGL {
     gl.uniform1i(u.u_useDetail, detail ? 1 : 0);
     gl.uniform4f(u.u_detailBox, detail ? detail.west * rad : 0, detail ? detail.north * rad : 0, detail ? detail.width * detail.dLon * rad : 1, detail ? detail.height * detail.dLat * rad : 1);
     gl.uniform2f(u.u_detailTex, detail ? Math.min(detail.width, this.max) : 1, detail ? Math.min(detail.height, this.max) : 1);
+    gl.uniform1i(u.u_fine, look.fine ? 1 : 0);
     gl.uniform1i(u.u_world, 5);
     gl.uniform1i(u.u_useWorld, world ? 1 : 0);
     gl.uniform1i(u.u_photo, 6);

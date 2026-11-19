@@ -24,9 +24,15 @@ export interface TerrainLook {
    * in downloaded as needed and kept on this computer). Off: the land's colours by its cover (D100).
    */
   photo: boolean;
+  /**
+   * Close in, below the heights' own detail, ground made up by the graphics card (D141): fine relief, rougher
+   * where the land is steep, and a faint mottling of the colours; the same at every visit. Off: the heights as
+   * they are, soft close in.
+   */
+  fine: boolean;
 }
 
-export const DEFAULT_TERRAIN_LOOK: TerrainLook = { colours: true, relief: true, overTerritories: false, seaFloor: true, strength: 1, palette: 'natural', detail: true, photo: true };
+export const DEFAULT_TERRAIN_LOOK: TerrainLook = { colours: true, relief: true, overTerritories: false, seaFloor: true, strength: 1, palette: 'natural', detail: true, photo: true, fine: true };
 export const STRENGTH_MIN = 0.25, STRENGTH_MAX = 4;
 
 /** A stored look, completed and checked (anything unknown takes its default); null when there is none. */
@@ -38,7 +44,7 @@ export function terrainLookOf(raw: unknown): TerrainLook | null {
   return {
     colours: bool(r.colours, d.colours), relief: bool(r.relief, d.relief), overTerritories: bool(r.overTerritories, d.overTerritories),
     seaFloor: bool(r.seaFloor, d.seaFloor), strength, palette: typeof r.palette === 'string' && r.palette in PALETTES ? (r.palette as TerrainPalette) : d.palette,
-    detail: bool(r.detail, d.detail), photo: bool(r.photo, d.photo),
+    detail: bool(r.detail, d.detail), photo: bool(r.photo, d.photo), fine: bool(r.fine, d.fine),
   };
 }
 

@@ -86,7 +86,7 @@ function TerrainSection({ spaceId, look, earth }: { spaceId: string; look: Terra
     setDrag(null);
     if (look && v !== look.strength) change({ strength: v });
   };
-  const box = (key: 'colours' | 'relief' | 'overTerritories' | 'seaFloor' | 'detail' | 'photo', label: string, testid: string) => look && (
+  const box = (key: 'colours' | 'relief' | 'overTerritories' | 'seaFloor' | 'detail' | 'photo' | 'fine', label: string, testid: string) => look && (
     <label className="check"><input type="checkbox" checked={look[key]} onChange={(e) => change({ [key]: e.target.checked })} data-testid={testid} /> {label}</label>
   );
   return (
@@ -108,6 +108,7 @@ function TerrainSection({ spaceId, look, earth }: { spaceId: string; look: Terra
               {(Object.keys(PALETTES) as TerrainPalette[]).map((p) => <option key={p} value={p}>{PALETTES[p].name}</option>)}
             </select>
           </label>
+          {box('fine', 'Fine ground close in: below the heights\' own detail, relief and mottling made up by the graphics card (rougher where the land is steep; the same every time)', 'terrain-fine')}
           {earth && PALETTES[look.palette].cover && box('photo', 'The Earth as photographed from space: the whole planet, and close in the photographs of the place, to about 10 m, downloaded as needed (Sentinel-2 cloudless by EOX; kept on this computer)', 'terrain-photo')}
           {earth && PALETTES[look.palette].cover && look.photo && <p className="muted">The photographs show the land, rivers, lakes and coasts as they are today (no rivers or coastline are drawn over them); land the sea has taken or left at another sea level, and sculpted land, keep the colours of their cover. Offline, close in: the picture of the whole planet. Credit the photographs where you publish them: see Data sources and credits.</p>}
           {earth && box('detail', 'Finer heights close in, downloaded as needed (Terrain Tiles on AWS Open Data; kept on this computer)', 'terrain-detail')}
