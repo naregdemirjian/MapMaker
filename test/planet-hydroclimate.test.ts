@@ -25,7 +25,7 @@ const nearest = (lon: number, lat: number) => {
 };
 const run = (def: PlanetDefinition, heights: ArrayLike<number>) => {
   const x = derive(def), cl = seasonalClimate(mesh, def, x, heights);
-  return hydroclimate(mesh, def, x, heights, cl.monthly);
+  return hydroclimate(mesh, def, x, heights, cl.monthly, 4, cl.dryWarm);
 };
 
 test('the Earth: deserts dry, rainforests wet, the monsoon in summer, rain shadows, dry subtropics, cold and warm currents', () => {
@@ -43,9 +43,16 @@ test('the Earth: deserts dry, rainforests wet, the monsoon in summer, rain shado
   // The monsoon: India's rain comes in summer.
   const india = nearest(78, 22);
   assert.ok(r.precipMonthly[6 * mesh.n + india] > 10 * Math.max(1, r.precipMonthly[0 * mesh.n + india]), 'India wet in July, dry in January');
-  // Rain shadows: the windward side of the Andes and the Cascades wetter than their lee.
-  assert.ok(P(-73.5, -45) > 1.4 * P(-69, -45), `Chile ${P(-73.5, -45).toFixed(0)} against Patagonia ${P(-69, -45).toFixed(0)} mm`);
+  // Rain shadows: the windward side of the Andes and the Cascades wetter than their lee. (The coarse level's cells,
+  // about 480 km across, blur a range as narrow as the southern Andes: the measured contrast is several times.)
+  assert.ok(P(-73.5, -45) > 1.25 * P(-69, -45), `Chile ${P(-73.5, -45).toFixed(0)} against Patagonia ${P(-69, -45).toFixed(0)} mm`);
   assert.ok(P(-122, 47.5) > 3 * P(-117, 39), `Seattle ${P(-122, 47.5).toFixed(0)} against Nevada ${P(-117, 39).toFixed(0)} mm`);
+  // The subtropical highs' moist western flanks and storms' eddies (D159): the eastern sides and interiors of the
+  // continents in mid-latitudes are not deserts (the measured rain is two to four times this; see D159).
+  for (const [name, lon, lat] of [['Shanghai', 121.5, 31.2], ['Beijing', 116.4, 39.9], ['Buenos Aires', -58.4, -34.6], ['Chicago', -88, 42], ['Moscow', 37.6, 55.7]] as const) {
+    assert.ok(P(lon, lat) > 250, `${name} is no desert (${P(lon, lat).toFixed(0)} mm)`);
+  }
+  assert.ok(P(46.7, 24.7) < 600 && P(-112, 33.4) < 300, `Arabia (${P(46.7, 24.7).toFixed(0)} mm) and Arizona (${P(-112, 33.4).toFixed(0)} mm) stay dry`);
   // The convergence zone wetter than the subtropical highs.
   const band = (a: number, b: number) => {
     let s = 0, w = 0;

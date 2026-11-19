@@ -3,9 +3,12 @@
 import { initialState, checkpoint, EARTH_SPEED, type TectonicParams, type TectonicState } from './state.ts';
 import { step, heights, regimeVigor } from './step.ts';
 import { erodeCrust } from './erode.ts';
+import { paleoClimate, co2Factor } from '../climate/paleo.ts';
+import { oceanVolume, seaLevelForVolume } from '../water/sealevel.ts';
 
-/** The grid steps keep to, Myr. */
+/** The grid steps keep to, Myr; and how often the climate of the moment is worked out (D159). */
 export const GRID_MYR = 5;
+export const PALEO_MYR = 50;
 
 export interface HistoryOptions {
   /** How long the history runs, Myr (it ends at the present). */
@@ -41,6 +44,16 @@ export interface TectonicHistory {
   tags: Uint8Array;
   sediment: Float32Array;
   discharge: Float32Array;
+  /**
+   * Per picture (D159): the sea's level (m, against the present's) from the ocean's conserved water, less what ice on
+   * land held then, and the moment's own rises (sea-level events); the ice on land (km³); the planet's mean
+   * temperature (K, 0 without a climate).
+   */
+  seaLevels: Float32Array;
+  iceVolumes: Float32Array;
+  meanTemps: Float32Array;
+  /** Per picture: the sea's level on the heights' datum (km) it was drawn against (a moment rebuilt from a checkpoint is pictured the same against it). */
+  frameSea: Float64Array;
 }
 
 /** The step that keeps every plate within a fraction of a cell per step. */
@@ -66,7 +79,12 @@ export function runHistory(params: TectonicParams, opts: HistoryOptions): Tecton
   frameTimes.push(D);
   const F = frameTimes.length;
   const H = new Int16Array(F * n), Pl = new Uint8Array(F * n), K = new Uint8Array(F * n);
-  const record = (f: number) => recordFrame(state, f, H, Pl, K);
+  const datumSea = new Float64Array(F), iceAt = new Float64Array(F), riseAt = new Float64Array(F), tempAt = new Float32Array(F);
+  const record = (f: number) => {
+    recordFrame(state, f, H, Pl, K);
+    datumSea[f] = state.seaLevel; iceAt[f] = state.paleo?.ice ?? 0; riseAt[f] = seaRise(state); tempAt[f] = state.paleo?.meanK ?? 0;
+  };
+  updatePaleo(state);
   record(0);
   const ckEvery = opts.checkpointEveryMyr ? Math.max(GRID_MYR, Math.round(opts.checkpointEveryMyr / GRID_MYR) * GRID_MYR) : 0;
   const checkpoints = ckEvery ? new Map<number, TectonicState>([[0, checkpoint(state)]]) : undefined;
@@ -88,12 +106,56 @@ export function runHistory(params: TectonicParams, opts: HistoryOptions): Tecton
   }
   const omega = new Float64Array(3 * state.plates.length);
   state.plates.forEach((p, i) => omega.set(p.omega, 3 * i));
+  // The sea's level in each picture from the water's volume (D159): the present's ocean and ice together hold the
+  // planet's water; at each moment the sea holds that less the ice on land then, over that moment's heights.
+  const seaLevels = new Float32Array(F), iceVolumes = new Float32Array(F), frameSea = Float64Array.from(datumSea);
+  if (Number.isFinite(state.seaLevel) && params.oceanFraction > 0 && params.oceanFraction < 1) {
+    const area = state.mesh.area, Rkm = params.radiusKm, toKmSr = 1e-9 / (Rkm * Rkm);
+    const datum = (f: number) => Float64Array.from({ length: n }, (_, c) => H[f * n + c] / 1000 + datumSea[f]);
+    const present = datum(F - 1);
+    const water = oceanVolume(present, area, datumSea[F - 1]) + iceAt[F - 1] * toKmSr;
+    const presentLevel = datumSea[F - 1] + riseAt[F - 1];
+    for (let f = 0; f < F; f++) {
+      const h = f === F - 1 ? present : datum(f);
+      const level = seaLevelForVolume(h, area, Math.max(0, water - iceAt[f] * toKmSr)) + riseAt[f];
+      const shift = Math.round((level - datumSea[f]) * 1000);
+      frameSea[f] = datumSea[f] + shift / 1000;
+      if (shift) for (let c = 0; c < n; c++) H[f * n + c] = Math.max(-32_000, Math.min(32_000, H[f * n + c] - shift));
+      seaLevels[f] = (level - presentLevel) * 1000;
+      iceVolumes[f] = iceAt[f] / 1e9;
+    }
+  }
   return {
     times: Float64Array.from(frameTimes, (t) => D - t), heights: H, plates: Pl, kinds: K, age, thickness,
     boundary: state.boundary.slice(), boundaryRate: state.boundaryRate.slice(), omega, plateCount: state.plates.length,
     stats: { steps: state.steps, ...state.totals, landShare: land / (4 * Math.PI), continentalShare: cont / (4 * Math.PI), ms: performance.now() - t0 },
-    tags, sediment, discharge: state.discharge.slice(), ...(checkpoints ? { checkpoints } : {}),
+    tags, sediment, discharge: state.discharge.slice(), seaLevels, iceVolumes, meanTemps: tempAt, frameSea, ...(checkpoints ? { checkpoints } : {}),
   };
+}
+
+/** The climate events under way at a state's moment. */
+function climateEvents(state: TectonicState) {
+  return state.events.filter((e) => (e.kind === 'ice-age' || e.kind === 'greenhouse' || e.kind === 'sea-level') && e.start <= state.time + 1e-9 && e.end > state.time + 1e-9);
+}
+
+/** The sea's own rise at a moment from sea-level events (km: 50 m for each unit of strength). */
+function seaRise(state: TectonicState): number {
+  let r = 0;
+  for (const e of climateEvents(state)) if (e.kind === 'sea-level') r += 0.05 * Math.max(0, e.strength);
+  return r;
+}
+
+/** Works out the moment's climate when PALEO_MYR has passed since the last, or the climate events have changed (D159). */
+function updatePaleo(state: TectonicState) {
+  const climate = state.params.climate;
+  if (!climate) return;
+  const co2 = co2Factor(climateEvents(state));
+  const last = state.paleo;
+  if (last && state.time - last.at < PALEO_MYR - 1e-9 && last.co2 === co2) return;
+  const n = state.mesh.n, heightM = new Float64Array(n);
+  for (let c = 0; c < n; c++) heightM[c] = (state.height[c] - state.seaLevel) * 1000;
+  const p = paleoClimate(state.mesh, heightM, climate, co2, last ? { rain: last.rain, ice: last.ice, coarseK: last.coarseK, meanK: last.meanK } : null);
+  state.paleo = { at: state.time, co2, rain: p.rain, ice: p.ice, coarseK: p.coarseK, meanK: p.meanK };
 }
 
 /** One step, or as many as it takes, to the next whole GRID_MYR (or the end); then the landscape for that span. */
@@ -102,6 +164,7 @@ function advanceToGrid(state: TectonicState, end: number, maxStep: number) {
   const grid = Math.min(end, (Math.floor(state.time / GRID_MYR + 1e-9) + 1) * GRID_MYR);
   while (state.time < grid - 1e-9) step(state, Math.min(stepLength(state, maxStep), grid - state.time));
   if (state.params.erosion !== false && state.time > from) erodeCrust(state, state.time - from);
+  updatePaleo(state);
 }
 
 /** Writes the world's heights (m above the sea), plates and crust as picture f. */

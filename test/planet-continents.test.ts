@@ -212,9 +212,10 @@ test('any moment rebuilt from the checkpoint before it is the moment the history
   const h = runHistory(p, { durationMyr: 200, frameEveryMyr: 25, checkpointEveryMyr: 50 });
   assert.deepEqual([...h.checkpoints!.keys()].sort((a, b) => a - b), [0, 50, 100, 150, 200]);
   const n = meshAt(4).n;
-  const frameAt = (st: TectonicState) => {
+  // (Each picture's heights are against the sea of its moment as the water's volume places it, D159.)
+  const frameAt = (st: TectonicState, sea = st.seaLevel) => {
     const H = new Int16Array(n);
-    for (let c = 0; c < n; c++) H[c] = Math.max(-32_000, Math.min(32_000, Math.round((st.height[c] - st.seaLevel) * 1000)));
+    for (let c = 0; c < n; c++) H[c] = Math.max(-32_000, Math.min(32_000, Math.round((st.height[c] - st.seaLevel) * 1000) - Math.round((sea - st.seaLevel) * 1000)));
     return H;
   };
   const hash = (a: Int16Array) => createHash('sha256').update(new Uint8Array(a.buffer, a.byteOffset, a.byteLength)).digest('hex');
@@ -222,16 +223,16 @@ test('any moment rebuilt from the checkpoint before it is the moment the history
     const f = t / 25;
     const st = reconstructAt(h.checkpoints!, t);
     assert.equal(st.time, t);
-    assert.equal(hash(frameAt(st)), hash(h.heights.subarray(f * n, (f + 1) * n)), `the moment ${t} Myr in`);
+    assert.equal(hash(frameAt(st, h.frameSea[f])), hash(h.heights.subarray(f * n, (f + 1) * n)), `the moment ${t} Myr in`);
   }
   // Rebuilding leaves the checkpoints as they were.
   const again = reconstructAt(h.checkpoints!, 125);
-  assert.equal(hash(frameAt(again)), hash(h.heights.subarray(5 * n, 6 * n)));
+  assert.equal(hash(frameAt(again, h.frameSea[5])), hash(h.heights.subarray(5 * n, 6 * n)));
   // Events (here a break-up at 60 Myr in) run through checkpoints the same way.
   const def = definitionFromPreset('supercontinent', 2);
   def.history.events = [{ id: 'part', kind: 'breakup', startMa: 140, durationMyr: 100, strength: 1 }];
   const pe = tectonicParams(def, 4, 200);
   const he = runHistory(pe, { durationMyr: 200, frameEveryMyr: 25, checkpointEveryMyr: 50 });
   const st = reconstructAt(he.checkpoints!, 125);
-  assert.equal(hash(frameAt(st)), hash(he.heights.subarray(5 * n, 6 * n)), 'through an event');
+  assert.equal(hash(frameAt(st, he.frameSea[5])), hash(he.heights.subarray(5 * n, 6 * n)), 'through an event');
 });

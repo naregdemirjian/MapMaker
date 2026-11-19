@@ -53,6 +53,11 @@ test('the Earth: its mean temperature, warm tropics, cold poles, wide continenta
   assert.ok(r.monthly[6 * mesh.n + southern] < r.monthly[0 * mesh.n + southern]);
   // Mountains are colder: the Tibetan plateau colder than the plains at its latitude.
   assert.ok(r.annual[nearest(88, 32)] < r.annual[nearest(80, 28)] - 10, 'colder on the high plateau');
+  // Dry continental ground runs warmer than its air column, and broad sunlit high ground cools more slowly with
+  // height (D159): Riyadh, Khartoum and Delhi warm through the year (measured 26, 30, 25 °C), Lhasa not arctic (8 °C).
+  for (const [name, lon, lat, least] of [['Riyadh', 46.7, 24.7, 12], ['Khartoum', 32.5, 15.6, 15], ['Delhi', 77.2, 28.6, 15], ['Lhasa', 91.1, 29.7, -10]] as const) {
+    assert.ok(r.annual[nearest(lon, lat)] > least, `${name} ${r.annual[nearest(lon, lat)].toFixed(1)} °C`);
+  }
   // Ice where it is cold.
   assert.ok(r.ice[nearest(0, -85)] > 0.75 && r.ice[singapore] === 0, `ice at the South Pole (${r.ice[nearest(0, -85)].toFixed(2)} of the year), none at the equator`);
   assert.ok(ms < 15_000, `${ms.toFixed(0)} ms`);

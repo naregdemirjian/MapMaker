@@ -52,6 +52,12 @@ export interface TectonicParams {
   erosion?: boolean;
   erodibility?: number;
   hadleyDeg?: number;
+  /**
+   * The planet's climate settings (star, orbit, body, air, water; D159): every PALEO_MYR the climate of the moment is
+   * worked out on the land and sea of that moment, setting erosion's rain and the ice on land (and so the sea's level).
+   * Without them, rain belts by latitude stand in (D155) and no ice is held.
+   */
+  climate?: unknown;
 }
 
 export interface TectonicState {
@@ -100,6 +106,8 @@ export interface TectonicState {
   scatter: [number, number, number] | null;
   /** Volcanism as a multiple of usual (volcanic periods). */
   volcanism: number;
+  /** The climate of the last moment it was worked out (D159): when, under which events, its rain and ice. */
+  paleo: { at: number; co2: number; rain: Float64Array; ice: number; coarseK: Float64Array; meanK: number } | null;
 }
 
 export const BOUNDARY = { none: 0, divergent: 1, convergent: 2, transform: 3 } as const;
@@ -185,7 +193,9 @@ export function initialState(params: TectonicParams): TectonicState {
     } else {
       p.kind[c] = CRUST.oceanic;
       p.thickness[c] = 7;
-      p.age[c] = 180 * (0.5 + 0.5 * ageNoise(x * 2.5 + 7, y * 2.5, z * 2.5));
+      // The sea floor's ages as a steady state of spreading and subduction leaves them (area falling linearly with
+      // age to about 180 Myr: Parsons 1982), so the ocean's basins hold about what they will later (D159).
+      p.age[c] = 180 * (1 - Math.sqrt(Math.max(0, Math.min(1, 0.5 + 0.5 * ageNoise(x * 2.5 + 7, y * 2.5, z * 2.5)))));
     }
   }
   const state = baseState(params, plates, owner, (params.seed * 747796405 + 2891336453) >>> 0);
@@ -209,7 +219,7 @@ function baseState(params: TectonicParams, plates: Plate[], owner: Int32Array, r
     discharge: new Float32Array(n),
     group: plates.map((_, i) => i), contact: new Map(), weldTime: plates.map(() => Infinity), born: plates.map(() => 0),
     rngState: rngState || 1, hotspots: [], events: (params.events ?? []).slice().sort((a, b) => a.start - b.start), begun: [],
-    gather: null, scatter: null, volcanism: 1,
+    gather: null, scatter: null, volcanism: 1, paleo: null,
   };
 }
 
@@ -283,6 +293,7 @@ export function checkpoint(state: TectonicState): TectonicState {
     group: state.group.slice(), contact: new Map(state.contact), weldTime: state.weldTime.slice(), born: state.born.slice(),
     hotspots: state.hotspots.map((h) => ({ ...h })), events: state.events.map((e) => ({ ...e })), begun: state.begun.slice(),
     gather: state.gather ? [...state.gather] as [number, number, number] : null, scatter: state.scatter ? [...state.scatter] as [number, number, number] : null,
+    paleo: state.paleo ? { ...state.paleo, rain: state.paleo.rain.slice(), coarseK: state.paleo.coarseK.slice() } : null,
   };
 }
 

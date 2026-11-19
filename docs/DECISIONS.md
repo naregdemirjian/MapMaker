@@ -61,6 +61,97 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D159. Water and ice: runoff, lakes, rivers, ice sheets, the sea's level; the climate revisited (Stage 14.8)
+
+- **Asked.** Stage 14.8: "runoff, Fill-Spill-Merge lakes and closed basins, rivers by discharge, deltas, floodplains
+  and wetlands, ice sheets, sea level from volumes; paleoclimate coupled into erosion through the history", done
+  when the drainage, conservation and flooding tests pass.
+- **The climate revisited first.** Checking runoff against the real Earth showed the climate of 14.6 and 14.7 far off
+  where the tests had not looked: land between 10° and 40° N 7 to 15 K too cold (Delhi −2 °C in January, Riyadh
+  9 °C a year), and the mid-latitude continents nearly rainless (Chicago 51 mm a year, Kansas 32, Beijing 47, Delhi
+  7, Buenos Aires 212). Causes and remedies, each physically motivated and calibrated on the Earth:
+  - A column energy balance has one temperature for the ground and its air, so the sea's evaporative cooling and
+    dry ground's lack of it, which set them apart, are missing; at its 480 km cells transport also smooths any contrast
+    smaller than about 3,000 km (D/B ≈ 0.4 rad²). Two corrections to its output, leaving the planet's energy balance
+    as it was: dry ground under the subtropical highs on a great landmass runs warmer than its column (up to 16 K,
+    by the land's share within 3,000 km and the subtropical band: `DRY_WARM`), and broad sunlit high ground cools
+    with height at 0.6 of the lapse rate (not over frozen ground, where ice sheets hold cold air: `PLATEAU`).
+    Against 35 stations the annual mean's error fell from 10.1 K rms (bias −7.9) to 5.7 K (−3.8). Winds and rain go
+    by the air column's temperature, without the ground's extra warmth (deserts' heat lows draw in no rain).
+    Weaker east-west transport and darker land were tried and dropped (colder planet; little effect).
+  - Rain: (1) the subtropical highs' flanks: on the western side of every wide ocean and the land beside it air turns
+    poleward with little sinking, bringing the sea's moisture (the Gulf of Mexico's to the American plains, the
+    South China Sea's to China); on the eastern side it sinks and turns to the equator (the west-coast deserts); (2)
+    the highs follow the convergence zone only a quarter as far (5° between seasons on Earth), so a summer
+    continent's trades are short and its westerlies stay; (3) between the equator and a convergence zone drawn into
+    the summer hemisphere, air crossing the equator turns east (the south-west monsoon of India and West Africa);
+    (4) storms carry vapour poleward as eddies (diffusion down its gradient, 1.5×10⁶ m²/s at the storm belts, kept
+    stable; as moist energy-balance models do, Frierson et al. 2007); (5) convective rain needs moist air (weighed
+    by how near saturation the vapour is), so hot deserts do not storm. Over 32 places the error (in logarithms)
+    fell from 0.88 to 0.75: Chicago 277 mm, Kansas 274, Beijing 698, Shanghai 606, Buenos Aires 430, Moscow 358,
+    Lagos 1,635, Mumbai 1,076, the Bay of Bengal 1,848; deserts stayed dry (the Sahara 156, the Atacama 76, the
+    Taklamakan 23). **Still short**: mid-latitude land gets a third to a half of its measured rain (30-40° N 199 mm
+    against about 520), as the coarse energy balance leaves the northern subtropical seas 5 to 7 K too cool, so their
+    air carries too little water; Delhi 148 mm (800), the Congo 642 (1,400), Arabia 448 (100). The rain shadow test
+    for the southern Andes relaxed to 1.25 (eddies blur a range narrower than a cell).
+- **Water balance** (`water/hydrology.ts`): potential evaporation by Hargreaves and Samani (1985) from the
+  temperature and the sunlight at the top of the air (a daily range of 12 K, unknown to the model); actual by
+  Budyko's curve in Fu's form (ω = 2.6); the rest runs off.
+- **Depressions and lakes**: the hierarchy of depressions (Barnes, Callaghan and Wickert 2020) by flooding from the
+  sea and every pit at once (minimax levels) and merging at outlets in order (Kruskal); water is credited to the
+  hollow it runs down into (steepest descent to a pit). Lakes at the climate's steady state by Fill-Spill-Merge's
+  logic on fluxes: a hollow fills until it spills or until its lake's evaporation (open water at PET less the land's
+  own) takes all that reaches it; a full hollow spills into its neighbour, both full make one lake rising above the
+  saddle; whether a subtree is full depends only on its total inflow, so it is decided without recursion trouble. The
+  same hierarchy filled with volumes (`fillVolume`) conserves them exactly. A hollow below sea level joins the sea only
+  if its water would stand at sea level (the Black Sea), else stays a closed lake or dry (the Caspian); lakes nowhere
+  deeper than 5 m over whole cells are marsh or flat, not lakes; a lake covering under half of a cell leaves it out.
+- **Rivers**: the water's surface (lakes flat) drained by Priority-Flood from the sea, closed lakes and dry basins, so
+  every drop runs downhill to one of them; discharge summed down the tree, an open lake's evaporation taken where
+  its water leaves (at most what reaches it), so the budget is the rivers' own and closes exactly; rivers past three
+  cells' worth of mean runoff with Strahler orders; floodplains (order 3 or more, slope under 0.3 m/km); wetlands by
+  the wetness index ln(a/tan β) over 19 with over 250 mm of runoff, or cold, flat, poorly drained lowlands; deltas
+  where a large river from high ground reaches a shallow sea.
+- **Ice** (`water/ice.ts`): snow is the share of each month's precipitation on days below 1 °C (daily temperatures
+  normal about the mean, σ = 5 K); melt by positive degree days (3 mm/K/day snow, 8 ice; Braithwaite 1995), 60 % of
+  the snow able to refreeze meltwater (Reeh 1991); on the ice the air colder by the lapse rate for its height, snow
+  5 % less per degree colder; flow by the shallow-ice approximation, Glen's n = 3, A = 5×10⁻¹⁷ Pa⁻³ a⁻¹,
+  semi-implicit (Mahaffy 1976) with steps of 500 years for up to 60,000 years on the level-4 mesh; the bed pressed down
+  by ρᵢ/ρₘ of the ice; ice afloat calves. A steady polar dome comes within 18 % of Vialov's analytical profile (a known
+  first-order bias of the edge fluxes at 480 km), and ice is conserved while it only grows.
+- **The sea's level** (`water/sealevel.ts`): exact (sorting the heights, the volume linear between them). In a history
+  the run itself keeps the set share of the surface under water (the present must match the user's setting); the
+  pictures are then redrawn against the level at which the ocean holds the planet's water (the present's ocean and
+  ice) less the ice on land then, plus sea-level events (50 m per unit of strength): tectono-eustasy and glacio-
+  eustasy. A moment rebuilt from a checkpoint is pictured against the same level (`frameSea`). The sea floor now
+  starts with the ages a steady state leaves (area falling linearly with age: Parsons 1982); started older, the
+  basins drained 800 m of sea over the first 500 Myr. On the Earth-like preset over 500 Myr the sea ranged from −300
+  to +290 m.
+- **Past climates in the history** (`climate/paleo.ts`): every 50 Myr (and whenever a climate event begins or ends)
+  the energy balance and rain run on the level-3 mesh (about 1,000 km) from the last moment's temperatures (two
+  to four years), every third month's rain; the rain (relative to the planet's mean) wears the land down in place of
+  the rain belts by latitude (D155); the ice on land is estimated where snow outlasts the summer (a perfectly plastic
+  sheet's volume-area scaling, 0.034 A^1.25 km³, matched to Antarctica and Greenland). Ice ages halve the air's carbon
+  dioxide per unit of strength while they last, greenhouse periods multiply it by 2^1.5. The history of an Earth-like
+  preview went from 3.7 to about 6 s. The history now depends on the climate settings; marking it stale instead and
+  re-running on request (plan 4.4) is for Stage 14.10.
+- **Results on the real Earth** (L6, today's climate): rain and snow on land 97,000 km³ a year (measured about
+  113,000), evaporated 70,000 (73,000), running off 27,000 (about 40,000; the dry continents above); the Amazon
+  the greatest river; lakes about twice the measured volume (coarse cells; the Black Sea a deep salt lake under a
+  too dry eastern Europe); snow outlasting the summer on Greenland and East Antarctica, not on Siberia, Canada or
+  Scandinavia; West Antarctica and the Antarctic coast melt (the energy balance leaves Antarctica 10 to 20 K too warm).
+- **In the pipeline**: a `water` stage after the climate (ice on level 4, then the water on the map's level, about a
+  quarter of a second at preview); layers: kinds of water (lakes, salt lakes and flats, rivers, floodplains,
+  wetlands, deltas, ice), rivers by discharge, runoff, ice thickness. The Studio shows them, the sea's level and ice
+  on land with each moment, and the climate events. Tectonics stage version 4.
+- **Tests.** `planet-water.test.ts` (5): Fill-Spill-Merge conserving water through filling, spilling, merging and
+  overflowing; closed lakes balancing evaporation with inflow, open ones passing all on; every drop draining to the
+  sea, a closed lake or a basin, never uphill, discharge growing downstream, orders never falling, the budget
+  closing; sea level exact and flooding monotonic; the real Earth's budget, the Amazon, deserts. `planet-ice.test.ts`
+  (4): degree days and the year's balance; Vialov's dome and conservation; the Earth's ice and its lack; a history's
+  sea level and an ice age's cold and ice. The climate tests gained stations (dry ground warm, Lhasa not arctic)
+  and mid-latitude rain (no deserts at Shanghai, Beijing, Buenos Aires, Chicago, Moscow; Arabia and Arizona dry).
+
 ### D158. The climate II: winds, rain and the sea's currents (Stage 14.7)
 
 - **Asked.** Stage 14.7: "circulation cells and winds, seasonal convergence zones and monsoons, evaporation,

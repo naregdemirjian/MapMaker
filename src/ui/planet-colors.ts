@@ -90,6 +90,24 @@ export function colourLayer(layer: LayerId, values: Float32Array, width: number,
   } else if (layer === 'currents') {
     for (let k = 0; k < values.length; k++) put(k, ramp([[-5, [40, 90, 200]], [-1, [120, 150, 190]], [0, [60, 66, 74]], [1, [200, 150, 110]], [5, [220, 70, 40]]], values[k]));
     legend = 'The sea\'s currents: red where they warm the surface (western sides of oceans, the high-latitude drift), blue where they cool it (eastern sides)';
+  } else if (layer === 'runoff') {
+    for (let k = 0; k < values.length; k++) put(k, ramp([[0, [190, 170, 130]], [50, [200, 200, 150]], [200, [120, 180, 150]], [600, [50, 140, 190]], [1500, [30, 70, 160]], [3000, [20, 30, 110]]], values[k]));
+    legend = `Water running off the land: up to ${Math.round(range.max).toLocaleString('en')} mm a year (what the rain leaves after evaporation)`;
+  } else if (layer === 'rivers') {
+    const top = Math.log10(Math.max(10, range.max));
+    for (let k = 0; k < values.length; k++) {
+      const t = Math.max(0, Math.log10(Math.max(1, values[k])) - 1) / Math.max(0.1, top - 1);
+      put(k, ramp([[0, [24, 28, 34]], [0.35, [40, 70, 110]], [0.7, [70, 150, 230]], [1, [210, 245, 255]]], t));
+    }
+    legend = `Rivers by how much water they carry: up to ${Math.round(range.max).toLocaleString('en')} m³/s`;
+  } else if (layer === 'water') {
+    // Kinds of water (hydrology.ts WATER): land, sea, lake, salt lake, salt flat, river, floodplain, wetland, delta, ice.
+    const KIND: RGB[] = [[58, 62, 56], [18, 46, 92], [70, 140, 210], [150, 210, 210], [226, 214, 176], [60, 120, 230], [90, 170, 150], [70, 150, 110], [200, 190, 90], [245, 248, 252]];
+    for (let k = 0; k < values.length; k++) put(k, KIND[values[k] | 0] ?? KIND[0]);
+    legend = 'Blue lakes and rivers · pale teal salt lakes · sand salt flats · green wetlands and floodplains · gold deltas · white ice sheets';
+  } else if (layer === 'iceThickness') {
+    for (let k = 0; k < values.length; k++) put(k, values[k] < 1 ? [40, 48, 56] : ramp([[1, [170, 200, 225]], [500, [205, 225, 242]], [2000, [235, 244, 252]], [4000, [255, 255, 255]]], values[k]));
+    legend = `Ice sheets: up to ${Math.round(range.max).toLocaleString('en')} m thick`;
   } else if (layer === 'ice') {
     for (let k = 0; k < values.length; k++) put(k, ramp([[0, [40, 60, 50]], [0.3, [120, 150, 170]], [0.7, [200, 220, 235]], [1, [250, 252, 255]]], values[k]));
     legend = 'Ice and snow: the share of the year a place lies under them';

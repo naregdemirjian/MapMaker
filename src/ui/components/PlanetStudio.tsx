@@ -20,12 +20,14 @@ const LAYER_NAMES: Array<[LayerId, string]> = [
   ['elevation', 'Relief'], ['plates', 'Plates'], ['boundaries', 'Plate boundaries'], ['crust', 'Kind of crust'], ['crustAge', 'Age of the crust'],
   ['crustThickness', 'Thickness of the crust'], ['history', 'What made the crust'], ['sediment', 'Sediment'], ['drainage', 'Rivers (water draining)'],
   ['temperature', 'Temperature (yearly mean)'], ['temperatureMonth', 'Temperature by month'], ['precipitation', 'Rain and snow (a year)'], ['precipitationMonth', 'Rain and snow by month'],
-  ['currents', 'The sea\'s currents'], ['ice', 'Ice and snow'], ['insolation', 'Sunlight'],
+  ['currents', 'The sea\'s currents'], ['ice', 'Ice and snow'], ['water', 'Lakes, rivers, wetlands and ice sheets'], ['rivers', 'Rivers (discharge)'],
+  ['runoff', 'Water running off'], ['iceThickness', 'Ice sheets (thickness)'], ['insolation', 'Sunlight'],
 ];
 const MONTHS = ['First month', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth', 'Seventh', 'Eighth', 'Ninth', 'Tenth', 'Eleventh', 'Twelfth'];
 const EVENT_KINDS: Array<[GeoEventKind, string]> = [
   ['supercontinent', 'Continents gather into a supercontinent'], ['breakup', 'A supercontinent breaks up'], ['rift', 'A rift opens'], ['collision', 'Continents collide'],
   ['volcanic-period', 'A volcanic period'], ['lip', 'A flood basalt (large igneous province)'], ['hotspot', 'A new hotspot'], ['impact', 'An impact'], ['reorganisation', 'Plates change direction'],
+  ['ice-age', 'An ice age (half the carbon dioxide per unit of strength)'], ['greenhouse', 'A greenhouse period (more carbon dioxide)'], ['sea-level', 'The sea rises (50 m per unit of strength)'],
 ];
 /** What each control does, in a sentence (shown as it is moved). */
 const EXPLAIN: Record<string, string> = {
@@ -95,7 +97,7 @@ export function PlanetStudio() {
   const x = useMemo(() => derive(def), [def]);
   const problems = useMemo(() => definitionProblems(def), [def]);
   // The simulated history shown, and what it was simulated from.
-  const [run, setRun] = useState<{ def: PlanetDefinition; key: string; times: number[] } | null>(null);
+  const [run, setRun] = useState<{ def: PlanetDefinition; key: string; times: number[]; seaLevels: number[]; ice: number[] } | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
   const abort = useRef<AbortController | null>(null);
   const [layer, setLayer] = useState<LayerId>('elevation');
@@ -120,7 +122,7 @@ export function PlanetStudio() {
     try {
       const r = await planetPipeline().product('tectonics', def, params, { signal: ac.signal, onProgress: (d, t) => setProgress(d / Math.max(1, t)) });
       const times = Array.from(r.data.times as Float64Array);
-      setRun({ def, key: r.key, times });
+      setRun({ def, key: r.key, times, seaLevels: Array.from((r.data.seaLevels as Float32Array | undefined) ?? []), ice: Array.from((r.data.iceVolumes as Float32Array | undefined) ?? []) });
       setFrame(times.length - 1);
       if (layer === 'insolation') setLayer('elevation');
       setStep('explore');
@@ -177,8 +179,12 @@ export function PlanetStudio() {
 
   const when = (f: number) => {
     if (!run) return '';
-    const t = run.times[f < 0 ? run.times.length - 1 : f];
-    return t === 0 ? 'Today' : `${fmt(t)} million years ago`;
+    const k = f < 0 ? run.times.length - 1 : f, t = run.times[k];
+    // The sea's level then against today's (D159), and the ice on land.
+    const sea = run.seaLevels[k], ice = run.ice[k];
+    const extra = t === 0 || sea === undefined ? '' : ` · sea ${Math.abs(sea) < 5 ? 'as today' : `${fmt(Math.abs(sea))} m ${sea > 0 ? 'higher' : 'lower'}`}`;
+    const iceText = ice ? ` · ice on land ${fmt(ice / 1e6, 1)} million km³` : '';
+    return (t === 0 ? 'Today' : `${fmt(t)} million years ago`) + extra + iceText;
   };
   const frames = run?.times.length ?? 0;
 
@@ -253,7 +259,8 @@ export function PlanetStudio() {
               <select value={layer} onChange={(e) => setLayer(e.target.value as LayerId)} data-testid="studio-layer">{LAYER_NAMES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
             {(layer === 'temperatureMonth' || layer === 'precipitationMonth') && <label className="studio-slider"><span>Month</span>
               <select value={month} onChange={(e) => setMonth(Number(e.target.value))} data-testid="studio-month">{MONTHS.map((l, i) => <option key={l} value={i}>{l}{i === 0 ? ' (January on an Earth-like orbit)' : i === 6 ? ' (July)' : ''}</option>)}</select></label>}
-            {['temperature', 'temperatureMonth', 'precipitation', 'precipitationMonth', 'currents', 'ice'].includes(layer) && <p className="muted">The climate of today over today's land and sea: a seasonal energy balance (D157), winds from the circulation cells, rain carried by them and raised by mountains, the sea's currents (D158).</p>}
+            {['temperature', 'temperatureMonth', 'precipitation', 'precipitationMonth', 'currents', 'ice'].includes(layer) && <p className="muted">The climate of today over today's land and sea: a seasonal energy balance (D157), winds from the circulation cells, rain carried by them and raised by mountains, the sea's currents (D158, D159).</p>}
+            {['water', 'rivers', 'runoff', 'iceThickness'].includes(layer) && <p className="muted">Today's water (D159): what the rain leaves after evaporation runs off; hollows fill until they spill or their lakes evaporate all they get (salt lakes); rivers by how much water they carry; ice sheets grown in today's climate.</p>}
             <label className="studio-slider"><span>Name</span><input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Aster Prime" data-testid="studio-name" /></label>
             <button className="primary" onClick={use} disabled={problems.length > 0} data-testid="studio-use">{editingId ? 'Apply to this map' : 'Use this planet for a new map'}</button>
             <p className="muted">The map's land and sea follow the planet's simulated history on its timeline: today at the present, earlier dates further back.</p>
@@ -275,7 +282,7 @@ export function PlanetStudio() {
             ? <button className="primary" onClick={simulate} disabled={problems.length > 0} data-testid="studio-simulate">{run ? 'Simulate again' : 'Simulate the history'}</button>
             : <><progress value={progress} max={1} data-testid="studio-progress" /><button className="small" onClick={() => abort.current?.abort()} data-testid="studio-cancel">Cancel</button></>}
           {stale && progress === null && <span className="warn-text" data-testid="studio-stale">The settings have changed since this history was simulated.</span>}
-          <span className="muted">Simulated with simplified models: plate tectonics, isostasy, erosion and sediment (the climate's rain by latitude for now).</span>
+          <span className="muted">Simulated with simplified models: plate tectonics, isostasy, erosion and sediment where each moment's climate rains, ice on land and the sea's level from its water.</span>
         </div>
       </main>
       <aside className="studio-side">

@@ -31,10 +31,15 @@ export interface ClimateOptions {
   /** Most years to run before giving up on a repeating year (and the change in the annual mean that counts as repeating, K). */
   maxYears?: number;
   tolerance?: number;
+  /** Fewest years to run (3; a warm start needs fewer). */
+  minYears?: number;
   /** The sunlight as a multiple of today's (the faint young star; 1 now). */
   sunFactor?: number;
+  /** The level the model runs at (default CLIMATE_LEVEL), and temperatures there to start from (K; a warm start). */
+  level?: number;
+  initialK?: Float64Array;
   /** (Calibration: transport and the land's heat capacity.) */
-  tune?: { D?: number; landC?: number; airShare?: number; cloudSwing?: number; width?: number; peak?: number };
+  tune?: { D?: number; landC?: number; airShare?: number; cloudSwing?: number; width?: number; peak?: number; dryWarm?: number; dryFrom?: number; plateau?: number };
 }
 
 /**
@@ -63,12 +68,23 @@ export interface ClimateResult {
   tropicsC: number;
   polesC: number;
   years: number;
+  /** The model's temperatures at the end of its last year, on its own level (K): to start the next run from. */
+  coarseK: Float64Array;
+  /** How much warmer than its air column dry ground runs (K, per cell; D159): winds and rain go by the column. */
+  dryWarm: Float32Array;
 }
 
 /** Earth's atmospheric heat transport as diffusion on the unit sphere, W m⁻² K⁻¹ (calibrated, D157). */
 export const EARTH_D = 0.3;
 /** The share of the air column's heat capacity that follows the surface through the seasons (its lowest part). */
 const AIR_SHARE = 0.3;
+/**
+ * The surface's own balance, which the column model leaves out (D159; calibrated on stations of the Earth): dry ground
+ * far from the sea under the subtropical highs runs warmer than its column by up to DRY_WARM (K), where the land's
+ * share within DRY_REACH (radians, about 3,000 km) exceeds DRY_FROM; broad high ground cools with height at PLATEAU of
+ * the lapse rate (the local relief above it at the full rate).
+ */
+export const DRY_WARM = 16, DRY_REACH = 0.45, DRY_FROM = 0.35, PLATEAU = 0.6;
 /** The level the model runs at: coarse enough to take a second or two; temperatures are then brought to the map's level. */
 export const CLIMATE_LEVEL = 4;
 
@@ -77,20 +93,32 @@ export const CLIMATE_LEVEL = 4;
  */
 export function seasonalClimate(mesh: Mesh, def: PlanetDefinition, x: Derived, heightM: ArrayLike<number>, opts: ClimateOptions = {}): ClimateResult {
   // The model runs on a coarse mesh: land as a share of each of its cells.
-  const coarse = meshAt(Math.min(mesh.level, CLIMATE_LEVEL));
+  const coarse = meshAt(Math.min(mesh.level, opts.level ?? CLIMATE_LEVEL));
   const landFine = new Float64Array(mesh.n);
   for (let c = 0; c < mesh.n; c++) landFine[c] = heightM[c] >= 0 ? 1 : 0;
   const land = mesh.level > coarse.level ? toLevel(landFine, mesh.level, coarse.level) : landFine;
   const sea = coarseClimate(coarse, def, x, land, opts);
-  // Brought to the map's level, and lowered by height on land at the planet's lapse rate.
+  // Brought to the map's level, and lowered by height on land at the planet's lapse rate; with the surface's own
+  // balance (dry continental ground warmer, broad high ground cooling more slowly with height; D159), which leaves
+  // the planet's balance of energy as it is.
   const n = mesh.n, months = 12;
   const monthly = new Float32Array(months * n), annual = new Float32Array(n), ice = new Float32Array(n);
   const up = (f: ArrayLike<number>) => (mesh.level > coarse.level ? toLevel(f, coarse.level, mesh.level) : Float64Array.from(f));
   const lapse = x.air.lapse; // K/km
+  const highFine = new Float64Array(mesh.n);
+  for (let c = 0; c < mesh.n; c++) highFine[c] = Math.max(0, heightM[c]);
+  const broad = up(mesh.level > coarse.level ? toLevel(highFine, mesh.level, coarse.level) : highFine);
+  const warm = up(dryGroundWarming(coarse, land, x, def, opts));
+  // (Sunlit high ground heats the air above it; frozen high ground, as an ice sheet, does not: there the full rate.)
+  const plateau = opts.tune?.plateau ?? PLATEAU, seaAnnual = new Float64Array(coarse.n);
+  for (let m = 0; m < months; m++) for (let c = 0; c < coarse.n; c++) seaAnnual[c] += sea.monthly[m * coarse.n + c] / months;
+  const frozen = up(seaAnnual);
+  for (let c = 0; c < n; c++) frozen[c] = plateau + (1 - plateau) * Math.max(0, Math.min(1, -frozen[c] / 10));
   for (let m = 0; m < months; m++) {
     const fine = up(sea.monthly.subarray(m * coarse.n, (m + 1) * coarse.n));
     for (let c = 0; c < n; c++) {
-      const t = fine[c] - (heightM[c] >= 0 ? (lapse * heightM[c]) / 1000 : 0);
+      const h = heightM[c];
+      const t = h >= 0 ? fine[c] - (lapse * (frozen[c] * Math.min(h, broad[c]) + Math.max(0, h - broad[c]))) / 1000 + warm[c] : fine[c];
       monthly[m * n + c] = t;
       annual[c] += t / months;
     }
@@ -104,13 +132,15 @@ export function seasonalClimate(mesh: Mesh, def: PlanetDefinition, x: Derived, h
     }
     ice[c] = cold / months;
   }
-  return { ...sea.stats, monthly, annual, ice };
+  const dryWarm = new Float32Array(n);
+  for (let c = 0; c < n; c++) dryWarm[c] = heightM[c] >= 0 ? warm[c] : 0;
+  return { ...sea.stats, monthly, annual, ice, coarseK: sea.finalK, dryWarm };
 }
 
 /** The model itself on a mesh, with the land's share of each cell: sea-level temperatures each month (°C) and the planet's figures. */
 function coarseClimate(mesh: Mesh, def: PlanetDefinition, x: Derived, land: ArrayLike<number>, opts: ClimateOptions) {
   const n = mesh.n, steps = opts.stepsPerYear ?? 24, months = 12;
-  const sun = insolationField(mesh, sunlightOf(def, x), months);
+  const sun = cachedInsolation(mesh, def, x, months);
   const f = opts.sunFactor ?? 1;
   const at = def.atmosphere;
   // Heat capacities, J m⁻² K⁻¹.
@@ -153,7 +183,7 @@ function coarseClimate(mesh: Mesh, def: PlanetDefinition, x: Derived, land: Arra
     }
   }
   const yearS = x.yearDays * 86_400, dt = yearS / steps;
-  let T: Float64Array = new Float64Array(n).fill(Math.max(150, Math.min(700, x.surfaceK)));
+  let T: Float64Array = opts.initialK && opts.initialK.length === n ? Float64Array.from(opts.initialK) : new Float64Array(n).fill(Math.max(150, Math.min(700, x.surfaceK)));
   const monthSum = new Float64Array(months * n), monthCount = new Float64Array(months);
   let prevAnnual = Infinity, years = 0, absorbed = 0, emitted = 0;
   const maxYears = opts.maxYears ?? 40, tol = opts.tolerance ?? 0.01;
@@ -180,7 +210,7 @@ function coarseClimate(mesh: Mesh, def: PlanetDefinition, x: Derived, land: Arra
     let mean = 0;
     for (let c = 0; c < n; c++) for (let m = 0; m < months; m++) mean += (area[c] * monthSum[m * n + c]) / monthCount[m] / months;
     mean /= 4 * Math.PI;
-    if (Math.abs(mean - prevAnnual) < tol && years >= 3) break;
+    if (Math.abs(mean - prevAnnual) < tol && years >= (opts.minYears ?? 3)) break;
     prevAnnual = mean;
   }
   const monthly = new Float32Array(months * n);
@@ -195,7 +225,7 @@ function coarseClimate(mesh: Mesh, def: PlanetDefinition, x: Derived, land: Arra
     if (lat > 70) { pole += area[c] * (tm - 273.15); poleA += area[c]; }
   }
   return {
-    monthly,
+    monthly, finalK: T,
     stats: { meanK: meanK / (4 * Math.PI), absorbed, emitted, tropicsC: tropA ? trop / tropA : NaN, polesC: poleA ? pole / poleA : NaN, years: Math.min(years, maxYears) },
   };
 }
@@ -233,4 +263,44 @@ function solve(n: number, start: Int32Array, nbr: Int32Array, w: Float64Array, d
     for (let i = 0; i < n; i++) p[i] = z[i] + beta * p[i];
   }
   return x;
+}
+
+/**
+ * How much warmer dry ground runs than the column model gives (K, per coarse cell, D159): where the land's share
+ * within DRY_REACH is high (a great landmass: little sea to temper it, little water to evaporate) and the subtropical
+ * highs keep skies clear and air sinking; strongest just inside the edge of the Hadley cells, fading towards the
+ * equator's rains and the storm belts. (A column model has one temperature for the ground and the air above it, so
+ * the sea's evaporation and the desert's lack of it, which set them apart, are missing; calibrated on stations.)
+ */
+function dryGroundWarming(mesh: Mesh, land: ArrayLike<number>, x: Derived, def: PlanetDefinition, opts: ClimateOptions): Float64Array {
+  const n = mesh.n, out = new Float64Array(n);
+  const amp = opts.tune?.dryWarm ?? DRY_WARM, from = opts.tune?.dryFrom ?? DRY_FROM;
+  if (!(amp > 0) || def.atmosphere.pressureBar <= 0) return out;
+  const cos = Math.cos(DRY_REACH);
+  for (let c = 0; c < n; c++) {
+    if (land[c] <= 0) continue;
+    let s = 0, a = 0;
+    for (let j = 0; j < n; j++) {
+      const d = mesh.xyz[3 * c] * mesh.xyz[3 * j] + mesh.xyz[3 * c + 1] * mesh.xyz[3 * j + 1] + mesh.xyz[3 * c + 2] * mesh.xyz[3 * j + 2];
+      if (d < cos) continue;
+      s += land[j] * mesh.area[j]; a += mesh.area[j];
+    }
+    const lat = Math.abs((mesh.lat[c] * 180) / Math.PI);
+    const band = Math.exp(-(((lat - (x.hadleyEdgeDeg - 5)) / 15) ** 2));
+    out[c] = amp * land[c] * band * Math.max(0, (s / a - from) / (1 - from));
+  }
+  return out;
+}
+
+/** Sunlight fields by level and sunlight (a history works out many climates under the same sky). */
+const insolationCache = new Map<string, { annual: Float32Array; monthly: Float32Array }>();
+function cachedInsolation(mesh: Mesh, def: PlanetDefinition, x: Derived, months: number) {
+  const s = sunlightOf(def, x), key = `${mesh.level}:${months}:${JSON.stringify(s)}`;
+  let f = insolationCache.get(key);
+  if (!f) {
+    f = insolationField(mesh, s, months);
+    if (insolationCache.size > 16) insolationCache.clear();
+    insolationCache.set(key, f);
+  }
+  return f;
 }

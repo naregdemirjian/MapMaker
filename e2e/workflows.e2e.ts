@@ -4306,14 +4306,15 @@ try {
     await page.getByTestId('studio-simulate').click();
     const drawn = (prefix: string) => page.waitForFunction((p) => ((document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement)?.dataset.drawn ?? '').startsWith(p), prefix, { timeout: 180_000 });
     await drawn('elevation:');
-    assert.equal(await text('studio-when'), 'Today');
+    assert.match(await text('studio-when'), /^Today/);
     assert.match(await text('studio-legend'), /Height above the sea/);
     await h.screenshot('planet-studio-relief');
     await page.getByTestId('studio-layer').selectOption('plates');
     await drawn('plates:');
     await page.getByTestId('studio-frame').fill('0');
     await drawn('plates:0:');
-    assert.equal(await text('studio-when'), '200 million years ago');
+    // With the sea's level then, from the ocean's water (D159).
+    assert.match(await text('studio-when'), /^200 million years ago · sea (as today|[\d,]+ m (higher|lower))/);
     const colours = await page.evaluate(() => {
       const c = document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement, d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
       const seen = new Set<string>();
@@ -4332,6 +4333,10 @@ try {
     await page.getByTestId('studio-layer').selectOption('precipitation');
     await drawn('precipitation:');
     assert.match(await text('studio-legend'), /Rain and snow over the year: \d+ to [\d,]+ mm/);
+    // Today's water: lakes, rivers, wetlands and ice (D159); and the sea's level shown with each moment.
+    await page.getByTestId('studio-layer').selectOption('water');
+    await drawn('water:');
+    assert.match(await text('studio-legend'), /salt lakes/);
     // Used for a map: its land and sea follow the history on its timeline.
     await page.getByTestId('studio-use').click();
     await page.getByTestId('planet-studio').waitFor({ state: 'detached' });

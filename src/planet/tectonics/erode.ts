@@ -14,14 +14,19 @@ export const setSlopeThreshold = (v: number) => { SLOPE_THRESHOLD = v; };
 export function erodeCrust(state: TectonicState, dt: number) {
   const { mesh, plates, owner, ref, params } = state;
   const n = mesh.n, R = params.radiusKm;
-  const rain = new Float64Array(n);
-  let mean = 0;
-  for (let c = 0; c < n; c++) {
-    rain[c] = zonalRain((mesh.lat[c] * 180) / Math.PI, params.hadleyDeg ?? 30);
-    mean += rain[c] * mesh.area[c];
+  // Rain where the moment's climate puts it (D159), or belts by latitude without a climate.
+  let rain: Float64Array;
+  if (state.paleo) rain = state.paleo.rain;
+  else {
+    rain = new Float64Array(n);
+    let mean = 0;
+    for (let c = 0; c < n; c++) {
+      rain[c] = zonalRain((mesh.lat[c] * 180) / Math.PI, params.hadleyDeg ?? 30);
+      mean += rain[c] * mesh.area[c];
+    }
+    mean /= 4 * Math.PI;
+    for (let c = 0; c < n; c++) rain[c] /= mean;
   }
-  mean /= 4 * Math.PI;
-  for (let c = 0; c < n; c++) rain[c] /= mean;
   // Creep at the scale of a cell: relief a cell across relaxes in a few hundred million years by creep alone.
   const spacing = Math.sqrt((4 * Math.PI) / n) * R;
   const res = landscapeStep(mesh, state.height, {

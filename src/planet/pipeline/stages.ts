@@ -9,6 +9,9 @@
 import { definitionOf, type PlanetDefinition } from '../model/definition.ts';
 import { seasonalClimate } from '../climate/ebm.ts';
 import { hydroclimate } from '../climate/hydroclimate.ts';
+import { hydrology } from '../water/hydrology.ts';
+import { iceSheets } from '../water/ice.ts';
+import { toLevel } from '../mesh/transfer.ts';
 import { derive } from '../model/physics.ts';
 import { cellsAt, meshAt } from '../mesh/icosphere.ts';
 import { rasterize } from '../mesh/transfer.ts';
@@ -74,6 +77,10 @@ export const LAYERS = {
   currents: { stage: 'climate', field: 'currents', unit: 'K', label: 'The sea\'s currents (warmer and cooler)', frames: false, categories: false },
   ice: { stage: 'climate', field: 'ice', unit: '', label: 'Ice and snow (share of the year)', frames: false, categories: false },
   drainage: { stage: 'tectonics', field: 'discharge', unit: 'km²', label: 'Water draining through', frames: false, categories: false },
+  runoff: { stage: 'water', field: 'runoff', unit: 'mm', label: 'Water running off (a year)', frames: false, categories: false },
+  rivers: { stage: 'water', field: 'discharge', unit: 'm³/s', label: 'Rivers (discharge)', frames: false, categories: false },
+  water: { stage: 'water', field: 'kind', unit: '', label: 'Lakes, rivers, wetlands and ice', frames: false, categories: true },
+  iceThickness: { stage: 'water', field: 'ice', unit: 'm', label: 'Ice sheets (thickness)', frames: false, categories: false },
   boundaries: { stage: 'tectonics', field: 'boundary', unit: '', label: 'Plate boundaries', frames: false, categories: true },
 } as const;
 export type LayerId = keyof typeof LAYERS;
@@ -93,6 +100,8 @@ export function tectonicParams(def: PlanetDefinition, level: number, durationMyr
     // Rivers need water and air: a dry world wears down far more slowly (wind and frost only).
     erodibility: (0.03 + 0.97 * Math.min(1, def.water.oceanFraction / 0.3)) * (0.3 + 0.7 * Math.min(1, def.atmosphere.pressureBar / 0.3)),
     hadleyDeg: x.hadleyEdgeDeg,
+    // The climate the history's erosion and ice follow (D159): the planet's own settings.
+    climate: { star: def.star, orbit: def.orbit, body: def.body, atmosphere: def.atmosphere, water: def.water, history: { ageGyr: def.history.ageGyr, events: [] }, interior: def.interior },
   };
 }
 
@@ -146,7 +155,7 @@ export const STAGES: Record<string, StageDef> = {
   /** The planet's tectonic history: plates, crust and heights through time (a preview at coarse levels). */
   tectonics: {
     id: 'tectonics',
-    version: 3,
+    version: 4,
     deps: () => [],
     inputs: (def, p) => ({
       ...(tectonicParams(def, p.level, p.durationMyr ?? 500) as unknown as ProductData),
@@ -182,13 +191,61 @@ export const STAGES: Record<string, StageDef> = {
       const r = seasonalClimate(mesh, def, x, heights);
       ctx.progress(1, 2);
       // Winds, rain and the sea's currents (D158); the currents' warmth goes into the temperatures.
-      const h = hydroclimate(mesh, def, x, heights, r.monthly);
+      const h = hydroclimate(mesh, def, x, heights, r.monthly, 4, r.dryWarm);
       const annual = new Float32Array(n);
       for (let m = 0; m < 12; m++) for (let c = 0; c < n; c++) annual[c] += h.tempMonthly[m * n + c] / 12;
       ctx.progress(2, 2);
       return {
         monthly: h.tempMonthly, annual, ice: r.ice, meanK: r.meanK, absorbed: r.absorbed, emitted: r.emitted, tropicsC: r.tropicsC, polesC: r.polesC, years: r.years,
         precipMonthly: h.precipMonthly, precipAnnual: h.precipAnnual, currents: h.currents, windJan: h.windJan, windJul: h.windJul, meanPrecip: h.meanPrecip,
+      };
+    },
+  },
+
+  /**
+   * Water on the land (D159): ice sheets grown to a steady state in the present climate (on the coarse level), then
+   * the water balance, lakes, rivers, wetlands and deltas on the map's level.
+   */
+  water: {
+    id: 'water',
+    version: 1,
+    deps: () => ['tectonics', 'climate', 'insolation'],
+    inputs: (def, p) => ({
+      level: p.level,
+      def: { star: def.star, orbit: def.orbit, body: def.body, atmosphere: def.atmosphere, water: def.water, history: { ageGyr: def.history.ageGyr, events: [] }, interior: def.interior } as unknown as ProductData,
+    }),
+    run: (inputs, deps, ctx) => {
+      const def = definitionOf(inputs.def)!;
+      const level = inputs.level as number, mesh = meshAt(level), n = mesh.n;
+      const all = deps.tectonics.heights as Int16Array;
+      const heights = Float64Array.from(all.subarray(all.length - n));
+      const x = derive(def);
+      const temp = deps.climate.monthly as Float32Array, precip = deps.climate.precipMonthly as Float32Array;
+      // Ice on the coarse level (about 480 km cells on an Earth-sized planet), brought to the map's.
+      const iceLevel = Math.min(level, 4), coarse = meshAt(iceLevel);
+      const down = (f: ArrayLike<number>) => (level > iceLevel ? toLevel(f, level, iceLevel) : Float64Array.from(f));
+      const up = (f: ArrayLike<number>) => (level > iceLevel ? toLevel(f, iceLevel, level) : Float64Array.from(f));
+      const monthsDown = (f: Float32Array) => {
+        const out = new Float64Array(12 * coarse.n);
+        for (let m = 0; m < 12; m++) out.set(down(f.subarray(m * n, (m + 1) * n)), m * coarse.n);
+        return out;
+      };
+      const ice = def.water.oceanFraction > 0 || def.atmosphere.pressureBar > 0
+        ? iceSheets({ mesh: coarse, radiusKm: def.body.radiusKm, gravity: x.gravity, bed: down(heights), temp: monthsDown(temp), precip: monthsDown(precip), yearDays: x.yearDays, lapse: x.air.lapse, years: 60_000, dt: 500 })
+        : null;
+      ctx.progress(1, 2);
+      const thickness = ice ? up(ice.thickness) : new Float64Array(n);
+      for (let c = 0; c < n; c++) if (thickness[c] < 1) thickness[c] = 0;
+      const w = hydrology({
+        mesh, radiusKm: def.body.radiusKm, height: heights, temp, precip, sun: deps.insolation.monthly as Float32Array, yearDays: x.yearDays,
+        ice: thickness, iceRunoff: ice ? up(ice.runoff) : null,
+      });
+      ctx.progress(2, 2);
+      return {
+        runoff: Float32Array.from(w.balance.runoff), discharge: w.discharge, kind: w.kind, order: w.order, lakeDepth: w.lakeDepth,
+        ice: Float32Array.from(thickness), riverMin: w.riverMin, depressions: w.depressions,
+        budget: w.budget as unknown as ProductData,
+        iceVolume: ice ? ice.volume : 0, iceArea: ice ? ice.area : 0, seaLevelEquivalent: ice ? ice.seaLevelEquivalent : 0, iceYears: ice ? ice.years : 0,
       };
     },
   },
