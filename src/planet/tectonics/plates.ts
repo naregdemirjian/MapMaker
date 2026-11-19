@@ -12,7 +12,8 @@ import type { Mesh } from '../mesh/icosphere.ts';
 export const CRUST = { none: 0, oceanic: 1, continental: 2, arc: 3 } as const;
 /** What has happened to crust (bits): sewn into a continent at a collision, scraped onto a margin, a flood basalt,
  * a hotspot's track, stretched in a rift, built in an arc, struck by an impact. */
-export const TAG = { suture: 1, accreted: 2, lip: 4, hotspot: 8, rift: 16, arc: 32, impact: 64 } as const;
+/** Crust history bits; `edited`: made by an event placed on the timeline (D161: provenance). */
+export const TAG = { suture: 1, accreted: 2, lip: 4, hotspot: 8, rift: 16, arc: 32, impact: 64, edited: 128 } as const;
 export type CrustKind = (typeof CRUST)[keyof typeof CRUST];
 
 export interface Plate {

@@ -6,7 +6,7 @@
 // The same registry runs in the interface (to work out inputs and keys, and to join parts) and in the workers (to
 // run stages). A stage that works cell by cell can be run in parts: fixed ranges of cells, whatever the number of
 // workers, joined in order, so the result is the same bytes on one worker or on many.
-import { definitionOf, type PlanetDefinition } from '../model/definition.ts';
+import { definitionOf, historyView, type PlanetDefinition } from '../model/definition.ts';
 import { seasonalClimate } from '../climate/ebm.ts';
 import { hydroclimate } from '../climate/hydroclimate.ts';
 import { hydrology } from '../water/hydrology.ts';
@@ -82,6 +82,7 @@ export const LAYERS = {
   rivers: { stage: 'water', field: 'discharge', unit: 'm³/s', label: 'Rivers (discharge)', frames: false, categories: false },
   water: { stage: 'water', field: 'kind', unit: '', label: 'Lakes, rivers, wetlands and ice', frames: false, categories: true },
   iceThickness: { stage: 'water', field: 'ice', unit: 'm', label: 'Ice sheets (thickness)', frames: false, categories: false },
+  provenance: { stage: 'tectonics', field: 'tags', unit: '', label: 'Simulated or edited', frames: false, categories: true },
   koppen: { stage: 'biomes', field: 'koppen', unit: '', label: 'Köppen-Geiger climates', frames: false, categories: true },
   biome: { stage: 'biomes', field: 'biome', unit: '', label: 'Biomes', frames: false, categories: true },
   boundaries: { stage: 'tectonics', field: 'boundary', unit: '', label: 'Plate boundaries', frames: false, categories: true },
@@ -89,8 +90,9 @@ export const LAYERS = {
 export type LayerId = keyof typeof LAYERS;
 
 /** What the tectonic history reads from a definition, for a history of `durationMyr` ending at the present. */
-export function tectonicParams(def: PlanetDefinition, level: number, durationMyr = 500): TectonicParams {
-  const x = derive(def);
+export function tectonicParams(live: PlanetDefinition, level: number, durationMyr = 500): TectonicParams {
+  // The history sees the climate settings it keeps, if it keeps them (D161).
+  const def = historyView(live), x = derive(def);
   const D = Math.min(durationMyr, def.history.ageGyr * 1000);
   // Timeline events, in the history's own time (Myr since it began); those wholly before it are left out.
   const events = def.history.events
@@ -104,6 +106,7 @@ export function tectonicParams(def: PlanetDefinition, level: number, durationMyr
     erodibility: (0.03 + 0.97 * Math.min(1, def.water.oceanFraction / 0.3)) * (0.3 + 0.7 * Math.min(1, def.atmosphere.pressureBar / 0.3)),
     hadleyDeg: x.hadleyEdgeDeg,
     // The climate the history's erosion and ice follow (D159): the planet's own settings.
+    // (As the history was simulated with, if it keeps them: D161.)
     climate: { star: def.star, orbit: def.orbit, body: def.body, atmosphere: def.atmosphere, water: def.water, history: { ageGyr: def.history.ageGyr, events: [] }, interior: def.interior },
   };
 }
@@ -158,7 +161,7 @@ export const STAGES: Record<string, StageDef> = {
   /** The planet's tectonic history: plates, crust and heights through time (a preview at coarse levels). */
   tectonics: {
     id: 'tectonics',
-    version: 4,
+    version: 5,
     deps: () => [],
     inputs: (def, p) => ({
       ...(tectonicParams(def, p.level, p.durationMyr ?? 500) as unknown as ProductData),

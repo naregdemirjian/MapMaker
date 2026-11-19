@@ -473,7 +473,7 @@ function plumes(state: TectonicState, dt: number, vmax: number) {
       const rate = p.kind[r] === CRUST.continental ? PLUME_CONTINENT : PLUME_OCEAN;
       p.thickness[r] = Math.min(vmax, p.thickness[r] + rate * h.strength * state.volcanism * dt * share);
       p.orogeny[r] = 0;
-      p.tags[r] |= TAG.hotspot;
+      p.tags[r] |= TAG.hotspot | (h.edited ? TAG.edited : 0);
     };
     add(c, 1);
     for (let k = mesh.nbrStart[c]; k < mesh.nbrStart[c + 1]; k++) add(mesh.nbr[k], 0.25);

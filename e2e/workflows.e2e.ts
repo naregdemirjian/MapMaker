@@ -4344,12 +4344,44 @@ try {
     await page.getByTestId('studio-layer').selectOption('satellite');
     await drawn('satellite:');
     const green = await page.evaluate(() => (document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement).dataset.drawn);
-    await page.getByTestId('studio-step-air').click();
+    await page.getByTestId('studio-step-life').click();
     await page.getByTestId('studio-control-vegetation').selectOption('red-dwarf');
     await page.waitForFunction((was) => { const d = (document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement).dataset.drawn ?? ''; return d.startsWith('satellite:') && d !== was; }, green, { timeout: 60_000 });
     assert.match(await text('studio-legend'), /a red dwarf: dark red/);
     await page.getByTestId('studio-control-vegetation').selectOption('earth');
     await page.getByTestId('studio-step-explore').click();
+    // Why is this here? (D161): a place clicked, explained.
+    const box = (await page.getByTestId('studio-canvas').boundingBox())!;
+    await page.mouse.click(box.x + box.width * 0.5, box.y + box.height * 0.5);
+    await page.getByTestId('studio-card').waitFor({ timeout: 60_000 });
+    assert.match(await text('studio-card'), /The ground[\s\S]*Plates[\s\S]*Climate/);
+    await h.screenshot('planet-studio-why');
+    // An edit with its geological explanation: volcanic islands from a hotspot placed at a point 100 million years
+    // ago; what follows; everything worked out again; the crust it made shown as edited; before and after side by side.
+    await page.getByTestId('studio-step-edit').click();
+    await page.mouse.click(box.x + box.width * 0.62, box.y + box.height * 0.6);
+    await page.waitForFunction(() => /Place: /.test(document.querySelector('[data-testid=studio-edit-place]')?.textContent ?? ''));
+    await page.getByTestId('studio-edit-kind').selectOption('hotspot');
+    await page.getByTestId('studio-edit-when').fill('100');
+    await page.getByTestId('studio-edit-add').click();
+    assert.match(await text('studio-report'), /Volcanoes grow where the plate passes over the plume/);
+    assert.match(await text('studio-stale'), /changed since this history was simulated/);
+    await page.getByTestId('studio-recompute-all').click();
+    await page.waitForFunction(() => !document.querySelector('[data-testid=studio-progress]') && !document.querySelector('[data-testid=studio-stale]'), null, { timeout: 180_000 });
+    await page.getByTestId('studio-step-explore').click();
+    await page.getByTestId('studio-layer').selectOption('provenance');
+    await drawn('provenance:');
+    const edited = await page.evaluate(() => {
+      const c = document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement, d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+      let k = 0;
+      for (let i = 0; i < d.length; i += 4) if (d[i] === 240 && d[i + 1] === 150 && d[i + 2] === 40) k++;
+      return k;
+    });
+    assert.ok(edited > 0, `the crust the edit made, in orange (${edited} pixels)`);
+    await page.getByTestId('studio-compare').check();
+    await page.waitForFunction(() => ((document.querySelector('[data-testid=studio-canvas-before]') as HTMLCanvasElement)?.dataset.drawn ?? '').startsWith('provenance:'), null, { timeout: 60_000 });
+    await h.screenshot('planet-studio-edit');
+    await page.getByTestId('studio-compare').uncheck();
     // Used for a map: its land and sea follow the history on its timeline.
     await page.getByTestId('studio-use').click();
     await page.getByTestId('planet-studio').waitFor({ state: 'detached' });

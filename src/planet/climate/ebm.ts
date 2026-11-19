@@ -251,7 +251,7 @@ function solve(n: number, start: Int32Array, nbr: Int32Array, w: Float64Array, d
   for (let it = 0; it < 400; it++) {
     let rr = 0;
     for (let i = 0; i < n; i++) rr += r[i] * r[i];
-    if (rr <= 1e-20 * rr0) break;
+    if (rr <= 1e-12 * rr0) break;
     apply(p, q);
     let pq = 0;
     for (let i = 0; i < n; i++) pq += p[i] * q[i];

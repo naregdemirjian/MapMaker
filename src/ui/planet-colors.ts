@@ -109,6 +109,10 @@ export function colourLayer(layer: LayerId, values: Float32Array, width: number,
   } else if (layer === 'iceThickness') {
     for (let k = 0; k < values.length; k++) put(k, values[k] < 1 ? [40, 48, 56] : ramp([[1, [170, 200, 225]], [500, [205, 225, 242]], [2000, [235, 244, 252]], [4000, [255, 255, 255]]], values[k]));
     legend = `Ice sheets: up to ${Math.round(range.max).toLocaleString('en')} m thick`;
+  } else if (layer === 'provenance') {
+    // (D161) Crust made by events placed on the timeline (edits) against the simulation's own.
+    for (let k = 0; k < values.length; k++) put(k, (values[k] | 0) & 128 ? [240, 150, 40] : [64, 82, 100]);
+    legend = 'Orange: made by events you placed on the timeline (edits) · blue-grey: the simulation\'s own';
   } else if (layer === 'koppen') {
     for (let k = 0; k < values.length; k++) { const i = values[k] | 0; put(k, i ? (KOPPEN[i - 1][2] as unknown as RGB) : [16, 30, 52]); }
     const seen = new Set<number>();

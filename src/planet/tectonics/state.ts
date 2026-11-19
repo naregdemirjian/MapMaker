@@ -28,8 +28,9 @@ export interface Hotspot {
   strength: number;
   start: number;
   end: number;
-  /** The world cell above it (kept to find it again quickly). */
+  /** The world cell above it (kept to find it again quickly); whether an event placed it (D161). */
   cell: number;
+  edited?: boolean;
 }
 
 export interface TectonicParams {
@@ -194,8 +195,9 @@ export function initialState(params: TectonicParams): TectonicState {
       p.kind[c] = CRUST.oceanic;
       p.thickness[c] = 7;
       // The sea floor's ages as a steady state of spreading and subduction leaves them (area falling linearly with
-      // age to about 180 Myr: Parsons 1982), so the ocean's basins hold about what they will later (D159).
-      p.age[c] = 180 * (1 - Math.sqrt(Math.max(0, Math.min(1, 0.5 + 0.5 * ageNoise(x * 2.5 + 7, y * 2.5, z * 2.5)))));
+      // age to about 180 Myr on Earth: Parsons 1982; younger on a planet whose plates move faster), so the ocean's
+      // basins hold about what they will later (D159).
+      p.age[c] = (180 / Math.max(0.5, params.vigor)) * (1 - Math.sqrt(Math.max(0, Math.min(1, 0.5 + 0.5 * ageNoise(x * 2.5 + 7, y * 2.5, z * 2.5)))));
     }
   }
   const state = baseState(params, plates, owner, (params.seed * 747796405 + 2891336453) >>> 0);

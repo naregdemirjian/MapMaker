@@ -106,7 +106,28 @@ export interface HistorySpec {
   /** How old the planet is, billion years. */
   ageGyr: number;
   events: GeoEvent[];
+  /**
+   * The climate settings the history was simulated with (D161): its erosion and ice follow these, so changing the air
+   * or the orbit afterwards recomputes today's climate, water and life at once and leaves the history as it was until
+   * it is re-run with them. None: the history follows the settings as they are.
+   */
+  climate?: ClimateSnapshot;
 }
+
+/**
+ * The settings that reach a history only through its climate (a history keeps them as it was simulated with, D161):
+ * the star, the orbit, the air, the tilt and the day. (The sea's share, the planet's size and its interior shape the
+ * history directly: changing them makes it out of date.)
+ */
+export interface ClimateSnapshot { star: StarSystemSpec; orbit: OrbitSpec; atmosphere: AtmosphereSpec; tiltDeg: number; dayHours: number }
+export const climateSnapshot = (d: PlanetDefinition): ClimateSnapshot => structuredClone({ star: d.star, orbit: d.orbit, atmosphere: d.atmosphere, tiltDeg: d.body.tiltDeg, dayHours: d.body.dayHours });
+/** A definition as its history sees it: with the climate settings the history keeps, if it keeps them. */
+export function historyView(d: PlanetDefinition): PlanetDefinition {
+  const s = d.history.climate;
+  return s ? { ...d, star: s.star, orbit: s.orbit, atmosphere: s.atmosphere, body: { ...d.body, tiltDeg: s.tiltDeg, dayHours: s.dayHours } } : d;
+}
+/** Whether a history was simulated with other climate settings than the definition's now. */
+export const historyClimateDiffers = (d: PlanetDefinition) => !!d.history.climate && JSON.stringify(d.history.climate) !== JSON.stringify(climateSnapshot(d));
 
 /** A biome of the user's own (D152 defines it; 14.9 classifies with it). */
 export interface CustomBiome {
@@ -360,6 +381,12 @@ export function definitionOf(raw: unknown): PlanetDefinition | null {
       ...(Array.isArray(e.at) && e.at.length === 2 && num(e.at[0]) !== undefined && num(e.at[1]) !== undefined ? { at: [num(e.at[0])!, num(e.at[1])!] as [number, number] } : {}),
       ...(typeof e.note === 'string' ? { note: e.note } : {}),
     }));
+    if (isObj(h.climate)) {
+      // Kept as it was simulated with (each part read as a definition's own, so it is valid).
+      const c = h.climate;
+      const snap = definitionOf({ star: c.star, orbit: c.orbit, atmosphere: c.atmosphere, body: { tiltDeg: c.tiltDeg, dayHours: c.dayHours } });
+      if (snap) out.history.climate = climateSnapshot(snap);
+    }
   }
   if (isObj(raw.life)) {
     const l = raw.life;

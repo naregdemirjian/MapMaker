@@ -61,6 +61,88 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D162. The planetary engine validated and measured; its model card (Stage 14.11)
+
+- **Asked.** Stage 14.11: "the Earth-like validation report, benchmarks with budgets, profiling and optimisation
+  (shared memory, GPU kernels if they pay), the model card in DEVELOPMENT, the decision records".
+- **Validation** (`bench/planet.bench.ts --validate`, written to `docs/PLANET_VALIDATION.md`): distributions, not maps
+  (plan 11.2). A simulated Earth-like planet (seed 1, 500 Myr, preview): land 29 % (29); hypsometry with two peaks,
+  0 to 500 m and −6,000 to −5,500 m (the Earth's 0 to 1,000 and −4,000 to −5,000: the deep sea floor too deep);
+  0.2 % of the surface above 2 km (about 3 %: preview cells average mountains away); the sea floor deepening 0.28 km
+  per √Myr (0.35); the sea's level −303 to +287 m over the history; mean temperature 16 °C (15), 27.8 °C within 10° of
+  the equator and −10 beyond 70°; deserts and steppe 51 % of the land at 15-35° and none within 10°; tropical forest
+  96 % within 10°; boreal forest 46 % at 50-65°, tundra, polar desert and ice 68 % beyond 65°; Hack's law exponent 0.49
+  (0.5 to 0.6). The real Earth's heights with the engine's climate: 22 places' yearly temperature within 5.4 K (root
+  mean square) and their rain within 0.85 in natural logarithms; water on land, Köppen's classes as in D159 and D160.
+- **Benchmarks** (`bench/planet.bench.ts`, one thread, the development container): the Earth-like preset over 500 Myr,
+  preview (level 5) and standard (level 6):
+
+  | Level | History | Sunlight | Climate | Water and ice | Biomes | Cover | An edit of the air |
+  | --- | --- | --- | --- | --- | --- | --- | --- |
+  | 5 | 5.5 s | 0.01 s | 1.0 to 2.4 s | 0.13 s | 0.03 s | 0.18 s | 1.0 to 2.3 s |
+  | 6 | 24 s | 0.01 s | 1.0 s | 0.21 s | 0.04 s | 0.18 s | 1.0 s |
+
+  (The climate runs on the coarse level whatever the map's, so it costs the same; the first run in a process is the
+  slower, before the JavaScript engine has compiled it.) Against the plan's budgets (8.4): the history at preview in
+  a few seconds (met: 5.5 s); simulating at standard under a minute (met: 24 s on one thread); a change of climate,
+  water or life within half a second (not met: about a second, the energy balance's year-by-year spin-up).
+- **Profiling and optimisation**: the history's tectonic steps take about half its time, the past climates a quarter
+  (D159 made them affordable: every 50 Myr, warm starts, every third month's rain, the sky's sunlight kept); the
+  rain model's per-edge fluxes worked out once a month (four to six times faster, D159); the energy balance's
+  conjugate gradients stop at a residual of a millionth instead of a ten-billionth: the climate 34 % faster
+  (2.35 to 1.56 s), temperatures changed by under a thousandth of a kelvin. Shared memory between workers and GPU
+  kernels were not built: the expensive models run on coarse levels (2,562 or 642 cells), where moving the data costs
+  as much as the arithmetic, and the history's steps depend on each other in time.
+- **The model card** in DEVELOPMENT: every model's kind (physically based, empirical, diagnostic), its calibration,
+  what it holds for, and its known errors in numbers.
+- **Found on the way**: the Studio's interface test caught a young volcanic world whose sea, 200 Myr ago, stood 1.4 km
+  lower: its sea floor started as old as the Earth's though its plates move three times as fast, so its basins started
+  too deep. The starting ages now scale with the plate speed (180 Myr for the Earth). Such a world still shows lower
+  seas in its past (a few hundred metres to a kilometre): its volcanism keeps adding crust, which with the water
+  conserved raises the sea over time.
+
+### D161. Planet Studio II: why is this here, edits with geological explanations, recalculation, provenance (Stage 14.10)
+
+- **Asked.** Stage 14.10: "climate, water and biome layers and steps 4 to 6 in full, 'why is this here?', side-by-side
+  comparisons, editing with geological explanations, consequences reports, automatic, selective and manual
+  recalculation, the provenance overlay; Mode A's direct tools", done when the editing interface test passes.
+- **Steps** as the plan lays them out: 1 Star and orbit · 2 Planet · 3 Interior and plates · 4 Air and water · 5 Life
+  and biomes · 6 History · 7 Simulate and explore · 8 Edit. The climate, water and biome layers came with 14.6 to
+  14.9 (D157 to D160).
+- **Why is this here?** (`explain.ts`): clicking the planet opens a card on what the simulation knows about the place
+  today: the crust (continental, an arc's, oceanic; its age and thickness) and what made or marked it (sutures,
+  accretion, flood basalts, hotspots, rifts, arcs, impacts), why it stands high or low (thick crust floating higher,
+  old sea floor sunk, a flooded margin); the plate boundary it lies on or beside, with its rate; its climate in numbers
+  and the circulation that gives it (the convergence zone, the subtropical high, the storm belt, a rain shadow found
+  by walking upwind, a monsoon, winter rain, a warm or cold current); its water (an ice sheet, a lake or salt lake, a
+  salt flat, a river's discharge, a wetland); its Köppen class and its biome with the aridity behind it (or the
+  planet's own biome); and whether an edit made it.
+- **Edits with geological explanations**: in step 8 a place is clicked and what happened there chosen; the engine
+  places the geological event that makes it on the timeline (D154's events, at that place): volcanic islands (a
+  hotspot under the moving plate, from then on), a mountain range (continents near the place pushed together for 60
+  Myr), an inland sea or ocean (a rift opening there), a volcanic plateau (a flood basalt), a crater (an impact), or a
+  higher sea. The crust such events make carries a new bit, `edited` (crust history bit 128): the **provenance**
+  layer shows it against the simulation's own.
+- **Consequences report**: after an edit, what follows in words (what the event does to the land, the climate,
+  rivers and biomes), that the history is simulated again with it and then today's climate, water and life; then
+  **automatic** ("work it all out now") or **manual** ("keep the pictures as they are": the history is marked out of
+  date until simulated again). **Selective**: the history keeps the settings that reach it only through its climate
+  as it was simulated with (star, orbit, air, tilt, day: `history.climate`), so changing them afterwards re-runs only
+  today's climate, water and life at once (the stage keys of the history do not change), with a note and a button to
+  re-run the history with the new climate (plan 4.4). The sea's share, the planet's size and its interior still make
+  the history out of date.
+- **Comparison**: after a history is simulated again, the picture before the change can be shown beside the new one
+  (the same layer).
+- **Not done.** Re-simulating from the checkpoint before an edit (the history is run again from its start; at preview
+  quality a few seconds); a consequences report from a quick estimate of the effects (it says in words what such an
+  event does); "set by hand" overrides of derived values; Mode A's direct tools (drawing a coastline, painting biomes,
+  drawing rivers) and its use of this climate: the generator keeps its sculpting brushes (D98).
+- **Tests.** `planet-explain.test.ts` (3): a placed hotspot's crust marked as edited and the place's explanation
+  saying so; explanations naming the convergence zone, the subtropical high or storm belt and Köppen's classes; the
+  history keeping its climate (the same key with more carbon dioxide afterwards, a note that it differs, the snapshot
+  surviving storage). The Studio's interface test explains a clicked place, places volcanic islands 100 million
+  years ago, reads the consequences, works it all out, sees the edited crust in orange and the picture before beside it.
+
 ### D160. Biomes: Köppen-Geiger climates, biomes by warmth and dryness, the planet's own, plants under other stars (Stage 14.9)
 
 - **Asked.** Stage 14.9: "Köppen-Geiger and Whittaker classes with alpine, wetland and ice zones, custom biome rules

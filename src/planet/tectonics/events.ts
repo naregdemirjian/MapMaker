@@ -84,12 +84,13 @@ function begin(state: TectonicState, e: TectonicEvent) {
       if (o >= 0) {
         const t = randomPole(() => rand(state));
         riftPlate(state, state.plates[o], at, [at[1] * t[2] - at[2] * t[1], at[2] * t[0] - at[0] * t[2], at[0] * t[1] - at[1] * t[0]], 25 * Math.max(0.5, e.strength));
+        mark(state, at, 400 / state.params.radiusKm);
       }
       break;
     }
     case 'hotspot': {
       const [x, y, z] = placeOf(state, e);
-      state.hotspots.push({ x, y, z, strength: Math.max(0.1, e.strength), start: e.start, end: e.end, cell: 0 });
+      state.hotspots.push({ x, y, z, strength: Math.max(0.1, e.strength), start: e.start, end: e.end, cell: 0, edited: true });
       break;
     }
     case 'lip': placeOf(state, e); if (e.end <= e.start) floodBasalt(state, e, 1); break;
@@ -133,7 +134,7 @@ function floodBasalt(state: TectonicState, e: TectonicEvent, myr: number) {
   if (!e.at) return;
   const share = e.end > e.start ? myr / (e.end - e.start) : 1;
   const R = (800 * Math.sqrt(Math.max(0.1, e.strength))) / state.params.radiusKm;
-  around(state, unit(e.at), 1.5 * R, (d) => 8 * e.strength * share * Math.exp(-((d / R) ** 2)), TAG.lip);
+  around(state, unit(e.at), 1.5 * R, (d) => 8 * e.strength * share * Math.exp(-((d / R) ** 2)), TAG.lip | TAG.edited);
 }
 
 /**
@@ -151,7 +152,17 @@ function crater(state: TectonicState, at: V3, strength: number) {
     const f = d / R;
     if (f <= 1) return -(depth * (1 - f * f)) / 0.15;
     return (0.15 * depth * Math.exp(-(((f - 1.1) / 0.15) ** 2))) / 0.15;
-  }, TAG.impact);
+  }, TAG.impact | TAG.edited);
+}
+
+/** Marks the crust within `radius` (radians) of a point as made by an edit (D161). */
+function mark(state: TectonicState, at: V3, radius: number) {
+  const { mesh, plates, owner, ref } = state, cos = Math.cos(radius);
+  for (let c = 0; c < mesh.n; c++) {
+    if (at[0] * mesh.xyz[3 * c] + at[1] * mesh.xyz[3 * c + 1] + at[2] * mesh.xyz[3 * c + 2] < cos) continue;
+    const p = plates[owner[c]];
+    if (p) p.tags[ref[c]] |= TAG.edited;
+  }
 }
 
 /** The crust under a world point (for tests and explanations). */
