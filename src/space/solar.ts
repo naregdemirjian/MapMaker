@@ -140,6 +140,42 @@ export function solarCatalogue(t: Instant, scale: SolarScale): StarCatalogue {
   return { radiusLy: SOLAR_RADIUS_AU, stars, byId: new Map(stars.map((s) => [s.id, s])) };
 }
 
+/**
+ * The solar system side by side (D133): not where the bodies are but who they are, in order: the Sun at the
+ * left, the planets in a row at even steps, each planet's large moons in a column below it, inner first.
+ * Units as drawn (the row is `ROW_STEP` from body to body, centred on the middle of the map); distances
+ * from the Sun stay true for the panels.
+ */
+export const ROW_STEP = 10;
+const MOON_STEP = 3.4, ROW_Y = 6;
+export const ROW_RADIUS = 33;
+export function solarRowCatalogue(t: Instant): StarCatalogue {
+  const T = centuriesSinceJ2000(t), x0 = -(BODIES.length * ROW_STEP) / 2;
+  const stars: Star[] = [{ id: 0, name: 'Sun', alt: '', x: x0, y: ROW_Y, z: 0, dist: 0, absmag: 4.83, spect: 'G2V', system: 0, color: '#ffd76a', size: 15 }];
+  BODIES.forEach((b, i) => {
+    const p = bodyAt(b, T);
+    stars.push({ id: b.id, name: b.name, alt: '', x: x0 + (i + 1) * ROW_STEP, y: ROW_Y, z: 0, dist: Math.hypot(p[0], p[1], p[2]), absmag: 0, spect: '', system: 0, color: b.color, size: b.size * 1.5 });
+  });
+  for (const m of MOONS) {
+    const planet = stars[m.planet], rank = MOONS.filter((x) => x.planet === m.planet && x.days < m.days).length;
+    stars.push({ id: m.id, name: m.name, alt: `a moon of ${planet.name}`, x: planet.x, y: ROW_Y - 4.6 - MOON_STEP * rank, z: 0, dist: planet.dist, absmag: 0, spect: '', system: 0, color: m.color, size: 2.8, kind: 'moon', minor: true, around: m.planet });
+  }
+  return { radiusLy: ROW_RADIUS, stars, byId: new Map(stars.map((s) => [s.id, s])) };
+}
+
+/** The lines of the side-by-side solar system (D133): the row from the Sun to the last planet, and each planet's column of moons. */
+export function solarRowLines(cat: StarCatalogue): Array<{ color: string; points: Array<[number, number, number]> }> {
+  const sun = cat.byId.get(0)!, last = cat.byId.get(BODIES[BODIES.length - 1].id)!;
+  const out: Array<{ color: string; points: Array<[number, number, number]> }> = [{ color: 'rgba(170,190,220,0.6)', points: [[sun.x, sun.y, 0], [last.x, last.y, 0]] }];
+  for (const b of BODIES) {
+    const moons = cat.stars.filter((s) => s.around === b.id);
+    if (!moons.length) continue;
+    const p = cat.byId.get(b.id)!, low = Math.min(...moons.map((m) => m.y));
+    out.push({ color: 'rgba(170,190,220,0.45)', points: [[p.x, p.y, 0], [p.x, low, 0]] });
+  }
+  return out;
+}
+
 /** The planets' orbits as drawn, at an instant, and the circles the moons are drawn on round their planets. */
 export function solarOrbits(t: Instant, scale: SolarScale): Array<{ id: number; color: string; points: Array<[number, number, number]>; small?: boolean }> {
   const T = centuriesSinceJ2000(t);

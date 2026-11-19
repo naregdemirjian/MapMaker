@@ -3,7 +3,7 @@
 import type { Instant } from '../core-time/index.ts';
 import type { SpaceSettings } from '../world-model/world-settings.ts';
 import { nearbyStarsNow, type StarCatalogue } from './catalogue.ts';
-import { solarCatalogue, solarOrbits, scalePoint, SOLAR_RADIUS_AU } from './solar.ts';
+import { solarCatalogue, solarOrbits, scalePoint, solarRowCatalogue, solarRowLines, ROW_RADIUS, ROW_STEP, SOLAR_RADIUS_AU } from './solar.ts';
 import { inventedStarsCached } from './invented.ts';
 import { galaxyCached, type GalaxyDust } from './galaxy.ts';
 import { exoplanetsNow, type ExoplanetList } from './exoplanets.ts';
@@ -32,10 +32,16 @@ export interface SpaceScene {
   middle?: Vec3;
   /** Stars with known planets (D118). */
   planets?: ReadonlySet<number>;
+  /** Laid out side by side (D133): seen flat, without a grid; names of holders over the bodies, lanes curving over the row. */
+  row?: boolean;
 }
 
 /** The scene of a space map at instant t (`onLoad`: called once the nearby stars have loaded). */
 export function spaceScene(settings: SpaceSettings | null, t: Instant, onLoad?: () => void): SpaceScene {
+  if (settings?.catalogue === 'solar' && settings.layout === 'side-by-side') {
+    const cat = solarRowCatalogue(t);
+    return { cat, radius: ROW_RADIUS, axisLabel: null, orbits: solarRowLines(cat), realmReach: ROW_STEP * 0.62, unit: 'au', dropLines: false, row: true };
+  }
   if (settings?.catalogue === 'solar') {
     const scale = settings.scale ?? 'compressed';
     const rings = [1, 5, 10, 20, 30, 40, 50].map((au) => ({ r: Math.hypot(...scalePoint([au, 0, 0], scale)), label: `${au} au` }));

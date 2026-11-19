@@ -3128,7 +3128,7 @@ try {
     assert.ok(frame.id);
   });
 
-  await h.step('The solar system: the planets where they are on the date viewed, moving as the date changes; true or compressed distances; a planet\'s panel; undone', async () => {
+  await h.step('The solar system: the planets where they are on the date viewed, moving as the date changes; true or compressed distances; a planet\'s panel; side by side, a planet held and its holder over it; undone', async () => {
     await page.getByTestId('mode-world').click();
     await page.getByRole('button', { name: '+ Map' }).click();
     await page.getByTestId('new-map-solar').check();
@@ -3179,10 +3179,39 @@ try {
     await page.evaluate(() => { const s = (window as any).__mapmaker.store; s.setCamera({ ...s.camera, zoom: 4.2 }); });
     await page.waitForFunction(() => ['Io', 'Europa', 'Callisto'].every((n) => ((window as any).__mapmaker.spaceNames() as string[]).includes(n)));
     await h.screenshot('jupiter-moons');
+    // Side by side (D133): the Sun at the left, the planets in a row at even steps, the Moon below the Earth.
+    await page.evaluate(() => { const s = (window as any).__mapmaker.store; s.set({ selection: null }); s.setCamera({ ...s.camera, zoom: 0, rotation: 0, target: undefined }); });
+    await page.getByTestId('solar-layout').click();
+    await page.waitForFunction(() => { const s = (window as any).__mapmaker.store; return JSON.parse(s.world.get('map_space', s.spaceId).settings).space.layout === 'side-by-side'; });
+    await page.waitForTimeout(200);
+    assert.equal(await page.getByTestId('solar-scale').count(), 0, 'no choice of scale side by side');
+    const row = await Promise.all([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 31].map((id) => hook<[number, number]>('starToPage', id)));
+    const step = row[2][0] - row[1][0];
+    for (let i = 1; i <= 9; i++) {
+      assert.ok(Math.abs(row[i][1] - row[0][1]) < 1, `body ${i} in the row`);
+      assert.ok(Math.abs(row[i][0] - row[i - 1][0] - step) < 1, `body ${i} a step on (${row[i][0] - row[i - 1][0]} against ${step})`);
+    }
+    assert.ok(step > 40, `room between them (${step} pixels)`);
+    assert.ok(Math.abs(row[10][0] - row[3][0]) < 1 && row[10][1] > row[3][1] + 15, 'the Moon below the Earth');
+    assert.ok((await page.evaluate(() => (window as any).__mapmaker.spaceNames() as string[])).includes('Io'), 'moons named side by side');
+    // Mars held from the date viewed: its holder's name over it, and since when.
+    await h.newCountry('Martian Republic');
+    const mars2 = await page.evaluate(() => (window as any).__mapmaker.store.world.all('entity').find((e: any) => e.name === 'Martian Republic').id as string);
+    await page.getByTestId('tool-systems').click();
+    await page.getByTestId('systems-owner').selectOption(mars2);
+    await page.mouse.click(row[4][0], row[4][1]);
+    await page.waitForFunction(([id]) => { const s = (window as any).__mapmaker.store; return s.engine.systemsAt(s.spaceId, s.time).get(4) === id; }, [mars2] as const);
+    await page.getByTestId('tool-select').click();
+    await page.waitForFunction(() => { const n = (window as any).__mapmaker.spaceNames() as string[]; return n.includes('MARTIAN REPUBLIC') && n.includes('since 2030'); });
+    await h.screenshot('solar-side-by-side');
+    // Back to the orbits.
+    await page.getByTestId('solar-layout').click();
+    await page.waitForFunction(() => { const s = (window as any).__mapmaker.store; return JSON.parse(s.world.get('map_space', s.spaceId).settings).space.layout === 'orbits'; });
+    await page.getByTestId('solar-scale').waitFor();
     // Undone; back to Earth.
     await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
     await page.locator('header select').first().selectOption({ label: 'Earth' });
-    for (let i = 0; i < 6 && (await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.kind === 'space'))); i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    for (let i = 0; i < 14 && (await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.kind === 'space'))); i++) { await page.getByTestId('undo').click(); await h.saved(); }
     assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.kind === 'space')), false);
   });
 

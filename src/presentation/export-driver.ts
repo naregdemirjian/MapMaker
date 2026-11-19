@@ -269,7 +269,7 @@ export function drawSpaceFrame(ctx: CanvasRenderingContext2D, world: World, engi
   const settings = spaceSettingsOf(world.get('map_space', shot.spaceId));
   const scene = spaceScene(settings, t);
   const look = settings?.look;
-  const view = makeSpaceView(cameraAt(shot, frame), width, height, scene.radius, !!look?.chart);
+  const view = makeSpaceView(cameraAt(shot, frame), width, height, scene.radius, !!look?.chart || !!scene.row);
   const all = def.name === 'all', back = def.passes.includes('background'), names = def.passes.includes('labels');
   const realms = !all && def.passes.includes('fills'), lanes = !all && def.passes.includes('features');
   ctx.clearRect(0, 0, width, height);
@@ -277,7 +277,7 @@ export function drawSpaceFrame(ctx: CanvasRenderingContext2D, world: World, engi
     spaceRenderer ??= new SpaceRenderer();
     spaceRenderer.render(ctx, view, scene.cat, {
       rings: scene.rings, axisLabel: scene.axisLabel, orbits: scene.orbits, realmReach: scene.realmReach, dust: scene.dust, armNames: scene.armNames, planets: all ? scene.planets : undefined,
-      transparent: all ? shot.transparent : !def.background, grid: shot.graticule && (all || back), dropLines: all && scene.dropLines !== false, names: shot.labels && (all || names) ? 'auto' : 'none',
+      transparent: all ? shot.transparent : !def.background, grid: !scene.row && shot.graticule && (all || back), dropLines: all && scene.dropLines !== false, names: shot.labels && (all || names) ? 'auto' : 'none', row: scene.row,
       only: all ? undefined : back ? 'background' : realms ? 'realms' : lanes ? 'lanes' : 'names',
       holdings: holdingsAt(world, engine, shot.spaceId, t, (t0) => screenSecondsSince(shot, frame, t0)), lanes: lanesFor(world, engine, shot.spaceId, t),
       look, wars: warsAmong(world, engine, t), seconds: frame / shot.fps,

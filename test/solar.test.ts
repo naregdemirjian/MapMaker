@@ -90,7 +90,7 @@ test('a solar system map: made, its scale chosen and undone; planets held like s
   const engine = new Engine(world);
   cmd.seedProject(world, 'Solar');
   const sp = cmd.createSpaceMap(world, 'The solar system', 'solar').result;
-  assert.deepEqual(spaceSettingsOf(world.get('map_space', sp)), { catalogue: 'solar', radiusLy: 50, scale: 'compressed', look: DEFAULT_SKY });
+  assert.deepEqual(spaceSettingsOf(world.get('map_space', sp)), { catalogue: 'solar', radiusLy: 50, scale: 'compressed', layout: 'orbits', look: DEFAULT_SKY });
   const r = cmd.setSolarScale(world, sp, 'true');
   assert.equal(spaceSettingsOf(world.get('map_space', sp))!.scale, 'true');
   world.applyDiffs(invertDiffs(r.diffs));
@@ -100,4 +100,71 @@ test('a solar system map: made, its scale chosen and undone; planets held like s
   const mars = cmd.createEntity(world, { type_id: 'polity', name: 'Martian Congressional Republic' }).result;
   cmd.holdStars(world, { spaceId: sp, stars: [4, 5], entity: mars, mode: { kind: 'change', t: gregorian.fromCivil({ year: 2200 }) } });
   assert.equal(engine.systemsAt(sp, gregorian.fromCivil({ year: 2201 })).get(4), mars, 'Mars held');
+});
+
+test('the solar system side by side (D133): the Sun, then the planets in a row at even steps, each one\'s moons below it, inner first; distances true for panels', async () => {
+  const { solarRowCatalogue, solarRowLines, ROW_STEP } = await import('../src/space/solar.ts');
+  const { spaceScene } = await import('../src/space/scene.ts');
+  const t = gregorian.fromCivil({ year: 2187, month: 3, day: 1 });
+  const row = solarRowCatalogue(t), real = solarCatalogue(t, 'compressed');
+  const sun = row.byId.get(0)!;
+  const planets = BODIES.map((b) => row.byId.get(b.id)!);
+  planets.forEach((p, i) => {
+    assert.equal(p.y, sun.y, `${p.name} in the row`);
+    assert.ok(Math.abs(p.x - (sun.x + (i + 1) * ROW_STEP)) < 1e-9, `${p.name} at its step`);
+    assert.ok(Math.abs(p.dist - real.byId.get(p.id)!.dist) < 1e-12, `${p.name}'s true distance from the Sun`);
+  });
+  assert.ok(Math.abs(sun.x + planets[planets.length - 1].x) < 1e-9, 'the row centred on the middle of the map');
+  for (const b of BODIES) {
+    const moons = MOONS.filter((m) => m.planet === b.id).sort((x, y) => x.days - y.days).map((m) => row.byId.get(m.id)!);
+    let above = row.byId.get(b.id)!.y;
+    for (const m of moons) {
+      assert.equal(m.x, row.byId.get(b.id)!.x, `${m.name} under ${b.name}`);
+      assert.ok(m.y < above, `${m.name} below the one before`);
+      above = m.y;
+      assert.equal(m.around, b.id);
+    }
+  }
+  // The row and a column for each planet with moons; no rings; seen flat.
+  const lines = solarRowLines(row);
+  assert.equal(lines.length, 1 + new Set(MOONS.map((m) => m.planet)).size);
+  const scene = spaceScene({ catalogue: 'solar', radiusLy: 50, layout: 'side-by-side' }, t);
+  assert.equal(scene.row, true);
+  assert.equal(scene.rings, undefined);
+  assert.equal(scene.unit, 'au');
+  assert.ok(scene.realmReach! > ROW_STEP / 2 && scene.realmReach! < ROW_STEP, 'neighbours held by one realm merge, by two meet between them');
+  // Where they are, as before, when not side by side.
+  assert.equal(spaceScene({ catalogue: 'solar', radiusLy: 50, layout: 'orbits' }, t).row, undefined);
+});
+
+test('the solar system laid out side by side and back (one step each, undone); refused for other maps; since when each body has been held', async () => {
+  const { invertDiffs } = await import('../src/world-model/schema.ts');
+  const { Engine } = await import('../src/temporal-engine/engine.ts');
+  const { holdingsAt } = await import('../src/space/realms.ts');
+  const Y = (y: number) => gregorian.fromCivil({ year: y });
+  const world = new World();
+  const engine = new Engine(world);
+  cmd.seedProject(world, 'Row');
+  const sp = cmd.createSpaceMap(world, 'Solar system', 'solar').result;
+  const r = cmd.setSolarLayout(world, sp, 'side-by-side');
+  assert.equal(r.label, 'The solar system side by side');
+  assert.equal(spaceSettingsOf(world.get('map_space', sp))!.layout, 'side-by-side');
+  assert.equal(spaceSettingsOf(world.get('map_space', sp))!.scale, 'compressed', 'its scale kept for when it goes back');
+  world.applyDiffs(invertDiffs(r.diffs));
+  assert.equal(spaceSettingsOf(world.get('map_space', sp))!.layout, 'orbits');
+  const nearby = cmd.createSpaceMap(world, 'Nearby').result;
+  assert.throws(() => cmd.setSolarLayout(world, nearby, 'side-by-side'), /Only the solar system/);
+  // Mars held by a republic from 2187, then by a league from 2250: since 2187, then since 2250; Earth since 2000.
+  const rep = cmd.createEntity(world, { type_id: 'polity', name: 'Martian Republic' }).result, lea = cmd.createEntity(world, { type_id: 'polity', name: 'League' }).result;
+  cmd.holdStars(world, { spaceId: sp, stars: [4], entity: rep, mode: { kind: 'change', t: Y(2187) } });
+  cmd.holdStars(world, { spaceId: sp, stars: [4], entity: lea, mode: { kind: 'change', t: Y(2250) } });
+  cmd.holdStars(world, { spaceId: sp, stars: [3], entity: rep, mode: { kind: 'correct', t: Y(2000) } });
+  const at = (y: number) => holdingsAt(world, engine, sp, Y(y));
+  assert.equal(at(2200).get(4)?.name, 'Martian Republic');
+  assert.equal(gregorian.format(at(2200).get(4)!.since!, 'year'), '2187');
+  assert.equal(gregorian.format(at(2260).get(4)!.since!, 'year'), '2250');
+  assert.equal(gregorian.format(at(2200).get(3)!.since!, 'year'), '2000');
+  // Given again to the same holder: still since it first had it.
+  cmd.holdStars(world, { spaceId: sp, stars: [4], entity: lea, mode: { kind: 'change', t: Y(2300) } });
+  assert.equal(gregorian.format(at(2310).get(4)!.since!, 'year'), '2250');
 });

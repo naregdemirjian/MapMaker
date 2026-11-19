@@ -3,6 +3,7 @@
 // and factions as glows around the stars they hold, lanes between stars, names. Canvas 2D: a thousand
 // stars draw in a few milliseconds.
 import type { SpaceView, Vec3 } from './space-view.ts';
+import { gregorian, type Instant } from '../core-time/index.ts';
 import { starColour, starSize, type StarCatalogue, type Star } from './catalogue.ts';
 import { seeded } from '../presentation/looks.ts';
 import type { GalaxyDust } from './galaxy.ts';
@@ -14,7 +15,7 @@ import { territoryField, paintTerritory, territoryBorders, realmLabels, type Ter
  * then `from`: who held it before, whose space round it shrinks meanwhile (D132). An empty `owner`: given
  * up to nobody a moment ago (only its former holder's shrinking space is drawn).
  */
-export interface Holding { owner: string; name: string; color: string; fresh?: number; from?: { owner: string; name: string; color: string } | null }
+export interface Holding { owner: string; name: string; color: string; fresh?: number; from?: { owner: string; name: string; color: string } | null; since?: Instant | null }
 /** A lane between two stars (D111), drawn `progress` of the way (1: whole). */
 export interface Lane { a: number; b: number; color: string; progress: number }
 
@@ -53,6 +54,8 @@ export interface SpaceDrawOptions {
   seconds?: number;
   /** Realms at war with each other (their borders drawn as fronts, D132). */
   wars?: Array<[string, string]>;
+  /** Side by side (the solar system, D133): names in their places over and beside the bodies, each held body's holder over it, lanes curving over the row. */
+  row?: boolean;
 }
 
 export interface DrawnStar { id: number; x: number; y: number; r: number }
@@ -131,7 +134,7 @@ export class SpaceRenderer {
     // (An export's layer of realms or of lanes holds only them.)
     if (o.only === 'realms' || o.only === 'lanes') {
       if (cat && o.only === 'realms' && o.holdings?.size) this.realmsAs(ctx, view, cat, o, look);
-      if (cat && o.only === 'lanes' && o.lanes?.length) this.lanes(ctx, view, cat, o.lanes);
+      if (cat && o.only === 'lanes' && o.lanes?.length) this.lanes(ctx, view, cat, o.lanes, o.row);
       ctx.restore();
       return;
     }
@@ -159,7 +162,7 @@ export class SpaceRenderer {
     }
     this.realmNames = [];
     if (o.holdings?.size && !o.only) this.realmsAs(ctx, view, cat, o, look, false);
-    if (o.lanes?.length && !o.only) this.lanes(ctx, view, cat, o.lanes);
+    if (o.lanes?.length && !o.only) this.lanes(ctx, view, cat, o.lanes, o.row);
     // Far stars first, so that nearer ones are drawn over them.
     placed.sort((a, b) => a.k - b.k);
     const grow = 1 + 0.12 * Math.max(0, view.camera.zoom);
@@ -196,7 +199,7 @@ export class SpaceRenderer {
       if (o.selected === s.id) { ctx.strokeStyle = '#ffe9a6'; ctx.lineWidth = Math.max(1, 2 * u); ctx.beginPath(); ctx.arc(x, y, r + 7 * u, 0, Math.PI * 2); ctx.stroke(); }
       this.lastStars.push({ id: s.id, x, y, r });
     }
-    if (o.names !== 'none') this.names(ctx, view, placed, o);
+    if (o.names !== 'none') { if (o.row) this.rowNames(ctx, view, placed, o); else this.names(ctx, view, placed, o); }
     if (this.realmNames.length && (!o.only || o.only === 'names')) this.drawRealmNames(ctx, look);
     ctx.restore();
   }
@@ -383,7 +386,7 @@ export class SpaceRenderer {
   private realmsAs(ctx: CanvasRenderingContext2D, view: SpaceView, cat: StarCatalogue, o: SpaceDrawOptions, look: SkyLook, drawNow = true): void {
     const holdings = o.holdings!;
     this.realmNames = [];
-    const reach = o.realmReach ?? REALM_REACH_LY, names = o.realmNames !== false;
+    const reach = o.realmReach ?? REALM_REACH_LY, names = o.realmNames !== false && !o.row;
     if (look.realms === 'none') return;
     if (look.realms === 'glow') {
       const live = new Map([...holdings].filter(([, h]) => h.owner));
@@ -679,7 +682,7 @@ export class SpaceRenderer {
     }
   }
 
-  private lanes(ctx: CanvasRenderingContext2D, view: SpaceView, cat: StarCatalogue, lanes: Lane[]): void {
+  private lanes(ctx: CanvasRenderingContext2D, view: SpaceView, cat: StarCatalogue, lanes: Lane[], row = false): void {
     const u = view.unit;
     ctx.save();
     ctx.lineCap = 'round';
@@ -687,17 +690,25 @@ export class SpaceRenderer {
       const a = cat.byId.get(l.a), b = cat.byId.get(l.b);
       if (!a || !b || l.progress <= 0) continue;
       const f = Math.min(1, l.progress);
-      const pa = view.project([a.x, a.y, a.z]), pb = view.project([a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f, a.z + (b.z - a.z) * f]);
-      if (!pa || !pb) continue;
+      const pa = view.project([a.x, a.y, a.z]), pe = view.project([b.x, b.y, b.z]);
+      if (!pa || !pe) continue;
+      // (Side by side, D133: lanes curve over the row, higher the farther they go, as on a map of routes.)
+      const lift = row ? 0.32 * Math.hypot(pe[0] - pa[0], pe[1] - pa[1]) + 8 * u : 0;
+      const cx = (pa[0] + pe[0]) / 2, cy = (pa[1] + pe[1]) / 2 - lift;
+      const at = (t: number): [number, number] => row ? [(1 - t) * (1 - t) * pa[0] + 2 * (1 - t) * t * cx + t * t * pe[0], (1 - t) * (1 - t) * pa[1] + 2 * (1 - t) * t * cy + t * t * pe[1]] : [pa[0] + (pe[0] - pa[0]) * t, pa[1] + (pe[1] - pa[1]) * t];
+      const pb = row ? at(f) : view.project([a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f, a.z + (b.z - a.z) * f]) ?? at(f);
       ctx.strokeStyle = l.color;
       ctx.globalAlpha = 0.8;
       ctx.lineWidth = Math.max(1, 2 * u);
       ctx.setLineDash([6 * u, 4 * u]);
-      ctx.beginPath(); ctx.moveTo(pa[0], pa[1]); ctx.lineTo(pb[0], pb[1]); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(pa[0], pa[1]);
+      if (row) for (let i = 1; i <= 32; i++) { const q = at((f * i) / 32); ctx.lineTo(q[0], q[1]); } else ctx.lineTo(pb[0], pb[1]);
+      ctx.stroke();
       ctx.setLineDash([]);
       // Still on its way (an expedition, a fleet): a pointed head at the front.
       if (f < 1) {
-        const dx = pb[0] - pa[0], dy = pb[1] - pa[1], len = Math.hypot(dx, dy) || 1, ux = dx / len, uy = dy / len, size = 7 * u;
+        const back = row ? at(Math.max(0, f - 0.02)) : pa;
+        const dx = pb[0] - back[0], dy = pb[1] - back[1], len = Math.hypot(dx, dy) || 1, ux = dx / len, uy = dy / len, size = 7 * u;
         ctx.globalAlpha = 1;
         ctx.fillStyle = l.color;
         ctx.beginPath();
@@ -707,6 +718,50 @@ export class SpaceRenderer {
         ctx.closePath();
         ctx.fill();
         ctx.strokeStyle = 'rgba(4,7,13,0.8)'; ctx.lineWidth = Math.max(1, 1.2 * u); ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+
+  /**
+   * Names side by side (D133): each planet's (and the Sun's) centred over it, and over that, when it is held,
+   * its holder's name in the holder's colour and since when; each moon's beside it, with its holder's name
+   * when not its planet's.
+   */
+  private rowNames(ctx: CanvasRenderingContext2D, view: SpaceView, placed: Array<{ s: Star; x: number; y: number; k: number }>, o: SpaceDrawOptions): void {
+    const u = view.unit, look = this.look, zoom = view.camera.zoom, grow = 1 + 0.12 * Math.max(0, zoom);
+    const size = Math.max(10, 17 * u * (1 + 0.08 * Math.max(0, zoom))), font = NAME_FONTS[look.nameFont];
+    ctx.save();
+    ctx.lineJoin = 'round'; ctx.textBaseline = 'middle';
+    const write = (text: string, x: number, y: number, colour: string, weight: number, px: number, align: CanvasTextAlign) => {
+      ctx.font = `${weight} ${px.toFixed(1)}px ${font}`;
+      ctx.textAlign = align;
+      ctx.strokeStyle = rgba(look.background, 0.85); ctx.lineWidth = Math.max(2, px * 0.26);
+      ctx.strokeText(text, x, y);
+      ctx.fillStyle = colour;
+      ctx.fillText(text, x, y);
+    };
+    const nameColour = (s: Star) => (s.id === o.selected ? '#ffe9a6' : rgba(look.names, 0.94));
+    for (const { s, x, y } of placed) {
+      const r = (s.size ?? 4) * look.size * u * grow, held = heldBy(o.holdings, s.id);
+      if (s.around === undefined) {
+        let top = y - r - 7 * u - size / 2;
+        write(s.name, x, top, nameColour(s), 600, size, 'center');
+        this.lastNames.push(s.name);
+        if (held) {
+          top -= size * 1.15;
+          if (held.since) { const since = `since ${gregorian.format(held.since, 'year')}`; write(since, x, top, rgba(look.names, 0.62), 500, Math.max(9, size * 0.78), 'center'); this.lastNames.push(since); top -= size * 1.05; }
+          write(held.name.toUpperCase(), x, top, held.color, 700, size * 0.92, 'center');
+          this.lastNames.push(held.name.toUpperCase());
+        }
+      } else {
+        const planet = heldBy(o.holdings, s.around);
+        write(s.name, x + r + 5 * u, y, nameColour(s), 500, size * 0.88, 'left');
+        this.lastNames.push(s.name);
+        if (held && held.owner !== planet?.owner) {
+          ctx.font = `500 ${(size * 0.88).toFixed(1)}px ${font}`;
+          write(held.name, x + r + 5 * u + ctx.measureText(s.name).width + 6 * u, y, held.color, 700, size * 0.8, 'left');
+        }
       }
     }
     ctx.restore();

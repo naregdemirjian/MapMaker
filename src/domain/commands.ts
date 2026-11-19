@@ -232,6 +232,15 @@ export function setSkyLook(world: World, spaceId: string, look: SkyLook, label =
   return run(world, label, (tx) => tx.update('map_space', { ...space, settings: JSON.stringify({ ...o, space: { ...o.space, look: skyLookOf(look) } }) }));
 }
 
+/** How a solar system map lays out its bodies (D133): where they are, with their orbits, or side by side. */
+export function setSolarLayout(world: World, spaceId: string, layout: 'orbits' | 'side-by-side'): CommandResult {
+  const space = world.get('map_space', spaceId);
+  if (!space || space.kind !== 'space') throw new Error('That is not a map of space.');
+  const o = worldSettings(space) as { space?: Record<string, unknown> };
+  if (o.space?.catalogue !== 'solar') throw new Error('Only the solar system can be laid out side by side.');
+  return run(world, layout === 'side-by-side' ? 'The solar system side by side' : 'The solar system as it moves', (tx) => tx.update('map_space', { ...space, settings: JSON.stringify({ ...o, space: { ...o.space, layout } }) }));
+}
+
 /** How a solar system map draws its distances (D113): true, or compressed so the inner planets have room. */
 export function setSolarScale(world: World, spaceId: string, scale: 'true' | 'compressed'): CommandResult {
   const space = world.get('map_space', spaceId);

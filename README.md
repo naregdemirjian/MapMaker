@@ -55,7 +55,8 @@ while Map Maker is closed. Don't keep projects inside OneDrive or Dropbox while 
   invented stars and galaxies; star systems held by countries and factions, drawn as territories with borders and
   fronts where realms at war meet, and lanes between them. How the stars look is yours to choose: colours, shapes,
   glows, spikes, nebulae, twinkling, fifteen presets and looks made up by chance; seen in three dimensions or as a
-  flat chart with squares or numbered hexes.
+  flat chart with squares or numbered hexes. The solar system can also be laid out side by side: the planets in a
+  row, their moons below, who holds each over it and since when.
 - Undo and redo, named versions, automatic backups, and recovery of a damaged project from its latest healthy backup.
 - Built to stay fast on large projects: moving the map, scrubbing time, drawing and exporting all keep their speed with
   hundreds of countries and detailed coasts. **Settings** (top right) trades sharpness for speed on slower computers;

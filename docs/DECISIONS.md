@@ -61,6 +61,24 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D133. The solar system side by side
+
+- **Asked.** A way to show the solar system side by side: organised, less about the planets' movements and
+  more about the political territories, the history and the story of what people were doing.
+- **What.** A choice kept with a solar system map (`layout`: where they are, or side by side), turned with a
+  button on the map ("Side by side" / "Orbits"; one undo step): the Sun at the left, the planets in a row at even
+  steps, each planet's large moons in a column below it, inner first (`solarRowCatalogue`), joined by thin lines
+  (`solarRowLines`); seen flat, without rings. Over each planet its name, and when it is held, its holder's name
+  in the holder's colour and since when ("since 2187": back over every change that kept it with the same holder,
+  `Holding.since`); beside each moon its name, and its holder's when not its planet's. Realms are territories
+  (D132) over the columns: neighbours held by one realm merge, two realms meet between them, a front where two at
+  war meet; lanes (D112) curve over the row, higher the farther they go, as on a map of routes, and grow along
+  their curve in an event. Distances in the panels stay true. Shots and exports draw the same.
+- **Tested.** solar: the Sun, then every planet at its step in the row, the row centred, each planet's moons below
+  it, inner first, distances from the Sun true; the row and a column for each planet with moons, no rings, seen
+  flat, a realm's reach between half a step and a step; laid out and back in one step each, refused for other
+  maps; since when a body has been held (from the change that gave it, kept when given again to the same holder).
+
 ### D132. Realms across the stars as territories, with fronts, changing hands in shots
 
 - **Asked.** A way to show territories and how they move across the stars, for great science-fiction wars

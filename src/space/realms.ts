@@ -16,18 +16,20 @@ export function holdingsAt(world: World, engine: Engine, spaceId: string, t: Ins
   for (const [star, id] of engine.systemsAt(spaceId, t)) {
     const now = who(id);
     if (!now) continue;
-    let fresh = 1, from: Holding['from'] = null;
-    if (secondsSince) {
-      const steps = engine.systemSteps(spaceId, star);
-      let k = -1;
-      for (let i = 0; i < steps.length; i++) if (compare(steps[i].t, t) <= 0) k = i;
-      // (Only when it passed from someone else, or nobody, to this holder: the one before shrinks as it grows.)
-      if (k >= 0 && steps[k].t.day !== -Infinity) {
-        fresh = Math.max(0, Math.min(1, secondsSince(steps[k].t) / REALM_GROW_SECONDS));
-        if (fresh < 1 && k > 0) from = who(steps[k - 1].entity);
-      }
+    let fresh = 1, from: Holding['from'] = null, since: Holding['since'] = null;
+    const steps = engine.systemSteps(spaceId, star);
+    let k = -1;
+    for (let i = 0; i < steps.length; i++) if (compare(steps[i].t, t) <= 0) k = i;
+    // (Since when it has been held by this holder: back over steps that kept it with the same one, D133.)
+    let j = k;
+    while (j > 0 && steps[j - 1].entity === id) j--;
+    if (j >= 0 && Number.isFinite(steps[j].t.day)) since = steps[j].t;
+    // (In a shot, only when it passed from someone else, or nobody, to this holder: the one before shrinks as it grows.)
+    if (secondsSince && k >= 0 && steps[k].t.day !== -Infinity) {
+      fresh = Math.max(0, Math.min(1, secondsSince(steps[k].t) / REALM_GROW_SECONDS));
+      if (fresh < 1 && k > 0) from = who(steps[k - 1].entity);
     }
-    out.set(star, { ...now, fresh, from });
+    out.set(star, { ...now, fresh, from, since });
   }
   // In a shot, stars just given up to nobody: their holder's space shrinks away (no holder now).
   if (secondsSince) {

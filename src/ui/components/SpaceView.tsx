@@ -60,7 +60,8 @@ export function SpaceView() {
   const cat = scene.cat;
   // How the map looks (D130), seen as a flat chart or not (D131).
   const look = settings?.look;
-  const chart = !!look?.chart;
+  // (Side by side, D133: always flat.)
+  const chart = !!look?.chart || !!scene.row;
   const view = makeSpaceView(camera, frame.w, frame.h, scene.radius, chart);
   // Realms and lanes at the moment shown (in a shot, a star newly held grows into its realm).
   const holdings = space && s.engine ? holdingsAt(s.world!, s.engine, space.id, time, shot ? (t0) => screenSecondsSince(shot, s.shotFrame, t0) : undefined) : undefined;
@@ -83,7 +84,7 @@ export function SpaceView() {
     ctx.save();
     ctx.beginPath(); ctx.rect(0, 0, frame.w, frame.h); ctx.clip();
     renderer.current.render(ctx, view, cat, {
-      transparent: !!shot?.transparent, grid: shot ? shot.graticule : true, dropLines: scene.dropLines !== false,
+      transparent: !!shot?.transparent, grid: !scene.row && (shot ? shot.graticule : true), dropLines: scene.dropLines !== false, row: scene.row,
       names: shot && !shot.labels ? 'none' : 'auto', selected: shot ? null : laneFrom ?? (s.selection?.kind === 'star' ? s.selection.id : null), holdings, lanes,
       rings: scene.rings, axisLabel: scene.axisLabel, orbits: scene.orbits, realmReach: scene.realmReach, dust: scene.dust, armNames: scene.armNames, planets: scene.planets,
       look, wars, seconds: shot ? s.shotFrame / shot.fps : undefined,
@@ -226,12 +227,13 @@ export function SpaceView() {
       <canvas ref={canvasRef} className="map-canvas" style={{ width: size.w, height: size.h, cursor: "grab" }} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onDoubleClick={onDoubleClick} onContextMenu={(e) => e.preventDefault()} data-testid="map-canvas" data-space="stars" />
       {!presentation && (
         <div className="map-hud">
-          <div className="scalebar space-note" data-testid="space-note">{settings?.catalogue === 'galaxy' && settings.galaxy && cat ? galaxyNote(settings.galaxy, cat, scene.rings?.[0]?.label ?? '') : settings?.catalogue === 'invented' && cat ? `${cat.stars.length} invented stars within ${cat.radiusLy} light-years · seed ${settings.invented?.seed}` : scene.unit === 'au' ? `The Sun and the planets on ${fmt(time)} · ${settings?.scale === 'true' ? 'distances true to scale' : 'distances compressed'}` : cat ? `${cat.stars.length} stars within ${cat.radiusLy} light-years${scene.planets ? ` · ${scene.planets.size} with known planets (dotted rings)` : ''} · rings every 10 ly` : 'Loading the stars…'}</div>
+          <div className="scalebar space-note" data-testid="space-note">{settings?.catalogue === 'galaxy' && settings.galaxy && cat ? galaxyNote(settings.galaxy, cat, scene.rings?.[0]?.label ?? '') : settings?.catalogue === 'invented' && cat ? `${cat.stars.length} invented stars within ${cat.radiusLy} light-years · seed ${settings.invented?.seed}` : scene.unit === 'au' ? (scene.row ? `The Sun, the planets and their large moons side by side on ${fmt(time)}` : `The Sun and the planets on ${fmt(time)} · ${settings?.scale === 'true' ? 'distances true to scale' : 'distances compressed'}`) : cat ? `${cat.stars.length} stars within ${cat.radiusLy} light-years${scene.planets ? ` · ${scene.planets.size} with known planets (dotted rings)` : ''} · rings every 10 ly` : 'Loading the stars…'}</div>
           {settings?.catalogue === 'galaxy' && settings.galaxy && space && <button className="small space-scale" onClick={() => store.execute((w) => cmd.setGalaxy(w, space.id, { ...settings.galaxy!, seed: settings.galaxy!.seed + 1 }))} data-testid="galaxy-again" title={settings.galaxy.kind === 'milkyway' ? 'Star systems elsewhere along the arms, from the next seed (held systems and lanes keep their numbers)' : 'Another galaxy from the next seed (held systems and lanes keep their numbers)'}>{settings.galaxy.kind === 'milkyway' ? 'Other star systems' : 'Another galaxy'} (seed {settings.galaxy.seed + 1})</button>}
           {settings?.catalogue === 'invented' && settings.invented && space && <button className="small space-scale" onClick={() => store.execute((w) => cmd.setInventedStars(w, space.id, { ...settings.invented!, seed: settings.invented!.seed + 1 }))} data-testid="invented-again" title="Other stars from the next seed (held stars and lanes keep their numbers)">Other stars (seed {settings.invented.seed + 1})</button>}
-          {scene.unit === 'au' && space && <button className="small space-scale" onClick={() => store.execute((w) => cmd.setSolarScale(w, space.id, settings?.scale === 'true' ? 'compressed' : 'true'))} data-testid="solar-scale" title="True to scale, the inner planets crowd round the Sun; compressed, every orbit has room">{settings?.scale === 'true' ? 'Compress the distances' : 'Distances true to scale'}</button>}
+          {scene.unit === 'au' && space && !scene.row && <button className="small space-scale" onClick={() => store.execute((w) => cmd.setSolarScale(w, space.id, settings?.scale === 'true' ? 'compressed' : 'true'))} data-testid="solar-scale" title="True to scale, the inner planets crowd round the Sun; compressed, every orbit has room">{settings?.scale === 'true' ? 'Compress the distances' : 'Distances true to scale'}</button>}
+          {scene.unit === 'au' && space && <button className={`small space-scale ${scene.row ? 'on' : ''}`} onClick={() => store.execute((w) => cmd.setSolarLayout(w, space.id, scene.row ? 'orbits' : 'side-by-side'))} data-testid="solar-layout" title={scene.row ? 'Back to the planets where they are, going round the Sun' : 'Side by side: the Sun and the planets in a row, their moons below them, who holds each over it (for the politics and the story rather than the orbits)'}>{scene.row ? 'Orbits' : 'Side by side'}</button>}
           {space && <div className="hud-buttons space-look-buttons">
-            <button className={chart ? 'on' : ''} onClick={() => store.execute((w) => cmd.setSkyLook(w, space.id, { ...(look ?? DEFAULT_SKY), chart: !chart }, chart ? 'Stars in three dimensions' : 'Stars as a flat chart'))} data-testid="space-chart" title={chart ? 'Back to the stars in three dimensions' : 'A flat chart: the map seen straight down on the plane, like a map of the stars (drag to move it, right-drag to turn it)'}>Chart</button>
+            {!scene.row && <button className={chart ? 'on' : ''} onClick={() => store.execute((w) => cmd.setSkyLook(w, space.id, { ...(look ?? DEFAULT_SKY), chart: !chart }, chart ? 'Stars in three dimensions' : 'Stars as a flat chart'))} data-testid="space-chart" title={chart ? 'Back to the stars in three dimensions' : 'A flat chart: the map seen straight down on the plane, like a map of the stars (drag to move it, right-drag to turn it)'}>Chart</button>}
             <button onClick={() => store.set({ dialog: 'sky-look' })} data-testid="space-look" title="How the stars look: colours, shapes, glows, the sky, lines and names, realms">Look…</button>
           </div>}
           <div className="hud-buttons">
