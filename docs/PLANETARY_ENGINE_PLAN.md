@@ -880,7 +880,7 @@ Each stage ends with its tests, the full check, its decision record, a commit an
 | 14.1 Foundations | Done (19 November 2026, D152) | Definition, presets and derived physics; nested icosahedral mesh, operators, transfer, pictures; sunlight; MMS1; stage keys, cache, workers. Operators first-order on the unoptimised mesh (D152) |
 | 14.2 Tectonics I | Done (19 November 2026, D153) | Plates with crust in their frames, real-motion ridges and trenches, arcs, boundaries, isostasy, slab-pull motions, welding; a 500 Myr history at L5 in 1.7 s. Old sea floor that never meets a trench survives: subduction initiation and plate splitting in 14.3 |
 | 14.3 Tectonics II | Done (19 November 2026, D154) | Volume-keeping collisions and rifts, sutures and accretion, the Wilson cycle and plate splitting, subduction initiation, plumes and their chains, timeline events, checkpoints with exact reconstruction on the 5 Myr grid |
-| 14.4 Landscape evolution | Not started | |
+| 14.4 Landscape evolution | Done (19 November 2026, D155) | Priority-Flood drainage, implicit stream power with a threshold slope and local isostatic rebound, creep, conservative sediment to basins, plains, deltas and shelves, coupled every 5 Myr; rain belts by latitude until the climate is coupled (14.8); flexural (regional) rebound left for finer levels |
 | 14.5 Planet Studio I | Not started | |
 | 14.6 Climate I | Not started | |
 | 14.7 Climate II | Not started | |

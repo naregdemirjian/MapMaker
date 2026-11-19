@@ -47,6 +47,11 @@ export interface TectonicParams {
   /** How many mantle plumes there are (and events that add or change things, D154). */
   hotspots?: number;
   events?: TectonicEvent[];
+  /** Landscape (D155): wear the surface down every 5 Myr of a history (default yes), how easily (× Earth's: water
+   * and air), and the edge of the Hadley cells (degrees) for the rain belts standing in for the climate. */
+  erosion?: boolean;
+  erodibility?: number;
+  hadleyDeg?: number;
 }
 
 export interface TectonicState {
@@ -70,8 +75,11 @@ export interface TectonicState {
   seaLevel: number;
   /** When plate motions are next reconsidered (Myr). */
   nextReorganisation: number;
-  /** Totals over the history: area made at ridges, consumed at trenches and in collisions (steradians). */
-  totals: { created: number; consumed: number; collided: number };
+  /** Totals over the history: area made at ridges, consumed at trenches and in collisions (steradians); rock
+   * removed by rivers and sediment laid down (km³). */
+  totals: { created: number; consumed: number; collided: number; eroded: number; deposited: number };
+  /** Water draining through each cell at the last landscape step (km², weighted by rain). */
+  discharge: Float32Array;
   /**
    * Plates welded together where their continents collided (a suture): each plate's group (the plate it was welded
    * to, as a union-find), and the area collided so far between two groups (key a·4096 + b, a < b).
@@ -197,7 +205,8 @@ function baseState(params: TectonicParams, plates: Plate[], owner: Int32Array, r
   return {
     mesh, params, plates, time: 0, steps: 0, owner, ref: Int32Array.from({ length: n }, (_, i) => i),
     boundary: new Uint8Array(n), boundaryRate: new Float32Array(n), subducting: new Int32Array(n).fill(-1), trench: new Uint8Array(n),
-    height: new Float32Array(n), seaLevel: 0, nextReorganisation: Infinity, totals: { created: 0, consumed: 0, collided: 0 },
+    height: new Float32Array(n), seaLevel: 0, nextReorganisation: Infinity, totals: { created: 0, consumed: 0, collided: 0, eroded: 0, deposited: 0 },
+    discharge: new Float32Array(n),
     group: plates.map((_, i) => i), contact: new Map(), weldTime: plates.map(() => Infinity), born: plates.map(() => 0),
     rngState: rngState || 1, hotspots: [], events: (params.events ?? []).slice().sort((a, b) => a.start - b.start), begun: [],
     gather: null, scatter: null, volcanism: 1,
@@ -270,6 +279,7 @@ export function checkpoint(state: TectonicState): TectonicState {
     })),
     owner: state.owner.slice(), ref: state.ref.slice(), boundary: state.boundary.slice(), boundaryRate: state.boundaryRate.slice(),
     subducting: state.subducting.slice(), trench: state.trench.slice(), height: state.height.slice(), totals: { ...state.totals },
+    discharge: state.discharge.slice(),
     group: state.group.slice(), contact: new Map(state.contact), weldTime: state.weldTime.slice(), born: state.born.slice(),
     hotspots: state.hotspots.map((h) => ({ ...h })), events: state.events.map((e) => ({ ...e })), begun: state.begun.slice(),
     gather: state.gather ? [...state.gather] as [number, number, number] : null, scatter: state.scatter ? [...state.scatter] as [number, number, number] : null,

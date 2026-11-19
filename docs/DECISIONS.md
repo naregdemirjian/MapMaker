@@ -61,6 +61,53 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D155. Landscape evolution: rivers, creep and sediment on the moving crust (Stage 14.4)
+
+- **Asked.** Stage 14.4: "drainage on the mesh, implicit stream-power incision with flexural isostatic rebound,
+  hillslope diffusion, sediment routing to deltas, shelves and basins, coupling into the history", done when the
+  steady-state slope-area and sediment conservation tests pass and mountains and valleys emerge together.
+- **Drainage** (`surface/drainage.ts`): Priority-Flood (Barnes, Lehman and Mulla 2014) from the outlets (the sea;
+  on a world without one, its lowest point) upwards: each cell drains to the neighbour it was reached from (its
+  lowest on the filled surface), depressions are crossed at their sills, and the flooding order puts every cell
+  after the one it drains to (solving downstream first; reversed, summing upstream). Ties are broken by the cell's
+  number, so the result never depends on the heap.
+- **Rivers** (`surface/erosion.ts`): the stream-power law, rock removed at R = K Q^m (S − Sc) with Q the area
+  drained weighted by rain, m = ½, n = 1, solved implicitly from the outlets upwards (Braun and Willett 2013), so
+  any step is stable; a river reaching the sea cuts to the sea's level. **Isostatic rebound**: height comes from the
+  crust, so removing rock lowers the surface by only β (0.15 for continental crust) of what is removed and the
+  roots rise; the implicit solve uses β. The rebound is local to each cell (Airy), which at these cell sizes (110 to
+  240 km) is about the flexural wavelength; a regional (flexural) kernel is the way forward for finer levels.
+  **Threshold**: below a slope of 0.001 rivers carry sediment but cut no bedrock. Without it, trunk rivers on old
+  cratons, whose drainage areas are huge at these cell sizes, wore whole continents nearly flat in 500 million
+  years (the land's median height fell to 150 m); with it, 470 m, about the Earth's.
+- **Creep**: rock moves between neighbouring land cells in proportion to their difference in height (linear
+  diffusion, a diffusivity of a cell's width squared over 400 million years), in substeps short enough to be stable,
+  keeping its volume.
+- **Sediment**: what rivers remove travels downstream, fills closed depressions up to their sills, settles on
+  lowland plains in proportion to how gentle they are (up to 30 per cent of the load a cell where the slope is
+  near zero), and the rest reaches the sea, where it builds deltas and spreads along the shelf (four passes). Every
+  cubic kilometre removed is laid down somewhere (tested to a billionth).
+- **Rain** stands in for the climate until the history is coupled to it (14.8): belts by latitude from the planet's
+  own Hadley cells (wet at the equator, dry at their edges, wetter in the storm belts beyond, dry at the poles).
+  Erodibility follows water and air: a dry world (no seas) wears down at 3 per cent of an Earth-like one, thin air
+  slows it further.
+- **In the history** (`tectonics/erode.ts`): every 5 million years, the landscape step acts on the world's surface
+  and its result goes back into the crust: rock removed thins the crust under it (its sediment first), sediment
+  laid down rests on the crust where it settled (and goes down at a trench with its plate, a share scraped off).
+  Mountains wear down slowly as their roots come up; sediment piles beside the land. On by default; checkpoints and
+  reconstruction include it.
+- **Results** (Earth-like, 500 million years at L5): rock removed about 2.3 km³ a year (the Earth's long-term rate
+  is thought to be a few km³ a year); the land's median height about 470 m; the high ground lower than without
+  erosion (the top per cent of the surface 1.4 km rather than 3.1); sediment thickest beside the land. Layers:
+  sediment, water draining through each cell (the rivers of 14.8 will follow it).
+- **Tests.** `planet-landscape.test.ts`: drainage (every cell once, each after the one it drains to, never uphill
+  on the filled surface, reaching the sea; a world without sea draining to its lowest point; summing upstream);
+  the exact steady state of the stream-power law (slope = (U/K) area^-½ in every cell to a millionth, the fitted
+  exponent −½; steep headwaters, gentle trunk rivers, mountains where the land rises); conservation (rock removed =
+  sediment laid down; creep only moves rock; a pit filled; more rain, faster; nothing cut below the threshold; rain
+  belts); a history with erosion (high ground lower, nothing lost, an Earth-like rate, sediment thickest beside the
+  land, a great river).
+
 ### D154. Continents over time: collisions, rifts, plumes, events, the supercontinent cycle, checkpoints (Stage 14.3)
 
 - **Asked.** Stage 14.3: "collisions and orogeny with gravity-limited thickening, sutures, terrane accretion,

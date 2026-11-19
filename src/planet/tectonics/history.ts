@@ -2,6 +2,7 @@
 // kept at fixed intervals (heights, plates and crust) for the timeline, and the present's crust in full.
 import { initialState, checkpoint, EARTH_SPEED, type TectonicParams, type TectonicState } from './state.ts';
 import { step, heights, regimeVigor } from './step.ts';
+import { erodeCrust } from './erode.ts';
 
 /** The grid steps keep to, Myr. */
 export const GRID_MYR = 5;
@@ -33,11 +34,13 @@ export interface TectonicHistory {
   /** The plates' angular velocities now (x y z per plate, rad/Myr) and how many there are. */
   omega: Float64Array;
   plateCount: number;
-  stats: { steps: number; created: number; consumed: number; collided: number; landShare: number; continentalShare: number; ms: number };
+  stats: { steps: number; created: number; consumed: number; collided: number; eroded: number; deposited: number; landShare: number; continentalShare: number; ms: number };
   /** Checkpoints kept (when asked), by their time (Myr since the history began). Not part of a stage's product. */
   checkpoints?: Map<number, TectonicState>;
-  /** The present's crust history (TAG bits) per cell. */
+  /** The present's crust history (TAG bits) per cell, sediment on it (km), and the water draining through it (km²). */
   tags: Uint8Array;
+  sediment: Float32Array;
+  discharge: Float32Array;
 }
 
 /** The step that keeps every plate within a fraction of a cell per step. */
@@ -74,12 +77,12 @@ export function runHistory(params: TectonicParams, opts: HistoryOptions): Tecton
     if (checkpoints && Math.abs(state.time / ckEvery - Math.round(state.time / ckEvery)) < 1e-9) checkpoints.set(Math.round(state.time), checkpoint(state));
   }
   // The present in full.
-  const age = new Float32Array(n), thickness = new Float32Array(n), tags = new Uint8Array(n);
+  const age = new Float32Array(n), thickness = new Float32Array(n), tags = new Uint8Array(n), sediment = new Float32Array(n);
   let land = 0, cont = 0;
   for (let c = 0; c < n; c++) {
     const p = state.plates[state.owner[c]], r = state.ref[c];
     if (!p) continue;
-    age[c] = p.age[r]; thickness[c] = p.thickness[r]; tags[c] = p.tags[r];
+    age[c] = p.age[r]; thickness[c] = p.thickness[r]; tags[c] = p.tags[r]; sediment[c] = p.sediment[r];
     if (state.height[c] > state.seaLevel) land += state.mesh.area[c];
     if (p.kind[r] === 2) cont += state.mesh.area[c];
   }
@@ -89,14 +92,16 @@ export function runHistory(params: TectonicParams, opts: HistoryOptions): Tecton
     times: Float64Array.from(frameTimes, (t) => D - t), heights: H, plates: Pl, kinds: K, age, thickness,
     boundary: state.boundary.slice(), boundaryRate: state.boundaryRate.slice(), omega, plateCount: state.plates.length,
     stats: { steps: state.steps, ...state.totals, landShare: land / (4 * Math.PI), continentalShare: cont / (4 * Math.PI), ms: performance.now() - t0 },
-    tags, ...(checkpoints ? { checkpoints } : {}),
+    tags, sediment, discharge: state.discharge.slice(), ...(checkpoints ? { checkpoints } : {}),
   };
 }
 
-/** One step, or as many as it takes, to the next whole GRID_MYR (or the end). */
+/** One step, or as many as it takes, to the next whole GRID_MYR (or the end); then the landscape for that span. */
 function advanceToGrid(state: TectonicState, end: number, maxStep: number) {
+  const from = state.time;
   const grid = Math.min(end, (Math.floor(state.time / GRID_MYR + 1e-9) + 1) * GRID_MYR);
   while (state.time < grid - 1e-9) step(state, Math.min(stepLength(state, maxStep), grid - state.time));
+  if (state.params.erosion !== false && state.time > from) erodeCrust(state, state.time - from);
 }
 
 /** Writes the world's heights (m above the sea), plates and crust as picture f. */

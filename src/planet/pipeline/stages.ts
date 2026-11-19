@@ -64,6 +64,8 @@ export const LAYERS = {
   crustAge: { stage: 'tectonics', field: 'age', unit: 'Myr', label: 'Age of the crust', frames: false, categories: false },
   crustThickness: { stage: 'tectonics', field: 'thickness', unit: 'km', label: 'Thickness of the crust', frames: false, categories: false },
   history: { stage: 'tectonics', field: 'tags', unit: '', label: 'What made the crust', frames: false, categories: true },
+  sediment: { stage: 'tectonics', field: 'sediment', unit: 'km', label: 'Sediment', frames: false, categories: false },
+  drainage: { stage: 'tectonics', field: 'discharge', unit: 'km²', label: 'Water draining through', frames: false, categories: false },
   boundaries: { stage: 'tectonics', field: 'boundary', unit: '', label: 'Plate boundaries', frames: false, categories: true },
 } as const;
 export type LayerId = keyof typeof LAYERS;
@@ -80,6 +82,9 @@ export function tectonicParams(def: PlanetDefinition, level: number, durationMyr
     level, seed: def.seed, radiusKm: def.body.radiusKm, gravity: x.gravity, plates: def.tectonics.plates,
     vigor: def.tectonics.activity * Math.sqrt(Math.max(0, x.heatFlowEarth)), continentalFraction: def.tectonics.continentalFraction,
     oceanFraction: def.water.oceanFraction, regime: x.regime, hotspots: def.tectonics.hotspots, events,
+    // Rivers need water and air: a dry world wears down far more slowly (wind and frost only).
+    erodibility: (0.03 + 0.97 * Math.min(1, def.water.oceanFraction / 0.3)) * (0.3 + 0.7 * Math.min(1, def.atmosphere.pressureBar / 0.3)),
+    hadleyDeg: x.hadleyEdgeDeg,
   };
 }
 
@@ -133,7 +138,7 @@ export const STAGES: Record<string, StageDef> = {
   /** The planet's tectonic history: plates, crust and heights through time (a preview at coarse levels). */
   tectonics: {
     id: 'tectonics',
-    version: 2,
+    version: 3,
     deps: () => [],
     inputs: (def, p) => ({
       ...(tectonicParams(def, p.level, p.durationMyr ?? 500) as unknown as ProductData),
