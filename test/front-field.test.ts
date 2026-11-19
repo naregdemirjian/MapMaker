@@ -2,7 +2,7 @@
 // reached at any moment traced as closed lines.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildFrontField, frontRings, frontLines, reachedAt, bandBounds, type FrontField, type Rings } from '../src/render-engine/front-field.ts';
+import { buildFrontField, frontRings, frontLines, reachedAt, bandBounds, bandBoxes, type FrontField, type Rings } from '../src/render-engine/front-field.ts';
 
 const box = (x0: number, y0: number, x1: number, y1: number): Array<[number, number]> => [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
 // A U: arms 0-4 and 12-16 degrees east from 10 S to 10 N, joined along the bottom (10 S to 6 S).
@@ -100,6 +100,34 @@ test('where the land reached between two moments lies: a cell more all round; no
   assert.ok(Math.abs(b[0] - 4) < 2.5 * cell && Math.abs(b[2] - 6) < 2.5 * cell, `west and east (${b[0].toFixed(2)}, ${b[2].toFixed(2)})`);
   assert.ok(b[1] < 0.01 && b[3] > 9.99, `south and north (${b[1].toFixed(2)}, ${b[3].toFixed(2)})`);
   assert.equal(bandBounds(f, 1, 2), null);
+});
+
+test('where a front passes between two moments: a strip of blocks holding every place whose reaching changes, a fraction of the change', () => {
+  const f = buildFrontField([box(0, 0, 20, 20)], { kind: 'lines', lonlat: [0, 0, 0, 20] }, { roughness: 0.4, seed: 9 })!;
+  const total = 20 * 20;
+  for (const [a, b] of [[0.30, 0.34], [0.34, 0.30], [0.7, 0.72], [0, 0.05]] as const) {
+    const boxes = bandBoxes(f, a, b);
+    assert.ok(boxes.length > 0);
+    const inBoxes = (x: number, y: number) => boxes.some(([w, s, e, n]) => x >= w && x <= e && y >= s && y <= n);
+    // Every place reached at one moment and not the other lies in a box.
+    let changed = 0;
+    for (let x = 0.1; x < 20; x += 0.2) for (let y = 0.1; y < 20; y += 0.2) {
+      if (reachedAt(f, x, y, a) === reachedAt(f, x, y, b)) continue;
+      changed++;
+      assert.ok(inBoxes(x, y), `(${x.toFixed(1)}, ${y.toFixed(1)}) changes between ${a} and ${b}`);
+    }
+    assert.ok(changed > 0);
+    // The boxes: within the field, and together far less than the change.
+    let area = 0;
+    for (const [w, s, e, n] of boxes) { assert.ok(e > w && n > s); area += (e - w) * (n - s); }
+    assert.ok(area < 0.45 * total, `${area.toFixed(0)} of ${total} square degrees between ${a} and ${b}`);
+  }
+  // Nothing of the change in a span past its end; all of it in the whole span.
+  assert.deepEqual(bandBoxes(f, 1.5, 2), []);
+  const all = bandBoxes(f, 0, 1);
+  let area = 0;
+  for (const [w, s, e, n] of all) area += (Math.min(20, e) - Math.max(0, w)) * (Math.min(20, n) - Math.max(0, s));
+  assert.ok(area > 0.99 * total, `the whole change in the whole span (${area})`);
 });
 
 test('an island of the change is reached from the nearest land taken, after it, across the water between', () => {

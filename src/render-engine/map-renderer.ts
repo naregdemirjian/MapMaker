@@ -14,7 +14,7 @@ import { parseJSON, slerpLonLat } from '../temporal-engine/engine.ts';
 import { type Instant, compare, diffMs } from '../core-time/index.ts';
 import { BASE_EVENT_ID } from '../world-model/schema.ts';
 import type { Vec3 } from '../geo-kernel/vec.ts';
-import { buildFrontField, frontRings, frontLines, bandBounds, type FrontField, type Rings } from './front-field.ts';
+import { buildFrontField, frontRings, frontLines, bandBounds, bandBoxes, type FrontField, type Rings } from './front-field.ts';
 import { frontSourceOf } from './front-source.ts';
 import { screenToLonLat, meridianOf, makeView, FLAT_EXTENT_DEG, type View, type Camera } from './camera.ts';
 import type { Arrangement } from '../geo-kernel/arrangement.ts';
@@ -396,8 +396,8 @@ interface TransitionGroup {
   look: FrontLookOptions;
   /** Who held the land before (the first parcel's previous owner). */
   from: string | null;
-  /** Where it is on screen, for a view (see groupBox): kept with the change from frame to frame. */
-  boxes: { key: string; changing: Box2 | null; all: Box2 | null };
+  /** Where it is on screen, for a view (see groupBox, groupRects): kept with the change from frame to frame. */
+  boxes: { key: string; changing: Box2 | null; all: Box2 | null; rectsKey?: string; rects?: number[][] | null };
   /** The front itself (with a field): the lines between the land reached and not yet reached, within the change, on screen. */
   line?: Path2D | null;
   /** All the parcels of the change, and those changing owner (null: none of it is on the sheet). */
@@ -2029,7 +2029,14 @@ export class MapRenderer {
           for (const q of boxes) total += (q[2] - q[0]) * (q[3] - q[1]);
           this.renewRects = { key: rk, rects: ok && total <= 0.6 * ctx.canvas.width * ctx.canvas.height ? boxes.map((q) => [q[0], q[1], q[2] - q[0], q[3] - q[1]] as DeviceRect) : null };
         }
-        if (this.renewRects.rects) renew = { rects: this.renewRects.rects, moment };
+        let rects = this.renewRects.rects;
+        // The picture kept shows these very changes a moment ago: only the strip each front has crossed since
+        // is drawn again (D140).
+        const shown = this.shownFronts.get(terrName);
+        if (shown && shown.rk === rk && shown.look === lookSig && keptNow?.canvas && keptNow.key && keptNow.moment === shown.moment) {
+          rects = this.frontRects(view, arr, prepared, shown.groups, m, pad, ctx.canvas.width, ctx.canvas.height) ?? rects;
+        }
+        if (rects) renew = { rects, moment };
       }
       const reliefKey = (tLook?.overTerritories && wantsFills ? `|r:${terrain!.key}|${JSON.stringify(tLook)}` : '') + (terrainLand && prepared.some((p) => p.clip) ? `|sea:${terrain!.key}|${seaLevel}` : '') + (reliefKeyNeedsDetail(tLook, wantsFills, terrainLand) ? `|d:${terrain?.detail?.key ?? ''}` : '');
       const key = animated && !renew && opts.transitions ? null : partKey(`${animated && !renew ? `${t.day}:${t.ms}|` : ''}${renew ? 'animated|' : ''}${lookSig}|${wantsFills ? 'f' : ''}${wantsBorders ? 'b' : ''}|${world.revision}|${style.border}|${style.borderWidth}|${opts.basemap ? `${opts.basemap.scales.length}|${lakeKey}` : ''}${landKey}${reliefKey}${anyMedia ? `|${assetEpoch()}|${this.mediaSeconds}|${this.mediaChannel}` : ''}`);
@@ -2058,8 +2065,13 @@ export class MapRenderer {
         if (own && before && before.strict === own.from) {
           if (!before.rects.length && !under.length) patch = own;
           else if (before.frame === frameKey) {
+            // Changes under way in both pictures are drawn again only where their fronts have moved (D140);
+            // those that began or ended between them, and any without a front, everywhere they lie.
+            const shown = this.shownFronts.get(terrName);
+            const moved = shown && shown.strict === own.from && shown.frame === frameKey && shown.look === lookSig && keptNow?.canvas && keptNow.moment === shown.moment
+              ? this.frontRects(view, arr, prepared, shown.groups, m, animPad, W, H) : null;
             const boxes: number[][] = [];
-            for (const [x, y, rw, rh] of [...own.rects, ...before.rects, ...under]) this.joinRect(boxes, [x, y, x + rw, y + rh]);
+            for (const [x, y, rw, rh] of moved ? [...own.rects, ...moved] : [...own.rects, ...before.rects, ...under]) this.joinRect(boxes, [x, y, x + rw, y + rh], 24);
             let total = 0;
             for (const q of boxes) total += (q[2] - q[0]) * (q[3] - q[1]);
             if (total <= 0.6 * W * H) patch = { from: own.from, rects: boxes.map((q) => [q[0], q[1], q[2] - q[0], q[3] - q[1]] as DeviceRect) };
@@ -2067,6 +2079,9 @@ export class MapRenderer {
         }
         this.animPrev.set(terrName, { strict: key.strict, frame: frameKey, rects: under });
       } else { this.patchPrev.delete(terrName); this.animPrev.delete(terrName); }
+      // (How much of the frame each way of drawing only part of the picture again would take: for tests and measurements.)
+      const share = (rects: DeviceRect[] | undefined) => (rects ? rects.reduce((a, q) => a + q[2] * q[3], 0) / Math.max(1, ctx.canvas.width * ctx.canvas.height) : 1);
+      this.lastRedraw = { renew: share(renew?.rects), patch: share(patch?.rects) };
       const terrDraw = (c: CanvasRenderingContext2D) => {
         // (Where the frame lies on what is drawn on: the canvas itself, or a kept picture with room around the frame.)
         const cm = c.getTransform();
@@ -2075,13 +2090,15 @@ export class MapRenderer {
           view, k: Math.hypot(cm.a, cm.b) || 1,
           box: (pad) => this.deviceBox(this.groupBox(view, arr, g, true), cm, pad, c.canvas.width, c.canvas.height),
           part: (deg, pad) => {
+            // (With room past the picture's edges: a blur that ended at an edge would fade there.)
+            const k = Math.hypot(cm.a, cm.b) || 1, beyond = Math.ceil(pad * k);
             // (Where whole outlines are needed, the projection bends boxes: the change's own box then.)
-            if (parcelGeometry(arr).needsOutline(g.changingFaces[0] ?? -1)) return this.deviceBox(this.groupBox(view, arr, g, true), cm, pad, c.canvas.width, c.canvas.height);
+            if (parcelGeometry(arr).needsOutline(g.changingFaces[0] ?? -1)) return this.deviceBox(this.groupBox(view, arr, g, true), cm, pad, c.canvas.width, c.canvas.height, beyond);
             const acc: Box2 = [Infinity, Infinity, -Infinity, -Infinity];
             this.boxOnScreen(view, deg, acc);
             if (!(acc[2] > acc[0] && acc[3] > acc[1])) return [0, 0, 0, 0];
-            const own = this.deviceBox(this.groupBox(view, arr, g, true), cm, pad, c.canvas.width, c.canvas.height);
-            const part = this.deviceBox([acc[0], acc[1], acc[2] - acc[0], acc[3] - acc[1]], cm, pad, c.canvas.width, c.canvas.height);
+            const own = this.deviceBox(this.groupBox(view, arr, g, true), cm, pad, c.canvas.width, c.canvas.height, beyond);
+            const part = this.deviceBox([acc[0], acc[1], acc[2] - acc[0], acc[3] - acc[1]], cm, pad, c.canvas.width, c.canvas.height, beyond);
             // (Within the change's own box.)
             const x0 = Math.max(own[0], part[0]), y0 = Math.max(own[1], part[1]), x1 = Math.min(own[0] + own[2], part[0] + part[2]), y1 = Math.min(own[1] + own[3], part[1] + part[3]);
             return x1 > x0 && y1 > y0 ? [x0, y0, x1 - x0, y1 - y0] : [0, 0, 0, 0];
@@ -2301,6 +2318,12 @@ export class MapRenderer {
         if (b0) this.layered(b0.name, ctx, b0.key, at, b0.draw, null, null, opens);
         this.layered(terrName, ctx, key, at, terrDraw, patch, renew);
       }
+      // How far each front had come in the picture now kept (for the strips of the next moment).
+      if (animated && renew && key) {
+        const groups = new Map<string, { progress: number; field: FrontField | null; rects: number[][] | null }>();
+        prepared.forEach((p, i) => { for (const [id, g] of p.tg.groups) groups.set(`${i}:${id}`, { progress: g.progress, field: g.advance ? g.field ?? null : null, rects: this.groupRects(view, arr, g, m, animPad, ctx.canvas.width, ctx.canvas.height) }); });
+        this.shownFronts.set(terrName, { rk, look: lookSig, frame: frameKey, strict: key.strict, moment: renew.moment, groups });
+      } else this.shownFronts.delete(terrName);
     } else if (base) this.layered(base.name, ctx, base.key, at, base.draw, null, null, opens);
 
     // Fields (D102): radiation, fire, floods, heatmaps, over the territories and under the features.
@@ -2964,7 +2987,7 @@ export class MapRenderer {
         a: st.assignment!, faces: cg.region.faces, changingFaces: cg.changing.faces, advance, spec, progress, disc: null, discRule: 'evenodd', border: null,
         region: this.setPath(sp, sheet, arr, cg.region), changing: cg.changing.faces.length ? this.setPath(sp, sheet, arr, cg.changing) : null,
         look: lookOf(st.assignment!), from: st.transition!.from,
-        boxes: this.groupBoxes.get(cg) ?? (() => { const b = { key: '', changing: null, all: null }; this.groupBoxes.set(cg, b); return b; })(),
+        boxes: this.groupBoxes.get(cg) ?? (() => { const b: TransitionGroup['boxes'] = { key: '', changing: null, all: null }; this.groupBoxes.set(cg, b); return b; })(),
       };
       groups.set(cg.id, g);
       for (const f of cg.region.faces) of.set(f, g);
@@ -3251,7 +3274,11 @@ export class MapRenderer {
       const o = this.boxBuffer(lc, box);
       o.save();
       this.clip(o, area);
-      paint(o, g.a.value, area);
+      // (Shapes are painted block by block where drawing is going on, which is told in the picture's own
+      // pixels: the buffer's lie `bx`, `by` from them. Left as it was, blocks of the new owner's shape were
+      // skipped whenever only part of a kept picture was drawn again, and the soft edge had holes.)
+      setPaintRegion(this.region ? this.region.map(([x, y, rw, rh]) => [x - bx, y - by, rw, rh] as DeviceRect) : null);
+      try { paint(o, g.a.value, area); } finally { setPaintRegion(this.region); }
       o.restore();
       o.save();
       o.setTransform(1, 0, 0, 1, 0, 0);
@@ -3722,7 +3749,7 @@ export class MapRenderer {
   }
 
   /** Join a rectangle of canvas pixels (x0, y0, x1, y1) to a short list of them: with one it nearly fills together with, or (beyond six) with any. */
-  private joinRect(list: number[][], add: number[]): void {
+  private joinRect(list: number[][], add: number[], most = 6): void {
     const area = (q: number[]) => (q[2] - q[0]) * (q[3] - q[1]);
     let box = add;
     for (let again = true; again;) {
@@ -3730,17 +3757,17 @@ export class MapRenderer {
       for (let j = 0; j < list.length; j++) {
         const o = list[j];
         const u = [Math.min(o[0], box[0]), Math.min(o[1], box[1]), Math.max(o[2], box[2]), Math.max(o[3], box[3])];
-        if (area(u) <= 1.3 * (area(o) + area(box)) + 4096 || list.length >= 6) { list.splice(j, 1); box = u; again = true; break; }
+        if (area(u) <= 1.3 * (area(o) + area(box)) + 4096 || list.length >= most) { list.splice(j, 1); box = u; again = true; break; }
       }
     }
     list.push(box);
   }
 
   /** Join to `list` the rectangles of the canvas that a box in degrees shows in, grown by `pad` view pixels. */
-  private joinBox(list: number[][], view: View, box: readonly [number, number, number, number], m: DOMMatrix, pad: number, width: number, height: number): void {
+  private joinBox(list: number[][], view: View, box: readonly [number, number, number, number], m: DOMMatrix, pad: number, width: number, height: number, most = 6): void {
     for (const sb of this.boxesOnScreen(view, box)) {
       const d = this.deviceBox([sb[0], sb[1], sb[2] - sb[0], sb[3] - sb[1]], m, pad, width, height);
-      if (d[2] > 0 && d[3] > 0) this.joinRect(list, [d[0], d[1], d[0] + d[2], d[1] + d[3]]);
+      if (d[2] > 0 && d[3] > 0) this.joinRect(list, [d[0], d[1], d[0] + d[2], d[1] + d[3]], most);
     }
   }
 
@@ -3773,15 +3800,16 @@ export class MapRenderer {
   }
 
   /** A box of the view in the canvas's own pixels (under the frame's transform), grown by `pad` and kept inside the canvas. */
-  private deviceBox(box: Box2, m: DOMMatrix, pad: number, width: number, height: number): Box2 {
+  private deviceBox(box: Box2, m: DOMMatrix, pad: number, width: number, height: number, beyond = 0): Box2 {
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     for (const [x, y] of [[box[0], box[1]], [box[0] + box[2], box[1]], [box[0], box[1] + box[3]], [box[0] + box[2], box[1] + box[3]]]) {
       const dx = m.a * x + m.c * y + m.e, dy = m.b * x + m.d * y + m.f;
       if (dx < x0) x0 = dx; if (dx > x1) x1 = dx; if (dy < y0) y0 = dy; if (dy > y1) y1 = dy;
     }
     const k = Math.hypot(m.a, m.b) || 1;
-    x0 = Math.max(0, Math.floor(x0 - pad * k)); y0 = Math.max(0, Math.floor(y0 - pad * k));
-    x1 = Math.min(width, Math.ceil(x1 + pad * k)); y1 = Math.min(height, Math.ceil(y1 + pad * k));
+    // (`beyond`: so many pixels past the canvas's edges are kept, for what is blurred and must not end at an edge.)
+    x0 = Math.max(-beyond, Math.floor(x0 - pad * k)); y0 = Math.max(-beyond, Math.floor(y0 - pad * k));
+    x1 = Math.min(width + beyond, Math.ceil(x1 + pad * k)); y1 = Math.min(height + beyond, Math.ceil(y1 + pad * k));
     return [x0, y0, x1 - x0, y1 - y0];
   }
 
@@ -4052,7 +4080,9 @@ export class MapRenderer {
     for (const g of inside) on.clip(g.disc!, g.discRule);
     for (const g of out) if (g.discRule === 'evenodd') on.clip(outsideOf(g.disc!), 'evenodd');
     if (on === ctx) on.globalAlpha *= alpha;
-    this.strokeOnSheet(on, path, width);
+    // (In a buffer of a box, where drawing is going on is told from the box's corner: see softEdge.)
+    if (on !== ctx && box) setPaintRegion(this.region ? this.region.map(([x, y, rw, rh]) => [x - box[0], y - box[1], rw, rh] as DeviceRect) : null);
+    try { this.strokeOnSheet(on, path, width); } finally { if (on !== ctx) setPaintRegion(this.region); }
     on.restore();
     if (on === ctx) return;
     on.save();
@@ -4105,7 +4135,66 @@ export class MapRenderer {
     ctx.restore();
   }
 
-  private groupBoxes = new WeakMap<object, { key: string; changing: Box2 | null; all: Box2 | null }>();
+  private groupBoxes = new WeakMap<object, TransitionGroup['boxes']>();
+  /** The share of the frame the territories' picture would be drawn again in, renewed for a new moment or patched from the picture before (1: all of it). */
+  lastRedraw = { renew: 1, patch: 1 };
+
+  /**
+   * For each kept picture of territories with changes under way: which picture it is (the stretch and view), the
+   * moment it shows, and each change then: how far its front had come, its field, and where it lies.
+   */
+  private shownFronts = new Map<string, { rk: string; look: string; frame: string; strict: string; moment: string; groups: Map<string, { progress: number; field: FrontField | null; rects: number[][] | null }> }>();
+
+  /** The rectangles of the picture a change under way lies in (x0, y0, x1, y1, grown by `pad` view pixels): found once for a view; null when it has none to give. */
+  private groupRects(view: View, arr: Arrangement, g: TransitionGroup, m: DOMMatrix, pad: number, width: number, height: number): number[][] | null {
+    const key = `${view.key}|${pad}|${m.e},${m.f}|${width}x${height}`;
+    if (g.boxes.rectsKey !== key) {
+      const list: number[][] = [];
+      let ok = true;
+      for (const face of g.faces) if (!this.joinFace(list, view, arr, face, m, pad, width, height)) { ok = false; break; }
+      g.boxes.rectsKey = key;
+      g.boxes.rects = ok ? list : null;
+    }
+    return g.boxes.rects ?? null;
+  }
+
+  /**
+   * The rectangles of the picture (x, y, width, height) that differ between a kept picture (each change under way
+   * then as in `before`) and now, for the changes under way (D140): for a front with the same field in both, the
+   * strip it has crossed since, with room for its line, its glow and its soft edges; for any other change under
+   * way now or then (a fade, a change that began or ended between the two), all of it. Null when a change has no
+   * rectangles to give, or together they are most of the picture.
+   */
+  private frontRects(view: View, arr: Arrangement, prepared: Array<{ tg: { groups: Map<string, TransitionGroup> } }>, before: Map<string, { progress: number; field: FrontField | null; rects: number[][] | null }>, m: DOMMatrix, pad: number, width: number, height: number): DeviceRect[] | null {
+    const boxes: number[][] = [];
+    const k = Math.hypot(m.a, m.b) || 1, perDegree = (Math.PI / 180) * view.projection.scale();
+    const now = new Set<string>();
+    for (let i = 0; i < prepared.length; i++) for (const [id, g] of prepared[i].tg.groups) {
+      now.add(`${i}:${id}`);
+      const was = before.get(`${i}:${id}`), f = g.field;
+      if (!g.advance || !f || !was || was.field !== f) {
+        const all = this.groupRects(view, arr, g, m, pad, width, height);
+        if (!all) return null;
+        for (const q of all) this.joinRect(boxes, q, 24);
+        continue;
+      }
+      if (was.progress === g.progress) continue;
+      const soft = g.look.soft > 0.01 ? g.look.soft * 0.25 : 0, wake = g.look.wake > 0.01 ? g.look.wake * 0.35 : 0;
+      // (The soft edge and the glow are blurred: three widths of their blur, in view pixels; and a cell, for the lines' rounding.)
+      const across = f.travel * perDegree * k;
+      const blur = (3 * Math.min(48, Math.max(0.6, Math.max((soft / 6) * across * 0.6, (wake / 5) * across * 0.6)))) / k;
+      const room = pad + (soft || wake ? blur : 0) + f.dlat * perDegree + 2;
+      for (const box of bandBoxes(f, Math.min(was.progress, g.progress) - wake, Math.max(was.progress, g.progress) + Math.max(soft, wake ? 0.1 : 0))) this.joinBox(boxes, view, box, m, room, width, height, 24);
+    }
+    for (const [gk, was] of before) {
+      if (now.has(gk)) continue;
+      if (!was.rects) return null;
+      for (const q of was.rects) this.joinRect(boxes, q, 24);
+    }
+    let total = 0;
+    for (const q of boxes) total += (q[2] - q[0]) * (q[3] - q[1]);
+    return total <= 0.6 * width * height ? boxes.map((q) => [q[0], q[1], q[2] - q[0], q[3] - q[1]] as DeviceRect) : null;
+  }
 
   /** Where a change under way is on screen (the parcels changing hands, or all its parcels): found once for the view. */
   private groupBox(view: View, arr: Arrangement, g: TransitionGroup, changing: boolean): Box2 {
@@ -4134,7 +4223,7 @@ export class MapRenderer {
     return x1 > x0 && y1 > y0 ? [x0, y0, x1 - x0, y1 - y0] : null;
   }
 
-  private boxBuffers: Array<{ canvas: OffscreenCanvas; ctx: CanvasRenderingContext2D; used: [number, number] | null }> = [];
+  private boxBuffers: Array<{ canvas: OffscreenCanvas; ctx: CanvasRenderingContext2D; used: [number, number] | null; limited: boolean }> = [];
   private boxNext = 0;
 
   /**
@@ -4150,14 +4239,24 @@ export class MapRenderer {
     let b = this.boxBuffers[i];
     if (!b || b.canvas.width < bw || b.canvas.height < bh) {
       const canvas = new OffscreenCanvas(Math.max(bw, b?.canvas.width ?? 1), Math.max(bh, b?.canvas.height ?? 1));
-      b = this.boxBuffers[i] = { canvas, ctx: canvas.getContext('2d') as unknown as CanvasRenderingContext2D, used: null };
+      b = this.boxBuffers[i] = { canvas, ctx: canvas.getContext('2d') as unknown as CanvasRenderingContext2D, used: null, limited: false };
     }
     const c = b.ctx;
+    if (b.limited) { c.restore(); b.limited = false; }
     c.setTransform(1, 0, 0, 1, 0, 0);
     c.globalAlpha = 1;
     c.globalCompositeOperation = 'source-over';
     c.clearRect(0, 0, b.used ? b.used[0] : b.canvas.width, b.used ? b.used[1] : b.canvas.height);
     b.used = [bw, bh];
+    // Nothing is drawn beyond the box: only the box is cleared for the next to take the buffer, and lines,
+    // shapes and blurs that ran past it were left there for a later, larger box to show. (Found by comparing
+    // frames of an intense look drawn in part with frames drawn afresh: differences of a few levels that
+    // came and went with what had used the buffer before.)
+    c.save();
+    c.beginPath();
+    c.rect(0, 0, bw, bh);
+    c.clip();
+    b.limited = true;
     const m = ctx.getTransform();
     c.setTransform(m.a, m.b, m.c, m.d, m.e - bx, m.f - by);
     return c;

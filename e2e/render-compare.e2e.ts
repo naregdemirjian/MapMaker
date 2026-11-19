@@ -429,7 +429,7 @@ try {
       const layers = s.world.all('layer').filter((l: any) => l.space_id === s.spaceId && l.kind === 'partition').map((l: any) => l.id);
       const canvas = () => { const c = new OffscreenCanvas(W, H); return c.getContext('2d', { willReadFrequently: true }) as OffscreenCanvasRenderingContext2D; };
       const a = canvas(), b = canvas();
-      const out: Array<{ name: string; part: string; animating: number; differing: number; worst: number; crossing?: boolean }> = [];
+      const out: Array<{ name: string; part: string; animating: number; differing: number; worst: number; crossing?: boolean; share?: number; front?: boolean }> = [];
       const compare = () => {
         const da = a.getImageData(0, 0, W, H).data, db = b.getImageData(0, 0, W, H).data;
         let differing = 0, worst = 0;
@@ -443,20 +443,23 @@ try {
         }
         return { differing: differing / (W * H), worst };
       };
-      for (const sc of scenes) for (const way of ['as exports are drawn', 'as the working view is drawn']) {
+      // (Also in an intense look, D137: a ragged front with a soft edge, a glow behind it and a wide glowing line,
+      // of which only the strip the front has crossed since the frame before is drawn again, D140.)
+      const intense = { mode: 'recorded', style: 'border', angle: 0, timing: 'event', seconds: 1.5, easing: 'smooth', restyleRecorded: false, front: { show: true, color: '#fff4cc', width: 3, glow: 26 }, roughness: 0.5, soft: 0.4, wake: 0.7, secondsSince: () => 0 };
+      for (const sc of scenes) for (const way of ['as exports are drawn', 'as the working view is drawn', 'as exports are drawn, in an intense look']) {
         const kept = new B.MapRenderer(), fresh = new B.MapRenderer();
-        if (way === 'as exports are drawn') kept.caching = 'always'; else kept.carry = true;
+        if (way !== 'as the working view is drawn') kept.caching = 'always'; else kept.carry = true;
         kept.verify = true;
         fresh.caching = 'off';
         const view = B.makeView(sc.camera, W, H);
-        const opts = { passes: new Set(['background', 'graticule', 'land', 'fills', 'borders']), transparent: false, layerIds: layers, basemap: sc.basemap ? s.basemap : null };
+        const opts = { passes: new Set(['background', 'graticule', 'land', 'fills', 'borders']), transparent: false, layerIds: layers, basemap: sc.basemap ? s.basemap : null, ...(way.endsWith('intense look') ? { transitions: intense } : {}) };
         const t0 = B.gregorian.fromCivil({ year: sc.year, month: sc.month ?? 1, day: 1 });
         // Moments a few days apart, forwards and back (as playing and scrubbing do).
         for (const days of [0, 3, 6, 9, 4, 12, 15]) {
           const t = { day: t0.day + days, ms: t0.ms };
           kept.render(a, view, s.world, s.engine, s.spaceId, t, opts);
           fresh.render(b, view, s.world, s.engine, s.spaceId, t, opts);
-          out.push({ name: `${sc.name}, ${way}, day ${days}`, part: kept.lastParts['territory:fb'], animating: kept.lastTransitions.length, ...compare() });
+          out.push({ name: `${sc.name}, ${way}, day ${days}`, part: kept.lastParts['territory:fb'], animating: kept.lastTransitions.length, share: kept.lastRedraw.renew, front: kept.lastTransitions.every((q: any) => q.style !== 'fade'), ...compare() });
         }
         // Into a change, out of it at either end, and from one change to another (as dragging the
         // timeline through a history does): in the working view only the areas of the changes, and
@@ -482,7 +485,7 @@ try {
       if (r.crossing && r.part === 'patched') crossed++;
       const ok = r.differing <= 0.0002 && (!r.crossing || r.part === 'patched');
       if (!ok) failed++;
-      if (!ok || process.env.VERBOSE) console.log(`    ${ok ? 'same' : 'DIFFERENT'}  ${r.name}: territory ${r.part}, ${r.animating} animating; ${(r.differing * 100).toFixed(4)}% of pixels differ (largest difference ${r.worst})`);
+      if (!ok || process.env.VERBOSE) console.log(`    ${ok ? 'same' : 'DIFFERENT'}  ${r.name}: territory ${r.part}${r.share !== undefined ? ` (${(r.share * 100).toFixed(1)}% of the frame)` : ''}, ${r.animating} animating; ${(r.differing * 100).toFixed(4)}% of pixels differ (largest difference ${r.worst})`);
     }
     assert.equal(failed, 0, `${failed} of ${results.length} frames of animated changes differ from frames drawn afresh`);
     assert.ok(renewed >= results.length / 3, `the animated area alone was drawn again in ${renewed} of ${results.length} frames`);

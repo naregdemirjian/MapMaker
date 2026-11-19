@@ -422,6 +422,52 @@ export function bandBounds(f: FrontField, lo: number, hi: number): [number, numb
   return [f.west + (i0 - 1) * f.dlon, f.north - (j1 + 2) * f.dlat, f.west + (i1 + 2) * f.dlon, f.north - (j0 - 1) * f.dlat];
 }
 
+/** Each block of 8 by 8 cells of a field (and a cell round it): the earliest and latest time of the change's cells in it. */
+const spansOf = new WeakMap<FrontField, { lo: Float32Array; hi: Float32Array; bw: number; bh: number }>();
+
+/**
+ * Where the front passes between two levels (`lo` to `hi`, either way round): boxes of the field's blocks (8 by
+ * 8 cells) whose cells' times reach into that span, each west, south, east, north in degrees, blocks side by
+ * side in a row joined. Outside them nothing of the change differs between the two moments: what lies behind the
+ * front at the earlier one and ahead of it at the later. Empty when the span touches none of the change.
+ */
+export function bandBoxes(f: FrontField, lo: number, hi: number): Array<[number, number, number, number]> {
+  if (lo > hi) [lo, hi] = [hi, lo];
+  const { nx, ny, at, inside } = f;
+  let sp = spansOf.get(f);
+  if (!sp) {
+    const bw = Math.ceil(nx / B), bh = Math.ceil(ny / B);
+    const blo = new Float32Array(bw * bh).fill(Infinity), bhi = new Float32Array(bw * bh).fill(-Infinity);
+    for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+      const c = j * nx + i;
+      if (!inside[c]) continue;
+      const t = at[c];
+      // (A cell counts for its own block and, at a block's edge, for the one beside it: the front between two
+      // cells of neighbouring blocks is in both.)
+      const b0 = Math.floor((j - 1) / B), b1 = Math.floor((j + 1) / B), a0 = Math.floor((i - 1) / B), a1 = Math.floor((i + 1) / B);
+      for (let bj = Math.max(0, b0); bj <= Math.min(bh - 1, b1); bj++) for (let bi = Math.max(0, a0); bi <= Math.min(bw - 1, a1); bi++) {
+        const q = bj * bw + bi;
+        if (t < blo[q]) blo[q] = t;
+        if (t > bhi[q]) bhi[q] = t;
+      }
+    }
+    spansOf.set(f, (sp = { lo: blo, hi: bhi, bw, bh }));
+  }
+  const out: Array<[number, number, number, number]> = [];
+  for (let bj = 0; bj < sp.bh; bj++) {
+    let from = -1;
+    for (let bi = 0; bi <= sp.bw; bi++) {
+      const q = bj * sp.bw + bi, on = bi < sp.bw && sp.lo[q] <= hi && sp.hi[q] >= lo;
+      if (on && from < 0) from = bi;
+      if (!on && from >= 0) {
+        out.push([f.west + from * B * f.dlon, f.north - Math.min(ny, (bj + 1) * B) * f.dlat, f.west + Math.min(nx, bi * B) * f.dlon, f.north - bj * B * f.dlat]);
+        from = -1;
+      }
+    }
+  }
+  return out;
+}
+
 /** Whether a place has been reached by `level` (read between the four nearest cells). */
 export function reachedAt(f: FrontField, lon: number, lat: number, level: number): boolean {
   const x = (near(lon, f.west, f.west + f.nx * f.dlon) - f.west) / f.dlon - 0.5, y = (f.north - lat) / f.dlat - 0.5;

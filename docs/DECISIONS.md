@@ -61,6 +61,40 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D140. Only the strip a front has crossed is drawn again; two faults of partial redraws fixed
+
+- **Why.** While a change animates, only the rectangles round it are drawn again in the kept picture (D58). They
+  were the change's whole parcels with room for the line and its glow: at a film's pace on the heavy benchmark
+  project (eleven changes under way) half the frame, every frame; and when a change began or ended, every change
+  under way was drawn again whole.
+- **What.** Between two moments nothing of an advancing front differs but the strip it has crossed (with its
+  line, its glow and its soft edges). The picture kept now remembers how far each front had come in it
+  (`shownFronts`); for the next moment each front with the same field gives the boxes of its field's blocks (8 by
+  8 cells) whose times reach into the span crossed (`bandBoxes`, with room for the line, the glow, the blur of soft
+  edges and a cell for the lines' rounding), and those alone are drawn again (`frontRects`). A change that has
+  just begun or ended, a fade, or a front seen for the first time gives all its parcels as before. The same when
+  the stretch of time changes under changes that go on (a change begins or ends while others are under way).
+- **Result.** At a film's pace the part of the frame drawn again fell from about half to 7% (clean) and 30%
+  (Blitz, whose glow reaches far). In software the frame went from 62 to 56 ms: here the time is no longer in
+  the area painted but in handing whole pictures to the canvas; where a graphics card paints, the area is what
+  counts. `MapRenderer.lastRedraw` gives the share for tests and measurements.
+- **Two faults found on the way**, by comparing frames drawn in part with frames drawn afresh in an intense look
+  (render-compare, which until now compared the plain look only):
+  1. *Holes in soft edges.* The soft edge's colour is painted in a buffer of the change's box; shapes are painted
+     block by block where drawing is going on, told in the picture's pixels, not the buffer's. Whenever only part
+     of a kept picture was drawn again (every frame of a preview after the first), blocks of the new owner's
+     shape were skipped and the soft edge was missing in places: differences of up to 108 levels. The buffer's
+     painting is now told where drawing goes on from its own corner (and the same for border lines drawn in a
+     buffer).
+  2. *What a buffer kept from its last use.* A buffer for a box cleared only the box of its last use, while
+     lines, shapes and blurs drawn into it ran past that box; a later, larger box showed them faintly (up to 11
+     levels, coming and going with what had used the buffer before). Nothing is drawn beyond a buffer's box now.
+  Blurred masks also keep room past the picture's edges, so a soft edge does not fade where it meets the frame.
+- **Tests.** `front-field.test.ts` (the boxes between two moments hold every place whose reaching changes, either
+  way round, and are a fraction of the change; none past the end; all of it for the whole span). render-compare
+  'While a change animates': now also in an intense look (ragged, soft edge, glow, wide glowing line), every
+  frame drawn in part equal to one drawn afresh (at most 0.0007% of pixels differing; 0.7% before the fixes).
+
 ### D139. Fronts at scale: a hundred changes under way at once
 
 - **Asked.** Large-scale and stress tests of the transitions, and their optimisation.
