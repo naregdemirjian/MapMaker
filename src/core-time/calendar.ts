@@ -1,13 +1,13 @@
 // Calendars translate instants to and from human dates. The Gregorian calendar comes first
 // (proleptic, astronomical year numbering internally: year 0 = 1 BCE). Fictional calendars
-// implement the same Calendar interface later; the stored instants never change.
-import { type Instant, MS_PER_DAY, instant, isFiniteInstant } from './instant.ts';
+// (custom-calendar.ts, D149) implement the same Calendar interface; the stored instants never change.
+import { type Instant, MS_PER_DAY, instant, isFiniteInstant, add } from './instant.ts';
 
 export type Precision = 'exact' | 'millisecond' | 'second' | 'minute' | 'hour' | 'day' | 'month' | 'year' | 'decade' | 'century' | 'millennium' | 'circa';
 
 export interface CivilDate {
-  year: number; // astronomical: 0 = 1 BCE, -1 = 2 BCE
-  month: number; // 1-12
+  year: number; // astronomical: 0 = 1 BCE, -1 = 2 BCE (a fictional calendar: its own count, year 1 the first)
+  month: number; // 1-12 (a fictional calendar: 1 to its months)
   day: number; // 1-31
   hour: number;
   minute: number;
@@ -22,6 +22,23 @@ export interface Calendar {
   fromCivil(c: Partial<CivilDate> & { year: number }): Instant;
   format(t: Instant, precision?: Precision): string;
   parse(text: string): { instant: Instant; precision: Precision } | null;
+  /** How many months its years have (a month may have no days in a common year: a leap month). */
+  monthsIn(year: number): number;
+  /** The days of a month of a year (0: the month is there in leap years only). */
+  daysIn(year: number, month: number): number;
+  /** A month's name (short: for tight places). */
+  monthName(year: number, month: number, short?: boolean): string;
+  /** A year as it is written: "1203", "500 BCE", "345 TA". */
+  yearLabel(year: number): string;
+  /** A year typed on its own ("1450", "44 BC", "345 TA"); null if it is not one. */
+  parseYear(text: string): number | null;
+  /** The days of its week, first first (null: it has no weeks), and which of them a day is. */
+  readonly weekdays: string[] | null;
+  weekdayOf(t: Instant): number | null;
+  /** Hours in its day (24 but for a world whose day is longer or shorter). */
+  readonly hoursPerDay: number;
+  /** An instant some of its days later (or earlier). */
+  addDays(t: Instant, n: number): Instant;
 }
 
 const fdiv = (a: number, b: number) => Math.floor(a / b);
@@ -87,6 +104,16 @@ export function formatYear(year: number): string {
 export const gregorian: Calendar = {
   id: 'gregorian',
   name: 'Gregorian',
+  weekdays: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'],
+  hoursPerDay: 24,
+  monthsIn: () => 12,
+  daysIn: (y, m) => daysInMonth(y, m),
+  monthName: (_y, m, short) => (short ? MONTHS[m - 1].slice(0, 3) : MONTHS[m - 1]),
+  yearLabel: (y) => formatYear(y),
+  parseYear: (text) => parseGregorianYear(text),
+  // (1 January 1970, day 0, was a Thursday: the fourth day of a week from Monday.)
+  weekdayOf: (t) => (isFiniteInstant(t) ? ((t.day % 7) + 7 + 3) % 7 : null),
+  addDays: (t, n) => add(t, n),
 
   toCivil(t) {
     if (!isFiniteInstant(t)) throw new RangeError('Cannot convert an infinite instant to a date');
@@ -183,15 +210,25 @@ export const gregorian: Calendar = {
   },
 };
 
+/** The year typed in a date's calendar: 1450, -44 (astronomical), 44 BCE / 44 BC, AD 900. */
+export function parseGregorianYear(text: string): number | null {
+  const m = /^\s*(?:(?:AD|CE)\s*)?(-?\d+)\s*(BCE|BC|AD|CE)?\s*$/i.exec(text);
+  if (!m) return null;
+  const n = Number(m[1]);
+  if (!Number.isFinite(n)) return null;
+  // (1 BCE is the year 0, 44 BCE the year -43.)
+  return m[2] && /^BC/i.test(m[2]) ? 1 - Math.abs(n) : n;
+}
+
 /** Round an instant down to a calendar unit; used for timeline tick generation. */
-export function floorTo(t: Instant, unit: 'year' | 'month' | 'day' | 'hour' | 'minute' | 'second', stepYears = 1): Instant {
-  const c = gregorian.toCivil(t);
+export function floorTo(t: Instant, unit: 'year' | 'month' | 'day' | 'hour' | 'minute' | 'second', stepYears = 1, cal: Calendar = gregorian): Instant {
+  const c = cal.toCivil(t);
   switch (unit) {
-    case 'year': return gregorian.fromCivil({ year: Math.floor(c.year / stepYears) * stepYears });
-    case 'month': return gregorian.fromCivil({ year: c.year, month: c.month });
-    case 'day': return instant(t.day, 0);
-    case 'hour': return instant(t.day, Math.floor(t.ms / 3_600_000) * 3_600_000);
-    case 'minute': return instant(t.day, Math.floor(t.ms / 60_000) * 60_000);
-    default: return instant(t.day, Math.floor(t.ms / 1000) * 1000);
+    case 'year': return cal.fromCivil({ year: Math.floor(c.year / stepYears) * stepYears });
+    case 'month': return cal.fromCivil({ year: c.year, month: c.month });
+    case 'day': return cal === gregorian ? instant(t.day, 0) : cal.fromCivil({ year: c.year, month: c.month, day: c.day });
+    case 'hour': return cal.fromCivil({ year: c.year, month: c.month, day: c.day, hour: c.hour });
+    case 'minute': return cal.fromCivil({ year: c.year, month: c.month, day: c.day, hour: c.hour, minute: c.minute });
+    default: return cal.fromCivil({ year: c.year, month: c.month, day: c.day, hour: c.hour, minute: c.minute, second: c.second });
   }
 }
