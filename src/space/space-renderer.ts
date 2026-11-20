@@ -456,7 +456,9 @@ export class SpaceRenderer {
         if (w > room) size = Math.max(9 * u, size * (room / w));
         ctx.font = `700 ${size.toFixed(1)}px ${NAME_FONTS[look.nameFont]}`;
         const tw = ctx.measureText(text).width * 1.08;
-        this.realmNames.push({ text, x: l.x, y: l.y, size, colour: l.colour, box: [l.x - tw / 2, l.y - size * 0.6, l.x + tw / 2, l.y + size * 0.6] });
+        // (Inside the frame, D180: a realm running off the edge has its name moved in, not cut.)
+        const m = 4 * u, x = Math.min(view.width - tw / 2 - m, Math.max(tw / 2 + m, l.x)), y = Math.min(view.height - size * 0.6 - m, Math.max(size * 0.6 + m, l.y));
+        this.realmNames.push({ text, x, y, size, colour: l.colour, box: [x - tw / 2, y - size * 0.6, x + tw / 2, y + size * 0.6] });
       }
       ctx.restore();
       if (drawNow) this.drawRealmNames(ctx, look);
@@ -499,22 +501,42 @@ export class SpaceRenderer {
   }
   private dustKey = '';
   private dustOf: GalaxyDust | null = null;
+  /** A soft round grain of each of the glow's colours (made once). */
+  private grainSprites: { colors: string[]; sprites: OffscreenCanvas[] } | null = null;
+  private grains(colors: string[]): OffscreenCanvas[] {
+    if (this.grainSprites && this.grainSprites.colors.join() === colors.join()) return this.grainSprites.sprites;
+    const sprites = colors.map((col) => {
+      const s = new OffscreenCanvas(64, 64), g = s.getContext('2d')!;
+      const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+      grad.addColorStop(0, rgba(col, 1)); grad.addColorStop(0.45, rgba(col, 0.5)); grad.addColorStop(1, rgba(col, 0));
+      g.fillStyle = grad; g.fillRect(0, 0, 64, 64);
+      return s;
+    });
+    this.grainSprites = { colors: [...colors], sprites };
+    return sprites;
+  }
   private paintDust(view: SpaceView, d: GalaxyDust, W: number, H: number): void {
     const g = this.dustLayer!.getContext('2d')!;
     g.setTransform(1, 0, 0, 1, 0, 0);
     g.clearRect(0, 0, W, H);
     g.globalCompositeOperation = 'lighter';
     const base = d.size * view.scale, alpha = [0.07, 0.07, 0.045, 0.15];
+    const sprites = this.grains(d.colors);
     for (let c = 0; c < d.colors.length; c++) {
       g.fillStyle = d.colors[c];
       for (let i = 0; i < d.count; i++) {
         if (d.points[i * 4 + 3] !== c) continue;
         const p = view.project([d.points[i * 4], d.points[i * 4 + 1], d.points[i * 4 + 2]]);
-        if (!p || p[0] < -20 || p[1] < -20 || p[0] > W + 20 || p[1] > H + 20) continue;
-        const r = Math.max(0.7, base * p[2]);
+        if (!p) continue;
+        const r = Math.max(0.7, base * p[2]), R = r * 1.6;
+        if (p[0] < -R || p[1] < -R || p[0] > W + R || p[1] > H + R) continue;
         // (Smaller grains keep their brightness: what they stand for is as bright, only smaller.)
-        g.globalAlpha = Math.min(0.6, alpha[c] * Math.max(1, 2.2 / r));
-        g.fillRect(p[0] - r, p[1] - r, 2 * r, 2 * r);
+        const a = Math.min(0.6, alpha[c] * Math.max(1, 2.2 / r));
+        // Close in, a grain is a soft round glow (D180: squares of thirty pixels made a mosaic of the sky); far out,
+        // a pixel or two across, a square looks the same and costs less. (The glow fades to its edge: as much light
+        // as the square it replaces from a disc 1.6 times as wide.)
+        if (r < 1.2) { g.globalAlpha = a; g.fillRect(p[0] - r, p[1] - r, 2 * r, 2 * r); }
+        else { g.globalAlpha = Math.min(0.9, a * 1.5); g.drawImage(sprites[c], p[0] - R, p[1] - R, 2 * R, 2 * R); }
       }
     }
     g.globalCompositeOperation = 'source-over';
@@ -779,22 +801,31 @@ export class SpaceRenderer {
     // brightest; companions only close in. Names that would overlap one already written are left out.
     const catalogueName = (n: string) => /^(Gl|GJ|HD|HIP|HYG|NN|Wo) /.test(n);
     // (A galaxy's many star systems, D116: named only close in.)
-    const want = (s: Star) => o.names === 'all' || s.id === 0 || s.id === o.selected || !!heldBy(o.holdings, s.id) || (s.minor ? zoom > 1.6 : (!s.system && (!catalogueName(s.name) || zoom > 1.2 || s.absmag < 9)) || zoom > 2.2);
+    // (D180: a galaxy's held systems are named at any distance only while there are few of them; once realms of
+    // hundreds fill it, their names say whose they are, and the systems are named only close in, like the rest.)
+    const manyHeld = !!o.holdings && placed.reduce((n, p) => n + (p.s.minor && heldBy(o.holdings, p.s.id) ? 1 : 0), 0) > 40;
+    const want = (s: Star) => o.names === 'all' || s.id === 0 || s.id === o.selected || (!!heldBy(o.holdings, s.id) && !(s.minor && manyHeld)) || (s.minor ? zoom > 1.6 : (!s.system && (!catalogueName(s.name) || zoom > 1.2 || s.absmag < 9)) || zoom > 2.2);
     const order = placed.filter((p) => want(p.s)).sort((a, b) => rank(a.s) - rank(b.s));
     function rank(s: Star): number { return s.id === o.selected ? -1e9 : s.id === 0 ? -1e8 : heldBy(o.holdings, s.id) ? -1e7 + s.absmag : s.size ? -s.size : catalogueName(s.name) ? s.absmag + 100 : s.absmag; }
     // (Realms' names are written over the stars: star names keep out of their way.)
     const boxes: Array<[number, number, number, number]> = this.realmNames.map((n) => n.box);
     // On a chart (D131), a star's height above or below the plane beside its name.
     const heights = view.chart && look.heights !== 'none';
+    // (No more than about a hundred names on a full frame, the most important first.)
+    const most = Math.round(110 * Math.max(0.3, (view.width * view.height) / (1920 * 1080)));
+    let written = 0;
     for (const { s, x, y } of order) {
       const z = heights && !s.minor && s.around === undefined && Math.abs(s.z) >= 0.05 ? s.z : null;
       const w0 = ctx.measureText(s.name).width, gap = 6 * u;
       const w = w0 + (z === null ? 0 : 3 * u + this.heightWidth(ctx, z, size, look));
       // Right of the star, else left, above or below: the first place no name has taken.
       const places: Array<[number, number]> = [[x + gap, y], [x - gap - w, y], [x - w / 2, y - size], [x - w / 2, y + size]];
+      // (Each name keeps a little room round it, D180: names packed edge to edge made a carpet of letters.)
+      const px = o.names === 'all' ? 0 : size * 0.9, py = o.names === 'all' ? 0 : size * 0.4;
       const free = places.map(([bx, by]) => [bx, by - size / 2, bx + w, by + size / 2] as [number, number, number, number])
-        .find((box) => !boxes.some((b) => !(box[2] < b[0] || box[0] > b[2] || box[3] < b[1] || box[1] > b[3])));
+        .find((box) => !boxes.some((b) => !(box[2] + px < b[0] || box[0] - px > b[2] || box[3] + py < b[1] || box[1] - py > b[3])));
       if (!free) continue;
+      if (o.names !== 'all' && ++written > most) break;
       boxes.push(free);
       const bx = free[0], by = (free[1] + free[3]) / 2;
       ctx.strokeStyle = rgba(look.background, 0.85);

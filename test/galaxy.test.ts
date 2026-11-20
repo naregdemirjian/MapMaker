@@ -107,3 +107,29 @@ test('a galaxy map: made with its settings, made again from another seed (undone
   assert.throws(() => cmd.createSpaceMap(world, 'Odd', 'galaxy', undefined, { ...MW, kind: 'invented', arms: 12 }), /1 to 8 arms/);
   assert.throws(() => cmd.setGalaxy(world, cmd.createSpaceMap(world, 'Stars').result, MW), /Only a galaxy map/);
 });
+
+test('thousands of systems given at once (D180): one change each, the same moment again replaces, in the event\'s order', async () => {
+  const { Engine } = await import('../src/temporal-engine/engine.ts');
+  const { gregorian } = await import('../src/core-time/index.ts');
+  const world = new World();
+  const engine = new Engine(world);
+  cmd.seedProject(world, 'Galaxies');
+  const mw = cmd.createSpaceMap(world, 'The Milky Way', 'galaxy', undefined, { ...MW, systems: 3000 }).result;
+  const a = cmd.createEntity(world, { type_id: 'polity', name: 'The Concord' }).result, b = cmd.createEntity(world, { type_id: 'polity', name: 'The Vael' }).result;
+  const t = gregorian.fromCivil({ year: 3600000 });
+  const ev = cmd.createEvent(world, { name: 'The Concord of the Arms', start: t, end: null }).result;
+  const all = Array.from({ length: 3000 }, (_, i) => SYSTEM_ID_BASE + i);
+  const first = cmd.holdStars(world, { spaceId: mw, stars: all, entity: a, mode: { kind: 'new', eventId: ev, at: t } });
+  assert.equal(first.result, 3000);
+  // The far half given to the other at the same moment of the same event: those changes are replaced, not added.
+  cmd.holdStars(world, { spaceId: mw, stars: all.slice(1500), entity: b, mode: { kind: 'new', eventId: ev, at: t } });
+  const effects = world.all('effect').filter((f) => f.event_id === ev);
+  assert.equal(effects.length, 3000, 'one change a system');
+  assert.deepEqual(effects.map((f) => f.ordinal).sort((x, y) => x - y), Array.from({ length: 3000 }, (_, i) => i + 1), 'in the event\'s order');
+  const now = engine.systemsAt(mw, t);
+  assert.equal(now.get(SYSTEM_ID_BASE), a);
+  assert.equal(now.get(SYSTEM_ID_BASE + 2999), b);
+  // At another moment, a change of its own, after the others in the event's order.
+  cmd.holdStars(world, { spaceId: mw, stars: [SYSTEM_ID_BASE], entity: b, mode: { kind: 'new', eventId: ev, at: gregorian.fromCivil({ year: 3600001 }) } });
+  assert.equal(Math.max(...world.all('effect').filter((f) => f.event_id === ev).map((f) => f.ordinal)), 3001);
+});

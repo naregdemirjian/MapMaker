@@ -6,6 +6,7 @@ import { buildConstantinople } from './constantinople.ts';
 import { buildMongols } from './mongols.ts';
 import { buildEmpires } from './empires.ts';
 import { buildOrrun } from './fantasy.ts';
+import { buildGalacticAges } from './galactic.ts';
 
 export interface Example { id: string; name: string; about: string; build(reg: ProjectRegistry, dataDir: string): ProjectInfo }
 
@@ -30,5 +31,10 @@ export const EXAMPLES: Example[] = [
     id: 'orrun', name: 'Orrun, a thousand years',
     about: 'A world of one\'s own: a generated planet cut into provinces, its own calendar of ten months and three ages; realms founded, grown and at war province by province; the Ember Dominion rising from a volcano and thrown down; a forest fire, a meteor, a flood and a neck of land sinking under the sea; heroes, a dragon and two voyages; and another history, in a branch of its own, in which the battle that saved the west is lost. Nine shots.',
     build: (reg, dataDir) => buildOrrun(reg, dataDir),
+  },
+  {
+    id: 'galactic-ages', name: 'The Galactic Ages, 2026 to 12,000,000',
+    about: 'Twelve million years ahead on four maps at four scales: the Earth united by a charter, the Solar System\'s planets and moons in revolt and at war, every star within fifty light-years settled by expeditions and waves of ships, then the whole Milky Way: realms spreading along the spiral arms system by system, supernovae, a people of machines at the core, first contact, the Core War, the Concord of the arms, the Long Silence and a plague of machines, a second dawn, and the voyage to the Large Magellanic Cloud. Eleven shots.',
+    build: (reg, dataDir) => buildGalacticAges(reg, dataDir),
   },
 ];

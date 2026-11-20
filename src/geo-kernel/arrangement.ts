@@ -1101,6 +1101,7 @@ export class Arrangement {
    * pieces of a split face become new children of it (the parent stops being a leaf).
    */
   private rebuildFaces(): void {
+    this.oldSegs = null;
     const t = this.topology();
     if (t.cycles.size === 0) return;
     const mode = Arrangement.faceRebuild;
@@ -1736,9 +1737,17 @@ export class Arrangement {
     return null;
   }
 
+  /** The old borders (labelled before the borders being added), listed once a rebuild of the faces (see oldFaceAt). */
+  private oldSegs: number[] | null = null;
+
   /** The face containing a point among the old borders alone (those already labelled), or the root face when there are none near enough. */
   private oldFaceAt(p: Vec3): number {
     const isOld = (id: number) => { const sg = this.segments.get(id); return !!sg && sg.left_face > 0 && sg.right_face > 0; };
+    // (D180: on a map being filled for the first time there are no old borders, and every area lies in the root face.
+    // Looking for them all over the map again for each of thousands of areas, today's countries and their islands
+    // added at once, took forty seconds.)
+    const old = (this.oldSegs ??= [...this.segments.keys()].filter(isOld).sort((x, y) => x - y));
+    if (!old.length) return this.rootFace;
     const oldNear = (legs: Array<[Vec3, Vec3]>) => {
       const out = new Set<number>();
       for (const [x, y] of legs) { const [lo, hi] = arcBox(x, y, 1e-9); for (const id of this.sgrid.query(lo, hi)) if (isOld(id)) out.add(id); }
@@ -1753,7 +1762,7 @@ export class Arrangement {
       const cands = [...this.sgrid.query(lo, hi)].filter(isOld).sort((x, y) => x - y);
       for (const sid of cands.slice(0, 8)) { const f = via(sid); if (f !== null) return f; }
     }
-    for (const sid of [...this.segments.keys()].filter(isOld).sort((x, y) => x - y)) { const f = via(sid); if (f !== null) return f; }
+    for (const sid of old) { const f = via(sid); if (f !== null) return f; }
     return this.rootFace;
   }
 

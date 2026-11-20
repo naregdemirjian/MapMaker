@@ -61,6 +61,60 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D180. Five large example projects, V: the Galactic Ages, 2026 to 12,000,000; space maps that stay readable
+
+- **The Galactic Ages** (`src/examples/galactic.ts`): twelve million years of a future history on four maps at four
+  scales, the same realms (entities) on all of them. The Earth: today's countries, all of them provinces of the Terran
+  Union by the Charter of 2068 (faded in over five years), and ten million years on a sea in the African Rift (a dated
+  stroke of the sculpting brush, and the land along it cleared). The Solar System side by side: the Moon, Mars, the
+  Jovian moons, Titan and the outer planets settled, a Martian revolution and a Ring War, lanes between the planets,
+  a Sunward Accord whose members are parts of a commonwealth. The near stars: expeditions as lanes growing at a tenth
+  of the speed of light to real stars (Alpha Centauri, Barnard's Star, Epsilon Eridani, Tau Ceti, Sirius, Vega…),
+  realms founded and at war, waves of settlement until all 982 stars within fifty light-years are held. The Milky Way
+  (3,000 regions): the Hearth's expeditions to the Pleiades, Polaris, Betelgeuse, Antares, the Helix, Rigel, Vela and
+  the Orion Nebula; the Orion Secession and the War of the Spur; realms on the Cygnus, Sagittarius, Carina, Perseus,
+  Scutum and Outer arms; a people of machines at the core; the Vael on the far side; the Core War with its fronts;
+  the Concord filling the galaxy; the Severing, the Fading and the Grey Tide; the Cluster Havens; the Synthesis and the
+  voyage to the Large Magellanic Cloud. Real astronomy where it is known (Apophis in 2029, Barnard's Star and Alpha
+  Centauri passing closest, Vega the pole star, the Arecibo message reaching the Hercules Cluster, Betelgeuse and VY
+  Canis Majoris exploding, Gliese 710 passing the Sun's comets, the Sun a twentieth of the way round the galaxy).
+  116 events, eleven shots, statistics on three maps (people in space, settled stars, settled regions, realms, people).
+- **Who settles the galaxy is worked out, not drawn** (`src/examples/settle.ts`): a race of colony ships from system to
+  system (only between systems within 3,000 light-years of each other), at a speed, each colony waiting before it
+  sends its own; a system belongs to the lineage that arrives first. Realms so grow along the arms, where systems are
+  close together, and meet in borders. The history then happens to the systems in time order (secessions, supernovae
+  clearing what is near them, conquests by distance from the core, the Concord, the old realms coming back at the
+  Severing by the lineage that settled each system, a share of worlds falling silent every hundred thousand years, the
+  Tide as a race of its own that takes what it reaches), and is written as the app's own changes: stars held in
+  events, lanes opened and closed, wars as relationships. The same every time.
+- **Fixed: a shot of a space map lost the point its camera turns round.** Between two keys the camera kept its
+  angle and zoom but not its `target`, so every frame of a played or exported shot circled the map's middle (the
+  galaxy's centre) whatever the keys said. The point is now carried from key to key in a straight line (a key without
+  one circles the middle).
+- **Names on star maps stay readable.** A galaxy's held systems were all named at every distance, and close in every
+  system was: hundreds of names packed edge to edge. Held systems are now named at any distance only while there are
+  forty or fewer in view (realms' names say whose the rest are); every name keeps a little room round it; at most about
+  a hundred are written on a full frame, the most important first (the selected star, the Sun, the famous places, held
+  stars, the brightest). Realms' names are moved in from the frame's edge instead of being cut.
+- **A galaxy's glow without squares.** Its grains were squares, invisible far out but thirty pixels across close in,
+  where they made a mosaic of the sky; grains more than a pixel or two across are now soft round glows of the same
+  light.
+- **Giving thousands of stars at once is quick.** `holdStars` looked through every change of the project twice for
+  each star given; it now looks through the event's changes once a command. Giving the 3,000 systems of a galaxy to a
+  realm in a project of 15,000 changes took seconds; it now takes a few milliseconds.
+- **Adding today's countries to an empty map is ten times quicker** (`oldFaceAt`, D177). For each area made only of
+  new borders, the kernel looked for the old borders around it, all over the map and then one by one, even when there
+  were none: on an empty map, the hundreds of countries and thousands of islands of today's countries took forty
+  seconds. The old borders are now listed once a rebuild, and with none every area lies in the root face at once
+  (four seconds; the End of Empires and Greater Armenia examples build in a quarter of the time).
+- **Statistics in quintillions and sextillions** (a galaxy's people), written and read back.
+- **The kit's boxes of events show the date as precisely as the shot does** (a year for the far future and for Orrun,
+  not "1 January 1,920,000"), and the realms' settlements of the galaxy, each lasting up to millions of years, are in
+  a group of their own, so that the boxes show what happens instead.
+- **Noticed, not changed: a map cannot be deleted.** A project started for space keeps the Earth map it began with
+  (here it has a part to play); removing a map would take its parcels, layers, changes and shots with it, and is left
+  for its own decision.
+
 ### D179. Five large example projects, IV: Orrun, a world of one's own; provinces for a generated planet
 
 - **Orrun, a thousand years** (`src/examples/fantasy.ts`): a project whose only map is a generated planet (an

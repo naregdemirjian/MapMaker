@@ -223,11 +223,17 @@ export function interpolateCamera(a: Camera, b: Camera, f: number): Camera {
   if (dl < -180) dl += 360;
   let lon = a.lon + dl * f;
   lon = ((lon + 540) % 360) - 180;
+  // A space map's camera circles a point (D180: kept between keys, moving in a straight line from one to the next;
+  // a key without one circles the map's middle).
+  const target: Camera['target'] = a.target || b.target
+    ? [0, 1, 2].map((i) => (a.target?.[i] ?? 0) + ((b.target?.[i] ?? 0) - (a.target?.[i] ?? 0)) * f) as [number, number, number]
+    : undefined;
   return {
     lon,
     lat: a.lat + (b.lat - a.lat) * f,
     zoom: a.zoom + (b.zoom - a.zoom) * f, // zoom is already logarithmic
     rotation: a.rotation + (b.rotation - a.rotation) * f,
     projection: f < 0.5 ? a.projection : b.projection,
+    ...(target ? { target } : {}),
   };
 }

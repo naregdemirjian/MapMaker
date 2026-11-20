@@ -1972,12 +1972,23 @@ export function holdStars(world: World, o: { spaceId: string; stars: number[]; e
     const t: Instant | null = o.mode.kind === 'new' ? o.mode.at ?? null : o.mode.t;
     const at = t && t.day !== -Infinity ? toStore(t) : null;
     recordable(tx.world, eventId, at);
+    // (The event's changes looked through once, not once a star (D180): which of these stars it already gives at
+    // this moment, and where its next change goes in its order. Thousands of a galaxy's systems at once stay quick.)
+    const same = new Map<number, string>();
+    let ordinal = 0;
+    for (const f of tx.world.rows('effect')) {
+      if (f.event_id !== eventId) continue;
+      ordinal = Math.max(ordinal, f.ordinal);
+      if (f.kind !== 'system' || f.space_id !== o.spaceId || f.at_day !== (at ? at[0] : null) || f.at_ms !== (at ? at[1] : null)) continue;
+      const star = parseJSON<SystemIntent | null>(f.intent, null)?.star;
+      if (star !== undefined && !same.has(star)) same.set(star, f.id);
+    }
     for (const star of stars) {
       const intent: SystemIntent = { op: 'system', star, entity: o.entity };
-      const same = tx.world.all('effect').find((f) => f.kind === 'system' && f.space_id === o.spaceId && f.event_id === eventId && f.at_day === (at ? at[0] : null) && f.at_ms === (at ? at[1] : null) && parseJSON<SystemIntent | null>(f.intent, null)?.star === star);
-      if (same) { tx.patch('effect', same.id, { intent: JSON.stringify(intent) }); continue; }
+      const id = same.get(star);
+      if (id) { tx.patch('effect', id, { intent: JSON.stringify(intent) }); continue; }
       tx.insert('effect', {
-        id: newId('eff'), event_id: eventId, ordinal: nextOrdinal(tx.world, eventId), kind: 'system', space_id: o.spaceId, layer_id: null,
+        id: newId('eff'), event_id: eventId, ordinal: ++ordinal, kind: 'system', space_id: o.spaceId, layer_id: null,
         at_day: at ? at[0] : null, at_ms: at ? at[1] : null, transition: '', intent: JSON.stringify(intent), resolution: JSON.stringify({ set: [] }), basis_hash: '',
       });
     }

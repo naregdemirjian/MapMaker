@@ -67,7 +67,7 @@ export function statisticAt(stat: Statistic, t: Instant): number | null {
   return k[k.length - 1].value;
 }
 
-const SCALES: Array<[number, string]> = [[1e15, 'quadrillion'], [1e12, 'trillion'], [1e9, 'billion'], [1e6, 'million']];
+const SCALES: Array<[number, string]> = [[1e21, 'sextillion'], [1e18, 'quintillion'], [1e15, 'quadrillion'], [1e12, 'trillion'], [1e9, 'billion'], [1e6, 'million']];
 const grouped = (v: number, decimals = 0) => v.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
 
 /** A value written as its statistic says: "$72.0 billion", "1.50 billion", "90,000", "45 %". */
@@ -101,11 +101,11 @@ export function fillStatistics(text: string, stats: Statistic[], t: Instant): st
 /** An amount as written by a person: "72 billion", "1.2 trillion", "$5 trillion", "90,000", "1.5e9", "300k". Null when it is not one. */
 export function parseAmount(text: string): number | null {
   const m = text.trim().toLowerCase().replace(/[$,\s]/g, ' ').replace(/\s+/g, ' ').trim()
-    .match(/^(-?[\d ]*\.?\d+(?:e[+-]?\d+)?) ?(k|thousand|m|mn|million|b|bn|billion|t|tn|trillion|q|quadrillion|%)?$/);
+    .match(/^(-?[\d ]*\.?\d+(?:e[+-]?\d+)?) ?(k|thousand|m|mn|million|b|bn|billion|t|tn|trillion|q|quadrillion|quintillion|sextillion|%)?$/);
   if (!m) return null;
   const n = Number(m[1].replace(/ /g, ''));
   if (!Number.isFinite(n)) return null;
-  const mult: Record<string, number> = { k: 1e3, thousand: 1e3, m: 1e6, mn: 1e6, million: 1e6, b: 1e9, bn: 1e9, billion: 1e9, t: 1e12, tn: 1e12, trillion: 1e12, q: 1e15, quadrillion: 1e15, '%': 1 };
+  const mult: Record<string, number> = { k: 1e3, thousand: 1e3, m: 1e6, mn: 1e6, million: 1e6, b: 1e9, bn: 1e9, billion: 1e9, t: 1e12, tn: 1e12, trillion: 1e12, q: 1e15, quadrillion: 1e15, quintillion: 1e18, sextillion: 1e21, '%': 1 };
   return n * (m[2] ? mult[m[2]] : 1);
 }
 

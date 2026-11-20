@@ -265,3 +265,22 @@ test('a shot\'s first moment (D176): where its trails can start, whichever key s
   assert.deepEqual(trailsStart({ ...back, trails: true, trailsFrom: 'shot' }), Y(1453));
   assert.equal(trailsStart({ ...back, trails: false, trailsFrom: 'shot' }), null);
 });
+
+test('a shot of a space map keeps the point its camera turns round between keys (D180), moving in a straight line', () => {
+  const t = gregorian.fromCivil({ year: 3000 });
+  const shot = defaultShot('space', { lon: 0, lat: 30, zoom: 2, rotation: 0, projection: 'equirectangular', target: [-26670, 0, 0] }, t, t, 24, 10);
+  shot.camera = [
+    { frame: 0, camera: { lon: 0, lat: 30, zoom: 2, rotation: 0, projection: 'equirectangular', target: [-26670, 0, 0] }, ease: 'linear' },
+    { frame: 100, camera: { lon: 40, lat: 30, zoom: 1, rotation: 0, projection: 'equirectangular', target: [-6670, 1000, -200] }, ease: 'linear' },
+    { frame: 200, camera: { lon: 40, lat: 30, zoom: 1, rotation: 0, projection: 'equirectangular' }, ease: 'linear' },
+  ];
+  shot.frames = 201;
+  assert.deepEqual(cameraAt(shot, 0).target, [-26670, 0, 0], 'the first key\'s point, still at its frame');
+  assert.deepEqual(cameraAt(shot, 50).target, [-16670, 500, -100], 'half way between the two');
+  // (A key without a point circles the map's middle: the camera moves there.)
+  assert.deepEqual(cameraAt(shot, 150).target, [-3335, 500, -100]);
+  assert.deepEqual(cameraAt(shot, 200).target, [0, 0, 0]);
+  // A map of the Earth's camera has none.
+  const earth = defaultShot('space', { lon: 10, lat: 20, zoom: 1, rotation: 0, projection: 'equalEarth' }, t, t, 24, 10);
+  assert.equal('target' in cameraAt(earth, 5), false);
+});

@@ -26,6 +26,9 @@ test('written as people read them', () => {
   assert.equal(formatStatistic(72e9, 'money'), '$72.0 billion');
   assert.equal(formatStatistic(1.2e12, 'money'), '$1.20 trillion');
   assert.equal(formatStatistic(1.2e15, 'money'), '$1.20 quadrillion');
+  // (A galaxy's people, D180.)
+  assert.equal(formatStatistic(1.15e18, 'count'), '1.15 quintillion');
+  assert.equal(formatStatistic(4e21, 'count'), '4.00 sextillion');
   assert.equal(formatStatistic(150e9, 'money'), '$150 billion');
   assert.equal(formatStatistic(90000, 'count'), '90,000');
   assert.equal(formatStatistic(6e9, 'count', 0), '6 billion');
@@ -36,6 +39,7 @@ test('written as people read them', () => {
   assert.equal(parseAmount('90,000'), 90000);
   assert.equal(parseAmount('300k'), 3e5);
   assert.equal(parseAmount('1.5e9'), 1.5e9);
+  assert.equal(parseAmount('2 quintillion'), 2e18);
   assert.equal(parseAmount('lots'), null);
 });
 

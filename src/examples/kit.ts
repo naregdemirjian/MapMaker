@@ -302,7 +302,7 @@ export function shot(b: Builder, p: ShotPlan): string {
     layers: p.hide ? b.world.all('layer').filter((l) => l.space_id === b.space && l.visible && !p.hide!.includes(l.name)).map((l) => l.id) : [], graticule: false, labels: true, cities: p.cities ?? true, characters: p.characters ?? false, trails: p.trails ?? false, ...(p.trails ? { trailsFrom: 'shot' as const } : {}), transparent: false,
     look: { id: p.look ?? 'classic' },
     transitions: withTransitionLook({ ...DEFAULT_TRANSITIONS, mode: 'recorded', restyleRecorded: false, seconds: 1.2 }, p.transitions ?? 'clean'),
-    ...(p.eventsBox ? { eventsBox: { show: true, corner: 'bottom-right', maxEvents: 3, showDescription: true, linger: 4, width: 500, title: 'Events', hideWhenEmpty: true, ...(typeof p.eventsBox === 'object' ? { groups: p.eventsBox.groups.map((g) => b.group(g)) } : {}) } } : {}),
+    ...(p.eventsBox ? { eventsBox: { show: true, corner: 'bottom-right', maxEvents: 3, showDescription: true, linger: 4, width: 500, title: 'Events', hideWhenEmpty: true, datePrecision: p.precision ?? 'day', ...(typeof p.eventsBox === 'object' ? { groups: p.eventsBox.groups.map((g) => b.group(g)) } : {}) } } : {}),
   };
   return b.commit(cmd.createSequence(b.world, p.name, s));
 }
