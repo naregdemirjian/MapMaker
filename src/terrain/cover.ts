@@ -7,6 +7,7 @@
 import type { ElevationGrid } from './grid.ts';
 import { biomeColours, type Climate } from './biomes.ts';
 import { loadEarthPhoto, EARTH_PHOTO_KEY } from './photo-cache.ts';
+import { paleoBetween } from './paleo.ts';
 
 /**
  * A world's land cover: RGBA pixels (or a decoded picture), and a name for its content. The Earth's comes with
@@ -59,5 +60,37 @@ export function coverNow(grid: ElevationGrid, key: string, radiusKm: number, cli
   if (have && have !== 'working') return have;
   const c = make(grid, k, radiusKm, climate);
   keep(k, c);
+  return c;
+}
+
+/**
+ * A simulated planet's land seen from space through its history (D167): a cover for each of its pictures, youngest
+ * first as its heights' pictures are kept (D156), null until made. `key` names the set.
+ */
+export interface CoverSet { ages: number[]; covers: Array<TerrainCover | null>; key: string }
+
+/** Steps between two pictures' covers: the colours change in sixteenths of the way from one to the next. */
+const BLEND_STEPS = 16;
+const blends = new Map<string, TerrainCover>();
+
+/**
+ * The land seen from space at an age (million years ago): the covers of the two pictures either side of it blended
+ * (as the heights are, D156), or the nearer one while the other is still being made; null when neither is ready.
+ */
+export function coverAt(set: CoverSet, age: number): TerrainCover | null {
+  const { a, b, f } = paleoBetween(set, age);
+  const q = Math.round(f * BLEND_STEPS) / BLEND_STEPS;
+  const A = set.covers[a], B = set.covers[b];
+  if (a === b || q === 0) return A ?? B;
+  if (q === 1) return B ?? A;
+  if (!A || !B) return (q < 0.5 ? A ?? B : B ?? A);
+  if (!(A.pixels instanceof Uint8Array) || !(B.pixels instanceof Uint8Array) || A.width !== B.width || A.height !== B.height) return q < 0.5 ? A : B;
+  const key = `${set.key}:${a}:${b}:${q}`, kept = blends.get(key);
+  if (kept) { blends.delete(key); blends.set(key, kept); return kept; }
+  const pa = A.pixels, pb = B.pixels, out = new Uint8Array(pa.length), wb = Math.round(q * 256), wa = 256 - wb;
+  for (let i = 0; i < out.length; i++) out[i] = (pa[i] * wa + pb[i] * wb + 128) >> 8;
+  const c: TerrainCover = { width: A.width, height: A.height, pixels: out, key };
+  blends.set(key, c);
+  while (blends.size > 4) blends.delete(blends.keys().next().value!);
   return c;
 }

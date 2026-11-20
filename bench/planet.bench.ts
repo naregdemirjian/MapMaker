@@ -43,7 +43,7 @@ async function runAll(def: PlanetDefinition, level: number, times?: Record<strin
 }
 
 async function bench() {
-  const rows: string[] = ['| Level | History (500 Myr) | Sunlight | Climate | Water and ice | Biomes | Cover (1024 × 512) | An edit of the air |', '| --- | --- | --- | --- | --- | --- | --- | --- |'];
+  const rows: string[] = ['| Level | History (500 Myr) | Sunlight | Climate | Water and ice | Biomes | Cover (1024 × 512) | An edit of the air | An earlier moment |', '| --- | --- | --- | --- | --- | --- | --- | --- | --- |'];
   for (const level of [5, 6]) {
     const def = definitionFromPreset('earthlike', 1);
     def.history.climate = climateSnapshot(def);
@@ -55,8 +55,13 @@ async function bench() {
     const t0 = performance.now();
     await runAll(edited, level, undefined, { tectonics: all.tectonics, insolation: all.insolation });
     const edit = performance.now() - t0;
+    // An earlier moment's own climate and life, and its land seen from space (D167): the picture 250 Myr ago.
+    const t1 = performance.now(), past = { level, durationMyr: 500, frameEveryMyr: 25, width: 1024, height: 512, frame: 10 };
+    const moment = await STAGES.moment.run(STAGES.moment.inputs(def, past), { tectonics: all.tectonics }, ctx);
+    await STAGES.cover.run(STAGES.cover.inputs(def, past), { moment }, ctx);
+    const earlier = performance.now() - t1;
     const s = (ms: number) => `${(ms / 1000).toFixed(2)} s`;
-    rows.push(`| ${level} (${level === 5 ? 'preview' : 'standard'}) | ${s(t.tectonics)} | ${s(t.insolation)} | ${s(t.climate)} | ${s(t.water)} | ${s(t.biomes)} | ${s(t.cover)} | ${s(edit)} |`);
+    rows.push(`| ${level} (${level === 5 ? 'preview' : 'standard'}) | ${s(t.tectonics)} | ${s(t.insolation)} | ${s(t.climate)} | ${s(t.water)} | ${s(t.biomes)} | ${s(t.cover)} | ${s(edit)} | ${s(earlier)} |`);
   }
   console.log(rows.join('\n'));
 }
@@ -124,6 +129,20 @@ async function validate() {
   say(`| Deserts and steppe: land at 15-35° / within 10° | ${fmt(share('15-35', ['desert', 'steppe', 'saltFlat']))} / ${fmt(share('0-10', ['desert', 'steppe', 'saltFlat']))} % | the subtropical belts / few |`);
   say(`| Tropical forest within 10° | ${fmt(share('0-10', ['rainforest', 'tropicalSeasonal', 'swamp']))} % | most |`);
   say(`| Boreal forest at 50-65°; tundra, polar desert and ice beyond 65° | ${fmt(share('50-65', ['boreal']))} %; ${fmt(share('65-90', ['tundra', 'polarDesert', 'ice']))} % | most; most |`);
+  // Earlier moments' own biomes (D167): the quick picture of today against the full stages.
+  const now = await STAGES.moment.run(STAGES.moment.inputs(def, { level, durationMyr: 500, frameEveryMyr: 25, frame: F - 1 }), { tectonics: all.tectonics }, ctx);
+  const pic = now.biome as Uint8Array, WET = ['wetland', 'swamp', 'lake', 'saltFlat'];
+  let landA = 0, sameA = 0, dryA = 0, sameDry = 0, desertFull = 0, desertPic = 0;
+  for (let c = 0; c < n; c++) {
+    const id = BIOME_IDS[biome[c]];
+    if (id === 'sea') continue;
+    landA += mesh.area[c];
+    if (biome[c] === pic[c]) sameA += mesh.area[c];
+    if (!WET.includes(id)) { dryA += mesh.area[c]; if (biome[c] === pic[c]) sameDry += mesh.area[c]; }
+    if (id === 'desert') desertFull += mesh.area[c];
+    if (BIOME_IDS[pic[c]] === 'desert') desertPic += mesh.area[c];
+  }
+  say(`| An earlier moment's biomes (worked out quickly from its own climate, D167), tried on today | the same biome on ${fmt(100 * sameA / landA)} % of the land, ${fmt(100 * sameDry / dryA)} % besides lakes and wetlands; deserts ${fmt(100 * desertPic / landA, 1)} % of the land (the full stages: ${fmt(100 * desertFull / landA, 1)} %) | — |`);
   // Hack's law from the rivers: main stream length against drainage area.
   const w = hydrology({ mesh, radiusKm: def.body.radiusKm, height: h, temp: all.climate.monthly as Float32Array, precip: all.climate.precipMonthly as Float32Array, sun: all.insolation.monthly as Float32Array, yearDays: derive(def).yearDays });
   const R = def.body.radiusKm, areaKm = new Float64Array(n), longest = new Float64Array(n), up = new Map<number, number[]>();

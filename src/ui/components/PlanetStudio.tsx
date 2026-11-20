@@ -21,7 +21,7 @@ import { CancelledError } from '../../planet/worker/pool.ts';
 import { estimateEdit, measureEdits, type Estimate, type Figure, type HistoryData, type PlanetFacts } from '../../planet/consequences.ts';
 import type { TectonicParams } from '../../planet/tectonics/state.ts';
 import { followCrust, distanceKm } from '../../planet/reconstruct.ts';
-import { LAYERS } from '../../planet/pipeline/stages.ts';
+import { LAYERS, PAST_FIELDS } from '../../planet/pipeline/stages.ts';
 
 type StepId = 'star' | 'planet' | 'interior' | 'air' | 'life' | 'history' | 'explore' | 'edit';
 const STEPS: Array<[StepId, string]> = [['star', '1 Star and orbit'], ['planet', '2 Planet'], ['interior', '3 Interior and plates'], ['air', '4 Air and water'], ['life', '5 Life and biomes'], ['history', '6 History'], ['explore', '7 Simulate and explore'], ['edit', '8 Edit']];
@@ -275,21 +275,26 @@ export function PlanetStudio() {
     if (layer !== 'insolation' && !run) { const g = c.getContext('2d')!; g.fillStyle = '#10171f'; g.fillRect(0, 0, c.width, c.height); setLegend('Simulate the history to see its layers.'); return; }
     const monthly = layer === 'temperatureMonth' || layer === 'precipitationMonth';
     const base = { ...simParams(want), width: c.width, height: c.height };
+    // An earlier moment of the history (D167): the layers its pictures show are that moment's own; the rest are today's.
+    const F = run?.times.length ?? 0, earlier = frame >= 0 && frame < F - 1 ? frame : -1;
+    const ago = earlier >= 0 && run ? `${fmt(run.times[earlier])} million years ago` : '';
     if (layer === 'satellite') {
-      planetPipeline().product('cover', want, base).then((r) => {
+      planetPipeline().product('cover', want, { ...base, ...(earlier >= 0 ? { frame: earlier } : {}) }).then((r) => {
         if (!live) return;
         c.getContext('2d')!.putImageData(new ImageData(new Uint8ClampedArray(r.data.pixels as Uint8Array), c.width, c.height), 0, 0);
-        setLegend(`Today's land seen from space: its biomes, its plants coloured after its star's light${def.life.vegetation === 'red-dwarf' ? ' (a red dwarf: dark red)' : def.life.vegetation === 'blue-star' ? ' (a hot star: yellow to orange)' : def.life.vegetation === 'none' ? ' (no plants: bare ground)' : ''}`);
-        c.dataset.drawn = `${layer}:-1:${r.key}`;
+        setLegend(`${ago ? `The land ${ago}` : "Today's land"} seen from space: its biomes, its plants coloured after its star's light${def.life.vegetation === 'red-dwarf' ? ' (a red dwarf: dark red)' : def.life.vegetation === 'blue-star' ? ' (a hot star: yellow to orange)' : def.life.vegetation === 'none' ? ' (no plants: bare ground)' : ''}`);
+        c.dataset.drawn = `${layer}:${earlier}:${r.key}`;
       }, (e: Error) => { if (live) s.toast(e.message, 'error'); });
       return () => { live = false; };
     }
-    planetPipeline().product('raster', want, { ...base, layer, frame: monthly ? month : frame }).then((r) => {
+    const past = !!PAST_FIELDS[layer as EngineLayer], throughTime = !monthly && (past || LAYERS[layer as EngineLayer].frames);
+    const shown = monthly ? month : past ? earlier : frame;
+    planetPipeline().product('raster', want, { ...base, layer, frame: shown }).then((r) => {
       if (!live) return;
       const { pixels, legend: text } = colourLayer(layer, r.data.raster as Float32Array, c.width, c.height, { min: r.data.min as number, max: r.data.max as number });
       c.getContext('2d')!.putImageData(new ImageData(pixels as unknown as Uint8ClampedArray<ArrayBuffer>, c.width, c.height), 0, 0);
-      setLegend(text);
-      c.dataset.drawn = `${layer}:${monthly ? month : frame}:${r.key}`;
+      setLegend(earlier >= 0 && !throughTime && layer !== 'insolation' ? `Today's (this layer is worked out for the present alone): ${text}` : past && ago ? `${ago}: ${text}` : text);
+      c.dataset.drawn = `${layer}:${shown}:${r.key}`;
     }, (e: Error) => { if (live) s.toast(e.message, 'error'); });
     return () => { live = false; };
   }, [run, layer, frame, month, stale ? null : def]);
@@ -316,9 +321,9 @@ export function PlanetStudio() {
     const rect = c.getBoundingClientRect();
     const lon = ((e.clientX - rect.left) / rect.width) * 360 - 180, lat = 90 - ((e.clientY - rect.top) / rect.height) * 180;
     if (step === 'edit') {
-      // The picture shows a moment of the history (layers through time) or today (the climate, water and life).
-      const k = frame < 0 ? run.times.length - 1 : frame;
-      const ma = layer !== 'satellite' && LAYERS[layer as EngineLayer]?.frames ? run.times[k] : 0;
+      // The picture shows a moment of the history (layers through time, D167) or today (the rest).
+      const k = frame < 0 ? run.times.length - 1 : frame, monthly = layer === 'temperatureMonth' || layer === 'precipitationMonth';
+      const ma = !monthly && (layer === 'satellite' || !!PAST_FIELDS[layer as EngineLayer] || LAYERS[layer as EngineLayer]?.frames) ? run.times[k] : 0;
       setPlace({ at: [Math.round(lon * 10) / 10, Math.round(lat * 10) / 10], ma });
       return;
     }
@@ -535,6 +540,7 @@ export function PlanetStudio() {
               <select value={month} onChange={(e) => setMonth(Number(e.target.value))} data-testid="studio-month">{MONTHS.map((l, i) => <option key={l} value={i}>{l}{i === 0 ? ' (January on an Earth-like orbit)' : i === 6 ? ' (July)' : ''}</option>)}</select></label>}
             {['temperature', 'temperatureMonth', 'precipitation', 'precipitationMonth', 'currents', 'ice'].includes(layer) && <p className="muted">The climate of today over today's land and sea: a seasonal energy balance (D157), winds from the circulation cells, rain carried by them and raised by mountains, the sea's currents (D158, D159).</p>}
             {['koppen', 'biome', 'satellite'].includes(layer) && <p className="muted">Today's biomes (D160): Köppen-Geiger climates by Peel and others' rules; biomes by warmth and dryness (rain over the evaporation the warmth and sunlight allow), with wetlands, ice and mountains from the water and the heights; the planet's own biomes where they fit. Changing plants or biomes in step 4 redraws them at once.</p>}
+            {['temperature', 'precipitation', 'biome', 'satellite'].includes(layer) && <p className="muted" data-testid="studio-past-note">At an earlier moment, the temperature, rain and biomes are that moment's own (D167): the same climate worked out over its own land and sea, starting from the climate the history had then (no lakes or wetlands, which need today's water). The other climate, water and life layers are today's.</p>}
             {['water', 'rivers', 'runoff', 'iceThickness'].includes(layer) && <p className="muted">Today's water (D159): what the rain leaves after evaporation runs off; hollows fill until they spill or their lakes evaporate all they get (salt lakes); rivers by how much water they carry; ice sheets grown in today's climate.</p>}
             <label className="studio-slider"><span>Name</span><input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Aster Prime" data-testid="studio-name" /></label>
             <button className="primary" onClick={use} disabled={problems.length > 0} data-testid="studio-use">{editingId ? 'Apply to this map' : 'Use this planet for a new map'}</button>

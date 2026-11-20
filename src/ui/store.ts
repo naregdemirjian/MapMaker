@@ -17,13 +17,13 @@ import { loadEarthTerrain, EARTH_TERRAIN_KEY, type ElevationGrid } from '../terr
 import { loadPaleo, paleoGridAt, ageOf, type PaleoSet } from '../terrain/paleo.ts';
 import { planetKey, type PlanetParams } from '../terrain/planet.ts';
 import { planetTerrain } from '../terrain/planet-cache.ts';
-import { loadEarthCover, coverSoon, type TerrainCover } from '../terrain/cover.ts';
+import { loadEarthCover, coverSoon, coverAt, type CoverSet, type TerrainCover } from '../terrain/cover.ts';
 import { climateOf } from '../terrain/biomes.ts';
 import type { FieldSource } from '../domain/fields.ts';
 import type { DisasterId } from '../domain/disasters.ts';
 import type { SculptTool } from '../terrain/sculpt.ts';
 import { terrainSourceOf, planetOf, isGeologicalMap, simOf } from '../world-model/world-settings.ts';
-import { simTerrain, simParams, simCover } from './planet-engine.ts';
+import { simTerrain, simParams, simCover, simCoverFrame } from './planet-engine.ts';
 import { keyOf as contentKey } from '../planet/state/hash.ts';
 import type { PlanetDefinition } from '../planet/model/definition.ts';
 import { MAIN_BRANCH, isBaseEvent, type MapSpaceRow } from '../world-model/schema.ts';
@@ -433,29 +433,44 @@ class AppStore {
       }
       return this.earthCover;
     }
-    // A simulated planet's land seen from space (D160): its biomes today; earlier moments are drawn by height.
+    // A simulated planet's land seen from space (D160): its biomes today, and at each earlier picture of its history
+    // its moment's own, blended between pictures (D167).
     if (source === 'sim') {
-      const def = simOf(space);
-      return def && ground.key.endsWith(':paleo:0.0000') ? this.simCoverFor(def) : null;
+      const def = simOf(space), age = /:paleo:(\d+(?:\.\d+)?)/.exec(ground.key);
+      return def && age ? this.simCoverAt(def, Number(age[1])) : null;
     }
     const params = source === 'planet' ? planetOf(space) : null;
     return params ? coverSoon(ground.grid, ground.key, (space?.radius_m ?? 6371008.8) / 1000, climateOf(params), () => this.notify()) : null;
   }
 
-  private simCovers = new Map<string, TerrainCover | 'making'>();
-  /** A simulated planet's land cover today, if it is ready (otherwise it is started, and everything drawn again when it is). */
-  simCoverFor(def: PlanetDefinition): TerrainCover | null {
-    const k = `sim-cover:${contentKey({ def, params: simParams(def) })}`;
-    const have = this.simCovers.get(k);
-    if (have && have !== 'making') return have;
-    if (!have) {
-      this.simCovers.set(k, 'making');
-      simCover(def).then(
-        (c) => { this.simCovers.set(k, { ...c, key: k }); this.notify(); },
-        (e: Error) => { this.simCovers.delete(k); this.toast(e.message, 'error'); },
-      );
+  /** Simulated planets' land seen from space through their histories (D167), the last two planets'. */
+  private simCoverSets = new Map<string, CoverSet & { asked: boolean[] }>();
+  /**
+   * A simulated planet's land cover at an age (million years ago), as far as it is ready: today's is made first, and
+   * the earlier pictures' all at once when an earlier moment is first shown (everything drawn again as each arrives).
+   */
+  simCoverAt(def: PlanetDefinition, age: number): TerrainCover | null {
+    const sim = this.simFor(def);
+    if (!sim) return null;
+    const key = `sim-cover:${contentKey({ def, params: simParams(def) })}`;
+    let set = this.simCoverSets.get(key);
+    if (!set) {
+      set = { ages: sim.set.ages, covers: sim.set.ages.map(() => null), key, asked: sim.set.ages.map(() => false) };
+      this.simCoverSets.set(key, set);
+      while (this.simCoverSets.size > 2) this.simCoverSets.delete(this.simCoverSets.keys().next().value!);
     }
-    return null;
+    const s = set, ask = (i: number) => {
+      if (s.asked[i]) return;
+      s.asked[i] = true;
+      simCover(def, { frame: simCoverFrame(i, s.ages.length) }).then(
+        (c) => { s.covers[i] = { ...c, key: `${key}:${i}` }; this.notify(); },
+        // (Today's is asked for again next time; an earlier picture's is left to the pictures beside it.)
+        (e: Error) => { if (i === 0) { s.asked[i] = false; this.toast(e.message, 'error'); } },
+      );
+    };
+    ask(0);
+    if (age > 0) for (let i = 1; i < s.ages.length; i++) ask(i);
+    return coverAt(s, age);
   }
 
   /** Loads Earth's terrain unless it is there or on its way (everything is drawn again when it arrives). */

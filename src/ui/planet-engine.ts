@@ -8,6 +8,8 @@ import { derive } from '../planet/model/physics.ts';
 import { sha256 } from '../planet/state/hash.ts';
 import type { LayerId, StageParams } from '../planet/pipeline/stages.ts';
 import type { PaleoSet } from '../terrain/paleo.ts';
+import type { CoverSet } from '../terrain/cover.ts';
+import { keyOf } from '../planet/state/hash.ts';
 import type { ElevationGrid } from '../terrain/grid.ts';
 
 /** Workers for a pool: one fewer than the processor's threads (the interface keeps one), from one to eight. */
@@ -103,8 +105,25 @@ export async function simTerrain(def: PlanetDefinition, opts: { onProgress?: (sh
   return { set: { ages, labels, grids }, key };
 }
 
-/** A simulated planet's land seen from space today (D160): its biomes' colours, laid like its heights' pictures. */
-export async function simCover(def: PlanetDefinition, opts: { signal?: AbortSignal } = {}): Promise<{ width: number; height: number; pixels: Uint8Array }> {
-  const r = await planetPipeline().product('cover', def, { ...simParams(def), width: SIM_WIDTH, height: SIM_HEIGHT }, { signal: opts.signal });
+/**
+ * A simulated planet's land seen from space (D160): its biomes' colours, laid like its heights' pictures; today's
+ * (frame −1, the default), or at one of its history's earlier pictures, that moment's own (D167).
+ */
+export async function simCover(def: PlanetDefinition, opts: { frame?: number; signal?: AbortSignal } = {}): Promise<{ width: number; height: number; pixels: Uint8Array }> {
+  const frame = opts.frame ?? -1;
+  const r = await planetPipeline().product('cover', def, { ...simParams(def), width: SIM_WIDTH, height: SIM_HEIGHT, ...(frame >= 0 ? { frame } : {}) }, { signal: opts.signal });
   return { width: r.data.width as number, height: r.data.height as number, pixels: r.data.pixels as Uint8Array };
+}
+
+/**
+ * The frame of a simulated planet's history whose cover is the `i`th of its pictures as the maps keep them (youngest
+ * first, D156): −1 for today, then the history's pictures from the latest back.
+ */
+export const simCoverFrame = (i: number, pictures: number) => (i === 0 ? -1 : pictures - 1 - i);
+
+/** A simulated planet's land seen from space at every picture of its history (D167), youngest first; `key` names them. */
+export async function simCovers(def: PlanetDefinition, ages: number[], opts: { signal?: AbortSignal } = {}): Promise<CoverSet> {
+  const key = `sim-cover:${keyOf({ def, params: simParams(def) })}`;
+  const covers = await Promise.all(ages.map(async (_, i) => ({ ...(await simCover(def, { frame: simCoverFrame(i, ages.length), signal: opts.signal })), key: `${key}:${i}` })));
+  return { ages, covers, key };
 }

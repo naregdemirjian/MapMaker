@@ -18,6 +18,9 @@ const same = (x: TectonicHistory, y: TectonicHistory, what: string) => {
   // The plates' rotations with each picture too (D164).
   assert.equal(y.frameRotations.length, x.frameRotations.length);
   x.frameRotations.forEach((r, f) => assert.equal(hash(y.frameRotations[f]), hash(r), `${what}: rotations in picture ${f}`));
+  // And the climate each picture's moment had, that its own climate and life are worked out from (D167).
+  assert.equal(hash(y.frameCo2!), hash(x.frameCo2!), `${what}: carbon dioxide`);
+  x.frameWarm!.forEach((k, f) => assert.equal(hash(y.frameWarm![f]), hash(k), `${what}: the climate of picture ${f}`));
   assert.deepEqual(y.resume.times, x.resume.times, `${what}: checkpoints at the same moments`);
 };
 

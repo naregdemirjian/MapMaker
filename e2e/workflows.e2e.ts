@@ -4331,10 +4331,25 @@ try {
       return seen.size;
     });
     assert.ok(colours >= 6, `plates in their colours (${colours})`);
+    // That moment's own climate and life (D167): its biomes and its land seen from space, worked out from the climate
+    // it had over its own land and sea; a layer kept for today alone says so. Then back to today.
+    await page.getByTestId('studio-layer').selectOption('biome');
+    await drawn('biome:0:');
+    assert.match(await text('studio-legend'), /^200 million years ago: Biomes: [a-z ,]+…$/);
+    assert.match(await text('studio-past-note'), /that moment's own/);
+    await page.getByTestId('studio-layer').selectOption('satellite');
+    await drawn('satellite:0:');
+    assert.match(await text('studio-legend'), /^The land 200 million years ago seen from space: its biomes/);
+    await h.screenshot('planet-studio-past-biomes');
+    await page.getByTestId('studio-layer').selectOption('koppen');
+    await drawn('koppen:');
+    assert.match(await text('studio-legend'), /^Today's \(this layer is worked out for the present alone\): Köppen-Geiger climates/);
+    await page.getByTestId('studio-frame').fill('8');
+    assert.match(await text('studio-when'), /^Today/);
     // Today's climate over today's land and sea (D157): the year's mean, and the first and seventh months.
     await page.getByTestId('studio-layer').selectOption('temperature');
-    await drawn('temperature:');
-    assert.match(await text('studio-legend'), /Temperature at the surface: -?\d+ °C to \d+ °C/);
+    await drawn('temperature:-1:');
+    assert.match(await text('studio-legend'), /^Temperature at the surface: -?\d+ °C to \d+ °C/);
     await page.getByTestId('studio-layer').selectOption('temperatureMonth');
     await page.getByTestId('studio-month').selectOption('6');
     await drawn('temperatureMonth:6:');
@@ -4351,7 +4366,8 @@ try {
     await drawn('koppen:');
     assert.match(await text('studio-legend'), /Köppen-Geiger climates: .*Af/);
     await page.getByTestId('studio-layer').selectOption('satellite');
-    await drawn('satellite:');
+    await drawn('satellite:-1:');
+    assert.match(await text('studio-legend'), /^Today's land seen from space/);
     const green = await page.evaluate(() => (document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement).dataset.drawn);
     await page.getByTestId('studio-step-life').click();
     await page.getByTestId('studio-control-vegetation').selectOption('red-dwarf');
@@ -4436,6 +4452,18 @@ try {
     assert.ok(r.differ > 100, 'the planet 150 million years ago differs');
     assert.ok(Math.abs(r.land - 0.2) < 0.08, `the sea where the planet has it (${r.land.toFixed(2)} land)`);
     assert.ok(r.start < -1.9e8, 'the timeline reaches back over the history');
+    // Its land seen from space through its history (D167): today's biomes; 150 million years ago, that moment's own
+    // (made when an earlier moment is first shown); 140 million years ago, the pictures either side blended.
+    const covers = () => {
+      const m = (window as any).__mapmaker, s = m.store, space = s.world.get('map_space', s.spaceId);
+      const at = (when: string) => s.coverOf(space, s.terrainOf(space, m.bench.gregorian.parse(when).instant))?.key ?? null;
+      return [at('2000'), at('150 Ma'), at('140 Ma')] as Array<string | null>;
+    };
+    // (Until the pictures either side of 140 million years ago are both made, the nearer stands in.)
+    await page.waitForFunction(`(${covers.toString()})().every((k) => k !== null) && /:0\\.\\d+$/.test((${covers.toString()})()[2])`, null, { timeout: 180_000 });
+    const keys = await page.evaluate(`(${covers.toString()})()`) as string[];
+    assert.equal(new Set(keys).size, 3, `three covers: ${keys.join(', ')}`);
+    assert.match(keys[2], /:0\.\d+$/, 'blended between two pictures');
     await h.screenshot('planet-studio-map');
     // Opened again, its settings are the map's.
     await page.getByTestId('open-planet-studio').click();

@@ -77,6 +77,13 @@ export interface TectonicHistory {
   frameRotations: Float64Array[];
   /** Where this history began (Myr since the beginning): 0, or the checkpoint an earlier history lent it (D163). */
   resumedFrom: number;
+  /**
+   * Per picture, when the history has a climate (D167): the climate it had then, to work out what the picture shows
+   * of its moment's climate and life from (paleo.ts, momentPicture): its coarse temperatures (K) and the factor on the
+   * air's carbon dioxide.
+   */
+  frameWarm?: Float64Array[];
+  frameCo2?: Float64Array;
 }
 
 /** The step that keeps every plate within a fraction of a cell per step. */
@@ -105,7 +112,7 @@ export function runHistory(params: TectonicParams, opts: HistoryOptions): Tecton
   // and these differ, if it ran with the same settings over the same span and pictures.
   let state: TectonicState | null = null, f = 1, from = 0;
   const base = opts.base;
-  if (base && base.params && base.resume && base.frameRotations && paramsBesidesEvents(base.params) === paramsBesidesEvents(params) && base.times.length === F
+  if (base && base.params && base.resume && base.frameRotations && (!params.climate || (base.frameWarm && base.frameCo2)) && paramsBesidesEvents(base.params) === paramsBesidesEvents(params) && base.times.length === F
     && Math.abs(base.times[0] - D) < 1e-9 && resumeEvery) {
     const T = Math.min(D, firstDifference(base.params.events ?? [], params.events ?? []));
     let k = -1;
@@ -128,12 +135,15 @@ export function runHistory(params: TectonicParams, opts: HistoryOptions): Tecton
   const H = new Int16Array(F * n), Pl = new Uint8Array(F * n), K = new Uint8Array(F * n);
   const datumSea = new Float64Array(F), iceAt = new Float64Array(F), riseAt = new Float64Array(F), tempAt = new Float32Array(F);
   const rotations: Float64Array[] = new Array(F);
+  // The climate each picture's moment had, to work out what the picture shows of it from (D167).
+  const warm: Float64Array[] | null = params.climate ? new Array(F) : null, co2At = new Float64Array(F).fill(1);
   const record = (f: number) => {
     recordFrame(st, f, H, Pl, K);
     const r = new Float64Array(8 * st.plates.length);
     st.plates.forEach((p, i) => { r.set(p.q, 8 * i); r.set(p.omega, 8 * i + 4); r[8 * i + 7] = 1; });
     rotations[f] = r;
     datumSea[f] = st.seaLevel; iceAt[f] = st.paleo?.ice ?? 0; riseAt[f] = seaRise(st); tempAt[f] = st.paleo?.meanK ?? 0;
+    if (warm) { warm[f] = st.paleo ? st.paleo.coarseK.slice() : new Float64Array(0); co2At[f] = st.paleo?.co2 ?? 1; }
   };
   if (from > 0) {
     // The pictures up to the checkpoint are the earlier history's (as its run had them, before its sea was redrawn).
@@ -144,6 +154,7 @@ export function runHistory(params: TectonicParams, opts: HistoryOptions): Tecton
       Pl.set(b.plates.subarray(f * n, (f + 1) * n), f * n); K.set(b.kinds.subarray(f * n, (f + 1) * n), f * n);
       datumSea[f] = b.frameDatum[f]; iceAt[f] = b.frameIce[f]; riseAt[f] = b.frameRise[f]; tempAt[f] = b.meanTemps[f];
       rotations[f] = b.frameRotations[f];
+      if (warm) { warm[f] = b.frameWarm![f]; co2At[f] = b.frameCo2![f]; }
     }
   } else {
     updatePaleo(st);
@@ -198,6 +209,7 @@ export function runHistory(params: TectonicParams, opts: HistoryOptions): Tecton
     stats: { steps: state2.steps, ...state2.totals, landShare: land / (4 * Math.PI), continentalShare: cont / (4 * Math.PI), ms: performance.now() - t0 },
     tags, sediment, discharge: state2.discharge.slice(), seaLevels, iceVolumes, meanTemps: tempAt, frameSea,
     frameDatum, frameIce: Float64Array.from(iceAt), frameRise: Float64Array.from(riseAt), params, resume: packed, resumedFrom: from, frameRotations: rotations,
+    ...(warm ? { frameWarm: warm, frameCo2: co2At } : {}),
     ...(checkpoints ? { checkpoints } : {}),
   };
 }
@@ -223,7 +235,7 @@ function updatePaleo(state: TectonicState) {
   if (last && state.time - last.at < PALEO_MYR - 1e-9 && last.co2 === co2) return;
   const n = state.mesh.n, heightM = new Float64Array(n);
   for (let c = 0; c < n; c++) heightM[c] = (state.height[c] - state.seaLevel) * 1000;
-  const p = paleoClimate(state.mesh, heightM, climate, co2, last ? { rain: last.rain, ice: last.ice, coarseK: last.coarseK, meanK: last.meanK } : null);
+  const p = paleoClimate(state.mesh, heightM, climate, co2, last);
   state.paleo = { at: state.time, co2, rain: p.rain, ice: p.ice, coarseK: p.coarseK, meanK: p.meanK };
 }
 

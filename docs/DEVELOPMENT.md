@@ -7,8 +7,13 @@ Companion files: [REQUIREMENTS.md](REQUIREMENTS.md) (checklist against the maste
 The approved architecture is the Claude Doc "Map Maker — Technical Architecture & Development Plan"
 (https://claude.ai/artifact/2JShAV3AWt6iECtNgBTsJN). All twelve of its decisions were approved on 15 November 2026.
 
-## Status at a glance (19 November 2026, Stages 2, 3, 4, 6, 8 to 14 done; Stage 7 mostly done)
+## Status at a glance (20 November 2026, Stages 2, 3, 4, 6, 8 to 14 done; Stage 7 mostly done)
 
+- **Stage 15.5, earlier moments in their own colours, 20 November** (D167): a simulated planet's earlier moments
+  show their own biomes on its map (in the satellite look, blended between its pictures, in exports too) and in the
+  Planet Studio's biome, temperature, rain and seen-from-space layers: each picture's climate is worked out from the
+  climate the history had then, when it is first wanted (0.2 to 0.5 s a picture in a worker); a picture of today
+  matches the full climate, water and life stages on 80 to 86 % of the land (no lakes or wetlands at earlier moments).
 - **Stage 15.4, the deep sea floor, mountains and lakes, 20 November** (D166): old sea floor founders as on the
   Earth (its mean age 47 to 67 Myr; 118 before), so the deep sea is no longer too deep and more subduction raises more
   ranges (0.35 to 1 % of the surface above 2 km at preview; about 1 % of rock on the Earth); straits narrower than a
@@ -405,12 +410,12 @@ The approved roadmap has 14 stages (0–13). Where each stands (brought up to da
 | Improvement pass | In progress | History played in the working view (D119); borders imported from GeoJSON maps of their years, following the borders already there (D120), or from a dataset dating each shape (D123); videos, MP4 and WebM (D121); a shot of the whole history in one click (D122); layers' opacity and border width; each layer as its own export pass (D124); names placed quickly while a shot plays (D125); borders while fronts move and where two changes meet (D126); a globe that turns, for shots (D127); a change over before its land changes hands again (D128); a date that stays still as it changes (D129); how the stars look (D130); star maps as flat charts (D131); realms across the stars as territories with fronts (D132); the solar system side by side (D133); the Earth through geological time (D134), its continents sliding between its maps (D135); fronts that follow the land (D136), and looks for them: soft, glowing, ragged, in patches, an event's own (D137); the Earth as photographed, sharp to city scale (D138); fronts at scale, a hundred changes under way at once (D139); only the strip a front has crossed drawn again, and two faults of partial redraws fixed (D140); fine ground close in, made up below the heights' own detail (D141) | Faster shot playback through many changes |
 | 12 Smart brushes | Done | The geography-aware brush and the strategic brush, with feature weights and live preview, in the brush, the border pen, the Split tool and the features tool (D148) | Forest edges, roads and railways from data |
 | 14 Planetary evolution engine | Done | The technical assessment and plan: `docs/PLANETARY_ENGINE_PLAN.md` (19 November 2026); 14.1 foundations (D152); 14.2 plate tectonics (D153); 14.3 continents over time (D154); 14.4 landscape evolution (D155); 14.5 the Planet Studio (D156); 14.6 the climate I (D157); 14.7 the climate II (D158); 14.8 water and ice (D159); 14.9 biomes (D160); 14.10 Studio II and editing (D161); 14.11 validation and performance (D162) | Done |
-| 15 Planetary engine refinements | In progress | 15.1 edits gathered and re-run together, from the checkpoint before the earliest (D163); 15.2 consequences in numbers, edits on the crust clicked, values set by hand (D164); 15.3 the climate's accuracy (D165); 15.4 the deep sea floor, mountains and lakes (D166) | 15.5 past moments by biome; 15.6 faster climate changes; 15.7 the quick generator's drawing tools |
+| 15 Planetary engine refinements | In progress | 15.1 edits gathered and re-run together, from the checkpoint before the earliest (D163); 15.2 consequences in numbers, edits on the crust clicked, values set by hand (D164); 15.3 the climate's accuracy (D165); 15.4 the deep sea floor, mountains and lakes (D166); 15.5 earlier moments by their own biomes (D167) | 15.6 faster climate changes; 15.7 the quick generator's drawing tools |
 | 13 Branches, calendars and refinement | Done | Each map in a calendar of its own (D149); branches, alternative timelines, compared side by side, in shots (D150); tidying unused borders, a shot's sound track (D151) | Sound mixed into exported videos; projection on the graphics card (D151) |
 
 ## Tests
 
-All pass as of 20 November 2026 (499 unit and randomised tests in 96 files, 23 + 70 + 14 + 8 interface steps). The
+All pass as of 20 November 2026 (503 unit and randomised tests in 97 files, 23 + 70 + 14 + 8 interface steps). The
 interface tests run with the verify mode on (D57): everything the app works out from what was there before is also
 worked out afresh, and any difference stops the test.
 `sh scripts/check-all.sh` runs everything and prints ALL CHECKS PASSED only when every check passed.
@@ -421,7 +426,8 @@ worked out afresh, and any difference stops the test.
 | `test/planet-mesh.test.ts` | 5 | The icosahedral mesh (D152): cells, faces, Euler's formula, areas summing to 4π, neighbours mutual and counter-clockwise, levels nesting; point location against brute force; the Laplacian and gradient against spherical harmonics level by level; conservative transport and diffusion; prolongation and restriction; pictures of fields and their round trip |
 | `test/planet-insolation.test.ts` | 3 | Sunlight (D152): Earth's against Berger's values, solstices and polar night; perihelion and the equinox; global means for five presets; a tidally locked planet's dark side; more tilt, sunnier poles |
 | `test/planet-consequences.test.ts` | 3 | Edits' consequences (D164): estimates by the history's own rules (a crater under two gravities, a flood basalt's volume, a hotspot's chain from its plate's speed, a higher sea's flooding); a re-run measured around each edit and over the planet (an ice age colder while it lasted); crust followed back with its plate and a crater made there landing where it was clicked |
-| `test/planet-resume.test.ts` | 2 | A history going on from a checkpoint (D163): edits added late, taken away, starting on a checkpoint, an ice age changing past climates: the same bytes as a run from the beginning, faster; another setting changed starts again |
+| `test/planet-resume.test.ts` | 2 | A history going on from a checkpoint (D163): edits added late, taken away, starting on a checkpoint, an ice age changing past climates: the same bytes as a run from the beginning (the pictures' rotations and climates too), faster; another setting changed starts again |
+| `test/planet-past.test.ts` | 4 | Earlier moments' own climate and life (D167): a picture of today against the full climate, water and life stages (the same biome on most land besides lakes and wetlands, temperatures and rain close); an ice age colder with more ice and tundra in its pictures; an earlier picture's land seen from space with the planet's own biomes; a map's cover blended between pictures, the nearer standing in |
 | `test/planet-explain.test.ts` | 3 | Why is this here, and edits (D161): a placed hotspot's crust marked as edited and explained; the circulation named; the history keeping its climate |
 | `test/planet-biomes.test.ts` | 3 | Biomes (D160): Köppen-Geiger for fifteen reference stations; biomes by warmth and dryness, refined; the planet's own; plants under other stars; the Earth-like validation |
 | `test/planet-water.test.ts` | 6 | Water on the land (D159): Fill-Spill-Merge conserving water through filling, spilling, merging and overflowing; steady lakes, closed and open; every drop drains downhill to the sea, a closed lake or a basin; sea level exact, flooding monotonic; the real Earth's water budget; a deep basin behind a low sill joins the sea, a shallow one stays land, a hollow's outlet cut (D166) |
@@ -512,7 +518,7 @@ observations; diagnostic: worked out from other fields, not evolved.
 | Water (`water/hydrology.ts`; D159, D166) | Physically based routing (Priority-Flood, Fill-Spill-Merge) with empirical evaporation (Hargreaves, Budyko-Fu); straits and outlets narrower than a cell | The Earth's water budget and lakes | Any land, with or without sea | Runoff as measured (38,600 km³ a year against 40,000); on the Earth's land fresh lakes 51,800 km³ and salt 7,700 against 91,000 and 85,000: the deep lakes narrower than a cell, the Caspian joining the sea, plateau basins keeping shallow lakes |
 | Ice (`water/ice.ts`; D159) | Physically based flow (shallow ice, Glen's law) with empirical melt (degree days) | Vialov's profile; Greenland and Antarctica's balance | Ice sheets on land on coarse cells | Domes 18 % thick against the analytical profile at 480 km cells; ice ages grow less ice at coasts than before D165 (land's own, warmer summers) |
 | The sea's level (`water/sealevel.ts`; D159) | Physically based: conserved water over the heights | Exact | Every picture of a history | The history's own steps keep the set share of sea (only the pictures follow the volume) |
-| Past climates (`climate/paleo.ts`; D159) | The same models, coarse and quick | As above | Erosion's rain and the ice on land over a history | Every 50 Myr; ice from a volume-area scaling, not the flow |
+| Past climates (`climate/paleo.ts`; D159, D167) | The same models, coarse and quick | As above; a picture of today against the full stages | Erosion's rain and the ice on land over a history; each picture's biomes, temperatures and rain | Every 50 Myr for the history; a picture's own on demand, the same biome as the full stages on 80 to 86 % of the land (no lakes or wetlands); ice from a volume-area scaling, not the flow |
 | Biomes (`life/biomes.ts`; D160) | Empirical classifications (Köppen-Geiger by Peel et al.; Whittaker by aridity) | Fifteen reference stations; the Earth's belts | Any climate the engine makes | Inherit the climate's errors: on the Earth's land A 20, B 30, C 14, D 18, E 18 % against 19, 30, 13, 25, 12 (B 42 % before D165) |
 | Explanations (`explain.ts`; D161) | Diagnostic: words from the fields | — | Today's planet | The circulation named by rules of thumb (latitude, upwind ground) |
 
@@ -520,14 +526,16 @@ observations; diagnostic: worked out from other fields, not evolved.
 
 One thread, the development container, the Earth-like preset over 500 Myr (D162):
 
-| Level | History | Sunlight | Climate | Water and ice | Biomes | Cover (1024 × 512) | An edit of the air |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| 5 (preview, 240 km cells) | 5.5 s | 0.01 s | 1.0 to 2.4 s | 0.13 s | 0.03 s | 0.18 s | 1.0 to 2.3 s |
-| 6 (standard, 110 km) | 24 s | 0.01 s | 1.0 s | 0.21 s | 0.04 s | 0.18 s | 1.0 s |
+| Level | History | Sunlight | Climate | Water and ice | Biomes | Cover (1024 × 512) | An edit of the air | An earlier moment (D167) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 5 (preview, 240 km cells) | 5.5 s | 0.01 s | 1.0 to 2.4 s | 0.13 s | 0.03 s | 0.18 s | 1.0 to 2.3 s | 0.35 s |
+| 6 (standard, 110 km) | 24 s | 0.01 s | 1.0 s | 0.21 s | 0.04 s | 0.18 s | 1.0 s | 0.40 s |
 
 Budgets (plan 8.4): history settings at preview in a few seconds (met); simulating at standard under a minute (met);
 climate, water or life settings within 0.5 s (not met: about 1 s, the energy balance's spin-up). Where the time goes:
-the history's tectonic steps about half of it, its past climates a quarter.
+the history's tectonic steps about half of it, its past climates a quarter. An earlier moment's biomes and picture
+(its climate worked out, then drawn at 1024 × 512) are made in a worker when first shown, the pictures of a history
+shared among the workers.
 
 ## Performance, 19 November 2026 (`bench/render.bench.ts`; large-scale runs with the new transitions)
 

@@ -155,10 +155,17 @@ export function customBiomeOf(p: Place, rules: CustomBiome[]): CustomBiome | nul
   if (p.water === WATER.sea) return null;
   let mat = 0, map = 0;
   for (let m = 0; m < p.temp.length; m++) { mat += p.temp[m] / p.temp.length; map += p.precip[m]; }
+  return customBiomeFor(mat, map, seasonality(p.precip), p.height, rules);
+}
+
+/**
+ * The first of a planet's own biomes (by priority) whose conditions are met by a place's year: its mean temperature
+ * (°C), rain and snow (mm), how seasonal the rain is (0 to 1) and its height (m); or null.
+ */
+export function customBiomeFor(mat: number, map: number, season: number, height: number, rules: CustomBiome[]): CustomBiome | null {
   const within = (v: number, r?: [number, number]) => !r || (v >= r[0] && v <= r[1]);
-  const season = seasonality(p.precip);
   for (const b of [...rules].sort((a, b2) => a.priority - b2.priority)) {
-    if (within(mat, b.tempC) && within(map, b.precipMm) && within(season, b.seasonality) && within(p.height, b.elevationM)) return b;
+    if (within(mat, b.tempC) && within(map, b.precipMm) && within(season, b.seasonality) && within(height, b.elevationM)) return b;
   }
   return null;
 }

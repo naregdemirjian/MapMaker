@@ -61,6 +61,45 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D167. Earlier moments in their own colours: each picture's climate and biomes (Stage 15.5)
+
+- **Asked.** Colour the past by biome: a simulated planet's earlier moments were drawn by height on its map, and the
+  Planet Studio's temperature, rain, biome and "seen from space" layers showed today's whatever moment was chosen.
+- **Found.** The history works out a quick climate every 50 Myr (D159) for its erosion and ice, but kept none of it
+  with its pictures (every 25 Myr), and plates move up to 2,500 km in 25 Myr, so a past climate cannot be laid on a
+  later picture. Worked out inside the history at every picture, the pictures' climates would slow a 500 Myr history
+  at the preview level from 5.5 s to 7 s; and that quick climate's rain, on 1,000 km cells, gives a picture of today
+  half the full stages' deserts (6.9 % of the land against 13.5; the rest steppe), so colours would jump between the
+  last earlier picture and today.
+- **Built.**
+  - The history keeps, with each picture, the climate it had then (its coarse temperatures, 642 values, and the
+    factor on the air's carbon dioxide from ice ages and greenhouse periods): about 100 KB for 21 pictures. Resumed
+    histories keep them exactly (D163).
+  - A stage, `moment` (`climate/paleo.ts`, `momentPicture`), works out what one picture shows when it is wanted:
+    the same energy balance started from the climate the history had then (two to four years), rain on the present's
+    480 km cells every third month, evaporation as the water stage's (Hargreaves), snow that outlasts the summer as
+    ice, then each cell's biome by the Earth's rules, the year's mean temperature, rain and how seasonal the rain is.
+    No lakes or wetlands (they need the water stage); the history itself unchanged.
+  - The `cover` stage at a picture (`frame`) colours its moment's biomes as today's are (plants after the star's
+    light, the planet's own biomes by their conditions); the `raster` stage draws the biome, temperature and rain
+    layers of an earlier picture from it.
+  - Maps (`terrain/cover.ts`, `coverAt`): a simulated planet's land cover at a date blends the two pictures either
+    side in sixteenths, as its heights blend; today's is made first and the earlier pictures' when an earlier moment
+    is first shown, the nearer one standing in until the other is made. Exports carry them too (before, a simulated
+    map's export had no biome colours even today).
+  - The Planet Studio shows the moment chosen for those layers ("200 million years ago: Biomes…", "The land 200
+    million years ago seen from space"); a layer kept for today alone says so; a place clicked on an earlier
+    moment's biomes is on that moment's map.
+- **Result.** A picture of today agrees with the full stages on 80 % of the land (Earth-like, preview level; 86 % at
+  the standard level), 84 to 91 % besides lakes and wetlands over four planets; deserts 12.0 % against 13.5. Temperatures within 0.7 K
+  and rain within 5 % of the climate stage's on average. An ice age of strength 2 in the history: its pictures 6 K
+  colder on land, ice and tundra on 16 % of the land against 4. A picture takes 0.2 to 0.3 s at the preview level and
+  0.3 to 0.5 s at the standard level, in a worker; the history's time is as before.
+- **Still wrong, and why.** No lakes, wetlands or floodplains at earlier moments (10 % of today's land on the
+  Earth-like planet is wetland or swamp); no ice sheets' flow (snowy land is ice, as the history's own estimate);
+  Köppen-Geiger classes and the other climate and water layers are today's only. Between two pictures the colours
+  blend in place, as the heights do, rather than move with the plates.
+
 ### D166. The deep sea floor, mountains and lakes (Stage 15.4)
 
 - **Asked.** Fix the inaccuracies D162 measured: the deep sea floor too deep (its depths' peak at 5.5 to 6 km

@@ -21,6 +21,8 @@ import { rasterizeNearest } from '../mesh/transfer.ts';
 import { runHistory, type TectonicHistory } from '../tectonics/history.ts';
 import type { TectonicParams } from '../tectonics/state.ts';
 import type { FieldArray } from '../state/codec.ts';
+import { momentColours, type Moment } from '../life/past.ts';
+import { momentPicture } from '../climate/paleo.ts';
 
 /** Changes whenever any model changes its results, so nothing made before is reused. */
 export const ENGINE_VERSION = 1;
@@ -90,6 +92,14 @@ export const LAYERS = {
   boundaries: { stage: 'tectonics', field: 'boundary', unit: '', label: 'Plate boundaries', frames: false, categories: true },
 } as const;
 export type LayerId = keyof typeof LAYERS;
+
+/**
+ * Layers shown at the history's earlier moments too (D167), from what each picture's moment's own climate made
+ * (the moment stage). At the present (frame −1) they are the climate and life stages' own.
+ */
+export const PAST_FIELDS: Partial<Record<LayerId, 'biome' | 'temp' | 'rain'>> = { biome: 'biome', temperature: 'temp', precipitation: 'rain' };
+/** Whether a picture of a layer is of an earlier moment (D167). */
+const pastOf = (p: StageParams) => !!PAST_FIELDS[p.layer ?? 'insolation'] && (p.frame ?? -1) >= 0;
 
 /** What the tectonic history reads from a definition, for a history of `durationMyr` ending at the present. */
 export function tectonicParams(live: PlanetDefinition, level: number, durationMyr = 500): TectonicParams {
@@ -163,7 +173,7 @@ export const STAGES: Record<string, StageDef> = {
   /** The planet's tectonic history: plates, crust and heights through time (a preview at coarse levels). */
   tectonics: {
     id: 'tectonics',
-    version: 6,
+    version: 7,
     deps: () => [],
     inputs: (def, p) => ({
       ...(tectonicParams(def, p.level, p.durationMyr ?? 500) as unknown as ProductData),
@@ -297,15 +307,45 @@ export const STAGES: Record<string, StageDef> = {
     },
   },
 
-  /** The land's colours seen from space as a picture (RGBA, smooth between cells): a map's satellite look (D160). */
+  /**
+   * What one of the history's pictures (`frame`; −1 or none: the last) shows of its moment's climate and life
+   * (D167): worked out from the picture's heights and the climate the history had then (paleo.ts, momentPicture).
+   */
+  moment: {
+    id: 'moment',
+    version: 1,
+    deps: () => ['tectonics'],
+    inputs: (_def, p) => ({ level: p.level, frame: p.frame ?? -1 }),
+    run: (inputs, deps, ctx) => {
+      const T = deps.tectonics, mesh = meshAt(inputs.level as number), n = mesh.n;
+      const params = T.params as unknown as TectonicParams, times = T.times as Float64Array, F = times.length;
+      if (!params.climate || !T.frameWarm) throw new Error('This history keeps no climate of its moments.');
+      const frame = inputs.frame as number, f = frame < 0 || frame >= F ? F - 1 : frame;
+      const height = (T.heights as Int16Array).slice(f * n, (f + 1) * n), warm = (T.frameWarm as Float64Array[])[f];
+      const p = momentPicture(mesh, height, params.climate, (T.frameCo2 as Float64Array)[f], warm.length ? warm : null);
+      ctx.progress(1, 1);
+      return { biome: p.biome, temp: p.temp, rain: p.rain, season: p.season, height, ma: times[f] };
+    },
+  },
+
+  /**
+   * The land's colours seen from space as a picture (RGBA, smooth between cells): a map's satellite look (D160); at
+   * one of the history's earlier pictures (`frame` 0 or more, D167), that moment's own biomes.
+   */
   cover: {
     id: 'cover',
-    version: 1,
-    deps: () => ['biomes'],
-    inputs: (_def, p) => ({ level: p.level, width: p.width ?? 1024, height: p.height ?? 512 }),
+    version: 2,
+    deps: (p) => ((p.frame ?? -1) >= 0 ? ['moment'] : ['biomes']),
+    inputs: (def, p) => ({
+      level: p.level, width: p.width ?? 1024, height: p.height ?? 512,
+      ...((p.frame ?? -1) >= 0 ? { frame: p.frame!, life: def.life as unknown as ProductData } : {}),
+    }),
     run: (inputs, deps, ctx) => {
       const mesh = meshAt(inputs.level as number), n = mesh.n, w = inputs.width as number, h = inputs.height as number;
-      const colour = deps.biomes.colour as Uint8Array, out = new Uint8Array(4 * w * h);
+      const colour = inputs.frame !== undefined
+        ? momentColours(deps.moment as unknown as Moment, inputs.life as unknown as PlanetDefinition['life'])
+        : deps.biomes.colour as Uint8Array;
+      const out = new Uint8Array(4 * w * h);
       for (let k = 0; k < 3; k++) {
         const ch = new Float32Array(n);
         for (let c = 0; c < n; c++) ch[c] = colour[3 * c + k];
@@ -321,17 +361,22 @@ export const STAGES: Record<string, StageDef> = {
   /** A picture of a layer: the field drawn on an equirectangular grid, with its range. */
   raster: {
     id: 'raster',
-    version: 2,
-    deps: (p) => [LAYERS[p.layer ?? 'insolation'].stage],
+    version: 3,
+    // (An earlier moment of a layer the history's pictures show, from the history alone: D167.)
+    deps: (p) => [pastOf(p) ? 'moment' : LAYERS[p.layer ?? 'insolation'].stage],
     inputs: (_def, p) => ({ level: p.level, width: p.width ?? 512, height: p.height ?? 256, layer: p.layer ?? 'insolation', frame: p.frame ?? -1 }),
     run: (inputs, deps, ctx) => {
-      const layer = LAYERS[inputs.layer as LayerId];
+      const layer = LAYERS[inputs.layer as LayerId], past = PAST_FIELDS[inputs.layer as LayerId];
       const mesh = meshAt(inputs.level as number), n = mesh.n;
-      let field = deps[layer.stage][layer.field] as Float32Array | Int16Array | Uint8Array;
-      if (layer.frames) {
-        const frames = field.length / n, f = inputs.frame as number;
-        const k = f < 0 || f >= frames ? frames - 1 : f;
-        field = field.subarray(k * n, (k + 1) * n);
+      let field: Float32Array | Int16Array | Uint8Array | Int8Array | Uint16Array;
+      if (past && (inputs.frame as number) >= 0) field = deps.moment[past] as Uint8Array | Int8Array | Uint16Array;
+      else {
+        field = deps[layer.stage][layer.field] as Float32Array | Int16Array | Uint8Array;
+        if (layer.frames) {
+          const frames = field.length / n, f = inputs.frame as number;
+          const k = f < 0 || f >= frames ? frames - 1 : f;
+          field = field.subarray(k * n, (k + 1) * n);
+        }
       }
       const w = inputs.width as number, h = inputs.height as number;
       const raster = layer.categories ? rasterizeNearest(mesh, field, w, h, new Float32Array(w * h)) : rasterize(mesh, field, w, h);

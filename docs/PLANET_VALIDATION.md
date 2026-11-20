@@ -22,6 +22,7 @@ and everything else is this engine's. Measured values are approximate climatolog
 | Deserts and steppe: land at 15-35° / within 10° | 56 / 0 % | the subtropical belts / few |
 | Tropical forest within 10° | 80 % | most |
 | Boreal forest at 50-65°; tundra, polar desert and ice beyond 65° | 23 %; 95 % | most; most |
+| An earlier moment's biomes (worked out quickly from its own climate, D167), tried on today | the same biome on 80 % of the land, 91 % besides lakes and wetlands; deserts 12.0 % of the land (the full stages: 13.5 %) | — |
 | Hack's law: main stream length ∝ area^h | h = 0.64 (42 cells draining over 20 cells) | 0.5 to 0.6 |
 
 ## The real Earth's heights with this engine's climate, water and biomes (level 5)
