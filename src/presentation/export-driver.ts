@@ -17,7 +17,8 @@ import { eventShown, entityStyle } from '../domain/commands.ts';
 import { isFeatureKind } from '../render-engine/feature-style.ts';
 import { preloadImages, prepareVideos } from '../render-engine/assets.ts';
 import { basemapSourceOf, loadBasemap, loadBasemapDetail, loadDatasetRecords, DEFAULT_BASEMAP_STYLE, type Basemap, type BasemapStyle } from '../render-engine/basemap.ts';
-import { shown, minLakeKm2, terrainLook, seaLevelPoints, planetOf, sculptOf, terrainSourceOf, isSpaceMap, spaceSettingsOf, isPaleoEarth, calendarOfSpace, simOf, statisticsOf } from '../world-model/world-settings.ts';
+import { AFFINITY_KINDS, RAMP_STOPS, type ColourBy } from '../domain/affinity.ts';
+import { shown, minLakeKm2, terrainLook, seaLevelPoints, planetOf, sculptOf, terrainSourceOf, isSpaceMap, spaceSettingsOf, isPaleoEarth, calendarOfSpace, simOf, statisticsOf, colourByOfSpace } from '../world-model/world-settings.ts';
 import { simTerrain, simCovers, quickPlanetCover } from '../ui/planet-engine.ts';
 import { makeSpaceView } from '../space/space-view.ts';
 import { SpaceRenderer } from '../space/space-renderer.ts';
@@ -156,6 +157,14 @@ export function drawShotOverlays(ctx: CanvasRenderingContext2D, width: number, h
   // (Dates in the calendar of the shot's map, D149.)
   const cal = calendarOfSpace(world.get('map_space', shot.spaceId));
   const rects = drawOverlays(ctx, width, height, overlaysAt(shot, frame, t, cal, statisticsOf(world.get('map_space', shot.spaceId))), width / 1920, DEFAULT_STYLE.font, project);
+  // The legend of a map coloured by closeness (D174).
+  const by = colourByOfSpace(world.get('map_space', shot.spaceId));
+  if (by?.legend) {
+    const focus = world.get('entity', by.focus);
+    const name = focus ? (engine?.nameAt(focus.id, t) ?? focus.name) : '';
+    const r = drawClosenessLegend(ctx, width, height, width / 1920, by, name);
+    if (r) rects.push(r);
+  }
   const box = eventsBoxOf(shot.eventsBox);
   if (!box.show) return rects;
   const groups = box.groups ? new Set(box.groups) : null;
@@ -163,6 +172,31 @@ export function drawShotOverlays(ctx: CanvasRenderingContext2D, width: number, h
   const r = drawEventsBox(ctx, width, height, width / 1920, box, t, events, cal);
   if (r) rects.push({ id: EVENTS_BOX_ID, ...r });
   return rects;
+}
+
+/** The legend of a map coloured by closeness (D174): what is measured, from whom, and the ramp from far to close. */
+function drawClosenessLegend(ctx: CanvasRenderingContext2D, width: number, height: number, u: number, by: ColourBy, focus: string): OverlayRect | null {
+  const kind = AFFINITY_KINDS.find((k) => k.id === by.kind)!;
+  const title = `${by.kind === 'overall' ? 'How close to' : `${kind.name} close to`} ${focus}`;
+  const pad = 14 * u, barW = 300 * u, barH = 14 * u, size = 24 * u, small = 16 * u;
+  ctx.save();
+  ctx.font = `600 ${size}px "Segoe UI", Arial, sans-serif`;
+  const w = Math.max(barW, ctx.measureText(title).width) + 2 * pad, h = size + barH + small + 4 * pad;
+  const x = 0.03 * width, y = 0.05 * height;
+  ctx.fillStyle = 'rgba(10,14,22,0.78)';
+  ctx.beginPath(); ctx.roundRect(x, y, w, h, 10 * u); ctx.fill();
+  ctx.fillStyle = '#f6f1e7'; ctx.textBaseline = 'top';
+  ctx.fillText(title, x + pad, y + pad);
+  const g = ctx.createLinearGradient(x + pad, 0, x + pad + barW, 0);
+  RAMP_STOPS.forEach((c, i) => g.addColorStop(i / (RAMP_STOPS.length - 1), c));
+  const by0 = y + 2 * pad + size;
+  ctx.fillStyle = g; ctx.fillRect(x + pad, by0, barW, barH);
+  ctx.font = `${small}px "Segoe UI", Arial, sans-serif`;
+  ctx.fillStyle = '#d9d2c4';
+  ctx.fillText('Nothing shared', x + pad, by0 + barH + pad / 2);
+  ctx.textAlign = 'right'; ctx.fillText('Closest', x + pad + barW, by0 + barH + pad / 2);
+  ctx.restore();
+  return { id: 'closeness-legend', x, y, w, h };
 }
 
 /**

@@ -19,6 +19,7 @@ import { ShotsPanel, ShotEditor, ShotTimeline } from './components/Presentation.
 import { LabelStyleDialog } from './components/LabelStyles.tsx';
 import { AddCountriesDialog } from './components/AddCountries.tsx';
 import { AddCitiesDialog } from './components/Cities.tsx';
+import { ColourByDialog } from './components/ColourBy.tsx';
 import { ImportBordersDialog } from './components/ImportBorders.tsx';
 import { SettingsDialog } from './components/Settings.tsx';
 import { NewLayerDialog } from './components/Features.tsx';
@@ -100,6 +101,7 @@ export function App() {
       {s.dialog === 'label-style' && <LabelStyleDialog onClose={() => s.set({ dialog: null })} />}
       {s.dialog === 'add-countries' && <AddCountriesDialog onClose={() => s.set({ dialog: null })} />}
       {s.dialog === 'add-cities' && <AddCitiesDialog onClose={() => s.set({ dialog: null })} />}
+      {s.dialog === 'colour-by' && <ColourByDialog />}
       {s.dialog === 'import-borders' && <ImportBordersDialog onClose={() => s.set({ dialog: null })} />}
       <OfflineNotice />
       <Toasts />

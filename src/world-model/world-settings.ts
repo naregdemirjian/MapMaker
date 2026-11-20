@@ -9,6 +9,7 @@ import { skyLookOf, type SkyLook } from '../space/sky-look.ts';
 import { calendarOf, calendarProblems, gregorian, type Calendar, type CalendarDef } from '../core-time/index.ts';
 import { cleanStatistics, type Statistic } from '../presentation/statistics.ts';
 import { cityFilterOf, type CityFilter } from '../domain/places.ts';
+import { colourByOf, type ColourBy } from '../domain/affinity.ts';
 
 /** The reference geography a world shows under its territories. */
 export type BasemapSource = 'natural-earth' | 'none';
@@ -49,6 +50,8 @@ export interface WorldSettings {
   calendar?: CalendarDef;
   /** Numbers kept over time (D171), shown in shots' texts by their names in braces. */
   statistics?: Statistic[];
+  /** Countries coloured by how close each is to one of them (D174); absent: their own colours. */
+  colourBy?: unknown;
 }
 
 /** A map's statistics (D171), cleaned. */
@@ -78,6 +81,11 @@ export function shown(space: Pick<MapSpaceRow, 'settings'> | null | undefined, w
 export function minLakeKm2(space: Pick<MapSpaceRow, 'settings'> | null | undefined): number {
   const v = space ? worldSettings(space).show?.minLakeKm2 : 0;
   return typeof v === 'number' && v > 0 ? v : 0;
+}
+
+/** A map's colouring by closeness (D174), or null. */
+export function colourByOfSpace(space: Pick<MapSpaceRow, 'settings'> | null | undefined): ColourBy | null {
+  return space ? colourByOf(worldSettings(space).colourBy) : null;
 }
 
 /** Which cities a map shows (D173). */

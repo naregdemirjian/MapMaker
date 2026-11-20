@@ -838,6 +838,37 @@ try {
     await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 0, lat: 0, zoom: 0, rotation: 0, projection: 'equirectangular' }));
   });
 
+  await step('Colour by closeness (D174): today\'s countries coloured by how close each is to Armenia, economically; their own colours back in one step', async () => {
+    await page.getByTestId('open-add-countries').click();
+    await page.getByTestId('add-countries').waitFor();
+    for (const c of ['Armenia', 'Russia', 'Turkey']) { await page.getByTestId('country-search').fill(c); await page.getByTestId(`country-${c}`).check(); }
+    await page.getByTestId('add-countries-go').click();
+    await page.getByTestId('add-countries').waitFor({ state: 'detached', timeout: 60000 });
+    await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 40, lat: 47, zoom: 2.6, rotation: 0, projection: 'mercator' }));
+    await page.waitForTimeout(600);
+    const russia: [number, number] = [45, 55], turkey: [number, number] = [29.6, 38.6];
+    const before = [await canvasPixel(russia), await canvasPixel(turkey)];
+    await page.getByTestId('open-colour-by').click();
+    await page.getByTestId('colour-by-focus').selectOption({ label: 'Armenia' });
+    await page.getByTestId('colour-by-economic').check();
+    const list = await page.getByTestId('colour-by-list').innerText();
+    assert.match(list.split('\n')[0], /Russia/, `Russia closest economically: ${list.slice(0, 120)}`);
+    assert.match(list, /Eurasian Economic Union/);
+    await page.getByTestId('colour-by-apply').click();
+    await page.waitForTimeout(700);
+    const after = [await canvasPixel(russia), await canvasPixel(turkey)];
+    assert.notDeepEqual(after[0], before[0], 'Russia recoloured');
+    assert.ok(after[0][1] > after[1][1] + 40 && after[1][2] > after[1][1], `Russia (close: yellow) brighter than Turkey (far: blue-violet): ${after[0]} vs ${after[1]}`);
+    await screenshot('colour-by-closeness');
+    await page.getByTestId('open-colour-by').click();
+    await page.getByTestId('colour-by-off').click();
+    await page.waitForTimeout(700);
+    assert.deepEqual(await canvasPixel(russia), before[0], 'their own colours again');
+    for (let i = 0; i < 3; i++) await page.getByTestId('undo').click();
+    await page.waitForFunction(() => !(window as any).__mapmaker.store.world.all('entity').some((e: any) => e.name === 'Russia'));
+    await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 0, lat: 0, zoom: 0, rotation: 0, projection: 'equirectangular' }));
+  });
+
   await step('History Health reports no problems', async () => {
     await page.getByTestId('mode-world').click();
     await page.getByTestId('health').click();

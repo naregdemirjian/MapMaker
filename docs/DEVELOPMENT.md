@@ -9,6 +9,9 @@ The approved architecture is the Claude Doc "Map Maker — Technical Architectur
 
 ## Status at a glance (20 November 2026, Stages 2, 3, 4, 6, 8 to 14 done; Stage 7 mostly done)
 
+- **Countries coloured by closeness, 20 November** (D174): "Colour countries by closeness…" in a map's options colours
+  today's countries by how close each is to one of them, militarily, economically, religiously, by language or
+  overall, with a legend in shots; their own colours come back in one step.
 - **Today's cities and capitals, 20 November** (D173): 7,289 places from Natural Earth, added under Cities
   ("Add today's cities…") or with today's countries; "What is shown" chooses which a map shows, by share of the
   country's people, size, capitals and economic centres, or only the cities ticked.
@@ -449,7 +452,7 @@ The approved roadmap has 14 stages (0–13). Where each stands (brought up to da
 
 ## Tests
 
-All pass as of 20 November 2026 (521 unit and randomised tests in 102 files, 24 + 71 + 14 + 8 interface steps). The
+All pass as of 20 November 2026 (524 unit and randomised tests in 103 files, 25 + 71 + 14 + 8 interface steps). The
 interface tests run with the verify mode on (D57): everything the app works out from what was there before is also
 worked out afresh, and any difference stops the test.
 `sh scripts/check-all.sh` runs everything and prints ALL CHECKS PASSED only when every check passed.
@@ -459,6 +462,7 @@ worked out afresh, and any difference stops the test.
 | `test/planet-physics.test.ts` | 6 | The planetary engine's definitions and physics (D152): every preset valid and what it says; Earth, Mars and Venus from their settings (gravity, years, days, sunlight, albedo, temperatures); Kepler, the Moon's and Mars's masses from their sizes, the Sun and red dwarfs, the faint young Sun, the habitable zone, early heat, tidal locking; each setting moving the results the right way; overrides and notes; stored definitions read back |
 | `test/planet-mesh.test.ts` | 5 | The icosahedral mesh (D152): cells, faces, Euler's formula, areas summing to 4π, neighbours mutual and counter-clockwise, levels nesting; point location against brute force; the Laplacian and gradient against spherical harmonics level by level; conservative transport and diffusion; prolongation and restriction; pictures of fields and their round trip |
 | `test/planet-insolation.test.ts` | 3 | Sunlight (D152): Earth's against Berger's values, solstices and polar night; perihelion and the equinox; global means for five presets; a tidally locked planet's dark side; more tilt, sunnier poles |
+| `test/affinity.test.ts` | 3 | Closeness of today's countries (D174): every name in the data one of today's; alliances, blocs, religions and languages scored; a map coloured and back |
 | `test/places.test.ts` | 3 | Today's cities (D173): capitals, shares, ranks and world cities from the data; which cities each filter keeps; added as cities that remember them, the map's filter stored |
 | `test/arrow-step.test.ts` | 1 | The arrow keys' steps of the date viewed (D172): a day, a week, a month, a year; Cmd as Ctrl |
 | `test/statistics.test.ts` | 3 | Statistics (D171): values between dates by a steady share, amount or at once; written as money, people, numbers and shares, and read back from words; a map's statistics filling "{name}" in a shot's texts as history goes |

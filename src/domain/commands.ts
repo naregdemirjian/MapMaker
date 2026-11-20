@@ -32,6 +32,7 @@ import { cleanStatistics, type Statistic } from '../presentation/statistics.ts';
 export { FEATURE_KINDS, DEFAULT_FEATURE_STYLE, isFeatureKind, featureStyle, type FeatureKind, type FeatureStyle } from '../render-engine/feature-style.ts';
 import { featureStyle as featureLook } from '../render-engine/feature-style.ts';
 import { cityFilterOf, placeMeta, placeMetaOf, type CityFilter, type TodayPlace } from './places.ts';
+import { colourByOf, type ColourBy } from './affinity.ts';
 import { ringFromMapPoints } from '../render-engine/stroke.ts';
 import { TRANSITION_LOOKS } from '../presentation/sequence.ts';
 import { flatRadiusKm } from '../render-engine/camera.ts';
@@ -355,6 +356,16 @@ export function setMapCalendar(world: World, spaceId: string, def: CalendarDef |
   const { calendar: _old, ...rest } = worldSettings(space);
   const label = def ? `Give "${space.name}" the ${def.name} calendar` : `Use the Gregorian calendar for "${space.name}"`;
   return run(world, label, (tx) => { tx.update('map_space', { ...space, settings: JSON.stringify(def ? { ...rest, calendar: def } : rest) }); });
+}
+
+/** Colour a map's countries by how close each is to one of them (D174), or (null) by their own colours again. */
+export function setColourBy(world: World, spaceId: string, by: ColourBy | null): CommandResult {
+  const space = world.get('map_space', spaceId);
+  if (!space) throw new Error('That map no longer exists.');
+  if (by && !world.get('entity', by.focus)) throw new Error('Choose the country to measure from.');
+  const { colourBy: _old, ...rest } = worldSettings(space);
+  const next = by ? colourByOf(by) : null;
+  return run(world, next ? 'Colour countries by closeness' : 'Colour countries by their own colours', (tx) => { tx.update('map_space', { ...space, settings: JSON.stringify(next ? { ...rest, colourBy: next } : rest) }); });
 }
 
 /** A map's statistics (D171): numbers kept over time and shown in shots' texts as "{name}". The whole list, in one step. */

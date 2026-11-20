@@ -61,6 +61,29 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D174. Today's countries coloured by how close each is to one of them
+
+- **Asked.** A setting to colour today's countries by how close they are militarily, economically, religiously and
+  in a couple of other ways.
+- **Data** (`domain/affinity-data.ts`, as of 2026, from the organisations' lists of members and Pew's estimates of
+  religion): 18 alliances and mutual-defence treaties (NATO, the EU's clause, the CSTO without Armenia, frozen since
+  2024, the Union State, Russia and North Korea's treaty, the United States' treaty allies, the GCC, Saudi Arabia
+  and Pakistan's pact of 2025, Turkey and Azerbaijan's Shusha Declaration, the Alliance of Sahel States, the SCO,
+  Russia's base at Gyumri…), each weighted by how binding it is; 33 economic groups (the EU, EEA, EAEU, USMCA,
+  Mercosur, ASEAN, RCEP, CPTPP, the GCC, ECOWAS, SACU, AfCFTA, BRICS, the G7, the OECD, the Organization of Turkic
+  States…); each country's majority religion (15 kinds) and language of government with its family and branch.
+- **Measures** (`domain/affinity.ts`): shared groups combine as 1 − Π(1 − weight); religion 1 for the same, 0.8
+  for Eastern and Oriental Orthodox or Sunni/Shia with Lebanon's mix, 0.6 within Christianity or Islam, 0.25 across
+  the Abrahamic faiths, 0.45 among the Dharmic and East Asian; language 1, 0.65 the same branch, 0.35 the same
+  family; "overall" the four together.
+- **Built.** "Colour countries by closeness…" in a map's options: a country to measure from, a measure, a legend in
+  shots; the closest twelve listed with what ties them. Kept in the map's settings (`colourBy`); the renderer and
+  SVG frames draw each country in the closeness colour (a ramp readable by everyone, viridis; the country itself in
+  red-pink; countries not of today grey; pictures filling countries give way), labels and borders unchanged; the
+  countries' own colours are never touched and come back in one step.
+- **Limits.** Only today's countries, matched by name (now or as first named); bilateral ties beyond the treaties
+  listed, and enmities, are not measured.
+
 ### D173. Today's cities and capitals, added alone or with today's countries, shown by rules or by name
 
 - **Asked.** Today's cities and capitals, added on their own or with today's countries; in "what is shown", a slider
