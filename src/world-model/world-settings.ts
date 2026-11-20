@@ -7,6 +7,7 @@ import { definitionOf, type PlanetDefinition } from '../planet/model/definition.
 import { cleanStamps, type TerrainStamp } from '../terrain/sculpt.ts';
 import { skyLookOf, type SkyLook } from '../space/sky-look.ts';
 import { calendarOf, calendarProblems, gregorian, type Calendar, type CalendarDef } from '../core-time/index.ts';
+import { cleanStatistics, type Statistic } from '../presentation/statistics.ts';
 
 /** The reference geography a world shows under its territories. */
 export type BasemapSource = 'natural-earth' | 'none';
@@ -45,6 +46,13 @@ export interface WorldSettings {
   sim?: { definition: unknown };
   /** The world's own calendar (D149); absent: the Gregorian. */
   calendar?: CalendarDef;
+  /** Numbers kept over time (D171), shown in shots' texts by their names in braces. */
+  statistics?: Statistic[];
+}
+
+/** A map's statistics (D171), cleaned. */
+export function statisticsOf(space: Pick<MapSpaceRow, 'settings'> | null | undefined): Statistic[] {
+  return space ? cleanStatistics(worldSettings(space).statistics) : [];
 }
 
 /** A map's own calendar (D149), if it has one that can be a calendar. */

@@ -28,7 +28,9 @@ import { planDisaster, isDisasterId, type DisasterId } from './disasters.ts';
 import { cleanIcon, type CharacterIcon, type RouteStyle } from '../render-engine/icons.ts';
 import type { TerritoryFill, FrontTeeth } from '../render-engine/map-renderer.ts';
 export type { CharacterIcon } from '../render-engine/icons.ts';
+import { cleanStatistics, type Statistic } from '../presentation/statistics.ts';
 export { FEATURE_KINDS, DEFAULT_FEATURE_STYLE, isFeatureKind, featureStyle, type FeatureKind, type FeatureStyle } from '../render-engine/feature-style.ts';
+import { featureStyle as featureLook } from '../render-engine/feature-style.ts';
 import { ringFromMapPoints } from '../render-engine/stroke.ts';
 import { TRANSITION_LOOKS } from '../presentation/sequence.ts';
 import { flatRadiusKm } from '../render-engine/camera.ts';
@@ -351,6 +353,22 @@ export function setMapCalendar(world: World, spaceId: string, def: CalendarDef |
   const { calendar: _old, ...rest } = worldSettings(space);
   const label = def ? `Give "${space.name}" the ${def.name} calendar` : `Use the Gregorian calendar for "${space.name}"`;
   return run(world, label, (tx) => { tx.update('map_space', { ...space, settings: JSON.stringify(def ? { ...rest, calendar: def } : rest) }); });
+}
+
+/** A map's statistics (D171): numbers kept over time and shown in shots' texts as "{name}". The whole list, in one step. */
+export function setMapStatistics(world: World, spaceId: string, stats: Statistic[]): CommandResult {
+  const space = world.get('map_space', spaceId);
+  if (!space) throw new Error('That map no longer exists.');
+  const clean = cleanStatistics(stats);
+  const names = new Set<string>();
+  for (const st of clean) {
+    const k = st.name.toLowerCase();
+    if (k === 'date') throw new Error('"date" already shows the date: give the statistic another name.');
+    if (names.has(k)) throw new Error(`Two statistics are called "${st.name}".`);
+    names.add(k);
+  }
+  const { statistics: _old, ...rest } = worldSettings(space);
+  return run(world, 'Change statistics', (tx) => { tx.update('map_space', { ...space, settings: JSON.stringify(clean.length ? { ...rest, statistics: clean } : rest) }); });
 }
 
 /** Sets a world's sea level over time (D96): the whole list of dated levels, in one step; none for today's. */
@@ -1051,13 +1069,17 @@ export interface CountryToAdd {
  * the same name is used) and its land is painted as a correction or as part of an event. All outlines
  * go into the map together, so the map's structure is rebuilt once however many countries there are.
  * With `into`, their land is given to that existing country instead (Greece's borders added to a
- * country of the user's own, say), and no countries are created.
+ * country of the user's own, say), and no countries are created. With `onlyFrom` (D171), only land those
+ * owners hold at the edit's moment is given ('' for land nobody holds): a province taken from one country, never
+ * the sea or a neighbour's land along a border drawn a little differently. With `clear`, the land goes to
+ * nobody; with `outside`, the change is to the land those owners hold outside the outlines instead.
  */
-export function addCountries(world: World, engine: Engine, o: { spaceId: string; layerId: string; countries: CountryToAdd[]; mode: EditMode; snap?: number; newEvent?: EventInput; into?: NewOwner; transition?: TransitionSpec | null }): CommandResult<{ entities: string[]; eventId: string | null }> {
+export function addCountries(world: World, engine: Engine, o: { spaceId: string; layerId: string; countries: CountryToAdd[]; mode: EditMode; snap?: number; newEvent?: EventInput; into?: NewOwner; transition?: TransitionSpec | null; onlyFrom?: string[]; clear?: boolean; outside?: boolean }): CommandResult<{ entities: string[]; eventId: string | null }> {
   checkTarget(world, { spaceId: o.spaceId, layerId: o.layerId, mode: o.newEvent ? undefined : o.mode, value: typeof o.into === 'string' ? o.into : undefined });
   if (!o.countries.length) throw new Error('Choose at least one country.');
+  if (o.outside && !o.onlyFrom) throw new Error('Say whose land outside the outlines changes.');
   const intoName = o.into === undefined ? '' : typeof o.into === 'string' ? world.get('entity', o.into)!.name : o.into.name.trim();
-  const label = o.into
+  const label = o.clear ? `Clear ${o.outside ? 'land outside ' : ''}${o.countries.length === 1 ? o.countries[0].name : `${o.countries.length} regions`}` : o.into
     ? `Add ${o.countries.length === 1 ? o.countries[0].name : `${o.countries.length} countries`} to ${intoName}`
     : o.countries.length === 1 ? `Add ${o.countries[0].name}` : `Add ${o.countries.length} countries`;
   return run(world, label, (tx) => {
@@ -1087,6 +1109,34 @@ export function addCountries(world: World, engine: Engine, o: { spaceId: string;
     const lefts = arr.facesLeftOfMany(paths);
     const insideOf = (i: number) => (arr.isSimpleCycle(paths[i]) && arr.separatesFaces(paths[i]) ? lefts[i] : arr.facesWoundBy(paths[i]));
     const items: Array<{ leaves: Iterable<number>; value: string | null }> = [];
+    // Only land held by these owners at the edit's moment (D171).
+    let heldBy: ((f: number) => boolean) | null = null;
+    if (o.onlyFrom) {
+      const from = new Set(o.onlyFrom);
+      const ev = o.mode.kind === 'new' ? world.get('event', o.mode.eventId) : undefined;
+      const t = o.mode.kind === 'new' ? o.mode.at ?? (ev ? eventStart(ev) : NEG_INF) : o.mode.t;
+      const ownerOf = ownerReader(arr, engine.partitionState(o.spaceId, o.layerId, t));
+      heldBy = (f) => from.has(ownerOf(f) ?? '');
+    }
+    // Everything the owners hold outside the outlines (D171), or (clear) the land given to nobody: one change.
+    if (o.outside || o.clear) {
+      const inside = new Set<number>();
+      for (const polys of parts) for (const p of polys) {
+        const holes = new Set<number>();
+        for (const h of p.holes) for (const f of leafDescendants(arr, insideOf(h))) holes.add(f);
+        for (const f of leafDescendants(arr, insideOf(p.outer))) if (!holes.has(f)) inside.add(f);
+      }
+      const faces = o.outside ? arr.leafFaces().filter((f) => !inside.has(f) && heldBy!(f)) : [...inside].filter((f) => !heldBy || heldBy(f));
+      const value = o.clear ? null : into ?? null;
+      if (faces.length) {
+        if (o.mode.kind === 'new') {
+          const [kept] = withoutLocked(world, engine, o.spaceId, o.layerId, o.mode, [{ leaves: faces, value }]);
+          const set = [...kept.leaves];
+          if (set.length) chainRecorded(tx, insertAssignEffect(tx, { eventId: o.mode.eventId, spaceId: o.spaceId, layerId: o.layerId, faces: canonicalFaces(arr, set), value, at: o.mode.at ?? null, transition: o.transition ?? null, intent: { op: 'paint', value } }));
+        } else writeAssignments(tx, engine, o.spaceId, o.layerId, o.mode, [{ leaves: faces, value }]);
+      }
+      return { entities: into ? [into] : [], eventId };
+    }
     o.countries.forEach((c, k) => {
       // Into an existing country: its territory grows; no country of this name is created.
       let id = into ?? existing.get(c.name.toLowerCase());
@@ -1101,7 +1151,7 @@ export function addCountries(world: World, engine: Engine, o: { spaceId: string;
       for (const p of parts[k]) {
         const holes = new Set<number>();
         for (const h of p.holes) for (const f of leafDescendants(arr, insideOf(h))) holes.add(f);
-        for (const f of leafDescendants(arr, insideOf(p.outer))) if (!holes.has(f)) faces.add(f);
+        for (const f of leafDescendants(arr, insideOf(p.outer))) if (!holes.has(f) && (!heldBy || heldBy(f))) faces.add(f);
       }
       if (!faces.size) return;
       if (o.mode.kind === 'new') {
@@ -2088,23 +2138,87 @@ export function addDisaster(world: World, o: { spaceId: string; disaster: Disast
   return run(world, plan.name, (tx) => {
     const eventId = ev ? ev.id : insertEventIn(tx, { name: plan.name, start: o.t, end: null });
     const at = ev && compare(o.t, fromStore(ev.start_day, ev.start_ms)) > 0 ? o.t : null;
-    for (const p of plan.sources) {
-      let layer = tx.world.all('layer').filter((l) => l.space_id === space.id && l.kind === 'field' && fieldLayerStyleOf(l.style).type === p.type).sort((a, b) => a.sort_order - b.sort_order)[0];
-      if (!layer) {
-        const name = FIELD_TYPES[p.type].name;
-        layer = tx.insert('layer', { id: newId('layer'), space_id: space.id, kind: 'field', name, sort_order: tx.world.all('layer').filter((l) => l.space_id === space.id).length, visible: 1, style: JSON.stringify({ field: { type: p.type, opacity: 1 } }), export_pass: name.toLowerCase().replace(/\W+/g, '-') });
-      }
-      const source = fieldSourceOf({ ...DEFAULT_SOURCES[p.type], ...p.source, seed: o.seed ?? 1 }, p.type);
+    disasterIn(tx, space.id, plan, lon, lat, eventId, at, o.t, o.seed ?? 1);
+    return eventId;
+  });
+}
+
+/** A disaster's conditions (and crater) in an event, at moment `at` of it (null: its start); `t` the moment itself. */
+function disasterIn(tx: Tx, spaceId: string, plan: ReturnType<typeof planDisaster>, lon: number, lat: number, eventId: string, at: Instant | null, t: Instant, seed: number): void {
+  const space = tx.world.get('map_space', spaceId)!;
+  for (const p of plan.sources) {
+    let layer = tx.world.all('layer').filter((l) => l.space_id === space.id && l.kind === 'field' && fieldLayerStyleOf(l.style).type === p.type).sort((a, b) => a.sort_order - b.sort_order)[0];
+    if (!layer) {
+      const name = FIELD_TYPES[p.type].name;
+      layer = tx.insert('layer', { id: newId('layer'), space_id: space.id, kind: 'field', name, sort_order: tx.world.all('layer').filter((l) => l.space_id === space.id).length, visible: 1, style: JSON.stringify({ field: { type: p.type, opacity: 1 } }), export_pass: name.toLowerCase().replace(/\W+/g, '-') });
+    }
+    const source = fieldSourceOf({ ...DEFAULT_SOURCES[p.type], ...p.source, seed }, p.type);
+    const id = newId('feat');
+    tx.insert('feature', { id, layer_id: layer.id, name: `${plan.name.replace(/ \(.*\)$/, '')}: ${p.name.toLowerCase()}`, entity_id: '', style: JSON.stringify({ source }), notes: '', created_seq: tx.world.nextSeq('feature') });
+    writeShape(tx, id, { kind: 'new', eventId, at }, { parts: [[lon, lat]], anim: null });
+  }
+  // The crater stays for good: a change to the terrain from the moment of the impact.
+  if (plan.crater && terrainSourceOf(space)) {
+    const settings = worldSettings(space);
+    const stamp = { id: newId('stamp'), tool: 'crater' as const, path: [[Math.round(lon * 1e5) / 1e5, Math.round(lat * 1e5) / 1e5]] as Array<[number, number]>, radiusKm: plan.crater.radiusKm, strength: plan.crater.depthM, seed, from: { day: t.day, ms: t.ms } };
+    tx.update('map_space', { ...space, settings: JSON.stringify({ ...settings, sculpt: [...cleanStamps(settings.sculpt), ...cleanStamps([stamp])] }) });
+  }
+}
+
+/** The great circle from `a` to `b` ([lon, lat] degrees), `f` of the way along (0 to 1), as places about every `stepDeg` degrees. */
+export function greatCircle(a: [number, number], b: [number, number], f = 1, stepDeg = 1.5): Array<[number, number]> {
+  const r = Math.PI / 180;
+  const v = ([lon, lat]: [number, number]) => [Math.cos(lat * r) * Math.cos(lon * r), Math.cos(lat * r) * Math.sin(lon * r), Math.sin(lat * r)];
+  const p = v(a), q = v(b);
+  const w = Math.acos(Math.max(-1, Math.min(1, p[0] * q[0] + p[1] * q[1] + p[2] * q[2])));
+  const n = Math.max(2, Math.ceil((w * f) / r / stepDeg) + 1);
+  const out: Array<[number, number]> = [];
+  for (let i = 0; i < n; i++) {
+    const s = (f * i) / (n - 1);
+    const k1 = w > 1e-9 ? Math.sin((1 - s) * w) / Math.sin(w) : 1 - s, k2 = w > 1e-9 ? Math.sin(s * w) / Math.sin(w) : s;
+    const x = k1 * p[0] + k2 * q[0], y = k1 * p[1] + k2 * q[1], z = k1 * p[2] + k2 * q[2];
+    out.push([Math.atan2(y, x) / r, Math.atan2(z, Math.hypot(x, y)) / r]);
+  }
+  return out;
+}
+
+/** One missile of a salvo: where from and to, when it is launched (absent: at the salvo's launch), how far it gets before it is shot down (absent: all the way). */
+export interface MissileFlight { from: [number, number]; to: [number, number]; launch?: Instant; shotDown?: number; name?: string }
+
+/**
+ * A salvo of missiles (D171), one event from the launch to the moment they arrive: each missile a line on a
+ * layer of missiles (made if the map has none) drawn as a missile, seen flying along the great circle to its
+ * target over the event; those not shot down end in a nuclear strike of `yieldKt` there as they arrive (0: none),
+ * or with `strike` 'conventional', in ground ruined and burning around the place.
+ * One undoable step; returns the event.
+ */
+export function missileSalvo(world: World, o: { spaceId: string; name: string; launch: Instant; arrive: Instant; flights: MissileFlight[]; entity?: string; color?: string; yieldKt?: number; strike?: 'nuclear' | 'conventional'; windDeg?: number; layerId?: string; description?: string; seed?: number }): CommandResult<string> {
+  const space = world.get('map_space', o.spaceId);
+  if (!space || space.kind !== 'sphere') throw new Error('Missiles fly on round maps.');
+  if (!o.flights.length) throw new Error('A salvo needs at least one missile.');
+  if (compare(o.arrive, o.launch) <= 0) throw new Error('Missiles arrive after they are launched.');
+  if (o.entity && !world.get('entity', o.entity)) throw new Error('That country or faction no longer exists.');
+  const given = o.layerId ? world.get('layer', o.layerId) : undefined;
+  if (o.layerId && (!given || given.kind !== 'line' || given.space_id !== space.id)) throw new Error('Choose a layer of lines on this map.');
+  return run(world, `Missiles: ${o.name}`, (tx) => {
+    let layer = given ?? tx.world.all('layer').filter((l) => l.space_id === space.id && l.kind === 'line' && featureLook('line', l.style, undefined).look === 'missile').sort((a, b) => a.sort_order - b.sort_order)[0];
+    if (!layer) layer = tx.insert('layer', { id: newId('layer'), space_id: space.id, kind: 'line', name: 'Missiles', sort_order: tx.world.all('layer').filter((l) => l.space_id === space.id).length, visible: 1, style: JSON.stringify({ look: 'missile', color: '#ffb347', width: 2.5, showName: false }), export_pass: 'missiles' });
+    const eventId = insertEventIn(tx, { name: o.name, type_id: 'war', start: o.launch, end: o.arrive, description: o.description ?? '' });
+    // A conventional warhead: the ground ruined and burning around where it lands, no fallout.
+    const plan: ReturnType<typeof planDisaster> | null = o.strike === 'conventional'
+      ? { name: 'Missile strike', crater: null, sources: [
+        { type: 'damage', name: 'Destruction', source: { shape: 'circle', radiusKm: 6, intensity: 70, rise: 0, hold: 365, decay: 730, grow: 0, noise: 0.4 } },
+        { type: 'fire', name: 'Fire', source: { shape: 'circle', radiusKm: 9, intensity: 0.9, rise: 0.01, hold: 0.3, decay: 0.5, grow: 0.05, noise: 0.5 } },
+      ] }
+      : (o.yieldKt ?? 0) > 0 ? planDisaster('nuclear', o.yieldKt!, o.windDeg ?? 90) : null;
+    o.flights.forEach((m, i) => {
+      const reach = Math.max(0.02, Math.min(1, m.shotDown ?? 1));
       const id = newId('feat');
-      tx.insert('feature', { id, layer_id: layer.id, name: `${plan.name.replace(/ \(.*\)$/, '')}: ${p.name.toLowerCase()}`, entity_id: '', style: JSON.stringify({ source }), notes: '', created_seq: tx.world.nextSeq('feature') });
-      writeShape(tx, id, { kind: 'new', eventId, at }, { parts: [[lon, lat]], anim: null });
-    }
-    // The crater stays for good: a change to the terrain from the moment of the impact.
-    if (plan.crater && terrainSourceOf(space)) {
-      const settings = worldSettings(tx.world.get('map_space', space.id)!);
-      const stamp = { id: newId('stamp'), tool: 'crater' as const, path: [[Math.round(lon * 1e5) / 1e5, Math.round(lat * 1e5) / 1e5]] as Array<[number, number]>, radiusKm: plan.crater.radiusKm, strength: plan.crater.depthM, seed: o.seed ?? 1, from: { day: o.t.day, ms: o.t.ms } };
-      tx.update('map_space', { ...tx.world.get('map_space', space.id)!, settings: JSON.stringify({ ...settings, sculpt: [...cleanStamps(settings.sculpt), ...cleanStamps([stamp])] }) });
-    }
+      tx.insert('feature', { id, layer_id: layer!.id, name: m.name ?? `${o.name} ${i + 1}`, entity_id: o.entity ?? '', style: o.color ? JSON.stringify({ color: o.color }) : '{}', notes: '', created_seq: tx.world.nextSeq('feature') });
+      const launch = m.launch && compare(m.launch, o.launch) > 0 && compare(m.launch, o.arrive) < 0 ? m.launch : null;
+      writeShape(tx, id, { kind: 'new', eventId, at: launch }, { parts: shapeParts('line', [greatCircle(m.from, m.to, reach)]), anim: 'draw' });
+      if (plan && reach >= 1) disasterIn(tx, space.id, plan, ((m.to[0] + 540) % 360) - 180, m.to[1], eventId, o.arrive, o.arrive, (o.seed ?? 1) + i);
+    });
     return eventId;
   });
 }

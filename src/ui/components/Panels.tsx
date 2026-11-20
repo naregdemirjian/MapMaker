@@ -10,7 +10,7 @@ import { type Instant, type Calendar, gregorian, fromStore, formatYear, compare,
 import { calendarNow } from '../calendar-now.ts';
 import { isBaseEvent, MAIN_BRANCH, type EffectRow } from '../../world-model/schema.ts';
 import { listedHere } from '../events-here.ts';
-import { basemapSourceOf, worldSettings, terrainSourceOf, sculptOf, isSpaceMap, isGeologicalMap, simOf } from '../../world-model/world-settings.ts';
+import { basemapSourceOf, worldSettings, terrainSourceOf, sculptOf, isSpaceMap, isGeologicalMap, simOf, statisticsOf } from '../../world-model/world-settings.ts';
 import { parseJSON, leafDescendants, isUntracked, resolutionOf, type Resolution, type TransitionSpec } from '../../temporal-engine/engine.ts';
 import type { World } from '../../world-model/world.ts';
 import { lonLatToVec } from '../../geo-kernel/vec.ts';
@@ -589,6 +589,7 @@ export function Outliner() {
               <button className="link" onClick={() => s.set({ dialog: 'sea-level' })} data-testid="open-sea-level" title="The sea higher or lower than today's at dates you choose; the coasts follow it">Sea level over time…</button>
             )}
             <button className="link" onClick={() => s.set({ dialog: 'calendar' })} data-testid="open-calendar" title="The calendar this map's dates are written, typed and chosen in: the Gregorian, or one of its own">Calendar: {calendarNow().name}…</button>
+            <button className="link" onClick={() => s.set({ dialog: 'statistics' })} data-testid="open-statistics" title="Numbers kept over time (an economy, an army, the dead of a war), shown counting in shots' texts as {name}">Statistics ({statisticsOf(currentSpace).length})…</button>
             <button className="link" onClick={() => s.set({ dialog: 'data-sources' })} data-testid="data-sources">Data sources and credits</button>
           </div>
         )}

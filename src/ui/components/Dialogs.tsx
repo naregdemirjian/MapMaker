@@ -523,6 +523,15 @@ export function ProjectPicker() {
   const [worldName, setWorldName] = useState('Earth');
   const [km, setKm] = useState('6371.0088');
   const [busy, setBusy] = useState(false);
+  const [examples, setExamples] = useState<Array<{ id: string; name: string; about: string }>>([]);
+  const [building, setBuilding] = useState('');
+  useEffect(() => { Api.examples().then(setExamples).catch(() => setExamples([])); }, []);
+  // An example (D171) is built into the projects folder by the data service, then opened: a new project each time.
+  const example = async (id: string) => {
+    setBuilding(id);
+    try { const p = await Api.buildExample(id); await s.openOrRecover(p.id); } catch (e) { s.toast((e as Error).message, 'error'); }
+    setBuilding('');
+  };
   const create = async () => {
     if (!name.trim()) { s.toast('Give the project a name.', 'error'); return; }
     setBusy(true);
@@ -550,6 +559,18 @@ export function ProjectPicker() {
           <label>Radius (km)<input type="number" value={km} onChange={(e) => setKm(e.target.value)} /></label>
         </div>
         <button className="primary" disabled={busy} onClick={create} data-testid="project-create">Create project</button>
+        {examples.length > 0 && <>
+          <h3>Examples</h3>
+          <p className="muted small-note">Finished projects made from an outline, to explore and change: each is built anew in your projects folder (it takes a few seconds).</p>
+          <div className="list">
+            {examples.map((x) => (
+              <div key={x.id} className="row example-row">
+                <div><b>{x.name}</b><div className="muted small-note">{x.about}</div></div>
+                <button disabled={!!building} onClick={() => example(x.id)} data-testid={`example-${x.id}`}>{building === x.id ? 'Building…' : 'Build and open'}</button>
+              </div>
+            ))}
+          </div>
+        </>}
         <p className="muted small-note">Projects are stored in {s.projectsDir}</p>
       </div>
     </div>

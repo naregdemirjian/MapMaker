@@ -3,6 +3,7 @@
 // through its camera keys. Shot data lives in the `sequence` table, apart from the world data.
 import { type Instant, type Calendar, lerp, fromJSONValue, toJSONValue, gregorian, compare, diffMs, MONTHS as MONTH_NAMES, type Precision } from '../core-time/index.ts';
 import { type Camera, interpolateCamera } from '../render-engine/camera.ts';
+import { fillStatistics, type Statistic } from './statistics.ts';
 
 export type Ease = 'linear' | 'smooth' | 'hold';
 
@@ -364,19 +365,20 @@ export function unspun(shot: ShotSettings, cam: Camera, frame: number): Camera {
 export interface OverlayDraw { overlay: Overlay; text: string; alpha: number; enter?: number; exit?: number }
 
 /** The overlays at a frame, their {date} written in `cal` (the calendar of the shot's map, D149). */
-export function overlaysAt(shot: ShotSettings, frame: number, t: Instant, cal: Calendar = gregorian): OverlayDraw[] {
+export function overlaysAt(shot: ShotSettings, frame: number, t: Instant, cal: Calendar = gregorian, stats: Statistic[] = []): OverlayDraw[] {
+  // ({date}, then each statistic's {name}, D171.)
+  const write = (text: string, p: Precision) => fillStatistics(text.replace(/\{date\}/g, cal.format(t, p)), stats, t);
   const out: OverlayDraw[] = [];
   for (const o of shot.overlays) {
     if (o.box) {
       const box = textBoxOf(o.box), st = textBoxState(shot, box, frame, t);
-      if (st) out.push({ overlay: { ...o, box }, text: o.text.replace(/\{date\}/g, cal.format(t, o.datePrecision)), alpha: 1, enter: st.enter, exit: st.exit });
+      if (st) out.push({ overlay: { ...o, box }, text: write(o.text, o.datePrecision), alpha: 1, enter: st.enter, exit: st.exit });
       continue;
     }
     if (frame < o.inFrame || frame > o.outFrame) continue;
     let alpha = 1;
     if (o.fade > 0) alpha = Math.min(1, (frame - o.inFrame + 1) / o.fade, (o.outFrame - frame + 1) / o.fade);
-    const text = o.text.replace(/\{date\}/g, cal.format(t, o.datePrecision));
-    out.push({ overlay: o, text, alpha });
+    out.push({ overlay: o, text: write(o.text, o.datePrecision), alpha });
   }
   return out;
 }

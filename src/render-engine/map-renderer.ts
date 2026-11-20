@@ -2602,9 +2602,17 @@ export class MapRenderer {
       ctx.restore();
       return out;
     }
+    // A missile (D171): only in flight, while its line draws itself.
+    if (kind === 'line' && st.look === 'missile' && (cut === null || cut <= 0)) { ctx.restore(); return out; }
     const sh = shapeOf(kind, parts);
     const screen = sh.lines.map(toScreen);
     if (!screen.length && !sh.path) { ctx.restore(); return out; }
+    if (kind === 'line' && st.look === 'missile') {
+      for (const l of screen) this.drawMissile(ctx, l, cut!, color, width);
+      ctx.restore();
+      out.push({ path: null, lines: screen, x: 0, y: 0, r: 0, width });
+      return out;
+    }
     if (grow !== null && screen.length) {
       // Growing from its middle: everything outside the circle is left out.
       const m = areaMiddle(screen);
@@ -2688,6 +2696,49 @@ export class MapRenderer {
     ctx.restore();
     out.push({ path: sh.path, lines: screen, x: 0, y: 0, r: 0, width });
     return out;
+  }
+
+  /**
+   * A missile in flight (D171): `f` of the way along its line (screen points). Its trail, a fifth of the
+   * line's length (at most a third of the frame), widens and brightens towards the head, a white-hot
+   * point in a glow of the line's colour.
+   */
+  private drawMissile(ctx: CanvasRenderingContext2D, l: Float32Array, f: number, color: string, width: number): void {
+    const n = l.length >> 1;
+    if (n < 2) return;
+    let total = 0;
+    for (let i = 1; i < n; i++) total += Math.hypot(l[2 * i] - l[2 * i - 2], l[2 * i + 1] - l[2 * i - 1]);
+    if (!(total > 0)) return;
+    const head = total * Math.min(1, f);
+    const tail = Math.min(total * 0.2, Math.max(ctx.canvas.width, ctx.canvas.height) / 3, head);
+    const pieces = 12;
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = color;
+    for (let k = 0; k < pieces; k++) {
+      const a = head - tail + (tail * k) / pieces, b = head - tail + (tail * (k + 1)) / pieces;
+      const part = cutLineBetween(l, a, b);
+      if (part.length < 4) continue;
+      const w = (k + 1) / pieces;
+      ctx.globalAlpha = 0.08 + 0.8 * w * w;
+      ctx.lineWidth = Math.max(0.6, width * (0.35 + 0.65 * w));
+      ctx.beginPath(); addLine(ctx, part); ctx.stroke();
+    }
+    const tip = cutLineBetween(l, Math.max(0, head - 0.5), head);
+    if (tip.length >= 2) {
+      const x = tip[tip.length - 2], y = tip[tip.length - 1], r = Math.max(2, width * 1.6);
+      const glow = ctx.createRadialGradient(x, y, 0, x, y, r * 3);
+      glow.addColorStop(0, 'rgba(255,255,255,1)');
+      glow.addColorStop(0.25, color);
+      glow.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = glow;
+      ctx.beginPath(); ctx.arc(x, y, r * 3, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(x, y, r * 0.55, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
   }
 
   /**

@@ -291,9 +291,9 @@ export function FeaturePanel({ id }: { id: string }) {
           </label>
         </>}
         {kind === 'line' && (
-          <label className="inline" title="A campaign arrow is a broad arrow along the line, narrowing to its tail; drawn in an event with a length, it grows along its path">Drawn as
+          <label className="inline" title="A campaign arrow is a broad arrow along the line, narrowing to its tail; drawn in an event with a length, it grows along its path. A missile is seen only while its line draws itself: a glowing head and trail flying along it, gone when it arrives">Drawn as
             <select value={st.look ?? 'line'} onChange={(ev) => { const v = ev.target.value as FeatureStyle['look']; look(v === 'arrow' && (st.width ?? 3) < 8 ? { look: v, width: 18 } : v === 'line' && (st.width ?? 3) > 20 ? { look: v, width: 3 } : { look: v }); }} data-testid="feature-look">
-              <option value="line">A line</option><option value="arrow">A campaign arrow</option>
+              <option value="line">A line</option><option value="arrow">A campaign arrow</option><option value="missile">A missile (seen only in flight)</option>
             </select>
           </label>
         )}

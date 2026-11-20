@@ -39,6 +39,8 @@ const p = (id: string) => `/api/projects/${encodeURIComponent(id)}`;
 export const Api = {
   app: () => call<{ version: string; projectsDir: string; platform: string }>('GET', '/api/app'),
   projects: () => call<ProjectInfo[]>('GET', '/api/projects'),
+  examples: () => call<Array<{ id: string; name: string; about: string }>>('GET', '/api/examples'),
+  buildExample: (id: string) => call<ProjectInfo>('POST', `/api/examples/${encodeURIComponent(id)}`),
   createProject: (name: string, world?: { name: string; radiusKm: number }) => call<ProjectInfo>('POST', '/api/projects', { name, world }),
   open: (id: string) => call<{ id: string; snapshot: Snapshot; journal: JournalState; dir: string }>('GET', p(id)),
   recover: (id: string) => call<{ restoredFrom: string; damagedFolder: string }>('POST', `${p(id)}/recover`),

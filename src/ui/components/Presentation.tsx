@@ -463,7 +463,7 @@ function TextBoxEditor({ o, shot, update, camera }: { o: Overlay; shot: ShotSett
     <details className="text-box-editor" open data-testid="text-box">
       <summary>{b.anchor ? 'Callout' : 'Text'}: {o.text.split('\n')[0].slice(0, 40) || '(empty)'}</summary>
       <label>Text<textarea rows={3} value={text} onChange={(e) => setText(e.target.value)} onBlur={() => text !== o.text && set({ text })} data-testid="text-box-text" /></label>
-      <p className="muted">Write {'{date}'} for the date shown. Drag the box on the preview to place it.</p>
+      <p className="muted">Write {'{date}'} for the date shown, and a statistic's name in braces (such as {'{GDP}'}, from the map's Statistics) for its value then. Drag the box on the preview to place it.</p>
       <div className="two">
         <label>Font<select value={b.font} onChange={(e) => set({}, { font: e.target.value })}>{fonts.map((f) => <option key={f} value={f}>{f}</option>)}</select></label>
         <label>Size<NumberField min={6} max={400} step={1} value={o.size} onCommit={(n) => set({ size: n })} testId="text-box-size" /></label>

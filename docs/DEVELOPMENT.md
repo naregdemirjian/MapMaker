@@ -9,6 +9,12 @@ The approved architecture is the Claude Doc "Map Maker — Technical Architectur
 
 ## Status at a glance (20 November 2026, Stages 2, 3, 4, 6, 8 to 14 done; Stage 7 mostly done)
 
+- **A project from an outline: the "Greater Armenia" example, 20 November** (D171): a future history from the user's
+  outline, 2039 to 2178, built by a script through the app's own commands into a finished project (82 events, the
+  Week War province by province, salvos of missiles, the exchange, the aftermath, nine shots); in the Projects
+  dialog under Examples, "Build and open". For it the software gained statistics that count in shots' texts
+  ("{GDP}", "Statistics…" in a map's options), a missile look for lines with salvos flown along great circles, and
+  regions given only from the owners named (no slivers at coasts and borders).
 - **Stage 15.8, the sea's level through a history, 20 November** (D170): a history now begins from plates already
   moving as they will (they run 200 Myr first; before, its first 200 Myr's seas stood 300 to 750 m below the
   present's while made-up plates settled); plates fuse as well as split (small ones captured by a neighbour for good
@@ -369,6 +375,8 @@ Terminology: the interface calls them **maps** (DECISIONS D24); the code and old
 | `src/presentation/` | Shots and export | Shot settings (time remap, camera keys, overlays) and the export driver that renders frames off screen at the exact output size. |
 | `src/export/` | Files on disk | PNG encoder, export folders, `manifest.json`, `COMPOSITING_GUIDE.txt`. |
 | `src/ui/` | The interface | React. `store.ts` holds the session state and saves every command; components for the map, timeline, panels, dialogs and presentation mode. |
+| `src/examples/`, `server/http.ts` (examples) | Example projects (D171) | Each built by a script through the commands into the projects folder when chosen in the Projects dialog; `greater-armenia.ts` the builder's helpers and shots, `greater-armenia-story.ts` the story. |
+| `src/presentation/statistics.ts`, `ui/components/StatisticsDialog.tsx` | Statistics (D171) | Numbers kept with a map over time, filled into shots' texts as "{name}" by `overlaysAt`. |
 | `src/domain/geojson-import.ts`, `ui/components/ImportBorders.tsx` | Importing borders (D120) | GeoJSON maps read into countries by a name property (colours too), years from file names; `commands.ts` importTerritories puts a map's countries on a layer at its date, one undo step a file. |
 | `src/ui/components/Timeline.tsx` | The timeline | Dates, events and the playhead; `useHistoryPlayer` plays history in the working view (D119): years a second, looping, Space. |
 | `src/domain/countries.ts` | Today's countries | Decoding `countries-50m.json`; colour groups. The command is `addCountries` in commands.ts. |
@@ -435,7 +443,7 @@ The approved roadmap has 14 stages (0–13). Where each stands (brought up to da
 
 ## Tests
 
-All pass as of 20 November 2026 (511 unit and randomised tests in 97 files, 23 + 71 + 14 + 8 interface steps). The
+All pass as of 20 November 2026 (517 unit and randomised tests in 100 files, 23 + 71 + 14 + 8 interface steps). The
 interface tests run with the verify mode on (D57): everything the app works out from what was there before is also
 worked out afresh, and any difference stops the test.
 `sh scripts/check-all.sh` runs everything and prints ALL CHECKS PASSED only when every check passed.
@@ -445,6 +453,9 @@ worked out afresh, and any difference stops the test.
 | `test/planet-physics.test.ts` | 6 | The planetary engine's definitions and physics (D152): every preset valid and what it says; Earth, Mars and Venus from their settings (gravity, years, days, sunlight, albedo, temperatures); Kepler, the Moon's and Mars's masses from their sizes, the Sun and red dwarfs, the faint young Sun, the habitable zone, early heat, tidal locking; each setting moving the results the right way; overrides and notes; stored definitions read back |
 | `test/planet-mesh.test.ts` | 5 | The icosahedral mesh (D152): cells, faces, Euler's formula, areas summing to 4π, neighbours mutual and counter-clockwise, levels nesting; point location against brute force; the Laplacian and gradient against spherical harmonics level by level; conservative transport and diffusion; prolongation and restriction; pictures of fields and their round trip |
 | `test/planet-insolation.test.ts` | 3 | Sunlight (D152): Earth's against Berger's values, solstices and polar night; perihelion and the equinox; global means for five presets; a tidally locked planet's dark side; more tilt, sunnier poles |
+| `test/statistics.test.ts` | 3 | Statistics (D171): values between dates by a steady share, amount or at once; written as money, people, numbers and shares, and read back from words; a map's statistics filling "{name}" in a shot's texts as history goes |
+| `test/missiles.test.ts` | 2 | Missile salvos (D171): flights along great circles over one event, in flight half way, gone on arrival; strikes where they land and none where one was shot down |
+| `test/example-greater-armenia.test.ts` | 1 | The Greater Armenia example (D171) built into a projects folder: no conflicts; Turkey and Azerbaijan gone without a sliver; the empire of 2175, the governments gone after the exchange, the fragments and the faction after; nine shots, statistics, the salvos |
 | `test/planet-consequences.test.ts` | 3 | Edits' consequences (D164): estimates by the history's own rules (a crater under two gravities, a flood basalt's volume, a hotspot's chain from its plate's speed, a higher sea's flooding); a re-run measured around each edit and over the planet (an ice age colder while it lasted); crust followed back with its plate and a crater made there landing where it was clicked |
 | `test/planet-resume.test.ts` | 2 | A history going on from a checkpoint (D163): edits added late, taken away, starting on a checkpoint, an ice age changing past climates: the same bytes as a run from the beginning (the pictures' rotations and climates too), faster; another setting changed starts again |
 | `test/planet-past.test.ts` | 4 | Earlier moments' own climate and life (D167): a picture of today against the full climate, water and life stages (the same biome on most land besides lakes and wetlands, temperatures and rain close); an ice age colder with more ice and tundra in its pictures; an earlier picture's land seen from space with the planet's own biomes; a map's cover blended between pictures, the nearer standing in |

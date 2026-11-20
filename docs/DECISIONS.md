@@ -61,6 +61,52 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D171. A project made from an outline: the "Greater Armenia" example; statistics, missiles and examples in the software
+
+- **Asked.** Make a whole project from the user's rough outline of a future history (a revolution in Armenia in
+  2042, the "Week War" of 2066, the Gulf in 2072, a golden age of space mining, Pakistan in 2156, an embargo, a world
+  war from 2165, a nuclear exchange in 2175 and its aftermath), right to the end but not exported, and change the
+  software where that helps it be animated.
+- **Built in the software.**
+  - **Statistics** (`presentation/statistics.ts`, `ui/components/StatisticsDialog.tsx`): numbers a map keeps over time,
+    each known at dates and worked out between them (growing by a steady share, by a steady amount, or at once),
+    written as money ($1.20 trillion), people (80.0 million), numbers or shares. A shot's text box or title shows one
+    by its name in braces, "{GDP}", counting as history plays, in the preview and every export (`overlaysAt`). Kept
+    in the map's settings (`statistics`); "Statistics…" in the map's options; `setMapStatistics`.
+  - **Missiles** (`feature-style.ts` look 'missile', `MapRenderer.drawMissile`, `commands.ts` missileSalvo,
+    greatCircle): a line drawn as a missile is seen only while it draws itself, a white-hot head in a glow with a
+    trail a fifth of its length, gone when it arrives (or where its line ends: one shot down). A salvo is one event
+    from launch to arrival: each missile flies its great circle; those not shot down end in a nuclear strike of the
+    yield given, or a conventional one (ground ruined and burning), as they arrive. The look is offered for any line.
+  - **Regions taken only from their owners** (`addCountries` onlyFrom, clear, outside): a province's outline gives
+    only the land the named owners hold at that moment (never the sea, nor a neighbour's land along a border drawn a
+    little differently: 3,800 km² of Turkey's coasts and borders were otherwise left in 300 slivers); '' names land
+    nobody holds; with `clear` the land becomes nobody's, with `outside` the change is to what those owners hold
+    outside the outlines (an empire breaking into fragments in one step). Disasters' placement is shared with salvos
+    (`disasterIn`).
+  - **Examples** (`src/examples/`, the data service's `/api/examples`, the Projects dialog): an example project is
+    built by its script through the same commands, into the projects folder, when "Build and open" is chosen: a new
+    project each time, about 15 seconds. No database is shipped.
+- **The project** (`examples/greater-armenia.ts`, `greater-armenia-story.ts`): today's 242 countries; 82 events in
+  nine groups; the Week War province by province from Natural Earth's states and provinces with advancing fronts in
+  the blitz look, two columns of campaign arrows, an allied counter-attack, 45 opening strikes; Iran, the Levant,
+  Kuwait and the Gulf; IPAM near Metsamor, DMRK at Mersin; Pakistan's 62 deflected warheads, 30 ICBMs back, drone
+  swarms and 40 bases; nuclear terror at IPAM and DMRK; the world's invasion and AM's answer; the conquests to 2174
+  (Russia in three coarse outlines: its states' 117,000 points would weigh the project down); the exchange as two
+  salvos of 150 and 360 missiles with 300 and 800 kt strikes and a heatmap of 2,300 detonations; the world's
+  governments dissolving; AM's fragments, the Northeastern Faction, southern Russia and the Islamabad gang; ten
+  statistics; three characters; nine shots with titles, captions, callouts, counters and the events box. 13 seconds
+  to build, 21 MB, no conflicts.
+- **Where the outline disagreed with itself** the dated outline wins: the movement in 2039, the revolution in
+  September 2042, office in January 2043; the world's people 17 billion when the war begins, 6 billion at its end (the
+  hyperwar passage's 22 billion and 4 billion are not used) and about 20 million after the exchange; the hyperwars in
+  2171 and 2173 (the outline's 26th and 30th years of the war would fall after 2175); the allies fire first, as dated.
+  Where it gave no figure, one was chosen and said so in the event: GDP and populations between the outline's
+  values, the dates within 2072, the positions of IPAM and DMRK. The alien and Mayem passages are notes on
+  characters and the closing event, not territory.
+- **Still to do.** Salvos and statistics have no tool of their own in the interface yet (salvos are made by scripts;
+  missiles drawn by hand take the look); the examples are built, not shipped, so building one takes a few seconds.
+
 ### D170. The sea's level through a history within the Earth's range (Stage 15.8)
 
 - **Asked.** Fix the inaccuracies the validation found; here the sea's level over a history: -553 to +129 m on the

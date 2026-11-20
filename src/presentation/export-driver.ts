@@ -17,7 +17,7 @@ import { eventShown, entityStyle } from '../domain/commands.ts';
 import { isFeatureKind } from '../render-engine/feature-style.ts';
 import { preloadImages, prepareVideos } from '../render-engine/assets.ts';
 import { basemapSourceOf, loadBasemap, loadBasemapDetail, loadDatasetRecords, DEFAULT_BASEMAP_STYLE, type Basemap, type BasemapStyle } from '../render-engine/basemap.ts';
-import { shown, minLakeKm2, terrainLook, seaLevelPoints, planetOf, sculptOf, terrainSourceOf, isSpaceMap, spaceSettingsOf, isPaleoEarth, calendarOfSpace, simOf } from '../world-model/world-settings.ts';
+import { shown, minLakeKm2, terrainLook, seaLevelPoints, planetOf, sculptOf, terrainSourceOf, isSpaceMap, spaceSettingsOf, isPaleoEarth, calendarOfSpace, simOf, statisticsOf } from '../world-model/world-settings.ts';
 import { simTerrain, simCovers, quickPlanetCover } from '../ui/planet-engine.ts';
 import { makeSpaceView } from '../space/space-view.ts';
 import { SpaceRenderer } from '../space/space-renderer.ts';
@@ -155,7 +155,7 @@ export function drawShotOverlays(ctx: CanvasRenderingContext2D, width: number, h
   const project = view ? (lon: number, lat: number) => lonLatToScreen(view, lon, lat) as [number, number] | null : undefined;
   // (Dates in the calendar of the shot's map, D149.)
   const cal = calendarOfSpace(world.get('map_space', shot.spaceId));
-  const rects = drawOverlays(ctx, width, height, overlaysAt(shot, frame, t, cal), width / 1920, DEFAULT_STYLE.font, project);
+  const rects = drawOverlays(ctx, width, height, overlaysAt(shot, frame, t, cal, statisticsOf(world.get('map_space', shot.spaceId))), width / 1920, DEFAULT_STYLE.font, project);
   const box = eventsBoxOf(shot.eventsBox);
   if (!box.show) return rects;
   const groups = box.groups ? new Set(box.groups) : null;

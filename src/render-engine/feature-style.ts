@@ -28,8 +28,10 @@ export interface FeatureStyle {
   /**
    * Lines (D106): drawn as a line, or as a broad campaign arrow (`width` across where it meets its
    * head, narrowing to its tail, its head at the end; drawing itself in an event, it grows along its path).
+   * A missile (D171): seen only while it draws itself, a glowing head with a fading trail behind it, gone
+   * when it arrives (or wherever its line ends: one shot down).
    */
-  look?: 'line' | 'arrow';
+  look?: 'line' | 'arrow' | 'missile';
   /** Lines (D106): marks flowing along the line in its direction as a shot plays, `flowSpeed` design pixels a second. */
   flow?: 'none' | 'dashes' | 'chevrons' | 'dots';
   flowSpeed?: number;

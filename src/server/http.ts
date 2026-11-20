@@ -8,6 +8,7 @@ import { spawn } from 'node:child_process';
 import { ProjectRegistry } from './projects.ts';
 import { startJob, writeFrame, writeEncodedFrame, writeEncodedTiff, writeSvgFrame, writeVideoBytes, repeatFrame, finishJob, type ExportJob, type ExportSettings } from '../export/writer.ts';
 import { saveAsset, serveAsset } from './assets.ts';
+import { EXAMPLES } from '../examples/index.ts';
 import type { RowDiff } from '../world-model/schema.ts';
 
 export interface ServerOptions {
@@ -184,6 +185,13 @@ export function createAppServer(opts: ServerOptions): { server: Server; registry
       const pick = opts.chooseFolder ? opts.chooseFolder(body.start) : systemFolderPicker(body.start);
       if (!pick) throw new HttpError(501, 'This computer has no folder picker Map Maker can open. Type the folder path instead.');
       return send(res, 200, { path: await pick });
+    }
+    // Example projects (D171): listed, and built into the projects folder when chosen (a new project each time).
+    if (parts[1] === 'examples') {
+      if (parts.length === 2 && method === 'GET') return send(res, 200, EXAMPLES.map(({ id, name, about }) => ({ id, name, about })));
+      const ex = EXAMPLES.find((e) => e.id === parts[2]);
+      if (!ex || method !== 'POST') throw new HttpError(404, 'There is no such example.');
+      return send(res, 201, ex.build(registry, join(opts.staticDir, 'data')));
     }
     if (parts[1] !== 'projects') throw new HttpError(404, 'Unknown API');
 
