@@ -55,8 +55,13 @@ test('a re-run is measured around each edit and over the planet', () => {
   const before = runHistory(tectonicParams(def, 4, 200), opts);
   const p = tectonicParams(def, 4, 200);
   const facts: PlanetFacts = { mesh: meshAt(4), radiusKm: def.body.radiusKm, gravity: derive(def).gravity, vigor: p.vigor, spanMyr: 200 };
+  // The crater on a continent then (sea floor struck may have gone down a trench by today).
+  const n = facts.mesh.n, f = Array.from(before.times).indexOf(25);
+  let c = 0;
+  while (before.kinds[f * n + c] !== CRUST.continental) c++;
+  const at: [number, number] = [(facts.mesh.lon[c] * 180) / Math.PI, (facts.mesh.lat[c] * 180) / Math.PI];
   const edits: GeoEvent[] = [
-    { id: 'k', kind: 'impact', startMa: 20, durationMyr: 0, strength: 2, at: [20, 30] },
+    { id: 'k', kind: 'impact', startMa: 20, durationMyr: 0, strength: 2, at },
     { id: 'i', kind: 'ice-age', startMa: 60, durationMyr: 30, strength: 1.5 },
   ];
   const estimates = edits.map((e) => ({ event: e, estimate: estimateEdit(e, before, facts) }));

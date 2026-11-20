@@ -10,6 +10,7 @@ import { BOUNDARY, maxThickness, groupOf, type TectonicState } from './state.ts'
 import { crustHeight, seaLevelFor } from './isostasy.ts';
 import { reorganise } from './reorganise.ts';
 import { applyEvents } from './events.ts';
+import type { Mesh } from '../mesh/icosphere.ts';
 
 /** What one step did (areas in steradians). */
 export interface StepReport {
@@ -146,9 +147,14 @@ export function step(state: TectonicState, dt: number): StepReport {
         report.collided += area[c];
         const ga = groupOf(state, upper.id), gb = groupOf(state, lower.id), key = Math.min(ga, gb) * 4096 + Math.max(ga, gb);
         state.contact.set(key, (state.contact.get(key) ?? 0) + area[c]);
-        // Shortening keeps the crust's volume: what is overridden thickens the crust above (beyond what gravity lets
-        // it hold, the excess is taken as spread and worn away).
-        upper.thickness[ru] = Math.min(vmax, upper.thickness[ru] + lower.thickness[rl]);
+        // Shortening keeps the crust's volume: what is overridden thickens the crust above, and beyond what gravity
+        // lets it hold, the rest spreads into the crust behind (an orogen widens, as Tibet's plateau grew outward;
+        // D170: before, it was thrown away, 2.5 km³ a year, and continents thinned through a history). Its
+        // sediment is scraped off onto the crust above (the Himalaya's Tethyan sediments).
+        const total = upper.thickness[ru] + lower.thickness[rl];
+        upper.thickness[ru] = Math.min(vmax, total);
+        if (total > vmax) spreadExcess(upper, ru, (total - vmax) * mesh.area[ru], vmax, mesh);
+        upper.sediment[ru] += lower.sediment[rl];
         if (upper.kind[ru] !== CRUST.continental && upper.thickness[ru] > 25) upper.kind[ru] = CRUST.continental;
         upper.orogeny[ru] = 0;
         upper.tags[ru] |= lower.kind[rl] === CRUST.continental && upper.kind[ru] === CRUST.continental ? TAG.suture : TAG.accreted;
@@ -344,6 +350,36 @@ function newCrust(state: TectonicState, p: Plate, r: number, c: number, oceanic:
   }
 }
 
+/**
+ * Crust beyond what gravity lets a column hold, `volume` (km × the frame's cell areas), spread from cell r of plate p
+ * into its cells around, ring by ring outward, each ring filled evenly up to the limit (D170). Crust thickened past
+ * 25 km is continental.
+ */
+function spreadExcess(p: Plate, r: number, volume: number, vmax: number, mesh: Mesh) {
+  const { nbrStart, nbr, area } = mesh;
+  const seen = new Set<number>([r]);
+  let ring = [r];
+  for (let k = 0; k < 12 && volume > 1e-12 && ring.length; k++) {
+    const next: number[] = [];
+    for (const c of ring) for (let e = nbrStart[c]; e < nbrStart[c + 1]; e++) {
+      const j = nbr[e];
+      if (seen.has(j) || !p.member[j]) continue;
+      seen.add(j); next.push(j);
+    }
+    // Fill the ring evenly: the cells with least room first, so each takes an equal share or what it can.
+    const room = next.map((j) => Math.max(0, vmax - p.thickness[j]) * area[j]).sort((a, b) => a - b);
+    let left = volume, cells = next.length, level = 0;
+    for (const v of room) { const share = left / cells; if (v >= share) { level = share; break; } left -= v; cells--; level = Infinity; }
+    for (const j of next) {
+      const add = Math.min(Math.max(0, vmax - p.thickness[j]) * area[j], level);
+      if (add <= 0) continue;
+      p.thickness[j] += add / area[j]; volume -= add; p.orogeny[j] = 0;
+      if (p.kind[j] !== CRUST.continental && p.thickness[j] > 25) p.kind[j] = CRUST.continental;
+    }
+    ring = next;
+  }
+}
+
 function copyCrust(p: Plate, from: number, to: number) {
   p.member[to] = 1; p.kind[to] = p.kind[from]; p.thickness[to] = p.thickness[from]; p.age[to] = p.age[from];
   p.orogeny[to] = p.orogeny[from]; p.sediment[to] = p.sediment[from]; p.tags[to] = p.tags[from];
@@ -382,7 +418,7 @@ export function regimeVigor(state: TectonicState): number {
   const { regime } = state.params;
   if (regime === 'stagnant-lid') return 0;
   if (regime === 'episodic') {
-    const phase = (state.time % 300) / 300;
+    const phase = (((state.time % 300) + 300) % 300) / 300;
     return phase < 0.2 ? 4 : 0.05;
   }
   return 1;

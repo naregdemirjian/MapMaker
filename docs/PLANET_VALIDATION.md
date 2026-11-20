@@ -9,21 +9,21 @@ and everything else is this engine's. Measured values are approximate climatolog
 | Measure | This planet | The Earth |
 | --- | --- | --- |
 | Land share | 29 % | 29 % |
-| Hypsometry: the two peaks (500 m bins) | 0 to 500 m and -3,500 to -3,000 m | 0 to 1,000 m and −4,000 to −5,000 m |
-| Surface above 2 km | 0.8 % | about 3 % (11 % of the land), about 1 % without the ice sheets' surfaces |
-| Sea floor deepening with age (younger than 80 Myr) | 0.28 km per √Myr | 0.35 (GDH1: 2.6 km over 64 Myr) |
-| The sea's level over the history | -553 to 129 m | about −120 to +250 m over the last 500 Myr |
-| Ice on land over the history | 0.9 to 12.9 million km³ | 0 to about 80 (today 30) |
-| Mean temperature at the surface | 14.9 °C | 15 °C |
-| Within 10° of the equator / beyond 70° | 25.2 / -16.7 °C | 27 / −15 to −30 °C |
-| Rain and snow, the planet's mean | 1,232 mm a year | about 1,000 |
-| Rain within 10° of the equator / at 20-30° | 2,971 / 546 mm | about 2,000 / 700 |
-| The sea's currents: warm western sides, cool eastern | 8.5 % of cells warmed (mean +1.2 K), 8.0 % cooled (-1.1 K) | as the Gulf Stream and Kuroshio, the Canary and Humboldt |
-| Deserts and steppe: land at 15-35° / within 10° | 53 / 0 % | the subtropical belts / few |
-| Tropical forest within 10° | 83 % | most |
-| Boreal forest at 50-65°; tundra, polar desert and ice beyond 65° | 24 %; 95 % | most; most |
-| An earlier moment's biomes (worked out quickly from its own climate, D167), tried on today | the same biome on 80 % of the land, 91 % besides lakes and wetlands; deserts 12.0 % of the land (the full stages: 13.1 %) | — |
-| Hack's law: main stream length ∝ area^h | h = 0.64 (42 cells draining over 20 cells) | 0.5 to 0.6 |
+| Hypsometry: the two peaks (500 m bins) | 0 to 500 m and -4,500 to -4,000 m | 0 to 1,000 m and −4,000 to −5,000 m |
+| Surface above 2 km | 2.3 % | about 3 % (11 % of the land), about 1 % without the ice sheets' surfaces |
+| Sea floor deepening with age (younger than 80 Myr) | 0.23 km per √Myr | 0.35 (GDH1: 2.6 km over 64 Myr) |
+| The sea's level over the history | -189 to 102 m | about −120 to +250 m over the last 500 Myr |
+| Ice on land over the history | 2.1 to 14.4 million km³ | 0 to about 80 (today 30) |
+| Mean temperature at the surface | 15.1 °C | 15 °C |
+| Within 10° of the equator / beyond 70° | 27.0 / -17.1 °C | 27 / −15 to −30 °C |
+| Rain and snow, the planet's mean | 1,329 mm a year | about 1,000 |
+| Rain within 10° of the equator / at 20-30° | 3,486 / 547 mm | about 2,000 / 700 |
+| The sea's currents: warm western sides, cool eastern | 7.6 % of cells warmed (mean +1.1 K), 6.6 % cooled (-1.1 K) | as the Gulf Stream and Kuroshio, the Canary and Humboldt |
+| Deserts and steppe: land at 15-35° / within 10° | 60 / 0 % | the subtropical belts / few |
+| Tropical forest within 10° | 87 % | most |
+| Boreal forest at 50-65°; tundra, polar desert and ice beyond 65° | 42 %; 90 % | most; most |
+| An earlier moment's biomes (worked out quickly from its own climate, D167), tried on today | the same biome on 84 % of the land, 91 % besides lakes and wetlands; deserts 10.5 % of the land (the full stages: 11.4 %) | — |
+| Hack's law: main stream length ∝ area^h | h = 0.54 (53 cells draining over 20 cells) | 0.5 to 0.6 |
 
 ## The real Earth's heights with this engine's climate, water and biomes (level 5)
 

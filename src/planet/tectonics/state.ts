@@ -201,7 +201,9 @@ export function initialState(params: TectonicParams): TectonicState {
     }
   }
   const state = baseState(params, plates, owner, (params.seed * 747796405 + 2891336453) >>> 0);
-  state.nextReorganisation = 0;
+  // Motions are first reconsidered once the plates have boundaries to be pulled and pushed by (D170: reconsidered at
+  // once, with no trenches yet, every plate slowed to half the Earth's speed for the first 40 to 90 Myr).
+  state.nextReorganisation = 40 + 50 * rand(state);
   // Plumes, spread over the sphere, each for the whole history.
   for (let i = 0; i < Math.max(0, Math.round(params.hotspots ?? 0)); i++) {
     const [x, y, z] = randomPole(rng);
@@ -279,6 +281,37 @@ export function splitPlate(state: TectonicState, p: Plate, take: (r: number) => 
   // The new plate leaves any group the old one was in.
   state.group[q.id] = q.id; state.weldTime[q.id] = Infinity; state.born[q.id] = state.time; state.born[p.id] = state.time;
   return q;
+}
+
+/** The weld time of a plate captured by a neighbour (D170): welded for good, never broken where it was sewn. */
+export const CAPTURED = -Infinity;
+
+/** The plate sharing the most edge with plate `pid` (−1 for none), from the world's cells now. */
+export function neighbourSharingMost(state: TectonicState, pid: number): number {
+  const { mesh, owner } = state;
+  const shared = new Float64Array(state.plates.length);
+  for (let c = 0; c < mesh.n; c++) {
+    if (owner[c] !== pid) continue;
+    for (let k = mesh.nbrStart[c]; k < mesh.nbrStart[c + 1]; k++) { const o = owner[mesh.nbr[k]]; if (o >= 0 && o !== pid) shared[o]++; }
+  }
+  let best = -1;
+  for (let i = 0; i < shared.length; i++) if (shared[i] > 0 && (best < 0 || shared[i] > shared[best])) best = i;
+  return best;
+}
+
+/**
+ * Welds broken where they were sewn (the Wilson cycle; a break-up): the plates of a group move apart again, but a
+ * plate captured for good (D170) goes on with the neighbour it shares the most edge with.
+ */
+export function breakWelds(state: TectonicState, members: Plate[]) {
+  for (const p of members) if (state.weldTime[p.id] !== CAPTURED) { state.group[p.id] = p.id; state.weldTime[p.id] = Infinity; }
+  for (const p of members) {
+    if (state.weldTime[p.id] !== CAPTURED) continue;
+    state.group[p.id] = p.id;
+    const into = neighbourSharingMost(state, p.id);
+    if (into >= 0 && groupOf(state, into) !== p.id) state.group[p.id] = groupOf(state, into);
+    else state.weldTime[p.id] = Infinity;
+  }
 }
 
 /** Everything a history needs to go on from a moment, copied (a checkpoint). */

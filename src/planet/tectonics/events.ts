@@ -14,7 +14,7 @@
 //  - reorganisation: plate motions are reconsidered at once.
 // Climate events (ice ages, greenhouse pulses, sea level) act through the climate and water stages (14.6 to 14.8).
 import { CRUST, TAG } from './plates.ts';
-import { rand, randomPole, groups, maxThickness, type TectonicEvent, type TectonicState } from './state.ts';
+import { rand, randomPole, groups, maxThickness, breakWelds, type TectonicEvent, type TectonicState } from './state.ts';
 import { continentalCentre, plateStats, riftPlate } from './reorganise.ts';
 
 type V3 = [number, number, number];
@@ -77,7 +77,7 @@ function begin(state: TectonicState, e: TectonicEvent) {
       const c = continentalCentre(state) ?? placeOf(state, e);
       e.at = e.at ?? [(Math.atan2(c[1], c[0]) * 180) / Math.PI, (Math.asin(c[2]) * 180) / Math.PI];
       // Welds break where they were sewn.
-      for (const [, members] of groups(state)) for (const p of members) { state.group[p.id] = p.id; state.weldTime[p.id] = Infinity; }
+      for (const [, members] of groups(state)) breakWelds(state, members);
       // The largest continental plates split through their continents.
       const s = plateStats(state);
       const order = state.plates.map((p) => p.id).filter((i) => s.cont[i] > 0.03 * 4 * Math.PI).sort((a, b) => s.cont[b] - s.cont[a]);

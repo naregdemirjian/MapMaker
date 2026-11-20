@@ -129,7 +129,7 @@ export function runHistory(params: TectonicParams, opts: HistoryOptions): Tecton
       for (let i = 0; i < base.resume.times.length; i++) if (base.resume.times[i] <= from + 1e-9) { packed.times.push(base.resume.times[i]); packed.states.push(base.resume.states[i]); }
     }
   }
-  if (!state) { state = initialState(params); heights(state); }
+  if (!state) { state = initialState(params); spinUp(state, SPIN_UP_MYR, opts.maxStepMyr ?? 5); heights(state); }
   const st = state;
   const n = st.mesh.n;
   const H = new Int16Array(F * n), Pl = new Uint8Array(F * n), K = new Uint8Array(F * n);
@@ -237,6 +237,28 @@ function updatePaleo(state: TectonicState) {
   for (let c = 0; c < n; c++) heightM[c] = (state.height[c] - state.seaLevel) * 1000;
   const p = paleoClimate(state.mesh, heightM, climate, co2, last);
   state.paleo = { at: state.time, co2, rain: p.rain, ice: p.ice, coarseK: p.coarseK, meanK: p.meanK };
+}
+
+/**
+ * Myr the plates move before a history begins (D170). A history's first moment is made up (plates drawn at random,
+ * continents set in them, no ridges or trenches yet) and its plates take 150 to 250 Myr to settle: their ridges
+ * lengthen, the sea floor grows younger and shallower, and before, the sea of a history's first 200 Myr stood 300
+ * to 750 m below the present's. Run first, the history begins from plates already moving as they will.
+ */
+export const SPIN_UP_MYR = 200;
+
+/** The plates (and rivers, rain by latitude) run for `myr` before the history's first moment, its clock set back. */
+function spinUp(state: TectonicState, myr: number, maxStep: number) {
+  if (!(myr > 0) || state.params.regime === 'stagnant-lid') return;
+  state.time -= myr; state.nextReorganisation -= myr;
+  for (let i = 0; i < state.born.length; i++) state.born[i] -= myr;
+  while (state.time < -1e-9) {
+    const from = state.time, grid = Math.min(0, (Math.floor(state.time / GRID_MYR + 1e-9) + 1) * GRID_MYR);
+    while (state.time < grid - 1e-9) step(state, Math.min(stepLength(state, maxStep), grid - state.time));
+    if (state.params.erosion !== false && state.time > from) erodeCrust(state, state.time - from);
+  }
+  state.time = 0;
+  state.totals = { created: 0, consumed: 0, collided: 0, eroded: 0, deposited: 0 };
 }
 
 /** One step, or as many as it takes, to the next whole GRID_MYR (or the end); then the landscape for that span. */

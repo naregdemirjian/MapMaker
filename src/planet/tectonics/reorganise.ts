@@ -9,8 +9,10 @@
 //    becomes a plate of its own moving towards the continent (Stern 2004); old sea floor far from any trench
 //    founders within the ocean, the plate splitting across it with its parts closing;
 //  - while a timeline event gathers continents (a supercontinent) or scatters them (a break-up), continents move
-//    towards or away from its centre.
-import { BOUNDARY, groupOf, groups, rand, randomPole, setMotion, splitPlate, memberCounts, type TectonicState } from './state.ts';
+//    towards or away from its centre;
+//  - plates fuse as well as split (D170): beyond twice the planet's plates moving on their own, the smallest is
+//    captured by a neighbour for good.
+import { BOUNDARY, CAPTURED, groupOf, groups, rand, randomPole, setMotion, splitPlate, breakWelds, neighbourSharingMost, memberCounts, type TectonicState } from './state.ts';
 import { CRUST, TAG, quatRotate, type Plate } from './plates.ts';
 import { simplex3 } from '../../terrain/planet.ts';
 
@@ -21,9 +23,11 @@ type V3 = [number, number, number];
  * continent on the same plate, with a `marginChance` at each reorganisation; anywhere (on a welded plate too, with
  * trenches or not: `trenchShare`, `welded`), a plate's floor older than `founderAge` covering more than `founderArea`
  * of the sphere founders with a `founderChance`. Calibrated so the sea floor's mean age is about the Earth's (64 Myr)
- * and almost none outlives 180 Myr (D166: before, a tenth of it was older than 300 Myr and the deep sea too deep).
+ * and almost none outlives 180 Myr (D166: before, a tenth of it was older than 300 Myr and the deep sea too deep);
+ * old floor founders at every reconsideration since plates also fuse (D170: at half of them, with fewer plates, the
+ * floor's mean age reached 115 Myr).
  */
-export const SUBDUCTION = { marginAge: 120, marginChance: 0.5, founderAge: 130, founderArea: 0.01, founderChance: 0.5, trenchShare: 1, welded: true };
+export const SUBDUCTION = { marginAge: 120, marginChance: 0.5, founderAge: 130, founderArea: 0.01, founderChance: 1, trenchShare: 1, welded: true };
 const norm = (v: number[]): V3 => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
 const cross = (a: number[], b: number[]): V3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 
@@ -83,9 +87,10 @@ export function reorganise(state: TectonicState) {
   for (const [g, members] of groups(state)) {
     if (members.length < 2) continue;
     const a = members.reduce((s, p) => s + stats.area[p.id], 0);
-    const since = state.time - Math.min(...members.map((p) => (p.id === g ? Infinity : state.weldTime[p.id])));
+    const since = state.time - Math.min(...members.map((p) => (p.id === g || state.weldTime[p.id] === CAPTURED ? Infinity : state.weldTime[p.id])));
+    if (members.every((p) => p.id === g || state.weldTime[p.id] === CAPTURED)) continue;
     if ((a > 0.25 * sphere || since > 200) && rand(state) < 0.5) {
-      for (const p of members) { state.group[p.id] = p.id; state.weldTime[p.id] = Infinity; }
+      breakWelds(state, members);
       // Each part moves away from the group's centre.
       const centre = norm(members.reduce((v, p) => [v[0] + stats.area[p.id] * stats.centroid[p.id][0], v[1] + stats.area[p.id] * stats.centroid[p.id][1], v[2] + stats.area[p.id] * stats.centroid[p.id][2]], [0, 0, 0]));
       for (const p of members) setMotion(state, p, norm(cross(centre, stats.centroid[p.id])), 0.7 + 0.3 * rand(state), 0.3);
@@ -149,6 +154,7 @@ export function reorganise(state: TectonicState) {
     const t = randomPole(() => rand(state));
     riftPlate(state, p, through, norm(cross(through, t)), -25);
   }
+  capture(state);
   // Torques: slab pull towards trenches, ridge push away from ridges.
   const torque = plates.map(() => [0, 0, 0]);
   const edge = new Float64Array(plates.length), slab = new Float64Array(plates.length);
@@ -195,6 +201,38 @@ export function reorganise(state: TectonicState) {
     setMotion(state, members, axis, 0.8 + 0.4 * rand(state), slabShare);
   }
   state.nextReorganisation = state.time + 40 + 50 * rand(state);
+}
+
+/**
+ * Plates fuse as well as split (D170): the Earth keeps about as many plates as it has, small ones captured by a
+ * neighbour (the Monterey and Arguello microplates by the Pacific plate, 20 Myr ago) and ridges dying (the Labrador
+ * Sea's, 33 Myr ago, Greenland since moving with North America). With more plates moving on their own than a
+ * share beyond the planet's setting (`excess`), the smallest moving alone (not made in the last `minAgeMyr`) is
+ * welded for good to the neighbour it shares the most edge with, and moves with it. (Before, plates only split: an
+ * Earth-like planet's twelve became thirty to fifty, with twice the Earth's ridges and young, shallow sea floor.)
+ */
+export const CAPTURE = { excess: 2, minAgeMyr: 40 };
+function capture(state: TectonicState) {
+  const { plates } = state;
+  const limit = Math.max(1, Math.round(CAPTURE.excess * state.params.plates));
+  for (let guard = 0; guard < plates.length; guard++) {
+    const s = plateStats(state);
+    const units = new Set<number>();
+    for (const p of plates) if (s.area[p.id] > 0) units.add(groupOf(state, p.id));
+    if (units.size <= limit) return;
+    let pick = -1;
+    for (const p of plates) {
+      if (!(s.area[p.id] > 0) || groupOf(state, p.id) !== p.id || state.time - state.born[p.id] < CAPTURE.minAgeMyr) continue;
+      if (plates.some((q) => q.id !== p.id && groupOf(state, q.id) === p.id)) continue;
+      if (pick < 0 || s.area[p.id] < s.area[pick]) pick = p.id;
+    }
+    if (pick < 0) return;
+    const into = neighbourSharingMost(state, pick);
+    if (into < 0) return;
+    const g = groupOf(state, into);
+    state.group[pick] = g; state.weldTime[pick] = CAPTURED;
+    plates[pick].omega.set(plates[g].omega);
+  }
 }
 
 /** Marks the crust either side of a new rift (the cells of each part next to the other) as rifted. */

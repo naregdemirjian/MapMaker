@@ -869,6 +869,7 @@ inaccuracies the validation found).
 - **15.6 Climate changes under half a second.**
 - **15.7 The quick generator's drawing tools.** Coastlines, biomes and rivers drawn by hand; the generator's
   colours from the climate and biome models.
+- **15.8 The sea's level through a history.** Within the Earth's range (about -120 to +250 m over 500 Myr).
 
 ---
 
@@ -914,6 +915,7 @@ inaccuracies the validation found).
 | 15.5 Past moments by biome | Done (20 November 2026, D167) | The history keeps each picture's climate (coarse temperatures and the air's carbon dioxide); a `moment` stage works out a picture's biomes, temperatures and rain when wanted (0.2 to 0.5 s in a worker, rain on the present's cells): today's picture matches the full stages on 80 to 86 % of the land; covers at earlier pictures, blended between them on simulated maps and in their exports; the studio's biome, temperature, rain and seen-from-space layers at the moment chosen. Still: no lakes or wetlands at earlier moments, Köppen and water layers today's only |
 | 15.6 Climate changes under half a second | Done (20 November 2026, D168) | The energy balance from the year's balance with its slow settling extrapolated: within 0.2 K of sixty years in 3 to 7 years (it stopped unsettled by 1 to 3 K, or ran 13 to 40 years); the rain's months shared among the workers and joined in order (the same bytes); the same arithmetic made faster. A change of the air: 0.5 s for its climate with warm workers (1.05 to 1.4 s); the real Earth's stations unchanged. Still: half a second only with warm workers here; past climates less settled |
 | 15.7 The quick generator's drawing tools | Done (20 November 2026, D169) | Outlines that become land or sea (a ragged coast, land rising inland with a shelf round it, or sea deepening with low shores); rivers drawn from source to mouth, cut so the water follows them and shown as rivers; biomes painted over generated and simulated planets' satellite look; a generated planet's colours from the climate, water and biome models on its own heights (given to the stages in place of a history) |
+| 15.8 The sea's level through a history | Done (20 November 2026, D170) | Found: histories began from made-up plates that took 150 to 250 Myr to settle (ridges lengthening, the floor growing younger and shallower), plates only split (12 became 29 to 52), collisions threw away 2.5 km³ of crust a year. Built: the plates run 200 Myr before the first moment; motions first reconsidered once there are boundaries; small plates captured for good beyond twice the planet's plates; collisions keep their crust (orogens widen); old floor founders at every reconsideration. Sea-level spans 290 to 425 m over five planets (650 to 850; the Earth's 370); the deep sea's peak 4 to 4.5 km (3 to 3.5); histories 6.9 s at preview (4.8). Still: the standard level's excess new sea floor, some floor older than 180 Myr, continents thinning slowly |
 
 ## References
 

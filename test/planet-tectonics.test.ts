@@ -5,8 +5,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { stateFrom, initialState, maxThickness, type TectonicParams } from '../src/planet/tectonics/state.ts';
-import { step, heights } from '../src/planet/tectonics/step.ts';
+import { stateFrom, initialState, maxThickness, groupOf, breakWelds, CAPTURED, type TectonicParams } from '../src/planet/tectonics/state.ts';
+import { step, heights, regimeVigor } from '../src/planet/tectonics/step.ts';
+import { reorganise } from '../src/planet/tectonics/reorganise.ts';
 import { runHistory, stepLength } from '../src/planet/tectonics/history.ts';
 import { oceanDepth, airyHeight, crustHeight, seaLevelFor } from '../src/planet/tectonics/isostasy.ts';
 import { CRUST, quatAxisAngle, quatMul, quatRotate, walkNearest } from '../src/planet/tectonics/plates.ts';
@@ -166,11 +167,62 @@ test('old ocean going under young makes an island arc; plates sliding past each 
   assert.ok(tfCells > 3 * other, `classified as a transform (${tfCells} against ${other})`);
 });
 
+test('continents colliding keep their crust: what gravity will not let a column hold spreads into a wider orogen, sediment scraped on (D170)', () => {
+  // Two continents, plate 0 (x ≥ 0) and plate 1, closing on each other at longitude 90° (and parting at −90°).
+  const st = stateFrom(params({ oceanFraction: 0.6 }), (c, x) => ({ plate: x >= 0 ? 0 : 1, kind: CRUST.continental, thickness: 35, age: 1000 }), [[0, 0, -W], [0, 0, W]]);
+  for (const p of st.plates) p.sediment.fill(0.5);
+  const volume = () => {
+    let v = 0, sed = 0;
+    for (const p of st.plates) for (let r = 0; r < st.mesh.n; r++) if (p.member[r] && p.kind[r] === CRUST.continental) { v += p.thickness[r] * st.mesh.area[r]; sed += p.sediment[r] * st.mesh.area[r]; }
+    return { v: v * R * R, sed: sed * R * R };
+  };
+  const before = volume();
+  const reports = run(st, 30);
+  assert.ok(reports.reduce((s, r) => s + r.collided, 0) * R * R > 2e6, 'the continents collided');
+  const after = volume();
+  // Before, crust beyond the 70 km gravity allows was thrown away (2.5 km³ a year over a history).
+  assert.ok(Math.abs(after.v - before.v) < 0.002 * before.v, `the crust's volume kept: ${(before.v / 1e9).toFixed(3)} → ${(after.v / 1e9).toFixed(3)} billion km³`);
+  assert.ok(Math.abs(after.sed - before.sed) < 0.002 * before.sed, 'and its sediment');
+  // The orogen: crust thickened well inland of the front, none beyond what gravity allows.
+  let thick = 0;
+  for (let c = 0; c < st.mesh.n; c++) {
+    const k = crustAt(st, c);
+    assert.ok(k.thickness <= maxThickness(9.8) + 1e-3);
+    if (k.thickness > 50) thick++;
+  }
+  assert.ok(thick > 20, `a wide belt of thickened crust (${thick} cells over 50 km)`);
+});
+
+test('plates fuse as well as split: beyond twice the planet\'s plates, the smallest is captured by its neighbour for good (D170)', () => {
+  // Eight plates in sectors of longitude, the planet's setting two: at most four move on their own afterwards.
+  const sector = (x: number, y: number) => Math.min(7, Math.floor(((Math.atan2(y, x) + Math.PI) / (2 * Math.PI)) * 8));
+  const poles: Array<[number, number, number]> = Array.from({ length: 8 }, (_, i) => [Math.cos(i) * W, Math.sin(i) * W, (i % 3) * W * 0.3]);
+  const st = stateFrom(params({ plates: 2 }), (c, x, y) => ({ plate: sector(x, y), kind: CRUST.oceanic, thickness: 7, age: 30 }), poles);
+  run(st, 2);
+  st.time = 100;
+  reorganise(st);
+  const moving = new Set(st.plates.map((p) => groupOf(st, p.id)));
+  assert.ok(moving.size <= 4, `${moving.size} plates or groups moving on their own`);
+  const captured = st.plates.filter((p) => st.weldTime[p.id] === CAPTURED);
+  assert.ok(captured.length >= 4, `${captured.length} captured`);
+  // A captured plate keeps its crust and moves with its group; the supercontinent cycle never breaks it off.
+  for (const p of captured) {
+    assert.ok(p.member.some((m) => m === 1));
+    assert.deepEqual(Array.from(p.omega), Array.from(st.plates[groupOf(st, p.id)].omega));
+  }
+  breakWelds(st, st.plates);
+  assert.ok(st.plates.filter((p) => st.weldTime[p.id] === CAPTURED).every((p) => groupOf(st, p.id) !== p.id), 'captured plates stay with a neighbour');
+  // (An episodic planet's bursts keep their rhythm before a history's first moment, where its clock is negative.)
+  const episodic = (time: number) => regimeVigor({ time, params: { regime: 'episodic' } } as unknown as Parameters<typeof regimeVigor>[0]);
+  assert.equal(episodic(-10), episodic(290));
+  assert.equal(episodic(-250), episodic(50));
+});
+
 test('a planet\'s 500-million-year history: every cell held once, crust made and consumed in balance, continents kept, Earth-like heights, the same every time', () => {
   const def = definitionFromPreset('earthlike', 5);
   const p = tectonicParams(def, 5);
   const t0 = performance.now();
-  const h = runHistory(p, { durationMyr: 500, frameEveryMyr: 50 });
+  const h = runHistory(p, { durationMyr: 500, frameEveryMyr: 50, checkpointEveryMyr: 500 });
   const ms = performance.now() - t0;
   const n = meshAt(5).n, F = h.times.length;
   assert.equal(F, 11);
@@ -204,6 +256,20 @@ test('a planet\'s 500-million-year history: every cell held once, crust made and
   ages.sort((a, b) => a - b);
   const meanAge = ages.reduce((s, a) => s + a, 0) / ages.length, p90 = ages[Math.floor(0.9 * ages.length)];
   assert.ok(meanAge > 25 && meanAge < 100 && p90 < 220, `the sea floor's mean age ${meanAge.toFixed(0)} Myr, nine-tenths younger than ${p90.toFixed(0)}`);
+  // The history begins from plates already moving as they will (D170: they run 200 Myr first), with ridges and young
+  // sea floor at its first moment; and the sea's level through it keeps within the Earth's range (about -120 to
+  // +250 m over the last 500 Myr: a span of 370 m; before, the first 200 Myr stood 300 to 750 m below the present's).
+  const first = h.checkpoints!.get(0)!;
+  let young0 = 0, ocean0 = 0;
+  for (let c = 0; c < n; c++) {
+    const pl = first.plates[first.owner[c]], r = first.ref[c];
+    if (pl.kind[r] !== CRUST.oceanic) continue;
+    ocean0 += first.mesh.area[c];
+    if (pl.age[r] < 10) young0 += first.mesh.area[c];
+  }
+  assert.ok(young0 > 0.06 * ocean0, `young sea floor at the first moment (${((100 * young0) / ocean0).toFixed(0)} %; 2 % before)`);
+  const sea = Array.from(h.seaLevels);
+  assert.ok(Math.max(...sea) - Math.min(...sea) < 450, `the sea's level from ${Math.min(...sea).toFixed(0)} to ${Math.max(...sea).toFixed(0)} m`);
   // The same history every time; another seed, another planet.
   const again = runHistory(p, { durationMyr: 500, frameEveryMyr: 100 });
   const hash = (a: Int16Array) => createHash('sha256').update(new Uint8Array(a.buffer, a.byteOffset, a.byteLength)).digest('hex');

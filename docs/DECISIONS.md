@@ -61,6 +61,58 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D170. The sea's level through a history within the Earth's range (Stage 15.8)
+
+- **Asked.** Fix the inaccuracies the validation found; here the sea's level over a history: -553 to +129 m on the
+  Earth-like planet (500 Myr at preview) against the Earth's -120 to +250 m over the last 500 Myr.
+- **Found.** Each picture's sea is the level at which that moment's hollows hold today's water (D159), so whatever
+  makes the ocean basins hold more early on lowers every early sea. Measured, with the crust's budget every 25 Myr,
+  over several planets and levels:
+  - A history's first moment is made up (plates drawn at random, continents set in them, no ridges or trenches) and
+    its plates took 150 to 250 Myr to settle. The first reconsideration of motions came at once, with no boundaries
+    yet to pull or push: every plate's slab pull was nothing and they moved at half the Earth's speed (2.2 cm a year)
+    for 40 to 90 Myr. Then ridges lengthened: new sea floor went from 1.6 to 5 to 9 km² a year, the floor younger
+    than 10 Myr from 2 % to 15 to 25 %, so the sea floor rose 0.5 to 0.9 km, and the first 200 Myr's seas stood 300
+    to 750 m below the present's.
+  - Plates only split, never fused: an Earth-like planet's twelve became 29 to 52 by its present, up to 51 moving
+    apart (the Earth has about fifteen); more plates, more ridges, the floor ever younger.
+  - Collisions threw away crust: what was overridden thickened the crust above, and beyond the 70 km gravity allows
+    the rest was discarded, 1.25 to 1.3 billion km³ over 500 Myr (2.5 km³ a year, where the Earth loses perhaps 0.4
+    in collisions); the overridden continent's sediment was lost too. Continents thinned from 36 to 28 km, so the
+    present's sea (set by its share of the surface) sat low over the ocean floor: the deep sea's peak at 3 to 3.5 km
+    against the Earth's 4 to 5.
+  - Old floor foundered at only half the reconsiderations.
+- **Built.**
+  - The plates run for 200 Myr before a history's first moment (`SPIN_UP_MYR`, `tectonics/history.ts`), with their
+    rivers (rain by latitude) but no climate; the history's clock runs from -200 to 0, so timeline events begun
+    before the history apply. The history begins from plates already moving as they will. 100 Myr was not enough
+    (two planets in five still began 500 m low).
+  - Motions are first reconsidered after 40 to 90 Myr, as every later time, once there are boundaries.
+  - Plates fuse as well as split (`capture` in `tectonics/reorganise.ts`): beyond twice the planet's plates moving on
+    their own, the smallest (not made in the last 40 Myr) is welded for good to the neighbour it shares the most edge
+    with, as microplates are captured and ridges die on the Earth. It keeps its crust and identity, so following crust
+    back through time stays exact; the supercontinent cycle never breaks such a weld (a captured plate goes on with
+    a neighbour). A limit of 1.5 times left too few plates and the floor grew old (a mean age up to 114 Myr).
+  - Collisions keep the crust's volume: beyond what gravity allows, the rest spreads ring by ring into the crust
+    behind, each ring filled evenly (`spreadExcess` in `tectonics/step.ts`), so orogens widen as Tibet's plateau
+    did; the overridden crust's sediment is scraped onto the crust above.
+  - Old floor founders at every reconsideration (`SUBDUCTION.founderChance` 1).
+  - An episodic planet's bursts keep their rhythm at negative times.
+- **Result.** The sea's level over a history, 500 Myr at preview: -189 to +102 m on the validation's planet; spans
+  of 290 to 425 m over five planets (650 to 850 before; the Earth's about 370), most of their seas above the
+  present's as on the Earth. At the standard level 340 and 420 m on two planets in three. The present's sea floor:
+  a mean age of 53 to 72 Myr over five planets (the Earth's 64), new floor 4 to 7 km² a year (1.6 to 9). The deep
+  sea's peak at 4 to 4.5 km (3 to 3.5; the Earth's 4 to 5); 2.3 % of the surface above 2 km (0.8; about 3 % on the
+  Earth with its ice sheets, 1 % of rock). A history takes 6.9 s at preview (4.8) and 31 s at the standard level
+  (25): the spin-up's cost.
+- **Still wrong, and why.** The standard level makes two to four times the Earth's new sea floor (up to 43 % of it
+  younger than 10 Myr at times; its plates' ragged edges open more), so one planet in three there spans 620 m.
+  4 to 8 % of the floor outlives 180 Myr (the Earth has almost none): welds snowball, two groups colliding become
+  one with all their plates, and old floor spread over many small welded plates never founders. Continents still
+  thin slowly (33 to 29 to 31 km over 500 Myr at preview, their volume 7 % down: sediment going down trenches, thin
+  new crust from arcs and rifts), and arcs' volume depends on the level (their band is at least a cell wide). The ice
+  on land over a history, 2 to 14 million km³, is still below the Earth's (30 today, 80 at glacial peaks).
+
 ### D169. The quick generator's drawing tools: coasts, rivers and biomes drawn by hand (Stage 15.7)
 
 - **Asked.** Direct tools for the quick generator (Mode A, D97): draw a coastline (the land and sea change, the rest
