@@ -1120,7 +1120,13 @@ export function addCountries(world: World, engine: Engine, o: { spaceId: string;
     const paths = tx.kernel(o.spaceId, (arr) => arr.insertPaths(rings, { closed: true, snap: o.snap ?? 1e-8 }));
     const arr = world.arrangement(o.spaceId);
     const lefts = arr.facesLeftOfMany(paths);
-    const insideOf = (i: number) => (arr.isSimpleCycle(paths[i]) && arr.separatesFaces(paths[i]) ? lefts[i] : arr.facesWoundBy(paths[i]));
+    // Each outline's ring as given (lon, lat), for checking what the map says it encloses.
+    const ringOf: Array<Array<[number, number]>> = [];
+    for (const c of o.countries) for (const poly of c.polygons) { if (ringFromMapPoints(poly[0], 1)) { ringOf.push(poly[0] as Array<[number, number]>); for (const h of poly.slice(1)) if (ringFromMapPoints(h, 1)) ringOf.push(h as Array<[number, number]>); } }
+    const insideOf = (i: number) => {
+      const found = arr.isSimpleCycle(paths[i]) && arr.separatesFaces(paths[i]) ? lefts[i] : arr.facesWoundBy(paths[i]);
+      return enclosedOnly(arr, found, paths[i], ringOf[i]);
+    };
     const items: Array<{ leaves: Iterable<number>; value: string | null }> = [];
     // Only land held by these owners at the edit's moment (D171).
     let heldBy: ((f: number) => boolean) | null = null;
@@ -1179,6 +1185,58 @@ export function addCountries(world: World, engine: Engine, o: { spaceId: string;
     if (o.mode.kind !== 'new' && items.length) writeAssignments(tx, engine, o.spaceId, o.layerId, o.mode, items);
     return { entities, eventId };
   });
+}
+
+/**
+ * What an outline encloses, checked against the outline itself (D177). Where the map's parcels disagree with
+ * themselves (old borders and new ones crossing almost along each other, as today's country outlines and province
+ * outlines do round the Aral Sea), the faces found inside an outline can run far beyond it: a province took a whole
+ * region. When the faces found cover clearly more than the outline encloses, only those that lie inside the outline
+ * are kept: points just inside each face (the middles of some of its borders, moved a couple of metres into it) are
+ * tested against the outline as given, and most must be inside it.
+ */
+function enclosedOnly(arr: ReturnType<World['arrangement']>, found: Set<number>, path: PathStep[], ring: Array<[number, number]> | undefined): Set<number> {
+  if (!ring || ring.length < 3) return found;
+  let area = 0;
+  for (const f of leafDescendants(arr, found)) area += arr.faceArea(f);
+  const want = arr.pathLeftArea(path);
+  if (area <= want * 1.15 + 1e-9) return found;
+  // A test for the inside of the outline (longitudes taken round to its side of the planet).
+  const ref = ring[0][0];
+  const xs = ring.map(([lon]) => lon + 360 * Math.round((ref - lon) / 360)), ys = ring.map(([, lat]) => lat);
+  const inside = (lon: number, lat: number) => {
+    const x = lon + 360 * Math.round((ref - lon) / 360);
+    let c = false;
+    for (let i = 0, j = xs.length - 1; i < xs.length; j = i++) if ((ys[i] > lat) !== (ys[j] > lat) && x < ((xs[j] - xs[i]) * (lat - ys[i])) / (ys[j] - ys[i]) + xs[i]) c = !c;
+    return c;
+  };
+  const NUDGE = 2e-5; // degrees: about two metres, far more than the map's rounding
+  // (The faces found may miss some of those inside: every face over the outline's box is looked at.)
+  let w = Infinity, e = -Infinity, so = Infinity, no2 = -Infinity;
+  for (let i = 0; i < xs.length; i++) { w = Math.min(w, xs[i]); e = Math.max(e, xs[i]); so = Math.min(so, ys[i]); no2 = Math.max(no2, ys[i]); }
+  const kept = new Set<number>();
+  for (const f of arr.leafFaces()) {
+    const rings = arr.faceRingsLonLat(f);
+    let over = false;
+    for (const r of rings) { for (const [lon, lat] of r) { const x = lon + 360 * Math.round((ref - lon) / 360); if (x >= w && x <= e && lat >= so && lat <= no2) { over = true; break; } } if (over) break; }
+    if (!over) continue;
+    const edges = rings.reduce((n, r) => n + r.length, 0);
+    const step = Math.max(1, Math.floor(edges / 9));
+    let yes = 0, no = 0, k = 0;
+    for (const r of rings) for (let i = 0; i < r.length; i++, k++) {
+      if (k % step) continue;
+      const [ax, ay] = r[i], [bx0, by] = r[(i + 1) % r.length];
+      const bx = bx0 + 360 * Math.round((ax - bx0) / 360);
+      const cos = Math.max(0.05, Math.cos((((ay + by) / 2) * Math.PI) / 180));
+      const dx = (bx - ax) * cos, dy = by - ay, len = Math.hypot(dx, dy);
+      if (!(len > 0)) continue;
+      // The face lies on the left of its rings: the point is moved that way.
+      const mx = (ax + bx) / 2 + ((-dy / len) * NUDGE) / cos, my = (ay + by) / 2 + (dx / len) * NUDGE;
+      if (inside(mx, my)) yes++; else no++;
+    }
+    if (yes > no) kept.add(f);
+  }
+  return kept;
 }
 
 /**

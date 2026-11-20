@@ -1435,6 +1435,8 @@ export class Arrangement {
       }
       let o = -1, bestN = -1;
       for (const [l, n2] of counts) if (n2 > bestN || (n2 === bestN && l < o)) { o = l; bestN = n2; }
+      // Made only of new borders: the old face it was carved out of (see oldFaceOfCycles).
+      if (o === -1 && key !== ROOT) o = this.oldFaceOfCycles(region(key).cycles.map((c) => t.cycles.get(c)!)) ?? -1;
       if (o === -1) o = key === ROOT || depth > 10000 ? this.rootFace : resolve(regionOfHole(holeOfPiece(key)), depth + 1);
       origin.set(key, o);
       return o;
@@ -1584,6 +1586,8 @@ export class Arrangement {
       }
       let o = -1, bestN = -1;
       for (const [l, n2] of counts) if (n2 > bestN || (n2 === bestN && l < o)) { o = l; bestN = n2; }
+      // Made only of new borders: the old face it was carved out of (see oldFaceOfCycles).
+      if (o === -1 && ri !== ROOT) o = this.oldFaceOfCycles(regions[ri].map((ci) => cyc[ci])) ?? -1;
       if (o === -1) o = ri === ROOT || depth > 10000 ? this.rootFace : resolve(containerRegion(ri), depth + 1);
       origin[ri] = o;
       return o;
@@ -1712,6 +1716,45 @@ export class Arrangement {
     }
     if (Math.abs(second - best.pos) < 1e-12) return null;
     return { seg: best.seg, side: best.side };
+  }
+
+  /**
+   * The old face (before the borders being added) that an area bounded only by new borders was carved out of
+   * (D177): new borders never cross old ones, so a new border lies inside one old face, and so does the area
+   * beside it. Found by locating the middle of one of its new borders among the old borders alone. (Taking the
+   * face that the area's connected piece of borders lies in was wrong when the new borders join old ones: a set
+   * of provinces running onto a country's coast or frontier was taken for land carved out of the rest of the
+   * world, and lost the country's history.) Null when the area has no new border.
+   */
+  private oldFaceOfCycles(cycles: number[][]): number | null {
+    for (const hs of cycles) for (const h of hs) {
+      const sg = this.segments.get(h >> 1)!;
+      if (sg.left_face > 0 || sg.right_face > 0) continue;
+      const a = this.v(sg.a), b = this.v(sg.b);
+      return this.oldFaceAt(normalize([a[0] + b[0], a[1] + b[1], a[2] + b[2]]));
+    }
+    return null;
+  }
+
+  /** The face containing a point among the old borders alone (those already labelled), or the root face when there are none near enough. */
+  private oldFaceAt(p: Vec3): number {
+    const isOld = (id: number) => { const sg = this.segments.get(id); return !!sg && sg.left_face > 0 && sg.right_face > 0; };
+    const oldNear = (legs: Array<[Vec3, Vec3]>) => {
+      const out = new Set<number>();
+      for (const [x, y] of legs) { const [lo, hi] = arcBox(x, y, 1e-9); for (const id of this.sgrid.query(lo, hi)) if (isOld(id)) out.add(id); }
+      return out;
+    };
+    const via = (sid: number): number | null => {
+      const hit = this.firstHit(p, this.segments.get(sid)!, oldNear);
+      return hit ? (hit.side > 0 ? hit.seg.left_face : hit.seg.right_face) : null;
+    };
+    for (let r = 2e-4; r < 4; r *= 4) {
+      const [lo, hi] = pointBox(p, r);
+      const cands = [...this.sgrid.query(lo, hi)].filter(isOld).sort((x, y) => x - y);
+      for (const sid of cands.slice(0, 8)) { const f = via(sid); if (f !== null) return f; }
+    }
+    for (const sid of [...this.segments.keys()].filter(isOld).sort((x, y) => x - y)) { const f = via(sid); if (f !== null) return f; }
+    return this.rootFace;
   }
 
   /**

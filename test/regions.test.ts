@@ -69,3 +69,41 @@ test('neighbouring regions given to two owners meet exactly: no gap, no overlap'
     }
   }
 });
+
+// D177: provinces given from a country whose outline is another dataset's (Natural Earth's 1:50m countries
+// against its 1:10m provinces), in one change.
+const countries = decodeCountries(JSON.parse(readFileSync(new URL('../data/natural-earth/countries-50m.json', import.meta.url), 'utf8')) as CountriesFile);
+const shapeOf = (n: string) => { const c = countries.find((x) => x.name === n)!; return { name: c.name, polygons: c.polygons }; };
+const provinces = (country: string, names: string[]) => regions.filter((r) => r.country === country && names.includes(r.name)).map((r) => ({ name: r.name, polygons: r.polygons }));
+function setUp(owned: string[]) {
+  const world = new World();
+  const { spaceId } = cmd.seedProject(world, 'T').result;
+  const layerId = world.all('layer').find((l) => l.kind === 'partition')!.id;
+  const A = cmd.createEntity(world, { type_id: 'polity', name: 'A', color: '#33f' }).result;
+  const B = cmd.createEntity(world, { type_id: 'polity', name: 'B', color: '#fc3' }).result;
+  cmd.addCountries(world, new Engine(world), { spaceId, layerId, countries: owned.map(shapeOf), mode: { kind: 'correct', t: NEG_INF }, into: A });
+  const ev = cmd.createEvent(world, { name: 'Change', start: gregorian.fromCivil({ year: 1260 }), end: gregorian.fromCivil({ year: 1261 }), type_id: 'general', description: '', precision: 'day' }).result;
+  return { world, spaceId, layerId, A, B, ev };
+}
+
+test('provinces running onto a country\'s frontier keep the country\'s history: none of them is taken for land carved out of the rest of the world (D177)', () => {
+  const { world, spaceId, layerId, A, B, ev } = setUp(['Kazakhstan']);
+  cmd.addCountries(world, new Engine(world), { spaceId, layerId, countries: provinces('Kazakhstan', ['Aqmola', 'Astana', 'Pavlodar']), mode: { kind: 'new', eventId: ev, at: null }, into: B, onlyFrom: [A] });
+  const engine = new Engine(world);
+  const at = (lon: number, lat: number, y: number) => engine.valueAtPoint(spaceId, layerId, lonLatToVec(lon, lat), gregorian.fromCivil({ year: y }));
+  assert.equal(at(71.43, 51.13, 1250), A, 'Astana held by A before the change');
+  assert.equal(at(69.5, 52.0, 1250), A, 'Aqmola too');
+  assert.equal(at(71.43, 51.13, 1262), B, 'and given to B by it');
+  assert.equal(at(76.9, 52.3, 1262), B, 'Pavlodar');
+  assert.equal(at(73.1, 49.8, 1262), A, 'Qaraghandy, not in the change, still A');
+});
+
+test('a province never takes land beyond its outline, even where the outlines of two datasets disagree round it (D177)', () => {
+  const { world, spaceId, layerId, A, B, ev } = setUp(['Uzbekistan', 'Turkmenistan', 'Afghanistan', 'Kazakhstan', 'Tajikistan']);
+  cmd.addCountries(world, new Engine(world), { spaceId, layerId, countries: [...provinces('Uzbekistan', ['Karakalpakstan', 'Khorezm']), ...provinces('Turkmenistan', ['Tashauz']), ...provinces('Kazakhstan', ['West Kazakhstan', 'Atyrau', 'Aqtöbe', 'Mangghystau', 'Qostanay', 'Aqmola', 'Astana', 'North Kazakhstan', 'Pavlodar', 'Qaraghandy'])], mode: { kind: 'new', eventId: ev, at: null }, into: B, onlyFrom: [A] });
+  const engine = new Engine(world);
+  const at = (lon: number, lat: number) => engine.valueAtPoint(spaceId, layerId, lonLatToVec(lon, lat), gregorian.fromCivil({ year: 1262 }));
+  assert.equal(at(59.6, 42.46), B, 'Nukus, in Karakalpakstan');
+  assert.equal(at(71.43, 51.13), B, 'Astana');
+  for (const [name, lon, lat] of [['Samarkand', 66.96, 39.65], ['Merv', 61.84, 37.66], ['Herat', 62.2, 34.35], ['Almaty', 76.9, 43.25]] as Array<[string, number, number]>) assert.equal(at(lon, lat), A, `${name} stays A`);
+});

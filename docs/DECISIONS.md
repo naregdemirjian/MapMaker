@@ -61,6 +61,37 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D177. Five large example projects, II: the Mongol Empire, 1206 to 1405; parcels that keep their history
+
+- **The Mongol Empire, 1206 to 1405** (`src/examples/mongols.ts`): one map of the Earth in an atlas's colours and the
+  Julian calendar; Eurasia in 1206 built from today's provinces (Natural Earth 1:10m only: provinces of one
+  dataset share their borders point for point, where today's 1:50m country outlines beside them leave slivers); 117
+  events: Genghis Khan's campaigns province by province, Khwarazm, the great raid and the Kalka, the Jin, the Rus',
+  Hungary occupied and given up, Baghdad, Syria taken and lost at Ain Jalut, the empire split into four khanates in
+  1260, the Song conquered, the fleets to Japan and Java, the Ilkhanate falling apart, the Ming, Lithuania and
+  Moscow, and Timur to his death at Otrar; campaigns as arrows drawing themselves, battles and sieges marked, the
+  capitals founded, the Silk Roads; nine characters (Marco Polo, William of Rubruck and Ibn Battuta on their
+  journeys); the lands under Mongol rule counted; nine shots.
+- **Fixed: land carved out of a country could lose its history.** When new borders are added, a new area whose
+  edges are all new takes its history from the old area it was carved out of. That old area was taken to be the
+  one the area's connected network of borders lay in: right for an island drawn in a country, wrong when the new
+  borders run onto old ones, as provinces running onto a country's frontier do. Aqmola and Astana, given from
+  Kazakhstan together with Pavlodar (which reaches the Russian frontier), were taken for land carved out of the rest
+  of the world and lost Kazakhstan's history: nobody's, before the change and after. Now the old area is found by
+  locating one of the area's new borders among the old borders (a new border never crosses an old one, so it lies
+  inside one old area) (`Arrangement.oldFaceOfCycles`), in the incremental rebuild of the parcels and the full one
+  alike.
+- **Fixed: a province could take land far beyond its outline.** Where two datasets' outlines run almost along each
+  other (round the Aral Sea, Karakalpakstan's 1:10m outline against Uzbekistan's and Kazakhstan's 1:50m ones), the
+  parcels can come out inconsistent: one parcel on both sides of an outline. The faces found inside the outline then
+  ran far beyond it: at the split of 1260 the Golden Horde, given Khwarazm, took Samarkand, Merv, Herat and the
+  Tarim. Now what an outline is found to enclose is checked against the area it encloses; when the faces found
+  cover clearly more, only the parcels lying inside the outline are given (points just inside each parcel, the
+  middles of some of its borders moved two metres into it, tested against the outline as given, most of them
+  inside) (`enclosedOnly` in `domain/commands.ts`).
+- **Seen.** The shots checked in the app: the khanates where they were in 1285 and Timur's empire in 1391, no slivers
+  inside the empire.
+
 ### D176. Five large example projects, I: the Fall of Constantinople, 1453, and what building it fixed
 
 - **Asked.** Five large projects of different kinds, each of a hundred events or more, simple and complex, among
