@@ -22,6 +22,7 @@ import { toLevel } from '../mesh/transfer.ts';
 import type { Derived } from '../model/physics.ts';
 import type { PlanetDefinition } from '../model/definition.ts';
 import { orbitAt } from './insolation.ts';
+import { currentAnomaly } from './currents.ts';
 
 export interface HydroResult {
   /** Rain and snow each month (mm) and over the year (mm), month m of cell c at [m·n + c]. */
@@ -39,7 +40,15 @@ export interface HydroResult {
 
 const DAY = 86_400;
 /** The rain model's constants (calibrated on the Earth, D158). */
-export const HYDRO = { base: 0.08, rising: 1.3, sinking: 0.6, itczWidth: 11, swingSea: 0.3, swingLand: 0.9, convective: 0.8, recycle: 0.3, evaporation: 0.14, carry: 0.7, warmRecycle: 0.3, eddy: 1.5e6 };
+/**
+ * The rain model's settings (D158, D159; recalibrated in D165 on 22 stations, the land's rain at 30-55° N, the share
+ * of dry climates and the planet's mean): rain rates (per day) in the convergence zone (`rising`) and the storm belts
+ * (`storm`), less under the highs' sinking air (`sinking`; convection held down by it: `subsidence`, which follow the
+ * convergence zone a quarter as far: `highFollow`); evaporation, slowing as the air nears saturation (`deficit`);
+ * the convergence zone drawn over land near the sea (`lowLand`, within `coastReach` km) and over high ground above
+ * `highFrom` m (one more unit per `plateau` m), in `sectors` of longitude.
+ */
+export const HYDRO = { base: 0.08, rising: 1, sinking: 0.6, itczWidth: 11, swingSea: 0.3, swingLand: 0.9, convective: 0.4, recycle: 0.3, evaporation: 0.11, carry: 0.7, warmRecycle: 0.3, eddy: 1.5e6, deficit: 0.25, subsidence: 3, lowLand: 1, plateau: 400, storm: 3, sectors: 24, coastReach: 800, highFrom: 1000, highFollow: 0.25, nearItcz: 6 };
 /** The subtropical highs' flanks (D159): winds (m/s) poleward on the western flanks, equatorward on the eastern; and how much more (less) air sinks there. */
 export const HIGHS = { poleward: 6, equatorward: 3, sinking: 0.8, wide: 1500, reachLand: 2500, reachSea: 1500, coast: 800, monsoon: 8 };
 /** Precipitable water over the sea at a temperature (mm): about 50 mm in the warm tropics, a few at the poles. */
@@ -51,16 +60,29 @@ const vapour = (t: number) => 48 * Math.exp(0.066 * (t - 27));
  * 20° N over Asia in July, 8° over the Pacific): the monsoons. By 30° bands of longitude, the land's share of the
  * summer hemisphere to 40° (high ground counting more) deciding the swing; smoothed across the bands, read per cell.
  */
-function convergenceZones(mesh: Mesh, land: ArrayLike<number>, height: ArrayLike<number>, declinationDeg: number): Float64Array {
-  const LON = 12;
+export function convergenceZones(mesh: Mesh, land: ArrayLike<number>, height: ArrayLike<number>, declinationDeg: number, radiusKm = 6371): Float64Array {
+  const LON = HYDRO.sectors;
   const share = new Float64Array(LON), all = new Float64Array(LON);
   const summer = declinationDeg >= 0 ? 1 : -1;
+  // How far each cell lies from the sea (km), by spreading out from the sea's cells (D165): lowland far inland, as
+  // the Sahara's, draws no rain belt.
+  const dist = new Float64Array(mesh.n).fill(Infinity), queue: number[] = [];
+  for (let c = 0; c < mesh.n; c++) if (land[c] < 0.5) { dist[c] = 0; queue.push(c); }
+  for (let q = 0; q < queue.length; q++) {
+    const c = queue[q];
+    for (let k = mesh.nbrStart[c]; k < mesh.nbrStart[c + 1]; k++) {
+      const j = mesh.nbr[k], d = dist[c] + mesh.edgeDist[k] * radiusKm;
+      if (d < dist[j]) { dist[j] = d; queue.push(j); }
+    }
+  }
   for (let c = 0; c < mesh.n; c++) {
     const lat = ((mesh.lat[c] * 180) / Math.PI) * summer;
     if (lat < 0 || lat > 40) continue;
     const l = Math.floor(((mesh.lon[c] + Math.PI) / (2 * Math.PI)) * LON) % LON;
-    // High ground heats the air above it most (a plateau draws the monsoon furthest).
-    share[l] += land[c] * (1 + height[c] / 2000) * mesh.area[c]; all[l] += mesh.area[c];
+    // High ground heats the air above it most (a plateau draws the monsoon furthest); low desert draws it much less
+    // (its heat low stays dry: the rain belt stops well short of it, D165).
+    // (High ground counts above about a kilometre, where it heats the middle of the air: Tibet's, Mexico's plateau.)
+    share[l] += land[c] * (HYDRO.lowLand * Math.exp(-dist[c] / HYDRO.coastReach) + Math.max(0, height[c] - HYDRO.highFrom) / HYDRO.plateau) * mesh.area[c]; all[l] += mesh.area[c];
   }
   const raw = new Float64Array(LON);
   for (let l = 0; l < LON; l++) raw[l] = Math.max(-28, Math.min(28, declinationDeg * (HYDRO.swingSea + HYDRO.swingLand * (all[l] ? share[l] / all[l] : 0))));
@@ -131,9 +153,10 @@ export function hydroclimate(mesh: Mesh, def: PlanetDefinition, x: Derived, heig
   for (let c = 0; c < fineN; c++) { landFine[c] = heightM[c] >= 0 ? 1 : 0; hFine[c] = Math.max(0, heightM[c]); }
   const land = down(landFine), height = down(hFine);
   // Winds and rain go by the air column's temperature: dry ground's own extra warmth (ebm.ts, D159) draws in no rain.
-  const T: Float64Array[] = [];
+  const T: Float64Array[] = [], Tair: Float64Array[] = [];
   for (let m = 0; m < months; m++) {
     const col = Array.prototype.slice.call(tempMonthly, m * fineN, (m + 1) * fineN) as number[];
+    Tair.push(down(col));
     if (dryWarm) for (let c = 0; c < fineN; c++) col[c] -= dryWarm[c];
     T.push(down(col));
   }
@@ -144,7 +167,7 @@ export function hydroclimate(mesh: Mesh, def: PlanetDefinition, x: Derived, heig
   // The subtropical highs' flanks (D159): poleward, moist on the western sides of wide oceans and the land beside
   // them; equatorward, sinking and dry on their eastern sides and the west coasts facing them.
   const flank = highFlanks(coarse, land, x);
-  for (let m = 0; m < months; m++) for (let c = 0; c < n; c++) T[m][c] += currents[c] * (1 - 0.6 * land[c]);
+  // (The currents' heat is in the temperatures already: the energy balance carries it, D165.)
   const precipMonthly = new Float32Array(months * fineN), tempOut = new Float32Array(months * fineN);
   let windJan = new Float32Array(2 * fineN), windJul = new Float32Array(2 * fineN);
   const retro = def.body.tiltDeg > 90;
@@ -164,11 +187,11 @@ export function hydroclimate(mesh: Mesh, def: PlanetDefinition, x: Derived, heig
       total += lastTotal;
       continue;
     }
-    const t = T[m];
+    const t = T[m], ta = Tair[m];
     // Where the star stands overhead a month earlier (mid-month).
     const o = orbitAt((m - 0.5) / months, def.orbit.eccentricity, def.orbit.perihelionDeg);
     const decl = (Math.asin(Math.sin((def.body.tiltDeg * Math.PI) / 180) * Math.sin(o.lambda)) * 180) / Math.PI;
-    const itczAt = convergenceZones(coarse, land, height, decl);
+    const itczAt = convergenceZones(coarse, land, height, decl, def.body.radiusKm);
     // Zonal means for the monsoon's pull (air drawn to where the air column is warmer than its latitude's mean).
     const zb = new Float64Array(37), zw = new Float64Array(37);
     for (let c = 0; c < n; c++) { const b = Math.round(((coarse.lat[c] * 180) / Math.PI + 90) / 5); zb[b] += t[c] * area[c]; zw[b] += area[c]; }
@@ -209,11 +232,19 @@ export function hydroclimate(mesh: Mesh, def: PlanetDefinition, x: Derived, heig
       const rate = new Float64Array(n), source = new Float64Array(n), convect = new Float64Array(n), lift = new Float64Array(n), sat = new Float64Array(n);
       for (let c = 0; c < n; c++) {
         const lat = (coarse.lat[c] * 180) / Math.PI, d = Math.abs(lat - itczAt[c]);
-        const rising = Math.exp(-((d / HYDRO.itczWidth) ** 2)) + 0.75 * Math.exp(-(((Math.abs(lat) - Math.min(80, x.hadleyEdgeDeg + 20)) / 13) ** 2));
+        // (The convergence zone's rising air and the storm belts', each with its own efficiency: storms rain out more of
+        // less vapour, D165.)
+        const rising = Math.exp(-((d / HYDRO.itczWidth) ** 2)) + (HYDRO.storm / HYDRO.rising) * Math.exp(-(((Math.abs(lat) - Math.min(80, x.hadleyEdgeDeg + 20)) / 13) ** 2));
         // Warm air rises in storms only where it is moist (over dry hot ground it does not: D159), so this part of
         // the rate is weighed by how near saturation the vapour is, step by step.
         convect[c] = HYDRO.convective * Math.max(0, Math.min(1, (t[c] - 22) / 6));
-        const sinking = Math.exp(-(((d - Math.min(60, x.hadleyEdgeDeg) + 8) / 9) ** 2)) * Math.max(0, 1 + HIGHS.sinking * (flank.east[c] - flank.west[c]));
+        // The subtropical highs' sinking air, beside the convergence zone; the highs follow its swing only partly (on
+        // the Earth about a quarter as far: D159, D165), so a desert stays under its high in winter too.
+        // (Not beside the convergence zone itself: where a monsoon draws it far, as over India, the high gives way.)
+        const dh = Math.abs(lat - HYDRO.highFollow * itczAt[c]), clear = Math.max(0, Math.min(1, (d - HYDRO.nearItcz) / HYDRO.nearItcz));
+        const sinking = clear * Math.exp(-(((dh - Math.min(60, x.hadleyEdgeDeg) + 8) / 9) ** 2)) * Math.max(0, 1 + HIGHS.sinking * (flank.east[c] - flank.west[c]));
+        // (Under the highs' sinking air the warm ground's convection stays shallow and dry: D165.)
+        convect[c] *= Math.max(0, 1 - HYDRO.subsidence * sinking);
         // Up or down a slope: the wind across the height's gradient (m/s × m/m), the biggest single term.
         let up = 0;
         for (let k = nbrStart[c]; k < nbrStart[c + 1]; k++) {
@@ -275,9 +306,13 @@ export function hydroclimate(mesh: Mesh, def: PlanetDefinition, x: Derived, heig
           const rain = (r / DAY) * W[c];
           // Land gives back part of its rain by evaporation and the breath of plants: more where it is warm and wet.
           const recycled = land[c] ? (HYDRO.recycle + HYDRO.warmRecycle * Math.max(0, Math.min(1, (t[c] - 12) / 12))) * rain : 0;
-          next[c] = Math.max(0, W[c] + dt * (source[c] / DAY + recycled + inflow - outflow * W[c] - rain));
+          // (Evaporation slows as the air nears saturation, D165: the bulk formula's humidity deficit, as much as before
+          // with the air at its usual vapour, more with drier air.)
+          const evap = HYDRO.deficit > 0 ? source[c] * Math.max(0, 1 - W[c] / ((1 + HYDRO.deficit) * sat[c])) * (1 + 1 / HYDRO.deficit) : source[c];
+          next[c] = Math.max(0, W[c] + dt * (evap / DAY + recycled + inflow - outflow * W[c] - rain));
           // Vapour cannot much exceed what the air holds at its temperature: over cold ground it condenses and falls.
-          const cap = (land[c] ? 0.9 : 1.05) * vapour(Math.min(30, t[c]));
+          // (The air's own temperature: over a hot desert it holds more, D165.)
+          const cap = (land[c] ? 0.9 : 1.05) * vapour(Math.min(30, ta[c]));
           if (next[c] > cap) { extra[c] += next[c] - cap; next[c] = cap; }
         }
         W.set(next);
@@ -300,49 +335,12 @@ export function hydroclimate(mesh: Mesh, def: PlanetDefinition, x: Derived, heig
   }
   // The currents' warmth on the fine mesh's temperatures (and a little inland).
   const cur = up(currents);
-  for (let m = 0; m < months; m++) for (let c = 0; c < fineN; c++) tempOut[m * fineN + c] = tempMonthly[m * fineN + c] + cur[c] * (heightM[c] >= 0 ? 0.4 : 1);
+  for (let m = 0; m < months; m++) for (let c = 0; c < fineN; c++) tempOut[m * fineN + c] = tempMonthly[m * fineN + c];
   const precipAnnual = new Float32Array(fineN);
   for (let m = 0; m < months; m++) for (let c = 0; c < fineN; c++) precipAnnual[c] += precipMonthly[m * fineN + c];
   return { precipMonthly, precipAnnual, tempMonthly: tempOut, currents: Float32Array.from(cur), windJan, windJul, meanPrecip: total / (4 * Math.PI) };
 }
 
-/**
- * The sea surface's change from the currents (K): warm along each basin's western side, cool along its eastern side
- * (between about 10° and 45°), warm on the eastern side at high latitudes where the warm drift arrives, fading with
- * distance from the shore (about 1,000 km); on land a little of it, fading inland.
- */
-function currentAnomaly(mesh: Mesh, land: ArrayLike<number>, x: Derived): Float64Array {
-  const n = mesh.n, W = 180, H = 90, grid = new Uint8Array(W * H);
-  // A raster of the land (2° cells), from the mesh.
-  for (let c = 0; c < n; c++) {
-    if (land[c] < 0.5) continue;
-    const i = Math.floor(((mesh.lon[c] + Math.PI) / (2 * Math.PI)) * W) % W, j = Math.min(H - 1, Math.floor(((Math.PI / 2 - mesh.lat[c]) / Math.PI) * H));
-    for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
-      const jj = j + dj, ii = (i + di + W) % W;
-      if (jj >= 0 && jj < H && Math.hypot(di, dj) < 1.2) grid[jj * W + ii] = 1;
-    }
-  }
-  const out = new Float64Array(n);
-  if (!(x.cellsPerHemisphere >= 2) || x.tidallyLocked) return out;
-  const R = x.radiusM / 1000, L = 1000;
-  for (let c = 0; c < n; c++) {
-    if (land[c] >= 0.5) continue;
-    const lat = (mesh.lat[c] * 180) / Math.PI, a = Math.abs(lat);
-    const i0 = Math.floor(((mesh.lon[c] + Math.PI) / (2 * Math.PI)) * W) % W, j = Math.min(H - 1, Math.floor(((Math.PI / 2 - mesh.lat[c]) / Math.PI) * H));
-    const kmPerCell = ((2 * Math.PI * R) / W) * Math.cos(mesh.lat[c]);
-    // Distance to the shore to the west and to the east, along the parallel (within half the world).
-    let dw = Infinity, de = Infinity;
-    for (let s = 1; s < W / 2; s++) { if (grid[j * W + ((i0 - s + W) % W)]) { dw = s * kmPerCell; break; } }
-    for (let s = 1; s < W / 2; s++) { if (grid[j * W + ((i0 + s) % W)]) { de = s * kmPerCell; break; } }
-    const west = Math.exp(-dw / L), eastSide = Math.exp(-de / L);
-    const edge = x.hadleyEdgeDeg;
-    // Warm western boundary currents in the subtropics and mid-latitudes, cold eastern ones; at high latitudes the drift warms the east.
-    const sub = Math.exp(-(((a - (edge - 5)) / 15) ** 2));
-    const high = Math.exp(-(((a - (edge + 25)) / 10) ** 2));
-    out[c] = 4 * sub * west - 4 * sub * eastSide + 5 * high * eastSide;
-  }
-  return out;
-}
 
 /**
  * Where each cell lies against the subtropical highs over the oceans (D159). Over a wide ocean (at least

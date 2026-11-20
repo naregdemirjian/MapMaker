@@ -92,3 +92,49 @@ test('simple planets: a ridge across the westerlies, the trade winds, a tidally 
   const dry = run(definitionFromPreset('inactive'), new Float64Array(mesh.n).fill(500));
   assert.equal(Math.max(...dry.precipAnnual), 0);
 });
+
+test('the sea\'s heat and the westerlies (D165): transport summing to zero, Europe milder than eastern Canada, a cold Antarctic plateau, dry climates near the Earth\'s share', async () => {
+  const { oceanHeatTransport } = await import('../src/planet/climate/currents.ts');
+  const { toLevel } = await import('../src/planet/mesh/transfer.ts');
+  const { koppen } = await import('../src/planet/life/biomes.ts');
+  const { insolationCells, sunlightOf } = await import('../src/planet/climate/insolation.ts');
+  const def = definitionFromPreset('earthlike'), x = derive(def);
+  // The heat the sea carries: none made or lost over the planet; given up in the tropics, given off further poleward.
+  const m4 = meshAt(4), landFine = Float64Array.from(earthHeights, (h) => (h >= 0 ? 1 : 0)), land = toLevel(landFine, 5, 4);
+  const q = oceanHeatTransport(m4, land, x, def.water.oceanFraction);
+  let sum = 0, tropics = 0, ta = 0, mid = 0, ma = 0;
+  for (let c = 0; c < m4.n; c++) {
+    const lat = Math.abs((m4.lat[c] * 180) / Math.PI);
+    sum += q[c] * m4.area[c];
+    if (lat < 10) { tropics += q[c] * m4.area[c]; ta += m4.area[c]; }
+    if (lat > 35 && lat < 60) { mid += q[c] * m4.area[c]; ma += m4.area[c]; }
+  }
+  assert.ok(Math.abs(sum) < 1e-9, `the sea's heat sums to zero (${sum})`);
+  assert.ok(tropics / ta < -5 && mid / ma > 5, `taken up in the tropics (${(tropics / ta).toFixed(1)} W/m²), given off at 35-60° (${(mid / ma).toFixed(1)})`);
+  // On the real Earth's heights: western Europe much milder than eastern Canada at the same latitude in winter.
+  const x5 = derive(def), cl = seasonalClimate(mesh, def, x5, earthHeights), hy = hydroclimate(mesh, def, x5, earthHeights, cl.monthly, 4, cl.dryWarm);
+  const n = mesh.n, jan = (lon: number, lat: number) => hy.tempMonthly[nearest(lon, lat)];
+  const year = (lon: number, lat: number) => { let t = 0; for (let m = 0; m < 12; m++) t += hy.tempMonthly[m * n + nearest(lon, lat)] / 12; return t; };
+  // (Measured about 20 K: 5 °C against −15. The model gives about 7, from the sea's heat and the westerlies; before
+  // D165, none. The winter's northerly winds down eastern Canada, which make up the rest, are not modelled.)
+  assert.ok(jan(2.3, 48.8) - jan(-70, 48.8) > 5, `Paris (${jan(2.3, 48.8).toFixed(1)} °C) milder in January than Quebec's latitude in Canada (${jan(-70, 48.8).toFixed(1)})`);
+  // The Antarctic plateau about as cold as measured (Vostok −55 °C, the South Pole −49), its summer below freezing.
+  assert.ok(year(106.8, -78.5) < -40 && year(0, -90) < -40, `Vostok ${year(106.8, -78.5).toFixed(0)} °C, the South Pole ${year(0, -90).toFixed(0)} °C`);
+  assert.ok(jan(0, -90) < -10, `the South Pole's summer ${jan(0, -90).toFixed(0)} °C`);
+  // Dry (Köppen B) climates on about the Earth's share of the land (30 %; 42 % before D165), and the mid-latitude
+  // land's rain about the Earth's (some 550 mm a year at 30-55° N; a third to a half of it before).
+  const sun = insolationCells(mesh, sunlightOf(def, x5), 0, n);
+  const T = new Float64Array(12), P = new Float64Array(12);
+  let dry = 0, la = 0, rain = 0, ra = 0;
+  for (let c = 0; c < n; c++) {
+    if (earthHeights[c] < 0) continue;
+    let most = 0;
+    for (let m = 0; m < 12; m++) { T[m] = hy.tempMonthly[m * n + c]; P[m] = hy.precipMonthly[m * n + c]; if (sun.monthly[m * n + c] > sun.monthly[most * n + c]) most = m; }
+    if (koppen(T, P, (most - 2 + 12) % 12)[0] === 'B') dry += mesh.area[c];
+    la += mesh.area[c];
+    const lat = (mesh.lat[c] * 180) / Math.PI;
+    if (lat > 30 && lat < 55) { rain += hy.precipAnnual[c] * mesh.area[c]; ra += mesh.area[c]; }
+  }
+  assert.ok(dry / la > 0.24 && dry / la < 0.36, `dry climates on ${(100 * dry / la).toFixed(0)} % of the land`);
+  assert.ok(rain / ra > 400 && rain / ra < 750, `the land's rain at 30-55° N ${(rain / ra).toFixed(0)} mm a year`);
+});

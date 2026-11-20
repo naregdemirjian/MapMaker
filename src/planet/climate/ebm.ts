@@ -24,6 +24,7 @@ import { SIGMA } from '../model/units.ts';
 import { opticalDepth, type Derived } from '../model/physics.ts';
 import type { PlanetDefinition } from '../model/definition.ts';
 import { insolationField, sunlightOf } from './insolation.ts';
+import { oceanHeatTransport } from './currents.ts';
 
 export interface ClimateOptions {
   /** Steps a year (24: about a fortnight on Earth). */
@@ -39,7 +40,7 @@ export interface ClimateOptions {
   level?: number;
   initialK?: Float64Array;
   /** (Calibration: transport and the land's heat capacity.) */
-  tune?: { D?: number; landC?: number; airShare?: number; cloudSwing?: number; width?: number; peak?: number; dryWarm?: number; dryFrom?: number; plateau?: number };
+  tune?: { D?: number; landC?: number; airShare?: number; cloudSwing?: number; width?: number; peak?: number; dryWarm?: number; dryFrom?: number; plateau?: number; transport?: number; gyre?: number; overturning?: number; snowCold?: number; cloudLand?: number; wind?: number; windSwing?: number; tile?: number };
 }
 
 /**
@@ -75,7 +76,7 @@ export interface ClimateResult {
 }
 
 /** Earth's atmospheric heat transport as diffusion on the unit sphere, W m⁻² K⁻¹ (calibrated, D157). */
-export const EARTH_D = 0.3;
+export const EARTH_D = 0.2;
 /** The share of the air column's heat capacity that follows the surface through the seasons (its lowest part). */
 const AIR_SHARE = 0.3;
 /**
@@ -85,6 +86,22 @@ const AIR_SHARE = 0.3;
  * the lapse rate (the local relief above it at the full rate).
  */
 export const DRY_WARM = 16, DRY_REACH = 0.45, DRY_FROM = 0.35, PLATEAU = 0.6;
+/** How much brighter the coldest snow is than snow near thawing (D165). */
+export const SNOW_COLD = 0.18;
+/** How much more cloud the sea has than the planet's mean cover, and the land less (a share of the cover, D165). */
+export const CLOUD_LAND = 0.15;
+/**
+ * The effective speed (m/s) at which the prevailing winds carry the air's heat along the parallels (D165): the
+ * westerlies of the storm belts and the trade winds. Effective, as the column's air is changed by the ground below it
+ * as it goes: calibrated on stations, it gives a maritime air's reach inland of a thousand or two kilometres.
+ */
+export const WIND = 5, WIND_SWING = 0.8;
+/**
+ * How strongly the land of a cell that is partly sea is held to the cell's air (W/m²K, D165): the land has its own
+ * temperature, from its own sunlight, snow and small heat capacity, so a coast's land has warmer summers and colder
+ * winters than the sea beside it (instead of the sea's temperature, as one temperature for the whole cell gave).
+ */
+export const TILE = 30;
 /** The level the model runs at: coarse enough to take a second or two; temperatures are then brought to the map's level. */
 export const CLIMATE_LEVEL = 4;
 
@@ -111,14 +128,15 @@ export function seasonalClimate(mesh: Mesh, def: PlanetDefinition, x: Derived, h
   const warm = up(dryGroundWarming(coarse, land, x, def, opts));
   // (Sunlit high ground heats the air above it; frozen high ground, as an ice sheet, does not: there the full rate.)
   const plateau = opts.tune?.plateau ?? PLATEAU, seaAnnual = new Float64Array(coarse.n);
-  for (let m = 0; m < months; m++) for (let c = 0; c < coarse.n; c++) seaAnnual[c] += sea.monthly[m * coarse.n + c] / months;
+  for (let m = 0; m < months; m++) for (let c = 0; c < coarse.n; c++) seaAnnual[c] += sea.monthlyLand[m * coarse.n + c] / months;
   const frozen = up(seaAnnual);
   for (let c = 0; c < n; c++) frozen[c] = plateau + (1 - plateau) * Math.max(0, Math.min(1, -frozen[c] / 10));
   for (let m = 0; m < months; m++) {
-    const fine = up(sea.monthly.subarray(m * coarse.n, (m + 1) * coarse.n));
+    // Land from its cells' land, sea from their sea (D165).
+    const fineL = up(sea.monthlyLand.subarray(m * coarse.n, (m + 1) * coarse.n)), fineS = up(sea.monthlySea.subarray(m * coarse.n, (m + 1) * coarse.n));
     for (let c = 0; c < n; c++) {
       const h = heightM[c];
-      const t = h >= 0 ? fine[c] - (lapse * (frozen[c] * Math.min(h, broad[c]) + Math.max(0, h - broad[c]))) / 1000 + warm[c] : fine[c];
+      const t = h >= 0 ? fineL[c] - (lapse * (frozen[c] * Math.min(h, broad[c]) + Math.max(0, h - broad[c]))) / 1000 + warm[c] : fineS[c];
       monthly[m * n + c] = t;
       annual[c] += t / months;
     }
@@ -152,26 +170,52 @@ function coarseClimate(mesh: Mesh, def: PlanetDefinition, x: Derived, land: Arra
   const D = (opts.tune?.D ?? EARTH_D) * (at.pressureBar > 0 ? rot * mass : 0.02);
   // Albedo pieces (as physics.ts): clouds by latitude from the circulation, normalised to the planet's mean cover.
   const rayleigh = 0.5 * (1 - Math.exp((-0.125 * (at.pressureBar * 1e5) / x.gravity) / 10_330));
-  const cloud = new Float64Array(n);
+  const cloud = new Float64Array(n), cloudL = new Float64Array(n);
   if (at.pressureBar > 0 && at.clouds > 0) {
     let mean = 0;
-    for (let c = 0; c < n; c++) { cloud[c] = cloudsByLatitude((mesh.lat[c] * 180) / Math.PI, x.hadleyEdgeDeg, at.clouds, opts.tune?.cloudSwing ?? 1); mean += cloud[c] * mesh.area[c]; }
+    // More cloud over the sea than over land (on the Earth about 72 against 55 per cent: the sea's evaporation and
+    // its low marine clouds, D165); the planet's mean cover kept.
+    const cl = opts.tune?.cloudLand ?? CLOUD_LAND;
+    // (Not in the deep tropics, where the land's convection clouds it as much as the sea.)
+    for (let c = 0; c < n; c++) {
+      const lat = (mesh.lat[c] * 180) / Math.PI, tropics = Math.max(0, Math.min(1, (Math.abs(lat) - 10) / 15));
+      const base = cloudsByLatitude(lat, x.hadleyEdgeDeg, at.clouds, opts.tune?.cloudSwing ?? 1);
+      cloud[c] = base * (1 + cl * tropics * (1 - 2 * land[c]));
+      cloudL[c] = base * (1 - cl * tropics);
+      mean += cloud[c] * mesh.area[c];
+    }
     mean /= 4 * Math.PI;
-    for (let c = 0; c < n; c++) cloud[c] = Math.min(1, (cloud[c] * at.clouds) / Math.max(1e-9, mean));
+    for (let c = 0; c < n; c++) { cloud[c] = Math.min(1, (cloud[c] * at.clouds) / Math.max(1e-9, mean)); cloudL[c] = Math.min(1, (cloudL[c] * at.clouds) / Math.max(1e-9, mean)); }
   }
+  const snowCold = opts.tune?.snowCold ?? SNOW_COLD;
+  // Each cell's yearly mean (K), from the year before: ground whose year is cold enough keeps its snow, as an ice
+  // sheet, through the summer (D165), instead of losing it whenever the summer sun warms it towards thawing.
+  let annualK: Float64Array | null = null;
   const iceOf = (c: number, T: number) => {
-    const tc = T - 273.15;
-    return { snow: Math.max(0, Math.min(1, -tc / 10)), sea: Math.max(0, Math.min(1, (-1.8 - tc) / 8)) };
+    const tc = T - 273.15, kept = annualK ? Math.max(0, Math.min(1, (263.15 - annualK[c]) / 10)) : 0;
+    return { snow: Math.max(kept, Math.max(0, Math.min(1, -tc / 10))), sea: Math.max(0, Math.min(1, (-1.8 - tc) / 8)), kept };
   };
   const albedo = (c: number, T: number) => {
     const i = iceOf(c, T), l = land[c];
-    const surface = l * (0.25 * (1 - i.snow) + 0.62 * i.snow) + (1 - l) * (0.06 * (1 - i.sea) + 0.62 * i.sea);
+    // (Snow brightens as it gets colder and drier: 0.62 at −10 °C to 0.8 at −30 °C and below, as on the ice sheets.)
+    const snowA = 0.62 + snowCold * Math.max(i.kept, Math.max(0, Math.min(1, (273.15 - 10 - T) / 20)));
+    const surface = l * (0.25 * (1 - i.snow) + snowA * i.snow) + (1 - l) * (0.06 * (1 - i.sea) + 0.62 * i.sea);
     return cloud[c] * at.cloudAlbedo + (1 - cloud[c]) * (rayleigh + (1 - rayleigh) ** 2 * surface);
+  };
+  // The albedo of a cell's land alone (its own clouds, its own snow from its own temperatures, D165).
+  let annualL: Float64Array | null = null;
+  const landAlbedo = (c: number, T: number) => {
+    const kept = annualL ? Math.max(0, Math.min(1, (263.15 - annualL[c]) / 10)) : 0;
+    const snow = Math.max(kept, Math.max(0, Math.min(1, -(T - 273.15) / 10)));
+    const snowA = 0.62 + snowCold * Math.max(kept, Math.max(0, Math.min(1, (273.15 - 10 - T) / 20)));
+    return cloudL[c] * at.cloudAlbedo + (1 - cloudL[c]) * (rayleigh + (1 - rayleigh) ** 2 * (0.25 * (1 - snow) + snowA * snow));
   };
   const olr = (T: number) => (SIGMA * T ** 4) / (1 + 0.75 * opticalDepth(def, T).total);
   // Transport is strongest in the storm belts beyond the Hadley cells (on Earth near 45°), where eddies carry heat
   // poleward, weaker towards the poles and the equator (North et al. 1981 let D vary with latitude in the same way).
   const storms = Math.min(70, x.hadleyEdgeDeg + 10), width = opts.tune?.width ?? 20, peak = opts.tune?.peak ?? 2;
+  // The heat the sea's currents carry (D165): taken up in the tropics, given off further poleward.
+  const qflux = oceanHeatTransport(mesh, land, x, def.water.oceanFraction, opts.tune ?? {});
   const { nbrStart, nbr, edgeLen, edgeDist, area } = mesh;
   const w = new Float64Array(nbr.length);
   for (let i = 0; i < n; i++) {
@@ -182,14 +226,56 @@ function coarseClimate(mesh: Mesh, def: PlanetDefinition, x: Derived, land: Arra
       w[k] = (D * shape * edgeLen[k]) / edgeDist[k];
     }
   }
+  // The prevailing winds along the parallels (D165): westerlies beyond the Hadley cells, the trades within them,
+  // carrying the air's heat downwind (upwind differences), so west coasts in the storm belts are mild and east coasts
+  // and continental interiors have hard winters. Not on a planet without a day (tidally locked).
+  const U = x.tidallyLocked || at.pressureBar <= 0 ? 0 : (opts.tune?.wind ?? WIND);
+  let coef: Float64Array = w;
+  const adv = new Float64Array(U > 0 ? w.length : 0);
+  if (U > 0) {
+    coef = Float64Array.from(w);
+    const hadley = Math.max(5, x.hadleyEdgeDeg), R = x.radiusM;
+    const zonal = (latDeg: number) => {
+      const a = Math.abs(latDeg);
+      return U * (Math.exp(-(((a - Math.min(75, hadley + 15)) / 15) ** 2)) - 0.7 * Math.exp(-(((a - 0.4 * hadley) / (0.35 * hadley)) ** 2)));
+    };
+    for (let i = 0; i < n; i++) {
+      for (let k = nbrStart[i]; k < nbrStart[i + 1]; k++) {
+        const j = nbr[k];
+        const mx = mesh.xyz[3 * i] + mesh.xyz[3 * j], my = mesh.xyz[3 * i + 1] + mesh.xyz[3 * j + 1], mz = mesh.xyz[3 * i + 2] + mesh.xyz[3 * j + 2];
+        const ml = Math.hypot(mx, my, mz) || 1, lat = (Math.asin(mz / ml) * 180) / Math.PI, lon = Math.atan2(my, mx);
+        let dx = mesh.xyz[3 * i] - mesh.xyz[3 * j], dy = mesh.xyz[3 * i + 1] - mesh.xyz[3 * j + 1];
+        const dz = mesh.xyz[3 * i + 2] - mesh.xyz[3 * j + 2], dl = Math.hypot(dx, dy, dz) || 1;
+        dx /= dl; dy /= dl;
+        // The wind's component from j towards i: inflow into i carries j's heat (W/m²K over the unit sphere).
+        const un = zonal(lat) * (-Math.sin(lon) * dx + Math.cos(lon) * dy);
+        if (un > 0) adv[k] = (air * un * edgeLen[k]) / R;
+      }
+    }
+  }
+  // The winds are stronger in each hemisphere's winter and weaker in its summer (on the Earth about half as strong in
+  // summer as in winter), more so with more tilt; month 0 is the northern winter's (insolation.ts).
+  const swing = (opts.tune?.windSwing ?? WIND_SWING) * Math.min(1, Math.sin((Math.abs(def.body.tiltDeg) * Math.PI) / 180) / Math.sin((23.44 * Math.PI) / 180));
+  let coefMonth = -1;
+  const windsFor = (m: number) => {
+    if (!(U > 0) || m === coefMonth) return;
+    coefMonth = m;
+    const north = Math.cos((2 * Math.PI * (m + 0.5)) / 12);
+    for (let i = 0; i < n; i++) {
+      const sfac = 1 + swing * (mesh.xyz[3 * i + 2] >= 0 ? north : -north);
+      for (let k = nbrStart[i]; k < nbrStart[i + 1]; k++) coef[k] = w[k] + sfac * adv[k];
+    }
+  };
   const yearS = x.yearDays * 86_400, dt = yearS / steps;
   let T: Float64Array = opts.initialK && opts.initialK.length === n ? Float64Array.from(opts.initialK) : new Float64Array(n).fill(Math.max(150, Math.min(700, x.surfaceK)));
-  const monthSum = new Float64Array(months * n), monthCount = new Float64Array(months);
+  if (opts.initialK && opts.initialK.length === n) { annualK = Float64Array.from(opts.initialK); annualL = Float64Array.from(opts.initialK); }
+  const TL = Float64Array.from(T), kappa = opts.tune?.tile ?? TILE, CL = air + 2e6;
+  const monthSum = new Float64Array(months * n), monthCount = new Float64Array(months), monthSumL = new Float64Array(months * n);
   let prevAnnual = Infinity, years = 0, absorbed = 0, emitted = 0;
   const maxYears = opts.maxYears ?? 40, tol = opts.tolerance ?? 0.01;
   const diag = new Float64Array(n), rhs = new Float64Array(n);
   for (years = 1; years <= maxYears; years++) {
-    monthSum.fill(0); monthCount.fill(0);
+    monthSum.fill(0); monthCount.fill(0); monthSumL.fill(0);
     let abs = 0, emi = 0;
     for (let s = 0; s < steps; s++) {
       const m = Math.min(months - 1, Math.floor((s * months) / steps));
@@ -199,25 +285,53 @@ function coarseClimate(mesh: Mesh, def: PlanetDefinition, x: Derived, land: Arra
         const i = iceOf(c, Tc);
         const C = air + land[c] * 2e6 + (1 - land[c]) * ocean * (1 - 0.9 * i.sea);
         diag[c] = (C / dt + B) * area[c];
-        rhs[c] = ((C / dt) * Tc + Q - o + B * Tc) * area[c];
+        rhs[c] = ((C / dt) * Tc + Q - o + B * Tc + qflux[c]) * area[c];
         abs += Q * area[c]; emi += o * area[c];
       }
-      T = solve(n, nbrStart, nbr, w, diag, rhs, T);
-      for (let c = 0; c < n; c++) monthSum[m * n + c] += T[c];
+      windsFor(m);
+      T = U > 0 ? solveGeneral(n, nbrStart, nbr, coef, diag, rhs, T) : solve(n, nbrStart, nbr, w, diag, rhs, T);
+      // The land of each cell: its own sunlight, snow and heat capacity, the same heat carried in by the air as the
+      // cell has (per square metre), and heat exchanged with the rest of the cell's air (implicit in its own
+      // temperature). In a cell that is all land it is the cell's temperature.
+      const cw = U > 0 ? coef : w;
+      for (let c = 0; c < n; c++) {
+        if (!(land[c] > 0)) { TL[c] = T[c]; continue; }
+        let tr = 0;
+        for (let k = nbrStart[c]; k < nbrStart[c + 1]; k++) tr += cw[k] * (T[nbr[k]] - T[c]);
+        tr /= area[c];
+        const t0 = TL[c], QL = f * sun.monthly[m * n + c] * (1 - landAlbedo(c, t0));
+        const oL = olr(t0), BL = Math.max(0.5, (olr(t0 + 0.5) - oL) / 0.5);
+        TL[c] = ((CL / dt) * t0 + QL - oL + BL * t0 + tr + kappa * T[c]) / (CL / dt + BL + kappa);
+      }
+      for (let c = 0; c < n; c++) { monthSum[m * n + c] += T[c]; monthSumL[m * n + c] += TL[c]; }
       monthCount[m]++;
     }
     absorbed = abs / (4 * Math.PI * steps); emitted = emi / (4 * Math.PI * steps);
+    annualK = annualK ?? new Float64Array(n);
+    annualL = annualL ?? new Float64Array(n);
+    for (let c = 0; c < n; c++) {
+      let a = 0, aL = 0;
+      for (let m = 0; m < months; m++) { a += monthSum[m * n + c] / Math.max(1, monthCount[m]) / months; aL += monthSumL[m * n + c] / Math.max(1, monthCount[m]) / months; }
+      annualK[c] = a; annualL[c] = aL;
+    }
     let mean = 0;
     for (let c = 0; c < n; c++) for (let m = 0; m < months; m++) mean += (area[c] * monthSum[m * n + c]) / monthCount[m] / months;
     mean /= 4 * Math.PI;
     if (Math.abs(mean - prevAnnual) < tol && years >= (opts.minYears ?? 3)) break;
     prevAnnual = mean;
   }
-  const monthly = new Float32Array(months * n);
+  const monthly = new Float32Array(months * n), monthlyLand = new Float32Array(months * n), monthlySea = new Float32Array(months * n);
   let meanK = 0, trop = 0, tropA = 0, pole = 0, poleA = 0;
   for (let c = 0; c < n; c++) {
     let sum = 0;
-    for (let m = 0; m < months; m++) { const t = monthSum[m * n + c] / monthCount[m]; monthly[m * n + c] = t - 273.15; sum += t; }
+    for (let m = 0; m < months; m++) {
+      const t = monthSum[m * n + c] / monthCount[m], tl = monthSumL[m * n + c] / monthCount[m], l = land[c];
+      monthly[m * n + c] = t - 273.15; sum += t;
+      monthlyLand[m * n + c] = tl - 273.15;
+      // The sea's: the cell's own, which the sea's large heat capacity sets.
+      monthlySea[m * n + c] = t - 273.15;
+      void l;
+    }
     const tm = sum / months;
     meanK += area[c] * tm;
     const lat = Math.abs((mesh.lat[c] * 180) / Math.PI);
@@ -225,7 +339,7 @@ function coarseClimate(mesh: Mesh, def: PlanetDefinition, x: Derived, land: Arra
     if (lat > 70) { pole += area[c] * (tm - 273.15); poleA += area[c]; }
   }
   return {
-    monthly, finalK: T,
+    monthly, monthlyLand, monthlySea, finalK: T,
     stats: { meanK: meanK / (4 * Math.PI), absorbed, emitted, tropicsC: tropA ? trop / tropA : NaN, polesC: poleA ? pole / poleA : NaN, years: Math.min(years, maxYears) },
   };
 }
@@ -261,6 +375,52 @@ function solve(n: number, start: Int32Array, nbr: Int32Array, w: Float64Array, d
     const beta = rz2 / rz;
     rz = rz2;
     for (let i = 0; i < n; i++) p[i] = z[i] + beta * p[i];
+  }
+  return x;
+}
+
+/**
+ * Solves (diag_i) x_i + Σ_j c_ij (x_i − x_j) = rhs_i for coefficients that need not be symmetric (diffusion with the
+ * winds' upwind transport, D165) by BiCGSTAB with a diagonal preconditioner, starting from `x0`.
+ */
+function solveGeneral(n: number, start: Int32Array, nbr: Int32Array, c: Float64Array, diag: Float64Array, rhs: Float64Array, x0: Float64Array): Float64Array {
+  const x = Float64Array.from(x0), full = new Float64Array(n);
+  for (let i = 0; i < n; i++) { let s = diag[i]; for (let k = start[i]; k < start[i + 1]; k++) s += c[k]; full[i] = s; }
+  const apply = (v: Float64Array, out: Float64Array) => {
+    for (let i = 0; i < n; i++) {
+      let s = full[i] * v[i];
+      for (let k = start[i]; k < start[i + 1]; k++) s -= c[k] * v[nbr[k]];
+      out[i] = s;
+    }
+  };
+  const r = new Float64Array(n), rh = new Float64Array(n), p = new Float64Array(n), v = new Float64Array(n);
+  const y = new Float64Array(n), sv = new Float64Array(n), z = new Float64Array(n), t = new Float64Array(n);
+  apply(x, v);
+  let rr0 = 0;
+  for (let i = 0; i < n; i++) { r[i] = rhs[i] - v[i]; rh[i] = r[i]; rr0 += rhs[i] * rhs[i]; }
+  v.fill(0);
+  let rho = 1, alpha = 1, omega = 1;
+  for (let it = 0; it < 400; it++) {
+    let rr = 0, rho2 = 0;
+    for (let i = 0; i < n; i++) { rr += r[i] * r[i]; rho2 += rh[i] * r[i]; }
+    if (rr <= 1e-12 * rr0 || rho2 === 0) break;
+    const beta = (rho2 / rho) * (alpha / omega);
+    for (let i = 0; i < n; i++) { p[i] = r[i] + beta * (p[i] - omega * v[i]); y[i] = p[i] / full[i]; }
+    apply(y, v);
+    let rv = 0;
+    for (let i = 0; i < n; i++) rv += rh[i] * v[i];
+    alpha = rho2 / rv;
+    let ss = 0;
+    for (let i = 0; i < n; i++) { sv[i] = r[i] - alpha * v[i]; ss += sv[i] * sv[i]; }
+    if (ss <= 1e-12 * rr0) { for (let i = 0; i < n; i++) x[i] += alpha * y[i]; break; }
+    for (let i = 0; i < n; i++) z[i] = sv[i] / full[i];
+    apply(z, t);
+    let ts = 0, tt = 0;
+    for (let i = 0; i < n; i++) { ts += t[i] * sv[i]; tt += t[i] * t[i]; }
+    omega = tt > 0 ? ts / tt : 0;
+    for (let i = 0; i < n; i++) { x[i] += alpha * y[i] + omega * z[i]; r[i] = sv[i] - omega * t[i]; }
+    rho = rho2;
+    if (omega === 0) break;
   }
   return x;
 }

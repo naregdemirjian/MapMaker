@@ -61,6 +61,68 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D165. The climate's accuracy: the sea's heat, the winds' and the land's own; rain recalibrated (Stage 15.3)
+
+- **Asked.** Fix the inaccuracies D162 measured: mid-latitude land rain at a third to a half of the measured, dry
+  (Köppen B) climates on 42 % of the land against 30, Europe too cold, Antarctica 10 to 20 K too warm, deserts'
+  edges too wet (Cairo 481 mm against 25).
+- **Found.** On the real Earth's heights the zonal means had the northern subtropics 2 to 3 K cold, the equator 2 K
+  warm and the south 4 to 9 K warm beyond 50°: the sea's heat transport was missing (taken up in the tropics, given
+  off poleward, carried north across the equator by the Atlantic's overturning). Western Europe was cold summer and
+  winter because coasts sat in coarse cells that are partly sea (one temperature for land and sea, the sea's), and
+  nothing carried the Atlantic's air east. Antarctica's summers thawed its snow (the snow followed the moment's
+  temperature), so the bare ground's albedo heated it. Over the sea the air held half the vapour it should (rain too
+  efficient, evaporation blind to the air's humidity), so little reached inland; the rain belt reached 24° N over the
+  Sahara (all land drew it), and Cairo's 480 km cell is three-quarters Mediterranean.
+- **The energy balance** (`climate/ebm.ts`, `climate/currents.ts`):
+  - the sea's heat as a steady source summing to zero: poleward transport ∝ sin φ cos⁴ φ (1.2 PW at its peak), none
+    across a circumpolar channel (sea all round with land beyond, as the Southern Ocean's), an overturning carrying
+    0.5 PW from the channel's side to 45-70° on the other (the Southern Ocean takes up heat, the North Atlantic gives
+    it off), the gyres' warm western and cold eastern sides and the subpolar gyres' warm east and cold west (the
+    Labrador and Oyashio currents); the air's diffusion lowered accordingly (0.3 to 0.2), the currents' warmth no
+    longer added after the fact;
+  - the prevailing winds carrying the air's heat along the parallels (westerlies beyond the Hadley cells, trades
+    within them; effective 5 m/s, stronger in winter, by the tilt), solved with BiCGSTAB (not symmetric);
+  - each cell's land with its own temperature: its sunlight, snow and small heat capacity, the transport its cell
+    receives, and heat exchanged with the cell's air (30 W/m²K); the sea keeps the cell's;
+  - snow kept all year where the yearly mean is below −10 °C (ice sheets), brighter when colder (0.62 to 0.8);
+  - more cloud over the sea than over land beyond the deep tropics (±15 % of the cover, the mean kept).
+- **Rain** (`climate/hydroclimate.ts`, settings in `HYDRO`): evaporation slows as the air nears saturation (the
+  bulk formula's humidity deficit); the storm belts' and the convergence zone's rates apart (storms rain out more of
+  less vapour); convection held down under the highs' sinking air, which follow the convergence zone a quarter as
+  far (none within 6° of it); the vapour's cap at the air's own temperature (hot deserts hold more); the convergence
+  zone drawn by lowland within about 800 km of the sea and by ground above 1 km (Tibet, Mexico's plateau), in 15°
+  sectors. Calibrated by a coordinate search on 22 stations, the land's rain at 30-55° N, the dry climates' share,
+  the deserts and the planet's mean.
+- **Result** (real Earth's heights, level 5; before → after, measured):
+
+  | Measure | Before | After | Measured |
+  | --- | --- | --- | --- |
+  | 22 stations' yearly temperature, root mean square | 5.4 K | 3.4 K | — |
+  | Their January and July temperatures | 7.0 K | 5.1 K | — |
+  | Zonal means, worst from 80° N to 60° S | +5.4 K (60° S) | about 1 K | — |
+  | Vostok; the South Pole (yearly) | −34; −34 °C | −48; −50 °C | −55; −49 |
+  | Paris; Moscow (yearly) | 4.5; −1.1 °C | 10.2; 5.1 °C | 12; 6 |
+  | January, Paris against eastern Canada at 49° N | −0.3 against 0.5 °C | 5.4 against −1.9 °C | 5 against −15 |
+  | Rain, log root mean square | 0.85 | 0.82 | — |
+  | Land's rain at 30-55° N | 275 mm | 540 mm | about 550 |
+  | Köppen A, B, C, D, E (% of land) | 13, 41, 12, 13, 20 | 20, 30, 14, 18, 18 | 19, 30, 13, 25, 12 |
+  | Cairo; Riyadh; Khartoum | 481; 448; 550 mm | 291; 391; 1,003 mm | 25; 100; 160 |
+  | Rain, evaporation, runoff on land (km³ a year) | 88,400; 63,900; 24,500 | 117,600; 78,100; 39,500 | 113,000; 73,000; 40,000 |
+
+- **Still wrong, and why.** Winds only along the parallels: the winter's northerlies down eastern North America and
+  Asia are missing (Chicago's January +5 °C against −5), and western Europe's summers stay cool (Paris's July 16 °C
+  against 21). The deep tropics rain too much (Singapore 4,250 mm against 2,300; the planet's mean 1,300 mm against
+  about 1,000). Northern India's monsoon is too dry (Delhi 80 mm against 800; 148 before): its moisture does not
+  reach 1,000 km inland. A city in a climate cell that is mostly sea takes the sea's rain (Cairo). Khartoum sits in
+  the African rain belt (13-15° N at 30° E; measured nearer 10-12). More runoff fills more lakes (295,000 km³
+  against 91,000: 15.4). Ice ages grow less ice at coasts than before (land's own summers are warmer than the sea's):
+  an ice age with an eighth of the carbon dioxide adds 0.6 million km³ on the test's planet (1.5 before; the test's
+  threshold lowered to 0.4 with this reason).
+- **Cost** (`bench/planet.bench.ts`, the Earth-like preset): the climate 1.84 s at preview and 1.41 s at standard
+  (1.0 to 2.4 and 1.0 before): the winds' non-symmetric solver costs about 40 %. Bringing a change of climate under
+  half a second is 15.6.
+
 ### D164. Edits' consequences in numbers, edits made on the crust clicked, values set by hand (Stage 15.2)
 
 - **Asked.** Numbers instead of words in the consequences reports, and derived values that can be set by hand.

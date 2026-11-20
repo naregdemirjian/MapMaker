@@ -70,5 +70,7 @@ test('a history: the sea\'s level from the ocean\'s water, falling while an ice 
   const at = (t: number) => Array.from(cold.times).findIndex((x) => Math.abs(x - t) < 1e-6);
   const f = at(125);
   assert.ok(cold.meanTemps[f] < plain.meanTemps[f] - 3, `colder during it (${(cold.meanTemps[f] - 273.15).toFixed(1)} against ${(plain.meanTemps[f] - 273.15).toFixed(1)} °C)`);
-  assert.ok(cold.iceVolumes[f] > plain.iceVolumes[f] + 1e6, `more ice (${(cold.iceVolumes[f] / 1e6).toFixed(1)} against ${(plain.iceVolumes[f] / 1e6).toFixed(1)} million km³)`);
+  // (About 0.6 million km³ more on this planet's land: since D165 land has its own summers, warmer than the sea
+  // beside it, so less snow outlasts them at the coasts than when one temperature served land and sea; 1.5 before.)
+  assert.ok(cold.iceVolumes[f] > plain.iceVolumes[f] + 4e5, `more ice (${(cold.iceVolumes[f] / 1e6).toFixed(1)} against ${(plain.iceVolumes[f] / 1e6).toFixed(1)} million km³)`);
 });
