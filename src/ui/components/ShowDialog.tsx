@@ -7,6 +7,7 @@ import * as cmd from '../../domain/commands.ts';
 import { SHOW_ITEMS, shown, minLakeKm2, basemapSourceOf, terrainLook, terrainSourceOf, type ShowSet } from '../../world-model/world-settings.ts';
 import { lakeCount } from '../../render-engine/basemap.ts';
 import { terrainDrawable } from '../../render-engine/terrain-gl.ts';
+import { CitiesShownSection } from './Cities.tsx';
 import { PALETTES, STRENGTH_MIN, STRENGTH_MAX, type TerrainLook, type TerrainPalette } from '../../terrain/look.ts';
 
 // The relief strength slider: powers of two from a quarter to four times the usual.
@@ -68,6 +69,7 @@ export function ShowDialog() {
             <span className="muted">{counts ? `${counts.shown.toLocaleString()} of ${counts.total.toLocaleString()} lakes shown. ` : ''}For scale: Lake Geneva is about 580 km², Lake Titicaca 8,400 km², Lake Superior 82,000 km².</span>
           </label>
         )}
+        {space.kind === 'sphere' && <CitiesShownSection spaceId={space.id} />}
         {terrainSourceOf(space) && <TerrainSection spaceId={space.id} look={look} earth={terrainSourceOf(space) === 'earth'} planet={terrainSourceOf(space) === 'planet'} />}
         <div className="modal-actions"><button className="primary" onClick={close}>Close</button></div>
       </div>

@@ -61,6 +61,26 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D173. Today's cities and capitals, added alone or with today's countries, shown by rules or by name
+
+- **Asked.** Today's cities and capitals, added on their own or with today's countries; in "what is shown", a slider
+  and options for which cities a map shows: by their share of their country's people, capitals, economic
+  importance; or just the cities chosen.
+- **Data.** Natural Earth's populated places at 1:10m (`scripts/fetch-places.mjs` → `data/natural-earth/places-10m.json`,
+  470 KB, committed): 7,289 places in 241 countries with the country (as named in today's countries), national or
+  regional capital, the urban area's population (POP_MAX), Natural Earth's world-city mark, and each country's
+  population (its 1:50m countries' POP_EST) for the share. Economic importance (`domain/places.ts`): 3 a world
+  city (70, the mark Natural Earth takes from the Globalization and World Cities ranking), 2 the country's largest
+  city, 1 among its three largest; there is no open measure of each city's economy to do better.
+- **Built.** `addCities` adds places as cities (dated points) that remember their country, population, share,
+  capital and importance (in their style, `place`), in a group "Today's cities"; those already in the project are
+  left. "Add today's cities…" under Cities chooses the countries (those on the map, all, or a list), which cities
+  and when; "Add today's countries" can add their cities with them (in the same event when it makes one). A map's
+  filter (`show.cities`): cities with at least a share of their country's people (a slider, 0 to 40 %) and a size,
+  plus capitals (national, or regional too) and economic centres kept whatever their size; or only the cities
+  ticked. The renderer applies it in the working view and every export; cities of one's own always show unless a
+  list is chosen.
+
 ### D172. A steady date at the top, the calendar's arrows inside it, the date stepped from the keyboard
 
 - **Asked.** The date at the top jittered while it changed; the calendar's next-year arrow stuck out of its box;

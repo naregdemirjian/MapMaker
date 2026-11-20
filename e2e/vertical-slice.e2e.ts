@@ -809,6 +809,35 @@ try {
     await page.waitForFunction(() => (window as any).__mapmaker.ownerAt(23.73, 37.98, '1300') === null);
   });
 
+  await step("Today's cities (D173): Armenia and Georgia added with their cities; the map shows only the city chosen", async () => {
+    await page.getByTestId('open-add-countries').click();
+    await page.getByTestId('add-countries').waitFor();
+    for (const c of ['Armenia', 'Georgia']) { await page.getByTestId('country-search').fill(c); await page.getByTestId(`country-${c}`).check(); }
+    await page.getByTestId('countries-with-cities').check();
+    await page.getByTestId('countries-cities-filter-capitals').selectOption('all');
+    await page.getByTestId('add-countries-go').click();
+    await page.getByTestId('add-countries').waitFor({ state: 'detached', timeout: 60000 });
+    await page.waitForFunction(() => (window as any).__mapmaker.store.world.all('entity').some((e: any) => e.name === 'Yerevan' && e.type_id === 'settlement'), undefined, { timeout: 30000 });
+    const made = await page.evaluate(() => (window as any).__mapmaker.store.world.all('entity').filter((e: any) => e.type_id === 'settlement' && e.style.includes('"place"')).map((e: any) => e.name)) as string[];
+    assert.ok(made.includes('Tbilisi') && made.includes('Gyumri') && made.includes('Batumi'), `capitals and regional capitals: ${made.join(', ')}`);
+    await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 44, lat: 41, zoom: 5, rotation: 0, projection: 'mercator' }));
+    await page.waitForTimeout(600);
+    const names = () => page.evaluate(() => (window as any).__mapmaker.store.renderer.lastCities.map((c: any) => c.name)) as Promise<string[]>;
+    assert.ok((await names()).includes('Yerevan'), 'Yerevan on the map');
+    // What is shown: only the cities chosen.
+    await page.getByTestId('open-show-lakes').click();
+    await page.getByTestId('cities-shown-only').check();
+    await page.getByTestId('cities-shown-search').fill('Tbilisi');
+    await page.getByTestId('cities-shown-Tbilisi').check();
+    await page.locator('[data-testid=show-dialog] .modal-actions button').click();
+    await page.waitForTimeout(500);
+    assert.deepEqual((await names()).filter((n) => made.includes(n)), ['Tbilisi'], 'only the city chosen');
+    await screenshot('todays-cities');
+    for (let i = 0; i < 4; i++) await page.getByTestId('undo').click();
+    await page.waitForFunction(() => !(window as any).__mapmaker.store.world.all('entity').some((e: any) => e.name === 'Yerevan'));
+    await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 0, lat: 0, zoom: 0, rotation: 0, projection: 'equirectangular' }));
+  });
+
   await step('History Health reports no problems', async () => {
     await page.getByTestId('mode-world').click();
     await page.getByTestId('health').click();

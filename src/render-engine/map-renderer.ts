@@ -29,6 +29,8 @@ import { BlockPath, setPaintRegion, type DeviceRect } from './blocks.ts';
 import { Kept as Weighed } from './kept.ts';
 import { parcelGeometry, type ParcelGeometry, type CycleGeom } from './parcel-geometry.ts';
 import { featureStyle, featureColor, isFeatureKind, type FeatureKind, type FeatureStyle } from './feature-style.ts';
+import { cityShown, placeMetaOf, DEFAULT_CITY_FILTER, type CityFilter } from '../domain/places.ts';
+import { cityFilterOfSpace } from '../world-model/world-settings.ts';
 import { campaignArrow, smoothLine, lineLength, arrowBodyLength, marksAlong, cutLineBetween, mixColor } from './routes.ts';
 import { shotProgress, eventScreenSeconds, eventTransitionLook, TRANSITION_LOOKS } from '../presentation/sequence.ts';
 import { iconById, iconOfStyle, unitOfStyle, drawIcon, type CharacterIcon, type RouteStyle } from './icons.ts';
@@ -556,6 +558,8 @@ export class MapRenderer {
   lastFeatures: Array<{ id: string; kind: FeatureKind; path: Path2D | null; place: [number, number, number]; lines: Float32Array[]; x: number; y: number; r: number; width: number }> = [];
   /** The project's sizes for cities and characters (set for each frame by render()). */
   private pointSizes = { city: 1, character: 1 };
+  /** Which cities the map shows (D173); set for each frame by render(). */
+  private cityFilter: CityFilter = DEFAULT_CITY_FILTER;
   /** How many characters' trails the last frame drew. */
   lastTrails = 0;
   /** The cities drawn in the last frame (same form; `named`: whether its name had room). */
@@ -1953,6 +1957,7 @@ export class MapRenderer {
     };
     const colorOf = (v: string | null) => (v ? entities.get(v)?.color ?? '#888888' : null);
     this.pointSizes = resolvePointStyle(world.get('meta', 'point_style')?.value);
+    this.cityFilter = cityFilterOfSpace(world.get('map_space', spaceId));
     const labels: LabelInfo[] = [];
 
     // Draw in the same order whether everything is drawn at once or pass by pass (as exported):
@@ -4757,6 +4762,7 @@ export class MapRenderer {
     for (const c of engine.charactersAt(spaceId, t)) {
       const e = entities.get(c.entity);
       if (!e || e.type_id !== 'settlement') continue;
+      if (!cityShown(c.entity, placeMetaOf(e.style), this.cityFilter)) continue;
       const p = view.projection([c.lon, c.lat]);
       if (!p || p[0] < -50 || p[1] < -50 || p[0] > view.width + 50 || p[1] > view.height + 50) continue;
       // Too small to read: no name (marked by a size of 0), only the dot.

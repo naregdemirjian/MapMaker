@@ -487,3 +487,8 @@ p.small { font-size: 11.5px; }
 /* Example projects (D171) */
 .example-row { display: flex; gap: 12px; align-items: center; justify-content: space-between; cursor: default; }
 .example-row > div { flex: 1; }
+/* Today's cities (D173) */
+.country-list.short { max-height: 200px; }
+.city-filter { display: flex; flex-direction: column; gap: 6px; margin: 6px 0; }
+.city-filter label { display: flex; flex-direction: column; gap: 2px; }
+.cities-shown { margin-top: 12px; }

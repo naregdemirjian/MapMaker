@@ -6,6 +6,8 @@ import * as cmd from '../../domain/commands.ts';
 import { decodeCountries, COUNTRY_GROUP_COLORS, type CountryShape, type CountriesFile } from '../../domain/countries.ts';
 import { NEG_INF } from '../../core-time/index.ts';
 import { fmt } from './Panels.tsx';
+import { CityFilterControls, loadPlaces } from './Cities.tsx';
+import { pickPlaces, type CityFilter } from '../../domain/places.ts';
 
 let loading: Promise<CountryShape[]> | null = null;
 export const loadCountries = () => (loading ??= fetch('data/natural-earth/countries-50m.json').then(async (r) => decodeCountries(await r.json() as CountriesFile)));
@@ -35,6 +37,9 @@ export function AddCountriesDialog({ onClose }: { onClose: () => void }) {
     return sel?.kind === 'entity' && owners.some((e) => e.id === sel.id) ? sel.id : owners[0]?.id ?? '';
   });
   const into = target === 'into' ? owners.find((e) => e.id === intoId) ?? null : null;
+  // Their cities too (D173), chosen as a map would show them.
+  const [withCities, setWithCities] = useState(false);
+  const [cityFilter, setCityFilter] = useState<CityFilter>({ minSharePct: 5, capitals: 'national', economic: 2, minPopulation: 0, only: null });
   useEffect(() => { loadCountries().then(setAll, (e: Error) => setError(e.message)); }, []);
   // (As part of their nation, territories are not listed: they come with it. Antarctica belongs to nobody.)
   const pool = useMemo(() => (all ?? []).filter((c) => c.nation || territories === 'own' || (territories === 'part' && c.name === 'Antarctica')), [all, territories]);
@@ -70,6 +75,13 @@ export function AddCountriesDialog({ onClose }: { onClose: () => void }) {
         into: into?.id,
       }));
       s.set({ busy: null });
+      if (r && withCities && !into) {
+        const names = new Set(list.map((c) => c.name));
+        void loadPlaces().then((places) => {
+          const picked = pickPlaces(places, names, cityFilter);
+          if (picked.length) s.execute((wd) => cmd.addCities(wd, { spaceId: s.spaceId, places: picked, mode: r.eventId ? { kind: 'new', eventId: r.eventId } : as === 'change' ? { kind: 'change', t: s.time } : { kind: 'correct', t: NEG_INF } }));
+        });
+      }
       if (r) {
         s.toast(into ? `Added the land of ${list.length === 1 ? list[0].name : `${list.length} countries`} to ${into.name}.` : `Added ${list.length} ${list.length === 1 ? 'country' : 'countries'}.`);
         if (r.eventId) s.set({ selection: { kind: 'event', id: r.eventId } });
@@ -128,6 +140,10 @@ export function AddCountriesDialog({ onClose }: { onClose: () => void }) {
               <option value="map">Map colours (neighbours always differ)</option><option value="distinct">A different colour for each</option>
             </select></label>
             <label className="check"><input type="checkbox" checked={flags} onChange={(e) => setFlags(e.target.checked)} data-testid="countries-flags" /> Fill each with its flag</label>
+          </>}
+          {target === 'own' && <>
+            <label className="check"><input type="checkbox" checked={withCities} onChange={(e) => setWithCities(e.target.checked)} data-testid="countries-with-cities" /> Add their cities and capitals too</label>
+            {withCities && <CityFilterControls value={cityFilter} onChange={setCityFilter} testId="countries-cities-filter" />}
           </>}
           <h4>When</h4>
           <label className="check"><input type="radio" name="when" checked={as === 'start'} onChange={() => setAs('start')} /> Part of the starting map (they exist from the beginning)</label>

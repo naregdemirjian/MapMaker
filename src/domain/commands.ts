@@ -31,6 +31,7 @@ export type { CharacterIcon } from '../render-engine/icons.ts';
 import { cleanStatistics, type Statistic } from '../presentation/statistics.ts';
 export { FEATURE_KINDS, DEFAULT_FEATURE_STYLE, isFeatureKind, featureStyle, type FeatureKind, type FeatureStyle } from '../render-engine/feature-style.ts';
 import { featureStyle as featureLook } from '../render-engine/feature-style.ts';
+import { cityFilterOf, placeMeta, placeMetaOf, type CityFilter, type TodayPlace } from './places.ts';
 import { ringFromMapPoints } from '../render-engine/stroke.ts';
 import { TRANSITION_LOOKS } from '../presentation/sequence.ts';
 import { flatRadiusKm } from '../render-engine/camera.ts';
@@ -316,7 +317,7 @@ export function setWorldBasemap(world: World, spaceId: string, basemap: BasemapS
 }
 
 /** What a map shows while working and in exports, and its smallest lake (D84). */
-export function setWorldShow(world: World, spaceId: string, patch: { working?: ShowSet; export?: ShowSet; minLakeKm2?: number }): CommandResult {
+export function setWorldShow(world: World, spaceId: string, patch: { working?: ShowSet; export?: ShowSet; minLakeKm2?: number; cities?: CityFilter }): CommandResult {
   const space = world.get('map_space', spaceId);
   if (!space) throw new Error('That map no longer exists.');
   const cur = worldSettings(space).show ?? {};
@@ -325,6 +326,7 @@ export function setWorldShow(world: World, spaceId: string, patch: { working?: S
     ...(patch.working ? { working: { ...cur.working, ...patch.working } } : {}),
     ...(patch.export ? { export: { ...cur.export, ...patch.export } } : {}),
     ...(patch.minLakeKm2 !== undefined ? { minLakeKm2: Math.max(0, patch.minLakeKm2) } : {}),
+    ...(patch.cities !== undefined ? { cities: cityFilterOf(patch.cities) } : {}),
   };
   return run(world, `Change what "${space.name}" shows`, (tx) => { tx.update('map_space', { ...space, settings: JSON.stringify({ ...worldSettings(space), show }) }); });
 }
@@ -1830,6 +1832,37 @@ export function placeCharacter(world: World, o: { spaceId: string; entity: strin
   // Characters travel between their places; cities and other places move (if at all) at once.
   const arrive = o.arrive ?? (e.type_id === 'character' ? undefined : 'jump');
   return run(world, `Place ${e.name}`, (tx) => writePlacement(tx, o.spaceId, o.entity, o.mode, { lon, lat: o.lat, arrive }));
+}
+
+/**
+ * Today's cities and capitals (D173), added as cities (dated points) that remember their country, population,
+ * share, capital and economic importance, in a group "Today's cities": from the beginning, from a date, or in an
+ * event, as the edit mode says. A city already in the project (the same name, and the same country if it is one
+ * of today's) is left as it is. One undo step; returns the cities made.
+ */
+export function addCities(world: World, o: { spaceId: string; places: TodayPlace[]; mode: EditMode }): CommandResult<string[]> {
+  const space = world.get('map_space', o.spaceId);
+  if (!space || space.kind !== 'sphere') throw new Error('Today\'s cities go on round maps.');
+  const have = new Set(world.all('entity').filter((e) => e.type_id === 'settlement').map((e) => `${e.name.toLowerCase()}|${placeMetaOf(e.style)?.country ?? ''}`));
+  const haveName = new Set(world.all('entity').filter((e) => e.type_id === 'settlement' && !placeMetaOf(e.style)).map((e) => e.name.toLowerCase()));
+  const places = o.places.filter((p) => !have.has(`${p.name.toLowerCase()}|${p.country}`) && !haveName.has(p.name.toLowerCase()));
+  if (!places.length) throw new Error(o.places.length ? 'Those cities are already on the map.' : 'Choose some cities.');
+  return run(world, `Add ${places.length === 1 ? places[0].name : `${places.length} cities`}`, (tx) => {
+    let group = tx.world.all('entity_group').find((g) => g.name === 'Today\'s cities')?.id;
+    if (!group) {
+      group = newId('egrp');
+      const n = tx.world.all('entity_group').length;
+      tx.insert('entity_group', { id: group, name: 'Today\'s cities', color: GROUP_COLORS[n % GROUP_COLORS.length], sort_order: n, created_seq: tx.world.nextSeq('entity_group') });
+    }
+    const ids: string[] = [];
+    for (const p of places) {
+      const id = newId('ent');
+      tx.insert('entity', { id, type_id: 'settlement', branch_id: MAIN_BRANCH, name: p.name, color: '#f4efe6', notes: `${p.capital === 'national' ? 'Capital of ' : p.capital === 'regional' ? `Capital of ${p.region}, ` : ''}${p.country}. About ${p.population.toLocaleString('en-US')} people (Natural Earth).`, created_seq: tx.world.nextSeq('entity'), style: JSON.stringify({ place: placeMeta(p) }), group_id: group });
+      writePlacement(tx, o.spaceId, id, o.mode, { lon: ((((p.lon + 180) % 360) + 360) % 360) - 180, lat: p.lat, arrive: 'jump' });
+      ids.push(id);
+    }
+    return ids;
+  });
 }
 
 /**

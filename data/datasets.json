@@ -189,5 +189,15 @@
     "credit": "Plate motions: PALEOMAP plate model v19o_r1c, C. R. Scotese, from A. T. Kocsis and C. R. Scotese's PaleoMAP PaleoCoastlines data (2023), CC BY 4.0.",
     "usedFor": "How the continents move between the PaleoDEMs' moments on maps of the Earth through geological time",
     "retrieved": "2026-11-19"
+  },
+  {
+    "id": "natural-earth-places",
+    "name": "Natural Earth populated places (1:10m) and countries' populations (1:50m)",
+    "version": "5.1.2",
+    "source": "https://www.naturalearthdata.com/ (files from https://github.com/nvkelso/natural-earth-vector)",
+    "licence": "Public domain",
+    "credit": "Made with Natural Earth. Free vector and raster map data @ naturalearthdata.com.",
+    "usedFor": "Today's cities and capitals: their places, populations, capitals and world cities; each country's population for the cities' shares (D173)",
+    "retrieved": "2026-11-20"
   }
 ]

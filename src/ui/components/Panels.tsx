@@ -671,6 +671,7 @@ export function Outliner() {
         <EntityRows sig={entitySig} section="cities" />
         {!others.length && newEntity?.type !== 'settlement' && <div className="muted pad">None yet. Cities are points on the map, founded and abandoned at dates.</div>}
         {others.length > looseOthers.length && <div className="muted small-hint">Cities in a country are listed under it.</div>}
+        {currentSpace && basemapSourceOf(currentSpace) === 'natural-earth' && <button className="link pad-link" onClick={() => s.set({ dialog: 'add-cities' })} data-testid="open-add-cities" title="Present-day cities and capitals, chosen by their share of their country's people, size, capital or economic importance">Add today's cities…</button>}
       </Section>
       <Section title="Areas, lines and points" onAdd={() => (featureLayers(s).length ? s.set({ tool: 'feature' }) : s.set({ dialog: 'new-layer' }))} addLabel="Draw">
         <FeatureRows />

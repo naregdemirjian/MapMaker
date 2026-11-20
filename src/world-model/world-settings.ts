@@ -8,6 +8,7 @@ import { cleanStamps, type TerrainStamp } from '../terrain/sculpt.ts';
 import { skyLookOf, type SkyLook } from '../space/sky-look.ts';
 import { calendarOf, calendarProblems, gregorian, type Calendar, type CalendarDef } from '../core-time/index.ts';
 import { cleanStatistics, type Statistic } from '../presentation/statistics.ts';
+import { cityFilterOf, type CityFilter } from '../domain/places.ts';
 
 /** The reference geography a world shows under its territories. */
 export type BasemapSource = 'natural-earth' | 'none';
@@ -28,7 +29,7 @@ export const SHOW_ITEMS: Array<{ key: keyof ShowSet; name: string }> = [
   { key: 'terrain', name: 'Terrain' },
 ];
 /** While working, and in presentation and exports; lakes smaller than minLakeKm2 are not shown in either. */
-export interface ShowSettings { working?: ShowSet; export?: ShowSet; minLakeKm2?: number }
+export interface ShowSettings { working?: ShowSet; export?: ShowSet; minLakeKm2?: number; cities?: unknown }
 
 export interface WorldSettings {
   projection?: string; basemap?: BasemapSource; show?: ShowSettings;
@@ -77,6 +78,11 @@ export function shown(space: Pick<MapSpaceRow, 'settings'> | null | undefined, w
 export function minLakeKm2(space: Pick<MapSpaceRow, 'settings'> | null | undefined): number {
   const v = space ? worldSettings(space).show?.minLakeKm2 : 0;
   return typeof v === 'number' && v > 0 ? v : 0;
+}
+
+/** Which cities a map shows (D173). */
+export function cityFilterOfSpace(space: Pick<MapSpaceRow, 'settings'> | null | undefined): CityFilter {
+  return cityFilterOf(space ? worldSettings(space).show?.cities : undefined);
 }
 
 export const EARTH_RADIUS_KM = 6371.0088;
