@@ -1,7 +1,7 @@
 // Shots: screen-time arithmetic used by transitions timed in screen seconds.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { defaultShot, screenSecondsSince, timeAt, shotTransitions, DEFAULT_TRANSITIONS, shotProgress, eventScreenSeconds, cameraAt, withStillCamera, unspun, steadyLayout, TRANSITION_LOOKS, withTransitionLook, eventTransitionLook, shotFirstMoment } from '../src/presentation/sequence.ts';
+import { defaultShot, screenSecondsSince, timeAt, shotTransitions, DEFAULT_TRANSITIONS, shotProgress, eventScreenSeconds, cameraAt, withStillCamera, unspun, steadyLayout, TRANSITION_LOOKS, withTransitionLook, eventTransitionLook, shotFirstMoment, trailsStart } from '../src/presentation/sequence.ts';
 import { World } from '../src/world-model/world.ts';
 import * as cmd from '../src/domain/commands.ts';
 import { invertDiffs } from '../src/world-model/schema.ts';
@@ -253,11 +253,15 @@ test('a date laid out steady keeps its day and its year in their places as it ch
   assert.deepEqual(steadyLayout(ctx, 'The Hundred Years').runs.map((r) => r.cell), [null]);
 });
 
-test('a shot\'s first moment (D176): where its trails start, whichever key shows it', () => {
+test('a shot\'s first moment (D176): where its trails can start, whichever key shows it', () => {
   const Y = (y: number) => gregorian.fromCivil({ year: y });
   const shot = defaultShot('space', { lon: 0, lat: 0, zoom: 0, rotation: 0, projection: 'equirectangular' }, Y(1453), Y(1460));
   assert.deepEqual(shotFirstMoment(shot), Y(1453));
   // A shot that looks back: its first moment is its earliest, not its first key's.
   const back = { ...shot, time: [{ ...shot.time[0], at: [Y(1460).day, 0] as [number, number] }, { ...shot.time[1], at: [Y(1453).day, 0] as [number, number] }] };
   assert.deepEqual(shotFirstMoment(back), Y(1453));
+  // Trails start there only when the shot asks; otherwise at each route's beginning, as before.
+  assert.equal(trailsStart({ ...back, trails: true }), null);
+  assert.deepEqual(trailsStart({ ...back, trails: true, trailsFrom: 'shot' }), Y(1453));
+  assert.equal(trailsStart({ ...back, trails: false, trailsFrom: 'shot' }), null);
 });

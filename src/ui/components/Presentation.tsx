@@ -372,6 +372,10 @@ export function ShotEditor() {
           <label className="check"><input type="checkbox" checked={shot.cities !== false} onChange={(e) => update({ cities: e.target.checked })} data-testid="shot-cities" /> Cities</label>
           <label className="check"><input type="checkbox" checked={shot.characters !== false} onChange={(e) => update({ characters: e.target.checked })} data-testid="shot-characters" /> Characters</label>
           {shot.characters !== false && <label className="check"><input type="checkbox" checked={!!shot.trails} onChange={(e) => update({ trails: e.target.checked })} data-testid="shot-trails" /> Their routes so far (trails)</label>}
+          {shot.characters !== false && shot.trails && <label>Trails from<select value={shot.trailsFrom ?? 'all'} onChange={(e) => update({ trailsFrom: e.target.value === 'shot' ? 'shot' : undefined })} data-testid="shot-trails-from">
+            <option value="all">the beginning of each route</option>
+            <option value="shot">the shot's first moment (only the way travelled in the shot)</option>
+          </select></label>}
         </Group>
         <Group title="Text">
           <p className="muted">Drag the date, the title or the events box on the preview to place them anywhere.</p>

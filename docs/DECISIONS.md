@@ -95,8 +95,8 @@ Follows from D2. The test drives the real interface exactly as a person would.
   - *A span of its own.* A drawn shape (line drawing itself, area growing, point fading in) can take a span of its
     own within its event (`animUntil`), and in an event of a moment too; each missile of a salvo can arrive at its
     own moment (`MissileFlight.arrive`): a day's bombardment is one event of many shots of a few hours each.
-  - *Trails in a shot* start at the shot's first moment, not at the start of each route (a shot of one morning
-    showed routes from years before).
+  - *Trails in a shot* can start at the shot's first moment instead of each route's beginning ("Trails from" under
+    the shot's characters; the examples use it): a shot of one morning showed routes travelled years before.
   - *Names.* Characters' names no longer overlap each other (beside the marker where free: right, left, above,
     below). Names of points that would overlap a name already written are left out, so points crowded together
     when seen from afar stay legible. A country's name placed in view (zoomed in on part of it) goes only where the

@@ -7,7 +7,7 @@ import type { Engine } from '../temporal-engine/engine.ts';
 import { MapRenderer, DEFAULT_STYLE, EXPORT_QUALITY, frontsMindLand, type PassName, type MapStyle, type RenderOptions } from '../render-engine/map-renderer.ts';
 import { resolveLook, isPlainLook, mapStyleOf, basemapStyleOf, finishLook, type Look } from './looks.ts';
 import { makeView, viewBounds, metresPerPixel, lonLatToScreen, type View } from '../render-engine/camera.ts';
-import { type ShotSettings, type OverlayRect, EVENTS_BOX_ID, timeAt, cameraAt, overlaysAt, drawOverlays, shotTransitions, screenSecondsSince, isVideoFormat, shotFirstMoment } from './sequence.ts';
+import { type ShotSettings, type OverlayRect, EVENTS_BOX_ID, timeAt, cameraAt, overlaysAt, drawOverlays, shotTransitions, screenSecondsSince, isVideoFormat, trailsStart } from './sequence.ts';
 import { planVideo, VideoFileEncoder, UploadSink, type VideoPlan } from './video-encoder.ts';
 import { videoBytes } from '../export/video-codecs.ts';
 import type { Instant } from '../core-time/index.ts';
@@ -341,7 +341,7 @@ export function frameSetup(world: World, shot: ShotSettings, frame: number, def:
   const passes = new Set<PassName>(def.passes.filter((p) => (p !== 'graticule' || (shot.graticule && on('graticule'))) && (p !== 'labels' || labels) && (p !== 'characters' || (shot.characters !== false && on('characters'))) && (p !== 'cities' || cities) && (p !== 'borders' || on('borders')) && (p !== 'features' || on('features')) && (p !== 'fields' || on('fields')) && (p !== 'terrain' || !!terrain?.look)));
   const transparent = def.name === 'all' ? shot.transparent : !def.background;
   const ls = lookStyles(shot);
-  return { view, t, ls, options: { passes, transparent, layerIds: def.layerId ? [def.layerId] : visibleLayers(world, shot), basemap, transitions: transitionOptions(shot, frame), mediaSeconds: frame / shot.fps, mediaChannel: 'export', trails: !!shot.trails, trailsSince: shot.trails ? shotFirstMoment(shot) : null, layout: { labels, cities }, show: { lakes: on('lakes'), coastline: on('coastline'), rivers: on('rivers'), minLakeKm2: minLakeKm2(space) }, terrain, style: ls?.style, basemapStyle: ls?.basemap } };
+  return { view, t, ls, options: { passes, transparent, layerIds: def.layerId ? [def.layerId] : visibleLayers(world, shot), basemap, transitions: transitionOptions(shot, frame), mediaSeconds: frame / shot.fps, mediaChannel: 'export', trails: !!shot.trails, trailsSince: trailsStart(shot), layout: { labels, cities }, show: { lakes: on('lakes'), coastline: on('coastline'), rivers: on('rivers'), minLakeKm2: minLakeKm2(space) }, terrain, style: ls?.style, basemapStyle: ls?.basemap } };
 }
 
 /** One space renderer for exports (it keeps nothing between frames but where it drew). */

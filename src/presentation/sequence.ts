@@ -125,6 +125,8 @@ export interface ShotSettings {
   characters?: boolean;
   /** Each character's route so far, drawn behind it. */
   trails?: boolean;
+  /** Where trails start (D176): 'shot', the shot's first moment (only the way travelled during the shot); absent, each route's beginning. */
+  trailsFrom?: 'shot';
   /** Cities' dots and names (absent: shown). */
   cities?: boolean;
   transparent: boolean;
@@ -329,7 +331,10 @@ export function timeAt(shot: ShotSettings, frame: number): Instant {
   return lerp(fromJSONValue(a.at), fromJSONValue(b.at), f);
 }
 
-/** The earliest moment a shot shows (its trails start there, D176). */
+/** The moment a shot's trails start (D176): its first moment when it asks for that; otherwise null (each route's beginning). */
+export const trailsStart = (shot: ShotSettings): Instant | null => (shot.trails && shot.trailsFrom === 'shot' ? shotFirstMoment(shot) : null);
+
+/** The earliest moment a shot shows (its trails can start there, D176). */
 export function shotFirstMoment(shot: ShotSettings): Instant {
   let first = fromJSONValue(shot.time[0].at);
   for (const k of shot.time) { const t = fromJSONValue(k.at); if (compare(t, first) < 0) first = t; }
