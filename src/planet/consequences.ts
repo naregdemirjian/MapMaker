@@ -9,7 +9,7 @@ import { CRUST, TAG } from './tectonics/plates.ts';
 import { EARTH_SPEED, maxThickness } from './tectonics/state.ts';
 import { airyHeight, oceanDepth } from './tectonics/isostasy.ts';
 import { craterSize, plateauSize, RIFT_SPEED } from './tectonics/events.ts';
-import { PLUME_CONTINENT, PLUME_OCEAN } from './tectonics/step.ts';
+import { PLUME_CELLS, PLUME_CONTINENT, PLUME_OCEAN } from './tectonics/step.ts';
 import { co2Factor } from './climate/paleo.ts';
 import { cellAt } from './explain.ts';
 import { BIOME, BIOME_IDS } from './life/biomes.ts';
@@ -105,7 +105,7 @@ export function estimateEdit(e: GeoEvent, h: HistoryData, p: PlanetFacts): Estim
   switch (e.kind) {
     case 'hotspot': {
       const v = (c >= 0 ? plateSpeedAt(h, p, c, e.startMa) : null) ?? EARTH_SPEED * p.vigor;
-      const rate = (continental ? PLUME_CONTINENT : PLUME_OCEAN) * s;
+      const rate = (continental ? PLUME_CONTINENT : PLUME_OCEAN) * s * (n / PLUME_CELLS);
       // A point of the plate stays over the plume for a cell's width at the plate's speed (or all along on a plate
       // that hardly moves); the plume adds to its cell and a quarter as much to each neighbour.
       const over = Math.min(lasts, cellKm / Math.max(v, 1e-6));

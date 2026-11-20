@@ -91,7 +91,7 @@ async function validate() {
   say('| --- | --- | --- |');
   say(`| Land share | ${fmt(100 * land)} % | 29 % |`);
   say(`| Hypsometry: the two peaks (500 m bins) | ${fmt(peak(true))} to ${fmt(peak(true) + 500)} m and ${fmt(peak(false))} to ${fmt(peak(false) + 500)} m | 0 to 1,000 m and −4,000 to −5,000 m |`);
-  say(`| Surface above 2 km | ${fmt(100 * high, 1)} % | about 3 % (11 % of the land) |`);
+  say(`| Surface above 2 km | ${fmt(100 * high, 1)} % | about 3 % (11 % of the land), about 1 % without the ice sheets' surfaces |`);
   // Age-depth: by construction GDH1; the fit says the relation survives the smoothing and trenches.
   const age = all.tectonics.age as Float32Array, kinds = (all.tectonics.kinds as Uint8Array).subarray((F - 1) * n);
   let sx = 0, sy = 0, sxx = 0, sxy = 0, k = 0;
@@ -201,8 +201,13 @@ async function validate() {
   say('  moisture does not reach 1,000 km inland); a city in a climate cell that is mostly sea takes the sea\'s rain (Cairo\'s');
   say('  480 km cell is three-quarters Mediterranean).');
   say('- Narrow ranges are blurred at the climate\'s 480 km cells: rain shadows are weaker than measured (D158).');
-  say('- Lakes come out about twice the measured volume: whole cells of 12,000 to 50,000 km² and a too-dry eastern Europe');
-  say('  (the Black Sea closed below sea level) (D159).');
+  say('- Lakes (D166): at the preview level a cell\'s mean height hides gorges and straits. Deep basins behind low sills');
+  say('  join the sea (the Black and Red Seas) and outlets are cut by most of their hollows\' depth, but plateau basins');
+  say('  whose gorges lie further off keep shallow lakes (British Columbia\'s, the Congo\'s, Lake Chad\'s much larger than');
+  say('  its own), the deep lakes that hold most of the measured water (Baikal, Tanganyika, Superior) are narrower than a');
+  say('  cell, and the Caspian fills to the sea\'s level and joins it.');
+  say('- The deep sea floor (D166): old floor now founders as on the Earth (the floor\'s mean age 47 to 67 Myr over four');
+  say('  seeds against 64), so its depths\' peak lies between 3 and 5.5 km by planet (the Earth\'s 4 to 5 km).');
   say('- A simulated planet is a different planet: its numbers are to be read as plausible, not as the Earth\'s.');
   console.log(lines.join('\n'));
 }

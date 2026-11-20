@@ -198,6 +198,12 @@ test('a planet\'s 500-million-year history: every cell held once, crust made and
   let young = 0, ocean = 0;
   for (let c = 0; c < n; c++) if (h.kinds[(F - 1) * n + c] === CRUST.oceanic) { ocean++; if (h.age[c] < 10) young++; }
   assert.ok(young > 0.03 * ocean, `young sea floor at ridges (${young} of ${ocean})`);
+  // Old sea floor founders (D166): its mean age near the Earth's (64 Myr; 118 before, with a tenth older than 300).
+  const ages: number[] = [];
+  for (let c = 0; c < n; c++) if (h.kinds[(F - 1) * n + c] === CRUST.oceanic) ages.push(h.age[c]);
+  ages.sort((a, b) => a - b);
+  const meanAge = ages.reduce((s, a) => s + a, 0) / ages.length, p90 = ages[Math.floor(0.9 * ages.length)];
+  assert.ok(meanAge > 25 && meanAge < 100 && p90 < 220, `the sea floor's mean age ${meanAge.toFixed(0)} Myr, nine-tenths younger than ${p90.toFixed(0)}`);
   // The same history every time; another seed, another planet.
   const again = runHistory(p, { durationMyr: 500, frameEveryMyr: 100 });
   const hash = (a: Int16Array) => createHash('sha256').update(new Uint8Array(a.buffer, a.byteOffset, a.byteLength)).digest('hex');

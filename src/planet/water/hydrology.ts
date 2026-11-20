@@ -66,6 +66,95 @@ export function budyko(P: number, E: number): number {
   return P * (1 + phi - (1 + phi ** FU_OMEGA) ** (1 / FU_OMEGA));
 }
 
+/**
+ * Straits narrower than a cell (D166): a basin below sea level as deep as an ocean's floor whose lowest way to the
+ * sea crosses no more than a low sill joins the sea (the Black Sea's Bosphorus, the Red Sea's Bab-el-Mandeb, a
+ * remnant ocean between continents), as a cell's mean height hides a narrow strait. A shallower hollow stays land (the
+ * Caspian's basin, which reaches the sea only over the Manych and through the Black Sea).
+ */
+export const STRAIT = { floor: -1000, sill: 150, near: 100 };
+/**
+ * Rivers keep cutting the outlets of the hollows they spill from (D166): a cell's mean height hides the gorge a river
+ * runs in (the Congo's through the Crystal Mountains, the Columbia's through the Cascades), so each hollow's outlet is
+ * notched below the cells' heights by a share of the relief around it (at most `max` m), and the water finds its
+ * hollows, lakes and rivers on that ground. Calibrated on the Earth's fresh lakes at the preview level.
+ */
+export const BREACH = { share: 0.25, max: 1000, depth: 0.85 };
+export function notchOutlets(mesh: Mesh, height: ArrayLike<number>): Float64Array {
+  const z = Float64Array.from(height);
+  if (!(BREACH.share > 0)) return z;
+  const ocean = straits(mesh, height, oceanMask(mesh, height)), dh = depressions(mesh, height, ocean);
+  // Whether a cell floods from depression d (its leaf lies in d's tree).
+  const within = (c: number, d: number) => { for (let a = dh.label[c]; a > 0; a = dh.parent[a]) if (a === d) return true; return false; };
+  for (let d = 1; d < dh.count; d++) {
+    const s0 = dh.spillCell[d], top = dh.outlet[d];
+    if (s0 < 0 || !(top < Infinity)) continue;
+    let hi = height[s0], lo = height[s0];
+    for (let e = mesh.nbrStart[s0]; e < mesh.nbrStart[s0 + 1]; e++) { const j = mesh.nbr[e]; hi = Math.max(hi, height[j]); lo = Math.min(lo, height[j]); }
+    // (Its deepest point: how much a river spilling from it has had to cut through.)
+    let bottom = top;
+    for (let a = dh.leafLo[d]; a < dh.leafHi[d]; a++) { const c = dh.cells[dh.cellStart[a]]; if (c >= 0) bottom = Math.min(bottom, height[c]); }
+    const floor = top - Math.min(BREACH.max, Math.max(BREACH.share * Math.max(0, hi - Math.max(lo, 0)), BREACH.depth * (top - bottom)));
+    if (!(floor < top)) continue;
+    // The rim on the hollow's side, then a channel from the outlet downhill until the ground is lower already (or
+    // the sea): carved, never dug, so it makes no new hollow.
+    // From the lowest rim cell inward, down the hollow's slope until below the notch (crossing a plateau to its hollow).
+    let rim = -1;
+    for (let e = mesh.nbrStart[s0]; e < mesh.nbrStart[s0 + 1]; e++) { const a = mesh.nbr[e]; if (!ocean[a] && within(a, d) && (rim < 0 || height[a] < height[rim])) rim = a; }
+    // (Each channel falls a centimetre a cell towards the outlet and beyond, so the water's way along it is never flat.)
+    for (let cur = rim, steps = 0; cur >= 0 && steps < 64 && height[cur] >= floor; steps++) {
+      z[cur] = Math.min(z[cur], floor + 0.01 * (steps + 1));
+      let next = -1, best = Infinity;
+      for (let e = mesh.nbrStart[cur]; e < mesh.nbrStart[cur + 1]; e++) { const j = mesh.nbr[e]; if (within(j, d) && height[j] < best) { best = height[j]; next = j; } }
+      if (next < 0 || best >= height[cur]) {
+        // (A flat: carry on towards the lowest neighbour, or stop.)
+        if (next < 0 || best > height[cur]) break;
+      }
+      cur = next;
+    }
+    for (let cur = s0, steps = 0; steps < 64 && !ocean[cur] && height[cur] >= floor; steps++) {
+      z[cur] = Math.min(z[cur], floor - 0.01 * steps);
+      let next = -1, best = Infinity;
+      for (let e = mesh.nbrStart[cur]; e < mesh.nbrStart[cur + 1]; e++) { const j = mesh.nbr[e]; if (!within(j, d) && height[j] < best) { best = height[j]; next = j; } }
+      if (next < 0) break;
+      cur = next;
+    }
+  }
+  return z;
+}
+export function straits(mesh: Mesh, z: ArrayLike<number>, ocean: Uint8Array): Uint8Array {
+  const n = mesh.n, pass = new Float64Array(n).fill(Infinity), heap = new Heap();
+  // The lowest pass on the way from the sea to each cell (flooding from the sea by level).
+  for (let c = 0; c < n; c++) if (ocean[c]) { pass[c] = z[c]; heap.push(z[c], c); }
+  const done = new Uint8Array(n);
+  while (heap.size) {
+    const c = heap.pop();
+    if (done[c]) continue;
+    done[c] = 1;
+    for (let e = mesh.nbrStart[c]; e < mesh.nbrStart[c + 1]; e++) {
+      const j = mesh.nbr[e], v = Math.max(pass[c], z[j]);
+      if (v < pass[j]) { pass[j] = v; heap.push(v, j); }
+    }
+  }
+  const out = Uint8Array.from(ocean), comp = new Int32Array(n).fill(-1), stack: number[] = [];
+  for (let s = 0; s < n; s++) {
+    if (comp[s] >= 0 || ocean[s] || !(z[s] < 0)) continue;
+    const cells: number[] = [];
+    let floor = 0, sill = Infinity;
+    comp[s] = s; stack.push(s);
+    while (stack.length) {
+      const c = stack.pop()!;
+      cells.push(c); floor = Math.min(floor, z[c]); sill = Math.min(sill, pass[c]);
+      for (let e = mesh.nbrStart[c]; e < mesh.nbrStart[c + 1]; e++) {
+        const j = mesh.nbr[e];
+        if (comp[j] < 0 && !ocean[j] && z[j] < 0) { comp[j] = s; stack.push(j); }
+      }
+    }
+    if (floor < STRAIT.floor && sill < STRAIT.sill) for (const c of cells) out[c] = 1;
+  }
+  return out;
+}
+
 /** The sea: cells below sea level joined to large bodies (a hollow below sea level far inland is land, as the Caspian's basin). */
 export function oceanMask(mesh: Mesh, z: ArrayLike<number>, minShare = 0.005): Uint8Array {
   const n = mesh.n, comp = new Int32Array(n).fill(-1), out = new Uint8Array(n);
@@ -459,12 +548,14 @@ export interface HydrologyInput {
 }
 
 export function hydrology(input: HydrologyInput): Hydrology {
-  const { mesh, height: z } = input;
+  const { mesh } = input;
   const n = mesh.n, R = input.radiusKm * 1000;
+  // The ground as the water finds it: each hollow's outlet notched by the gorge a cell's mean height hides (D166).
+  const z = notchOutlets(mesh, input.height);
   const area = new Float64Array(n);
   for (let c = 0; c < n; c++) area[c] = mesh.area[c] * R * R;
   const iced = (c: number) => !!input.ice && input.ice[c] > 50;
-  let ocean = oceanMask(mesh, z);
+  let ocean = straits(mesh, z, oceanMask(mesh, z));
   let land = new Uint8Array(n);
   for (let c = 0; c < n; c++) land[c] = ocean[c] ? 0 : 1;
   const balance = waterBalance(n, input.temp, input.precip, input.sun, land, input.yearDays / 12);
@@ -483,17 +574,25 @@ export function hydrology(input: HydrologyInput): Hydrology {
   let lakes = steadyLakes(dh, z, area, supply, take);
   // An inland hollow below sea level whose water would rise to sea level or above joins the sea (its outlet is soon
   // cut down: the Black Sea); one whose lake evaporates all it gets below sea level stays a closed lake there (the
-  // Caspian, the Dead Sea), or dry.
+  // Caspian, the Dead Sea), or dry. A basin as deep as an ocean's whose water stands within STRAIT.near of sea level
+  // joins it too (D166): a sea cut off only by a strait narrower than a cell (a Mediterranean), not a salt lake.
+  const deep = new Uint8Array(lakes.surface.length > 0 ? n : 0);
+  {
+    const floorOf = new Map<number, number>();
+    for (let c = 0; c < n; c++) { const d = lakes.lakeOf[c]; if (d >= 0) floorOf.set(d, Math.min(floorOf.get(d) ?? 0, z[c])); }
+    for (let c = 0; c < n; c++) { const d = lakes.lakeOf[c]; if (d >= 0 && (floorOf.get(d) ?? 0) < STRAIT.floor) deep[c] = 1; }
+  }
+  const joins = (c: number) => lakes.lakeOf[c] >= 0 && (lakes.surface[c] >= 0 || (deep[c] === 1 && lakes.surface[c] >= -STRAIT.near));
   let joined = false;
   for (let c = 0; c < n; c++) {
     if (ocean[c] || !(z[c] < 0)) continue;
-    if (lakes.lakeOf[c] >= 0 && lakes.surface[c] >= 0) { joined = true; break; }
+    if (joins(c)) { joined = true; break; }
   }
   if (joined) {
     const sea = Uint8Array.from(ocean);
     const stack: number[] = [];
     for (let c = 0; c < n; c++) {
-      if (sea[c] || !(z[c] < 0) || lakes.lakeOf[c] < 0 || !(lakes.surface[c] >= 0)) continue;
+      if (sea[c] || !(z[c] < 0) || !joins(c)) continue;
       sea[c] = 1; stack.push(c);
       while (stack.length) {
         const k = stack.pop()!;

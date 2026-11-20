@@ -10,7 +10,7 @@ import { inflateSync } from 'node:zlib';
 import { decodeTerrain } from '../src/terrain/grid.ts';
 import { meshAt } from '../src/planet/mesh/icosphere.ts';
 import { sampleGrid } from '../src/planet/mesh/transfer.ts';
-import { depressions, fillVolume, steadyLakes, hydrology, budyko, oceanMask, WATER } from '../src/planet/water/hydrology.ts';
+import { depressions, fillVolume, steadyLakes, hydrology, budyko, oceanMask, straits, notchOutlets, WATER } from '../src/planet/water/hydrology.ts';
 import { seaLevelForVolume, oceanVolume } from '../src/planet/water/sealevel.ts';
 import { definitionFromPreset } from '../src/planet/model/definition.ts';
 import { derive } from '../src/planet/model/physics.ts';
@@ -152,3 +152,44 @@ test('the real Earth: a budget that closes, the Amazon the greatest river, deser
     assert.ok(w.balance.runoff[near5(10, 23)] < 30 && w.balance.runoff[near5(-62, -3)] > 300, `the Sahara sheds ${w.balance.runoff[near5(10, 23)].toFixed(0)} mm, the Amazon ${w.balance.runoff[near5(-62, -3)].toFixed(0)} mm`);
   });
 });
+
+test('straits and outlets narrower than a cell (D166): a deep basin behind a low sill is sea, a shallow one stays land; a hollow\'s outlet is cut', () => {
+  // An ocean to the west; land to the east with two small basins (too small to count as seas themselves) reached over
+  // a low sill (100 m): one as deep as an ocean's floor, one 300 m below the sea (as the Caspian's).
+  const z = new Float64Array(n);
+  const at = (c: number, lon: number, lat: number) => Math.hypot(deg(mesh.lon[c]) - lon, deg(mesh.lat[c]) - lat);
+  for (let c = 0; c < n; c++) {
+    const lon = deg(mesh.lon[c]);
+    z[c] = lon < 0 ? -4000 : 800;
+    if (lon >= 0 && lon < 32 && Math.abs(deg(mesh.lat[c]) - 20) < 6) z[c] = 100; // the sill's corridor to the first basin
+    if (at(c, 36, 20) < 6) z[c] = -2500;
+    if (lon >= 0 && lon < 32 && Math.abs(deg(mesh.lat[c]) + 30) < 6) z[c] = 100;
+    if (at(c, 36, -30) < 6) z[c] = -300;
+  }
+  const plain = oceanMask(mesh, z), sea = straits(mesh, z, plain);
+  const deep = cellAtDeg(36, 20), shallow = cellAtDeg(36, -30);
+  assert.ok(!plain[deep] && sea[deep], 'the deep basin joins the sea through its strait');
+  assert.ok(!sea[shallow], 'the shallow basin stays land (a lake or a dry hollow)');
+  // The plateau's hollows, 700 m deep behind its rim: their outlet is cut by most of that depth.
+  const h = plateau();
+  const hollow: number[] = [];
+  for (let c = 0; c < n; c++) if (at(c, 15, 30) < 4) hollow.push(c);
+  assert.ok(hollow.length > 0);
+  const cut = notchOutlets(mesh, h), before = depressions(mesh, h, oceanMask(mesh, h)), after = depressions(mesh, cut, oceanMask(mesh, h));
+  // The hollow's depth: its outermost depression's outlet over its lowest cell.
+  const pit = hollow.reduce((a, c) => (h[c] < h[a] ? c : a), hollow[0]);
+  const depth = (dh: ReturnType<typeof depressions>, zz: ArrayLike<number>) => {
+    let d = dh.label[pit];
+    if (d <= 0) return 0;
+    while (dh.parent[d] >= 0) d = dh.parent[d];
+    return dh.outlet[d] - zz[pit];
+  };
+  const deep0 = depth(before, h), deep1 = depth(after, cut);
+  assert.ok(deep0 > 250 && deep1 < 0.3 * deep0, `the hollow ${deep0.toFixed(0)} m deep, ${deep1.toFixed(0)} m once its outlet is cut`);
+});
+
+function cellAtDeg(lon: number, lat: number): number {
+  let best = 0, bd = Infinity;
+  for (let c = 0; c < n; c++) { const d = Math.hypot(deg(mesh.lon[c]) - lon, deg(mesh.lat[c]) - lat); if (d < bd) { bd = d; best = c; } }
+  return best;
+}

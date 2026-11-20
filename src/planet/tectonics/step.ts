@@ -24,6 +24,8 @@ export interface StepReport {
 const ARC_RATE = 0.004;
 /** Hotspot volcanism: crust added over a plume, km per Myr at strength 1, on oceanic and on continental crust. */
 export const PLUME_OCEAN = 0.3, PLUME_CONTINENT = 0.08;
+/** The cells (of the whole sphere) at which those rates hold: level 5's (D166). */
+export const PLUME_CELLS = 10_242;
 /** New oceanic crust, km (thicker from a hotter mantle). */
 const oceanicThickness = (vigor: number) => 7 * Math.min(2.2, Math.max(1, vigor) ** 0.4);
 
@@ -470,7 +472,8 @@ function plumes(state: TectonicState, dt: number, vmax: number) {
     const add = (cell: number, share: number) => {
       const p = plates[owner[cell]], r = ref[cell];
       if (!p || r < 0 || !p.member[r]) return;
-      const rate = p.kind[r] === CRUST.continental ? PLUME_CONTINENT : PLUME_OCEAN;
+      // (Per cell, so that a plume makes as much rock at any level: calibrated at level 5's cells, D166.)
+      const rate = (p.kind[r] === CRUST.continental ? PLUME_CONTINENT : PLUME_OCEAN) * (mesh.n / PLUME_CELLS);
       p.thickness[r] = Math.min(vmax, p.thickness[r] + rate * h.strength * state.volcanism * dt * share);
       p.orogeny[r] = 0;
       p.tags[r] |= TAG.hotspot | (h.edited ? TAG.edited : 0);

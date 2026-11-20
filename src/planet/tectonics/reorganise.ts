@@ -15,6 +15,15 @@ import { CRUST, TAG, quatRotate, type Plate } from './plates.ts';
 import { simplex3 } from '../../terrain/planet.ts';
 
 type V3 = [number, number, number];
+
+/**
+ * When old sea floor begins to go down (D154; D166): at a passive margin, crust older than `marginAge` Myr along a
+ * continent on the same plate, with a `marginChance` at each reorganisation; anywhere (on a welded plate too, with
+ * trenches or not: `trenchShare`, `welded`), a plate's floor older than `founderAge` covering more than `founderArea`
+ * of the sphere founders with a `founderChance`. Calibrated so the sea floor's mean age is about the Earth's (64 Myr)
+ * and almost none outlives 180 Myr (D166: before, a tenth of it was older than 300 Myr and the deep sea too deep).
+ */
+export const SUBDUCTION = { marginAge: 120, marginChance: 0.5, founderAge: 130, founderArea: 0.01, founderChance: 0.5, trenchShare: 1, welded: true };
 const norm = (v: number[]): V3 => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
 const cross = (a: number[], b: number[]): V3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 
@@ -102,7 +111,7 @@ export function reorganise(state: TectonicState) {
     const o = owner[c];
     if (o < 0) continue;
     const p = plates[o], r = state.ref[c];
-    if (p.kind[r] !== CRUST.oceanic || p.age[r] < 120) continue;
+    if (p.kind[r] !== CRUST.oceanic || p.age[r] < SUBDUCTION.marginAge) continue;
     for (let k = nbrStart[c]; k < nbrStart[c + 1]; k++) {
       const j = nbr[k];
       if (owner[j] === o && p.kind[state.ref[j]] === CRUST.continental) { margin[o]++; break; }
@@ -110,7 +119,7 @@ export function reorganise(state: TectonicState) {
   }
   const minMargin = Math.max(3, 0.0006 * n);
   for (const p of plates.slice()) {
-    if (p.id >= now.area.length || margin[p.id] < minMargin || groupOf(state, p.id) !== p.id || rand(state) >= 0.5) continue;
+    if (p.id >= now.area.length || margin[p.id] < minMargin || groupOf(state, p.id) !== p.id || rand(state) >= SUBDUCTION.marginChance) continue;
     if (!(now.cont[p.id] > 0)) continue;
     const q = splitPlate(state, p, (r) => p.kind[r] === CRUST.oceanic);
     if (!q) continue;
@@ -128,14 +137,14 @@ export function reorganise(state: TectonicState) {
     if (state.trench[c]) trenchCells[o]++;
     if (state.boundary[c] !== BOUNDARY.none) edgeCells[o]++;
     const p = plates[o], r = state.ref[c];
-    if (p.kind[r] !== CRUST.oceanic || p.age[r] < 150) continue;
+    if (p.kind[r] !== CRUST.oceanic || p.age[r] < SUBDUCTION.founderAge) continue;
     const a = mesh.area[c];
     oldArea[o] += a;
     oldCen[o][0] += a * xyz[3 * c]; oldCen[o][1] += a * xyz[3 * c + 1]; oldCen[o][2] += a * xyz[3 * c + 2];
   }
   for (const p of plates.slice()) {
-    if (p.id >= oldArea.length || oldArea[p.id] < 0.03 * sphere || trenchCells[p.id] > 0.2 * edgeCells[p.id] || groupOf(state, p.id) !== p.id) continue;
-    if (rand(state) >= 0.35) continue;
+    if (p.id >= oldArea.length || oldArea[p.id] < SUBDUCTION.founderArea * sphere || trenchCells[p.id] > SUBDUCTION.trenchShare * edgeCells[p.id] || (!SUBDUCTION.welded && groupOf(state, p.id) !== p.id)) continue;
+    if (rand(state) >= SUBDUCTION.founderChance) continue;
     const through = norm(oldCen[p.id]);
     const t = randomPole(() => rand(state));
     riftPlate(state, p, through, norm(cross(through, t)), -25);

@@ -9,20 +9,20 @@ and everything else is this engine's. Measured values are approximate climatolog
 | Measure | This planet | The Earth |
 | --- | --- | --- |
 | Land share | 29 % | 29 % |
-| Hypsometry: the two peaks (500 m bins) | 0 to 500 m and -6,000 to -5,500 m | 0 to 1,000 m and −4,000 to −5,000 m |
-| Surface above 2 km | 0.1 % | about 3 % (11 % of the land) |
-| Sea floor deepening with age (younger than 80 Myr) | 0.29 km per √Myr | 0.35 (GDH1: 2.6 km over 64 Myr) |
-| The sea's level over the history | -425 to 131 m | about −120 to +250 m over the last 500 Myr |
-| Ice on land over the history | 0.3 to 8.3 million km³ | 0 to about 80 (today 30) |
-| Mean temperature at the surface | 15.0 °C | 15 °C |
-| Within 10° of the equator / beyond 70° | 26.4 / -18.8 °C | 27 / −15 to −30 °C |
-| Rain and snow, the planet's mean | 1,305 mm a year | about 1,000 |
-| Rain within 10° of the equator / at 20-30° | 3,483 / 477 mm | about 2,000 / 700 |
-| The sea's currents: warm western sides, cool eastern | 8.6 % of cells warmed (mean +1.2 K), 7.6 % cooled (-1.2 K) | as the Gulf Stream and Kuroshio, the Canary and Humboldt |
-| Deserts and steppe: land at 15-35° / within 10° | 73 / 0 % | the subtropical belts / few |
-| Tropical forest within 10° | 85 % | most |
-| Boreal forest at 50-65°; tundra, polar desert and ice beyond 65° | 38 %; 82 % | most; most |
-| Hack's law: main stream length ∝ area^h | h = 0.54 (64 cells draining over 20 cells) | 0.5 to 0.6 |
+| Hypsometry: the two peaks (500 m bins) | 0 to 500 m and -3,500 to -3,000 m | 0 to 1,000 m and −4,000 to −5,000 m |
+| Surface above 2 km | 0.8 % | about 3 % (11 % of the land), about 1 % without the ice sheets' surfaces |
+| Sea floor deepening with age (younger than 80 Myr) | 0.28 km per √Myr | 0.35 (GDH1: 2.6 km over 64 Myr) |
+| The sea's level over the history | -553 to 129 m | about −120 to +250 m over the last 500 Myr |
+| Ice on land over the history | 0.9 to 12.9 million km³ | 0 to about 80 (today 30) |
+| Mean temperature at the surface | 14.6 °C | 15 °C |
+| Within 10° of the equator / beyond 70° | 23.6 / -15.6 °C | 27 / −15 to −30 °C |
+| Rain and snow, the planet's mean | 1,163 mm a year | about 1,000 |
+| Rain within 10° of the equator / at 20-30° | 2,665 / 526 mm | about 2,000 / 700 |
+| The sea's currents: warm western sides, cool eastern | 8.5 % of cells warmed (mean +1.2 K), 8.0 % cooled (-1.1 K) | as the Gulf Stream and Kuroshio, the Canary and Humboldt |
+| Deserts and steppe: land at 15-35° / within 10° | 56 / 0 % | the subtropical belts / few |
+| Tropical forest within 10° | 80 % | most |
+| Boreal forest at 50-65°; tundra, polar desert and ice beyond 65° | 23 %; 95 % | most; most |
+| Hack's law: main stream length ∝ area^h | h = 0.64 (42 cells draining over 20 cells) | 0.5 to 0.6 |
 
 ## The real Earth's heights with this engine's climate, water and biomes (level 5)
 
@@ -53,7 +53,7 @@ and everything else is this engine's. Measured values are approximate climatolog
 
 Over these 22 places the yearly temperature's error is 3.4 K (root mean square) and rain's 0.82 in natural logarithms (0.69 is a factor of two).
 
-Water on land: rain and snow 117,646 km³ a year (measured about 113,000), evaporated 78,119 (73,000), running off 39,527 (40,000), reaching the sea 35,154; lakes 294,692 km³ and salt lakes 172,494 km³ (91,000 and 85,000).
+Water on land: rain and snow 114,441 km³ a year (measured about 113,000), evaporated 75,832 (73,000), running off 38,610 (40,000), reaching the sea 37,762; lakes 51,811 km³ and salt lakes 7,651 km³ (91,000 and 85,000).
 
 Köppen-Geiger's main classes as shares of the land: A 20 %, B 30 %, C 14 %, D 18 %, E 18 % (measured A 19, B 30, C 13, D 25, E 12 per cent).
 
@@ -70,6 +70,11 @@ Köppen-Geiger's main classes as shares of the land: A 20 %, B 30 %, C 14 %, D 1
   moisture does not reach 1,000 km inland); a city in a climate cell that is mostly sea takes the sea's rain (Cairo's
   480 km cell is three-quarters Mediterranean).
 - Narrow ranges are blurred at the climate's 480 km cells: rain shadows are weaker than measured (D158).
-- Lakes come out about twice the measured volume: whole cells of 12,000 to 50,000 km² and a too-dry eastern Europe
-  (the Black Sea closed below sea level) (D159).
+- Lakes (D166): at the preview level a cell's mean height hides gorges and straits. Deep basins behind low sills
+  join the sea (the Black and Red Seas) and outlets are cut by most of their hollows' depth, but plateau basins
+  whose gorges lie further off keep shallow lakes (British Columbia's, the Congo's, Lake Chad's much larger than
+  its own), the deep lakes that hold most of the measured water (Baikal, Tanganyika, Superior) are narrower than a
+  cell, and the Caspian fills to the sea's level and joins it.
+- The deep sea floor (D166): old floor now founders as on the Earth (the floor's mean age 47 to 67 Myr over four
+  seeds against 64), so its depths' peak lies between 3 and 5.5 km by planet (the Earth's 4 to 5 km).
 - A simulated planet is a different planet: its numbers are to be read as plausible, not as the Earth's.

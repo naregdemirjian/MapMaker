@@ -61,6 +61,46 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D166. The deep sea floor, mountains and lakes (Stage 15.4)
+
+- **Asked.** Fix the inaccuracies D162 measured: the deep sea floor too deep (its depths' peak at 5.5 to 6 km
+  against 4 to 5), mountains too low at the preview level (0.2 % of the surface above 2 km against about 3), lakes
+  about twice (since D165's wetter land, three times) the measured volume.
+- **Found.** The sea floor was old: a mean age of 118 Myr and a tenth of it older than 300 Myr (the Earth's: 64 Myr,
+  the oldest about 180), so most of it sat at the oldest floor's depth. Old floor foundered only on plates not welded
+  into a continent's group and with few trenches, at a third of the reorganisations. Compared at the same cells, the
+  real Earth has 3.1 % of its surface above 2 km at the preview level, but two-thirds of that is the Antarctic and
+  Greenland ice sheets' surfaces: about 1 % for rock. Lakes: at 220 km cells a cell's mean height hides gorges and
+  straits, so the Red Sea and the Black Sea became closed lakes, river basins became huge lakes (the Congo's
+  cuvette 795,000 km², the Columbia's and Fraser's plateaus), and a simulated planet's remnant ocean cut off between
+  continents became a 3.8 million km³ salt lake. A plume made as much rock per cell at any level, so a quarter as
+  much in all at the standard level as at preview.
+- **Built.**
+  - Old floor founders more readily (`tectonics/reorganise.ts`, `SUBDUCTION`): from 130 Myr, over 1 % of the sphere,
+    on any plate (welded or not, with trenches or not), with an even chance at each reorganisation. Over four seeds
+    the floor's mean age is 47 to 67 Myr and nine-tenths of it younger than 101 to 143 Myr; more subduction raises
+    more arcs and ranges: 0.35 to 1 % of the surface above 2 km (0.08 to 0.2 before).
+  - A plume's rock per cell scales with the cells' size, as it was at the preview level (`PLUME_CELLS`), so a
+    hotspot makes as much rock at any level.
+  - Straits narrower than a cell (`water/hydrology.ts`, `straits`): a basin below sea level as deep as an ocean's
+    floor (below −1 km) whose lowest way to the sea crosses a sill under 150 m joins the sea; one whose water stands
+    within 100 m of the sea's level joins it too. The Black and Red Seas are seas; the Caspian's basin (shallower)
+    stays land.
+  - Outlets cut (`notchOutlets`): before the water finds its hollows, each hollow's outlet is cut by 85 % of its
+    depth (or a quarter of the relief around it, if more; at most 1 km): a channel carved from the rim inward down
+    the hollow's slope and outward down the land beyond, falling a centimetre a cell, never dug into a new hollow.
+- **Result.** Real Earth, preview level: fresh lakes 51,800 km³ and salt 7,700 (measured 91,000 and 85,000; before
+  294,700 and 172,500); the Congo's lake shallow (5,500 km³ against 64,500). Simulated Earth-like planets: fresh
+  lakes 1,200 to 167,000 km³ and salt up to 45,000 over three seeds (before 30,000 to 205,000 and up to 1.5
+  million). The simulated planet's depths now peak between 3 and 5.5 km below the sea by seed (5.5 to 6 before;
+  the Earth's 4 to 5).
+- **Still wrong, and why.** Plateau basins whose gorges lie beyond their outlet's neighbours keep shallow lakes
+  (British Columbia's 27,000 km³; Lake Chad's much larger than its own); the deep lakes that hold most of the
+  measured fresh water (Baikal, Tanganyika, Superior, Malawi) are narrower than a cell, so the model cannot hold
+  them; the Caspian fills to the sea's level and joins it (its inflow and evaporation balance about 30 m lower). The
+  sea's depth relative to its surface depends on where the coastline falls on each planet's continents, so seeds
+  differ by over 2 km. Volcanic islands remain narrower than preview cells (D164).
+
 ### D165. The climate's accuracy: the sea's heat, the winds' and the land's own; rain recalibrated (Stage 15.3)
 
 - **Asked.** Fix the inaccuracies D162 measured: mid-latitude land rain at a third to a half of the measured, dry
