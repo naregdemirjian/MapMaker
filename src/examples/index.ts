@@ -4,6 +4,7 @@ import type { ProjectRegistry, ProjectInfo } from '../server/projects.ts';
 import { GREATER_ARMENIA, buildGreaterArmenia } from './greater-armenia.ts';
 import { buildConstantinople } from './constantinople.ts';
 import { buildMongols } from './mongols.ts';
+import { buildEmpires } from './empires.ts';
 
 export interface Example { id: string; name: string; about: string; build(reg: ProjectRegistry, dataDir: string): ProjectInfo }
 
@@ -18,5 +19,10 @@ export const EXAMPLES: Example[] = [
     id: 'mongols', name: 'The Mongol Empire, 1206 to 1405',
     about: 'A continent conquered and divided: Genghis Khan\'s campaigns province by province, Khwarazm, the Rus\', Hungary taken and given up, Baghdad, Ain Jalut, the Song, the fleets to Japan and Java, four khanates, the Ming, Lithuania and Moscow, and Timur; campaign arrows, battles, capitals, Marco Polo, Rubruck and Ibn Battuta on their journeys. Nine shots.',
     build: (reg, dataDir) => buildMongols(reg, dataDir),
+  },
+  {
+    id: 'end-of-empires', name: 'The End of Empires, 1945 to 1999',
+    about: 'The whole world in half a century: the British, French, Dutch, Belgian, Portuguese and Spanish empires, Japan\'s, the Soviet Union and Yugoslavia, colony by colony to independence, with the names countries had then; the partition of India, Korea\'s front up and down the peninsula, Indochina, the year of Africa, Katanga and Biafra, Suez and the Six-Day War, the Sahara, Germany parted and joined, the Soviet break-up, Hong Kong and Macau; leaders on their journeys, the UN\'s members and the new states counted. Ten shots.',
+    build: (reg, dataDir) => buildEmpires(reg, dataDir),
   },
 ];

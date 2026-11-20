@@ -18,7 +18,7 @@ import { processLasso, densify, orientInteriorLeft, signedArea, splitLoops, simp
 import { geoCentroid } from 'd3-geo';
 import { lonLatToVec, E7 } from '../../geo-kernel/vec.ts';
 import { cameraAt, timeAt, overlaysAt, drawOverlays, withStillCamera, unspun, moveOverlay, shotTransitions, trailsStart, type ShotSettings, type OverlayRect } from '../../presentation/sequence.ts';
-import { transitionOptions, drawShotOverlays, lookStyles } from '../../presentation/export-driver.ts';
+import { transitionOptions, drawShotOverlays, lookStyles, overlayKeepOut } from '../../presentation/export-driver.ts';
 import { finishLook } from '../../presentation/looks.ts';
 import { parseJSON, slerpLonLat } from '../../temporal-engine/engine.ts';
 import { compare, fromStore, gregorian, formatYear } from '../../core-time/index.ts';
@@ -401,8 +401,11 @@ export function MapView() {
     if (citiesOn) passes.add('cities');
     // A shot's look (D108): its colours, and its finish once the map is drawn.
     const shotLook = shot ? lookStyles(shot) : null;
+    // (In a shot, the names on the map keep clear of its texts, as in its exports, D178.)
+    const overlaid = shot ? (s.presentOverlay ? moveOverlay(shot, s.presentOverlay.id, s.presentOverlay.dx, s.presentOverlay.dy, s.presentOverlay.from) : shot) : null;
+    const keepOut = overlaid && (namesOn || citiesOn) ? overlayKeepOut(s.world, overlaid, s.shotFrame, time, frame.w, frame.h, view, s.engineFor(overlaid.branch)) : undefined;
     try {
-      s.renderer.render(ctx, view, s.world, shot ? s.engineFor(shot.branch) : s.engine, s.spaceId, time, { passes, transparent: !!shot?.transparent, layerIds: layers, basemap, referenceBorders: !shot && s.referenceBorders, transitions: shot ? transitionOptions(shot, s.shotFrame) : undefined, mediaSeconds: shot ? s.shotFrame / shot.fps : 0, trails: !!shot?.trails, trailsSince: shot ? trailsStart(shot) : null, layout: { labels: namesOn && !namesHidden, cities: citiesOn }, moving: moving && vs.whileMoving === 'carry', holdNames: moving && vs.names === 'hold', fillAround, hurried, show, terrain, style: shotLook?.style, basemapStyle: shotLook?.basemap });
+      s.renderer.render(ctx, view, s.world, shot ? s.engineFor(shot.branch) : s.engine, s.spaceId, time, { passes, transparent: !!shot?.transparent, layerIds: layers, basemap, referenceBorders: !shot && s.referenceBorders, transitions: shot ? transitionOptions(shot, s.shotFrame) : undefined, mediaSeconds: shot ? s.shotFrame / shot.fps : 0, trails: !!shot?.trails, trailsSince: shot ? trailsStart(shot) : null, layout: { labels: namesOn && !namesHidden, cities: citiesOn }, moving: moving && vs.whileMoving === 'carry', holdNames: moving && vs.names === 'hold', fillAround, hurried, show, terrain, style: shotLook?.style, basemapStyle: shotLook?.basemap, keepOut });
     } catch (e) {
       console.error(e);
     }

@@ -61,6 +61,47 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D178. Five large example projects, III: the End of Empires, 1945 to 1999; names where they can be read
+
+- **The End of Empires, 1945 to 1999** (`src/examples/empires.ts`): the whole world on one map in an atlas's
+  colours. Today's countries (Natural Earth 1:50m), then in 1945 the colonies given to their empires (the British,
+  French, Dutch, Belgian, Portuguese and Spanish empires, Japan's to its surrender, the United States', Australia's,
+  New Zealand's, Denmark's and South Africa's dependencies, the Soviet Union's republics, Yugoslavia,
+  Czechoslovakia) and the pieces the empires cut out of countries of today: Spanish Morocco, Tangier, Ifni, Cape
+  Juby and the Spanish Sahara out of today's Morocco; Goa, Daman, Diu, Dadra and French India, Hyderabad and Sikkim
+  out of India; Aden out of Yemen; the Golan (Syrian until 1967) out of today's Israel; Crimea (Ukrainian from 1954)
+  out of today's Russia; Newfoundland and Labrador out of Canada; Tibet out of China; the Ryukyus and the Bonins;
+  Korea at the 38th parallel. Islands and peninsulas are taken as whole pieces of a country's outline (Zanzibar,
+  West New Guinea, Sarawak and Sabah, Crimea, the Gaza Strip and the West Bank), not by rough boxes. 244 events: every
+  independence with the name the country had then (Ceylon, Burma, Dahomey, Upper Volta, Tanganyika, Swaziland,
+  Western Samoa, Rhodesia, Zaire, Democratic Kampuchea, the Central African Empire), the renamings after, and the
+  unions and break-ups (the United Arab Republic, Tanzania, Malaysia and Singapore, the two Yemens, the two Germanys,
+  the Soviet Union, Yugoslavia, Czechoslovakia, Somaliland); wars that move borders and give them back (Korea four
+  times, Katanga, Biafra shrinking to its heartland, the Six-Day War, the Ogaden, Kuwait, the Falklands, Cyprus,
+  the Sahara and its wall); refugees, landings and offensives as arrows, battles marked; eight leaders on their
+  journeys; the UN's members, the new states (counted from the independences themselves) and the people ruled from
+  abroad; ten shots, their events boxes each showing their region's events (South Asia, East Asia, Southeast Asia,
+  Indochina, the Middle East, Africa, Southern Africa...).
+- **Names where they can be read (renderer).** Each country is labelled once, in its largest piece. Now, where that
+  piece is not in view and another large piece is (one of at least a hundredth of its land: the British Empire's
+  India while its largest piece is in Africa, East Pakistan, the French Union's Indochina), the name goes in the
+  largest of those in view (`OwnerPiece.others`). Names keep clear of a shot's texts, its date, title, statistics,
+  captions and events box, in the preview and in every export pass (the texts are laid out first on a canvas of
+  their own, `overlayKeepOut`, and their boxes given to the renderer as `keepOut`): before, a name under the events
+  box was half hidden. A name reaching over the frame's edge moves in by as much, when that is less than about half
+  its width, else it goes elsewhere or is hidden; a city's name goes on a side of its dot inside the frame.
+- **Fixed texts are written as they are.** The steady layout that keeps a changing date still (every figure in a
+  cell, a month's name in a cell as wide as September) was used for every text in a shot, so a fixed subtitle such
+  as "August 1947" came out with a gap after the month. Now only a text that changes, one with a {placeholder}, is
+  laid out steady. (The examples' subtitles also have a box of their own, readable over light land and sea.)
+- **Building it.** Leaders who stay put for years would otherwise drift across the map between two journeys
+  (Gorbachev halfway to Crimea in 1990): the example's journeys are written as stays, each left a few days before
+  arriving at the next place (`trip`). Independences cross-fade over six weeks (`fade`, not the speckled dissolve,
+  which with a dozen countries at once in 1960 looked like noise); where a new state is fought over within weeks
+  (the Congo and Katanga, East Timor) the fade is shortened so the changes do not overlap.
+- **Seen.** The shots checked in the app: the British Empire named over India in 1947, Korea's fronts, Indochina's
+  divisions in distinct colours, the Middle East's borders moving in 1948, 1967 and 1982, names clear of the boxes.
+
 ### D177. Five large example projects, II: the Mongol Empire, 1206 to 1405; parcels that keep their history
 
 - **The Mongol Empire, 1206 to 1405** (`src/examples/mongols.ts`): one map of the Earth in an atlas's colours and the

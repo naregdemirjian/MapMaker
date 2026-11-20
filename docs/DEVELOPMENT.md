@@ -9,6 +9,11 @@ The approved architecture is the Claude Doc "Map Maker — Technical Architectur
 
 ## Status at a glance (20 November 2026, Stages 2, 3, 4, 6, 8 to 14 done; Stage 7 mostly done)
 
+- **Five large example projects, III: the End of Empires, 1945 to 1999, 20 November** (D178): the whole world in
+  half a century, 244 events, ten shots: every colony to independence with the names countries had then, the wars
+  that moved borders, leaders on their journeys. Building it improved how names are placed: an empire is named on its
+  piece in view (the British Empire over India), names keep clear of a shot's texts and stay inside the frame, and
+  fixed titles are no longer spaced out like a changing date.
 - **Five large example projects, II: the Mongol Empire, 1206 to 1405, 20 November** (D177): a continent conquered and
   divided, 117 events, nine shots. Building it found and fixed two faults in how land is given from outlines: land
   carved out of a country by provinces running onto its frontier lost the country's history, and where two
@@ -397,7 +402,7 @@ Terminology: the interface calls them **maps** (DECISIONS D24); the code and old
 | `src/presentation/` | Shots and export | Shot settings (time remap, camera keys, overlays) and the export driver that renders frames off screen at the exact output size. |
 | `src/export/` | Files on disk | PNG encoder, export folders, `manifest.json`, `COMPOSITING_GUIDE.txt`. |
 | `src/ui/` | The interface | React. `store.ts` holds the session state and saves every command; components for the map, timeline, panels, dialogs and presentation mode. |
-| `src/examples/`, `server/http.ts` (examples) | Example projects (D171, D176, D177) | Each built by a script through the commands into the projects folder when chosen in the Projects dialog; `kit.ts` the builder and its helpers (events, changes, features, characters, statistics, shots); `greater-armenia*.ts`, `constantinople.ts`, `mongols.ts` the projects. |
+| `src/examples/`, `server/http.ts` (examples) | Example projects (D171, D176 to D178) | Each built by a script through the commands into the projects folder when chosen in the Projects dialog; `kit.ts` the builder and its helpers (events, changes, features, characters, statistics, shots); `greater-armenia*.ts`, `constantinople.ts`, `mongols.ts`, `empires.ts` the projects. |
 | `src/presentation/statistics.ts`, `ui/components/StatisticsDialog.tsx` | Statistics (D171) | Numbers kept with a map over time, filled into shots' texts as "{name}" by `overlaysAt`. |
 | `src/domain/geojson-import.ts`, `ui/components/ImportBorders.tsx` | Importing borders (D120) | GeoJSON maps read into countries by a name property (colours too), years from file names; `commands.ts` importTerritories puts a map's countries on a layer at its date, one undo step a file. |
 | `src/ui/components/Timeline.tsx` | The timeline | Dates, events and the playhead; `useHistoryPlayer` plays history in the working view (D119): years a second, looping, Space. |
@@ -481,6 +486,7 @@ worked out afresh, and any difference stops the test.
 | `test/arrow-step.test.ts` | 1 | The arrow keys' steps of the date viewed (D172): a day, a week, a month, a year; Cmd as Ctrl |
 | `test/statistics.test.ts` | 3 | Statistics (D171): values between dates by a steady share, amount or at once; written as money, people, numbers and shares, and read back from words; a map's statistics filling "{name}" in a shot's texts as history goes |
 | `test/missiles.test.ts` | 3 | Missile salvos (D171): flights along great circles over one event, in flight half way, gone on arrival; strikes where they land and none where one was shot down; each missile arriving at its own moment and a point fading in over its own span (D176) |
+| `test/example-empires.test.ts` | 1 | The End of Empires example (D178): no conflicts, over two hundred events; some seventy places checked at their dates across Asia, the Middle East, Africa, Europe and the Americas (colonies under their empires and then their own states with the names of the time; Korea at the 38th parallel and at the armistice line; Goa, Aden, the Golan, Sinai, Gaza, Crimea, the Saar, Zanzibar, West New Guinea, the Sahara and its wall, Biafra, Katanga, the Ogaden, Kuwait, the Falklands, Hong Kong and Macau); ten shots; statistics (UN members, new states) |
 | `test/example-mongols.test.ts` | 1 | The Mongol example (D177): no conflicts, over a hundred events; Samarkand Khwarazm's, the Mongols', Chagatai's at the split (nothing spilled to another khanate), Timur's; Kiev, Hungary occupied and given up, Baghdad, Syria before and after Ain Jalut and under Ghazan, the Song, the Yuan, the Ming; nine shots; statistics |
 | `test/example-constantinople.test.ts` | 1 | The Constantinople example (D176): no conflicts, over a hundred events, the Julian calendar; the city held until dawn on 29 May, taken quarter by quarter, the Cretans' towers last; Galata, Selymbria, the Morea and Trebizond when the sources say; the chain; shots in flight a few hours each; ten shots; statistics |
 | `test/example-greater-armenia.test.ts` | 1 | The Greater Armenia example (D171) built into a projects folder: no conflicts; Turkey and Azerbaijan gone without a sliver; the empire of 2175, the governments gone after the exchange, the fragments and the faction after; nine shots, statistics, the salvos |

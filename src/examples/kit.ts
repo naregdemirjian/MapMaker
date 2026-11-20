@@ -278,7 +278,8 @@ export function shot(b: Builder, p: ShotPlan): string {
     overlays: [
       { id: 'date', kind: 'date', text: '{date}', x: 0.04, y: 0.92, size: 46, color: '#f6f1e7', background: 'rgba(10,14,22,0.7)', align: 'left', inFrame: 0, outFrame: frames - 1, fade: 0, datePrecision: p.precision ?? 'day' },
       { id: 'title', kind: 'text', text: p.title, x: 0.5, y: 0.06, size: 50, color: '#f6f1e7', background: 'rgba(10,14,22,0.7)', align: 'center', inFrame: 0, outFrame: Math.min(frames - 1, 6 * FPS), fade: Math.round(0.8 * FPS), datePrecision: 'day' },
-      ...(p.subtitle ? [{ id: 'subtitle', kind: 'text' as const, text: p.subtitle, x: 0.5, y: 0.125, size: 28, color: '#d9d2c4', background: null, align: 'center' as const, inFrame: 0, outFrame: Math.min(frames - 1, 6 * FPS), fade: Math.round(0.8 * FPS), datePrecision: 'day' as const }] : []),
+      // (On a box of its own, readable over light land and sea.)
+      ...(p.subtitle ? [{ id: 'subtitle', kind: 'text' as const, text: p.subtitle, x: 0.5, y: 0.128, size: 28, color: '#e6dfd1', background: 'rgba(10,14,22,0.6)', align: 'center' as const, inFrame: 0, outFrame: Math.min(frames - 1, 6 * FPS), fade: Math.round(0.8 * FPS), datePrecision: 'day' as const }] : []),
       // (The statistics box shows from long before the shot's first moment, whatever its calendar.)
       ...(p.stats ? [{ ...captionOverlay({ text: p.stats, from: { day: first.day - 1e7, ms: 0 }, to: null, x: 0.04, y: 0.79, size: 28, align: 'left', enter: 'fade' }, frames) }] : []),
       ...p.captions.map((c) => captionOverlay(c, frames)),

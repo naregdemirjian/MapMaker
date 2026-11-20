@@ -296,7 +296,7 @@ export async function detailForFrame(world: World, shot: ShotSettings, frame: nu
 export function renderFrame(ctx: CanvasRenderingContext2D, renderer: MapRenderer, world: World, engine: Engine, shot: ShotSettings, frame: number, def: ExportPassDef, width: number, height: number, basemap: Basemap | null = null, ground: Ground | null = null, detail: CloseUp | null = null): void {
   const space = world.get('map_space', shot.spaceId);
   if (isSpaceMap(space)) { drawSpaceFrame(ctx, world, engine, shot, frame, def, width, height); return; }
-  const { view, t, options, ls } = frameSetup(world, shot, frame, def, width, height, basemap, ground, detail);
+  const { view, t, options, ls } = frameSetup(world, shot, frame, def, width, height, basemap, ground, detail, engine);
   ctx.clearRect(0, 0, width, height);
   if (options.passes.size) {
     renderer.render(ctx, view, world, engine, shot.spaceId, t, options);
@@ -310,7 +310,7 @@ export function renderFrame(ctx: CanvasRenderingContext2D, renderer: MapRenderer
  * What a frame of a pass is drawn with: its view, its moment and the renderer's options (the passes
  * the shot and the map show among the pass's own), and the shot's look. (Exports and SVG frames, D115.)
  */
-export function frameSetup(world: World, shot: ShotSettings, frame: number, def: ExportPassDef, width: number, height: number, basemap: Basemap | null = null, ground: Ground | null = null, detail: CloseUp | null = null): { view: View; t: Instant; options: RenderOptions; ls: ReturnType<typeof lookStyles> } {
+export function frameSetup(world: World, shot: ShotSettings, frame: number, def: ExportPassDef, width: number, height: number, basemap: Basemap | null = null, ground: Ground | null = null, detail: CloseUp | null = null, engine?: Engine): { view: View; t: Instant; options: RenderOptions; ls: ReturnType<typeof lookStyles> } {
   const t = timeAt(shot, frame);
   const space = world.get('map_space', shot.spaceId);
   const view = makeView(cameraAt(shot, frame), width, height);
@@ -341,7 +341,25 @@ export function frameSetup(world: World, shot: ShotSettings, frame: number, def:
   const passes = new Set<PassName>(def.passes.filter((p) => (p !== 'graticule' || (shot.graticule && on('graticule'))) && (p !== 'labels' || labels) && (p !== 'characters' || (shot.characters !== false && on('characters'))) && (p !== 'cities' || cities) && (p !== 'borders' || on('borders')) && (p !== 'features' || on('features')) && (p !== 'fields' || on('fields')) && (p !== 'terrain' || !!terrain?.look)));
   const transparent = def.name === 'all' ? shot.transparent : !def.background;
   const ls = lookStyles(shot);
-  return { view, t, ls, options: { passes, transparent, layerIds: def.layerId ? [def.layerId] : visibleLayers(world, shot), basemap, transitions: transitionOptions(shot, frame), mediaSeconds: frame / shot.fps, mediaChannel: 'export', trails: !!shot.trails, trailsSince: trailsStart(shot), layout: { labels, cities }, show: { lakes: on('lakes'), coastline: on('coastline'), rivers: on('rivers'), minLakeKm2: minLakeKm2(space) }, terrain, style: ls?.style, basemapStyle: ls?.basemap } };
+  // (Names keep clear of the frame's texts, in every pass: the texts lie over all of them, D178.)
+  const keepOut = labels || cities ? overlayKeepOut(world, shot, frame, t, width, height, view, engine) : undefined;
+  return { view, t, ls, options: { passes, transparent, layerIds: def.layerId ? [def.layerId] : visibleLayers(world, shot), basemap, transitions: transitionOptions(shot, frame), mediaSeconds: frame / shot.fps, mediaChannel: 'export', trails: !!shot.trails, trailsSince: trailsStart(shot), layout: { labels, cities }, show: { lakes: on('lakes'), coastline: on('coastline'), rivers: on('rivers'), minLakeKm2: minLakeKm2(space) }, terrain, style: ls?.style, basemapStyle: ls?.basemap, keepOut } };
+}
+
+let measuring: CanvasRenderingContext2D | null = null;
+
+/**
+ * The boxes a shot's texts will cover in a frame (west, north, east, south, in the frame's pixels), measured by
+ * laying them out on a small canvas of their own: the names on the map keep clear of them (D178).
+ */
+export function overlayKeepOut(world: World, shot: ShotSettings, frame: number, t: Instant, width: number, height: number, view?: View, engine?: Engine): Array<[number, number, number, number]> {
+  if (typeof OffscreenCanvas === 'undefined') return [];
+  measuring ??= new OffscreenCanvas(8, 8).getContext('2d') as unknown as CanvasRenderingContext2D;
+  if (!measuring) return [];
+  measuring.save();
+  try {
+    return drawShotOverlays(measuring, width, height, world, shot, frame, t, view, engine).map((r): [number, number, number, number] => [r.x, r.y, r.x + r.w, r.y + r.h]);
+  } finally { measuring.restore(); }
 }
 
 /** One space renderer for exports (it keeps nothing between frames but where it drew). */

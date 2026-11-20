@@ -177,6 +177,11 @@ export interface RenderOptions {
   /** Trails from this moment on (D176: a shot's first moment; absent, the whole route so far). */
   trailsSince?: Instant | null;
   /**
+   * Boxes of the frame (view pixels: west, north, east, south) that a shot's texts cover, its date, title,
+   * statistics, captions and events box: names on the map keep clear of them (D178).
+   */
+  keepOut?: Array<[number, number, number, number]>;
+  /**
    * What the full picture shows, when only some passes are drawn (exports): texts are placed as in
    * the full picture. Default: as the passes drawn.
    */
@@ -336,7 +341,11 @@ const LABEL_MARGIN = 0.04;
 const MIN_VIEW_LABEL = 6;
 
 /** An owner's main piece of territory (for its label). */
-interface OwnerPiece { owner: string; key: string; arcs: Float64Array; centreLon: number; area: number; total: number; /** Its outline's box: west, south, east, north. */ box: [number, number, number, number] }
+interface OwnerPiece {
+  owner: string; key: string; arcs: Float64Array; centreLon: number; area: number; total: number; /** Its outline's box: west, south, east, north. */ box: [number, number, number, number];
+  /** The owner's other large pieces, largest first (an empire's colonies apart from its largest; islands): named where the main piece is not in view (D178). */
+  others?: OwnerPiece[];
+}
 interface PlacedLabel { lon: number; lat: number; font: number; lines: string[] }
 /**
  * The ways of writing a label (on one line, two, three), each placed when it is first asked for:
@@ -2413,7 +2422,7 @@ export class MapRenderer {
     // and where they cannot the one with less priority is hidden (larger countries, then smaller
     // ones, then cities).
     const cities = placesText && layout.cities ? this.cityItems(view, engine, spaceId, t, entities) : [];
-    if (placesText) this.placeTexts(ctx, labels, cities);
+    if (placesText) this.placeTexts(ctx, labels, cities, view.rotation ? null : [view.width, view.height], opts.keepOut);
     this.lastCities = cities.map((c) => ({ entity: c.entity, name: c.name, x: c.x, y: c.y, lon: c.lon, lat: c.lat, moving: false, named: c.drawn, box: c.box }));
     if (opts.passes.has('cities') && !opts.textsApart) this.drawCities(ctx, cities, u);
     if (opts.passes.has('labels') && !opts.textsApart) this.drawLabels(ctx, labels, style, u);
@@ -3638,7 +3647,7 @@ export class MapRenderer {
         ctx.rotate((view.rotation * Math.PI) / 180);
         ctx.translate(-view.width / 2, -view.height / 2);
       }
-      this.placeTexts(ctx, labels, cities);
+      this.placeTexts(ctx, labels, cities, view.rotation ? null : [view.width, view.height], opts.keepOut);
       if (opts.passes.has('cities')) this.drawCities(ctx, cities, view.unit);
       if (opts.passes.has('labels')) this.drawLabels(ctx, labels, style, view.unit);
       ctx.restore();
@@ -4502,7 +4511,7 @@ export class MapRenderer {
         this.pieceCache.set(key, p);
       }
       // (The same parcels may have passed to another owner.)
-      if (p) out.set(owner, p.owner === owner ? p : { ...p, owner });
+      if (p) out.set(owner, p.owner === owner ? p : { ...p, owner, others: p.others?.map((o) => ({ ...o, owner })) });
     }
     return out;
   }
@@ -4537,7 +4546,18 @@ export class MapRenderer {
     let main: Comp | null = null;
     for (const c of comps.values()) if (c.area > 0 && (!main || c.area > main.area)) main = c;
     if (!main) return null;
-    // The outline of the main piece: the border chains with the piece on one side only.
+    const piece = this.pieceOutline(owner, gr, find, main, total, mask);
+    // The other pieces of at least a hundredth of the main one's land (D178): an empire's India while its largest
+    // piece is in Africa, a country's large islands. The twelve largest are kept, for a view that shows one of them
+    // and not the main piece.
+    const others = [...comps.values()].filter((c) => c !== main && c.area > 0 && c.area >= 0.01 * main!.area).sort((x, y) => y.area - x.area).slice(0, 12);
+    if (others.length) piece.others = others.map((c) => this.pieceOutline(owner, gr, find, c, c.area, mask));
+    return piece;
+  }
+
+  /** The outline of one connected piece of an owner's parcels (`total`: the land its label's size is worked from). */
+  private pieceOutline(owner: string, gr: ReturnType<ReturnType<typeof parcelGeometry>['graph']>, find: (i: number) => number, main: { root: number; area: number; sx: number; sy: number; sz: number }, total: number, mask: LandMask | null): OwnerPiece {
+    // The outline of the piece: the border chains with the piece on one side only.
     const root = main.root;
     const edge = (q: number) => find(gr.of[q]) === root && (gr.across[q] < 0 || find(gr.across[q]) !== root);
     // The outline is taken at a detail that suits its size (points that matter less than a
@@ -4750,19 +4770,32 @@ export class MapRenderer {
       if (!pl || !p) return null;
       return { pos: [pl.lon, pl.lat], fontPx: pl.font * scale, lines: pl.lines };
     };
+    // The main piece's label; where that is not in view, the label of the largest other piece that is (D178: the
+    // British Empire named over India in a view of India, its largest piece being in Africa).
+    const placeSome = (piece: OwnerPiece, text: string, st: LabelStyle) => {
+      const r = place(piece, text, st);
+      if (vis === null || !piece.others || (r && onScreen(view.projection(r.pos) as [number, number] | null))) return r ? { ...r, piece } : null;
+      for (const o of piece.others) {
+        if (!boxIntersects(o.box, vis)) continue;
+        const ro = place(o, text, st);
+        if (ro && onScreen(view.projection(ro.pos) as [number, number] | null)) return { ...ro, piece: o };
+      }
+      return r ? { ...r, piece } : null;
+    };
+    const near = (p: OwnerPiece | undefined) => !!p && vis !== null && (boxIntersects(p.box, vis) || !!p.others?.some((o) => boxIntersects(o.box, vis)));
 
     const out: LabelInfo[] = [];
     const owners = new Set([...piecesAfter.keys(), ...piecesBefore.keys()]);
     for (const id of owners) {
       const pa = piecesAfter.get(id), pb = piecesBefore.get(id);
       // A country nowhere near the view has no label to place (most countries, close in).
-      if (vis !== null && !(pa && boxIntersects(pa.box, vis)) && !(pb && boxIntersects(pb.box, vis))) continue;
+      if (vis !== null && !near(pa) && !near(pb)) continue;
       const name = entities.get(id)?.name;
       if (!name) continue;
       const look = this.labelLook(id, name);
       if (!look) continue;
-      const a = pa ? place(pa, look.text, look.style) : null;
-      const b = pb === pa ? a : pb ? place(pb, look.text, look.style) : null;
+      const a = pa ? placeSome(pa, look.text, look.style) : null;
+      const b = pb === pa ? a : pb ? placeSome(pb, look.text, look.style) : null;
       if (!a && !b) continue;
       const pr = progress.get(id);
       const f = pr && pr.w > 0 ? pr.p / pr.w : 1;
@@ -4773,14 +4806,14 @@ export class MapRenderer {
         pos = toLonLat([vb[0] + (va[0] - vb[0]) * f, vb[1] + (va[1] - vb[1]) * f, vb[2] + (va[2] - vb[2]) * f]);
         fontPx = b.fontPx + (a.fontPx - b.fontPx) * f;
         lines = f >= 0.5 ? a.lines : b.lines;
-        total = pb!.total + (pa!.total - pb!.total) * f;
-        area = pb!.area + (pa!.area - pb!.area) * f;
+        total = b.piece.total + (a.piece.total - b.piece.total) * f;
+        area = b.piece.area + (a.piece.area - b.piece.area) * f;
       } else if (a) {
         // Appearing: grows with the change.
-        ({ pos, fontPx, lines } = a); total = pa!.total * f; area = pa!.area * f;
+        ({ pos, fontPx, lines } = a); total = a.piece.total * f; area = a.piece.area * f;
       } else {
         // Disappearing: shrinks with the change.
-        ({ pos, fontPx, lines } = b!); total = pb!.total * (1 - f); area = pb!.area * (1 - f);
+        ({ pos, fontPx, lines } = b!); total = b!.piece.total * (1 - f); area = b!.piece.area * (1 - f);
       }
       if (total <= 0) continue;
       const p = view.projection(pos);
@@ -4872,7 +4905,7 @@ export class MapRenderer {
    * label its centre, then a little above, below or to the side; a city name right of its dot, then
    * left, above or below. One that finds no free place is hidden.
    */
-  private placeTexts(ctx: CanvasRenderingContext2D, labels: LabelInfo[], cities: CityItem[]): void {
+  private placeTexts(ctx: CanvasRenderingContext2D, labels: LabelInfo[], cities: CityItem[], frame: [number, number] | null = null, keepOut: Array<[number, number, number, number]> = []): void {
     type Box = [number, number, number, number];
     // (Boxes are kept by the squares of the frame they reach into: with hundreds of names, looking
     // through all of them for each place tried took longer than drawing them.)
@@ -4880,6 +4913,19 @@ export class MapRenderer {
     const dots: Box[] = cities.map((c) => [c.x - c.r, c.y - c.r, c.x + c.r, c.y + c.r]);
     for (const d of dots) dotGrid.add(d);
     const hits = (b: Box, grid: BoxGrid, except: Box | null = null) => grid.hits(b, except);
+    // A shot's texts are there first (D178): names move aside from them, or are hidden.
+    for (const k of keepOut) placed.add([k[0], k[1], k[2], k[3]]);
+    // Names stay inside the frame (D178): one reaching over its edge moves in by as much, when that is less than about
+    // half its width (more, and it would leave its land), else it is placed elsewhere or hidden. A city's name goes on
+    // a side of its dot that is in the frame.
+    const inFrame = (b: Box) => !frame || (b[0] >= 0 && b[1] >= 0 && b[2] <= frame[0] && b[3] <= frame[1]);
+    const intoFrame = (b: Box, w: number, h: number): [number, number] | null => {
+      if (!frame) return [0, 0];
+      const m = 0.12 * h;
+      const sx = b[0] < m ? m - b[0] : b[2] > frame[0] - m ? frame[0] - m - b[2] : 0;
+      const sy = b[1] < m ? m - b[1] : b[3] > frame[1] - m ? frame[1] - m - b[3] : 0;
+      return Math.abs(sx) <= 0.45 * w && Math.abs(sy) <= 0.9 * h ? [sx, sy] : null;
+    };
     ctx.save();
     const sorted = [...labels].sort((a, b) => b.priority - a.priority || b.size - a.size || a.text.localeCompare(b.text));
     for (const l of sorted) {
@@ -4893,7 +4939,12 @@ export class MapRenderer {
       // First keeping clear of city dots too; failing that, only of other labels.
       let found: [number, number] | null = null;
       for (const avoidDots of [true, false]) {
-        for (const [dx, dy] of tries) { const b = at(dx, dy); if (!hits(b, placed) && (!avoidDots || !hits(b, dotGrid))) { found = [dx, dy]; break; } }
+        for (const [dx0, dy0] of tries) {
+          const into = intoFrame(at(dx0, dy0), w, h);
+          if (!into) continue;
+          const dx = dx0 + into[0], dy = dy0 + into[1], b = at(dx, dy);
+          if (!hits(b, placed) && (!avoidDots || !hits(b, dotGrid))) { found = [dx, dy]; break; }
+        }
         if (found) break;
       }
       if (!found) continue;
@@ -4917,7 +4968,7 @@ export class MapRenderer {
         { tx: c.x - gap * 0.6, ty: c.y - h * 0.8, align: 'right', box: [c.x - gap * 0.6 - w, c.y - h * 1.3, c.x - gap * 0.6, c.y - h * 0.3] },
         { tx: c.x - gap * 0.6, ty: c.y + h * 0.8, align: 'right', box: [c.x - gap * 0.6 - w, c.y + h * 0.3, c.x - gap * 0.6, c.y + h * 1.3] },
       ];
-      const ok = options.find((o) => !hits(o.box, placed) && !hits(o.box, dotGrid, own));
+      const ok = options.find((o) => inFrame(o.box) && !hits(o.box, placed) && !hits(o.box, dotGrid, own));
       c.drawn = !!ok;
       if (!ok) continue;
       c.tx = ok.tx; c.ty = ok.ty; c.align = ok.align; c.box = ok.box;

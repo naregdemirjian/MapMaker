@@ -564,8 +564,9 @@ export function drawOverlays(ctx: CanvasRenderingContext2D | OffscreenCanvasRend
     ctx.font = `600 ${size}px ${font}`;
     ctx.textBaseline = 'middle';
     const x = o.x * width, y = o.y * height;
-    // (Steady: a date's day and year keep their places, and the box its size, as the date changes.)
-    const lay = steadyLayout(ctx, it.text);
+    // (Steady: a date's day and year keep their places, and the box its size, as the date changes. A text that
+    // never changes, a title, is written as it is, D178: laid out steady, a month's name in it stood apart.)
+    const lay = /\{[^}]+\}/.test(o.text) ? steadyLayout(ctx, it.text) : { width: ctx.measureText(it.text).width, runs: [{ text: it.text, x: 0, cell: null }] };
     const w = lay.width;
     const left = o.align === 'left' ? x : o.align === 'center' ? x - w / 2 : x - w;
     if (o.background) {

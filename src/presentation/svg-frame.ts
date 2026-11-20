@@ -177,7 +177,7 @@ export async function svgFrame(o: SvgFrameOptions): Promise<SvgFrame> {
     const basemap = await basemapFor(world, shot.spaceId);
     const ground = await terrainFor(world, shot.spaceId, shot);
     const detail = await detailForFrame(world, shot, frame, W, H, ground);
-    const setup = frameSetup(world, shot, frame, all, W, H, basemap, ground, detail);
+    const setup = frameSetup(world, shot, frame, all, W, H, basemap, ground, detail, engine);
     view = setup.view;
     const { options } = setup;
     const style = options.style ?? DEFAULT_STYLE;
@@ -188,7 +188,7 @@ export async function svgFrame(o: SvgFrameOptions): Promise<SvgFrame> {
     pictures.caching = 'off';
     const picture = (passes: PassName[], background: boolean): string | null => {
       const def: ExportPassDef = { name: 'svg', label: '', blend: 'Normal', passes, overlays: false, background };
-      const s = frameSetup(world, shot, frame, def, W, H, basemap, ground, detail);
+      const s = frameSetup(world, shot, frame, def, W, H, basemap, ground, detail, engine);
       if (!s.options.passes.size) return null;
       const c = frameCanvas(W, H);
       pictures.render(c.ctx, s.view, world, engine, shot.spaceId, s.t, s.options);
