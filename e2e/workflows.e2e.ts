@@ -2559,6 +2559,87 @@ try {
     await page.evaluate((w) => (window as any).__mapmaker.store.set({ spaceId: w.spaceId, layerId: w.layerId, selection: null }), was);
   });
 
+  await h.step('The quick generator\'s drawing tools (D169): on a generated planet, land drawn as an outline in its sea; a river from it to the sea; desert painted on it; undone', async () => {
+    await page.getByTestId('mode-world').click();
+    const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
+    const before = await steps();
+    const was = await page.evaluate(() => { const s = (window as any).__mapmaker.store; return { spaceId: s.spaceId as string, layerId: s.layerId as string }; });
+    await page.getByRole('button', { name: '+ Map' }).click();
+    await page.getByTestId('new-map-planet').check();
+    await page.getByTestId('new-map-name').fill('Drawn world');
+    await page.getByTestId('planet-preset-earthlike').click();
+    await page.getByTestId('planet-seed').fill('7');
+    await page.getByTestId('new-map-create').click();
+    await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastTerrain.cover, null, { timeout: 60000 });
+    // Open sea: deep water 8° all round a place in the middle latitudes.
+    const sea = await page.evaluate(() => {
+      const s = (window as any).__mapmaker.store, g = s.terrainOf(s.world.get('map_space', s.spaceId)).grid, W = g.width, H = g.height, r = Math.round((8 / 360) * W);
+      for (let j = Math.round(H * 0.3); j < H * 0.7; j += 7) for (let i = r; i < W - r; i += 7) {
+        let ok = true;
+        for (let dj = -r; dj <= r && ok; dj += 3) for (let di = -r; di <= r && ok; di += 3) if (g.data[(j + dj) * W + i + di] * g.step > -500) ok = false;
+        if (ok) return [-180 + ((i + 0.5) * 360) / W, 90 - ((j + 0.5) * 180) / H] as [number, number];
+      }
+      return null;
+    });
+    assert.ok(sea, 'open sea on the planet');
+    const [lon0, lat0] = sea!;
+    await page.evaluate(([lon, lat]) => (window as any).__mapmaker.store.setCamera({ lon, lat, zoom: 2, rotation: 0, projection: 'equirectangular' }), sea!);
+    const pixelAt = (ll: [number, number]) => page.evaluate(([lon, lat]) => {
+      const p = (window as any).__mapmaker.lonLatToPage(lon, lat);
+      const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement;
+      const r = c.getBoundingClientRect(), k = c.width / r.width;
+      return Array.from(c.getContext('2d')!.getImageData(Math.round((p[0] - r.left) * k), Math.round((p[1] - r.top) * k), 1, 1).data).slice(0, 3);
+    }, ll);
+    const heightAt = (ll: [number, number]) => page.evaluate(([lon, lat]) => {
+      const m = (window as any).__mapmaker, s = m.store, space = s.world.get('map_space', s.spaceId), g = s.terrainOf(space);
+      return m.bench.heightAt(m.bench.sculpted(g.grid, g.key, JSON.parse(space.settings).sculpt ?? [], space.radius_m / 1000).grid, lon, lat) as number;
+    }, ll);
+    const stroke = async (lls: Array<[number, number]>) => {
+      const pts: Array<[number, number]> = [];
+      for (const ll of lls) pts.push(await h.toPage(ll));
+      await page.mouse.move(pts[0][0], pts[0][1]);
+      await page.mouse.down();
+      for (const q of pts.slice(1)) await page.mouse.move(q[0], q[1], { steps: 4 });
+      await page.mouse.up();
+    };
+    const seaPx = await pixelAt(sea!);
+    // An outline drawn round the place: the sea inside it becomes land, rising inland.
+    await page.getByTestId('tool-sculpt').click();
+    await page.getByTestId('sculpt-brush').selectOption('coast-land');
+    await page.getByTestId('sculpt-size').fill('150');
+    await page.getByTestId('sculpt-strength').fill('600');
+    await stroke(Array.from({ length: 17 }, (_, k) => [lon0 + 5 * Math.cos((2 * Math.PI * k) / 16), lat0 + 4 * Math.sin((2 * Math.PI * k) / 16)] as [number, number]));
+    assert.ok((await heightAt(sea!)) > 300, `land where the sea was (${await heightAt(sea!)} m)`);
+    assert.ok((await heightAt([lon0 + 7.5, lat0])) < 0, 'the sea beyond the outline');
+    let px = seaPx;
+    for (let i = 0; i < 40 && Math.max(...px.map((v, k) => Math.abs(v - seaPx[k]))) <= 25; i++) { await page.waitForTimeout(100); px = await pixelAt(sea!); }
+    assert.ok(Math.max(...px.map((v, k) => Math.abs(v - seaPx[k]))) > 25, `drawn as land (${px} against the sea's ${seaPx})`);
+    // A river from the middle of the new land east to the sea: its bed falls all the way.
+    await page.getByTestId('sculpt-brush').selectOption('river');
+    await page.getByTestId('sculpt-size').fill('60');
+    await stroke([[lon0, lat0], [lon0 + 3, lat0 + 0.5], [lon0 + 6.5, lat0]]);
+    const bed = await Promise.all([0, 1.5, 3, 4.5].map((d) => heightAt([lon0 + d, lat0 + (d <= 3 ? d / 6 : 0.5 - (d - 3) / 7)])));
+    assert.ok(bed[0] < 600 && bed.every((v, i) => i === 0 || v <= bed[i - 1] + 20), `the river's bed falls towards the sea (${bed.map(Math.round).join(', ')} m)`);
+    // Desert painted over the land, as the satellite look shows it: sand.
+    await page.getByTestId('sculpt-brush').selectOption('biome');
+    await page.getByTestId('sculpt-biome').selectOption('desert');
+    await page.getByTestId('sculpt-size').fill('200');
+    const spot: [number, number] = [lon0 - 2, lat0 - 1];
+    await stroke([[lon0 - 3.5, lat0 - 1], [lon0 - 0.5, lat0 - 1]]);
+    let sand = await pixelAt(spot);
+    for (let i = 0; i < 40 && !(sand[0] > sand[2] + 30); i++) { await page.waitForTimeout(100); sand = await pixelAt(spot); }
+    assert.ok(sand[0] > sand[2] + 30, `desert painted (${sand})`);
+    await h.screenshot('planet-drawn');
+    const strokes = await page.evaluate(() => { const s = (window as any).__mapmaker.store; return JSON.parse(s.world.get('map_space', s.spaceId).settings).sculpt.map((x: any) => `${x.tool}${x.biome ? `:${x.biome}` : ''}`); });
+    assert.deepEqual(strokes, ['coast-land', 'river', 'biome:desert']);
+    // Undone: the strokes one by one, then the planet.
+    for (let i = 0; i < 4; i++) await page.getByTestId('undo').click();
+    await h.saved();
+    assert.equal(await steps(), before, 'each stroke was one step');
+    await page.getByTestId('tool-select').click();
+    await page.evaluate((w) => (window as any).__mapmaker.store.set({ spaceId: w.spaceId, layerId: w.layerId, selection: null }), was);
+  });
+
   await h.step('Sculpting: land painted into the North Sea in the base world; a dated stroke floods England from a date only; undone', async () => {
     await page.getByTestId('mode-world').click();
     await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 2, lat: 54, zoom: 3, rotation: 0, projection: 'equirectangular' }));

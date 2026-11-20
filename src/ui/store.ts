@@ -22,6 +22,7 @@ import { climateOf } from '../terrain/biomes.ts';
 import type { FieldSource } from '../domain/fields.ts';
 import type { DisasterId } from '../domain/disasters.ts';
 import type { SculptTool } from '../terrain/sculpt.ts';
+import type { Biome } from '../terrain/biomes.ts';
 import { terrainSourceOf, planetOf, isGeologicalMap, simOf } from '../world-model/world-settings.ts';
 import { simTerrain, simParams, simCover, simCoverFrame } from './planet-engine.ts';
 import { keyOf as contentKey } from '../planet/state/hash.ts';
@@ -195,7 +196,7 @@ class AppStore {
   /** The adjusted line used, the line kept as drawn, or the drawing dropped (set by the map view). */
   adjustFinish: (choice: 'adjusted' | 'drawn' | 'cancel') => void = () => { this.set({ adjust: null }); };
   /** The sculpting brush (D98): which, how large (km), how strong (m), and whether a stroke changes the base world or holds from the date viewed. */
-  sculpt: { tool: SculptTool; radiusKm: number; strength: number; dated: boolean } = { tool: 'raise', radiusKm: 300, strength: 500, dated: false };
+  sculpt: { tool: SculptTool; radiusKm: number; strength: number; dated: boolean; biome: Biome } = { tool: 'raise', radiusKm: 300, strength: 500, dated: false, biome: 'forest' };
   pending: PendingEdit | null = null;
   /** The Split tool's line, drawn and waiting for the part that changes hands to be clicked (D76). */
   splitLine: Array<[number, number]> | null = null;

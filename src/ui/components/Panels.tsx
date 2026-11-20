@@ -2,6 +2,10 @@ import { useState, useEffect, memo } from 'react';
 import { useStore, useLive, store, type Tool } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
 import { SCULPT_TOOLS } from '../../terrain/sculpt.ts';
+import { BIOMES, type Biome } from '../../terrain/biomes.ts';
+
+/** The biomes a brush can paint (D169), by their names. */
+const BIOME_NAMES: Record<Biome, string> = { ice: 'Ice', tundra: 'Tundra', boreal: 'Northern forest', forest: 'Forest', grass: 'Grassland', steppe: 'Steppe', desert: 'Desert', savanna: 'Savanna', rainforest: 'Rainforest', rock: 'Bare rock' };
 import { type Instant, type Calendar, gregorian, fromStore, formatYear, compare, add, NEG_INF, DEEP_BEFORE_YEAR, fromApproxYear } from '../../core-time/index.ts';
 import { calendarNow } from '../calendar-now.ts';
 import { isBaseEvent, MAIN_BRANCH, type EffectRow } from '../../world-model/schema.ts';
@@ -1030,12 +1034,19 @@ function SculptToolOptions() {
           {SCULPT_TOOLS.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
         </select>
       </label>
-      <label className="inline" title="The brush's radius on the ground">Size
+      <label className="inline" title={b.tool === 'coast-land' || b.tool === 'coast-sea' ? 'How ragged the coast is: the size of its bays and headlands' : 'The brush\'s radius on the ground'}>Size
         <input type="number" min={1} max={5000} step={10} value={b.radiusKm} onChange={(e) => Number(e.target.value) > 0 && set({ radiusKm: Math.min(5000, Number(e.target.value)) })} data-testid="sculpt-size" /> km
       </label>
       {uses && (
-        <label className="inline" title={b.tool === 'land' ? 'How high the new land stands' : b.tool === 'sea' ? 'How deep the new sea is' : 'How much the brush raises or lowers'}>{b.tool === 'land' ? 'Height' : b.tool === 'sea' ? 'Depth' : 'Strength'}
+        <label className="inline" title={b.tool === 'land' ? 'How high the new land stands' : b.tool === 'coast-land' ? 'How high the land rises inland' : b.tool === 'sea' || b.tool === 'coast-sea' ? 'How deep the new sea is' : b.tool === 'river' ? 'How far below the ground the river\'s bed runs' : 'How much the brush raises or lowers'}>{b.tool === 'land' || b.tool === 'coast-land' ? 'Height' : b.tool === 'sea' || b.tool === 'coast-sea' || b.tool === 'river' ? 'Depth' : 'Strength'}
           <input type="number" min={1} max={10000} step={50} value={b.strength} onChange={(e) => Number(e.target.value) > 0 && set({ strength: Math.min(10000, Number(e.target.value)) })} data-testid="sculpt-strength" /> m
+        </label>
+      )}
+      {b.tool === 'biome' && (
+        <label className="inline" title="What grows where you paint, as the satellite look shows it">Biome
+          <select value={b.biome} onChange={(e) => set({ biome: e.target.value as Biome })} data-testid="sculpt-biome">
+            {(Object.keys(BIOMES) as Biome[]).map((k) => <option key={k} value={k}>{BIOME_NAMES[k]}</option>)}
+          </select>
         </label>
       )}
       <label className="inline" title="A change to the base world holds at every date; a dated change holds from the date viewed on">Changes

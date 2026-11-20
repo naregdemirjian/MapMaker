@@ -3,11 +3,17 @@
 // always (the base world) or from a date on (a change in history). The heights a map shows at a moment
 // are its base heights (Earth's, or a planet's) with every stamp holding then applied in the order
 // drawn, so strokes are as light to store as their paths and every change can be undone.
+//
+// The quick generator's drawing tools (Stage 15.7, D169): an outline that becomes land or sea (its coast ragged, the
+// land rising inland or the sea deepening away from it), a river drawn from its source to its mouth (a valley falling
+// all the way, so the water the map works out follows it), and biomes painted over the land's colours (kept with the
+// strokes, but changing no heights: see cover.ts).
 import type { ElevationGrid } from './grid.ts';
 import { simplex3 } from './planet.ts';
+import { BIOMES, type Biome } from './biomes.ts';
 import type { Instant } from '../core-time/index.ts';
 
-export type SculptTool = 'raise' | 'lower' | 'smooth' | 'flatten' | 'roughen' | 'mountains' | 'valley' | 'crater' | 'island' | 'land' | 'sea' | 'erode';
+export type SculptTool = 'raise' | 'lower' | 'smooth' | 'flatten' | 'roughen' | 'mountains' | 'valley' | 'crater' | 'island' | 'land' | 'sea' | 'erode' | 'coast-land' | 'coast-sea' | 'river' | 'biome';
 
 export const SCULPT_TOOLS: Array<{ id: SculptTool; name: string; hint: string; strength: number }> = [
   { id: 'raise', name: 'Raise', hint: 'Lift the ground along the stroke', strength: 500 },
@@ -22,7 +28,15 @@ export const SCULPT_TOOLS: Array<{ id: SculptTool; name: string; hint: string; s
   { id: 'island', name: 'Island', hint: 'Raise land out of the sea where you click or draw', strength: 800 },
   { id: 'land', name: 'Paint land', hint: 'Make land of what is under the stroke (low land, a little above the sea)', strength: 40 },
   { id: 'sea', name: 'Paint sea', hint: 'Flood what is under the stroke (shallow sea)', strength: 60 },
+  { id: 'coast-land', name: 'Draw land (outline)', hint: 'Draw round a shape: inside becomes land, rising inland to the height set; the size sets how ragged its coast is', strength: 400 },
+  { id: 'coast-sea', name: 'Draw sea (outline)', hint: 'Draw round a shape: inside becomes sea, deepening away from its coast to the depth set; the size sets how ragged its coast is', strength: 3000 },
+  { id: 'river', name: 'River', hint: 'Draw from a river\'s source to its mouth: a valley falling all the way, so the water follows it', strength: 120 },
+  { id: 'biome', name: 'Paint a biome', hint: 'Paint what grows there, as the satellite look shows it (generated and simulated planets)', strength: 0 },
 ];
+/** Tools whose stroke is an outline (closed by the map). */
+export const OUTLINE_TOOLS: readonly SculptTool[] = ['coast-land', 'coast-sea'];
+/** Whether a stroke changes the heights (painted biomes change only the land's colours). */
+export const changesHeights = (s: Pick<TerrainStamp, 'tool'>) => s.tool !== 'biome';
 export const isSculptTool = (v: unknown): v is SculptTool => typeof v === 'string' && SCULPT_TOOLS.some((t) => t.id === v);
 
 /** A stroke of the sculpting brush (or a click: a path of one point). */
@@ -37,6 +51,8 @@ export interface TerrainStamp {
   seed: number;
   /** From when it holds: null for the base world (always). */
   from: { day: number; ms: number } | null;
+  /** For a painted biome: which. */
+  biome?: Biome;
 }
 
 /** Stamps as stored, checked (anything broken left out). */
@@ -50,7 +66,11 @@ export function cleanStamps(raw: unknown): TerrainStamp[] {
     const path = s.path.filter((p): p is [number, number] => Array.isArray(p) && Number.isFinite(p[0]) && Number.isFinite(p[1]) && Math.abs(p[1]) <= 90);
     if (!path.length || !(Number(s.radiusKm) > 0) || !Number.isFinite(Number(s.strength))) continue;
     const from = s.from && Number.isFinite(s.from.day) ? { day: s.from.day, ms: Number.isFinite(s.from.ms) ? s.from.ms : 0 } : null;
-    out.push({ id: s.id, tool: s.tool, path, radiusKm: Math.min(5000, Number(s.radiusKm)), strength: Math.max(0, Math.min(10000, Number(s.strength))), seed: Number.isFinite(s.seed) ? Number(s.seed) : 1, from });
+    if (s.tool === 'biome' && !(typeof s.biome === 'string' && s.biome in BIOMES)) continue;
+    out.push({
+      id: s.id, tool: s.tool, path, radiusKm: Math.min(5000, Number(s.radiusKm)), strength: Math.max(0, Math.min(10000, Number(s.strength))), seed: Number.isFinite(s.seed) ? Number(s.seed) : 1, from,
+      ...(s.tool === 'biome' ? { biome: s.biome } : {}),
+    });
   }
   return out;
 }
@@ -73,13 +93,18 @@ const RAD = Math.PI / 180;
  * measured on it). Cells a stamp changed are marked in `touched` (so that on Earth the coastline drawn
  * gives way to the terrain there).
  */
-export function applyStamps(base: ElevationGrid, stamps: readonly TerrainStamp[], radiusKm: number): Sculpted {
+export function applyStamps(base: ElevationGrid, all: readonly TerrainStamp[], radiusKm: number): Sculpted {
+  const stamps = all.filter(changesHeights);
   if (!stamps.length) return { grid: base, touched: null };
   const { width: W, height: H, step } = base;
   const e = new Float32Array(W * H);
   for (let k = 0; k < e.length; k++) e[k] = base.data[k] * step;
   const touched = new Uint8Array(W * H);
-  for (const s of stamps) applyStamp(e, touched, W, H, s, radiusKm);
+  for (const s of stamps) {
+    if (OUTLINE_TOOLS.includes(s.tool)) applyOutline(e, touched, W, H, s, radiusKm);
+    else if (s.tool === 'river') applyRiver(e, touched, W, H, s, radiusKm);
+    else applyStamp(e, touched, W, H, s, radiusKm);
+  }
   const data = new Int16Array(W * H);
   for (let k = 0; k < data.length; k++) data[k] = Math.max(-32768, Math.min(32767, Math.round(e[k] / step)));
   return { grid: { width: W, height: H, step, data }, touched };
@@ -256,6 +281,197 @@ function applyStamp(e: Float32Array, touched: Uint8Array, W: number, H: number, 
       }
       for (let q = 0; q < m; q++) if (weight[q]) mark(index[q]);
       break;
+    }
+  }
+}
+
+
+/**
+ * An outline that becomes land or sea (D169). The outline (closed from its last point to its first) is the coast,
+ * made ragged by noise as wide as the brush (the stroke's radius); inside it, land rises from 10 m at the coast to the
+ * height set (its own hills and hollows on it, a quarter either way; higher ground is kept), or the sea deepens from
+ * 20 m at the coast to the depth set (a tenth either way; deeper sea is kept), over four brush widths; outside it,
+ * the shore: a shelf rising from the sea floor to 20 m deep at the new land, or land falling to 10 m at the new sea. (Inside by
+ * crossings along each row; the distance to the coast by a distance transform over the outline's box, so the work
+ * grows with its area alone.)
+ */
+function applyOutline(e: Float32Array, touched: Uint8Array, W: number, H: number, s: TerrainStamp, radiusKm: number): void {
+  if (s.path.length < 3) return;
+  // Longitudes made continuous along the outline (one crossing the 180th meridian stays one shape).
+  const ring: Array<[number, number]> = [];
+  for (const [lon, lat] of s.path) {
+    const prev = ring[ring.length - 1];
+    ring.push([prev ? prev[0] + ((((lon - prev[0]) % 360) + 540) % 360) - 180 : lon, lat]);
+  }
+  const r = s.radiusKm / radiusKm, ramp = 4 * r; // radians
+  const lons = ring.map((p) => p[0]), lats = ring.map((p) => p[1]);
+  // (The box reaches past the coast as far as its shores are shaped.)
+  const reachDeg = (r + ramp) / RAD, cellLat = Math.PI / H, cellLon = (2 * Math.PI) / W;
+  const lat0 = Math.max(-90, Math.min(...lats) - reachDeg), lat1 = Math.min(90, Math.max(...lats) + reachDeg);
+  const j0 = Math.max(0, Math.floor(((90 - lat1) / 180) * H)), j1 = Math.min(H - 1, Math.ceil(((90 - lat0) / 180) * H));
+  const widest = Math.max(Math.abs(lat0), Math.abs(lat1));
+  const lonPad = Math.min(180, reachDeg / Math.max(0.05, Math.cos(Math.min(89, widest) * RAD)));
+  const cFrom = Math.floor(((Math.min(...lons) - lonPad + 180) / 360) * W), cTo = Math.min(cFrom + W - 1, Math.ceil(((Math.max(...lons) + lonPad + 180) / 360) * W));
+  const R = j1 - j0 + 1, C = cTo - cFrom + 1;
+  // Inside: an odd number of the ring's crossings of the row lie west of the cell.
+  const inside = new Uint8Array(R * C);
+  for (let jj = 0; jj < R; jj++) {
+    const lat = 90 - ((j0 + jj + 0.5) / H) * 180, xs: number[] = [];
+    for (let a = 0, b = ring.length - 1; a < ring.length; b = a++) {
+      const [xa, ya] = ring[a], [xb, yb] = ring[b];
+      if ((ya > lat) !== (yb > lat)) xs.push(xa + ((lat - ya) * (xb - xa)) / (yb - ya));
+    }
+    xs.sort((p, q) => p - q);
+    let q = 0;
+    for (let cc = 0; cc < C; cc++) {
+      const lon = -180 + ((cFrom + cc + 0.5) / W) * 360;
+      while (q < xs.length && xs[q] < lon) q++;
+      inside[jj * C + cc] = q & 1;
+    }
+  }
+  // The distance to the coast (radians): zero on cells beside the other side, then two passes over the box.
+  const dist = new Float64Array(R * C).fill(Infinity), dx = new Float64Array(R);
+  for (let jj = 0; jj < R; jj++) dx[jj] = cellLon * Math.max(0.01, Math.cos((90 - ((j0 + jj + 0.5) / H) * 180) * RAD));
+  for (let jj = 0; jj < R; jj++) for (let cc = 0; cc < C; cc++) {
+    const k = jj * C + cc, v = inside[k];
+    if ((cc > 0 && inside[k - 1] !== v) || (cc + 1 < C && inside[k + 1] !== v) || (jj > 0 && inside[k - C] !== v) || (jj + 1 < R && inside[k + C] !== v)) dist[k] = 0;
+  }
+  const relax = (k: number, from: number, step: number) => { const d = dist[from] + step; if (d < dist[k]) dist[k] = d; };
+  for (let jj = 0; jj < R; jj++) for (let cc = 0; cc < C; cc++) {
+    const k = jj * C + cc;
+    if (cc > 0) relax(k, k - 1, dx[jj]);
+    if (jj > 0) { relax(k, k - C, cellLat); const dg = Math.hypot(dx[jj], cellLat); if (cc > 0) relax(k, k - C - 1, dg); if (cc + 1 < C) relax(k, k - C + 1, dg); }
+  }
+  for (let jj = R - 1; jj >= 0; jj--) for (let cc = C - 1; cc >= 0; cc--) {
+    const k = jj * C + cc;
+    if (cc + 1 < C) relax(k, k + 1, dx[jj]);
+    if (jj + 1 < R) { relax(k, k + C, cellLat); const dg = Math.hypot(dx[jj], cellLat); if (cc + 1 < C) relax(k, k + C + 1, dg); if (cc > 0) relax(k, k + C - 1, dg); }
+  }
+  const noise = simplex3(s.seed), f = 1 / Math.max(r, 1e-4), land = s.tool === 'coast-land';
+  for (let jj = 0; jj < R; jj++) {
+    const lat = 90 - ((j0 + jj + 0.5) / H) * 180, cl = Math.cos(lat * RAD), z = Math.sin(lat * RAD);
+    for (let cc = 0; cc < C; cc++) {
+      const q = jj * C + cc, d = Number.isFinite(dist[q]) ? dist[q] : ramp + r, isIn = inside[q] === 1;
+      if (!isIn && d >= r + ramp) continue;
+      const lon = -180 + ((cFrom + cc + 0.5) / W) * 360, x = cl * Math.cos(lon * RAD), y = cl * Math.sin(lon * RAD);
+      // The coast moved by its noise, ragged at the brush's scale (only near it can it change the side).
+      const ragged = d < r ? r * (0.65 * noise(x * 2 * f, y * 2 * f, z * 2 * f) + 0.35 * noise(x * 6 * f, y * 6 * f, z * 6 * f)) : 0;
+      const signed = (isIn ? d : -d) + ragged;
+      const k = (j0 + jj) * W + (((cFrom + cc) % W) + W) % W;
+      if (signed <= 0) {
+        // Beyond the coast, its shore: the sea floor rising to 20 m deep at new land (a shelf), or the land falling to
+        // 10 m at a new sea, from as it was four brush widths away.
+        const u = Math.min(1, -signed / ramp), keep = u * u * (3 - 2 * u);
+        const shore = land ? -20 + (e[k] + 20) * keep : 10 + (e[k] - 10) * keep;
+        if (land ? shore > e[k] : shore < e[k]) { e[k] = shore; touched[k] = 1; }
+        continue;
+      }
+      const u = Math.min(1, signed / ramp), rise = u * u * (3 - 2 * u);
+      const hills = noise(x * 4 * f, y * 4 * f, z * 4 * f);
+      if (land) {
+        const target = 10 + (s.strength - 10) * rise * (1 + 0.25 * hills) + 30 * Math.abs(hills);
+        if (target > e[k]) { e[k] = target; touched[k] = 1; }
+      } else {
+        const target = -(20 + (s.strength - 20) * rise * (1 + 0.1 * hills));
+        if (target < e[k]) { e[k] = target; touched[k] = 1; }
+      }
+    }
+  }
+}
+
+/**
+ * A river drawn from its source to its mouth (D169): along the stroke the ground is cut to a bed falling steadily
+ * from the depth set below the source's ground to just below the sea where the stroke first reaches it (or, ending
+ * inland, to the depth set below the ground there), and the valley's sides slope down to it across the brush's width,
+ * so the water the map works out runs the way it was drawn.
+ */
+function applyRiver(e: Float32Array, touched: Uint8Array, W: number, H: number, s: TerrainStamp, radiusKm: number): void {
+  if (s.path.length < 2) return;
+  const at = (lon: number, lat: number) => {
+    const j = Math.max(0, Math.min(H - 1, Math.floor(((90 - lat) / 180) * H))), i = (((Math.floor(((lon + 180) / 360) * W)) % W) + W) % W;
+    return j * W + i;
+  };
+  const pts = s.path.map(([lon, lat]) => vec(lon, lat));
+  // How far along the stroke each point lies (radians), and the bed's height there: from the depth set below the
+  // source's ground down to the depth set below the mouth's (and below the sea at least), falling all the way.
+  const along = [0];
+  for (let i = 1; i < pts.length; i++) along.push(along[i - 1] + Math.acos(Math.max(-1, Math.min(1, pts[i][0] * pts[i - 1][0] + pts[i][1] * pts[i - 1][1] + pts[i][2] * pts[i - 1][2]))));
+  const total = Math.max(1e-9, along[along.length - 1]);
+  const [lonA, latA] = s.path[0], [lonB, latB] = s.path[s.path.length - 1];
+  if (e[at(lonA, latA)] < 0) return;
+  // Its mouth: where the stroke first reaches the sea (the bed falls to just below it there, and the stroke ends);
+  // or, drawn to an end inland, there (the bed as far below the ground there as at the source).
+  let mouth = 1;
+  for (let q = 0; q + 1 < s.path.length && mouth === 1; q++) {
+    const [a, b] = [s.path[q], s.path[q + 1]], dLon = ((((b[0] - a[0]) % 360) + 540) % 360) - 180;
+    const n = Math.max(1, Math.ceil((Math.hypot(dLon, b[1] - a[1]) / 180) * H * 2));
+    for (let k = 1; k <= n; k++) if (e[at(a[0] + (dLon * k) / n, a[1] + ((b[1] - a[1]) * k) / n)] < 0) { mouth = (along[q] + ((along[q + 1] - along[q]) * k) / n) / total; break; }
+  }
+  const top = e[at(lonA, latA)] - s.strength, bottom = mouth < 1 ? Math.min(-5, top - 1) : Math.min(e[at(lonB, latB)] - s.strength, top - 1);
+  const bedAt = (t: number) => top + ((bottom - top) * t) / mouth;
+  const r = s.radiusKm / radiusKm, reachDeg = r / RAD;
+  const lats = s.path.map((p) => p[1]);
+  const unwrapped: number[] = [];
+  for (const [lon] of s.path) { const prev = unwrapped[unwrapped.length - 1]; unwrapped.push(prev === undefined ? lon : prev + ((((lon - prev) % 360) + 540) % 360) - 180); }
+  const lat0 = Math.max(-90, Math.min(...lats) - reachDeg), lat1 = Math.min(90, Math.max(...lats) + reachDeg);
+  const j0 = Math.max(0, Math.floor(((90 - lat1) / 180) * H)), j1 = Math.min(H - 1, Math.ceil(((90 - lat0) / 180) * H));
+  const widest = Math.max(Math.abs(lat0), Math.abs(lat1));
+  const lonPad = Math.min(180, reachDeg / Math.max(0.05, Math.cos(Math.min(89, widest) * RAD)));
+  const cFrom = Math.floor(((Math.min(...unwrapped) - lonPad + 180) / 360) * W), cTo = Math.min(cFrom + W - 1, Math.ceil(((Math.max(...unwrapped) + lonPad + 180) / 360) * W));
+  for (let j = j0; j <= j1; j++) {
+    const lat = 90 - ((j + 0.5) / H) * 180, cl = Math.cos(lat * RAD), z = Math.sin(lat * RAD);
+    for (let cc = cFrom; cc <= cTo; cc++) {
+      const i = ((cc % W) + W) % W, lon = -180 + ((i + 0.5) / W) * 360;
+      const x = cl * Math.cos(lon * RAD), y = cl * Math.sin(lon * RAD);
+      // The nearest point of the stroke: its segment, and how far along.
+      let best = Infinity, t = 0;
+      for (let q = 0; q + 1 < pts.length; q++) {
+        const a = pts[q], b = pts[q + 1];
+        const ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], ap = [x - a[0], y - a[1], z - a[2]];
+        const len2 = ab[0] * ab[0] + ab[1] * ab[1] + ab[2] * ab[2];
+        const u = len2 > 0 ? Math.max(0, Math.min(1, (ap[0] * ab[0] + ap[1] * ab[1] + ap[2] * ab[2]) / len2)) : 0;
+        const dx = ap[0] - u * ab[0], dy = ap[1] - u * ab[1], dz = ap[2] - u * ab[2], d = Math.hypot(dx, dy, dz);
+        if (d < best) { best = d; t = (along[q] + u * (along[q + 1] - along[q])) / total; }
+      }
+      if (best >= r || t > mouth) continue;
+      const k = j * W + i, w = best / r, bed = bedAt(t);
+      // The valley: the bed in the middle, its sides rising to the ground at the brush's edge.
+      const side = bed + (e[k] - bed) * w * w;
+      if (side < e[k]) { e[k] = side; touched[k] = 1; }
+    }
+  }
+}
+
+/**
+ * Each cell of a W × H grid (equirectangular, from the north-west corner) under a stroke's brush, with the brush's
+ * weight there (1 on the stroke, falling to 0 at its radius); `radiusKm` is the planet's (D169: what painted biomes
+ * colour).
+ */
+export function underBrush(W: number, H: number, s: Pick<TerrainStamp, 'path' | 'radiusKm'>, radiusKm: number, visit: (k: number, weight: number) => void): void {
+  const r = s.radiusKm / radiusKm, pts = s.path.map(([lon, lat]) => vec(lon, lat));
+  const normals = pts.map((a, i) => {
+    const b = pts[i + 1];
+    if (!b) return null;
+    const n: [number, number, number] = [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+    const len = Math.hypot(n[0], n[1], n[2]);
+    return len > 1e-12 ? ([n[0] / len, n[1] / len, n[2] / len] as [number, number, number]) : null;
+  });
+  const reachDeg = r / RAD, lats = s.path.map((p) => p[1]);
+  const unwrapped: number[] = [];
+  for (const [lon] of s.path) { const prev = unwrapped[unwrapped.length - 1]; unwrapped.push(prev === undefined ? lon : prev + ((((lon - prev) % 360) + 540) % 360) - 180); }
+  const lat0 = Math.max(-90, Math.min(...lats) - reachDeg), lat1 = Math.min(90, Math.max(...lats) + reachDeg);
+  const j0 = Math.max(0, Math.floor(((90 - lat1) / 180) * H)), j1 = Math.min(H - 1, Math.ceil(((90 - lat0) / 180) * H));
+  const widest = Math.max(Math.abs(lat0), Math.abs(lat1));
+  const lonPad = Math.min(180, reachDeg / Math.max(0.05, Math.cos(Math.min(89, widest) * RAD)));
+  const cFrom = Math.floor(((Math.min(...unwrapped) - lonPad + 180) / 360) * W), cTo = Math.min(cFrom + W - 1, Math.ceil(((Math.max(...unwrapped) + lonPad + 180) / 360) * W));
+  for (let j = j0; j <= j1; j++) {
+    const lat = 90 - ((j + 0.5) / H) * 180, cl = Math.cos(lat * RAD), z = Math.sin(lat * RAD);
+    for (let cc = cFrom; cc <= cTo; cc++) {
+      const i = ((cc % W) + W) % W, lon = -180 + ((i + 0.5) / W) * 360;
+      const d = distanceToPath(cl * Math.cos(lon * RAD), cl * Math.sin(lon * RAD), z, pts, normals);
+      if (d >= r) continue;
+      const u = d / r;
+      visit(j * W + i, (1 - u * u) * (1 - u * u));
     }
   }
 }

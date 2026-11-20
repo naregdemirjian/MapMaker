@@ -61,6 +61,32 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D169. The quick generator's drawing tools: coasts, rivers and biomes drawn by hand (Stage 15.7)
+
+- **Asked.** Direct tools for the quick generator (Mode A, D97): draw a coastline (the land and sea change, the rest
+  follows), paint biomes, draw rivers.
+- **Found.** The sculpting brushes (D98) already painted land or sea under a brush, but a coast had to be painted
+  stroke by stroke and came out smooth and cliff-edged; rivers came only from the heights, where enough water
+  gathered; the land's colours came only from the heights and latitude (D100).
+- **Built.** Three kinds of stroke beside the brushes, kept, dated and undone as they are (`terrain/sculpt.ts`):
+  - **An outline** ("Draw land" or "Draw sea"): the shape drawn becomes land rising inland from 10 m at the coast to
+    the height set (its own hills a quarter either way; higher ground kept), or sea deepening to the depth set
+    (deeper sea kept), over four brush widths; the coast ragged by noise at the brush's size; a shore beyond it: a
+    shelf rising from the sea floor to 20 m deep at new land, land falling to 10 m at a new sea. Inside is found by
+    crossings along each row, the distance to the coast by a distance transform over the outline's box (an outline
+    80° by 50° on a generated planet: 75 ms).
+  - **A river**, drawn from its source to its mouth: a valley whose bed falls steadily from the depth set below the
+    source's ground to just below the sea where the stroke first reaches it, so the water the map works out runs the
+    way it was drawn; shown as a river whatever water reaches it, from its source to its mouth.
+  - **A painted biome** (ice to rainforest, the satellite look's colours, D100): laid over the land's colours under
+    the brush, its edge soft, on generated and simulated planets (`paintedCover`); it changes no heights, so painting
+    does not make the heights or rivers again.
+- **Result.** In the interface: an island drawn into a generated planet's open sea, a river from it to the sea and
+  desert painted on it, each one undoable step; the same strokes on any map with terrain (the Earth included, where
+  painted biomes are not shown: its land cover is a photograph-like picture).
+- **Still wrong, and why.** A river cannot be moved (draw another; the old valley stays); an outline round a pole
+  is not understood (its inside is found along rows of latitude); painted biomes do not reach the Earth's cover.
+
 ### D168. Climate changes quicker, and the climate settled (Stage 15.6)
 
 - **Asked.** Climate settings within half a second (the plan's budget, not met: about a second).

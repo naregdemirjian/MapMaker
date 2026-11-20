@@ -123,3 +123,85 @@ test('a stroke is kept with the map in one step, checked, and all of them taken 
   const flatMap = cmd.createFlatMap(world, 'Town', 5).result;
   assert.throws(() => cmd.addTerrainStamp(world, flatMap, { tool: 'raise', path: [[0, 0]], radiusKm: 1, strength: 1, seed: 1, from: null }), /terrain to sculpt/);
 });
+
+test('an outline drawn becomes land or sea (D169): the coast ragged at the brush\'s size, land rising inland, sea deepening; across the 180th meridian too', () => {
+  const sea = flat(-2000);
+  const square: Array<[number, number]> = [[0, 0], [20, 0], [20, 15], [0, 15]];
+  const land = applyStamps(sea, [stamp('coast-land', square, { radiusKm: 200, strength: 400 })], R).grid;
+  assert.ok(at(land, 10.5, 7.5) >= 0.7 * 400, `the middle stands high (${at(land, 10.5, 7.5)} m)`);
+  assert.ok(at(land, 1.5, 7.5) > 0 && at(land, 1.5, 7.5) < at(land, 10.5, 7.5), `lower near the coast (${at(land, 1.5, 7.5)} m)`);
+  // Its shore: a shelf rising from the sea floor to the new coast over four brush widths; the sea beyond untouched.
+  assert.ok(at(land, 22.5, 7.5) > -1000 && at(land, 22.5, 7.5) < 0, `a shelf by the coast (${at(land, 22.5, 7.5)} m)`);
+  assert.equal(at(land, 30.5, 7.5), -2000, 'the sea beyond it untouched');
+  assert.equal(at(land, 10.5, -9.5), -2000);
+  // A ragged coast: along the southern edge, some of the band within the brush is land and some sea.
+  let landed = 0, cells = 0;
+  for (let lon = 2.5; lon < 18; lon++) for (const lat of [-0.5, 0.5]) { cells++; if (at(land, lon, lat) > 0) landed++; }
+  assert.ok(landed > 0.15 * cells && landed < 0.85 * cells, `a ragged coast (${landed} of ${cells} cells on the line land)`);
+  // Higher ground inside is kept.
+  const hills = applyStamps(flat(-2000, (lon, lat) => (lon > 9 && lon < 11 && lat > 6 && lat < 8 ? 2500 : -2000)), [stamp('coast-land', square, { radiusKm: 200, strength: 400 })], R).grid;
+  assert.equal(at(hills, 10.5, 7.5), 2500);
+  // The sea drawn over land: deeper away from the coast.
+  const flooded = applyStamps(flat(300), [stamp('coast-sea', square, { radiusKm: 200, strength: 3000 })], R).grid;
+  assert.ok(at(flooded, 10.5, 7.5) <= -0.8 * 3000, `deep in the middle (${at(flooded, 10.5, 7.5)} m)`);
+  assert.ok(at(flooded, 1.5, 7.5) < 0 && at(flooded, 1.5, 7.5) > at(flooded, 10.5, 7.5), 'shallower near the coast');
+  assert.ok(at(flooded, 22.5, 7.5) > 10 && at(flooded, 22.5, 7.5) < 300, `low shores beside the new sea (${at(flooded, 22.5, 7.5)} m)`);
+  assert.equal(at(flooded, 30.5, 7.5), 300);
+  // Round the 180th meridian.
+  const across = applyStamps(sea, [stamp('coast-land', [[170, -10], [-170, -10], [-170, 10], [170, 10]], { radiusKm: 100, strength: 400 })], R).grid;
+  assert.ok(at(across, 179.5, 0.5) > 0 && at(across, -179.5, 0.5) > 0, 'land on both sides');
+  assert.equal(at(across, 0.5, 0.5), -2000, 'not the other side of the world');
+});
+
+test('a river drawn from its source to its mouth (D169): its bed falls all the way, and the water runs down it', async () => {
+  // Rolling land at 400 to 600 m, sea east of 12°E.
+  const ground = flat(0, (lon, lat) => (lon > 12 ? -1500 : 500 + Math.round(100 * Math.sin(lon * 1.7) * Math.cos(lat * 2.3))));
+  const path: Array<[number, number]> = [[0.5, 10.5], [5.5, 12.5], [10.5, 10.5], [13.5, 10.5]];
+  const g = applyStamps(ground, [stamp('river', path, { radiusKm: 300, strength: 120 })], R).grid;
+  // Downhill all the way from the source: the valley's floor (the lowest of the cells about each place along the
+  // stroke, on this grid of 1° cells) falls step by step, about 70 m a step, give or take the cells' own places.
+  const floor = (lon: number, lat: number) => Math.min(...[-1, 0, 1].flatMap((a) => [-1, 0, 1].map((b) => at(g, lon + a, lat + b))));
+  const along: number[] = [];
+  for (let q = 0; q + 1 < path.length; q++) for (let k = 0; k < 10; k++) { const t = k / 10; along.push(floor(path[q][0] + (path[q + 1][0] - path[q][0]) * t, path[q][1] + (path[q + 1][1] - path[q][1]) * t)); }
+  for (let i = 1; i < along.length; i++) assert.ok(along[i] <= along[i - 1] + 30, `downhill at step ${i} (${along[i - 1]} → ${along[i]} m)`);
+  assert.ok(along[along.length - 1] < 0 && along.slice(0, 15).every((v) => v > 0), 'down to the sea, above it inland');
+  assert.ok(at(g, 0.5, 10.5) < at(ground, 0.5, 10.5), 'cut below the ground at the source');
+  // Water from the source finds the sea by the steepest way down, close by the river drawn.
+  let lon = 0.5, lat = 10.5, steps = 0, off = 0;
+  while (at(g, lon, lat) >= 0 && steps++ < 100) {
+    let best: [number, number] = [lon, lat], low = at(g, lon, lat);
+    for (const [dl, dp] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) { const v = at(g, lon + dl, lat + dp); if (v < low) { low = v; best = [lon + dl, lat + dp]; } }
+    if (best[0] === lon && best[1] === lat) break;
+    [lon, lat] = best;
+    off = Math.max(off, Math.min(...[10.5, 11.5, 12.5].map((l) => Math.abs(lat - l))));
+  }
+  assert.ok(at(g, lon, lat) < 0, `the water reaches the sea (stopped at ${lon}, ${lat})`);
+  assert.ok(off <= 1, 'along the river drawn');
+  // Shown as a river whatever water reaches it, from its source to its mouth (not on into the sea).
+  const { riversNow } = await import('../src/terrain/river-cache.ts');
+  const river = stamp('river', path, { radiusKm: 300, strength: 120 });
+  const lines = riversNow(g, 'drawn-river-test', [river]).lines.coordinates;
+  const drawn = lines[lines.length - 1];
+  assert.deepEqual(drawn[0], [0.5, 10.5], 'from its source');
+  const end = drawn[drawn.length - 1];
+  assert.ok(end[0] > 11.4 && end[0] < 12.6, `to its mouth at the coast, an estuary its last few kilometres (${end})`);
+});
+
+test('painted biomes (D169): kept and checked with the strokes, changing no heights, laid over the land\'s colours', async () => {
+  const { paintedCover } = await import('../src/terrain/cover.ts');
+  const { BIOMES } = await import('../src/terrain/biomes.ts');
+  const base = flat(300);
+  const desert = stamp('biome', [[0.5, 0.5], [10.5, 0.5]], { radiusKm: 300, strength: 0, biome: 'desert' });
+  assert.equal(applyStamps(base, [desert], R).grid.data, base.data, 'no heights changed');
+  assert.deepEqual(cleanStamps([desert]).map((s) => s.biome), ['desert']);
+  assert.equal(cleanStamps([{ ...desert, biome: 'jungle' }]).length, 0, 'an unknown biome is left out');
+  const green = new Uint8Array(4 * W * H);
+  for (let k = 0; k < W * H; k++) { green[4 * k] = 40; green[4 * k + 1] = 90; green[4 * k + 2] = 40; green[4 * k + 3] = 255; }
+  const cover = { width: W, height: H, pixels: green, key: 'green' };
+  const painted = paintedCover(cover, [desert], R);
+  const px = (lon: number, lat: number) => { const k = Math.floor(90 - lat) * W + Math.floor(lon + 180); return Array.from((painted.pixels as Uint8Array).subarray(4 * k, 4 * k + 3)); };
+  assert.deepEqual(px(5.5, 0.5), [...BIOMES.desert], 'the desert on the stroke');
+  assert.deepEqual(px(5.5, 20.5), [40, 90, 40], 'the forest beyond it');
+  assert.notEqual(painted.key, cover.key);
+  assert.equal(paintedCover(cover, [], R), cover, 'nothing painted: the cover itself');
+});

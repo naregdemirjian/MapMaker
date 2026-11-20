@@ -33,7 +33,7 @@ import { planetKey } from '../terrain/planet.ts';
 import { planetTerrain } from '../terrain/planet-cache.ts';
 import { seaLevelAt } from '../terrain/sea-level.ts';
 import { loadEarthTerrain, EARTH_TERRAIN_KEY, type ElevationGrid } from '../terrain/grid.ts';
-import { loadEarthCover, coverNow, coverAt, type CoverSet, type TerrainCover } from '../terrain/cover.ts';
+import { loadEarthCover, coverNow, coverAt, paintedCover, type CoverSet, type TerrainCover } from '../terrain/cover.ts';
 import { detailNeed, type DetailGrid } from '../terrain/detail.ts';
 import { detailNow } from '../terrain/detail-cache.ts';
 import { photoNeed, METRES_PER_DEGREE, type PhotoRegion } from '../terrain/photo.ts';
@@ -286,12 +286,14 @@ export function frameSetup(world: World, shot: ShotSettings, frame: number, def:
   const strokes = stampsAt(sculptOf(space), t);
   const fieldsHere = world.all('layer').some((l) => l.kind === 'field' && l.space_id === shot.spaceId);
   const carved = ground && (terrainShown || seaPoints.length || planetOf(space) || paleo || strokes.length || fieldsHere || frontsMindLand(world, shotTransitions(shot))) ? sculpted(ground.grid, ground.key, strokes, (space?.radius_m ?? 6371008.8) / 1000) : null;
-  const rivers = carved && (planetOf(space) || simKey) && on('rivers') ? riversNow(carved.grid, carved.key) : null;
+  const rivers = carved && (planetOf(space) || simKey) && on('rivers') ? riversNow(carved.grid, carved.key, strokes) : null;
   // The land's colours in the satellite look (D100): Earth's land cover, or the planet's biomes.
   const planet = planetOf(space);
-  const cover = carved && terrainShown && PALETTES[look.palette].cover
+  const bare = carved && terrainShown && PALETTES[look.palette].cover
     ? (planet ? coverNow(carved.grid, carved.key, (space?.radius_m ?? 6371008.8) / 1000, climateOf(planet)) : coverSet ? coverAt(coverSet, ageOf(t)) : ground?.cover ?? null)
     : null;
+  // (With the biomes painted over it, D169.)
+  const cover = bare ? paintedCover(bare, strokes, (space?.radius_m ?? 6371008.8) / 1000) : null;
   const terrain = carved ? { grid: carved.grid, key: carved.key, look: terrainShown ? look : null, seaLevel: seaLevelAt(seaPoints, t) + glacial, override: carved.touched && basemap ? { data: carved.touched, key: carved.key } : null, rivers, cover, detail: detail?.heights ?? null, photo: detail?.photo ?? null } : null;
   const passes = new Set<PassName>(def.passes.filter((p) => (p !== 'graticule' || (shot.graticule && on('graticule'))) && (p !== 'labels' || labels) && (p !== 'characters' || (shot.characters !== false && on('characters'))) && (p !== 'cities' || cities) && (p !== 'borders' || on('borders')) && (p !== 'features' || on('features')) && (p !== 'fields' || on('fields')) && (p !== 'terrain' || !!terrain?.look)));
   const transparent = def.name === 'all' ? shot.transparent : !def.background;

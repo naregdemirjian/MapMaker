@@ -8,6 +8,8 @@ import type { ElevationGrid } from './grid.ts';
 import { biomeColours, type Climate } from './biomes.ts';
 import { loadEarthPhoto, EARTH_PHOTO_KEY } from './photo-cache.ts';
 import { paleoBetween } from './paleo.ts';
+import { underBrush, type TerrainStamp } from './sculpt.ts';
+import { BIOMES } from './biomes.ts';
 
 /**
  * A world's land cover: RGBA pixels (or a decoded picture), and a name for its content. The Earth's comes with
@@ -93,4 +95,31 @@ export function coverAt(set: CoverSet, age: number): TerrainCover | null {
   blends.set(key, c);
   while (blends.size > 4) blends.delete(blends.keys().next().value!);
   return c;
+}
+
+const painted = new Map<string, TerrainCover>();
+
+/**
+ * A land cover with biomes painted over it (D169): each painted stroke, in order, lays its biome's colour over the
+ * cover under its brush, its edge soft. (Covers kept as pixels: a generated or simulated planet's; the Earth's
+ * picture is left as it is.) `radiusKm` is the planet's.
+ */
+export function paintedCover(cover: TerrainCover, paint: readonly TerrainStamp[], radiusKm: number): TerrainCover {
+  const strokes = paint.filter((s) => s.tool === 'biome' && s.biome);
+  if (!strokes.length || !(cover.pixels instanceof Uint8Array)) return cover;
+  const key = `${cover.key}+paint:${strokes.map((s) => s.id).join(',')}`;
+  const have = painted.get(key);
+  if (have) { painted.delete(key); painted.set(key, have); return have; }
+  const px = cover.pixels.slice(), W = cover.width, H = cover.height;
+  for (const s of strokes) {
+    const rgb = BIOMES[s.biome!];
+    underBrush(W, H, s, radiusKm, (k, w) => {
+      const a = Math.min(1, w * 2.5);
+      for (let q = 0; q < 3; q++) px[4 * k + q] = Math.round(px[4 * k + q] + (rgb[q] - px[4 * k + q]) * a);
+    });
+  }
+  const out: TerrainCover = { width: W, height: H, pixels: px, key };
+  painted.set(key, out);
+  while (painted.size > 4) painted.delete(painted.keys().next().value!);
+  return out;
 }

@@ -146,9 +146,11 @@ export function smartInputFor(view: View, stroke: Pt[], closed: boolean, side: 0
   const planet = !!planetOf(space);
   const wantHeights = offered.heights && (w.ridges > 0 || (!strategic && w.valleys > 0) || (strategic && (w.rough > 0 || w.passes > 0)));
   const ground = wantHeights || (offered.rivers && planet && w.rivers > 0) ? store.terrainOf(space, store.time) : null;
-  const carved = ground ? sculpted(ground.grid, ground.key, stampsAt(sculptOf(space), store.time), (space?.radius_m ?? 6371008.8) / 1000) : null;
+  const strokes = stampsAt(sculptOf(space), store.time);
+  const carved = ground ? sculpted(ground.grid, ground.key, strokes, (space?.radius_m ?? 6371008.8) / 1000) : null;
   if ((wantHeights || (planet && w.rivers > 0)) && !carved) missing.push('heights');
-  const planetRivers = offered.rivers && planet && w.rivers > 0 && carved ? riversSoon(carved.grid, carved.key, () => store.notify()) : null;
+  // (With the rivers drawn on the map, D169, as the map has them.)
+  const planetRivers = offered.rivers && planet && w.rivers > 0 && carved ? riversSoon(carved.grid, carved.key, () => store.notify(), strokes) : null;
   if (offered.rivers && planet && w.rivers > 0 && carved && !planetRivers) missing.push("planet's rivers");
   const earth = (offered.coasts || offered.today) && store.basemap ? chooseScale(store.basemap, view) : null;
   const features: SmartFeature[] = [

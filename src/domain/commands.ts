@@ -19,6 +19,7 @@ import { terrainLookOf, DEFAULT_TERRAIN_LOOK, type TerrainLook } from '../terrai
 import { cleanSeaLevel, type SeaLevelPoint } from '../terrain/sea-level.ts';
 import { planetParamsOf, PLANET_PRESETS, type PlanetParams } from '../terrain/planet.ts';
 import { cleanStamps, isSculptTool, SCULPT_TOOLS, type TerrainStamp } from '../terrain/sculpt.ts';
+import { BIOMES } from '../terrain/biomes.ts';
 import { resolvePointStyle, type LabelStyle, type CountryLabel, type PointStyle } from '../render-engine/label-style.ts';
 import { DEFAULT_FEATURE_STYLE, isFeatureKind, type FeatureKind, type FeatureStyle } from '../render-engine/feature-style.ts';
 import { relationKind, isRelationKind, type RelationKind } from './relations.ts';
@@ -205,6 +206,7 @@ export function addTerrainStamp(world: World, spaceId: string, stamp: Omit<Terra
   if (!path.length) throw new Error('A stroke needs at least one place on the map.');
   if (path.length > 600) { const step = path.length / 600; path = Array.from({ length: 600 }, (_, i) => path[Math.min(path.length - 1, Math.round(i * step))]); }
   if (!(stamp.radiusKm > 0) || !Number.isFinite(stamp.strength)) throw new Error('A stroke needs a size and a strength.');
+  if (stamp.tool === 'biome' && !(typeof stamp.biome === 'string' && stamp.biome in BIOMES)) throw new Error('Choose a biome to paint.');
   const settings = worldSettings(space);
   return run(world, `Sculpt the terrain (${SCULPT_TOOLS.find((t) => t.id === stamp.tool)!.name.toLowerCase()})`, (tx) => {
     const id = newId('stamp');

@@ -23,8 +23,9 @@ import { finishLook } from '../../presentation/looks.ts';
 import { parseJSON, slerpLonLat } from '../../temporal-engine/engine.ts';
 import { compare, fromStore, gregorian, formatYear } from '../../core-time/index.ts';
 import { basemapSourceOf, shown, minLakeKm2, terrainLook, seaLevelPoints, planetOf, sculptOf, terrainSourceOf, isPaleoEarth, simOf } from '../../world-model/world-settings.ts';
-import { stampsAt } from '../../terrain/sculpt.ts';
+import { stampsAt, OUTLINE_TOOLS } from '../../terrain/sculpt.ts';
 import { sculpted } from '../../terrain/sculpt-cache.ts';
+import { paintedCover } from '../../terrain/cover.ts';
 import { riversSoon } from '../../terrain/river-cache.ts';
 import { detailNeed, type DetailGrid } from '../../terrain/detail.ts';
 import { detailSoon } from '../../terrain/detail-cache.ts';
@@ -97,9 +98,12 @@ export function frameRect(shot: ShotSettings, w: number, h: number) {
 function sculptStroke(points: Pt[]): void {
   const s = store, b = s.sculpt;
   if (!points.length || !s.world) return;
+  // (An outline needs three points to enclose anything; a river two, from its source to its mouth: D169.)
+  if ((OUTLINE_TOOLS.includes(b.tool) && points.length < 3) || (b.tool === 'river' && points.length < 2)) { s.toast(b.tool === 'river' ? 'Draw the river from its source to its mouth.' : 'Draw round the shape to make it land or sea.', 'info'); return; }
   s.execute((wd) => cmd.addTerrainStamp(wd, s.spaceId, {
     tool: b.tool, path: points.map((q) => [q[0], q[1]] as [number, number]), radiusKm: b.radiusKm, strength: b.strength,
     seed: 1 + Math.floor(Math.random() * 999_999), from: b.dated && Number.isFinite(s.time.day) ? { day: s.time.day, ms: s.time.ms } : null,
+    ...(b.tool === 'biome' ? { biome: b.biome } : {}),
   }));
 }
 
@@ -340,9 +344,11 @@ export function MapView() {
     const ground = needsGrid ? s.terrainOf(space, time) : null;
     const carved = ground ? sculpted(ground.grid, ground.key, strokes, (space?.radius_m ?? 6371008.8) / 1000) : null;
     // A planet's rivers (D99), worked out a moment after its heights (drawn without them meanwhile).
-    const rivers = carved && (planetOf(space) || simulated) && on('rivers') ? riversSoon(carved.grid, carved.key, () => store.notify()) : null;
+    const rivers = carved && (planetOf(space) || simulated) && on('rivers') ? riversSoon(carved.grid, carved.key, () => store.notify(), strokes) : null;
     // The land's colours in the satellite look (D100): Earth's land cover, or a planet's biomes.
-    const cover = carved && terrainShown && look && PALETTES[look.palette].cover ? s.coverOf(space, carved) : null;
+    // (With the biomes painted over it, D169.)
+    const bare = carved && terrainShown && look && PALETTES[look.palette].cover ? s.coverOf(space, carved) : null;
+    const cover = bare ? paintedCover(bare, strokes, (space?.radius_m ?? 6371008.8) / 1000) : null;
     const terrain = ground && carved ? { grid: carved.grid, key: carved.key, look: terrainShown ? look : null, seaLevel, override: carved.touched && basemapSourceOf(space) === 'natural-earth' ? { data: carved.touched, key: carved.key } : null, rivers, cover, detail: null as DetailGrid | null, photo: null as PhotoRegion | null } : null;
     if (terrain?.look) passes.add('terrain');
     if (on('borders')) passes.add('borders');
@@ -551,12 +557,18 @@ export function MapView() {
       }
       ctx.restore();
     }
-    // A stroke of the sculpting brush, as wide as the brush (D98).
+    // A stroke of the sculpting brush, as wide as the brush (D98); an outline, closed and filled (D169).
     if (drag.current.kind === 'sculpt') {
       const pts = drag.current.points.map((q) => lonLatToScreen(v, q[0], q[1])).filter((q): q is Pt => !!q);
       const sp = s.world?.get('map_space', s.spaceId);
       const px = Math.max(2, (s.sculpt.radiusKm / ((sp?.radius_m ?? 6371008.8) / 1000)) / radiansPerPixel(v));
-      if (pts.length) {
+      if (pts.length > 1 && OUTLINE_TOOLS.includes(s.sculpt.tool)) {
+        ctx.save();
+        ctx.beginPath(); pts.forEach((q, i) => (i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]))); ctx.closePath();
+        ctx.fillStyle = s.sculpt.tool === 'coast-land' ? 'rgba(160, 200, 120, 0.3)' : 'rgba(90, 150, 220, 0.3)'; ctx.fill();
+        ctx.strokeStyle = 'rgba(255, 214, 102, 0.9)'; ctx.lineWidth = 2; ctx.setLineDash([6, 4]); ctx.stroke();
+        ctx.restore();
+      } else if (pts.length) {
         ctx.save(); ctx.strokeStyle = 'rgba(255, 214, 102, 0.35)'; ctx.lineWidth = 2 * px; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
         ctx.beginPath(); pts.forEach((q, i) => (i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]))); if (pts.length === 1) ctx.lineTo(pts[0][0] + 0.01, pts[0][1]); ctx.stroke();
         const last = pts[pts.length - 1];

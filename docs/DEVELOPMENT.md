@@ -9,6 +9,11 @@ The approved architecture is the Claude Doc "Map Maker — Technical Architectur
 
 ## Status at a glance (20 November 2026, Stages 2, 3, 4, 6, 8 to 14 done; Stage 7 mostly done)
 
+- **Stage 15.7, the quick generator's drawing tools, 20 November** (D169): with the Terrain tool, an outline drawn
+  becomes land (rising inland, a shelf round it) or sea (deepening, low shores round it), its coast ragged at the
+  brush's size; a river drawn from its source falls all the way to its mouth, cut into the land so the map's water
+  follows it, and is shown as a river; biomes painted over the satellite look of generated and simulated planets.
+  Each a stroke like the others: in the base world or from a date, undone one at a time, in exports too.
 - **Stage 15.6, climate changes quicker and the climate settled, 20 November** (D168): the energy balance starts from
   the year's balance worked out directly and extrapolates its slow settling, so it ends within 0.2 K of sixty years in
   3 to 7 years whatever the change (it stopped by luck after 4 years on the Earth-like planet, 1 to 3 K off, and ran
@@ -416,12 +421,12 @@ The approved roadmap has 14 stages (0–13). Where each stands (brought up to da
 | Improvement pass | In progress | History played in the working view (D119); borders imported from GeoJSON maps of their years, following the borders already there (D120), or from a dataset dating each shape (D123); videos, MP4 and WebM (D121); a shot of the whole history in one click (D122); layers' opacity and border width; each layer as its own export pass (D124); names placed quickly while a shot plays (D125); borders while fronts move and where two changes meet (D126); a globe that turns, for shots (D127); a change over before its land changes hands again (D128); a date that stays still as it changes (D129); how the stars look (D130); star maps as flat charts (D131); realms across the stars as territories with fronts (D132); the solar system side by side (D133); the Earth through geological time (D134), its continents sliding between its maps (D135); fronts that follow the land (D136), and looks for them: soft, glowing, ragged, in patches, an event's own (D137); the Earth as photographed, sharp to city scale (D138); fronts at scale, a hundred changes under way at once (D139); only the strip a front has crossed drawn again, and two faults of partial redraws fixed (D140); fine ground close in, made up below the heights' own detail (D141) | Faster shot playback through many changes |
 | 12 Smart brushes | Done | The geography-aware brush and the strategic brush, with feature weights and live preview, in the brush, the border pen, the Split tool and the features tool (D148) | Forest edges, roads and railways from data |
 | 14 Planetary evolution engine | Done | The technical assessment and plan: `docs/PLANETARY_ENGINE_PLAN.md` (19 November 2026); 14.1 foundations (D152); 14.2 plate tectonics (D153); 14.3 continents over time (D154); 14.4 landscape evolution (D155); 14.5 the Planet Studio (D156); 14.6 the climate I (D157); 14.7 the climate II (D158); 14.8 water and ice (D159); 14.9 biomes (D160); 14.10 Studio II and editing (D161); 14.11 validation and performance (D162) | Done |
-| 15 Planetary engine refinements | In progress | 15.1 edits gathered and re-run together, from the checkpoint before the earliest (D163); 15.2 consequences in numbers, edits on the crust clicked, values set by hand (D164); 15.3 the climate's accuracy (D165); 15.4 the deep sea floor, mountains and lakes (D166); 15.5 earlier moments by their own biomes (D167); 15.6 climate changes quicker, the climate settled (D168) | 15.7 the quick generator's drawing tools; 15.8 the sea's level through a history |
+| 15 Planetary engine refinements | In progress | 15.1 edits gathered and re-run together, from the checkpoint before the earliest (D163); 15.2 consequences in numbers, edits on the crust clicked, values set by hand (D164); 15.3 the climate's accuracy (D165); 15.4 the deep sea floor, mountains and lakes (D166); 15.5 earlier moments by their own biomes (D167); 15.6 climate changes quicker, the climate settled (D168); 15.7 the quick generator's drawing tools (D169) | 15.7 generated planets coloured by the climate model; 15.8 the sea's level through a history |
 | 13 Branches, calendars and refinement | Done | Each map in a calendar of its own (D149); branches, alternative timelines, compared side by side, in shots (D150); tidying unused borders, a shot's sound track (D151) | Sound mixed into exported videos; projection on the graphics card (D151) |
 
 ## Tests
 
-All pass as of 20 November 2026 (505 unit and randomised tests in 97 files, 23 + 70 + 14 + 8 interface steps). The
+All pass as of 20 November 2026 (508 unit and randomised tests in 97 files, 23 + 71 + 14 + 8 interface steps). The
 interface tests run with the verify mode on (D57): everything the app works out from what was there before is also
 worked out afresh, and any difference stops the test.
 `sh scripts/check-all.sh` runs everything and prints ALL CHECKS PASSED only when every check passed.
