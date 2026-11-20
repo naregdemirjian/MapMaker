@@ -61,6 +61,42 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D168. Climate changes quicker, and the climate settled (Stage 15.6)
+
+- **Asked.** Climate settings within half a second (the plan's budget, not met: about a second).
+- **Found.** The time was not the energy balance's arithmetic alone. It started from one even temperature and stopped
+  when the planet's mean changed by under 0.01 K a year: on the Earth-like planet that happened after 4 years by
+  luck, while the pattern was still settling (the 50 m sea layer's time constant is about 3 years): its tropics 1.7 K
+  cooler and its poles 0.9 K warmer than settled, single cells 3 K off; after almost any change (a doubled carbon
+  dioxide, an ocean world, a desert world) it ran 13 to 18 years, a hothouse 40 (still 3 K off), and a tidally locked
+  world stopped 2.4 K off on average. The rain's loop ran at half its speed inside its large function; the outgoing
+  heat was worked out from scratch four times per cell and step; the solvers made ten arrays per step.
+- **Built.**
+  - The energy balance starts from the year's balance worked out directly (the year's mean sunlight, the outgoing
+    heat linearised, the albedo from the last estimate: a few solves, 20 to 60 ms), then runs the seasons; at year 5
+    the slow settling, by then a steady ratio from year to year (about 0.7), is extrapolated to where it ends, and a
+    year more checks it. Planets that settle sooner stop at 3 years. A history's own past climates start as before,
+    so histories are unchanged.
+  - The same arithmetic, faster: the rain's step in a small function of its own, what stays the same through a month
+    worked out once (no exponential per cell and step), the solvers' vectors made once and their dot products taken
+    with the matrix products; the outgoing heat from a table every twentieth of a kelvin (within a part in a billion).
+  - Two stages for the climate: `temperature` (the energy balance) and `climate`, whose twelve months of winds and
+    rain are shared among the workers (as many parts as workers, up to twelve) and joined in order: the same bytes
+    however they are shared (`rainMonths`, `joinRain`). A stage can now say how many items a part takes for the
+    number of workers, and its join is given the stage's dependencies.
+- **Result.** Within 0.2 K of a sixty-year run everywhere, in 3 to 7 years (a doubled carbon dioxide 6, a hothouse
+  3). The real Earth's 22 stations as before (3.4 K root-mean-square; none moves by more than 0.1 K: there the old
+  stop happened to be settled); the simulated Earth-like planet's equator 25.2 °C (23.6 before; the Earth's 27), the
+  polar caps 1.1 K colder, its tropics wetter (2,971 mm within 10° of the equator against 2,665). One thread: the
+  climate 0.6 to 0.9 s at the preview level, an edit of the air with its water, biomes and picture 1.1 s (2.35 s
+  before) and 0.84 s at the standard level (2.2 s). Through three workers in this container, once they are warm, a
+  change of the air reaches its temperature and rain pictures in 0.5 to 0.55 s (1.05 to 1.4 s before); the first
+  changes in fresh workers 0.8 to 1 s; the land seen from space 0.2 to 0.3 s after.
+- **Still wrong, and why.** Half a second is met only with warm workers on this container (a quicker processor
+  meets it outright); the energy balance alone is 0.3 to 0.55 s of it and runs on one worker (its years follow one
+  another). A history's own past climates, and the pictures of earlier moments (D167), still start from the climate
+  before them and stop after 2 to 4 years, so they are less settled than today's.
+
 ### D167. Earlier moments in their own colours: each picture's climate and biomes (Stage 15.5)
 
 - **Asked.** Colour the past by biome: a simulated planet's earlier moments were drawn by height on its map, and the

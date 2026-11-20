@@ -39,6 +39,13 @@ export interface ClimateOptions {
   /** The level the model runs at (default CLIMATE_LEVEL), and temperatures there to start from (K; a warm start). */
   level?: number;
   initialK?: Float64Array;
+  /** How a cold start begins (D168): from the year's balance worked out directly (the default), or one even temperature. */
+  start?: 'balance' | 'even';
+  /**
+   * After a cold start, the year at which the slow settling is extrapolated to where it ends (D168; default 5); 0:
+   * never (the years run until the planet's mean settles).
+   */
+  extrapolateAt?: number;
   /** (Calibration: transport and the land's heat capacity.) */
   tune?: { D?: number; landC?: number; airShare?: number; cloudSwing?: number; width?: number; peak?: number; dryWarm?: number; dryFrom?: number; plateau?: number; transport?: number; gyre?: number; overturning?: number; snowCold?: number; cloudLand?: number; wind?: number; windSwing?: number; tile?: number };
 }
@@ -210,7 +217,20 @@ function coarseClimate(mesh: Mesh, def: PlanetDefinition, x: Derived, land: Arra
     const snowA = 0.62 + snowCold * Math.max(kept, Math.max(0, Math.min(1, (273.15 - 10 - T) / 20)));
     return cloudL[c] * at.cloudAlbedo + (1 - cloudL[c]) * (rayleigh + (1 - rayleigh) ** 2 * (0.25 * (1 - snow) + snowA * snow));
   };
-  const olr = (T: number) => (SIGMA * T ** 4) / (1 + 0.75 * opticalDepth(def, T).total);
+  // (The air's opacity to heat as physics.ts works it out, its parts that do not change with the temperature taken out
+  // once; at 288 K the water vapour's factor is 1, so its part there is its coefficient. Read from a table every
+  // twentieth of a kelvin, between its values: within a part in a billion, D168.)
+  const tau0 = opticalDepth(def, 288), dryTau = tau0.co2 + tau0.ch4, wet = tau0.h2o;
+  const olrOf = (T: number) => (SIGMA * T ** 4) / (1 + 0.75 * (dryTau + wet * Math.exp(Math.min(8, 0.0237 * (T - 288)))));
+  const OLR_FROM = 50, OLR_STEP = 0.05, OLR_N = Math.ceil((2000 - OLR_FROM) / OLR_STEP) + 2;
+  const olrTable = new Float64Array(OLR_N);
+  for (let i = 0; i < OLR_N; i++) olrTable[i] = olrOf(OLR_FROM + i * OLR_STEP);
+  const olr = (T: number) => {
+    const u = (T - OLR_FROM) / OLR_STEP;
+    if (!(u >= 0 && u < OLR_N - 1)) return olrOf(T);
+    const i = Math.floor(u), t = u - i;
+    return olrTable[i] + (olrTable[i + 1] - olrTable[i]) * t;
+  };
   // Transport is strongest in the storm belts beyond the Hadley cells (on Earth near 45°), where eddies carry heat
   // poleward, weaker towards the poles and the equator (North et al. 1981 let D vary with latitude in the same way).
   const storms = Math.min(70, x.hadleyEdgeDeg + 10), width = opts.tune?.width ?? 20, peak = opts.tune?.peak ?? 2;
@@ -266,17 +286,45 @@ function coarseClimate(mesh: Mesh, def: PlanetDefinition, x: Derived, land: Arra
       for (let k = nbrStart[i]; k < nbrStart[i + 1]; k++) coef[k] = w[k] + sfac * adv[k];
     }
   };
-  const yearS = x.yearDays * 86_400, dt = yearS / steps;
+  const yearS = x.yearDays * 86_400;
   let T: Float64Array = opts.initialK && opts.initialK.length === n ? Float64Array.from(opts.initialK) : new Float64Array(n).fill(Math.max(150, Math.min(700, x.surfaceK)));
   if (opts.initialK && opts.initialK.length === n) { annualK = Float64Array.from(opts.initialK); annualL = Float64Array.from(opts.initialK); }
+  const ws = space(n), cold = !(opts.initialK && opts.initialK.length === n);
+  if (cold && (opts.start ?? 'balance') === 'balance') {
+    // The year's balance worked out directly (D168): the year's mean sunlight, the outgoing heat linearised about the
+    // last estimate and the albedo from it, the transport as in a step; four-fifths of the way to each new estimate
+    // until none moves by a fifth of a kelvin (a start: the seasons' years settle the rest).
+    const Sbar = new Float64Array(n);
+    for (let m = 0; m < months; m++) for (let c = 0; c < n; c++) Sbar[c] += (f * sun.monthly[m * n + c]) / months;
+    if (U > 0) { for (let i = 0; i < n; i++) for (let k = nbrStart[i]; k < nbrStart[i + 1]; k++) coef[k] = w[k] + adv[k]; coefMonth = -1; }
+    const d0 = new Float64Array(n), r0 = new Float64Array(n);
+    annualK = Float64Array.from(T); annualL = Float64Array.from(T);
+    for (let it = 0; it < 40; it++) {
+      for (let c = 0; c < n; c++) {
+        const Tc = T[c], a = albedo(c, Tc), o = olr(Tc), B = Math.max(0.5, (olr(Tc + 0.5) - o) / 0.5);
+        d0[c] = B * area[c];
+        r0[c] = (Sbar[c] * (1 - a) - o + B * Tc + qflux[c]) * area[c];
+      }
+      const next = U > 0 ? solveGeneral(n, nbrStart, nbr, coef, d0, r0, T, ws, 1e-8) : solve(n, nbrStart, nbr, w, d0, r0, T, ws, 1e-8);
+      let most = 0;
+      for (let c = 0; c < n; c++) { const v = Math.max(100, Math.min(1500, 0.2 * T[c] + 0.8 * next[c])); most = Math.max(most, Math.abs(v - T[c])); T[c] = v; }
+      annualK.set(T); annualL.set(T);
+      if (most < 0.2) break;
+    }
+  }
   const TL = Float64Array.from(T), kappa = opts.tune?.tile ?? TILE, CL = air + 2e6;
   const monthSum = new Float64Array(months * n), monthCount = new Float64Array(months), monthSumL = new Float64Array(months * n);
   let prevAnnual = Infinity, years = 0, absorbed = 0, emitted = 0;
   const maxYears = opts.maxYears ?? 40, tol = opts.tolerance ?? 0.01;
   const diag = new Float64Array(n), rhs = new Float64Array(n);
+  const settleAt = cold ? (opts.extrapolateAt ?? 5) : 0;
+  const means: number[] = [];
+  let extrapolated: number | null = null;
+  let lastEnd: Float64Array | null = null, lastEndL: Float64Array | null = null, lastA: Float64Array | null = null, lastAL: Float64Array | null = null;
   for (years = 1; years <= maxYears; years++) {
     monthSum.fill(0); monthCount.fill(0); monthSumL.fill(0);
     let abs = 0, emi = 0;
+    const dt = yearS / steps;
     for (let s = 0; s < steps; s++) {
       const m = Math.min(months - 1, Math.floor((s * months) / steps));
       for (let c = 0; c < n; c++) {
@@ -289,7 +337,7 @@ function coarseClimate(mesh: Mesh, def: PlanetDefinition, x: Derived, land: Arra
         abs += Q * area[c]; emi += o * area[c];
       }
       windsFor(m);
-      T = U > 0 ? solveGeneral(n, nbrStart, nbr, coef, diag, rhs, T) : solve(n, nbrStart, nbr, w, diag, rhs, T);
+      T = U > 0 ? solveGeneral(n, nbrStart, nbr, coef, diag, rhs, T, ws) : solve(n, nbrStart, nbr, w, diag, rhs, T, ws);
       // The land of each cell: its own sunlight, snow and heat capacity, the same heat carried in by the air as the
       // cell has (per square metre), and heat exchanged with the rest of the cell's air (implicit in its own
       // temperature). In a cell that is all land it is the cell's temperature.
@@ -317,8 +365,24 @@ function coarseClimate(mesh: Mesh, def: PlanetDefinition, x: Derived, land: Arra
     let mean = 0;
     for (let c = 0; c < n; c++) for (let m = 0; m < months; m++) mean += (area[c] * monthSum[m * n + c]) / monthCount[m] / months;
     mean /= 4 * Math.PI;
-    if (Math.abs(mean - prevAnnual) < tol && years >= (opts.minYears ?? 3)) break;
-    prevAnnual = mean;
+    means.push(mean);
+    // (D168) The slow settling, once it is the only change left (the planet's mean changing by a steady ratio from
+    // year to year), extrapolated to where it ends.
+    if (settleAt > 0 && years === settleAt && means.length >= 3 && lastEnd && lastA && lastEndL && lastAL) {
+      const d1 = means[means.length - 2] - means[means.length - 3], d2 = mean - means[means.length - 2], rho = d1 !== 0 ? d2 / d1 : 0;
+      if (rho > 0.05 && rho < 0.95) {
+        const g = rho / (1 - rho);
+        for (let c = 0; c < n; c++) {
+          const dT = T[c] - lastEnd[c], dL = TL[c] - lastEndL[c], dA = annualK![c] - lastA[c], dAL = annualL![c] - lastAL[c];
+          T[c] += g * dT; TL[c] += g * dL; annualK![c] += g * dA; annualL![c] += g * dAL;
+        }
+        // (The next year is measured against where the settling was extrapolated to.)
+        extrapolated = mean + g * d2;
+      }
+    }
+    if (settleAt > 0 && years === settleAt - 1) { lastEnd = Float64Array.from(T); lastEndL = Float64Array.from(TL); lastA = Float64Array.from(annualK); lastAL = Float64Array.from(annualL); }
+    if (Math.abs(mean - prevAnnual) < tol && years >= (opts.minYears ?? 3) && (extrapolated === null || years > settleAt)) break;
+    prevAnnual = extrapolated !== null && years === settleAt ? extrapolated : mean;
   }
   const monthly = new Float32Array(months * n), monthlyLand = new Float32Array(months * n), monthlySea = new Float32Array(months * n);
   let meanK = 0, trop = 0, tropA = 0, pole = 0, poleA = 0;
@@ -339,18 +403,25 @@ function coarseClimate(mesh: Mesh, def: PlanetDefinition, x: Derived, land: Arra
     if (lat > 70) { pole += area[c] * (tm - 273.15); poleA += area[c]; }
   }
   return {
-    monthly, monthlyLand, monthlySea, finalK: T,
+    monthly, monthlyLand, monthlySea, finalK: Float64Array.from(T),
     stats: { meanK: meanK / (4 * Math.PI), absorbed, emitted, tropicsC: tropA ? trop / tropA : NaN, polesC: poleA ? pole / poleA : NaN, years: Math.min(years, maxYears) },
   };
 }
+
+/** The solvers' working vectors (D168: made once for a climate, not for every step). */
+interface Space { x: Float64Array; full: Float64Array; r: Float64Array; rh: Float64Array; p: Float64Array; v: Float64Array; y: Float64Array; sv: Float64Array; z: Float64Array; t: Float64Array; dots: Float64Array }
+const space = (n: number): Space => ({
+  x: new Float64Array(n), full: new Float64Array(n), r: new Float64Array(n), rh: new Float64Array(n), p: new Float64Array(n),
+  v: new Float64Array(n), y: new Float64Array(n), sv: new Float64Array(n), z: new Float64Array(n), t: new Float64Array(n), dots: new Float64Array(2),
+});
 
 /**
  * Solves (diag_i) x_i + Σ_j w_ij (x_i − x_j) = rhs_i (symmetric positive definite) by conjugate gradients with a
  * diagonal preconditioner, starting from `x0`.
  */
-function solve(n: number, start: Int32Array, nbr: Int32Array, w: Float64Array, diag: Float64Array, rhs: Float64Array, x0: Float64Array): Float64Array {
-  const x = Float64Array.from(x0), r = new Float64Array(n), z = new Float64Array(n), p = new Float64Array(n), q = new Float64Array(n);
-  const full = new Float64Array(n);
+function solve(n: number, start: Int32Array, nbr: Int32Array, w: Float64Array, diag: Float64Array, rhs: Float64Array, x0: Float64Array, ws = space(n), tol = 1e-12): Float64Array {
+  const { x, r, z, p, v: q, full } = ws;
+  x.set(x0); p.fill(0);
   for (let i = 0; i < n; i++) { let s = diag[i]; for (let k = start[i]; k < start[i + 1]; k++) s += w[k]; full[i] = s; }
   const apply = (v: Float64Array, out: Float64Array) => {
     for (let i = 0; i < n; i++) {
@@ -365,7 +436,7 @@ function solve(n: number, start: Int32Array, nbr: Int32Array, w: Float64Array, d
   for (let it = 0; it < 400; it++) {
     let rr = 0;
     for (let i = 0; i < n; i++) rr += r[i] * r[i];
-    if (rr <= 1e-12 * rr0) break;
+    if (rr <= tol * rr0) break;
     apply(p, q);
     let pq = 0;
     for (let i = 0; i < n; i++) pq += p[i] * q[i];
@@ -383,46 +454,62 @@ function solve(n: number, start: Int32Array, nbr: Int32Array, w: Float64Array, d
  * Solves (diag_i) x_i + Σ_j c_ij (x_i − x_j) = rhs_i for coefficients that need not be symmetric (diffusion with the
  * winds' upwind transport, D165) by BiCGSTAB with a diagonal preconditioner, starting from `x0`.
  */
-function solveGeneral(n: number, start: Int32Array, nbr: Int32Array, c: Float64Array, diag: Float64Array, rhs: Float64Array, x0: Float64Array): Float64Array {
-  const x = Float64Array.from(x0), full = new Float64Array(n);
-  for (let i = 0; i < n; i++) { let s = diag[i]; for (let k = start[i]; k < start[i + 1]; k++) s += c[k]; full[i] = s; }
-  const apply = (v: Float64Array, out: Float64Array) => {
-    for (let i = 0; i < n; i++) {
-      let s = full[i] * v[i];
-      for (let k = start[i]; k < start[i + 1]; k++) s -= c[k] * v[nbr[k]];
-      out[i] = s;
-    }
-  };
-  const r = new Float64Array(n), rh = new Float64Array(n), p = new Float64Array(n), v = new Float64Array(n);
-  const y = new Float64Array(n), sv = new Float64Array(n), z = new Float64Array(n), t = new Float64Array(n);
-  apply(x, v);
+function solveGeneral(n: number, start: Int32Array, nbr: Int32Array, c: Float64Array, diag: Float64Array, rhs: Float64Array, x0: Float64Array, ws = space(n), tol = 1e-12): Float64Array {
+  const { x, full, r, rh, p, v, y, sv, z, t } = ws;
+  x.set(x0);
+  for (let i = 0; i < n; i++) { let s = diag[i]; const e = start[i + 1]; for (let k = start[i]; k < e; k++) s += c[k]; full[i] = s; }
+  p.fill(0);
+  operate(n, start, nbr, c, full, x, v);
   let rr0 = 0;
   for (let i = 0; i < n; i++) { r[i] = rhs[i] - v[i]; rh[i] = r[i]; rr0 += rhs[i] * rhs[i]; }
   v.fill(0);
   let rho = 1, alpha = 1, omega = 1;
+  const dots = ws.dots;
   for (let it = 0; it < 400; it++) {
     let rr = 0, rho2 = 0;
     for (let i = 0; i < n; i++) { rr += r[i] * r[i]; rho2 += rh[i] * r[i]; }
-    if (rr <= 1e-12 * rr0 || rho2 === 0) break;
+    if (rr <= tol * rr0 || rho2 === 0) break;
     const beta = (rho2 / rho) * (alpha / omega);
     for (let i = 0; i < n; i++) { p[i] = r[i] + beta * (p[i] - omega * v[i]); y[i] = p[i] / full[i]; }
-    apply(y, v);
-    let rv = 0;
-    for (let i = 0; i < n; i++) rv += rh[i] * v[i];
+    // (Each product with the matrix gives its dot products as it goes: the same sums in the same order, D168.)
+    operateDot(n, start, nbr, c, full, y, v, rh, dots);
+    const rv = dots[0];
     alpha = rho2 / rv;
     let ss = 0;
     for (let i = 0; i < n; i++) { sv[i] = r[i] - alpha * v[i]; ss += sv[i] * sv[i]; }
-    if (ss <= 1e-12 * rr0) { for (let i = 0; i < n; i++) x[i] += alpha * y[i]; break; }
+    if (ss <= tol * rr0) { for (let i = 0; i < n; i++) x[i] += alpha * y[i]; break; }
     for (let i = 0; i < n; i++) z[i] = sv[i] / full[i];
-    apply(z, t);
-    let ts = 0, tt = 0;
-    for (let i = 0; i < n; i++) { ts += t[i] * sv[i]; tt += t[i] * t[i]; }
+    operateDot(n, start, nbr, c, full, z, t, sv, dots);
+    const ts = dots[0], tt = dots[1];
     omega = tt > 0 ? ts / tt : 0;
     for (let i = 0; i < n; i++) { x[i] += alpha * y[i] + omega * z[i]; r[i] = sv[i] - omega * t[i]; }
     rho = rho2;
     if (omega === 0) break;
   }
   return x;
+}
+
+/** out = A v for A = diag(full) − (the coefficients towards each neighbour). */
+function operate(n: number, start: Int32Array, nbr: Int32Array, c: Float64Array, full: Float64Array, v: Float64Array, out: Float64Array): void {
+  for (let i = 0; i < n; i++) {
+    let s = full[i] * v[i];
+    const e = start[i + 1];
+    for (let k = start[i]; k < e; k++) s -= c[k] * v[nbr[k]];
+    out[i] = s;
+  }
+}
+
+/** out = A v as `operate`, with dots[0] = Σ w·out and dots[1] = Σ out·out. */
+function operateDot(n: number, start: Int32Array, nbr: Int32Array, c: Float64Array, full: Float64Array, v: Float64Array, out: Float64Array, w: Float64Array, dots: Float64Array): void {
+  let a = 0, b = 0;
+  for (let i = 0; i < n; i++) {
+    let s = full[i] * v[i];
+    const e = start[i + 1];
+    for (let k = start[i]; k < e; k++) s -= c[k] * v[nbr[k]];
+    out[i] = s;
+    a += s * w[i]; b += s * s;
+  }
+  dots[0] = a; dots[1] = b;
 }
 
 /**

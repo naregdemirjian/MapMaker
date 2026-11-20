@@ -14,47 +14,47 @@ and everything else is this engine's. Measured values are approximate climatolog
 | Sea floor deepening with age (younger than 80 Myr) | 0.28 km per √Myr | 0.35 (GDH1: 2.6 km over 64 Myr) |
 | The sea's level over the history | -553 to 129 m | about −120 to +250 m over the last 500 Myr |
 | Ice on land over the history | 0.9 to 12.9 million km³ | 0 to about 80 (today 30) |
-| Mean temperature at the surface | 14.6 °C | 15 °C |
-| Within 10° of the equator / beyond 70° | 23.6 / -15.6 °C | 27 / −15 to −30 °C |
-| Rain and snow, the planet's mean | 1,163 mm a year | about 1,000 |
-| Rain within 10° of the equator / at 20-30° | 2,665 / 526 mm | about 2,000 / 700 |
+| Mean temperature at the surface | 14.9 °C | 15 °C |
+| Within 10° of the equator / beyond 70° | 25.2 / -16.7 °C | 27 / −15 to −30 °C |
+| Rain and snow, the planet's mean | 1,232 mm a year | about 1,000 |
+| Rain within 10° of the equator / at 20-30° | 2,971 / 546 mm | about 2,000 / 700 |
 | The sea's currents: warm western sides, cool eastern | 8.5 % of cells warmed (mean +1.2 K), 8.0 % cooled (-1.1 K) | as the Gulf Stream and Kuroshio, the Canary and Humboldt |
-| Deserts and steppe: land at 15-35° / within 10° | 56 / 0 % | the subtropical belts / few |
-| Tropical forest within 10° | 80 % | most |
-| Boreal forest at 50-65°; tundra, polar desert and ice beyond 65° | 23 %; 95 % | most; most |
-| An earlier moment's biomes (worked out quickly from its own climate, D167), tried on today | the same biome on 80 % of the land, 91 % besides lakes and wetlands; deserts 12.0 % of the land (the full stages: 13.5 %) | — |
+| Deserts and steppe: land at 15-35° / within 10° | 53 / 0 % | the subtropical belts / few |
+| Tropical forest within 10° | 83 % | most |
+| Boreal forest at 50-65°; tundra, polar desert and ice beyond 65° | 24 %; 95 % | most; most |
+| An earlier moment's biomes (worked out quickly from its own climate, D167), tried on today | the same biome on 80 % of the land, 91 % besides lakes and wetlands; deserts 12.0 % of the land (the full stages: 13.1 %) | — |
 | Hack's law: main stream length ∝ area^h | h = 0.64 (42 cells draining over 20 cells) | 0.5 to 0.6 |
 
 ## The real Earth's heights with this engine's climate, water and biomes (level 5)
 
 | Place | Temperature, model (measured) | Rain and snow, model (measured) |
 | --- | --- | --- |
-| Singapore | 26.5 °C (27.5) | 4,253 mm (2,300) |
-| Manaus | 25.9 °C (27) | 2,163 mm (2,300) |
-| Lagos | 24.3 °C (27) | 2,048 mm (1,500) |
-| Kinshasa | 23.4 °C (25.5) | 1,155 mm (1,400) |
-| Mumbai | 21.7 °C (27) | 702 mm (2,200) |
-| Delhi | 24.3 °C (25) | 78 mm (800) |
-| Riyadh | 22.5 °C (26) | 391 mm (100) |
+| Singapore | 26.4 °C (27.5) | 4,244 mm (2,300) |
+| Manaus | 25.9 °C (27) | 2,161 mm (2,300) |
+| Lagos | 24.3 °C (27) | 2,047 mm (1,500) |
+| Kinshasa | 23.4 °C (25.5) | 1,156 mm (1,400) |
+| Mumbai | 21.7 °C (27) | 700 mm (2,200) |
+| Delhi | 24.2 °C (25) | 78 mm (800) |
+| Riyadh | 22.4 °C (26) | 390 mm (100) |
 | Cairo | 22.8 °C (22) | 291 mm (25) |
 | Khartoum | 25.6 °C (30) | 1,003 mm (160) |
-| Phoenix | 17.5 °C (24) | 113 mm (200) |
-| Atlanta | 19.8 °C (17) | 400 mm (1,250) |
-| Chicago | 15.1 °C (10) | 729 mm (940) |
-| Beijing | 13.1 °C (13) | 740 mm (570) |
-| Shanghai | 16.2 °C (17) | 842 mm (1,150) |
-| Madrid | 9.7 °C (15) | 708 mm (420) |
-| Paris | 10.2 °C (12) | 1,391 mm (640) |
+| Phoenix | 17.5 °C (24) | 112 mm (200) |
+| Atlanta | 19.8 °C (17) | 399 mm (1,250) |
+| Chicago | 15.1 °C (10) | 727 mm (940) |
+| Beijing | 13.0 °C (13) | 738 mm (570) |
+| Shanghai | 16.1 °C (17) | 839 mm (1,150) |
+| Madrid | 9.7 °C (15) | 707 mm (420) |
+| Paris | 10.2 °C (12) | 1,389 mm (640) |
 | Moscow | 5.1 °C (6) | 911 mm (700) |
-| Yakutsk | -7.3 °C (-9) | 337 mm (240) |
-| Buenos Aires | 14.4 °C (18) | 488 mm (1,200) |
-| Sydney | 10.5 °C (18) | 2,190 mm (1,200) |
+| Yakutsk | -7.3 °C (-9) | 336 mm (240) |
+| Buenos Aires | 14.5 °C (18) | 490 mm (1,200) |
+| Sydney | 10.6 °C (18) | 2,198 mm (1,200) |
 | Alice Springs | 19.4 °C (21) | 257 mm (280) |
-| Cape Town | 15.5 °C (17) | 651 mm (520) |
+| Cape Town | 15.6 °C (17) | 654 mm (520) |
 
 Over these 22 places the yearly temperature's error is 3.4 K (root mean square) and rain's 0.82 in natural logarithms (0.69 is a factor of two).
 
-Water on land: rain and snow 114,441 km³ a year (measured about 113,000), evaporated 75,832 (73,000), running off 38,610 (40,000), reaching the sea 37,762; lakes 51,811 km³ and salt lakes 7,651 km³ (91,000 and 85,000).
+Water on land: rain and snow 114,370 km³ a year (measured about 113,000), evaporated 75,809 (73,000), running off 38,561 (40,000), reaching the sea 37,713; lakes 51,811 km³ and salt lakes 7,644 km³ (91,000 and 85,000).
 
 Köppen-Geiger's main classes as shares of the land: A 20 %, B 30 %, C 14 %, D 18 %, E 18 % (measured A 19, B 30, C 13, D 25, E 12 per cent).
 

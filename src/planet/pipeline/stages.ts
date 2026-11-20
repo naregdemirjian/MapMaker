@@ -8,7 +8,7 @@
 // workers, joined in order, so the result is the same bytes on one worker or on many.
 import { definitionOf, historyView, type PlanetDefinition } from '../model/definition.ts';
 import { seasonalClimate } from '../climate/ebm.ts';
-import { hydroclimate } from '../climate/hydroclimate.ts';
+import { joinRain, rainMonths, type RainMonths } from '../climate/hydroclimate.ts';
 import { hydrology } from '../water/hydrology.ts';
 import { iceSheets } from '../water/ice.ts';
 import { BIOME_IDS, KOPPEN, biomeColour, biomeOf, customBiomeOf, koppen, type Place } from '../life/biomes.ts';
@@ -57,9 +57,12 @@ export interface StageDef {
   inputs(def: PlanetDefinition, params: StageParams): ProductData;
   /** How many items (cells) it can be run in parts over, if it can. */
   parts?(inputs: ProductData): number;
+  /** How many items a part takes, given the workers (default: fixed ranges of cells); the product is the same whatever. */
+  partSize?(items: number, workers: number): number;
+  /** Run on a range of items, a part; without one, the whole product (as the parts joined). */
   run(inputs: ProductData, deps: Record<string, ProductData>, ctx: StageContext, range?: [number, number]): ProductData | Promise<ProductData>;
   /** Joins the parts' products, in order. */
-  join?(parts: ProductData[], inputs: ProductData): ProductData;
+  join?(parts: ProductData[], inputs: ProductData, deps: Record<string, ProductData>): ProductData;
 }
 
 /**
@@ -120,6 +123,22 @@ export function tectonicParams(live: PlanetDefinition, level: number, durationMy
     // The climate the history's erosion and ice follow (D159): the planet's own settings.
     // (As the history was simulated with, if it keeps them: D161.)
     climate: { star: def.star, orbit: def.orbit, body: def.body, atmosphere: def.atmosphere, water: def.water, history: { ageGyr: def.history.ageGyr, events: [] }, interior: def.interior },
+  };
+}
+
+/** What the climate reads from a definition (and the water and life stages after it). */
+const climateInputs = (def: PlanetDefinition) =>
+  ({ star: def.star, orbit: def.orbit, body: def.body, atmosphere: def.atmosphere, water: def.water, history: { ageGyr: def.history.ageGyr, events: [] }, interior: def.interior }) as unknown as ProductData;
+
+/** The climate's product: the temperatures with the months' rain joined in order (D168). */
+function joinClimate(parts: ProductData[], deps: Record<string, ProductData>, n: number): ProductData {
+  const t = deps.temperature, monthly = t.monthly as Float32Array;
+  const h = joinRain(parts as unknown as RainMonths[], monthly, n);
+  const annual = new Float32Array(n);
+  for (let m = 0; m < 12; m++) for (let c = 0; c < n; c++) annual[c] += h.tempMonthly[m * n + c] / 12;
+  return {
+    monthly: h.tempMonthly, annual, ice: t.ice, meanK: t.meanK, absorbed: t.absorbed, emitted: t.emitted, tropicsC: t.tropicsC, polesC: t.polesC, years: t.years,
+    precipMonthly: h.precipMonthly, precipAnnual: h.precipAnnual, currents: h.currents, windJan: h.windJan, windJul: h.windJul, meanPrecip: h.meanPrecip,
   };
 }
 
@@ -190,36 +209,51 @@ export const STAGES: Record<string, StageDef> = {
   },
 
   /**
-   * The present climate through the year (D157): the seasonal energy balance over the present land and sea of the
-   * planet's history. Reads only what the climate depends on (star, orbit, body, air, water, age), so changing the
-   * air re-runs the climate alone.
+   * The present's temperatures through the year (D157): the seasonal energy balance over the present land and sea of
+   * the planet's history, with those heights (for the rain, D168). Reads only what the climate depends on (star,
+   * orbit, body, air, water, age), so changing the air re-runs the climate alone.
    */
-  climate: {
-    id: 'climate',
-    version: 2,
+  temperature: {
+    id: 'temperature',
+    version: 1,
     deps: () => ['tectonics'],
-    inputs: (def, p) => ({
-      level: p.level,
-      def: { star: def.star, orbit: def.orbit, body: def.body, atmosphere: def.atmosphere, water: def.water, history: { ageGyr: def.history.ageGyr, events: [] }, interior: def.interior } as unknown as ProductData,
-    }),
+    inputs: (def, p) => ({ level: p.level, def: climateInputs(def) }),
     run: (inputs, deps, ctx) => {
       const def = definitionOf(inputs.def)!;
       const mesh = meshAt(inputs.level as number), n = mesh.n;
       const all = deps.tectonics.heights as Int16Array;
       const heights = all.subarray(all.length - n);
-      const x = derive(def);
-      const r = seasonalClimate(mesh, def, x, heights);
-      ctx.progress(1, 2);
-      // Winds, rain and the sea's currents (D158); the currents' warmth goes into the temperatures.
-      const h = hydroclimate(mesh, def, x, heights, r.monthly, 4, r.dryWarm);
-      const annual = new Float32Array(n);
-      for (let m = 0; m < 12; m++) for (let c = 0; c < n; c++) annual[c] += h.tempMonthly[m * n + c] / 12;
-      ctx.progress(2, 2);
+      const r = seasonalClimate(mesh, def, derive(def), heights);
+      ctx.progress(1, 1);
       return {
-        monthly: h.tempMonthly, annual, ice: r.ice, meanK: r.meanK, absorbed: r.absorbed, emitted: r.emitted, tropicsC: r.tropicsC, polesC: r.polesC, years: r.years,
-        precipMonthly: h.precipMonthly, precipAnnual: h.precipAnnual, currents: h.currents, windJan: h.windJan, windJul: h.windJul, meanPrecip: h.meanPrecip,
+        monthly: r.monthly, dryWarm: r.dryWarm, ice: r.ice, meanK: r.meanK, absorbed: r.absorbed, emitted: r.emitted, tropicsC: r.tropicsC, polesC: r.polesC,
+        years: r.years, heights: heights.slice(),
       };
     },
+  },
+
+  /**
+   * The present climate through the year (D157, D158): the temperatures, and the winds, rain and the sea's currents
+   * worked out month by month, the months shared among the workers and joined in order (D168: the same product
+   * however they are shared).
+   */
+  climate: {
+    id: 'climate',
+    version: 3,
+    deps: () => ['temperature'],
+    inputs: (def, p) => ({ level: p.level, def: climateInputs(def) }),
+    parts: () => 12,
+    partSize: (items, workers) => Math.ceil(items / Math.max(1, Math.min(items, workers))),
+    run: (inputs, deps, ctx, range) => {
+      const def = definitionOf(inputs.def)!, mesh = meshAt(inputs.level as number), t = deps.temperature;
+      const [a, b] = range ?? [0, 12];
+      const months = Array.from({ length: b - a }, (_, i) => a + i);
+      const part = rainMonths(mesh, def, derive(def), t.heights as Int16Array, t.monthly as Float32Array, 4, t.dryWarm as Float32Array, months);
+      ctx.progress(1, 1);
+      const out = part as unknown as ProductData;
+      return range ? out : joinClimate([out], deps, mesh.n);
+    },
+    join: (parts, inputs, deps) => joinClimate(parts, deps, cellsAt(inputs.level as number)),
   },
 
   /**

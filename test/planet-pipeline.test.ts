@@ -151,3 +151,29 @@ test('workers: the same bytes from one worker, four, or none; progress; errors; 
   }
   await assert.rejects(pool.run('ping', null), /closed/);
 });
+
+test('the climate\'s months shared among workers (D168): the same bytes however they are shared, and as one run', async () => {
+  const def = definitionFromPreset('earthlike', 2);
+  const params = { level: 4, durationMyr: 100, frameEveryMyr: 25 };
+  const fields = ['monthly', 'annual', 'precipMonthly', 'precipAnnual', 'currents', 'windJan', 'windJul'] as const;
+  const bytes = (d: Record<string, unknown>) => fields.map((f) => digest(d[f] as Float32Array)).join('') + `${d.meanPrecip}:${d.meanK}`;
+  const seen: string[] = [];
+  let history: Record<string, unknown> | null = null, temperature: Record<string, unknown> | null = null;
+  // One worker (all twelve months in one part), three (four months each), seven (two each).
+  for (const size of [1, 3, 7]) {
+    const p = new Pipeline(new LocalExecutor(size));
+    const parts: number[] = [];
+    const c = await p.product('climate', def, params, { onProgress: (d) => parts.push(d) });
+    assert.equal(parts.length, Math.ceil(12 / Math.ceil(12 / size)), `${size} workers: the months in ${parts.length} parts`);
+    seen.push(bytes(c.data));
+    history ??= p.cache.get(p.keyOf('tectonics', def, params)) as Record<string, unknown>;
+    temperature ??= p.cache.get(p.keyOf('temperature', def, params)) as Record<string, unknown>;
+  }
+  assert.equal(seen[1], seen[0], 'three workers: the same bytes as one');
+  assert.equal(seen[2], seen[0], 'seven workers: the same bytes');
+  // Run whole (no parts): the same product.
+  const { STAGES } = await import('../src/planet/pipeline/stages.ts');
+  const whole = await STAGES.climate.run(STAGES.climate.inputs(def, params), { temperature: temperature as never }, { progress() {} });
+  assert.equal(bytes(whole as Record<string, unknown>), seen[0], 'and as one run');
+  assert.ok(history, 'the history made once for each pipeline');
+});

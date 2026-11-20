@@ -145,7 +145,54 @@ export function beltWind(latDeg: number, itczDeg: number, hadleyDeg: number, cel
  * heights (m above the sea; under 0 the sea). Runs on the climate's coarse mesh, results brought to `mesh`'s level.
  */
 export function hydroclimate(mesh: Mesh, def: PlanetDefinition, x: Derived, heightM: ArrayLike<number>, tempMonthly: ArrayLike<number>, level = 4, dryWarm: ArrayLike<number> | null = null, monthStep = 1): HydroResult {
-  const fineN = mesh.n, months = 12;
+  // (A history's past climates work out every `monthStep`-th month and give the months between the last one's rain.)
+  const wanted: number[] = [];
+  for (let m = 0; m < 12; m++) if (m % monthStep === 0) wanted.push(m);
+  return joinRain([rainMonths(mesh, def, x, heightM, tempMonthly, level, dryWarm, wanted)], tempMonthly, mesh.n);
+}
+
+/**
+ * Some months' rain (D168: the months are independent of one another, so the year's can be worked out in parts, in
+ * any grouping, and joined by `joinRain` into exactly what one run makes): each month's rain and snow (mm) in the
+ * order asked, its total over the coarse cells, the winds of the first and seventh months if asked, the currents.
+ */
+export interface RainMonths {
+  months: number[];
+  precip: Float32Array;
+  totals: Float64Array;
+  windJan: Float32Array | null;
+  windJul: Float32Array | null;
+  currents: Float32Array;
+}
+
+/** Joins months' rain worked out in parts into the year's; a month not worked out takes the one before's rain. */
+export function joinRain(parts: RainMonths[], tempMonthly: ArrayLike<number>, fineN: number): HydroResult {
+  const months = 12, precipMonthly = new Float32Array(months * fineN), tempOut = new Float32Array(months * fineN);
+  const of = new Map<number, [RainMonths, number]>();
+  for (const p of parts) p.months.forEach((m, i) => of.set(m, [p, i]));
+  let total = 0, lastTotal = 0, windJan: Float32Array = new Float32Array(2 * fineN), windJul: Float32Array = new Float32Array(2 * fineN);
+  for (let m = 0; m < months; m++) {
+    const got = of.get(m);
+    if (!got) {
+      precipMonthly.copyWithin(m * fineN, (m - 1) * fineN, m * fineN);
+      total += lastTotal;
+      continue;
+    }
+    const [p, i] = got;
+    precipMonthly.set(p.precip.subarray(i * fineN, (i + 1) * fineN), m * fineN);
+    lastTotal = p.totals[i];
+    total += lastTotal;
+  }
+  for (const p of parts) { if (p.windJan) windJan = p.windJan; if (p.windJul) windJul = p.windJul; }
+  for (let m = 0; m < months; m++) for (let c = 0; c < fineN; c++) tempOut[m * fineN + c] = tempMonthly[m * fineN + c];
+  const precipAnnual = new Float32Array(fineN);
+  for (let m = 0; m < months; m++) for (let c = 0; c < fineN; c++) precipAnnual[c] += precipMonthly[m * fineN + c];
+  return { precipMonthly, precipAnnual, tempMonthly: tempOut, currents: parts[0].currents, windJan, windJul, meanPrecip: total / (4 * Math.PI) };
+}
+
+/** The rain of the months asked (indices 0 to 11), from the temperatures of every month (°C, month m of cell c at [m·n + c]). */
+export function rainMonths(mesh: Mesh, def: PlanetDefinition, x: Derived, heightM: ArrayLike<number>, tempMonthly: ArrayLike<number>, level: number, dryWarm: ArrayLike<number> | null, wanted: number[]): RainMonths {
+  const fineN = mesh.n;
   const coarse = meshAt(Math.min(mesh.level, level)), n = coarse.n;
   const down = (f: ArrayLike<number>) => (mesh.level > coarse.level ? toLevel(f, mesh.level, coarse.level) : Float64Array.from(f));
   const up = (f: ArrayLike<number>) => (mesh.level > coarse.level ? toLevel(f, coarse.level, mesh.level) : Float64Array.from(f));
@@ -154,11 +201,11 @@ export function hydroclimate(mesh: Mesh, def: PlanetDefinition, x: Derived, heig
   const land = down(landFine), height = down(hFine);
   // Winds and rain go by the air column's temperature: dry ground's own extra warmth (ebm.ts, D159) draws in no rain.
   const T: Float64Array[] = [], Tair: Float64Array[] = [];
-  for (let m = 0; m < months; m++) {
+  for (const m of wanted) {
     const col = Array.prototype.slice.call(tempMonthly, m * fineN, (m + 1) * fineN) as number[];
-    Tair.push(down(col));
+    Tair[m] = down(col);
     if (dryWarm) for (let c = 0; c < fineN; c++) col[c] -= dryWarm[c];
-    T.push(down(col));
+    T[m] = down(col);
   }
   const water = def.water.oceanFraction > 0 && def.atmosphere.pressureBar > 0.006;
   const R = def.body.radiusKm * 1000;
@@ -168,8 +215,8 @@ export function hydroclimate(mesh: Mesh, def: PlanetDefinition, x: Derived, heig
   // them; equatorward, sinking and dry on their eastern sides and the west coasts facing them.
   const flank = highFlanks(coarse, land, x);
   // (The currents' heat is in the temperatures already: the energy balance carries it, D165.)
-  const precipMonthly = new Float32Array(months * fineN), tempOut = new Float32Array(months * fineN);
-  let windJan = new Float32Array(2 * fineN), windJul = new Float32Array(2 * fineN);
+  const months = 12, precip = new Float32Array(wanted.length * fineN), totals = new Float64Array(wanted.length);
+  let windJan: Float32Array | null = null, windJul: Float32Array | null = null;
   const retro = def.body.tiltDeg > 90;
   const { xyz, nbrStart, nbr, edgeLen, edgeDist, area } = coarse;
   // Local east and north unit vectors per cell.
@@ -179,15 +226,8 @@ export function hydroclimate(mesh: Mesh, def: PlanetDefinition, x: Derived, heig
     east[3 * c] = -Math.sin(lo); east[3 * c + 1] = Math.cos(lo); east[3 * c + 2] = 0;
     north[3 * c] = -Math.sin(la) * Math.cos(lo); north[3 * c + 1] = -Math.sin(la) * Math.sin(lo); north[3 * c + 2] = Math.cos(la);
   }
-  let total = 0, lastTotal = 0;
-  // (A history's past climates work out every `monthStep`-th month and give the months between the last one's rain.)
-  for (let m = 0; m < months; m++) {
-    if (m % monthStep !== 0) {
-      precipMonthly.copyWithin(m * fineN, (m - 1) * fineN, m * fineN);
-      total += lastTotal;
-      continue;
-    }
-    const t = T[m], ta = Tair[m];
+  for (let i = 0; i < wanted.length; i++) {
+    const m = wanted[i], t = T[m], ta = Tair[m];
     // Where the star stands overhead a month earlier (mid-month).
     const o = orbitAt((m - 0.5) / months, def.orbit.eccentricity, def.orbit.perihelionDeg);
     const decl = (Math.asin(Math.sin((def.body.tiltDeg * Math.PI) / 180) * Math.sin(o.lambda)) * 180) / Math.PI;
@@ -291,37 +331,36 @@ export function hydroclimate(mesh: Mesh, def: PlanetDefinition, x: Derived, heig
       for (let c = 0; c < n; c++) { let sum = 0; for (let k = nbrStart[c]; k < nbrStart[c + 1]; k++) sum += eddy[k]; most = Math.max(most, sum * (DAY / 3)); }
       if (most > 0.4) for (let k = 0; k < eddy.length; k++) eddy[k] *= 0.4 / most;
       // Steady state by upwind steps of a third of a day (what condenses at the cap counted as rain, per step, at the end).
+      // (What stays the same through the month is worked out once, D168: the same arithmetic as step by step.)
+      const outflowOf = new Float64Array(n), inward = new Float64Array(nbr.length), conv = new Float64Array(n), recycle = new Float64Array(n);
+      const satDeficit = new Float64Array(n), cap = new Float64Array(n), deficitGain = 1 + 1 / HYDRO.deficit;
+      for (let c = 0; c < n; c++) {
+        let outflow = 0;
+        for (let k = nbrStart[c]; k < nbrStart[c + 1]; k++) { const f = flux[k]; if (f > 0) outflow += f; else inward[k] = -f; }
+        outflowOf[c] = outflow;
+        conv[c] = HYDRO.base * HYDRO.rising * convect[c] * lift[c];
+        // Land gives back part of its rain by evaporation and the breath of plants: more where it is warm and wet.
+        recycle[c] = land[c] ? (HYDRO.recycle + HYDRO.warmRecycle * Math.max(0, Math.min(1, (t[c] - 12) / 12))) : 0;
+        satDeficit[c] = (1 + HYDRO.deficit) * sat[c];
+        // Vapour cannot much exceed what the air holds at its temperature: over cold ground it condenses and falls.
+        // (The air's own temperature: over a hot desert it holds more, D165.)
+        cap[c] = (land[c] ? 0.9 : 1.05) * vapour(Math.min(30, ta[c]));
+      }
       const dt = DAY / 3, steps = 240, extra = new Float64Array(n);
+      const loop: VapourLoop = { n, nbrStart, nbr, inward, eddy, rate, conv, sat, recycle, satDeficit, deficit: HYDRO.deficit, deficitGain, source, outflowOf, cap, dt };
+      let next = new Float64Array(n), here = W;
       for (let it = 0; it < steps; it++) {
         if (it === steps - 60) extra.fill(0);
-        const next = new Float64Array(n);
-        for (let c = 0; c < n; c++) {
-          let inflow = 0, outflow = 0;
-          for (let k = nbrStart[c]; k < nbrStart[c + 1]; k++) {
-            const f = flux[k], j = nbr[k];
-            if (f > 0) outflow += f; else inflow -= f * W[j];
-            inflow += eddy[k] * (W[j] - W[c]);
-          }
-          const r = rate[c] + HYDRO.base * HYDRO.rising * convect[c] * lift[c] * Math.min(1, W[c] / sat[c]);
-          const rain = (r / DAY) * W[c];
-          // Land gives back part of its rain by evaporation and the breath of plants: more where it is warm and wet.
-          const recycled = land[c] ? (HYDRO.recycle + HYDRO.warmRecycle * Math.max(0, Math.min(1, (t[c] - 12) / 12))) * rain : 0;
-          // (Evaporation slows as the air nears saturation, D165: the bulk formula's humidity deficit, as much as before
-          // with the air at its usual vapour, more with drier air.)
-          const evap = HYDRO.deficit > 0 ? source[c] * Math.max(0, 1 - W[c] / ((1 + HYDRO.deficit) * sat[c])) * (1 + 1 / HYDRO.deficit) : source[c];
-          next[c] = Math.max(0, W[c] + dt * (evap / DAY + recycled + inflow - outflow * W[c] - rain));
-          // Vapour cannot much exceed what the air holds at its temperature: over cold ground it condenses and falls.
-          // (The air's own temperature: over a hot desert it holds more, D165.)
-          const cap = (land[c] ? 0.9 : 1.05) * vapour(Math.min(30, ta[c]));
-          if (next[c] > cap) { extra[c] += next[c] - cap; next[c] = cap; }
-        }
-        W.set(next);
+        vapourStep(loop, here, next, extra);
+        const was = here;
+        here = next; next = was;
       }
+      if (here !== W) W.set(here);
       const days = x.yearDays / months;
       for (let c = 0; c < n; c++) P[c] = ((rate[c] + HYDRO.base * HYDRO.rising * convect[c] * lift[c] * Math.min(1, W[c] / sat[c])) * W[c] + (extra[c] / 60) * (DAY / dt)) * days;
     }
     const fineP = up(P);
-    for (let c = 0; c < fineN; c++) precipMonthly[m * fineN + c] = Math.max(0, fineP[c]);
+    for (let c = 0; c < fineN; c++) precip[i * fineN + c] = Math.max(0, fineP[c]);
     if (m === 0 || m === 6) {
       const out = new Float32Array(2 * fineN);
       const ue = up(Float64Array.from({ length: n }, (_, c) => wind[3 * c] * east[3 * c] + wind[3 * c + 1] * east[3 * c + 1] + wind[3 * c + 2] * east[3 * c + 2]));
@@ -329,18 +368,49 @@ export function hydroclimate(mesh: Mesh, def: PlanetDefinition, x: Derived, heig
       for (let c = 0; c < fineN; c++) { out[2 * c] = ue[c]; out[2 * c + 1] = vn[c]; }
       if (m === 0) windJan = out; else windJul = out;
     }
-    lastTotal = 0;
-    for (let c = 0; c < n; c++) lastTotal += P[c] * area[c];
-    total += lastTotal;
+    let monthTotal = 0;
+    for (let c = 0; c < n; c++) monthTotal += P[c] * area[c];
+    totals[i] = monthTotal;
   }
-  // The currents' warmth on the fine mesh's temperatures (and a little inland).
-  const cur = up(currents);
-  for (let m = 0; m < months; m++) for (let c = 0; c < fineN; c++) tempOut[m * fineN + c] = tempMonthly[m * fineN + c];
-  const precipAnnual = new Float32Array(fineN);
-  for (let m = 0; m < months; m++) for (let c = 0; c < fineN; c++) precipAnnual[c] += precipMonthly[m * fineN + c];
-  return { precipMonthly, precipAnnual, tempMonthly: tempOut, currents: Float32Array.from(cur), windJan, windJul, meanPrecip: total / (4 * Math.PI) };
+  // The currents (on the fine mesh).
+  return { months: wanted, precip, totals, windJan, windJul, currents: Float32Array.from(up(currents)) };
 }
 
+
+/** What one step of the vapour's month reads (D168: a small function the engine optimises well). */
+interface VapourLoop {
+  n: number; nbrStart: Int32Array; nbr: Int32Array; inward: Float64Array; eddy: Float64Array; rate: Float64Array; conv: Float64Array;
+  sat: Float64Array; recycle: Float64Array; satDeficit: Float64Array; deficit: number; deficitGain: number; source: Float64Array;
+  outflowOf: Float64Array; cap: Float64Array; dt: number;
+}
+
+/**
+ * One upwind step of a third of a day of the vapour (`here` to `next`): carried in by the wind and the storms' eddies,
+ * raining out, evaporating from the sea and given back by the land; what passes the air's capacity condenses (added
+ * to `extra`).
+ */
+function vapourStep(L: VapourLoop, here: Float64Array, next: Float64Array, extra: Float64Array): void {
+  const { n, nbrStart, nbr, inward, eddy, rate, conv, sat, recycle, satDeficit, deficit, deficitGain, source, outflowOf, cap, dt } = L;
+  for (let c = 0; c < n; c++) {
+    const wc = here[c];
+    let inflow = 0;
+    const end = nbrStart[c + 1];
+    for (let k = nbrStart[c]; k < end; k++) {
+      const wj = here[nbr[k]];
+      inflow += inward[k] * wj;
+      inflow += eddy[k] * (wj - wc);
+    }
+    const r = rate[c] + conv[c] * Math.min(1, wc / sat[c]);
+    const rain = (r / DAY) * wc;
+    const recycled = recycle[c] * rain;
+    // (Evaporation slows as the air nears saturation, D165: the bulk formula's humidity deficit, as much as before
+    // with the air at its usual vapour, more with drier air.)
+    const evap = deficit > 0 ? source[c] * Math.max(0, 1 - wc / satDeficit[c]) * deficitGain : source[c];
+    let w = Math.max(0, wc + dt * (evap / DAY + recycled + inflow - outflowOf[c] * wc - rain));
+    if (w > cap[c]) { extra[c] += w - cap[c]; w = cap[c]; }
+    next[c] = w;
+  }
+}
 
 /**
  * Where each cell lies against the subtropical highs over the oceans (D159). Over a wide ocean (at least

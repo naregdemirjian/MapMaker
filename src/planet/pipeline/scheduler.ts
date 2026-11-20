@@ -103,15 +103,15 @@ export class Pipeline {
     if (!s.parts || !s.join) {
       return (await this.executor.run('stage', { stage, inputs, deps, ...(opts.hints ? { hints: opts.hints } : {}) }, opts)) as ProductData;
     }
-    const n = s.parts(inputs);
+    const n = s.parts(inputs), size = Math.max(1, s.partSize ? s.partSize(n, this.executor.size) : PART_SIZE);
     const ranges: Array<[number, number]> = [];
-    for (let a = 0; a < n; a += PART_SIZE) ranges.push([a, Math.min(n, a + PART_SIZE)]);
+    for (let a = 0; a < n; a += size) ranges.push([a, Math.min(n, a + size)]);
     let done = 0;
     const parts = await Promise.all(ranges.map((range) =>
       this.executor.run('stage', { stage, inputs, deps, range }, { signal: opts.signal }).then((r) => {
         opts.onProgress?.(++done, ranges.length);
         return r as ProductData;
       })));
-    return s.join(parts, inputs);
+    return s.join(parts, inputs, deps);
   }
 }

@@ -26,7 +26,7 @@ test('a picture of today shows the biomes the full climate, water and life stage
   assert.ok((h.frameWarm as Float64Array[]).every((k) => k.length === 642 && k.every((v) => v > 150 && v < 400)), 'coarse temperatures, K');
   assert.ok((h.frameCo2 as Float64Array).every((v) => v === 1), 'no climate events: the air as set');
   const ins = await stage('insolation', def, {});
-  const cl = await stage('climate', def, { tectonics: h });
+  const cl = await stage('climate', def, { temperature: await stage('temperature', def, { tectonics: h }) });
   const wa = await stage('water', def, { tectonics: h, climate: cl, insolation: ins });
   const bi = await stage('biomes', def, { tectonics: h, climate: cl, water: wa, insolation: ins });
   const now = await stage('moment', def, { tectonics: h }, { frame: F - 1 });

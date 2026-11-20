@@ -35,7 +35,8 @@ async function runAll(def: PlanetDefinition, level: number, times?: Record<strin
   };
   await go('tectonics', []);
   await go('insolation', []);
-  await go('climate', ['tectonics']);
+  await go('temperature', ['tectonics']);
+  await go('climate', ['temperature']);
   await go('water', ['tectonics', 'climate', 'insolation']);
   await go('biomes', ['tectonics', 'climate', 'water', 'insolation']);
   await go('cover', ['biomes']);
@@ -43,7 +44,7 @@ async function runAll(def: PlanetDefinition, level: number, times?: Record<strin
 }
 
 async function bench() {
-  const rows: string[] = ['| Level | History (500 Myr) | Sunlight | Climate | Water and ice | Biomes | Cover (1024 × 512) | An edit of the air | An earlier moment |', '| --- | --- | --- | --- | --- | --- | --- | --- | --- |'];
+  const rows: string[] = ['| Level | History (500 Myr) | Sunlight | Climate (temperatures + rain) | Water and ice | Biomes | Cover (1024 × 512) | An edit of the air | An earlier moment |', '| --- | --- | --- | --- | --- | --- | --- | --- | --- |'];
   for (const level of [5, 6]) {
     const def = definitionFromPreset('earthlike', 1);
     def.history.climate = climateSnapshot(def);
@@ -61,7 +62,7 @@ async function bench() {
     await STAGES.cover.run(STAGES.cover.inputs(def, past), { moment }, ctx);
     const earlier = performance.now() - t1;
     const s = (ms: number) => `${(ms / 1000).toFixed(2)} s`;
-    rows.push(`| ${level} (${level === 5 ? 'preview' : 'standard'}) | ${s(t.tectonics)} | ${s(t.insolation)} | ${s(t.climate)} | ${s(t.water)} | ${s(t.biomes)} | ${s(t.cover)} | ${s(edit)} | ${s(earlier)} |`);
+    rows.push(`| ${level} (${level === 5 ? 'preview' : 'standard'}) | ${s(t.tectonics)} | ${s(t.insolation)} | ${s(t.temperature + t.climate)} (${s(t.temperature)} + ${s(t.climate)}) | ${s(t.water)} | ${s(t.biomes)} | ${s(t.cover)} | ${s(edit)} | ${s(earlier)} |`);
   }
   console.log(rows.join('\n'));
 }

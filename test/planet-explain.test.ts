@@ -16,7 +16,7 @@ const run = async (def: ReturnType<typeof definitionFromPreset>, level = 4, span
   const p = { level, durationMyr: span, frameEveryMyr: 25 }, ctx = { progress() {} };
   const go = async (id: string, deps: Record<string, unknown>) => STAGES[id].run(STAGES[id].inputs(def, p), deps as never, ctx) as Promise<Record<string, unknown>>;
   const tectonics = await go('tectonics', {}), insolation = await go('insolation', {});
-  const climate = await go('climate', { tectonics }), water = await go('water', { tectonics, climate, insolation });
+  const climate = await go('climate', { temperature: await go('temperature', { tectonics }) }), water = await go('water', { tectonics, climate, insolation });
   const biomes = await go('biomes', { tectonics, climate, water, insolation });
   return { tectonics, climate, water, biomes };
 };

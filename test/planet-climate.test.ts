@@ -97,3 +97,18 @@ test('other worlds: a tidally locked planet\'s cold night, Venus even and hot, a
   for (let c = 0; c < mesh.n; c++) ice += frozen.ice[c] * mesh.area[c];
   assert.ok(ice / (4 * Math.PI) > 0.5, `mostly icy (${(ice / (4 * Math.PI)).toFixed(2)})`);
 });
+
+test('the climate settled (D168): from the year\'s balance and the slow settling extrapolated, within a fifth of a kelvin of sixty years, in a few', () => {
+  // A doubled carbon dioxide on the Earth's land and sea, a tidally locked world and a hothouse: before D168 these ran
+  // 16, 10 (unsettled by 2 K) and 40 years.
+  const doubled = definitionFromPreset('earthlike');
+  doubled.atmosphere.co2 *= 2;
+  for (const [name, def, most] of [['doubled carbon dioxide', doubled, 7], ['tidally locked', definitionFromPreset('tidally-locked'), 4], ['hothouse', definitionFromPreset('hothouse'), 4]] as const) {
+    const quick = climate(def);
+    const settled = seasonalClimate(mesh, def, derive(def), earthHeights, { minYears: 60, maxYears: 60, extrapolateAt: 0 });
+    let off = 0;
+    for (let c = 0; c < mesh.n; c++) off = Math.max(off, Math.abs(quick.annual[c] - settled.annual[c]));
+    assert.ok(quick.years <= most, `${name}: ${quick.years} years`);
+    assert.ok(off < 0.2, `${name}: within ${off.toFixed(2)} K of sixty years everywhere`);
+  }
+});

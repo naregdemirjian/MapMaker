@@ -64,7 +64,8 @@ function snowyLand(n: number, heightM: ArrayLike<number>, hy: HydroResult, x: De
 export function paleoClimate(mesh: Mesh, heightM: ArrayLike<number>, climateDef: unknown, co2: number, prev: { coarseK: Float64Array } | null): PaleoClimate {
   const def = definitionAt(climateDef, co2);
   const x = derive(def), n = mesh.n;
-  const cl = seasonalClimate(mesh, def, x, heightM, { level: PALEO_LEVEL, initialK: prev?.coarseK, maxYears: prev ? 4 : 40, minYears: prev ? 2 : 3, tolerance: 0.05 });
+  // (A history's first climate starts as it always has, from one even temperature: D168 leaves histories as they were.)
+  const cl = seasonalClimate(mesh, def, x, heightM, { level: PALEO_LEVEL, initialK: prev?.coarseK, maxYears: prev ? 4 : 40, minYears: prev ? 2 : 3, tolerance: 0.05, ...(prev ? {} : { start: 'even' as const, extrapolateAt: 0 }) });
   const hy = hydroclimate(mesh, def, x, heightM, cl.monthly, PALEO_LEVEL, cl.dryWarm, 3);
   const rain = new Float64Array(n);
   let mean = 0;
