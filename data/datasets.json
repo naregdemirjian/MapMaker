@@ -199,5 +199,15 @@
     "credit": "Made with Natural Earth. Free vector and raster map data @ naturalearthdata.com.",
     "usedFor": "Today's cities and capitals: their places, populations, capitals and world cities; each country's population for the cities' shares (D173)",
     "retrieved": "2026-11-20"
+  },
+  {
+    "id": "natural-earth-urban",
+    "name": "Natural Earth urban areas (1:10m), the Middle East and the Caucasus",
+    "version": "5.1.2",
+    "source": "https://www.naturalearthdata.com/ (files from https://github.com/nvkelso/natural-earth-vector); built-up areas from MODIS (Schneider et al.)",
+    "licence": "Public domain",
+    "credit": "Made with Natural Earth. Free vector and raster map data @ naturalearthdata.com.",
+    "usedFor": "The built-up areas of cities on the ready-made maps of the Middle East and of Armenia (D175)",
+    "retrieved": "2026-11-20"
   }
 ]

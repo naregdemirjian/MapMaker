@@ -18,6 +18,8 @@ import { defaultEnd, typeSettings, type Spread } from '../../domain/event-types.
 import { PLANET_PRESETS, planetParamsOf, type PlanetParams, type PlanetPreset } from '../../terrain/planet.ts';
 import { planetPreview } from '../../terrain/planet-preview.ts';
 import { spaceCamera } from '../../space/space-view.ts';
+import { REGION_MAPS } from '../../domain/region-maps.ts';
+import { makeRegionMap } from '../region-maps.ts';
 
 function Modal({ title, children, onClose, wide }: { title: string; children: React.ReactNode; onClose: () => void; wide?: boolean }) {
   return (
@@ -211,7 +213,7 @@ export function NewWorldDialog() {
   const [name, setName] = useState('');
   const [km, setKm] = useState('6371');
   const [earth, setEarth] = useState(false);
-  const [kind, setKind] = useState<'round' | 'paleo' | 'planet' | 'sim' | 'flat' | 'stars' | 'solar' | 'invented' | 'milkyway' | 'galaxy'>('round');
+  const [kind, setKind] = useState<'round' | 'paleo' | 'planet' | 'sim' | 'flat' | 'stars' | 'solar' | 'invented' | 'milkyway' | 'galaxy' | `region:${string}`>('round');
   const [inv, setInv] = useState({ seed: newSeed(), count: 300, radiusLy: 50, shape: 'sphere' as 'sphere' | 'disc' });
   const [gal, setGal] = useState({ seed: newSeed(), systems: 600, arms: 4, pitch: 14, radiusLy: 50000, bar: true });
   const flat = kind === 'flat';
@@ -221,6 +223,8 @@ export function NewWorldDialog() {
   const create = () => {
     // A simulated planet (D156) is described in the Planet Studio, which makes its map.
     if (kind === 'sim') { s.set({ dialog: 'planet-studio', studioSpaceId: null, studioName: name.trim() }); return; }
+    // A ready-made map of a region (D175).
+    if (kind.startsWith('region:')) { close(); void makeRegionMap(kind.slice(7)); return; }
     const id = kind === 'milkyway' || kind === 'galaxy'
       ? s.execute((w) => cmd.createSpaceMap(w, name.trim() || (kind === 'milkyway' ? 'The Milky Way' : 'A galaxy'), 'galaxy', undefined, { ...gal, kind: kind === 'milkyway' ? 'milkyway' : 'invented', seed: kind === 'milkyway' ? 1 : gal.seed }))
       : kind === 'stars' || kind === 'solar' || kind === 'invented'
@@ -247,6 +251,7 @@ export function NewWorldDialog() {
       <p className="muted">Each map has its own geography, layers and territorial history; events and countries are shared by the whole project.</p>
       <div className="choice-row">
         <label className="check"><input type="radio" name="map-kind" checked={kind === 'round'} onChange={() => setKind('round')} /> Round: a planet or moon (Earth, another real body, or a blank one of your own)</label>
+        {REGION_MAPS.map((m) => <label key={m.id} className="check" title={m.about}><input type="radio" name="map-kind" checked={kind === `region:${m.id}`} onChange={() => setKind(`region:${m.id}`)} data-testid={`new-map-region-${m.id}`} /> Ready-made: {m.name}, as photographed from space, at the finest detail, with a 4K shot</label>)}
         <label className="check"><input type="radio" name="map-kind" checked={kind === 'paleo'} onChange={() => setKind('paleo')} data-testid="new-map-paleo" /> The Earth through geological time: its continents, seas and mountains as they were, from 540 million years ago to today</label>
         <label className="check"><input type="radio" name="map-kind" checked={kind === 'planet'} onChange={() => setKind('planet')} data-testid="new-map-planet" /> A planet of your own, generated: continents, seas and mountains from a seed</label>
         <label className="check"><input type="radio" name="map-kind" checked={kind === 'sim'} onChange={() => setKind('sim')} data-testid="new-map-sim" /> A simulated planet: its star, orbit, interior, air and water described, its continents shaped by plate tectonics and erosion over its history (the Planet Studio)</label>
@@ -280,7 +285,7 @@ export function NewWorldDialog() {
           <label>Shape<select value={inv.shape} onChange={(e) => setInv({ ...inv, shape: e.target.value as 'sphere' | 'disc' })}><option value="sphere">A sphere round the home star</option><option value="disc">A flat disc</option></select></label>
         </div>
         <p className="muted" data-testid="new-map-invented-note">Stars round a home star, most of them red dwarfs as around the Sun, with names of their own (the faintest numbered). The same seed gives the same stars; held stars and lanes work as on the real map.</p>
-      </> : kind === 'sim' ? <p className="muted" data-testid="new-map-sim-note">The Planet Studio opens: choose a starting point (Earth-like, a supercontinent, a young volcanic world, a frozen or desert world, an ocean world, a tidally locked planet, a super-Earth, a hothouse…), change what you like step by step, see what follows (its year, gravity, sunlight, temperature, winds, interior) and why, simulate its history and explore it, then use it for a map whose land and sea follow its history through time.</p> : kind === 'paleo' ? <p className="muted" data-testid="new-map-paleo-note">The Earth's land and sea floor at 109 moments from 540 million years ago to today (the PALEOMAP PaleoDEMs of C. R. Scotese and N. Wright, 2018), changing steadily between them: Pangaea coming together and breaking up, oceans opening and closing, mountains rising; over the last 128,000 years the seas of the ice ages (land bridges where the sea was lower). Coasts are where the land meets the sea of each moment. Dates before 10,000 BCE are written as how long ago they were: type "250 Ma" or "21,000 years ago".</p> : kind === 'solar' ? <p className="muted" data-testid="new-map-solar-note">The planets and Pluto on their orbits, where they are on any date from their orbital elements (JPL): they move as the date changes. Give them to countries and factions, join them with lanes, as on a star map.</p> : kind === 'stars' ? <p className="muted" data-testid="new-map-stars-note">982 stars from the HYG database: real positions, colours by type, names. Drag to turn the view, scroll to zoom, click a star to see what it is.</p> : flat ? <>
+      </> : kind.startsWith('region:') ? <p className="muted" data-testid="new-map-region-note">{REGION_MAPS.find((m) => `region:${m.id}` === kind)?.about} The photographs (Sentinel-2 cloudless, about 10 m a pixel) and the finer heights (about 40 m) are downloaded as you close in or export, and kept on this computer.</p> : kind === 'sim' ? <p className="muted" data-testid="new-map-sim-note">The Planet Studio opens: choose a starting point (Earth-like, a supercontinent, a young volcanic world, a frozen or desert world, an ocean world, a tidally locked planet, a super-Earth, a hothouse…), change what you like step by step, see what follows (its year, gravity, sunlight, temperature, winds, interior) and why, simulate its history and explore it, then use it for a map whose land and sea follow its history through time.</p> : kind === 'paleo' ? <p className="muted" data-testid="new-map-paleo-note">The Earth's land and sea floor at 109 moments from 540 million years ago to today (the PALEOMAP PaleoDEMs of C. R. Scotese and N. Wright, 2018), changing steadily between them: Pangaea coming together and breaking up, oceans opening and closing, mountains rising; over the last 128,000 years the seas of the ice ages (land bridges where the sea was lower). Coasts are where the land meets the sea of each moment. Dates before 10,000 BCE are written as how long ago they were: type "250 Ma" or "21,000 years ago".</p> : kind === 'solar' ? <p className="muted" data-testid="new-map-solar-note">The planets and Pluto on their orbits, where they are on any date from their orbital elements (JPL): they move as the date changes. Give them to countries and factions, join them with lanes, as on a star map.</p> : kind === 'stars' ? <p className="muted" data-testid="new-map-stars-note">982 stars from the HYG database: real positions, colours by type, names. Drag to turn the view, scroll to zoom, click a star to see what it is.</p> : flat ? <>
         <label>Width (km)<input type="number" min={0.01} max={5000} value={widthKm} onChange={(e) => setWidthKm(e.target.value)} data-testid="new-map-width" /></label>
         <p className="muted">Borders on a flat map are straight lines; the scale bar reads in metres and kilometres.</p>
       </> : <>

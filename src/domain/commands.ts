@@ -1849,16 +1849,22 @@ export function placeCharacter(world: World, o: { spaceId: string; entity: strin
  * Today's cities and capitals (D173), added as cities (dated points) that remember their country, population,
  * share, capital and economic importance, in a group "Today's cities": from the beginning, from a date, or in an
  * event, as the edit mode says. A city already in the project (the same name, and the same country if it is one
- * of today's) is left as it is. One undo step; returns the cities made.
+ * of today's) is placed on this map if it is not on it yet, else left as it is. One undo step; returns the cities placed.
  */
 export function addCities(world: World, o: { spaceId: string; places: TodayPlace[]; mode: EditMode }): CommandResult<string[]> {
   const space = world.get('map_space', o.spaceId);
   if (!space || space.kind !== 'sphere') throw new Error('Today\'s cities go on round maps.');
-  const have = new Set(world.all('entity').filter((e) => e.type_id === 'settlement').map((e) => `${e.name.toLowerCase()}|${placeMetaOf(e.style)?.country ?? ''}`));
-  const haveName = new Set(world.all('entity').filter((e) => e.type_id === 'settlement' && !placeMetaOf(e.style)).map((e) => e.name.toLowerCase()));
-  const places = o.places.filter((p) => !have.has(`${p.name.toLowerCase()}|${p.country}`) && !haveName.has(p.name.toLowerCase()));
-  if (!places.length) throw new Error(o.places.length ? 'Those cities are already on the map.' : 'Choose some cities.');
-  return run(world, `Add ${places.length === 1 ? places[0].name : `${places.length} cities`}`, (tx) => {
+  // Cities already in the project: by name and today's country, or by name for cities of one's own.
+  const known = new Map<string, string>();
+  for (const e of world.all('entity')) {
+    if (e.type_id !== 'settlement') continue;
+    const m = placeMetaOf(e.style);
+    known.set(`${e.name.toLowerCase()}|${m?.country ?? '*'}`, e.id);
+  }
+  const placedHere = new Set(world.all('effect').filter((f) => f.kind === 'place' && f.space_id === o.spaceId).map((f) => parseJSON<PlaceIntent | null>(f.intent, null)?.entity).filter((x): x is string => !!x));
+  const todo = o.places.map((p) => ({ p, id: known.get(`${p.name.toLowerCase()}|${p.country}`) ?? known.get(`${p.name.toLowerCase()}|*`) ?? null })).filter((x) => !x.id || !placedHere.has(x.id));
+  if (!todo.length) throw new Error(o.places.length ? 'Those cities are already on the map.' : 'Choose some cities.');
+  return run(world, `Add ${todo.length === 1 ? todo[0].p.name : `${todo.length} cities`}`, (tx) => {
     let group = tx.world.all('entity_group').find((g) => g.name === 'Today\'s cities')?.id;
     if (!group) {
       group = newId('egrp');
@@ -1866,9 +1872,13 @@ export function addCities(world: World, o: { spaceId: string; places: TodayPlace
       tx.insert('entity_group', { id: group, name: 'Today\'s cities', color: GROUP_COLORS[n % GROUP_COLORS.length], sort_order: n, created_seq: tx.world.nextSeq('entity_group') });
     }
     const ids: string[] = [];
-    for (const p of places) {
-      const id = newId('ent');
-      tx.insert('entity', { id, type_id: 'settlement', branch_id: MAIN_BRANCH, name: p.name, color: '#f4efe6', notes: `${p.capital === 'national' ? 'Capital of ' : p.capital === 'regional' ? `Capital of ${p.region}, ` : ''}${p.country}. About ${p.population.toLocaleString('en-US')} people (Natural Earth).`, created_seq: tx.world.nextSeq('entity'), style: JSON.stringify({ place: placeMeta(p) }), group_id: group });
+    for (const { p, id: have } of todo) {
+      let id = have;
+      if (!id) {
+        id = newId('ent');
+        tx.insert('entity', { id, type_id: 'settlement', branch_id: MAIN_BRANCH, name: p.name, color: '#f4efe6', notes: `${p.capital === 'national' ? 'Capital of ' : p.capital === 'regional' ? `Capital of ${p.region}, ` : ''}${p.country}. About ${p.population.toLocaleString('en-US')} people (Natural Earth).`, created_seq: tx.world.nextSeq('entity'), style: JSON.stringify({ place: placeMeta(p) }), group_id: group });
+      }
+      // (A city already in the project, from another map: placed on this one too.)
       writePlacement(tx, o.spaceId, id, o.mode, { lon: ((((p.lon + 180) % 360) + 360) % 360) - 180, lat: p.lat, arrive: 'jump' });
       ids.push(id);
     }

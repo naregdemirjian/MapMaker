@@ -61,6 +61,24 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D175. Two ready-made maps at the finest detail: the Middle East today, and Armenia with its neighbours
+
+- **Asked.** For the film, two maps of the highest quality: the Middle East today with its urban areas, as a
+  satellite map with terrain; and Armenia with its borders with Turkey, Azerbaijan, Georgia and Iran.
+- **Built.** "New map" offers both, made in the open project through the usual commands (`domain/region-maps.ts`,
+  `ui/region-maps.ts`): a map of the Earth in the satellite look with every detail on (the photographs, Sentinel-2
+  cloudless, about 10 m a pixel close in; heights to about 40 m with relief and fine ground; both downloaded as the
+  view or an export needs them and kept on the computer); today's countries reaching into the region in light
+  fills under clear borders (3.2 px on Armenia's map), ending at the coast; the built-up areas of cities (Natural
+  Earth's urban areas, 2,038 in the region, `data/natural-earth/urban-10m-mideast.json` by
+  `scripts/fetch-urban.mjs`, as one area of many parts); today's cities and capitals (D173) of the region (the Middle
+  East: national capitals, the largest cities and those of over 3 % of their country; Armenia's map: every capital,
+  regional ones too, and towns over 0.6 % of their country); Armenia's provinces as dotted lines; the view framed
+  on the region; and a still shot of it in 4K (3840 × 2160, 30 fps), ready to export. A city already in the project
+  from another map is placed on the new one (`addCities`).
+- **Seen.** Both checked in the app with the photographs downloaded: Lake Van, Urmia and Sevan, the Caucasus, the
+  Nile and the Gulf as photographed, borders and names over them. The tests run offline (plain tiles stand in).
+
 ### D174. Today's countries coloured by how close each is to one of them
 
 - **Asked.** A setting to colour today's countries by how close they are militarily, economically, religiously and

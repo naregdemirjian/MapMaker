@@ -14,6 +14,7 @@ import assert from 'node:assert/strict';
 import { geoContains } from 'd3-geo';
 import { decodeBasemap, type BasemapFile } from '../src/render-engine/basemap.ts';
 import { capture } from './harness.ts';
+import { encodePNG } from '../src/export/png.ts';
 
 type LL = [number, number];
 type Pt = [number, number];
@@ -867,6 +868,34 @@ try {
     for (let i = 0; i < 3; i++) await page.getByTestId('undo').click();
     await page.waitForFunction(() => !(window as any).__mapmaker.store.world.all('entity').some((e: any) => e.name === 'Russia'));
     await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 0, lat: 0, zoom: 0, rotation: 0, projection: 'equirectangular' }));
+  });
+
+  await step('A ready-made map (D175): Armenia and its neighbours, as photographed, with its countries, provinces, cities, built-up areas and a 4K shot', async () => {
+    // (The tests run offline: close-in photographs and heights are answered with plain tiles, sea level and ochre.)
+    const tile = (r: number, g: number, b: number) => { const px = new Uint8Array(256 * 256 * 4); for (let i = 0; i < px.length; i += 4) { px[i] = r; px[i + 1] = g; px[i + 2] = b; px[i + 3] = 255; } return Buffer.from(encodePNG(256, 256, px)); };
+    const heights = tile(128, 0, 0), photo = tile(190, 160, 110);
+    await page.route('**/api/terrain-tile/**', (r) => r.fulfill({ status: 200, contentType: 'image/png', body: heights }));
+    await page.route('**/api/photo-tile/**', (r) => r.fulfill({ status: 200, contentType: 'image/png', body: photo }));
+    await page.getByRole('button', { name: '+ Map' }).click();
+    await page.getByTestId('new-map-region-armenia').check();
+    await page.getByTestId('new-map-region-note').waitFor();
+    await page.getByTestId('new-map-create').click();
+    await page.waitForFunction(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.name === 'Armenia and its neighbours') && !(window as any).__mapmaker.store.busy, undefined, { timeout: 60000 });
+    const made = await page.evaluate(() => {
+      const st = (window as any).__mapmaker.store, w = st.world;
+      const space = w.all('map_space').find((m: any) => m.name === 'Armenia and its neighbours');
+      const shot = w.all('sequence').find((q: any) => JSON.parse(q.settings).spaceId === space.id);
+      return { viewing: st.spaceId === space.id, look: JSON.parse(space.settings).terrain, shot: shot ? JSON.parse(shot.settings) : null, layers: w.all('layer').filter((l: any) => l.space_id === space.id).map((l: any) => l.name) };
+    });
+    assert.ok(made.viewing, 'the new map is shown');
+    assert.ok(made.look.photo && made.look.detail && made.look.palette === 'satellite', 'as photographed, at the finest detail');
+    assert.deepEqual([made.shot.width, made.shot.height], [3840, 2160]);
+    assert.ok(made.layers.includes('Urban areas') && made.layers.includes('Provinces'), made.layers.join(', '));
+    await page.waitForTimeout(800);
+    const names = await page.evaluate(() => (window as any).__mapmaker.store.renderer.lastCities.map((c: any) => c.name)) as string[];
+    assert.ok(names.includes('Yerevan') && names.includes('Tbilisi'), `cities on the map: ${names.slice(0, 12).join(', ')}`);
+    assert.equal(await ownerAt([44.5, 40.2], '2026'), 'Armenia');
+    await screenshot('region-map-armenia');
   });
 
   await step('History Health reports no problems', async () => {
