@@ -3,7 +3,7 @@
 // tile could not be had).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { tileXY, tileLonLat, terrariumHeights, detailNeed, buildDetail, underIce, TILE, type DetailNeed } from '../src/terrain/detail.ts';
+import { tileXY, tileLonLat, terrariumHeights, detailNeed, buildDetail, underIce, detailHeightAt, TILE, type DetailNeed } from '../src/terrain/detail.ts';
 import type { ElevationGrid } from '../src/terrain/grid.ts';
 
 test('tile coordinates of places and back; heights from a tile\'s colours', () => {
@@ -63,10 +63,14 @@ test('a region\'s grid is laid from its tiles: heights where they are, the bundl
   }
   assert.ok(at(g, 10.0, 46.0) > 1400, 'the narrow ridge (5 km across) is there, which the bundled grid could not hold');
   assert.equal(g.key, `detail:${need.key}:flat`);
+  assert.equal(g.whole, true, 'every height from the tiles, to the region\'s edge (D176)');
+  assert.equal(detailHeightAt(g, 10.0, 46.0), at(g, 10.0, 46.0));
+  assert.equal(detailHeightAt(g, 12, 46), null, 'outside the region');
   // A missing tile: there, the bundled heights.
   const [mx, my] = tileXY(9.6, 46.3, need.z).map(Math.floor);
   const holed = buildDetail(need, tiles(need.z, ridge, (x, y) => x === mx && y === my), base);
   assert.equal(at(holed, 9.6, 46.3), 50);
+  assert.equal(holed.whole, false, 'not fine enough everywhere to draw the coast close in');
   assert.ok(Math.abs(at(holed, 10.3, 45.8) - ridge(10.3, 45.8)) < 0.06 * ridge(10.3, 45.8) + 30, 'elsewhere the tiles');
   // Sculpted cells keep the sculpted heights.
   const touched = new Uint8Array(W * H);
@@ -85,4 +89,20 @@ test('a region across the 180th meridian runs on round the planet', () => {
   assert.ok(g.west < 180 && g.west + g.width * g.dLon > 180);
   assert.ok(at(g, 179.95, -17) === 900 || Math.abs(at(g, 179.95, -17) - 900) < 50, `the meridian's ridge (${at(g, 179.95, -17)})`);
   assert.ok(Math.abs(at(g, 180.5, -17) - 100) < 5, 'and beyond it');
+});
+
+test('close in on the Earth, the finer heights draw the coast (D176): when they are all from the tiles, fine enough, at today\'s sea level and unsculpted', async () => {
+  const { closeCoastOf, CLOSE_COAST_ZOOM } = await import('../src/render-engine/map-renderer.ts');
+  const need = detailNeed({ west: 28.9, south: 41.0, east: 29.0, north: 41.05 }, 10)!;
+  assert.ok(need.z >= CLOSE_COAST_ZOOM, `a city's view takes tiles of zoom ${need.z}`);
+  const whole = buildDetail(need, tiles(need.z, () => 40), { grid: flat(0), key: 'e' });
+  const base = { grid: flat(0), key: 'e', look: null } as const;
+  const basemap = {};
+  assert.equal(closeCoastOf({ ...base, detail: whole }, basemap, 0), true);
+  assert.equal(closeCoastOf({ ...base, detail: whole }, basemap, 12), false, 'another sea level: the terrain decides anyway');
+  assert.equal(closeCoastOf({ ...base, detail: whole }, null, 0), false, 'no coastline (a planet): the terrain decides anyway');
+  assert.equal(closeCoastOf({ ...base, detail: { ...whole, whole: false } }, basemap, 0), false, 'a tile missing: the coastline');
+  assert.equal(closeCoastOf({ ...base, detail: { ...whole, z: CLOSE_COAST_ZOOM - 1 } }, basemap, 0), false, 'coarser heights: the coastline');
+  assert.equal(closeCoastOf({ ...base, detail: whole, override: { data: new Uint8Array(1), key: 's' } }, basemap, 0), false, 'sculpted: as before');
+  assert.equal(closeCoastOf({ ...base, detail: null }, basemap, 0), false);
 });

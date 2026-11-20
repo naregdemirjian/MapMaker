@@ -302,6 +302,7 @@ export function ShotEditor() {
             </div>
             <label>Fade in and out (s)<NumberField min={0} max={10} step={0.1} value={box.fade} onCommit={(n) => setBox({ fade: n })} /></label>
             <label className="check"><input type="checkbox" checked={box.showDescription} onChange={(e) => setBox({ showDescription: e.target.checked })} /> Show each event's description</label>
+            <label className="check"><input type="checkbox" checked={box.hideWhenEmpty} onChange={(e) => setBox({ hideWhenEmpty: e.target.checked })} data-testid="events-box-hide-empty" /> Hide the box while no event is listed</label>
             {w.all('event_group').length > 0 && <>
               <label className="check"><input type="checkbox" checked={box.groups === null} onChange={(e) => setBox({ groups: e.target.checked ? null : [] })} /> Events of every group</label>
               {box.groups !== null && w.all('event_group').map((g) => (

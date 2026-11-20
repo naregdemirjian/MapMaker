@@ -5,10 +5,11 @@
 // Metsamor power plant; DMRK its main port, placed here at Mersin.
 import * as cmd from '../domain/commands.ts';
 import { toJSONValue, type Instant } from '../core-time/index.ts';
-import type { Builder } from './greater-armenia.ts';
-import { D, event, take, annex, clear, clearAllBut, featureLayer, feature, city, stat, shot, circle } from './greater-armenia.ts';
+import type { Builder } from './kit.ts';
+import { D, event, take, annex, clear, clearAllBut, featureLayer, feature, city, stat, shot, circle } from './kit.ts';
 
-export type Place = [number, number];
+export type { Place } from './kit.ts';
+import type { Place } from './kit.ts';
 
 // ---------------------------------------------------------------- places
 

@@ -76,9 +76,10 @@ export function daysInMonth(y: number, m: number): number {
 export const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const pad = (n: number, w = 2) => String(Math.abs(n)).padStart(w, '0');
 
+/** A year's digits, grouped by thousands from five digits on ("1453", "12,026", "5,000,000"). */
 function groupDigits(n: number): string {
   const s = String(n);
-  return s.length > 5 ? s.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : s;
+  return s.length > 4 ? s.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : s;
 }
 
 /** Years before this (astronomical) year are written as how long ago they were (D134): before 10,000 BCE. */

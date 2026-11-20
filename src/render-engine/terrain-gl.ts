@@ -45,7 +45,15 @@ export interface TerrainOverride { data: Uint8Array; key: string }
  * drawn, that coastline's land as a picture the size of the terrain's picture (land opaque), so that at
  * today's level land is exactly what the coastline encloses (see heightAboveSea).
  */
-export interface TerrainSea { level: number; mask: TexImageSource | null; maskKey: string }
+export interface TerrainSea {
+  level: number; mask: TexImageSource | null; maskKey: string;
+  /**
+   * Close in on the Earth's finer heights, at today's level (D176): the heights draw the coast where they
+   * are finer than the coastline (a city's harbour, a strait a few hundred metres across), the coastline's
+   * picture saying only where land lies below the sea (polders, the shores of the Dead Sea).
+   */
+  close?: boolean;
+}
 const TODAY: TerrainSea = { level: 0, mask: null, maskKey: '' };
 export const PROJ: Partial<Record<ProjectionName, number>> = { equirectangular: 0, mercator: 1, equalEarth: 2, naturalEarth: 3 };
 
@@ -117,6 +125,7 @@ uniform int u_landN;
 uniform float u_seaLevel;
 uniform sampler2D u_mask;
 uniform int u_useMask;
+uniform int u_closeCoast;
 uniform sampler2D u_override;
 uniform int u_useOverride;
 uniform sampler2D u_cover;
@@ -247,7 +256,31 @@ void main() {
   // Where sculpting changed the terrain (D98), the terrain's own coast, whatever the coastline says.
   float over = u_useOverride == 1 ? texture(u_override, uv).r : 0.0;
   float h = e;
-  if (u_useMask == 1) h = mix(texelFetch(u_mask, ivec2(dev), 0).a > 0.5 ? max(e, 0.5) : min(e, -0.5), e, over);
+  // (Close in on the finer heights, D176: how much of the pixel is land as they say, or -1.)
+  float closeA = -1.0;
+  if (u_useMask == 1) {
+    bool onLand = texelFetch(u_mask, ivec2(dev), 0).a > 0.5;
+    float byLine = onLand ? max(e, 0.5) : min(e, -0.5);
+    // Close in on the finer heights (D176): the heights draw the coast (the tiles have water at 0 m and land
+    // from 1 m); below the sea, land only where the coastline has land. The coast runs midway between the
+    // cells of water and of land (each cell taken as land or water, laid between them as the heights are): a
+    // smooth line, not the outline of the cells of water.
+    if (u_closeCoast == 1 && inD) {
+      byLine = onLand && e < -0.75 ? max(e, 0.5) : e - 0.5;
+      vec2 tc = su * u_detailTex - 0.5, fr = fract(tc);
+      ivec2 i0 = ivec2(floor(tc)), top = ivec2(u_detailTex) - 1;
+      float w00 = texelFetch(u_detail, clamp(i0, ivec2(0), top), 0).r, w10 = texelFetch(u_detail, clamp(i0 + ivec2(1, 0), ivec2(0), top), 0).r;
+      float w01 = texelFetch(u_detail, clamp(i0 + ivec2(0, 1), ivec2(0), top), 0).r, w11 = texelFetch(u_detail, clamp(i0 + ivec2(1, 1), ivec2(0), top), 0).r;
+      vec4 L = vec4(w00, w10, w01, w11);
+      L = mix(sign(L - 0.5), vec4(1.0), onLand ? vec4(lessThan(L, vec4(-0.75))) : vec4(0.0));
+      float land = mix(mix(L.x, L.y, fr.x), mix(L.z, L.w, fr.x), fr.y);
+      // (How fast that changes from pixel to pixel: the coast smoothed over about a pixel.)
+      vec2 dL = vec2(mix(L.y - L.x, L.w - L.z, fr.y), mix(L.z - L.x, L.w - L.y, fr.x)) * u_detailTex;
+      float perPx = abs(dot(dL, sgx)) + abs(dot(dL, sgy));
+      closeA = clamp(land / max(perPx, 1e-3) + 0.5, 0.0, 1.0);
+    }
+    h = mix(byLine, e, over);
+  }
   float rel = h - u_seaLevel;
   // How much of the pixel is land: the coast is smoothed over about a pixel. (How fast the height
   // changes from pixel to pixel is worked out from the slope of the terrain, not from neighbouring
@@ -255,7 +288,7 @@ void main() {
   // view must be the picture drawn afresh.)
   float dEdu = (eE - eW) / (2.0 * foot.x), dEdv = (eS - eN) / (2.0 * foot.y);
   float perPixel = abs(dEdu * sgx.x + dEdv * sgx.y) + abs(dEdu * sgy.x + dEdv * sgy.y);
-  float landA = clamp(rel / max(perPixel, 1e-3) + 0.5, 0.0, 1.0);
+  float landA = closeA >= 0.0 ? closeA : clamp(rel / max(perPixel, 1e-3) + 0.5, 0.0, 1.0);
   if (!ok) { outColor = vec4(0.0); return; }
   if (u_mode == 4) { outColor = vec4(landA); return; }
   if (u_mode == 5) { outColor = vec4(over); return; }
@@ -316,7 +349,7 @@ void main() {
       float a = p.a * fade.x * fade.y;
       if (p.a > 0.003) ph = vec4(mix(ph.rgb, p.rgb / p.a, a), max(ph.a, a));
     }
-    float landToday = clamp(h / max(perPixel, 1e-3) + 0.5, 0.0, 1.0);
+    float landToday = closeA >= 0.0 ? closeA : clamp(h / max(perPixel, 1e-3) + 0.5, 0.0, 1.0);
     float w = ph.a * clamp((1.0 - over) * (1.0 - abs(landA - landToday)), 0.0, 1.0);
     col = mix(col, ph.rgb, w);
     // (A photograph has its own light and shadow: the relief over it is gentler, and none close in.)
@@ -329,7 +362,7 @@ void main() {
   outColor = vec4(col, 1.0);
 }`;
 
-const UNIFORMS = ['u_elev', 'u_tex', 'u_size', 'u_offset', 'u_inv', 'u_S', 'u_origin', 'u_lonRef', 'u_proj', 'u_mode', 'u_shadeTint', 'u_exag', 'u_seaRelief', 'u_light', 'u_sea', 'u_seaN', 'u_land', 'u_landN', 'u_seaLevel', 'u_mask', 'u_useMask', 'u_override', 'u_useOverride', 'u_cover', 'u_useCover', 'u_detail', 'u_useDetail', 'u_detailBox', 'u_detailTex', 'u_world', 'u_useWorld', 'u_photo', 'u_usePhoto', 'u_photoBox', 'u_fine'] as const;
+const UNIFORMS = ['u_elev', 'u_tex', 'u_size', 'u_offset', 'u_inv', 'u_S', 'u_origin', 'u_lonRef', 'u_proj', 'u_mode', 'u_shadeTint', 'u_exag', 'u_seaRelief', 'u_light', 'u_sea', 'u_seaN', 'u_land', 'u_landN', 'u_seaLevel', 'u_mask', 'u_useMask', 'u_closeCoast', 'u_override', 'u_useOverride', 'u_cover', 'u_useCover', 'u_detail', 'u_useDetail', 'u_detailBox', 'u_detailTex', 'u_world', 'u_useWorld', 'u_photo', 'u_usePhoto', 'u_photoBox', 'u_fine'] as const;
 type UniformName = (typeof UNIFORMS)[number];
 
 /** The relief's exaggeration at strength 1 (slopes ten kilometres across are gentle). */
@@ -600,6 +633,7 @@ class TerrainGL {
     gl.uniform1f(u.u_seaLevel, sea.level);
     gl.uniform1i(u.u_mask, 1);
     gl.uniform1i(u.u_useMask, sea.mask ? 1 : 0);
+    gl.uniform1i(u.u_closeCoast, sea.mask && sea.close && detail?.whole ? 1 : 0);
     gl.uniform1i(u.u_override, 2);
     gl.uniform1i(u.u_useOverride, over ? 1 : 0);
     gl.uniform1i(u.u_cover, 3);
@@ -655,7 +689,7 @@ export class TerrainPictures {
     if (x1 <= x0 || y1 <= y0) return null;
     const w = x1 - x0, h = y1 - y0;
     const { a, b, c, d, e } = f.m;
-    const key = `${gridKey}|${JSON.stringify(look)}|${f.kind}|${f.S}|${f.ox}|${f.oy}|${f.lonRef}|${a},${b},${c},${d},${e},${f.m.f}|${W}x${H}|${x0},${y0},${w}x${h}|${sea.level}|${sea.maskKey}|${over?.key ?? ''}|${cover?.key ?? ''}|${detail?.key ?? ''}|${cover?.photo?.key ?? ''}|${photo?.key ?? ''}`;
+    const key = `${gridKey}|${JSON.stringify(look)}|${f.kind}|${f.S}|${f.ox}|${f.oy}|${f.lonRef}|${a},${b},${c},${d},${e},${f.m.f}|${W}x${H}|${x0},${y0},${w}x${h}|${sea.level}|${sea.maskKey}${sea.close ? '|close' : ''}|${over?.key ?? ''}|${cover?.key ?? ''}|${detail?.key ?? ''}|${cover?.photo?.key ?? ''}|${photo?.key ?? ''}`;
     const k = this.kept.get(kind);
     if (k && k.key === key) return k.out;
     const gl = terrainGL();

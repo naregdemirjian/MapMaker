@@ -108,7 +108,7 @@ test('deep time: ages of instants and back; dates before 10,000 BCE written and 
   assert.equal(formatYear(-249_998_000), '250 million years ago');
   assert.equal(formatYear(-2_578_000), '2.58 million years ago');
   assert.equal(formatYear(-19_000), '21,000 years ago');
-  assert.equal(formatYear(DEEP_BEFORE_YEAR), '10000 BCE', 'from 10,000 BCE on, years as before');
+  assert.equal(formatYear(DEEP_BEFORE_YEAR), '10,000 BCE', 'from 10,000 BCE on, years as before');
   assert.equal(formatYear(-499), '500 BCE');
   for (const [text, year, shown] of [
     ['250 Ma', -249_998_000, '250 million years ago'], ['250 million years ago', -249_998_000, '250 million years ago'], ['2.58 mya', -2_578_000, '2.58 million years ago'],

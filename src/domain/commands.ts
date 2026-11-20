@@ -2050,7 +2050,7 @@ export function shapeParts(kind: FeatureKind, parts: Array<Array<[number, number
  * Draw a new area, line or point on a feature layer: it exists from the date the edit mode gives
  * ('correct' at the beginning of time: always), as part of an event (mode 'new') or not.
  */
-export function createFeature(world: World, o: { layerId: string; name: string; entity?: string; parts: Array<Array<[number, number]>>; mode: EditMode; style?: FeatureStyle; anim?: FeatureAnimStyle | null }): CommandResult<string> {
+export function createFeature(world: World, o: { layerId: string; name: string; entity?: string; parts: Array<Array<[number, number]>>; mode: EditMode; style?: FeatureStyle; anim?: FeatureAnimStyle | null; animUntil?: Instant | null }): CommandResult<string> {
   const layer = world.get('layer', o.layerId);
   if (!layer || !isFeatureKind(layer.kind)) throw new Error('Choose a layer of areas, lines or points first.');
   if (o.entity && !world.get('entity', o.entity)) throw new Error('That country or faction no longer exists.');
@@ -2059,7 +2059,7 @@ export function createFeature(world: World, o: { layerId: string; name: string; 
   return run(world, `Draw "${name}"`, (tx) => {
     const id = newId('feat');
     tx.insert('feature', { id, layer_id: layer.id, name, entity_id: o.entity ?? '', style: o.style ? JSON.stringify(o.style) : '{}', notes: '', created_seq: world.nextSeq('feature') });
-    writeShape(tx, id, o.mode, { parts, anim: o.anim ?? null });
+    writeShape(tx, id, o.mode, { parts, anim: o.anim ?? null, animUntil: o.animUntil ?? null });
     return id;
   });
 }
@@ -2237,7 +2237,8 @@ export function greatCircle(a: [number, number], b: [number, number], f = 1, ste
 }
 
 /** One missile of a salvo: where from and to, when it is launched (absent: at the salvo's launch), how far it gets before it is shot down (absent: all the way). */
-export interface MissileFlight { from: [number, number]; to: [number, number]; launch?: Instant; shotDown?: number; name?: string }
+/** One missile of a salvo: launched at `launch` (absent: the salvo's launch); arriving at `arrive` (D176: a flight of its own, e.g. a cannonball's; absent: the salvo's arrival). */
+export interface MissileFlight { from: [number, number]; to: [number, number]; launch?: Instant; arrive?: Instant; shotDown?: number; name?: string }
 
 /**
  * A salvo of missiles (D171), one event from the launch to the moment they arrive: each missile a line on a
@@ -2270,8 +2271,9 @@ export function missileSalvo(world: World, o: { spaceId: string; name: string; l
       const id = newId('feat');
       tx.insert('feature', { id, layer_id: layer!.id, name: m.name ?? `${o.name} ${i + 1}`, entity_id: o.entity ?? '', style: o.color ? JSON.stringify({ color: o.color }) : '{}', notes: '', created_seq: tx.world.nextSeq('feature') });
       const launch = m.launch && compare(m.launch, o.launch) > 0 && compare(m.launch, o.arrive) < 0 ? m.launch : null;
-      writeShape(tx, id, { kind: 'new', eventId, at: launch }, { parts: shapeParts('line', [greatCircle(m.from, m.to, reach)]), anim: 'draw' });
-      if (plan && reach >= 1) disasterIn(tx, space.id, plan, ((m.to[0] + 540) % 360) - 180, m.to[1], eventId, o.arrive, o.arrive, (o.seed ?? 1) + i);
+      const arrive = m.arrive && compare(m.arrive, launch ?? o.launch) > 0 && compare(m.arrive, o.arrive) < 0 ? m.arrive : null;
+      writeShape(tx, id, { kind: 'new', eventId, at: launch }, { parts: shapeParts('line', [greatCircle(m.from, m.to, reach)]), anim: 'draw', animUntil: arrive });
+      if (plan && reach >= 1) disasterIn(tx, space.id, plan, ((m.to[0] + 540) % 360) - 180, m.to[1], eventId, arrive ?? o.arrive, arrive ?? o.arrive, (o.seed ?? 1) + i);
     });
     return eventId;
   });
@@ -2326,7 +2328,7 @@ function correctOrWrite(tx: Tx, engine: Engine, f: FeatureRow, mode: EditMode, w
   return writeShape(tx, f.id, mode, what);
 }
 
-function writeShape(tx: Tx, feature: string, mode: EditMode, what: { parts?: number[][]; off?: boolean; anim?: FeatureAnimStyle | null }): string {
+function writeShape(tx: Tx, feature: string, mode: EditMode, what: { parts?: number[][]; off?: boolean; anim?: FeatureAnimStyle | null; animUntil?: Instant | null }): string {
   const world = tx.world;
   if (mode.kind === 'new' && !world.get('event', mode.eventId)) throw new Error('That event no longer exists.');
   const eventId = eventForMode(tx, mode);
@@ -2337,7 +2339,8 @@ function writeShape(tx: Tx, feature: string, mode: EditMode, what: { parts?: num
   // The same feature, event and moment: that shape is replaced.
   const same = world.all('effect').find((f) => f.kind === 'shape' && f.event_id === eventId && f.at_day === (at ? at[0] : null) && f.at_ms === (at ? at[1] : null)
     && parseJSON<ShapeIntent | null>(f.intent, null)?.feature === feature);
-  const transition = what.anim && mode.kind === 'new' && !what.off ? JSON.stringify({ style: what.anim }) : '';
+  // (Appearing until a moment of its own within the event, D176, or until the event's end.)
+  const transition = what.anim && mode.kind === 'new' && !what.off ? JSON.stringify({ style: what.anim, ...(what.animUntil ? { until: toStore(what.animUntil) } : {}) }) : '';
   if (same) { tx.patch('effect', same.id, { intent: JSON.stringify(intent), ...(what.anim !== undefined ? { transition } : {}) }); return same.id; }
   const layer = world.get('layer', world.get('feature', feature)?.layer_id ?? '');
   const id = newId('eff');

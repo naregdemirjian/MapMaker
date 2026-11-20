@@ -13,7 +13,7 @@ import { globeGL, globeInView } from './globe-gl.ts';
 import { parseJSON, slerpLonLat } from '../temporal-engine/engine.ts';
 import { type Instant, compare, diffMs } from '../core-time/index.ts';
 import { isBaseEvent } from '../world-model/schema.ts';
-import type { Vec3 } from '../geo-kernel/vec.ts';
+import { lonLatToVec, type Vec3 } from '../geo-kernel/vec.ts';
 import { buildFrontField, frontRings, frontLines, bandBounds, bandBoxes, type FrontField, type Rings } from './front-field.ts';
 import { frontSourceOf } from './front-source.ts';
 import { terrainSlowness } from './front-terrain.ts';
@@ -38,7 +38,7 @@ import { iconById, iconOfStyle, unitOfStyle, drawIcon, type CharacterIcon, type 
 import { TerrainPictures, terrainDrawable, type TerrainFrame, type TerrainImageKind, type TerrainSea, type TerrainOverride } from './terrain-gl.ts';
 import type { ElevationGrid } from '../terrain/grid.ts';
 import type { TerrainCover } from '../terrain/cover.ts';
-import type { DetailGrid } from '../terrain/detail.ts';
+import { detailHeightAt, type DetailGrid } from '../terrain/detail.ts';
 import type { PhotoRegion } from '../terrain/photo.ts';
 import { FieldPictures, edgePhases, type FieldInstance, type FieldRaster } from './fields-gl.ts';
 import { spreadRaster, type SpreadRaster, type SpreadKind } from '../domain/spread.ts';
@@ -101,6 +101,15 @@ function hashInstances(inst: FieldInstance[]): string {
   for (let i = 0; i < u.length; i++) { h ^= u[i]; h = Math.imul(h, 0x01000193) >>> 0; }
   return `${inst.length}:${h.toString(36)}`;
 }
+/** The coarsest zoom of finer heights that draws the coast close in (D176): cells of about 150 m at the equator, finer than Natural Earth's coastline. */
+export const CLOSE_COAST_ZOOM = 10;
+/**
+ * Whether the coast is the finer heights' close in (D176): on the Earth (Natural Earth's coastline given) at today's
+ * sea level, unsculpted, where the heights in view are all from the tiles and fine enough. There the heights draw
+ * the coast (a city's harbour, a strait a few hundred metres across), the coastline only saying where land lies below
+ * the sea.
+ */
+export const closeCoastOf = (terrain: TerrainShown | null, basemap: unknown, seaLevel: number) => !!terrain && !!basemap && seaLevel === 0 && !terrain.override && !!terrain.detail?.whole && terrain.detail.z >= CLOSE_COAST_ZOOM;
 /** Whether territories' pictures depend on the finer grid close in (D101): relief over them, or their coast of the moment. */
 const reliefKeyNeedsDetail = (look: TerrainLook | null, fills: boolean, terrainLand: boolean) => (!!look?.overTerritories && fills) || terrainLand;
 /** Rivers in a blue that suits the terrain's palette (D99). */
@@ -165,6 +174,8 @@ export interface RenderOptions {
   mediaChannel?: MediaChannel;
   /** Draw each character's route so far (shots with trails on). */
   trails?: boolean;
+  /** Trails from this moment on (D176: a shot's first moment; absent, the whole route so far). */
+  trailsSince?: Instant | null;
   /**
    * What the full picture shows, when only some passes are drawn (exports): texts are placed as in
    * the full picture. Default: as the passes drawn.
@@ -1586,7 +1597,7 @@ export class MapRenderer {
    * Earth's coastline is drawn, a picture of the land it encloses on that canvas (kept while the view
    * stays put).
    */
-  private seaOf(c: CanvasRenderingContext2D, view: View, sheet: Sheet, basemap: Basemap | null, level: number, at?: DOMMatrix): TerrainSea {
+  private seaOf(c: CanvasRenderingContext2D, view: View, sheet: Sheet, basemap: Basemap | null, level: number, at?: DOMMatrix, close = false): TerrainSea {
     if (!basemap) return { level, mask: null, maskKey: '' };
     const m = at ?? c.getTransform();
     const key = `${c.canvas.width}x${c.canvas.height}|${m.a},${m.b},${m.c},${m.d},${m.e},${m.f}|${sheet.id}|${view.key}|${basemap.scales.length}`;
@@ -1602,7 +1613,7 @@ export class MapRenderer {
       this.basemapPainter.fillLand(k.ctx, view, sheet, basemap);
       k.key = key;
     }
-    return { level, mask: k.canvas, maskKey: key };
+    return { level, mask: k.canvas, maskKey: key, close };
   }
   private coastMasks: { canvas: OffscreenCanvas; ctx: CanvasRenderingContext2D; key: string } | null = null;
 
@@ -1614,7 +1625,7 @@ export class MapRenderer {
     if (!terrain) { if (basemap) this.maskLand(lc, view, sheet, basemap, frameKey, lakes); return; }
     lc.save();
     lc.globalCompositeOperation = 'destination-in';
-    this.layTerrain(lc, view, sheet, terrain, 'landmask', at, this.seaOf(lc, view, sheet, basemap, seaLevel, at));
+    this.layTerrain(lc, view, sheet, terrain, 'landmask', at, this.seaOf(lc, view, sheet, basemap, seaLevel, at, closeCoastOf(terrain, basemap, seaLevel)));
     lc.restore();
     if (lakes && basemap) this.basemapPainter.eraseLakes(lc, view, sheet, basemap);
   }
@@ -1684,7 +1695,7 @@ export class MapRenderer {
   svgMasks(view: View, spaceId: string, opts: RenderOptions): { fills: OffscreenCanvas; borders: OffscreenCanvas; band: OffscreenCanvas | null; outsideBand: OffscreenCanvas | null; rim: number; coast: 'land' | 'sea' | 'mixed' | 'terrain' } | null {
     const terrain = opts.terrain && view.camera.projection !== 'flat' && terrainDrawable() ? opts.terrain : null;
     const seaLevel = terrain ? Math.round((terrain.seaLevel ?? 0) * 100) / 100 : 0;
-    const terrainLand = !!terrain && (seaLevel !== 0 || !opts.basemap || !!terrain.override);
+    const terrainLand = !!terrain && (seaLevel !== 0 || !opts.basemap || !!terrain.override || closeCoastOf(terrain, opts.basemap, seaLevel));
     if (!opts.basemap && !terrainLand) return null;
     const sheet = this.sheetFor(view, spaceId);
     this.basemapPainter.lakeFilter = { show: opts.show?.lakes !== false, minKm2: Math.max(0, opts.show?.minLakeKm2 ?? 0) };
@@ -1770,7 +1781,9 @@ export class MapRenderer {
     const seaLevel = terrain ? Math.round((terrain.seaLevel ?? 0) * 100) / 100 : 0, shifted = seaLevel !== 0;
     // Where the terrain decides what is land: at another sea level than today's, and on a world without
     // Natural Earth's coastline (a generated planet, D97).
-    const terrainLand = !!terrain && (shifted || !opts.basemap || !!terrain.override);
+    // Close in on the Earth's finer heights (D176), the terrain decides too: they are finer than the coastline.
+    const closeCoast = closeCoastOf(terrain, opts.basemap, seaLevel);
+    const terrainLand = !!terrain && (shifted || !opts.basemap || !!terrain.override || closeCoast);
     // The Earth drawn as photographed (D138): the satellite look with its photographs, at today's sea level.
     const photographed = terrainColours && !shifted && !!tLook?.photo && !!PALETTES[tLook.palette].cover && !!terrain?.cover?.photo;
     // The plain land the terrain decides (without terrain colours), in the land pass.
@@ -1851,7 +1864,7 @@ export class MapRenderer {
         clipPlanet(c);
         if (wantsTerrain && terrainLand) {
           // The coasts of the moment (D96), or of a world without a coastline drawn: the terrain's.
-          this.layTerrain(c, view, sheet, terrain!, 'both', undefined, this.seaOf(c, view, sheet, opts.basemap ?? null, seaLevel));
+          this.layTerrain(c, view, sheet, terrain!, 'both', undefined, this.seaOf(c, view, sheet, opts.basemap ?? null, seaLevel, undefined, closeCoast));
         } else if (wantsTerrain) {
           // The sea's colours over the whole planet, then the land's inside the coastline (lakes keep
           // the sea's).
@@ -1889,7 +1902,7 @@ export class MapRenderer {
         // Land the terrain decides, without terrain colours: the plain land where the terrain has land.
         if (landByTerrain) {
           const lc = this.scratch(c);
-          this.layTerrain(lc, view, sheet, terrain!, 'landmask', undefined, this.seaOf(c, view, sheet, opts.basemap ?? null, seaLevel));
+          this.layTerrain(lc, view, sheet, terrain!, 'landmask', undefined, this.seaOf(c, view, sheet, opts.basemap ?? null, seaLevel, undefined, closeCoast));
           lc.save();
           lc.setTransform(1, 0, 0, 1, 0, 0);
           lc.globalCompositeOperation = 'source-in';
@@ -1913,7 +1926,7 @@ export class MapRenderer {
           coastline: opts.show?.coastline !== false && !terrainLand && !photographed,
           // With terrain colours, the land is those colours (in the terrain pass); where the terrain decides, the terrain's land.
           fills: terrainLand ? 'lakes' : !terrainColours,
-          afterFills: reliefOnLand ? () => this.layTerrain(c, view, sheet, terrain!, 'relief', undefined, shifted ? this.seaOf(c, view, sheet, opts.basemap!, seaLevel) : undefined) : undefined,
+          afterFills: reliefOnLand ? () => this.layTerrain(c, view, sheet, terrain!, 'relief', undefined, shifted || closeCoast ? this.seaOf(c, view, sheet, opts.basemap!, seaLevel, undefined, closeCoast) : undefined) : undefined,
         });
         else if (reliefOnLand) this.layTerrain(c, view, sheet, terrain!, 'relief', undefined, this.seaOf(c, view, sheet, null, seaLevel));
         if (planetRivers) drawRiverLines(c, view, sheet, terrain!.rivers!, riverColour(tLook));
@@ -2250,7 +2263,7 @@ export class MapRenderer {
           if (tLook?.overTerritories) {
             lc.save();
             lc.globalCompositeOperation = 'source-atop';
-            this.layTerrain(lc, view, sheet, terrain!, 'relief', cm, terrainLand ? this.seaOf(lc, view, sheet, opts.basemap ?? null, seaLevel, cm) : undefined);
+            this.layTerrain(lc, view, sheet, terrain!, 'relief', cm, terrainLand ? this.seaOf(lc, view, sheet, opts.basemap ?? null, seaLevel, cm, closeCoast) : undefined);
             lc.restore();
           }
           if (clip) this.trimToLand(lc, view, sheet, opts.basemap ?? null, frameKey, true, terrainLand ? terrain : null, seaLevel, cm);
@@ -2390,8 +2403,11 @@ export class MapRenderer {
 
     // One label per country: a country on several layers (its land, and its military control, say) is
     // labelled from the lowest layer it is on.
+    // (Close in, where the finer heights draw the coast, D176, a name in view goes on their land: the coarser mask
+    // cannot tell a strait from the land beside it.)
+    const fineLand = closeCoast && terrain?.detail ? ((g: DetailGrid) => (lon: number, lat: number) => (detailHeightAt(g, lon, lat) ?? 1) > 0.5)(terrain.detail) : null;
     if (placesText && layout.labels) for (const { states, snap, clip } of prepared) {
-      for (const l of this.layerLabels(view, arr, snap, states, entities, clip && opts.basemap ? landMaskOf(opts.basemap) : null)) if (!labels.some((x) => x.entityId === l.entityId)) labels.push(l);
+      for (const l of this.layerLabels(view, arr, snap, states, entities, clip && opts.basemap ? landMaskOf(opts.basemap) : null, clip ? fineLand : null)) if (!labels.some((x) => x.entityId === l.entityId)) labels.push(l);
     }
     // Country labels and city names are placed together: they move apart where they would overlap,
     // and where they cannot the one with less priority is hidden (larger countries, then smaller
@@ -2405,7 +2421,7 @@ export class MapRenderer {
     this.lastCityItems = cities;
     this.lastCharacters = [];
     this.lastTrails = 0;
-    if (opts.passes.has('characters')) this.drawCharacters(ctx, view, engine, spaceId, t, entities, !!opts.trails);
+    if (opts.passes.has('characters')) this.drawCharacters(ctx, view, engine, spaceId, t, entities, !!opts.trails, opts.trailsSince ?? null);
     ctx.restore();
   }
 
@@ -2538,6 +2554,7 @@ export class MapRenderer {
   private drawFeatures(ctx: CanvasRenderingContext2D, view: View, sheet: Sheet, world: World, engine: Engine, spaceId: string, t: Instant, layerIds: string[], u: number, clip: Path2D | null): void {
     this.featureWorld = world;
     this.lastFeatures = [];
+    this.pointNames = [];
     const [k, e, g] = this.place;
     const toScreen = (l: Float32Array) => { const o = new Float32Array(l.length); for (let i = 0; i < l.length; i += 2) { o[i] = l[i] * k + e; o[i + 1] = l[i + 1] * k + g; } return o; };
     let cache = sheet.cache.get('features') as WeakMap<number[][], { path: Path2D | null; lines: Float32Array[] }> | undefined;
@@ -2614,7 +2631,7 @@ export class MapRenderer {
       for (const [x, y] of this.pointCopies(view, lon, lat)) {
         const r = Math.max(2, ((st.size ?? 9) / 2) * kDot * u) * (scale ?? 1);
         this.drawSymbol(ctx, st.symbol ?? 'circle', x, y, r, color, u);
-        if (st.showName && nameSize) this.featureName(ctx, name, x + r + 4 * u, y, 'left', 0, u, nameSize);
+        if (st.showName && nameSize && this.pointNameFree(ctx, name, x + r + 4 * u, y, nameSize)) this.featureName(ctx, name, x + r + 4 * u, y, 'left', 0, u, nameSize);
         out.push({ path: null, lines: [], x, y, r, width });
       }
       ctx.restore();
@@ -2961,6 +2978,20 @@ export class MapRenderer {
   }
 
   /** The name of a feature, with a dark halo (`angle`: along a line; `lift`: moved across it). */
+  /** The names of points written in this frame (D176): one that would overlap another is left out, so points crowded together when seen from afar stay legible. */
+  private pointNames: Array<[number, number, number, number]> = [];
+  private pointNameFree(ctx: CanvasRenderingContext2D, name: string, x: number, y: number, size: number): boolean {
+    if (!name) return false;
+    ctx.save();
+    ctx.font = `italic 600 ${size.toFixed(1)}px Georgia, "Times New Roman", serif`;
+    const w = ctx.measureText(name).width;
+    ctx.restore();
+    const box: [number, number, number, number] = [x - 2, y - size * 0.6, x + w + 2, y + size * 0.6];
+    if (this.pointNames.some((q) => !(box[2] <= q[0] || box[0] >= q[2] || box[3] <= q[1] || box[1] >= q[3]))) return false;
+    this.pointNames.push(box);
+    return true;
+  }
+
   private featureName(ctx: CanvasRenderingContext2D, name: string, x: number, y: number, align: CanvasTextAlign, angle: number, u: number, size: number, lift = 0): void {
     if (!name) return;
     ctx.save();
@@ -3482,7 +3513,7 @@ export class MapRenderer {
     const area = globeInView(W, H, cx, cy, R, lon0, lat0, roll);
     if (!area) { this.lastGlobe = null; return; }
     // What the flat picture shows (it is drawn again when any of this changes).
-    const steady = `${engine.revision}|${world.revision}|${spaceId}|${[...opts.passes].join(',')}|${opts.layerIds.join(',')}|${opts.transparent ? 1 : 0}|${opts.basemap ? `${opts.basemap.version}|${opts.basemap.scales.length}` : '-'}|${JSON.stringify(opts.style ?? null)}|${JSON.stringify(opts.basemapStyle ?? null)}|${JSON.stringify(opts.show ?? null)}|${opts.terrain ? `${JSON.stringify(opts.terrain.look)}|${opts.terrain.detail?.key ?? ''}|${opts.terrain.photo?.key ?? ''}|${opts.terrain.seaLevel ?? 0}` : '-'}|${JSON.stringify(opts.transitions ?? null)}|${opts.trails ? 1 : 0}|${JSON.stringify(opts.layout ?? null)}|${opts.hurried ? 1 : 0}|${assetEpoch()}|${view.unit * k}`;
+    const steady = `${engine.revision}|${world.revision}|${spaceId}|${[...opts.passes].join(',')}|${opts.layerIds.join(',')}|${opts.transparent ? 1 : 0}|${opts.basemap ? `${opts.basemap.version}|${opts.basemap.scales.length}` : '-'}|${JSON.stringify(opts.style ?? null)}|${JSON.stringify(opts.basemapStyle ?? null)}|${JSON.stringify(opts.show ?? null)}|${opts.terrain ? `${JSON.stringify(opts.terrain.look)}|${opts.terrain.detail?.key ?? ''}|${opts.terrain.photo?.key ?? ''}|${opts.terrain.seaLevel ?? 0}` : '-'}|${JSON.stringify(opts.transitions ?? null)}|${opts.trails ? `1${opts.trailsSince ? `:${opts.trailsSince.day},${opts.trailsSince.ms}` : ''}` : 0}|${JSON.stringify(opts.layout ?? null)}|${opts.hurried ? 1 : 0}|${assetEpoch()}|${view.unit * k}`;
     // (Video fills follow the shot's clock: a moment of their own, see timeMoves.)
     const content = `${steady}|${t.day}|${t.ms}|${opts.mediaSeconds ?? 0}`;
     // The flat picture: around the middle of what is in view (on a grid of 2 degrees, and its pixels to a
@@ -4641,7 +4672,7 @@ export class MapRenderer {
     return best;
   }
 
-  private layerLabels(view: View, arr: Arrangement, snap: LayerSnap, states: Map<number, FaceState>, entities: Map<string, LabelEntity>, mask: LandMask | null = null): LabelInfo[] {
+  private layerLabels(view: View, arr: Arrangement, snap: LayerSnap, states: Map<number, FaceState>, entities: Map<string, LabelEntity>, mask: LandMask | null = null, fineLand: ((lon: number, lat: number) => boolean) | null = null): LabelInfo[] {
     // How far each owner's changes have come (by area), for labels gliding with an animated change.
     // (Kept for the states it was worked out from: the same for every frame of the same moment.)
     let progress = this.progressOf.get(states);
@@ -4697,9 +4728,13 @@ export class MapRenderer {
       // The best place is off screen while part of the territory is in view (zoomed in on a large
       // country): place the label in the part that is in view.
       if ((!pl || !onScreen(p)) && vis !== null && boxIntersects(piece.box, vis)) {
-        const inView = (lon: number, lat: number) => onScreen(view.projection([lon, lat]) as [number, number] | null) && (!landOk || landOk(lon, lat));
+        // (The outline searched is the whole territory's, drawn at a detail that suits its size: close in, a hole in it
+        // smaller than that detail, a city of another, say, is not in it. The place is checked against the territory
+        // itself, D176.)
+        const own = (lon: number, lat: number) => { try { return states.get(arr.locate(lonLatToVec(lon, lat)))?.value === piece.owner; } catch { return true; } };
+        const inView = (lon: number, lat: number) => onScreen(view.projection([lon, lat]) as [number, number] | null) && (!landOk || landOk(lon, lat)) && (!fineLand || fineLand(lon, lat)) && own(lon, lat);
         // (While the map moves the place is found less finely: it is found again, finely, when the map rests.)
-        const rough = this.moving ? 4 : 1, vk = `${ck}|view${rough > 1 ? '|rough' : ''}`;
+        const rough = this.moving ? 4 : 1, vk = `${ck}|view${rough > 1 ? '|rough' : ''}${fineLand ? '|fine' : ''}`;
         const before = held?.get(vk);
         if (before) {
           // Held while the map moves: a place found, for as long as it stays in view; and that none
@@ -4892,7 +4927,7 @@ export class MapRenderer {
   }
 
   /** Characters: a marker in the character's colour and its name beside it. Points, never territory. */
-  private drawCharacters(ctx: CanvasRenderingContext2D, view: View, engine: Engine, spaceId: string, t: Instant, entities: Map<string, LabelEntity>, trails = false): void {
+  private drawCharacters(ctx: CanvasRenderingContext2D, view: View, engine: Engine, spaceId: string, t: Instant, entities: Map<string, LabelEntity>, trails = false, since: Instant | null = null): void {
     const u = view.unit;
     const list = engine.charactersAt(spaceId, t);
     if (!list.length) return;
@@ -4917,11 +4952,15 @@ export class MapRenderer {
         const a = track[i - 1], b = track[i];
         if (compare(a.t, t) > 0) break;
         if (a.off || b.off || b.arrive !== 'travel' || a.t.day === -Infinity) continue;
-        // Up to where the character is now on the last leg.
-        const done = compare(b.t, t) <= 0 ? 1 : Math.max(0, Math.min(1, diffMs(a.t, t) / Math.max(1, diffMs(a.t, b.t))));
-        const n = Math.max(2, Math.ceil(24 * done));
+        // (Only the way travelled since the trail's start: a shot's own span, D176.)
+        if (since && compare(b.t, since) <= 0) continue;
+        // Up to where the character is now on the last leg, from where it was at the trail's start.
+        const span = Math.max(1, diffMs(a.t, b.t));
+        const done = compare(b.t, t) <= 0 ? 1 : Math.max(0, Math.min(1, diffMs(a.t, t) / span));
+        const from = since && compare(a.t, since) < 0 ? Math.max(0, Math.min(done, diffMs(a.t, since) / span)) : 0;
+        const n = Math.max(2, Math.ceil(24 * (done - from)));
         for (let k = 0; k <= n; k++) {
-          const [lon, lat] = slerpLonLat(a.lon, a.lat, b.lon, b.lat, (done * k) / n);
+          const [lon, lat] = slerpLonLat(a.lon, a.lat, b.lon, b.lat, from + ((done - from) * k) / n);
           const q = view.projection([lon, lat]);
           if (!q) continue;
           if (k === 0) path.moveTo(q[0], q[1]); else path.lineTo(q[0], q[1]);
@@ -4939,6 +4978,9 @@ export class MapRenderer {
       ctx.stroke(path);
       ctx.setLineDash([]);
     }
+    // Each name beside its marker where it overlaps no name already written: to the right, else the left, above or
+    // below (D176: characters gathered in one place).
+    const placed: Array<[number, number, number, number]> = [];
     for (const c of list) {
       const e = entities.get(c.entity);
       if (!e || e.type_id === 'settlement') continue;
@@ -4960,13 +5002,19 @@ export class MapRenderer {
         ctx.stroke();
       }
       ctx.font = `600 ${(20 * k * u).toFixed(1)}px "Segoe UI", Arial, sans-serif`;
-      ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
+      const tw = ctx.measureText(e.name).width, th = 22 * k * u, gap = r + 5 * k * u;
+      const spots: Array<[number, number, CanvasTextAlign]> = [[p[0] + gap, p[1], 'left'], [p[0] - gap, p[1], 'right'], [p[0], p[1] - gap - th / 2, 'center'], [p[0], p[1] + gap + th / 2, 'center']];
+      const boxOf = ([x, y, align]: [number, number, CanvasTextAlign]): [number, number, number, number] => { const x0 = align === 'left' ? x : align === 'right' ? x - tw : x - tw / 2; return [x0, y - th / 2, x0 + tw, y + th / 2]; };
+      const free = (bx: [number, number, number, number]) => placed.every((q) => bx[2] <= q[0] || bx[0] >= q[2] || bx[3] <= q[1] || bx[1] >= q[3]);
+      const spot = spots.find((sp) => free(boxOf(sp))) ?? spots[0];
+      placed.push(boxOf(spot));
+      ctx.textAlign = spot[2];
       ctx.lineWidth = 4 * k * u;
       ctx.strokeStyle = 'rgba(10,16,24,0.85)';
-      ctx.strokeText(e.name, p[0] + r + 5 * k * u, p[1]);
+      ctx.strokeText(e.name, spot[0], spot[1]);
       ctx.fillStyle = '#ffffff';
-      ctx.fillText(e.name, p[0] + r + 5 * k * u, p[1]);
+      ctx.fillText(e.name, spot[0], spot[1]);
       this.lastCharacters.push({ entity: c.entity, name: e.name, x: p[0], y: p[1], lon: c.lon, lat: c.lat, moving: c.moving, r: r / u, icon: drawn?.icon ?? 'marker', angle: drawn?.angle ?? 0, mirror: drawn?.mirror ?? false, color });
     }
     ctx.restore();

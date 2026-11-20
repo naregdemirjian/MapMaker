@@ -68,7 +68,19 @@ export function detailNeed(region: { west: number; south: number; east: number; 
  * from the region's north-west corner (`west` may be less than −180 or `west + width × dLon` more than
  * 180: the region runs on round the planet). `key` names its content.
  */
-export interface DetailGrid extends ElevationGrid { west: number; north: number; dLon: number; dLat: number; z: number; key: string }
+export interface DetailGrid extends ElevationGrid {
+  west: number; north: number; dLon: number; dLat: number; z: number; key: string;
+  /** Every height from the tiles (none kept from the bundled grid: no tile missing, no ice sheet, nothing sculpted): fine enough to draw the coast close in (D176). */
+  whole?: boolean;
+}
+
+/** The height a grid has at a place (longitudes taken round to the grid's side of the planet); null outside it. */
+export function detailHeightAt(g: DetailGrid, lon: number, lat: number): number | null {
+  const l = lon + 360 * Math.round((g.west + (g.width * g.dLon) / 2 - lon) / 360);
+  const i = Math.floor((l - g.west) / g.dLon), j = Math.floor((g.north - lat) / g.dLat);
+  if (i < 0 || j < 0 || i >= g.width || j >= g.height) return null;
+  return g.data[j * g.width + i] * g.step;
+}
 
 /** Whether a grid covers a region (longitudes compared on the grid's side of the planet). */
 export function covers(g: DetailGrid, r: { west: number; south: number; east: number; north: number }): boolean {
@@ -109,6 +121,7 @@ export function buildDetail(need: DetailNeed, tile: (x: number, y: number) => Fl
     const t = tileAt(Math.floor(X / TILE), Math.floor(Y / TILE));
     return t ? t[(Y - Math.floor(Y / TILE) * TILE) * TILE + (X - Math.floor(X / TILE) * TILE)] : NaN;
   };
+  let whole = true;
   for (let j = 0; j < height; j++) {
     const lat = north - (j + 0.5) * dLat;
     for (let i = 0; i < width; i++) {
@@ -119,10 +132,18 @@ export function buildDetail(need: DetailNeed, tile: (x: number, y: number) => Fl
         const fx = tx * TILE - 0.5, fy = Math.max(0, Math.min(n * TILE - 1, ty * TILE - 0.5));
         const X = Math.floor(fx), Y = Math.floor(fy), ax = fx - X, ay = fy - Y;
         const a = pixel(X, Y), b = pixel(X + 1, Y), c = pixel(X, Math.min(n * TILE - 1, Y + 1)), d = pixel(X + 1, Math.min(n * TILE - 1, Y + 1));
-        v = (a * (1 - ax) + b * ax) * (1 - ay) + (c * (1 - ax) + d * ax) * ay;
+        // (At the region's edge a neighbour may lie in a tile not fetched: the others are used.)
+        const wa = (1 - ax) * (1 - ay), wb = ax * (1 - ay), wc = (1 - ax) * ay, wd = ax * ay;
+        let sum = 0, weight = 0, some = NaN;
+        if (a === a) { sum += a * wa; weight += wa; some = a; }
+        if (b === b) { sum += b * wb; weight += wb; some = b; }
+        if (c === c) { sum += c * wc; weight += wc; some = c; }
+        if (d === d) { sum += d * wd; weight += wd; some = d; }
+        v = weight > 0 ? sum / weight : some;
       }
+      if (!Number.isFinite(v)) whole = false;
       data[j * width + i] = Math.max(-32768, Math.min(32767, Math.round(Number.isFinite(v) ? v : heightAt(g, lon, lat))));
     }
   }
-  return { width, height, step: 1, data, west, north, dLon, dLat, z, key: `detail:${need.key}:${base.key}` };
+  return { width, height, step: 1, data, west, north, dLon, dLat, z, key: `detail:${need.key}:${base.key}`, whole };
 }

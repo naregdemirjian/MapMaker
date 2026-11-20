@@ -9,6 +9,12 @@ The approved architecture is the Claude Doc "Map Maker — Technical Architectur
 
 ## Status at a glance (20 November 2026, Stages 2, 3, 4, 6, 8 to 14 done; Stage 7 mostly done)
 
+- **Five large example projects, I: the Fall of Constantinople, 1453, 20 November** (D176): a medieval city close
+  up, 136 events (every day of the siege's cannon fire, the fall hour by hour), ten shots, in the Julian calendar;
+  under Examples in the Projects dialog. Building it fixed and added: coasts drawn by the finer heights close in
+  (the Golden Horn as water), finer heights and photographs loading after choosing a shot, shapes and missiles
+  appearing over spans of their own, trails within a shot, names that keep clear of each other, of the water and
+  of other territories, an events box that hides while empty, five-digit years grouped.
 - **Two ready-made maps, 20 November** (D175): "New map" makes the Middle East today or Armenia and its neighbours
   as photographed from space at the finest detail, with today's borders, the built-up areas of cities, today's
   cities and capitals (Armenia's provinces too) and a 4K shot of each, ready to export.
@@ -387,7 +393,7 @@ Terminology: the interface calls them **maps** (DECISIONS D24); the code and old
 | `src/presentation/` | Shots and export | Shot settings (time remap, camera keys, overlays) and the export driver that renders frames off screen at the exact output size. |
 | `src/export/` | Files on disk | PNG encoder, export folders, `manifest.json`, `COMPOSITING_GUIDE.txt`. |
 | `src/ui/` | The interface | React. `store.ts` holds the session state and saves every command; components for the map, timeline, panels, dialogs and presentation mode. |
-| `src/examples/`, `server/http.ts` (examples) | Example projects (D171) | Each built by a script through the commands into the projects folder when chosen in the Projects dialog; `greater-armenia.ts` the builder's helpers and shots, `greater-armenia-story.ts` the story. |
+| `src/examples/`, `server/http.ts` (examples) | Example projects (D171, D176) | Each built by a script through the commands into the projects folder when chosen in the Projects dialog; `kit.ts` the builder and its helpers (events, changes, features, characters, statistics, shots); `greater-armenia*.ts`, `constantinople.ts` the projects. |
 | `src/presentation/statistics.ts`, `ui/components/StatisticsDialog.tsx` | Statistics (D171) | Numbers kept with a map over time, filled into shots' texts as "{name}" by `overlaysAt`. |
 | `src/domain/geojson-import.ts`, `ui/components/ImportBorders.tsx` | Importing borders (D120) | GeoJSON maps read into countries by a name property (colours too), years from file names; `commands.ts` importTerritories puts a map's countries on a layer at its date, one undo step a file. |
 | `src/ui/components/Timeline.tsx` | The timeline | Dates, events and the playhead; `useHistoryPlayer` plays history in the working view (D119): years a second, looping, Space. |
@@ -470,7 +476,8 @@ worked out afresh, and any difference stops the test.
 | `test/places.test.ts` | 3 | Today's cities (D173): capitals, shares, ranks and world cities from the data; which cities each filter keeps; added as cities that remember them, the map's filter stored |
 | `test/arrow-step.test.ts` | 1 | The arrow keys' steps of the date viewed (D172): a day, a week, a month, a year; Cmd as Ctrl |
 | `test/statistics.test.ts` | 3 | Statistics (D171): values between dates by a steady share, amount or at once; written as money, people, numbers and shares, and read back from words; a map's statistics filling "{name}" in a shot's texts as history goes |
-| `test/missiles.test.ts` | 2 | Missile salvos (D171): flights along great circles over one event, in flight half way, gone on arrival; strikes where they land and none where one was shot down |
+| `test/missiles.test.ts` | 3 | Missile salvos (D171): flights along great circles over one event, in flight half way, gone on arrival; strikes where they land and none where one was shot down; each missile arriving at its own moment and a point fading in over its own span (D176) |
+| `test/example-constantinople.test.ts` | 1 | The Constantinople example (D176): no conflicts, over a hundred events, the Julian calendar; the city held until dawn on 29 May, taken quarter by quarter, the Cretans' towers last; Galata, Selymbria, the Morea and Trebizond when the sources say; the chain; shots in flight a few hours each; ten shots; statistics |
 | `test/example-greater-armenia.test.ts` | 1 | The Greater Armenia example (D171) built into a projects folder: no conflicts; Turkey and Azerbaijan gone without a sliver; the empire of 2175, the governments gone after the exchange, the fragments and the faction after; nine shots, statistics, the salvos |
 | `test/planet-consequences.test.ts` | 3 | Edits' consequences (D164): estimates by the history's own rules (a crater under two gravities, a flood basalt's volume, a hotspot's chain from its plate's speed, a higher sea's flooding); a re-run measured around each edit and over the planet (an ice age colder while it lasted); crust followed back with its plate and a crater made there landing where it was clicked |
 | `test/planet-resume.test.ts` | 2 | A history going on from a checkpoint (D163): edits added late, taken away, starting on a checkpoint, an ice age changing past climates: the same bytes as a run from the beginning (the pictures' rotations and climates too), faster; another setting changed starts again |
@@ -510,13 +517,13 @@ worked out afresh, and any difference stops the test.
 | `test/countries.test.ts` | 4 | Today's countries: holes, overseas parts, across 180°, all 242 at once as an event (about 5 s), one undo; land added into the user's own country |
 | `test/label-style.test.ts` | 3 | Label styles: layering, clamping, text, commands with undo |
 | `test/fills.test.ts` | 3 | Video timing; fill commands with undo; the 197 flags and their credit |
-| `test/events-box.test.ts` | 2 | Current events: started and not ended, lingering, alternatives, groups, fades, limits |
+| `test/events-box.test.ts` | 3 | Current events: started and not ended, lingering, alternatives, groups, fades, limits; hidden while empty when asked (D176) |
 | `test/photo.test.ts` | 5 | The Earth as photographed (D138): the tiles' layout; which tiles a view needs at each zoom, never more than allowed, across the 180th meridian and at the poles; where their picture lies and when it covers a view; the bundled picture and its record |
 | `test/front-source.test.ts` | 3 | Where a front starts (D136): the border shared with the new owner's land, found from the change's own edges exactly as from every edge of the map; the side facing its nearest land; the middle; the outer edges of land given up; an expansion's points; a dissolve |
 | `test/front-field.test.ts` | 12 | Fronts that follow the land (D136): a U taken from the tip of one arm, a straight border, the land reached as closed lines, islands, pincers, the middle, across the sea, across the 180th meridian, speed; the front's own lines across the land only, never along a narrow gap or round an island not yet reached; where the land reached between two moments lies (D137); a coarser field of the same change gives the same ragged front (D139); the strip of blocks a front crosses between two moments (D140) |
 | `test/paleo.test.ts` | 7 | The Earth through geological time (D134): maps packed and read back, blended between moments; the real PALEOMAP maps (today about 30% land; 250 million years ago one land, Pangaea); the glacial sea; deep-time dates written and read; the map made and undone. Continents sliding (D135): a block half way along its motion and whole; India moving steadily north between 50 and 45 million years ago |
 | `test/sky-look.test.ts` | 11 | Looks of star maps (D130): made whole and within bounds, every preset its own, looks by chance, colourings, kept and undone; the flat chart (D131): straight down, turned and moved; territories (D132): a lone star's disc, merging, borders half way and pushed back, changing hands, painting, speed |
-| `test/sequence.test.ts` | 11 | Screen seconds through even and eased pacing; transition settings and styles; transition looks and an event's own look (D137); the still camera and its reset; moving texts and the events box; export choices and sizes; each layer on its own; an event's own time on screen, out of sync with the clock; a turning globe; a steady date |
+| `test/sequence.test.ts` | 12 | Screen seconds through even and eased pacing; transition settings and styles; transition looks and an event's own look (D137); the still camera and its reset; moving texts and the events box; export choices and sizes; each layer on its own; an event's own time on screen, out of sync with the clock; a turning globe; a steady date; a shot's first moment, where its trails start (D176) |
 | `test/workflow.test.ts` | 4 | Groups of countries (made, renamed, moved in and out, deleted keeping members); labels and pictures of many at once; many events and countries deleted at once; one undo each |
 | `test/names.test.ts` | 1 | Names over time: before and after, renamed again at the same moment, in an event, from the beginning, reload, deleted with the thing, undo |
 | `test/flat-maps.test.ts` | 3 | Flat maps: plan view, the width on screen, exact screen conversions, straight borders, panning stops at the edge; true to scale within 1%; labels |
@@ -823,7 +830,9 @@ recompiling the 1,000-territory history took about 800 ms after every edit.
 1. **Not yet run on the user's PC.** The tests run on a Windows machine in GitHub Actions; the installer and the
    launcher have not yet been tried by the user.
 2. **Coastline detail.** The finest basemap detail is 1:10m (about 200 m); street-level coasts (OpenStreetMap) are not
-   included. Areas in the inspector include parts clipped away at the coast.
+   included. With the terrain on and its finer heights, close in (a city) the heights draw the coast to about 30 m
+   (D176); offline, or where a height tile is missing, Natural Earth's coastline is used. Areas in the inspector
+   include parts clipped away at the coast.
 3. **Large maps** (done in the optimisation stage, see Performance): what still takes time is listed there.
 4. **(Fixed 18 November 2026) Two animations meeting.** Where two simultaneous animated changes touch, their
    shared border is now shown only where the fronts make the owners on its two sides differ (D126); it was drawn

@@ -329,6 +329,13 @@ export function timeAt(shot: ShotSettings, frame: number): Instant {
   return lerp(fromJSONValue(a.at), fromJSONValue(b.at), f);
 }
 
+/** The earliest moment a shot shows (its trails start there, D176). */
+export function shotFirstMoment(shot: ShotSettings): Instant {
+  let first = fromJSONValue(shot.time[0].at);
+  for (const k of shot.time) { const t = fromJSONValue(k.at); if (compare(t, first) < 0) first = t; }
+  return first;
+}
+
 /** The shot with one camera for its whole length (the view never moves during the shot). */
 export function withStillCamera(shot: ShotSettings, camera: Camera): ShotSettings {
   return { ...shot, camera: shot.camera.map((k) => ({ ...k, camera: { ...camera } })) };

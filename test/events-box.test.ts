@@ -66,3 +66,13 @@ test('current events: an event holding several changes on different dates shows 
   // Listed once, never twice at the same moment.
   assert.equal(at(1942).length, 1);
 });
+
+test('an events box set to hide while empty (D176) draws nothing between events', async () => {
+  const { drawEventsBox } = await import('../src/presentation/events-box.ts');
+  const calls: string[] = [];
+  const ctx = new Proxy({}, { get: (_t, k) => (k === 'measureText' ? () => ({ width: 10 }) : typeof k === 'string' && ['save', 'restore', 'fillText', 'fill', 'fillRect', 'beginPath', 'roundRect', 'stroke', 'moveTo', 'lineTo', 'arc', 'closePath', 'rect', 'clip', 'drawImage', 'arcTo', 'quadraticCurveTo'].includes(k) ? () => { calls.push(k); } : undefined), set: () => true }) as unknown as CanvasRenderingContext2D;
+  const t = gregorian.fromCivil({ year: 1453, month: 5, day: 29 });
+  assert.equal(drawEventsBox(ctx, 1920, 1080, 1, eventsBoxOf({ show: true, hideWhenEmpty: true }), t, []), null);
+  assert.equal(calls.length, 0, 'nothing drawn');
+  assert.notEqual(drawEventsBox(ctx, 1920, 1080, 1, eventsBoxOf({ show: true }), t, []), null, 'as before when not asked: the date alone');
+});

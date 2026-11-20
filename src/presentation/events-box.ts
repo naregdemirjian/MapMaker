@@ -38,6 +38,8 @@ export interface EventsBox {
   image: string | null; imageFit: 'wrap' | 'stretch' | 'cover' | 'contain'; imageOpacity: number;
   /** Fixed height (design pixels); 0 grows with the content. Useful with a custom graphic. */
   height: number;
+  /** Hidden while no event is listed (D176): no box with only its title and the date between events. */
+  hideWhenEmpty: boolean;
 }
 
 export const DEFAULT_EVENTS_BOX: EventsBox = {
@@ -46,7 +48,7 @@ export const DEFAULT_EVENTS_BOX: EventsBox = {
   font: 'Segoe UI', titleSize: 18, dateSize: 30, textSize: 24,
   titleColor: '#ffd166', dateColor: '#f4efe6', textColor: '#e3e9ef', accentColor: '#ffd166',
   background: '#0a1018', backgroundOpacity: 0.72, borderColor: '#ffffff', borderWidth: 0, radius: 12,
-  image: null, imageFit: 'cover', imageOpacity: 1, height: 0,
+  image: null, imageFit: 'cover', imageOpacity: 1, height: 0, hideWhenEmpty: false,
 };
 
 export function eventsBoxOf(stored: Partial<EventsBox> | null | undefined): EventsBox {
@@ -130,7 +132,7 @@ function withAlpha(color: string, a: number): string {
 
 /** Draw the box. `unit` = frame width / 1920. Returns the box rectangle (for tests), or null. */
 export function drawEventsBox(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, width: number, height: number, unit: number, box: EventsBox, t: Instant, events: CurrentEvent[], cal: Calendar = gregorian): { x: number; y: number; w: number; h: number } | null {
-  if (!box.show) return null;
+  if (!box.show || (box.hideWhenEmpty && !events.length)) return null;
   const u = unit, pad = box.padding * u, w = box.width * u;
   const inner = w - 2 * pad;
   // Lay out first, to know the height.

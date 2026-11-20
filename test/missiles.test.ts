@@ -50,3 +50,27 @@ test('a great circle between two places', () => {
   assert.deepEqual(arc[0].map((x) => +x.toFixed(6)), [-74, 40.7]);
   assert.ok(Math.abs(arc[arc.length - 1][0] - 37.6) < 1e-6);
 });
+
+test('a shot of its own (D176): each missile, or cannonball, arrives at its own moment; a point fades in over a span of its own', () => {
+  const world = new World();
+  const { spaceId } = cmd.seedProject(world, 'Test').result;
+  cmd.missileSalvo(world, {
+    spaceId, name: 'Bombardment', launch: T(6), arrive: T(20),
+    flights: [{ from: [28.92, 41.017], to: [28.924, 41.016], launch: T(7), arrive: T(9) }, { from: [28.92, 41.01], to: [28.923, 41.01], launch: T(12), arrive: T(14) }],
+  });
+  const engine = new Engine(world);
+  const lines = world.all('layer').find((l) => l.kind === 'line')!;
+  const at = (t: ReturnType<typeof T>) => engine.featuresAt(lines.id, t);
+  assert.equal(at(T(8)).filter((f) => f.progress !== undefined).length, 1, 'the first in flight at 8');
+  assert.ok(Math.abs(at(T(8)).find((f) => f.progress !== undefined)!.progress! - 0.5) < 0.2, 'half way: two hours of flight, not the whole day');
+  assert.equal(at(T(10)).filter((f) => f.progress !== undefined).length, 0, 'the first has landed by 10, the second not yet fired');
+  assert.equal(at(T(13)).filter((f) => f.progress !== undefined).length, 1, 'the second in flight at 1 pm');
+  // A point fading in over its own half hour, in an event of a moment (no end).
+  const ev = cmd.createEvent(world, { name: 'Flags on the towers', start: T(5, 30), end: null, type_id: 'war', description: '', precision: 'minute' }).result;
+  const pts = cmd.createLayer(world, spaceId, 'Fighting', 'point').result;
+  cmd.createFeature(world, { layerId: pts, name: 'Flags', parts: [[[28.94, 41.032]]], mode: { kind: 'new', eventId: ev, at: T(5, 30) }, anim: 'fade', animUntil: T(6) });
+  const e2 = new Engine(world);
+  const f = (t: ReturnType<typeof T>) => e2.featuresAt(pts, t)[0];
+  assert.ok(f(T(5, 45)).progress! > 0.3 && f(T(5, 45)).progress! < 0.7, 'half faded in at 5.45');
+  assert.equal(f(T(6, 30)).progress, undefined, 'whole from 6');
+});

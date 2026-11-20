@@ -618,12 +618,16 @@ export class Engine {
         let steps = byLayer.get(f.id);
         if (!steps) byLayer.set(f.id, (steps = []));
         const t = effectTime(ef, ev);
-        // Appearing over the rest of its event (from its own moment to the event's end), if asked to.
+        // Appearing over the rest of its event (from its own moment to the event's end), if asked to; or over a
+        // span of its own within the event (D176: a cannonball's flight, `until`).
         let anim: ShapeStep['anim'] = null;
-        const tr = parts ? parseJSON<{ style?: unknown } | null>(ef.transition, null) : null;
-        if (tr && isFeatureAnim(tr.style) && !isUntracked(ef) && ev.end_day !== null) {
-          const end = fromStore(ev.end_day, ev.end_ms ?? 0);
-          if (compare(end, t) > 0) { anim = { style: tr.style, end }; this.animEnds.push(end); this.countTime(end, 1, false); }
+        const tr = parts ? parseJSON<{ style?: unknown; until?: unknown } | null>(ef.transition, null) : null;
+        if (tr && isFeatureAnim(tr.style) && !isUntracked(ef)) {
+          const evEnd = ev.end_day !== null ? fromStore(ev.end_day, ev.end_ms ?? 0) : null;
+          const own = Array.isArray(tr.until) && tr.until.length === 2 && tr.until.every((v) => typeof v === 'number' && Number.isFinite(v)) ? fromStore(tr.until[0] as number, tr.until[1] as number) : null;
+          // (A span of its own needs no end to the event: a moment's event can have a shape fade in.)
+          const end = own && compare(own, t) > 0 && (!evEnd || compare(own, evEnd) < 0) ? own : evEnd;
+          if (end && compare(end, t) > 0) { anim = { style: tr.style, end }; this.animEnds.push(end); this.countTime(end, 1, false); }
         }
         steps.push({ t, parts, effectId: ef.id, eventId: ev.id, precedence: isUntracked(ef) ? UNTRACKED_PRECEDENCE : ev.precedence, eventSeq: ev.created_seq, ordinal: ef.ordinal, anim });
         count(t);

@@ -17,7 +17,7 @@ import { periodChangesNow, GAINED_COLOR, LOST_COLOR } from './CountryHistory.tsx
 import { processLasso, densify, orientInteriorLeft, signedArea, splitLoops, simplify, smooth, type Pt, dedupe, ringFromMapPoints } from '../../render-engine/stroke.ts';
 import { geoCentroid } from 'd3-geo';
 import { lonLatToVec, E7 } from '../../geo-kernel/vec.ts';
-import { cameraAt, timeAt, overlaysAt, drawOverlays, withStillCamera, unspun, moveOverlay, shotTransitions, type ShotSettings, type OverlayRect } from '../../presentation/sequence.ts';
+import { cameraAt, timeAt, overlaysAt, drawOverlays, withStillCamera, unspun, moveOverlay, shotTransitions, shotFirstMoment, type ShotSettings, type OverlayRect } from '../../presentation/sequence.ts';
 import { transitionOptions, drawShotOverlays, lookStyles } from '../../presentation/export-driver.ts';
 import { finishLook } from '../../presentation/looks.ts';
 import { parseJSON, slerpLonLat } from '../../temporal-engine/engine.ts';
@@ -369,12 +369,16 @@ export function MapView() {
     shownView = { view, preview: !!shot };
     if (sig !== mo.sig) { mo.at = mo.sig ? started : -Infinity; mo.sig = sig; }
     const moving = started - mo.at < SETTLE_MS;
+    // (Finer heights and photographs are fetched only once the view rests: after a jump with nothing else left to
+    // draw more finely, e.g. choosing a shot, it is drawn once more when it has rested, or they would never come.)
+    let waitsForRest = false;
     // Close in on the Earth (D101): finer heights for the region in view and around it, downloaded
     // when the map rests (meanwhile the last region's, where it reaches).
     if (terrain && carved && look?.detail && terrainSourceOf(space) === 'earth') {
       const shows = viewBounds(view), around = shows && viewBounds(view, 0.5);
       const need = around ? detailNeed(around, metresPerPixel(view, (space?.radius_m ?? 6371008.8) / 1000)) : null;
       terrain.detail = need && shows ? detailSoon(shows, need, carved, () => store.notify(), !moving) : null;
+      if (need && moving) waitsForRest = true;
     }
     // Close in on the Earth as photographed (D138): the photographs of the region in view and around it,
     // downloaded when the map rests (meanwhile the last region's, where it reaches, over the bundled picture).
@@ -382,6 +386,7 @@ export function MapView() {
       const shows = viewBounds(view), around = shows && viewBounds(view, 0.25);
       const need = around ? photoNeed(around, metresPerPixel(view, 6371.0088) / METRES_PER_DEGREE / dpr, 300) : null;
       terrain.photo = need && shows ? photoSoon(shows, need, () => store.notify(), !moving) : null;
+      if (need && moving) waitsForRest = true;
     }
     // The moment shown is being dragged along the timeline, or a shot is playing: names are placed less finely
     // until it rests (then finely again; exports always place them finely).
@@ -397,7 +402,7 @@ export function MapView() {
     // A shot's look (D108): its colours, and its finish once the map is drawn.
     const shotLook = shot ? lookStyles(shot) : null;
     try {
-      s.renderer.render(ctx, view, s.world, shot ? s.engineFor(shot.branch) : s.engine, s.spaceId, time, { passes, transparent: !!shot?.transparent, layerIds: layers, basemap, referenceBorders: !shot && s.referenceBorders, transitions: shot ? transitionOptions(shot, s.shotFrame) : undefined, mediaSeconds: shot ? s.shotFrame / shot.fps : 0, trails: !!shot?.trails, layout: { labels: namesOn && !namesHidden, cities: citiesOn }, moving: moving && vs.whileMoving === 'carry', holdNames: moving && vs.names === 'hold', fillAround, hurried, show, terrain, style: shotLook?.style, basemapStyle: shotLook?.basemap });
+      s.renderer.render(ctx, view, s.world, shot ? s.engineFor(shot.branch) : s.engine, s.spaceId, time, { passes, transparent: !!shot?.transparent, layerIds: layers, basemap, referenceBorders: !shot && s.referenceBorders, transitions: shot ? transitionOptions(shot, s.shotFrame) : undefined, mediaSeconds: shot ? s.shotFrame / shot.fps : 0, trails: !!shot?.trails, trailsSince: shot?.trails ? shotFirstMoment(shot) : null, layout: { labels: namesOn && !namesHidden, cities: citiesOn }, moving: moving && vs.whileMoving === 'carry', holdNames: moving && vs.names === 'hold', fillAround, hurried, show, terrain, style: shotLook?.style, basemapStyle: shotLook?.basemap });
     } catch (e) {
       console.error(e);
     }
@@ -405,7 +410,7 @@ export function MapView() {
     // (Counted from the end of this frame, not from the movement that caused it: a frame that itself
     // takes longer than the wait would otherwise be followed at once by the sharp redraw, in the
     // middle of the movement, and a slow computer would draw everything twice.)
-    if ((moving || hurried) && (s.renderer.lastApproximate || namesHidden || holding)) mo.timer = window.setTimeout(() => force((n) => n + 1), SETTLE_MS + 4);
+    if ((moving || hurried) && (s.renderer.lastApproximate || namesHidden || holding || waitsForRest)) mo.timer = window.setTimeout(() => force((n) => n + 1), SETTLE_MS + 4);
     // Once the view has rested a moment after moving, the room around the kept pictures is drawn (once
     // per view): the next move, or zooming out a little, then starts with nothing to draw.
     window.clearTimeout(fl.timer);

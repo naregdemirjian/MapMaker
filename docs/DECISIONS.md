@@ -61,6 +61,53 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D176. Five large example projects, I: the Fall of Constantinople, 1453, and what building it fixed
+
+- **Asked.** Five large projects of different kinds, each of a hundred events or more, simple and complex, among
+  them close-up maps of medieval times and far-future science fiction, for the user to inspect; and to find and
+  fix what needs changing in the software while making them.
+- **The kit** (`src/examples/kit.ts`): what every example is built with, through the interface's commands: a
+  builder holding the project (its map and political layer, which can change to another map), today's countries,
+  regions and places as material, and helpers for events, changes of territory (from named owners only, clearing,
+  annexing), features (drawn, grown, faded in, over the event or a span of their own), cities, characters'
+  journeys, statistics, dates (`later`), a seeded random generator and shots (title, captions with pointers,
+  statistics, the events box). The Greater Armenia example (D171) now uses it.
+- **The Fall of Constantinople, 1453** (`src/examples/constantinople.ts`, "Examples" in the Projects dialog): one
+  map of the Earth in the Julian calendar (the sources' dates); the terrain from the finer heights close in; the
+  states of 1451 around the Marmara (the Ottomans, the Byzantine city and outposts, Galata, the Morea, Trebizond,
+  Karaman, Candar, Athens); the city drawn on the shores the heights give (the Theodosian walls, the sea walls,
+  gates, landmarks, the chain across the Golden Horn, Galata's walls); 136 events: the build-up from 1451, the
+  siege day by day (the camps, fourteen batteries, every day's cannon fire, 994 features in all), the battle off
+  the Acropolis, the ships over the hill, Coco's attack, the pontoon bridge, the mines, the siege tower, the omens,
+  the fall hour by hour on 29 May (three waves, the Kerkoporta, the breach, the city taken quarter by quarter, the
+  Cretans' towers last, the ships breaking out), then Galata, Selymbria, Athens, the Morea, Candar, Trebizond and
+  Karaman to 1468; nine characters; five statistics; ten shots.
+- **Fixed and added in the software, found while building it.**
+  - *The coast close in.* Natural Earth's coastline (1:10m) cannot show a city's harbour: the Golden Horn was land.
+    Close in on the Earth, where the finer heights are all from the tiles (`DetailGrid.whole`), of zoom 10 or finer,
+    at today's sea level and unsculpted (`closeCoastOf`), the heights now draw the coast: water where the tiles
+    have 0 m, land from 1 m, and land below the sea only where the coastline has land (polders, the Dead Sea's
+    shores). The coast runs midway between cells of land and water, laid between them as the heights are, so it is
+    a smooth line, not the outline of the cells. Territories end at it, and names in view go on its land. A grid's
+    edge cells no longer count as missing heights (the neighbour beyond the region is left out).
+  - *Finer heights and photographs after a jump.* They are fetched once the view rests; after a jump with nothing
+    else to draw again (choosing a shot), the view was never drawn again, so they never came. It now is.
+  - *A span of its own.* A drawn shape (line drawing itself, area growing, point fading in) can take a span of its
+    own within its event (`animUntil`), and in an event of a moment too; each missile of a salvo can arrive at its
+    own moment (`MissileFlight.arrive`): a day's bombardment is one event of many shots of a few hours each.
+  - *Trails in a shot* start at the shot's first moment, not at the start of each route (a shot of one morning
+    showed routes from years before).
+  - *Names.* Characters' names no longer overlap each other (beside the marker where free: right, left, above,
+    below). Names of points that would overlap a name already written are left out, so points crowded together
+    when seen from afar stay legible. A country's name placed in view (zoomed in on part of it) goes only where the
+    country itself is: its outline is drawn at a detail that suits its size, and a hole in it smaller than that (a
+    city of another) was taken for part of it.
+  - *The events box* can hide itself while no event is listed ("Hide the box while no event is listed"; on in the
+    examples), instead of a box with only its title and the date.
+  - *Years* of five digits are grouped by thousands ("12,026", "10,000 BCE"), as longer ones already were.
+- **Seen.** Every shot checked in the app with the heights downloaded: the Golden Horn and the Bosphorus as water,
+  the walls on the shores, the fall quarter by quarter, names clear of each other and of the water.
+
 ### D175. Two ready-made maps at the finest detail: the Middle East today, and Armenia with its neighbours
 
 - **Asked.** For the film, two maps of the highest quality: the Middle East today with its urban areas, as a
