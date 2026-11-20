@@ -1233,6 +1233,19 @@ try {
     await cur.press('Alt+ArrowDown');
     assert.equal(await cur.inputValue(), '11 June 1929');
     assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.time.day), gregorian.fromCivil({ year: 1929, month: 6, day: 11 }).day, 'the date viewed moved with the keys');
+    // Anywhere but a text box (D172): left and right a day; Ctrl a week; Ctrl+Shift a month; Ctrl+Shift+Alt a year.
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    const viewed = () => page.evaluate(() => { const s = (window as any).__mapmaker.store; return s.time.day; });
+    const dayOf = (y: number, m: number, d: number) => gregorian.fromCivil({ year: y, month: m, day: d }).day;
+    await page.locator('body').press('ArrowRight');
+    assert.equal(await viewed(), dayOf(1929, 6, 12));
+    await page.locator('body').press('Control+ArrowRight');
+    assert.equal(await viewed(), dayOf(1929, 6, 19));
+    await page.locator('body').press('Control+Shift+ArrowLeft');
+    assert.equal(await viewed(), dayOf(1929, 5, 19));
+    await page.locator('body').press('Control+Shift+Alt+ArrowRight');
+    assert.equal(await viewed(), dayOf(1930, 5, 19));
+    await page.getByTestId('steady-date').waitFor();
     await h.setDate('1930');
   });
 

@@ -61,6 +61,18 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D172. A steady date at the top, the calendar's arrows inside it, the date stepped from the keyboard
+
+- **Asked.** The date at the top jittered while it changed; the calendar's next-year arrow stuck out of its box;
+  arrow keys to move the date: a day, with Ctrl a week, Ctrl+Shift a month, Ctrl+Shift+Alt a year.
+- **Found.** The date viewed was already drawn as day, month and year in cells of fixed width, but only while the
+  field's text matched the date, and that text is brought up to date a moment after each change: while history
+  played, the cells gave way to the plain text on about one frame in three (3 of 8 sampled), which jumped about.
+- **Built.** The cells show whenever the field is not being typed in (none dropped in 20 frames sampled while
+  playing). The calendar is a little wider and its arrows narrower, so its header fits. Left and right arrows step
+  the date viewed while building, anywhere but a text box: a day; Ctrl (Cmd), a week of the map's calendar; Ctrl+Shift,
+  a month; Ctrl+Shift+Alt, a year (`arrowStep` in `core-time/steps.ts`); playing history stops.
+
 ### D171. A project made from an outline: the "Greater Armenia" example; statistics, missiles and examples in the software
 
 - **Asked.** Make a whole project from the user's rough outline of a future history (a revolution in Armenia in

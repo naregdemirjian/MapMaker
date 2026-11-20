@@ -37,3 +37,11 @@ export function stepDate(t: Instant, unit: 'day' | 'month' | 'year', n: number, 
 /** The year typed in the calendar's box: 1450, -44 (astronomical), 44 BCE / 44 BC, AD 900. */
 export const parseYear = (text: string): number | null => parseGregorianYear(text);
 
+/** The date a step of the arrow keys away (D172): a day; with Ctrl (or Cmd), a week; with Shift too, a month; with Alt too, a year. */
+export function arrowStep(t: Instant, dir: 1 | -1, k: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean; altKey: boolean }, cal: Calendar = gregorian): Instant {
+  const ctrl = k.ctrlKey || k.metaKey;
+  if (ctrl && k.shiftKey && k.altKey) return stepDate(t, 'year', dir, cal);
+  if (ctrl && k.shiftKey) return stepDate(t, 'month', dir, cal);
+  if (ctrl) return stepDate(t, 'day', dir * (cal.weekdays?.length || 7), cal);
+  return stepDate(t, 'day', dir, cal);
+}

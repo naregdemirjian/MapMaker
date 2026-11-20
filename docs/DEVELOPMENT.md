@@ -9,6 +9,9 @@ The approved architecture is the Claude Doc "Map Maker — Technical Architectur
 
 ## Status at a glance (20 November 2026, Stages 2, 3, 4, 6, 8 to 14 done; Stage 7 mostly done)
 
+- **Steadier dates and keyboard stepping, 20 November** (D172): the date at the top no longer jumps while history
+  plays; the calendar's arrows fit inside it; left and right arrows step the date viewed by a day (Ctrl: a week,
+  Ctrl+Shift: a month, Ctrl+Shift+Alt: a year).
 - **A project from an outline: the "Greater Armenia" example, 20 November** (D171): a future history from the user's
   outline, 2039 to 2178, built by a script through the app's own commands into a finished project (82 events, the
   Week War province by province, salvos of missiles, the exchange, the aftermath, nine shots); in the Projects
@@ -443,7 +446,7 @@ The approved roadmap has 14 stages (0–13). Where each stands (brought up to da
 
 ## Tests
 
-All pass as of 20 November 2026 (517 unit and randomised tests in 100 files, 23 + 71 + 14 + 8 interface steps). The
+All pass as of 20 November 2026 (518 unit and randomised tests in 101 files, 23 + 71 + 14 + 8 interface steps). The
 interface tests run with the verify mode on (D57): everything the app works out from what was there before is also
 worked out afresh, and any difference stops the test.
 `sh scripts/check-all.sh` runs everything and prints ALL CHECKS PASSED only when every check passed.
@@ -453,6 +456,7 @@ worked out afresh, and any difference stops the test.
 | `test/planet-physics.test.ts` | 6 | The planetary engine's definitions and physics (D152): every preset valid and what it says; Earth, Mars and Venus from their settings (gravity, years, days, sunlight, albedo, temperatures); Kepler, the Moon's and Mars's masses from their sizes, the Sun and red dwarfs, the faint young Sun, the habitable zone, early heat, tidal locking; each setting moving the results the right way; overrides and notes; stored definitions read back |
 | `test/planet-mesh.test.ts` | 5 | The icosahedral mesh (D152): cells, faces, Euler's formula, areas summing to 4π, neighbours mutual and counter-clockwise, levels nesting; point location against brute force; the Laplacian and gradient against spherical harmonics level by level; conservative transport and diffusion; prolongation and restriction; pictures of fields and their round trip |
 | `test/planet-insolation.test.ts` | 3 | Sunlight (D152): Earth's against Berger's values, solstices and polar night; perihelion and the equinox; global means for five presets; a tidally locked planet's dark side; more tilt, sunnier poles |
+| `test/arrow-step.test.ts` | 1 | The arrow keys' steps of the date viewed (D172): a day, a week, a month, a year; Cmd as Ctrl |
 | `test/statistics.test.ts` | 3 | Statistics (D171): values between dates by a steady share, amount or at once; written as money, people, numbers and shares, and read back from words; a map's statistics filling "{name}" in a shot's texts as history goes |
 | `test/missiles.test.ts` | 2 | Missile salvos (D171): flights along great circles over one event, in flight half way, gone on arrival; strikes where they land and none where one was shot down |
 | `test/example-greater-armenia.test.ts` | 1 | The Greater Armenia example (D171) built into a projects folder: no conflicts; Turkey and Azerbaijan gone without a sliver; the empire of 2175, the governments gone after the exchange, the fragments and the faction after; nine shots, statistics, the salvos |

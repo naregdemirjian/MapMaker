@@ -2,6 +2,8 @@ import { CalendarDialog } from './components/CalendarDialog.tsx';
 import { StatisticsDialog } from './components/StatisticsDialog.tsx';
 import { BranchesDialog } from './components/Branches.tsx';
 import { useEffect } from 'react';
+import { arrowStep } from '../core-time/steps.ts';
+import { calendarNow } from './calendar-now.ts';
 import { useStore, store } from './store.ts';
 import { TopBar, Outliner, ToolBar, Inspector, Toasts } from './components/Panels.tsx';
 import { ShowDialog } from './components/ShowDialog.tsx';
@@ -41,6 +43,15 @@ export function App() {
         e.preventDefault();
         if (store.mode === 'world') { const p = store.historyPlay; store.set({ historyPlay: { ...p, on: !p.on } }); if (p.on) store.setTime(store.time); }
         else if (store.shotId) store.set({ playing: !store.playing });
+      }
+      // Left and right arrows step the date viewed: a day; Ctrl, a week; Ctrl+Shift, a month; Ctrl+Shift+Alt, a year.
+      if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && store.mode === 'world' && !store.pending && !store.dialog && !(e.target as HTMLElement)?.isContentEditable) {
+        const t = store.time;
+        if (Number.isFinite(t.day)) {
+          e.preventDefault();
+          if (store.historyPlay.on) store.set({ historyPlay: { ...store.historyPlay, on: false } });
+          store.setTime(arrowStep(t, e.key === 'ArrowRight' ? 1 : -1, e, calendarNow()));
+        }
       }
       // Delete: everything chosen in the lists (the Border points tool uses Delete for points).
       if (e.key === 'Delete' && store.tool !== 'vertex' && store.mode !== 'present' && !store.pending) {

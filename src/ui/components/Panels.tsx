@@ -59,7 +59,9 @@ export function DateField({ value, onChange, placeholder, allowEmpty, testId, su
   const [focused, setFocused] = useState(false);
   // Shown steady (see SteadyDate) while the field is not being typed in.
   // (Deep time, D134, is written as how long ago: no cells of day, month and year.)
-  const steadyShown = !!steady && !focused && !!value && Number.isFinite(value.day) && text === show(value) && (cal !== gregorian || gregorian.toCivil(value).year >= DEEP_BEFORE_YEAR);
+  // (Not tied to the text: that is brought up to date a moment after the date changes, and while history plays the
+  // steady cells would give way to the text on every other frame, jumping about.)
+  const steadyShown = !!steady && !focused && !bad && !!value && Number.isFinite(value.day) && (cal !== gregorian || gregorian.toCivil(value).year >= DEEP_BEFORE_YEAR);
   useEffect(() => { setText(value ? show(value) : ''); setBad(false); }, [value?.day, value?.ms, cal]);
   const suggested = !value && suggest ? show(suggest) : null;
   const commit = (t = text) => {
@@ -86,7 +88,7 @@ export function DateField({ value, onChange, placeholder, allowEmpty, testId, su
       <input
         className={`${bad ? 'date-input bad' : 'date-input'}${steadyShown ? ' steady-under' : ''}`} value={text} placeholder={suggested ?? placeholder ?? (cal === gregorian ? 'e.g. 14 May 1203, 500 BCE, 2241-03-02' : `e.g. ${cal.format(cal.fromCivil({ year: 1, month: 1, day: 1 }), 'day')}`)}
         onChange={(e) => setText(e.target.value)} onFocus={() => setFocused(true)} onBlur={() => { setFocused(false); commit(); }} onKeyDown={key}
-        title={cal === gregorian ? 'Dates: 14 May 1203 · May 1203 · 1203 · 500 BCE · 2241-03-02T04:05 · c. 3000 BCE. Arrow keys: a day (Shift: a month, Alt: a year)' : `Dates in the ${cal.name} calendar: ${cal.format(cal.fromCivil({ year: 12, month: 1, day: 3 }), 'day')} · ${cal.format(cal.fromCivil({ year: 12 }), 'month')} · ${cal.yearLabel(12)} · 12-1-3 (its own year, month and day numbers). Arrow keys: a day (Shift: a month, Alt: a year)`} data-testid={testId}
+        title={cal === gregorian ? 'Dates: 14 May 1203 · May 1203 · 1203 · 500 BCE · 2241-03-02T04:05 · c. 3000 BCE. Up and down arrows here: a day (Shift: a month, Alt: a year). Anywhere else, left and right arrows: a day (Ctrl: a week, Ctrl+Shift: a month, Ctrl+Shift+Alt: a year)' : `Dates in the ${cal.name} calendar: ${cal.format(cal.fromCivil({ year: 12, month: 1, day: 3 }), 'day')} · ${cal.format(cal.fromCivil({ year: 12 }), 'month')} · ${cal.yearLabel(12)} · 12-1-3 (its own year, month and day numbers). Up and down arrows here: a day (Shift: a month, Alt: a year). Anywhere else, left and right arrows: a day (Ctrl: a week, Ctrl+Shift: a month, Ctrl+Shift+Alt: a year)`} data-testid={testId}
       />
       {steadyShown && <SteadyDate t={value!} yearSizer={steady!.yearSizer} dayOnly={steady!.dayOnly} />}
       <button type="button" className="date-calendar-button" title="Choose on a calendar" onClick={() => setOpen(!open)} data-testid={testId ? `${testId}-calendar` : undefined} tabIndex={-1}>
