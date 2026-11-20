@@ -76,6 +76,9 @@ Köppen-Geiger's main classes as shares of the land: A 20 %, B 30 %, C 14 %, D 1
   whose gorges lie further off keep shallow lakes (British Columbia's, the Congo's, Lake Chad's much larger than
   its own), the deep lakes that hold most of the measured water (Baikal, Tanganyika, Superior) are narrower than a
   cell, and the Caspian fills to the sea's level and joins it.
-- The deep sea floor (D166): old floor now founders as on the Earth (the floor's mean age 47 to 67 Myr over four
-  seeds against 64), so its depths' peak lies between 3 and 5.5 km by planet (the Earth's 4 to 5 km).
+- The sea floor and the sea's level (D166, D170): old floor founders as on the Earth, plates fuse as well as split
+  and run 200 Myr before a history begins, so over five planets the floor's mean age is 53 to 72 Myr (the Earth's
+  64), its depths' peak 4 to 4.5 km (4 to 5) and the sea's level spans 290 to 425 m over 500 Myr (about 370).
+  Still: 4 to 8 % of the floor outlives 180 Myr (the Earth has almost none), and the standard level makes two to
+  four times the Earth's new floor (its plates' ragged edges open more), so one planet in three there spans 620 m.
 - A simulated planet is a different planet: its numbers are to be read as plausible, not as the Earth's.

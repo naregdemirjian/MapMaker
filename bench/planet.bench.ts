@@ -226,8 +226,11 @@ async function validate() {
   say('  whose gorges lie further off keep shallow lakes (British Columbia\'s, the Congo\'s, Lake Chad\'s much larger than');
   say('  its own), the deep lakes that hold most of the measured water (Baikal, Tanganyika, Superior) are narrower than a');
   say('  cell, and the Caspian fills to the sea\'s level and joins it.');
-  say('- The deep sea floor (D166): old floor now founders as on the Earth (the floor\'s mean age 47 to 67 Myr over four');
-  say('  seeds against 64), so its depths\' peak lies between 3 and 5.5 km by planet (the Earth\'s 4 to 5 km).');
+  say('- The sea floor and the sea\'s level (D166, D170): old floor founders as on the Earth, plates fuse as well as split');
+  say('  and run 200 Myr before a history begins, so over five planets the floor\'s mean age is 53 to 72 Myr (the Earth\'s');
+  say('  64), its depths\' peak 4 to 4.5 km (4 to 5) and the sea\'s level spans 290 to 425 m over 500 Myr (about 370).');
+  say('  Still: 4 to 8 % of the floor outlives 180 Myr (the Earth has almost none), and the standard level makes two to');
+  say('  four times the Earth\'s new floor (its plates\' ragged edges open more), so one planet in three there spans 620 m.');
   say('- A simulated planet is a different planet: its numbers are to be read as plausible, not as the Earth\'s.');
   console.log(lines.join('\n'));
 }
