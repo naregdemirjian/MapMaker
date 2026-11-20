@@ -187,14 +187,22 @@ export function createPaleoEarth(world: World, name: string): CommandResult<stri
   });
 }
 
-/** Makes a planet anew from other settings (D97): its terrain changes everywhere, its history stays. */
+/**
+ * Makes a planet anew from other settings (D97): its terrain changes everywhere, its history stays. A round map
+ * with no terrain of its own (no Earth under it) becomes a generated planet, in its preset's colours (D179).
+ */
 export function setWorldPlanet(world: World, spaceId: string, params: PlanetParams): CommandResult {
   const space = world.get('map_space', spaceId);
   if (!space) throw new Error('That map no longer exists.');
-  if (terrainSourceOf(space) !== 'planet') throw new Error('Only a generated planet can be made anew.');
+  const source = terrainSourceOf(space);
+  const blank = source === null && space.kind === 'sphere';
+  if (source !== 'planet' && !blank) throw new Error('Only a generated planet can be made anew.');
   const planet = planetParamsOf(params);
   if (!planet) throw new Error('Those are not settings for a planet.');
-  return run(world, `Make "${space.name}" anew`, (tx) => { tx.update('map_space', { ...space, settings: JSON.stringify({ ...worldSettings(space), planet }) }); });
+  const preset = PLANET_PRESETS[planet.preset];
+  return run(world, blank ? `Make "${space.name}" a planet` : `Make "${space.name}" anew`, (tx) => {
+    tx.update('map_space', { ...space, settings: JSON.stringify({ ...worldSettings(space), planet, ...(blank ? { terrain: terrainLookOf({ palette: preset.palette, relief: preset.relief }) } : {}) }) });
+  });
 }
 
 /**

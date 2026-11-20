@@ -19,7 +19,7 @@ import { frontSourceOf } from './front-source.ts';
 import { terrainSlowness } from './front-terrain.ts';
 import { screenToLonLat, meridianOf, makeView, FLAT_EXTENT_DEG, type View, type Camera } from './camera.ts';
 import type { Arrangement } from '../geo-kernel/arrangement.ts';
-import { BasemapPainter, chooseScale, landMaskOf, visibleBounds, boxIntersects, drawRiverLines, DEFAULT_BASEMAP_STYLE, type Basemap, type BasemapStyle, type LandMask, type RiverSet } from './basemap.ts';
+import { BasemapPainter, chooseScale, landMaskOf, visibleBounds, boxIntersects, drawRiverLines, DEFAULT_BASEMAP_STYLE, LandMask, type Basemap, type BasemapStyle, type RiverSet } from './basemap.ts';
 import { planeShape, placeLabel, lineChoices, textWidthEm, blockHeightEm, LINE_HEIGHT, type PlaneShape } from './label-place.ts';
 import { resolveLabelStyle, resolvePointStyle, labelSize, labelFont, labelText, type LabelStyle, type CountryLabel } from './label-style.ts';
 import { imageNow, videoNow, drawImageFit, assetEpoch, type MediaChannel } from './assets.ts';
@@ -36,7 +36,7 @@ import { campaignArrow, smoothLine, lineLength, arrowBodyLength, marksAlong, cut
 import { shotProgress, eventScreenSeconds, eventTransitionLook, TRANSITION_LOOKS } from '../presentation/sequence.ts';
 import { iconById, iconOfStyle, unitOfStyle, drawIcon, type CharacterIcon, type RouteStyle } from './icons.ts';
 import { TerrainPictures, terrainDrawable, type TerrainFrame, type TerrainImageKind, type TerrainSea, type TerrainOverride } from './terrain-gl.ts';
-import type { ElevationGrid } from '../terrain/grid.ts';
+import { heightAt, type ElevationGrid } from '../terrain/grid.ts';
 import type { TerrainCover } from '../terrain/cover.ts';
 import { detailHeightAt, type DetailGrid } from '../terrain/detail.ts';
 import type { PhotoRegion } from '../terrain/photo.ts';
@@ -2415,8 +2415,10 @@ export class MapRenderer {
     // (Close in, where the finer heights draw the coast, D176, a name in view goes on their land: the coarser mask
     // cannot tell a strait from the land beside it.)
     const fineLand = closeCoast && terrain?.detail ? ((g: DetailGrid) => (lon: number, lat: number) => (detailHeightAt(g, lon, lat) ?? 1) > 0.5)(terrain.detail) : null;
+    // (On a world without the Earth's coastline, a generated planet, names stand on the land its own heights make, D179.)
+    const labelMask = opts.basemap ? landMaskOf(opts.basemap) : terrainLand && terrain ? this.terrainMask(terrain.grid, terrain.key, seaLevel) : null;
     if (placesText && layout.labels) for (const { states, snap, clip } of prepared) {
-      for (const l of this.layerLabels(view, arr, snap, states, entities, clip && opts.basemap ? landMaskOf(opts.basemap) : null, clip ? fineLand : null)) if (!labels.some((x) => x.entityId === l.entityId)) labels.push(l);
+      for (const l of this.layerLabels(view, arr, snap, states, entities, clip ? labelMask : null, clip ? fineLand : null)) if (!labels.some((x) => x.entityId === l.entityId)) labels.push(l);
     }
     // Country labels and city names are placed together: they move apart where they would overlap,
     // and where they cannot the one with less priority is hidden (larger countries, then smaller
@@ -4830,6 +4832,25 @@ export class MapRenderer {
   }
 
   private progressOf = new WeakMap<Map<number, FaceState>, Map<string, { w: number; p: number }>>();
+
+  private terrainMasks = new Map<string, LandMask>();
+  /** Land and sea as a terrain's heights have them at a sea level (D179), at most a quarter-degree a cell, kept per terrain. */
+  private terrainMask(grid: ElevationGrid, key: string, seaLevel: number): LandMask {
+    const k = `${key}|${seaLevel}`;
+    let m = this.terrainMasks.get(k);
+    if (!m) {
+      const W = Math.min(grid.width, 1440), H = W / 2;
+      const bits = new Uint8Array(W * H);
+      for (let y = 0; y < H; y++) {
+        const lat = 90 - ((y + 0.5) / H) * 180;
+        for (let x = 0; x < W; x++) bits[y * W + x] = heightAt(grid, -180 + ((x + 0.5) / W) * 360, lat) > seaLevel ? 1 : 0;
+      }
+      m = new LandMask(W, H, bits);
+      if (this.terrainMasks.size >= 6) this.terrainMasks.clear();
+      this.terrainMasks.set(k, m);
+    }
+    return m;
+  }
 
   /** The look of one country's label (null: hidden); set for each frame by render(). */
   private labelLook: (id: string, name: string) => { style: LabelStyle; text: string } | null = (_id, name) => ({ style: resolveLabelStyle(), text: name });

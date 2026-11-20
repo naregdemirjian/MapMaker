@@ -5,6 +5,7 @@ import { GREATER_ARMENIA, buildGreaterArmenia } from './greater-armenia.ts';
 import { buildConstantinople } from './constantinople.ts';
 import { buildMongols } from './mongols.ts';
 import { buildEmpires } from './empires.ts';
+import { buildOrrun } from './fantasy.ts';
 
 export interface Example { id: string; name: string; about: string; build(reg: ProjectRegistry, dataDir: string): ProjectInfo }
 
@@ -24,5 +25,10 @@ export const EXAMPLES: Example[] = [
     id: 'end-of-empires', name: 'The End of Empires, 1945 to 1999',
     about: 'The whole world in half a century: the British, French, Dutch, Belgian, Portuguese and Spanish empires, Japan\'s, the Soviet Union and Yugoslavia, colony by colony to independence, with the names countries had then; the partition of India, Korea\'s front up and down the peninsula, Indochina, the year of Africa, Katanga and Biafra, Suez and the Six-Day War, the Sahara, Germany parted and joined, the Soviet break-up, Hong Kong and Macau; leaders on their journeys, the UN\'s members and the new states counted. Ten shots.',
     build: (reg, dataDir) => buildEmpires(reg, dataDir),
+  },
+  {
+    id: 'orrun', name: 'Orrun, a thousand years',
+    about: 'A world of one\'s own: a generated planet cut into provinces, its own calendar of ten months and three ages; realms founded, grown and at war province by province; the Ember Dominion rising from a volcano and thrown down; a forest fire, a meteor, a flood and a neck of land sinking under the sea; heroes, a dragon and two voyages; and another history, in a branch of its own, in which the battle that saved the west is lost. Nine shots.',
+    build: (reg, dataDir) => buildOrrun(reg, dataDir),
   },
 ];

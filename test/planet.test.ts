@@ -118,7 +118,16 @@ test('a planet map is created with its terrain and colours, made anew, undone; o
   assert.equal(terrainLook(space())!.palette, 'desert', 'its look kept');
   world.applyDiffs(invertDiffs(anew.diffs));
   assert.equal(planetOf(space())!.seed, 99, 'undone in one step');
+  // A blank round map can be made a planet (D179), in its preset's colours; a flat plan or a map of space cannot.
   const plain = cmd.createWorld(world, 'Blank', 3000).result;
-  assert.throws(() => cmd.setWorldPlanet(world, plain, planetOf(space())!), /Only a generated planet/);
+  const made = cmd.setWorldPlanet(world, plain, planetOf(space())!);
+  assert.equal(made.label, 'Make "Blank" a planet');
+  assert.equal(terrainSourceOf(world.get('map_space', plain)!), 'planet');
+  assert.equal(terrainLook(world.get('map_space', plain)!)!.palette, 'desert', "the preset's colours");
+  world.applyDiffs(invertDiffs(made.diffs));
+  assert.equal(terrainSourceOf(world.get('map_space', plain)!), null, 'blank again once undone');
+  const flat = cmd.createFlatMap(world, 'Plan', 20).result, stars = cmd.createSpaceMap(world, 'Stars').result;
+  assert.throws(() => cmd.setWorldPlanet(world, flat, planetOf(space())!), /Only a generated planet/);
+  assert.throws(() => cmd.setWorldPlanet(world, stars, planetOf(space())!), /Only a generated planet/);
   assert.throws(() => cmd.createPlanet(world, 'Nowhere', 0, planetOf(space())!), /positive radius/);
 });

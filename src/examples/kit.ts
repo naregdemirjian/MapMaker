@@ -51,13 +51,21 @@ export interface Builder {
   group(name: string, color?: string): string;
   /** Work on another map (its first political layer). */
   useMap(spaceId: string): void;
+  /**
+   * Record into a branch (D179), with an engine of its own answering what is where in it ("land of these owners"
+   * is that branch's land, not the main timeline's); or into the main timeline again.
+   */
+  useBranch(branch: string): void;
   /** Events made so far by `event` (simple and with changes). */
   events: number;
 }
 
-/** A new project in the registry's folder, with the data the examples draw on (read when first used). */
-export function startProject(reg: ProjectRegistry, dataDir: string, name: string): { info: ProjectInfo; b: Builder } {
-  const info = reg.create(name);
+/**
+ * A new project in the registry's folder, with the data the examples draw on (read when first used); its first
+ * map the Earth, or a round map of the name and radius given (D179: a world of one's own).
+ */
+export function startProject(reg: ProjectRegistry, dataDir: string, name: string, firstWorld?: { name: string; radiusKm: number }): { info: ProjectInfo; b: Builder } {
+  const info = reg.create(name, firstWorld);
   const db = reg.get(info.id);
   const world = World.fromSnapshot(db.snapshot());
   const engine = new Engine(world);
@@ -66,6 +74,7 @@ export function startProject(reg: ProjectRegistry, dataDir: string, name: string
   let countries: CountryShape[] | null = null, regions: PickRegion[] | null = null, places: TodayPlace[] | null = null;
   const groups = new Map<string, string>();
   const space = world.all('map_space')[0].id;
+  const engines = new Map<string, Engine>([[world.branch, engine]]);
   const b: Builder = {
     world, engine, space, layer: world.all('layer').find((l) => l.space_id === space && l.kind === 'partition')!.id, commit, events: 0,
     commitAll(label, rs) { const diffs = rs.flatMap((r) => r.diffs); if (diffs.length) db.commit(label, diffs, db.journalState().head); },
@@ -97,6 +106,12 @@ export function startProject(reg: ProjectRegistry, dataDir: string, name: string
     useMap(spaceId) {
       b.space = spaceId;
       b.layer = world.all('layer').find((l) => l.space_id === spaceId && l.kind === 'partition')?.id ?? '';
+    },
+    useBranch(branch) {
+      world.branch = branch;
+      let e = engines.get(branch);
+      if (!e) engines.set(branch, (e = new Engine(world, branch)));
+      b.engine = e;
     },
   };
   return { info, b };

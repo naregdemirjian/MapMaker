@@ -61,6 +61,41 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D179. Five large example projects, IV: Orrun, a world of one's own; provinces for a generated planet
+
+- **Orrun, a thousand years** (`src/examples/fantasy.ts`): a project whose only map is a generated planet (an
+  Earth-like world of five continents, the same every time) with its own calendar, the Reckoning of Orrun: ten
+  months of 33 days and the five days of the Long Night (six every fourth year), a week of six days, and three ages
+  (Crowns, Embers, Concord) whose years each count from 1. Sixteen realms founded, grown, at war, united and divided
+  province by province; the Ember Dominion rising from a volcano in the north-east and thrown down; disasters of the
+  app's own kinds (a meteor whose crater stays, the volcano, a forest burning all summer, a flood); the neck of land
+  between the continents sunk under the sea from the year 600 by a stroke of the sculpting brush dated that winter;
+  seven characters (a queen, two navigators, a sorcerer, a dragon, a ranger, a princess) on their journeys; and a
+  branch, the Ember Ascendant, splitting off on the morning of the Battle of the Ashfields, in which it is lost: its
+  own events, the Dominion over both continents, and its own fates for the characters. 122 events, nine shots (a
+  turning globe; the Age of Crowns; a voyage; the eruption; the fire; the Sundering; the siege and the battle; the
+  other history; the whole thousand years).
+- **Provinces for a generated planet** (`src/examples/provinces.ts`): the planet's land cut into provinces of about
+  the same size, grown together from seeds spread over the land, cheaply across plains and dearly up and down
+  mountains (so borders follow the ridges), reaching a little way into the sea (the planet's own coast ends them).
+  The borders are traced between the grid's cells as chains between the points where three provinces meet, and each
+  chain is smoothed once, so the two provinces beside it share it point for point: land given by province never
+  leaves a sliver or takes a neighbour's. Names made of syllables. The same every time for the same planet and seed.
+- **Names on a generated planet stand on its land (renderer).** Where there is no Earth coastline under a map, the
+  places for names are tested against the land the terrain's own heights make at the sea level of the moment
+  (`terrainMask`): before, a realm reaching into the sea had its name written on the water.
+- **A blank round map can become a generated planet** (`setWorldPlanet`), in its preset's colours; the example kit
+  can start a project on a round map of a name and radius of its own (`startProject`).
+- **Fixed: the example kit recorded into a branch with the main timeline's engine.** "Land of these owners" was then
+  the main timeline's land: in the branch where the steppe breaks free in 980, the land it should take from the
+  Dominion was found nowhere, because in the main timeline it had been free since 776. `useBranch` records into a
+  branch with an engine of the branch's own.
+- **Fantasy icons** for characters (a castle, a tower, a wizard, a dragon), in a group of their own.
+- **Building it.** The disasters' sizes are in their own units (kilometres a fire spreads, explosivity, metres across
+  a meteor): a fire of size 2 spread two kilometres. A fire burns a few days at each place: a summer-long fire is
+  fires set one after another in one event. A shot of decades shows an eruption of weeks for a fraction of a second:
+  its time slows round it.
+
 ### D178. Five large example projects, III: the End of Empires, 1945 to 1999; names where they can be read
 
 - **The End of Empires, 1945 to 1999** (`src/examples/empires.ts`): the whole world on one map in an atlas's

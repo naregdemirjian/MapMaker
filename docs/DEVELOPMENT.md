@@ -9,6 +9,10 @@ The approved architecture is the Claude Doc "Map Maker — Technical Architectur
 
 ## Status at a glance (20 November 2026, Stages 2, 3, 4, 6, 8 to 14 done; Stage 7 mostly done)
 
+- **Five large example projects, IV: Orrun, a world of one's own, 20 November** (D179): a generated planet cut into
+  provinces of its own, its own calendar of three ages, 122 events, a branch where the decisive battle is lost, nine
+  shots. Building it added provinces for generated planets (borders shared point for point), names that stand on a
+  planet's land, a blank map that becomes a planet, fantasy icons, and fixed the example kit's recording into a branch.
 - **Five large example projects, III: the End of Empires, 1945 to 1999, 20 November** (D178): the whole world in
   half a century, 244 events, ten shots: every colony to independence with the names countries had then, the wars
   that moved borders, leaders on their journeys. Building it improved how names are placed: an empire is named on its
@@ -402,7 +406,7 @@ Terminology: the interface calls them **maps** (DECISIONS D24); the code and old
 | `src/presentation/` | Shots and export | Shot settings (time remap, camera keys, overlays) and the export driver that renders frames off screen at the exact output size. |
 | `src/export/` | Files on disk | PNG encoder, export folders, `manifest.json`, `COMPOSITING_GUIDE.txt`. |
 | `src/ui/` | The interface | React. `store.ts` holds the session state and saves every command; components for the map, timeline, panels, dialogs and presentation mode. |
-| `src/examples/`, `server/http.ts` (examples) | Example projects (D171, D176 to D178) | Each built by a script through the commands into the projects folder when chosen in the Projects dialog; `kit.ts` the builder and its helpers (events, changes, features, characters, statistics, shots); `greater-armenia*.ts`, `constantinople.ts`, `mongols.ts`, `empires.ts` the projects. |
+| `src/examples/`, `server/http.ts` (examples) | Example projects (D171, D176 to D179) | Each built by a script through the commands into the projects folder when chosen in the Projects dialog; `kit.ts` the builder and its helpers (events, changes, features, characters, statistics, shots, branches); `provinces.ts` provinces for a generated planet; `greater-armenia*.ts`, `constantinople.ts`, `mongols.ts`, `empires.ts`, `fantasy.ts` the projects. |
 | `src/presentation/statistics.ts`, `ui/components/StatisticsDialog.tsx` | Statistics (D171) | Numbers kept with a map over time, filled into shots' texts as "{name}" by `overlaysAt`. |
 | `src/domain/geojson-import.ts`, `ui/components/ImportBorders.tsx` | Importing borders (D120) | GeoJSON maps read into countries by a name property (colours too), years from file names; `commands.ts` importTerritories puts a map's countries on a layer at its date, one undo step a file. |
 | `src/ui/components/Timeline.tsx` | The timeline | Dates, events and the playhead; `useHistoryPlayer` plays history in the working view (D119): years a second, looping, Space. |
@@ -486,6 +490,8 @@ worked out afresh, and any difference stops the test.
 | `test/arrow-step.test.ts` | 1 | The arrow keys' steps of the date viewed (D172): a day, a week, a month, a year; Cmd as Ctrl |
 | `test/statistics.test.ts` | 3 | Statistics (D171): values between dates by a steady share, amount or at once; written as money, people, numbers and shares, and read back from words; a map's statistics filling "{name}" in a shot's texts as history goes |
 | `test/missiles.test.ts` | 3 | Missile salvos (D171): flights along great circles over one event, in flight half way, gone on arrival; strikes where they land and none where one was shot down; each missile arriving at its own moment and a point fading in over its own span (D176) |
+| `test/example-orrun.test.ts` | 1 | The Orrun example (D179): one map, a generated planet with the Reckoning of Orrun (its eras); no conflicts in either timeline; over a hundred events; realms where the story puts them in the main history and in the branch where the Ashfields are lost; the neck sunk from 600; nine shots, one of the branch; statistics |
+| `test/provinces.test.ts` | 1 | Provinces of a generated planet (D179): the same every time; every piece of border walked once each way by the two provinces beside it; land points each in one province (only the smallest islands in none); smoothed, hardly a right-angled corner left |
 | `test/example-empires.test.ts` | 1 | The End of Empires example (D178): no conflicts, over two hundred events; some seventy places checked at their dates across Asia, the Middle East, Africa, Europe and the Americas (colonies under their empires and then their own states with the names of the time; Korea at the 38th parallel and at the armistice line; Goa, Aden, the Golan, Sinai, Gaza, Crimea, the Saar, Zanzibar, West New Guinea, the Sahara and its wall, Biafra, Katanga, the Ogaden, Kuwait, the Falklands, Hong Kong and Macau); ten shots; statistics (UN members, new states) |
 | `test/example-mongols.test.ts` | 1 | The Mongol example (D177): no conflicts, over a hundred events; Samarkand Khwarazm's, the Mongols', Chagatai's at the split (nothing spilled to another khanate), Timur's; Kiev, Hungary occupied and given up, Baghdad, Syria before and after Ain Jalut and under Ghazan, the Song, the Yuan, the Ming; nine shots; statistics |
 | `test/example-constantinople.test.ts` | 1 | The Constantinople example (D176): no conflicts, over a hundred events, the Julian calendar; the city held until dawn on 29 May, taken quarter by quarter, the Cretans' towers last; Galata, Selymbria, the Morea and Trebizond when the sources say; the chain; shots in flight a few hours each; ten shots; statistics |

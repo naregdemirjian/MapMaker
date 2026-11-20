@@ -6,7 +6,7 @@
 
 /** How an icon follows its character's travel: turned to face it (seen from above), flipped to face east or west (seen from the side), or not at all. */
 export type IconTurn = 'rotate' | 'mirror' | 'none';
-export type IconGroup = 'Ships' | 'Aircraft' | 'On land' | 'Military signs' | 'People and places';
+export type IconGroup = 'Ships' | 'Aircraft' | 'On land' | 'Military signs' | 'People and places' | 'Fantasy';
 
 export interface IconDef {
   id: string;
@@ -24,7 +24,7 @@ export interface IconDef {
 const circle = (x: number, y: number, r: number) => `M${x - r} ${y}a${r} ${r} 0 1 0 ${2 * r} 0a${r} ${r} 0 1 0 ${-2 * r} 0Z`;
 const circles = (pts: Array<[number, number]>, r: number) => pts.map(([x, y]) => circle(x, y, r)).join('');
 
-export const ICON_GROUPS: IconGroup[] = ['Ships', 'Aircraft', 'On land', 'Military signs', 'People and places'];
+export const ICON_GROUPS: IconGroup[] = ['Ships', 'Aircraft', 'On land', 'Military signs', 'People and places', 'Fantasy'];
 
 export const ICONS: IconDef[] = [
   // Ships (seen from the side, bow to the right).
@@ -296,6 +296,36 @@ export const ICONS: IconDef[] = [
   {
     id: 'flag', name: 'Flag', group: 'People and places', turn: 'none',
     solid: 'M12 4H16V60H12Z' + 'M16 7Q26 3 36 8Q46 13 55 8V35Q46 40 36 35Q26 30 16 34Z',
+  },
+  // Worlds of one's own (D179).
+  {
+    id: 'castle', name: 'Castle', group: 'Fantasy', turn: 'none',
+    solid: 'M4 58V18H7V13H11V18H14V13H18V58Z' + 'M46 58V18H49V13H53V18H56V13H60V58Z' + 'M18 58V30H22V26H26V30H30V26H34V30H38V26H42V30H46V58Z' + 'M25 32V16H28V11H31V16H33V11H36V16H39V32Z' + 'M31.2 2h1.6v10h-1.6ZM32.8 2.5L40 5L32.8 7.5Z',
+    detail: 'M27 58V49Q32 43 37 49V58Z' + 'M10 25h2.5v6h-2.5ZM51.5 25h2.5v6h-2.5ZM30.8 19h2.4v6h-2.4Z',
+  },
+  {
+    id: 'tower', name: 'Tower', group: 'Fantasy', turn: 'none',
+    solid: 'M23 60V24H41V60Z' + 'M19 26L32 2L45 26Z' + 'M18 60V55H46V60Z',
+    detail: 'M29.5 31h5v7h-5ZM29.5 43h5v6h-5Z' + 'M28 60V55Q32 51 36 55V60Z',
+    top: circle(32, 3, 2.4),
+  },
+  {
+    id: 'wizard', name: 'Wizard', group: 'Fantasy', turn: 'none',
+    solid: 'M23 21L33 2L41 21Z' + 'M15 21H49V25.5H15Z' + circle(32, 31, 6) + 'M17 60L23 38H41L47 60Z' + circle(52, 9, 4.5),
+    detail: 'M31 41h2v19h-2Z',
+    line: 'M52 13V61', lineWidth: 3,
+  },
+  {
+    id: 'dragon', name: 'Dragon', group: 'Fantasy', turn: 'mirror',
+    solid:
+      'M17 41Q23 32 37 33Q46 34 49 40Q44 47 32 47Q21 47 17 41Z' + // body
+      'M43 36Q48 27 52 21L58 17.5L63 19.5L61 22.5L56 23.5L54 25.5Q51 31 48 40Z' + // neck and head
+      'M54 17.5L55.5 12.5L57.5 17Z' + // horn
+      'M18 40Q10 41 5.5 47Q3 52 7.5 55.5Q5.5 51 9 48Q13 44.5 20 44Z' + // tail
+      'M3.5 56.5L6.5 52.5L9 56Z' + // the tail's tip
+      'M24 35L15 8L23 14L28 5L33 15L40 9L41 34Z' + // wing
+      'M25 45L22.5 55H27L30 46Z' + 'M38 45L38.5 55H43L42 44Z', // legs
+    detail: 'M18.6 12.6L25.4 33.5L24.4 33.8L17.6 12.9Z' + 'M27.6 8.2L30.4 33.6L29.4 33.7L26.6 8.3Z' + 'M37.8 12.2L36.2 33.6L35.2 33.5L36.8 12.1Z',
   },
 ];
 
