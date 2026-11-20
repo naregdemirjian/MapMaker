@@ -68,7 +68,7 @@ export function ShowDialog() {
             <span className="muted">{counts ? `${counts.shown.toLocaleString()} of ${counts.total.toLocaleString()} lakes shown. ` : ''}For scale: Lake Geneva is about 580 km², Lake Titicaca 8,400 km², Lake Superior 82,000 km².</span>
           </label>
         )}
-        {terrainSourceOf(space) && <TerrainSection spaceId={space.id} look={look} earth={terrainSourceOf(space) === 'earth'} />}
+        {terrainSourceOf(space) && <TerrainSection spaceId={space.id} look={look} earth={terrainSourceOf(space) === 'earth'} planet={terrainSourceOf(space) === 'planet'} />}
         <div className="modal-actions"><button className="primary" onClick={close}>Close</button></div>
       </div>
     </div>
@@ -76,7 +76,7 @@ export function ShowDialog() {
 }
 
 /** The terrain of an Earth map (D95): on or off, and how it is drawn. */
-function TerrainSection({ spaceId, look, earth }: { spaceId: string; look: TerrainLook | null; earth: boolean }) {
+function TerrainSection({ spaceId, look, earth, planet = false }: { spaceId: string; look: TerrainLook | null; earth: boolean; planet?: boolean }) {
   const s = useStore();
   const [drag, setDrag] = useState<number | null>(null);
   const change = (patch: Partial<TerrainLook> | null) => s.execute((wd) => cmd.setWorldTerrain(wd, spaceId, patch));
@@ -86,7 +86,7 @@ function TerrainSection({ spaceId, look, earth }: { spaceId: string; look: Terra
     setDrag(null);
     if (look && v !== look.strength) change({ strength: v });
   };
-  const box = (key: 'colours' | 'relief' | 'overTerritories' | 'seaFloor' | 'detail' | 'photo' | 'fine', label: string, testid: string) => look && (
+  const box = (key: 'colours' | 'relief' | 'overTerritories' | 'seaFloor' | 'detail' | 'photo' | 'fine' | 'climate', label: string, testid: string) => look && (
     <label className="check"><input type="checkbox" checked={look[key]} onChange={(e) => change({ [key]: e.target.checked })} data-testid={testid} /> {label}</label>
   );
   return (
@@ -109,6 +109,7 @@ function TerrainSection({ spaceId, look, earth }: { spaceId: string; look: Terra
             </select>
           </label>
           {box('fine', 'Fine ground close in: below the heights\' own detail, relief, mottling and the bends of coasts made up by the graphics card (rougher where the land is steep; the same every time)', 'terrain-fine')}
+          {planet && PALETTES[look.palette].cover && box('climate', 'The land\'s colours from the climate models: the simulated planets\' seasons, winds and rain, rivers, lakes, ice and biomes worked out on this planet\'s own land and sea (a few seconds; its sculpting included)', 'terrain-climate')}
           {earth && PALETTES[look.palette].cover && box('photo', 'The Earth as photographed from space: the whole planet, and close in the photographs of the place, to about 10 m, downloaded as needed (Sentinel-2 cloudless by EOX; kept on this computer)', 'terrain-photo')}
           {earth && PALETTES[look.palette].cover && look.photo && <p className="muted">The photographs show the land, rivers, lakes and coasts as they are today (no rivers or coastline are drawn over them); land the sea has taken or left at another sea level, and sculpted land, keep the colours of their cover. Offline, close in: the picture of the whole planet. Credit the photographs where you publish them: see Data sources and credits.</p>}
           {earth && box('detail', 'Finer heights close in, downloaded as needed (Terrain Tiles on AWS Open Data; kept on this computer)', 'terrain-detail')}

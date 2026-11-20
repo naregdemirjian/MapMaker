@@ -38,6 +38,11 @@ export interface StageParams {
   /** For histories: how long (Myr, ending at the present) and how often a picture is kept (Myr). */
   durationMyr?: number;
   frameEveryMyr?: number;
+  /**
+   * The present's heights (m above the sea, per cell of the mesh at `level`) given instead of a history (D169: a
+   * generated planet's own land and sea): the climate, water and life stages work on them.
+   */
+  heights?: Int16Array;
 }
 
 export type ProductValue = FieldArray | number | string | boolean | null | ProductValue[] | { [k: string]: ProductValue };
@@ -125,6 +130,17 @@ export function tectonicParams(live: PlanetDefinition, level: number, durationMy
     climate: { star: def.star, orbit: def.orbit, body: def.body, atmosphere: def.atmosphere, water: def.water, history: { ageGyr: def.history.ageGyr, events: [] }, interior: def.interior },
   };
 }
+
+/** The present's heights: given (D169), or the history's last picture. */
+const presentHeights = (inputs: ProductData, deps: Record<string, ProductData>, n: number): Int16Array => {
+  if (inputs.heights) return inputs.heights as Int16Array;
+  const all = deps.tectonics.heights as Int16Array;
+  return all.subarray(all.length - n);
+};
+/** A stage's dependencies, without the history when the heights are given (D169). */
+const fromHeights = (p: StageParams, deps: string[]) => (p.heights ? deps.filter((d) => d !== 'tectonics') : deps);
+/** The heights given, as an input. */
+const givenHeights = (p: StageParams): ProductData => (p.heights ? { heights: p.heights } : {});
 
 /** What the climate reads from a definition (and the water and life stages after it). */
 const climateInputs = (def: PlanetDefinition) =>
@@ -216,13 +232,12 @@ export const STAGES: Record<string, StageDef> = {
   temperature: {
     id: 'temperature',
     version: 1,
-    deps: () => ['tectonics'],
-    inputs: (def, p) => ({ level: p.level, def: climateInputs(def) }),
+    deps: (p) => fromHeights(p, ['tectonics']),
+    inputs: (def, p) => ({ level: p.level, def: climateInputs(def), ...givenHeights(p) }),
     run: (inputs, deps, ctx) => {
       const def = definitionOf(inputs.def)!;
       const mesh = meshAt(inputs.level as number), n = mesh.n;
-      const all = deps.tectonics.heights as Int16Array;
-      const heights = all.subarray(all.length - n);
+      const heights = presentHeights(inputs, deps, n);
       const r = seasonalClimate(mesh, def, derive(def), heights);
       ctx.progress(1, 1);
       return {
@@ -263,16 +278,12 @@ export const STAGES: Record<string, StageDef> = {
   water: {
     id: 'water',
     version: 1,
-    deps: () => ['tectonics', 'climate', 'insolation'],
-    inputs: (def, p) => ({
-      level: p.level,
-      def: { star: def.star, orbit: def.orbit, body: def.body, atmosphere: def.atmosphere, water: def.water, history: { ageGyr: def.history.ageGyr, events: [] }, interior: def.interior } as unknown as ProductData,
-    }),
+    deps: (p) => fromHeights(p, ['tectonics', 'climate', 'insolation']),
+    inputs: (def, p) => ({ level: p.level, def: climateInputs(def), ...givenHeights(p) }),
     run: (inputs, deps, ctx) => {
       const def = definitionOf(inputs.def)!;
       const level = inputs.level as number, mesh = meshAt(level), n = mesh.n;
-      const all = deps.tectonics.heights as Int16Array;
-      const heights = Float64Array.from(all.subarray(all.length - n));
+      const heights = Float64Array.from(presentHeights(inputs, deps, n));
       const x = derive(def);
       const temp = deps.climate.monthly as Float32Array, precip = deps.climate.precipMonthly as Float32Array;
       // Ice on the coarse level (about 480 km cells on an Earth-sized planet), brought to the map's.
@@ -311,12 +322,12 @@ export const STAGES: Record<string, StageDef> = {
   biomes: {
     id: 'biomes',
     version: 1,
-    deps: () => ['tectonics', 'climate', 'water', 'insolation'],
-    inputs: (def, p) => ({ level: p.level, life: def.life as unknown as ProductData }),
+    deps: (p) => fromHeights(p, ['tectonics', 'climate', 'water', 'insolation']),
+    inputs: (def, p) => ({ level: p.level, life: def.life as unknown as ProductData, ...givenHeights(p) }),
     run: (inputs, deps, ctx) => {
       const level = inputs.level as number, n = cellsAt(level);
       const life = inputs.life as unknown as PlanetDefinition['life'];
-      const all = deps.tectonics.heights as Int16Array, heights = all.subarray(all.length - n);
+      const heights = presentHeights(inputs, deps, n);
       const temp = deps.climate.monthly as Float32Array, precip = deps.climate.precipMonthly as Float32Array;
       const sun = deps.insolation.monthly as Float32Array;
       const kind = deps.water.kind as Uint8Array, ice = deps.water.ice as Float32Array, pet = deps.water.pet as Float32Array;

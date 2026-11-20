@@ -10,6 +10,10 @@ import type { LayerId, StageParams } from '../planet/pipeline/stages.ts';
 import type { PaleoSet } from '../terrain/paleo.ts';
 import type { CoverSet } from '../terrain/cover.ts';
 import { keyOf } from '../planet/state/hash.ts';
+import { meshAt } from '../planet/mesh/icosphere.ts';
+import { sampleGrid } from '../planet/mesh/transfer.ts';
+import { climateOf } from '../terrain/biomes.ts';
+import type { PlanetParams } from '../terrain/planet.ts';
 import type { ElevationGrid } from '../terrain/grid.ts';
 
 /** Workers for a pool: one fewer than the processor's threads (the interface keeps one), from one to eight. */
@@ -126,4 +130,39 @@ export async function simCovers(def: PlanetDefinition, ages: number[], opts: { s
   const key = `sim-cover:${keyOf({ def, params: simParams(def) })}`;
   const covers = await Promise.all(ages.map(async (_, i) => ({ ...(await simCover(def, { frame: simCoverFrame(i, ages.length), signal: opts.signal })), key: `${key}:${i}` })));
   return { ages, covers, key };
+}
+
+/** The level a generated planet's colours are worked out at by the climate models (D169: about 240 km cells on an Earth-sized planet). */
+export const QUICK_LEVEL = 5;
+
+/**
+ * The definition a generated planet's colours are worked out from by the simulated planets' models (D169): the
+ * Earth-like preset sized as the planet, with its sea's share, and warmer or colder as its climate (D100) says (about
+ * 3 °C for each doubling of the air's carbon dioxide); null for a world without life (its bare ground keeps its own
+ * colours).
+ */
+export function quickPlanetDefinition(params: PlanetParams, radiusKm: number, oceanFraction: number): PlanetDefinition | null {
+  const c = climateOf(params);
+  if (c.barren) return null;
+  const def = definitionFromPreset('earthlike', params.seed);
+  def.name = 'Generated planet';
+  def.body.radiusKm = Math.max(500, Math.min(20_000, radiusKm));
+  def.water.oceanFraction = Math.max(0.01, Math.min(0.99, oceanFraction));
+  def.atmosphere.co2 *= 2 ** (c.warmth / 3);
+  return def;
+}
+
+/**
+ * A generated planet's land seen from space by the simulated planets' climate, water and biome models on its own
+ * heights (D169), drawn at half its heights' size; null for a world without life.
+ */
+export async function quickPlanetCover(params: PlanetParams, radiusKm: number, grid: ElevationGrid, opts: { signal?: AbortSignal } = {}): Promise<{ width: number; height: number; pixels: Uint8Array } | null> {
+  const mesh = meshAt(QUICK_LEVEL), h = sampleGrid(mesh, grid.data, grid.width, grid.height, grid.step);
+  const heights = new Int16Array(mesh.n);
+  let sea = 0;
+  for (let c = 0; c < mesh.n; c++) { heights[c] = Math.max(-32_000, Math.min(32_000, Math.round(h[c]))); if (heights[c] < 0) sea += mesh.area[c]; }
+  const def = quickPlanetDefinition(params, radiusKm, sea / (4 * Math.PI));
+  if (!def) return null;
+  const r = await planetPipeline().product('cover', def, { level: QUICK_LEVEL, heights, width: Math.max(64, grid.width >> 1), height: Math.max(32, grid.height >> 1) }, { signal: opts.signal });
+  return { width: r.data.width as number, height: r.data.height as number, pixels: r.data.pixels as Uint8Array };
 }

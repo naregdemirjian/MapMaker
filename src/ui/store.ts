@@ -23,8 +23,8 @@ import type { FieldSource } from '../domain/fields.ts';
 import type { DisasterId } from '../domain/disasters.ts';
 import type { SculptTool } from '../terrain/sculpt.ts';
 import type { Biome } from '../terrain/biomes.ts';
-import { terrainSourceOf, planetOf, isGeologicalMap, simOf } from '../world-model/world-settings.ts';
-import { simTerrain, simParams, simCover, simCoverFrame } from './planet-engine.ts';
+import { terrainSourceOf, planetOf, isGeologicalMap, simOf, terrainLook } from '../world-model/world-settings.ts';
+import { simTerrain, simParams, simCover, simCoverFrame, quickPlanetCover } from './planet-engine.ts';
 import { keyOf as contentKey } from '../planet/state/hash.ts';
 import type { PlanetDefinition } from '../planet/model/definition.ts';
 import { MAIN_BRANCH, isBaseEvent, type MapSpaceRow } from '../world-model/schema.ts';
@@ -441,7 +441,28 @@ class AppStore {
       return def && age ? this.simCoverAt(def, Number(age[1])) : null;
     }
     const params = source === 'planet' ? planetOf(space) : null;
-    return params ? coverSoon(ground.grid, ground.key, (space?.radius_m ?? 6371008.8) / 1000, climateOf(params), () => this.notify()) : null;
+    if (!params) return null;
+    const radiusKm = (space?.radius_m ?? 6371008.8) / 1000;
+    const simple = coverSoon(ground.grid, ground.key, radiusKm, climateOf(params), () => this.notify());
+    // Coloured by the climate models (D169), once worked out (the simple colours meanwhile).
+    if (terrainLook(space)?.climate) return this.quickCoverFor(params, radiusKm, ground) ?? simple;
+    return simple;
+  }
+
+  private quickCovers = new Map<string, TerrainCover | 'making' | 'none'>();
+  /** A generated planet's land coloured by the climate models (D169), if worked out (otherwise it is started). */
+  private quickCoverFor(params: PlanetParams, radiusKm: number, ground: { grid: ElevationGrid; key: string }): TerrainCover | null {
+    const k = `quick-cover:${ground.key}:${radiusKm}`;
+    const have = this.quickCovers.get(k);
+    if (have === 'none' || have === 'making') return null;
+    if (have) return have;
+    this.quickCovers.set(k, 'making');
+    while (this.quickCovers.size > 3) this.quickCovers.delete(this.quickCovers.keys().next().value!);
+    quickPlanetCover(params, radiusKm, ground.grid).then(
+      (c) => { this.quickCovers.set(k, c ? { ...c, key: k } : 'none'); this.notify(); },
+      (e: Error) => { this.quickCovers.delete(k); this.toast(e.message, 'error'); },
+    );
+    return null;
   }
 
   /** Simulated planets' land seen from space through their histories (D167), the last two planets'. */

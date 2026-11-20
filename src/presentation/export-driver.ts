@@ -18,7 +18,7 @@ import { isFeatureKind } from '../render-engine/feature-style.ts';
 import { preloadImages, prepareVideos } from '../render-engine/assets.ts';
 import { basemapSourceOf, loadBasemap, loadBasemapDetail, loadDatasetRecords, DEFAULT_BASEMAP_STYLE, type Basemap, type BasemapStyle } from '../render-engine/basemap.ts';
 import { shown, minLakeKm2, terrainLook, seaLevelPoints, planetOf, sculptOf, terrainSourceOf, isSpaceMap, spaceSettingsOf, isPaleoEarth, calendarOfSpace, simOf } from '../world-model/world-settings.ts';
-import { simTerrain, simCovers } from '../ui/planet-engine.ts';
+import { simTerrain, simCovers, quickPlanetCover } from '../ui/planet-engine.ts';
 import { makeSpaceView } from '../space/space-view.ts';
 import { SpaceRenderer } from '../space/space-renderer.ts';
 import { loadNearbyStars } from '../space/catalogue.ts';
@@ -201,7 +201,16 @@ export interface Ground {
 export async function terrainFor(world: World, spaceId: string, shot: ShotSettings | null = null): Promise<Ground | null> {
   const space = world.get('map_space', spaceId);
   const planet = planetOf(space);
-  if (planet) return { grid: await planetTerrain(planet), key: planetKey(planet) };
+  if (planet) {
+    const grid = await planetTerrain(planet), key = planetKey(planet), look = terrainLook(space), radiusKm = (space?.radius_m ?? 6371008.8) / 1000;
+    // Coloured by the climate models (D169): worked out once for the shot, on its heights at its first frame.
+    if (look?.climate && shown(space, 'export', 'terrain') && PALETTES[look.palette].cover) {
+      const carved = sculpted(grid, key, stampsAt(sculptOf(space), shot ? timeAt(shot, 0) : { day: Infinity, ms: 0 }), radiusKm);
+      const c = await quickPlanetCover(planet, radiusKm, carved.grid);
+      return { grid, key, cover: c ? { ...c, key: `quick-cover:${carved.key}:${radiusKm}` } : null };
+    }
+    return { grid, key };
+  }
   // (The Earth through geological time, D134: each frame takes the heights of its moment, see frameSetup.)
   if (isPaleoEarth(space)) { const p = await loadPaleo(); return { grid: p.grids[0], key: paleoGridAt(p, 0).key, paleo: p }; }
   // A simulated planet (D156): its history, made in workers (or reused), each frame taking its moment's heights.
@@ -290,7 +299,7 @@ export function frameSetup(world: World, shot: ShotSettings, frame: number, def:
   // The land's colours in the satellite look (D100): Earth's land cover, or the planet's biomes.
   const planet = planetOf(space);
   const bare = carved && terrainShown && PALETTES[look.palette].cover
-    ? (planet ? coverNow(carved.grid, carved.key, (space?.radius_m ?? 6371008.8) / 1000, climateOf(planet)) : coverSet ? coverAt(coverSet, ageOf(t)) : ground?.cover ?? null)
+    ? (planet ? ground?.cover ?? coverNow(carved.grid, carved.key, (space?.radius_m ?? 6371008.8) / 1000, climateOf(planet)) : coverSet ? coverAt(coverSet, ageOf(t)) : ground?.cover ?? null)
     : null;
   // (With the biomes painted over it, D169.)
   const cover = bare ? paintedCover(bare, strokes, (space?.radius_m ?? 6371008.8) / 1000) : null;

@@ -2559,7 +2559,7 @@ try {
     await page.evaluate((w) => (window as any).__mapmaker.store.set({ spaceId: w.spaceId, layerId: w.layerId, selection: null }), was);
   });
 
-  await h.step('The quick generator\'s drawing tools (D169): on a generated planet, land drawn as an outline in its sea; a river from it to the sea; desert painted on it; undone', async () => {
+  await h.step('The quick generator\'s drawing tools (D169): on a generated planet, land drawn as an outline in its sea; a river from it to the sea; desert painted on it; its colours from the climate models; undone', async () => {
     await page.getByTestId('mode-world').click();
     const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
     const before = await steps();
@@ -2632,8 +2632,27 @@ try {
     await h.screenshot('planet-drawn');
     const strokes = await page.evaluate(() => { const s = (window as any).__mapmaker.store; return JSON.parse(s.world.get('map_space', s.spaceId).settings).sculpt.map((x: any) => `${x.tool}${x.biome ? `:${x.biome}` : ''}`); });
     assert.deepEqual(strokes, ['coast-land', 'river', 'biome:desert']);
-    // Undone: the strokes one by one, then the planet.
-    for (let i = 0; i < 4; i++) await page.getByTestId('undo').click();
+    // The land's colours from the climate models (D169): the simulated planets' climate, water and biomes worked out on
+    // this planet's own land and sea (the drawn island included), the painted desert still over them.
+    const coverKey = () => page.evaluate(() => {
+      const m = (window as any).__mapmaker, s = m.store, space = s.world.get('map_space', s.spaceId), g = s.terrainOf(space);
+      return s.coverOf(space, m.bench.sculpted(g.grid, g.key, JSON.parse(space.settings).sculpt ?? [], space.radius_m / 1000))?.key ?? '';
+    });
+    assert.doesNotMatch(await coverKey(), /^quick-cover:/);
+    await page.getByTestId('open-show').click();
+    await page.getByTestId('show-dialog').waitFor();
+    await page.getByTestId('terrain-climate').check();
+    await page.getByTestId('show-dialog').getByRole('button', { name: 'Close' }).last().click();
+    for (let i = 0; i < 300 && !/^quick-cover:/.test(await coverKey()); i++) await page.waitForTimeout(200);
+    assert.match(await coverKey(), /^quick-cover:/, 'coloured by the climate models');
+    sand = await pixelAt(spot);
+    for (let i = 0; i < 40 && !(sand[0] > sand[2] + 30); i++) { await page.waitForTimeout(100); sand = await pixelAt(spot); }
+    assert.ok(sand[0] > sand[2] + 30, `the painted desert over them (${sand})`);
+    await page.evaluate(([lon, lat]) => (window as any).__mapmaker.store.setCamera({ lon, lat, zoom: 0.7, rotation: 0, projection: 'equirectangular' }), sea!);
+    await page.waitForTimeout(500);
+    await h.screenshot('planet-climate-colours');
+    // Undone: the colours, the strokes one by one, then the planet.
+    for (let i = 0; i < 5; i++) await page.getByTestId('undo').click();
     await h.saved();
     assert.equal(await steps(), before, 'each stroke was one step');
     await page.getByTestId('tool-select').click();

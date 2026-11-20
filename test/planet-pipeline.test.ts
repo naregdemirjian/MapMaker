@@ -177,3 +177,39 @@ test('the climate\'s months shared among workers (D168): the same bytes however 
   assert.equal(bytes(whole as Record<string, unknown>), seen[0], 'and as one run');
   assert.ok(history, 'the history made once for each pipeline');
 });
+
+test('a generated planet\'s own heights given to the climate, water and life stages (D169): no history made, keyed by the heights', async () => {
+  const { meshAt } = await import('../src/planet/mesh/icosphere.ts');
+  const { sampleGrid } = await import('../src/planet/mesh/transfer.ts');
+  const { generatePlanet } = await import('../src/terrain/planet.ts');
+  const { quickPlanetDefinition } = await import('../src/ui/planet-engine.ts');
+  const { BIOME_IDS } = await import('../src/planet/life/biomes.ts');
+  const params = { seed: 3, preset: 'earthlike' as const, sea: 0.65, continents: 4, mountains: 1, roughness: 0.5, ice: 0.3 };
+  const grid = generatePlanet(params, 512, 256), mesh = meshAt(4);
+  const h = sampleGrid(mesh, grid.data, grid.width, grid.height, grid.step), heights = Int16Array.from(h, (v) => Math.round(v));
+  let sea = 0;
+  for (let c = 0; c < mesh.n; c++) if (heights[c] < 0) sea += mesh.area[c];
+  const def = quickPlanetDefinition(params, 6371, sea / (4 * Math.PI))!;
+  assert.ok(Math.abs(def.water.oceanFraction - 0.65) < 0.08, `its sea's share (${def.water.oceanFraction.toFixed(2)})`);
+  const p = new Pipeline(new LocalExecutor());
+  const b = await p.product('biomes', def, { level: 4, heights });
+  assert.equal(p.cache.get(p.keyOf('tectonics', def, { level: 4 })), undefined, 'no history was made');
+  const biome = b.data.biome as Uint8Array;
+  // Its land and sea as its heights have them (but for straits the water cuts to basins below the sea, D166).
+  let landCells = 0, landSea = 0, deep = 0, deepSea = 0;
+  for (let c = 0; c < mesh.n; c++) {
+    if (heights[c] >= 0) { landCells++; if (BIOME_IDS[biome[c]] === 'sea') landSea++; }
+    if (heights[c] < -200) { deep++; if (BIOME_IDS[biome[c]] === 'sea') deepSea++; }
+  }
+  assert.ok(landSea < 0.01 * landCells, `land (${landSea} of ${landCells} land cells sea)`);
+  assert.ok(deepSea > 0.95 * deep, `the sea (${deepSea} of ${deep} deep cells)`);
+  const land = new Set<string>();
+  for (let c = 0; c < mesh.n; c++) if (heights[c] >= 0) land.add(BIOME_IDS[biome[c]]);
+  assert.ok(land.size >= 5, `a range of biomes on its land (${[...land].join(', ')})`);
+  // Other heights, other products.
+  const other = heights.slice(); other[0] = other[0] + 100;
+  assert.notEqual(p.keyOf('biomes', def, { level: 4, heights: other }), b.key);
+  // A world without life keeps its own colours; a warmer one has more carbon dioxide.
+  assert.equal(quickPlanetDefinition({ ...params, preset: 'moon' }, 1737, 0), null);
+  assert.ok(quickPlanetDefinition({ ...params, preset: 'desert' }, 6371, 0.3)!.atmosphere.co2 > def.atmosphere.co2);
+});

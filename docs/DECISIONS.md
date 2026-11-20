@@ -81,11 +81,20 @@ Follows from D2. The test drives the real interface exactly as a person would.
   - **A painted biome** (ice to rainforest, the satellite look's colours, D100): laid over the land's colours under
     the brush, its edge soft, on generated and simulated planets (`paintedCover`); it changes no heights, so painting
     does not make the heights or rivers again.
+- **Built (colours).** A generated planet's land can take its colours from the simulated planets' climate, water
+  and biome models ("The land's colours from the climate models" in its terrain settings): its own heights (sculpted
+  ones included), sampled to the preview level's cells, are given to the temperature, water and biome stages in place
+  of a history (a stage parameter, `heights`, part of the products' keys), for the Earth-like preset sized as the
+  planet, with its sea's share and its climate's warmth (3 °C for each doubling of the air's carbon dioxide); worlds
+  without life keep their own colours. The simple colours stand in while they are worked out; exports work them out
+  once for the shot.
 - **Result.** In the interface: an island drawn into a generated planet's open sea, a river from it to the sea and
   desert painted on it, each one undoable step; the same strokes on any map with terrain (the Earth included, where
   painted biomes are not shown: its land cover is a photograph-like picture).
 - **Still wrong, and why.** A river cannot be moved (draw another; the old valley stays); an outline round a pole
-  is not understood (its inside is found along rows of latitude); painted biomes do not reach the Earth's cover.
+  is not understood (its inside is found along rows of latitude); painted biomes do not reach the Earth's cover. The
+  climate models' colours follow a generated planet's warmth but not its wetness (the rain is the models' own), and an
+  export takes its sculpting as it is at the shot's first frame.
 
 ### D168. Climate changes quicker, and the climate settled (Stage 15.6)
 
