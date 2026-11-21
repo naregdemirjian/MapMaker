@@ -9,6 +9,7 @@ import { resolveLook, isPlainLook, mapStyleOf, basemapStyleOf, finishLook, type 
 import { makeView, viewBounds, metresPerPixel, lonLatToScreen, type View } from '../render-engine/camera.ts';
 import { type ShotSettings, type OverlayRect, EVENTS_BOX_ID, timeAt, cameraAt, overlaysAt, drawOverlays, shotTransitions, screenSecondsSince, isVideoFormat, trailsStart } from './sequence.ts';
 import { planVideo, VideoFileEncoder, UploadSink, type VideoPlan } from './video-encoder.ts';
+import { motionBlurOf, blurMoments, FrameAverage } from './motion-blur.ts';
 import { videoBytes } from '../export/video-codecs.ts';
 import type { Instant } from '../core-time/index.ts';
 import { encodeTiff, deflateInBrowser } from '../export/tiff.ts';
@@ -307,6 +308,28 @@ export function renderFrame(ctx: CanvasRenderingContext2D, renderer: MapRenderer
 }
 
 /**
+ * A frame as exported: with the shot's motion blur (D185), the average of pictures drawn at moments about it
+ * (each with its videos at that moment); without, the frame itself.
+ */
+async function exportFrame(ctx: CanvasRenderingContext2D, renderer: MapRenderer, world: World, engine: Engine, shot: ShotSettings, frame: number, def: ExportPassDef, width: number, height: number, basemap: Basemap | null, ground: Ground | null, detail: CloseUp | null, videoFills: Parameters<typeof prepareVideos>[0]): Promise<void> {
+  const blur = motionBlurOf(shot.motionBlur);
+  if (!blur) {
+    if (videoFills.length) await prepareVideos(videoFills, frame / shot.fps);
+    renderFrame(ctx, renderer, world, engine, shot, frame, def, width, height, basemap, ground, detail);
+    return;
+  }
+  const avg = new FrameAverage(width * height * 4);
+  for (const at of blurMoments(frame, blur, shot.frames)) {
+    if (videoFills.length) await prepareVideos(videoFills, at / shot.fps);
+    renderFrame(ctx, renderer, world, engine, shot, at, def, width, height, basemap, ground, detail);
+    avg.add(ctx.getImageData(0, 0, width, height).data);
+  }
+  const out = ctx.createImageData(width, height);
+  avg.write(out.data);
+  ctx.putImageData(out, 0, 0);
+}
+
+/**
  * What a frame of a pass is drawn with: its view, its moment and the renderer's options (the passes
  * the shot and the map show among the pass's own), and the shot's look. (Exports and SVG frames, D115.)
  */
@@ -494,8 +517,7 @@ export async function runExport(o: {
     for (const def of defs) {
       if (failure) throw failure;
       if (o.isCancelled?.()) { await Promise.allSettled(pending); throw new Error('Export cancelled.'); }
-      if (videoFills.length) await prepareVideos(videoFills, frame / o.shot.fps);
-      renderFrame(ctx, renderer, o.world, o.engine, o.shot, frame, def, width, height, basemap, terrain, detail);
+      await exportFrame(ctx, renderer, o.world, o.engine, o.shot, frame, def, width, height, basemap, terrain, detail, videoFills);
       const pixels = ctx.getImageData(0, 0, width, height).data;
       const [a, b] = pixelHash(pixels);
       const before = last.get(def.name);
@@ -543,8 +565,7 @@ async function exportVideo(
     for (let frame = p.f0; frame <= p.f1; frame++) {
       if (o.isCancelled?.()) throw new Error('Export cancelled.');
       const detail = await detailForFrame(o.world, shot, frame, width, height, p.terrain);
-      if (p.videoFills.length) await prepareVideos(p.videoFills, frame / shot.fps);
-      renderFrame(ctx, renderer, o.world, o.engine, shot, frame, all, width, height, p.basemap, p.terrain, detail);
+      await exportFrame(ctx, renderer, o.world, o.engine, shot, frame, all, width, height, p.basemap, p.terrain, detail, p.videoFills);
       await encoder.add(canvas);
       await sink.room();
       o.onProgress?.(frame - p.f0 + 1, total);

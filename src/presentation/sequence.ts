@@ -147,6 +147,8 @@ export interface ShotSettings {
   format?: ExportFormat;
   /** A video's quality (D121; absent: good). */
   videoQuality?: import('../export/video-codecs.ts').VideoQuality;
+  /** Motion blur in exports (D185): several pictures averaged into each frame; absent, one. See motion-blur.ts. */
+  motionBlur?: import('./motion-blur.ts').MotionBlur;
   /**
    * A globe turning on its own (D127): degrees a second, as the Earth turns (west to east: the middle of the
    * view moves west); negative the other way. Absent or 0: still. Only for the globe.

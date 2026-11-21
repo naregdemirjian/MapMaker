@@ -1,7 +1,7 @@
 // Domain commands: every user action is one of these. Each runs inside a transaction against the
 // in-memory world and returns the exact row diffs to save (and to undo). Commands never draw anything.
 import { layerBordersOf, type LayerBorders } from '../render-engine/border-look.ts';
-import { countryLookOf, layerLookOf, type CountryLook, type LayerLook } from '../render-engine/country-look.ts';
+import { countryLookOf, layerLookOf, lookPresetsOf, type CountryLook, type LayerLook, type LookPreset } from '../render-engine/country-look.ts';
 import { calendarProblems, type CalendarDef } from '../core-time/index.ts';
 import { World, Tx, newId } from '../world-model/world.ts';
 import {
@@ -452,6 +452,63 @@ export function setCountryLook(world: World, id: string, look: CountryLook | nul
   if (look && !clean) throw new Error('That is not a look.');
   if (clean) next.look = clean; else delete next.look;
   return run(world, clean ? `Change the look of ${e.name}` : `${e.name} looks like its layer again`, (tx) => tx.patch('entity', id, { style: JSON.stringify(next) }));
+}
+
+/** The same look given to several countries at once (a preset, D185); null: each looks like its layer again. One undo step. */
+export function setCountriesLook(world: World, ids: string[], look: CountryLook | null, what = 'a look'): CommandResult {
+  const clean = look ? countryLookOf(look) : null;
+  if (look && !clean) throw new Error('That is not a look.');
+  const rows = ids.map((id) => world.get('entity', id)).filter((e): e is NonNullable<typeof e> => !!e);
+  if (!rows.length) throw new Error('Choose a country first.');
+  return run(world, rows.length === 1 ? `Give ${rows[0].name} ${what}` : `Give ${rows.length} countries ${what}`, (tx) => {
+    for (const e of rows) {
+      const next: EntityStyle = { ...entityStyle(e) };
+      if (clean) next.look = clean; else delete next.look;
+      tx.patch('entity', e.id, { style: JSON.stringify(next) });
+    }
+  });
+}
+
+/** The project's looks kept under names (D185). */
+export function lookPresets(world: World): LookPreset[] {
+  return lookPresetsOf(parseJSON<unknown>(world.get('meta', 'look_presets')?.value ?? '[]', []));
+}
+
+function putLookPresets(world: World, label: string, list: LookPreset[]): CommandResult {
+  const value = JSON.stringify(list);
+  return run(world, label, (tx) => {
+    if (world.get('meta', 'look_presets')) tx.update('meta', { key: 'look_presets', value }); else tx.insert('meta', { key: 'look_presets', value });
+  });
+}
+
+/** Keep a look under a name (one of the same name is replaced). */
+export function saveLookPreset(world: World, name: string, look: CountryLook): CommandResult & { result: string } {
+  const clean = countryLookOf(look), n = name.trim().slice(0, 80);
+  if (!clean) throw new Error('That is not a look.');
+  if (!n) throw new Error('Give the look a name.');
+  const list = lookPresets(world), same = list.find((p) => p.name.toLowerCase() === n.toLowerCase());
+  const id = same?.id ?? newId('look');
+  const r = putLookPresets(world, `Keep the look "${n}"`, same ? list.map((p) => (p.id === id ? { id, name: n, look: clean } : p)) : [...list, { id, name: n, look: clean }]);
+  return { ...r, result: id };
+}
+
+export function deleteLookPreset(world: World, id: string): CommandResult {
+  const list = lookPresets(world), p = list.find((x) => x.id === id);
+  if (!p) throw new Error('That look is no longer kept.');
+  return putLookPresets(world, `Forget the look "${p.name}"`, list.filter((x) => x.id !== id));
+}
+
+/** Presets from a file (another project's): added, those of a name already kept replacing it. Returns how many. */
+export function importLookPresets(world: World, file: unknown): CommandResult & { result: number } {
+  const incoming = lookPresetsOf(file);
+  if (!incoming.length) throw new Error('There are no looks in that file.');
+  const list = [...lookPresets(world)];
+  for (const p of incoming) {
+    const i = list.findIndex((x) => x.name.toLowerCase() === p.name.toLowerCase());
+    if (i >= 0) list[i] = { ...p, id: list[i].id }; else list.push({ ...p, id: newId('look') });
+  }
+  const r = putLookPresets(world, incoming.length === 1 ? `Add the look "${incoming[0].name}"` : `Add ${incoming.length} looks`, list.slice(0, 200));
+  return { ...r, result: incoming.length };
 }
 
 /**

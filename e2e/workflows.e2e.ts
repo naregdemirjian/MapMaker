@@ -3396,6 +3396,77 @@ try {
     assert.equal(await page.evaluate((id) => !!(window as any).__mapmaker.store.world.get('sequence', id), shotId), false);
   });
 
+  await h.step('Looks of countries (D181, D185): effects added in a country\'s panel, a light sweep that changes the frame as time on screen passes, a change through history, a look kept and given to a second country, an export with motion blur; undone', async () => {
+    await page.getByTestId('mode-world').click();
+    const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
+    const before = await steps();
+    const lookOf = (name: string) => page.evaluate((n) => { const e = (window as any).__mapmaker.store.world.all('entity').find((x: any) => x.name === n); return JSON.parse(e.style || '{}').look ?? null; }, name);
+    // A drop shadow and a light sweep from the country's panel.
+    await page.getByTestId(`entity-row-${A}`).click();
+    await page.locator('details.country-look > summary').click();
+    await page.getByTestId('country-add-effect').selectOption('shadow');
+    await h.saved();
+    await page.getByTestId('country-add-effect').selectOption('shine');
+    await h.saved();
+    assert.deepEqual((await lookOf(A)).effects.map((e: any) => e.kind), ['shadow', 'shine']);
+    // The shadow's strength changing through history: from its value to another between two dates.
+    await page.getByTestId('country-effect').first().locator('details.effect-motion > summary').click();
+    await page.getByTestId('country-0-add-motion').click();
+    await h.saved();
+    await page.getByTestId('country-0-motion-to').fill('10');
+    await page.getByTestId('country-0-motion-to').press('Enter');
+    await h.saved();
+    const motion = (await lookOf(A)).effects[0].motions[0];
+    assert.deepEqual([motion.field, motion.from, motion.to], ['opacity', 0.55, 0.1], 'from 55 % to 10 %');
+    // Kept under a name, and given to another country from its panel.
+    await page.getByTestId('country-preset-save').click();
+    await page.getByTestId('ask-input').fill('Shining');
+    await page.getByTestId('ask-ok').click();
+    await h.saved();
+    await page.getByTestId(`entity-row-${B}`).click();
+    await page.locator('details.country-look > summary').click();
+    await page.getByTestId('country-preset-use').selectOption({ label: 'Shining' });
+    await h.saved();
+    assert.deepEqual((await lookOf(B)).effects.map((e: any) => e.kind), ['shadow', 'shine'], 'the kept look given to the second country');
+    // In a shot of one moment of history, the sweep crosses the countries as time on screen passes.
+    const mid: LL = [(P.a[0] + P.b[0]) / 2, (P.a[1] + P.b[1]) / 2];
+    const shotId = await page.evaluate((c) => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const settings = B.defaultShot(s.spaceId, { lon: c[0], lat: c[1], zoom: 3, rotation: 0, projection: 'equirectangular' }, s.time, s.time, 24, 1);
+      settings.overlays = [];
+      const id = s.execute((w: any) => B.commands.createSequence(w, 'Moving looks', settings));
+      s.set({ shotId: id, shotFrame: 0, presentCamera: null, mode: 'present' });
+      return id as string;
+    }, mid);
+    await page.getByTestId('shot-editor').waitFor();
+    const picture = () => page.evaluate(() => { const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement; return Array.from(c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data.filter((_, i) => i % 16 < 3)); });
+    await page.getByTestId('frame-slider').fill('0');
+    await page.waitForTimeout(1500);
+    const p0 = await picture();
+    await page.getByTestId('frame-slider').fill('19');
+    // (Drawn when the frame has changed: looked at until it shows, for up to ten seconds. Every colour is compared:
+    // light on a red country changes its green and blue more than its red.)
+    let changed = 0;
+    for (let i = 0; i < 20 && changed <= 200; i++) {
+      await page.waitForTimeout(500);
+      const p19 = await picture();
+      changed = p0.filter((v, k) => Math.abs(v - p19[k]) > 24).length;
+    }
+    assert.ok(changed > 200, `the sweep changes the picture as time on screen passes (${changed} samples)`);
+    // An export with motion blur: four pictures a frame.
+    await page.getByTestId('export-motion-blur').selectOption('4');
+    await page.waitForFunction((id) => JSON.parse((window as any).__mapmaker.store.world.get('sequence', id).settings).motionBlur?.samples === 4, shotId);
+    await page.getByTestId('export-shutter').waitFor();
+    const { frames, manifest } = await exportShot('export-preview');
+    assert.ok(frames('all').length >= 24 && frames('all').length === manifest.frames[1] - manifest.frames[0] + 1, `every frame of the preview, each blurred (${frames('all').length})`);
+    // Undone, all of it: the looks, the kept look and the shot.
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ mode: 'world', shotId: null }));
+    for (let i = 0; i < 20 && (await steps()) > before; i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await steps(), before);
+    assert.deepEqual([await lookOf(A), await lookOf(B)], [null, null]);
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.get('meta', 'look_presets')?.value ?? '[]'), '[]', 'no look kept');
+  });
+
   await h.step('SVG frames: the frame shown saved as an SVG file; territories, borders, names and texts as shapes and text in their layers; drawn by the browser it is the exported frame; undone', async () => {
     await page.getByTestId('mode-world').click();
     const shotId = await page.evaluate(() => {

@@ -7,7 +7,7 @@
 // changed; and what stays the same through a stretch of time (who holds what, which borders show)
 // is worked out once for the stretch (LayerSnap), not once per frame.
 import { layerBordersOf, bordersMove, plainBorder, dashPattern, type BorderStyle, type LayerBorders } from './border-look.ts';
-import { countryLookOf, layerLookOf, lookFor, looksPlain, shadowKey, shadowOffset, compositeOf, castOf, awayFromLight, INSIDE, type CountryLook, type Effect, type ShadowEffect, type StrokeEffect } from './country-look.ts';
+import { countryLookOf, layerLookOf, lookFor, lookAt, looksPlain, shadowKey, shadowOffset, compositeOf, castOf, awayFromLight, sweepAt, rgbaOf, changesInHistory, movesOnScreen, INSIDE, type CountryLook, type Effect, type ShadowEffect, type StrokeEffect } from './country-look.ts';
 import { patternTile, textureTile } from './textures.ts';
 import { geoPath, geoCircle, geoCentroid, geoArea, type GeoPermissibleObjects, type GeoProjection } from 'd3-geo';
 import type { World } from '../world-model/world.ts';
@@ -791,7 +791,12 @@ export class MapRenderer {
   }
 
   /** An effect drawn inside a country, over its fill (D182); `boxOf(pad)`: the country's box in device pixels, with room. */
-  private insideEffect(c: CanvasRenderingContext2D, tmp: CanvasRenderingContext2D, s: Shape, e: Effect, boxOf: (pad: number) => Box2, u: number): void {
+  /**
+   * An effect inside a country's edge. `boxOf`: the box of all its land on the canvas, padded; `mainOf`: the box of its
+   * main body (France without its lands overseas), not cut at the canvas's edge, which gradients and light sweeps cross
+   * (so they do not change as the map moves, nor cross half the world for a country with islands far away).
+   */
+  private insideEffect(c: CanvasRenderingContext2D, tmp: CanvasRenderingContext2D, s: Shape, e: Effect, boxOf: (pad: number) => Box2, u: number, mainOf: () => Box2 = () => boxOf(0)): void {
     if (e.kind === 'inner-shadow') {
       const [dx, dy] = shadowOffset(e, u);
       this.innerShadow(c, tmp, s, e.color, e.opacity, dx, dy, e.blur * u, boxOf((e.distance + 3 * e.blur) * u + 4));
@@ -803,6 +808,26 @@ export class MapRenderer {
       const lit = e.style === 'raised' ? 1 : -1;
       this.innerShadow(c, tmp, s, e.highlight, e.highlightOpacity, lit * dx, lit * dy, e.size * u, box);
       this.innerShadow(c, tmp, s, e.shade, e.shadeOpacity, -lit * dx, -lit * dy, e.size * u, box);
+    } else if (e.kind === 'shine') {
+      // A band of light across the country, from one side of its box to the other, then a pause (D185).
+      const at = sweepAt(e.period, e.pause, this.mediaSeconds);
+      if (at === null || e.opacity <= 0) return;
+      const [bx, by, bw, bh] = boxOf(0), [mx, my, mw, mh] = mainOf();
+      if (bw <= 0 || bh <= 0) return;
+      const a = (e.angle * Math.PI) / 180, ux = Math.cos(a), uy = -Math.sin(a), half = Math.abs((mw / 2) * ux) + Math.abs((mh / 2) * uy);
+      const w = e.width * u, cx = mx + mw / 2, cy = my + mh / 2, d = -half - w + at * (2 * half + 2 * w);
+      const g = c.createLinearGradient(cx + ux * (d - w), cy + uy * (d - w), cx + ux * (d + w), cy + uy * (d + w));
+      g.addColorStop(0, rgbaOf(e.color, 0));
+      g.addColorStop(0.5, rgbaOf(e.color, 1));
+      g.addColorStop(1, rgbaOf(e.color, 0));
+      c.save();
+      this.clip(c, s);
+      c.setTransform(1, 0, 0, 1, 0, 0);
+      c.globalAlpha = e.opacity;
+      c.globalCompositeOperation = 'screen';
+      c.fillStyle = g;
+      c.fillRect(bx, by, bw, bh);
+      c.restore();
     } else if (e.kind === 'gradient' || e.kind === 'pattern' || e.kind === 'texture') {
       if (e.opacity <= 0) return;
       const [bx, by, bw, bh] = boxOf(0);
@@ -813,11 +838,11 @@ export class MapRenderer {
       c.globalAlpha = e.opacity;
       c.globalCompositeOperation = compositeOf(e.blend);
       if (e.kind === 'gradient') {
-        const cx = bx + bw / 2, cy = by + bh / 2;
+        const [mx, my, mw, mh] = mainOf(), cx = mx + mw / 2, cy = my + mh / 2;
         let g: CanvasGradient;
-        if (e.style === 'radial') g = c.createRadialGradient(cx, cy, 0, cx, cy, Math.max(bw, bh) * 0.55);
+        if (e.style === 'radial') g = c.createRadialGradient(cx, cy, 0, cx, cy, Math.max(mw, mh) * 0.55);
         else {
-          const a = (e.angle * Math.PI) / 180, ux = Math.cos(a), uy = -Math.sin(a), h = Math.abs((bw / 2) * ux) + Math.abs((bh / 2) * uy);
+          const a = (e.angle * Math.PI) / 180, ux = Math.cos(a), uy = -Math.sin(a), h = Math.abs((mw / 2) * ux) + Math.abs((mh / 2) * uy);
           g = c.createLinearGradient(cx - ux * h, cy - uy * h, cx + ux * h, cy + uy * h);
         }
         g.addColorStop(0, e.from);
@@ -2111,7 +2136,7 @@ export class MapRenderer {
     this.mediaChannel = opts.mediaChannel ?? 'live';
     // Pictures and videos filling territory, by owner.
     const fills = new Map<string, CountryFillLike | null>();
-    let anyMedia = false;
+    let anyMedia = false, looksInHistory = false;
     const fillOf = (v: string): CountryFillLike | null => {
       if (fills.has(v)) return fills.get(v)!;
       const f = parseJSON<{ fill?: CountryFillLike }>(entities.get(v)?.style ?? '{}', {})?.fill ?? null;
@@ -2200,6 +2225,13 @@ export class MapRenderer {
       for (const owner of snap.byOwner.keys()) if (fillOf(owner)) anyMedia = true;
       // (Borders whose dashes march, D183: the picture changes as time on screen passes, as a video's does.)
       if (bordersMove(layerBordersOf(ls.borders))) anyMedia = true;
+      // (Looks that change as history goes or as time on screen passes, D185: drawn afresh at each moment.)
+      const ll = layerLookOf(ls.look);
+      for (const owner of snap.byOwner.keys()) {
+        const l = lookFor(ownLookOf(owner), ll);
+        if (movesOnScreen(l)) anyMedia = true;
+        if (changesInHistory(l)) { anyMedia = true; looksInHistory = true; }
+      }
     }
 
     this.lastTransitions = prepared.flatMap((p) => [...p.tg.groups.values()].map((g) => ({ style: g.spec.style, progress: g.progress })));
@@ -2250,7 +2282,7 @@ export class MapRenderer {
         if (rects) renew = { rects, moment };
       }
       const reliefKey = (tLook?.overTerritories && wantsFills ? `|r:${terrain!.key}|${JSON.stringify(tLook)}` : '') + (terrainLand && prepared.some((p) => p.clip) ? `|sea:${terrain!.key}|${seaLevel}` : '') + (reliefKeyNeedsDetail(tLook, wantsFills, terrainLand) ? `|d:${terrain?.detail?.key ?? ''}` : '');
-      const key = animated && !renew && opts.transitions ? null : partKey(`${animated && !renew ? `${t.day}:${t.ms}|` : ''}${renew ? 'animated|' : ''}${lookSig}|${wantsFills ? 'f' : ''}${wantsBorders ? 'b' : ''}|${world.revision}|${style.border}|${style.borderWidth}|${opts.basemap ? `${opts.basemap.scales.length}|${lakeKey}` : ''}${landKey}${reliefKey}${anyMedia ? `|${assetEpoch()}|${this.mediaSeconds}|${this.mediaChannel}` : ''}`);
+      const key = animated && !renew && opts.transitions ? null : partKey(`${animated && !renew ? `${t.day}:${t.ms}|` : ''}${renew ? 'animated|' : ''}${lookSig}|${wantsFills ? 'f' : ''}${wantsBorders ? 'b' : ''}|${world.revision}|${style.border}|${style.borderWidth}|${opts.basemap ? `${opts.basemap.scales.length}|${lakeKey}` : ''}${landKey}${reliefKey}${anyMedia ? `|${assetEpoch()}|${this.mediaSeconds}|${this.mediaChannel}` : ''}${looksInHistory ? `|${t.day}:${t.ms}` : ''}`);
       // The working view, after an edit or a step in time that changed few parcels: only where they lie is drawn again.
       // A change under way looks different at every moment, and different again once it is over: where
       // the picture before showed one, and where this one does, is drawn again along with the parcels
@@ -2387,7 +2419,7 @@ export class MapRenderer {
           const items: Array<{ owner: string; set: FaceSet; shape: Shape; look: CountryLook | null }> = [];
           for (const [owner, set] of snap.byOwner) {
             const shape = this.setPath(sp, sheet, arr, set);
-            if (shape) items.push({ owner, set, shape, look: lookFor(ownLookOf(owner), layerLook) });
+            if (shape) items.push({ owner, set, shape, look: lookAt(lookFor(ownLookOf(owner), layerLook), t.day + t.ms / 864e5, this.mediaSeconds) });
           }
           const styled = items.some((it) => !looksPlain(it.look));
           const paintOwner = (owner: string, set: FaceSet, shape: Shape) => {
@@ -2446,7 +2478,13 @@ export class MapRenderer {
                 const inside = (it.look?.effects ?? []).filter((e) => e.on && INSIDE.has(e.kind));
                 if (inside.length) {
                   const box = this.screenBox(view, arr, it.set.faces);
-                  for (const e of inside) this.insideEffect(lc, tmp, it.shape, e, (pad) => this.deviceBox(box, cm, pad, lc.canvas.width, lc.canvas.height), u);
+                  let main: Box2 | null = null;
+                  const mainOf = (): Box2 => {
+                    if (main) return main;
+                    const core = this.fillClusters(arr, it.set, { kind: 'color' })[0]?.core, on = core ? this.boxesOnScreen(view, core)[0] : undefined;
+                    return (main = this.deviceBox(on ? [on[0], on[1], on[2] - on[0], on[3] - on[1]] : box, cm, 0, lc.canvas.width, lc.canvas.height, Infinity));
+                  };
+                  for (const e of inside) this.insideEffect(lc, tmp, it.shape, e, (pad) => this.deviceBox(box, cm, pad, lc.canvas.width, lc.canvas.height), u, mainOf);
                 }
               }
               i = j;

@@ -61,6 +61,28 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D185. Looks of countries, V: looks that move, light sweeps, motion blur and kept looks
+
+- **Changes through history** (`effectAt` in `src/render-engine/country-look.ts`): any number setting of an effect
+  (a shadow's distance, a glow's strength, a bevel's depth…) can go from one value to another between two dates,
+  evenly, eased in and out, slow then fast, or fast then slow. Before its first date it has its first value, after its
+  last its last; several changes of one setting follow one another. A glow can grow through a war and fade after it.
+- **Pulses on screen:** a setting can also move about its value as time on screen passes, evenly (a heartbeat) or
+  unevenly (a flicker, from smooth noise, the same at every playing and in every export).
+- **Light sweep:** a new kind of effect, a band of light crossing the country again and again with a pause between.
+- **Drawn afresh:** a picture whose looks change through history is drawn again for each moment (its kept copy is
+  keyed by the moment); one whose looks pulse or sweep is drawn again as time on screen passes, as videos are.
+- **Motion blur in exports** (`src/presentation/motion-blur.ts`): a shot can have 4, 8 or 16 pictures averaged into
+  each exported frame, spread over a part of the time to the next one (the shutter, half by default, as a film
+  camera's): borders advancing, the camera moving and pulses are smeared along their way. Pictures are averaged with
+  their transparency (red and clear make red at half strength, not dark red), so passes laid over others in an editor
+  blur as the whole picture does. Exports take as many times longer; the shot's own playing is not blurred.
+- **Kept looks:** a look can be kept under a name in the project, given to every country chosen at once (one undo
+  step) or to a layer, forgotten, saved to a file and added to another project from it (one of the same name is
+  replaced).
+- **Not yet:** borders' and graphics' settings do not change through history (their own styles, D183 and D184, are
+  fixed for a shot); keys set by dragging on a timeline are left for later: a change is two dates and two values.
+
 ### D184. Looks of countries, IV: the look of a shot's graphics (events box, text boxes, date, title)
 
 - **One style for a shot's graphics** (`src/presentation/graphic-style.ts`): the events box, each text box, and the

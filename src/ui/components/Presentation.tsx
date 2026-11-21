@@ -207,6 +207,10 @@ export function ShotEditor() {
             <optgroup label="Image sequences (for editing)">{EXPORT_FORMATS.filter((f) => !f.video).map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}</optgroup>
             <optgroup label="One video file (to play and share)">{EXPORT_FORMATS.filter((f) => f.video).map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}</optgroup>
           </select></label>
+          <label title="Several pictures averaged into each exported frame, so what moves is smeared along its way as on film (exports take as many times longer)">Motion blur<select value={shot.motionBlur?.samples ?? 0} onChange={(e) => { const n = Number(e.target.value); update({ motionBlur: n > 1 ? { samples: n, shutter: shot.motionBlur?.shutter ?? 0.5 } : undefined }); }} data-testid="export-motion-blur">
+            <option value={0}>None</option><option value={4}>Light (4 pictures a frame)</option><option value={8}>Film (8)</option><option value={16}>Smooth (16)</option>
+          </select></label>
+          {shot.motionBlur && <label title="How much of the time between frames the pictures are spread over (half, as a film camera's shutter)">Shutter (%)<NumberField min={5} max={100} step={5} value={Math.round(shot.motionBlur.shutter * 100)} onCommit={(n) => update({ motionBlur: { ...shot.motionBlur!, shutter: n / 100 } })} testId="export-shutter" /></label>}
           <p className="muted" data-testid="export-format-note">{EXPORT_FORMATS.find((f) => f.id === (shot.format ?? 'png'))!.note}</p>
           {video && <>
             <label>Video quality<select value={shot.videoQuality ?? 'good'} onChange={(e) => update({ videoQuality: e.target.value as VideoQuality })} data-testid="export-video-quality">
