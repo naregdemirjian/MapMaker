@@ -17,6 +17,7 @@ import { TopologyError, type PathStep } from '../geo-kernel/arrangement.ts';
 import { worldSettings, terrainSourceOf, simOf, EARTH_RADIUS_KM, type BasemapSource, type ShowSet, type ShowSettings } from '../world-model/world-settings.ts';
 import { definitionOf, definitionProblems, canonicalDefinition, type PlanetDefinition } from '../planet/model/definition.ts';
 import { skyLookOf, type SkyLook } from '../space/sky-look.ts';
+import { solarRowOf, type SolarRow } from '../space/solar.ts';
 import { terrainLookOf, DEFAULT_TERRAIN_LOOK, type TerrainLook } from '../terrain/look.ts';
 import { cleanSeaLevel, type SeaLevelPoint } from '../terrain/sea-level.ts';
 import { planetParamsOf, PLANET_PRESETS, type PlanetParams } from '../terrain/planet.ts';
@@ -302,6 +303,15 @@ export function setSolarLayout(world: World, spaceId: string, layout: 'orbits' |
   const o = worldSettings(space) as { space?: Record<string, unknown> };
   if (o.space?.catalogue !== 'solar') throw new Error('Only the solar system can be laid out side by side.');
   return run(world, layout === 'side-by-side' ? 'The solar system side by side' : 'The solar system as it moves', (tx) => tx.update('map_space', { ...space, settings: JSON.stringify({ ...o, space: { ...o.space, layout } }) }));
+}
+
+/** How the side-by-side solar system is drawn (D192): the bodies' sizes, the spacing of the row, which moons. */
+export function setSolarRow(world: World, spaceId: string, row: SolarRow): CommandResult {
+  const space = world.get('map_space', spaceId);
+  if (!space || space.kind !== 'space') throw new Error('That is not a map of space.');
+  const o = worldSettings(space) as { space?: Record<string, unknown> };
+  if (o.space?.catalogue !== 'solar') throw new Error('Only the solar system can be laid out side by side.');
+  return run(world, 'Change the solar system side by side', (tx) => tx.update('map_space', { ...space, settings: JSON.stringify({ ...o, space: { ...o.space, row: solarRowOf(row) } }) }));
 }
 
 /** How a solar system map draws its distances (D113): true, or compressed so the inner planets have room. */

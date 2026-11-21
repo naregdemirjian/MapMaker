@@ -142,23 +142,65 @@ export function solarCatalogue(t: Instant, scale: SolarScale): StarCatalogue {
 
 /**
  * The solar system side by side (D133): not where the bodies are but who they are, in order: the Sun at the
- * left, the planets in a row at even steps, each planet's large moons in a column below it, inner first.
- * Units as drawn (the row is `ROW_STEP` from body to body, centred on the middle of the map); distances
- * from the Sun stay true for the panels.
+ * left, the planets in a row, each planet's large moons in a column below it, inner first. Units as drawn (the
+ * row is `ROW_STEP` from body to body when even, centred on the middle of the map); distances from the Sun stay
+ * true for the panels. How it is drawn can be chosen (D192, `SolarRow`): the bodies' sizes, the spacing of the row,
+ * which moons. Every body keeps its id, so who holds what and the lanes between them stay.
  */
 export const ROW_STEP = 10;
 const MOON_STEP = 3.4, ROW_Y = 6;
 export const ROW_RADIUS = 33;
-export function solarRowCatalogue(t: Instant): StarCatalogue {
-  const T = centuriesSinceJ2000(t), x0 = -(BODIES.length * ROW_STEP) / 2;
-  const stars: Star[] = [{ id: 0, name: 'Sun', alt: '', x: x0, y: ROW_Y, z: 0, dist: 0, absmag: 4.83, spect: 'G2V', system: 0, color: '#ffd76a', size: 15 }];
+
+/** Sizes: as drawn before (picked to read well), all alike, true to each other, or compressed (by the square root). */
+export type RowSizes = 'styled' | 'equal' | 'true' | 'compressed';
+/** Spacing: even steps, true to the distances from the Sun, or compressed (by the square root). */
+export type RowSpacing = 'even' | 'true' | 'compressed';
+export interface SolarRow { sizes: RowSizes; spacing: RowSpacing; moons: 'all' | 'none' | 'chosen'; chosen: number[] }
+export const DEFAULT_SOLAR_ROW: SolarRow = { sizes: 'styled', spacing: 'even', moons: 'all', chosen: [] };
+
+/** A side-by-side solar system's settings as stored, checked. */
+export function solarRowOf(v: unknown): SolarRow {
+  const o = (v && typeof v === 'object' ? v : {}) as Partial<SolarRow>;
+  const ids = new Set(MOONS.map((m) => m.id));
+  return {
+    sizes: (['styled', 'equal', 'true', 'compressed'] as const).includes(o.sizes as RowSizes) ? (o.sizes as RowSizes) : 'styled',
+    spacing: (['even', 'true', 'compressed'] as const).includes(o.spacing as RowSpacing) ? (o.spacing as RowSpacing) : 'even',
+    moons: o.moons === 'none' || o.moons === 'chosen' ? o.moons : 'all',
+    chosen: Array.isArray(o.chosen) ? [...new Set(o.chosen.filter((x): x is number => typeof x === 'number' && ids.has(x)))] : [],
+  };
+}
+
+/** Mean radii (km): the Sun, the planets and Pluto by id, and the moons. */
+export const RADIUS_KM: Readonly<Record<number, number>> = {
+  0: 695700, 1: 2439.7, 2: 6051.8, 3: 6371, 4: 3389.5, 5: 69911, 6: 58232, 7: 25362, 8: 24622, 9: 1188.3,
+  31: 1737.4, 41: 11.3, 42: 6.2, 51: 1821.6, 52: 1560.8, 53: 2634.1, 54: 2410.3, 61: 2574.7, 62: 252.1, 63: 763.8, 71: 788.4, 72: 761.4, 81: 1353.4, 91: 606,
+};
+
+/**
+ * The size a body is drawn at in a row (as a planet's `size`): true sizes have Jupiter 13 across its radius and the
+ * rest to scale (the Sun, ten times wider, held at three Jupiters so the row still shows); compressed by the square
+ * root of that; equal all alike; styled as before.
+ */
+export function rowSize(id: number, sizes: RowSizes, styled: number): number {
+  const rel = (RADIUS_KM[id] ?? 1000) / RADIUS_KM[5];
+  if (sizes === 'styled') return styled;
+  if (sizes === 'equal') return id === 0 ? 9 : id > 10 ? 3 : 6;
+  if (sizes === 'true') return id === 0 ? 39 : Math.max(id > 10 ? 0.7 : 0.9, 13 * rel);
+  return id === 0 ? 26 : Math.max(id > 10 ? 1.2 : 2, 13 * Math.sqrt(rel));
+}
+
+export function solarRowCatalogue(t: Instant, row: SolarRow = DEFAULT_SOLAR_ROW): StarCatalogue {
+  const T = centuriesSinceJ2000(t), span = BODIES.length * ROW_STEP, x0 = -span / 2, far = Math.max(...BODIES.map((b) => b.el[0]));
+  const xOf = (b: Body, i: number) => (row.spacing === 'true' ? x0 + span * (b.el[0] / far) : row.spacing === 'compressed' ? x0 + span * Math.sqrt(b.el[0] / far) : x0 + (i + 1) * ROW_STEP);
+  const stars: Star[] = [{ id: 0, name: 'Sun', alt: '', x: x0, y: ROW_Y, z: 0, dist: 0, absmag: 4.83, spect: 'G2V', system: 0, color: '#ffd76a', size: rowSize(0, row.sizes, 15) }];
   BODIES.forEach((b, i) => {
     const p = bodyAt(b, T);
-    stars.push({ id: b.id, name: b.name, alt: '', x: x0 + (i + 1) * ROW_STEP, y: ROW_Y, z: 0, dist: Math.hypot(p[0], p[1], p[2]), absmag: 0, spect: '', system: 0, color: b.color, size: b.size * 1.5 });
+    stars.push({ id: b.id, name: b.name, alt: '', x: xOf(b, i), y: ROW_Y, z: 0, dist: Math.hypot(p[0], p[1], p[2]), absmag: 0, spect: '', system: 0, color: b.color, size: rowSize(b.id, row.sizes, b.size * 1.5) });
   });
-  for (const m of MOONS) {
-    const planet = stars[m.planet], rank = MOONS.filter((x) => x.planet === m.planet && x.days < m.days).length;
-    stars.push({ id: m.id, name: m.name, alt: `a moon of ${planet.name}`, x: planet.x, y: ROW_Y - 4.6 - MOON_STEP * rank, z: 0, dist: planet.dist, absmag: 0, spect: '', system: 0, color: m.color, size: 2.8, kind: 'moon', minor: true, around: m.planet });
+  const shown = MOONS.filter((m) => row.moons === 'all' || (row.moons === 'chosen' && row.chosen.includes(m.id)));
+  for (const m of shown) {
+    const planet = stars[m.planet], rank = shown.filter((x) => x.planet === m.planet && x.days < m.days).length;
+    stars.push({ id: m.id, name: m.name, alt: `a moon of ${planet.name}`, x: planet.x, y: ROW_Y - 4.6 - MOON_STEP * rank, z: 0, dist: planet.dist, absmag: 0, spect: '', system: 0, color: m.color, size: rowSize(m.id, row.sizes, 2.8), kind: 'moon', minor: true, around: m.planet });
   }
   return { radiusLy: ROW_RADIUS, stars, byId: new Map(stars.map((s) => [s.id, s])) };
 }

@@ -39,7 +39,7 @@ export interface SpaceScene {
 /** The scene of a space map at instant t (`onLoad`: called once the nearby stars have loaded). */
 export function spaceScene(settings: SpaceSettings | null, t: Instant, onLoad?: () => void): SpaceScene {
   if (settings?.catalogue === 'solar' && settings.layout === 'side-by-side') {
-    const cat = solarRowCatalogue(t);
+    const cat = solarRowCatalogue(t, settings.row);
     return { cat, radius: ROW_RADIUS, axisLabel: null, orbits: solarRowLines(cat), realmReach: ROW_STEP * 0.62, unit: 'au', dropLines: false, row: true };
   }
   if (settings?.catalogue === 'solar') {

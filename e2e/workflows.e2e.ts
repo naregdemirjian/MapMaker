@@ -3987,6 +3987,21 @@ try {
     await page.getByTestId('tool-select').click();
     await page.waitForFunction(() => { const n = (window as any).__mapmaker.spaceNames() as string[]; return n.includes('MARTIAN REPUBLIC') && n.includes('since 2030'); });
     await h.screenshot('solar-side-by-side');
+    // Side by side as chosen (D192): sizes and distances true to each other, only the Moon and Titan.
+    await page.getByTestId('solar-row-open').click();
+    await page.getByTestId('solar-row-sizes').selectOption('true');
+    await page.getByTestId('solar-row-spacing').selectOption('true');
+    await page.getByTestId('solar-row-moons').selectOption('chosen');
+    await page.getByTestId('solar-row-moon-Moon').check();
+    await page.getByTestId('solar-row-moon-Titan').check();
+    await page.locator('[data-testid=solar-row-dialog] .modal-actions button').click();
+    await page.waitForFunction(() => { const s = (window as any).__mapmaker.store; const r = JSON.parse(s.world.get('map_space', s.spaceId).settings).space.row; return r?.chosen?.length === 2; });
+    await page.waitForTimeout(300);
+    const spaced = await Promise.all([0, 6, 8].map((id) => hook<[number, number]>('starToPage', id)));
+    const ratio = (spaced[2][0] - spaced[0][0]) / (spaced[1][0] - spaced[0][0]);
+    assert.ok(Math.abs(ratio - 30.07 / 9.537) < 0.08, `Neptune three times as far as Saturn (${ratio.toFixed(2)})`);
+    const shownNames = await page.evaluate(() => (window as any).__mapmaker.spaceNames() as string[]);
+    assert.ok(shownNames.includes('Titan') && !shownNames.includes('Io'), `only the moons chosen: ${shownNames.filter((n) => ['Io', 'Titan', 'Moon'].includes(n)).join(', ')}`);
     // The planets as photographed (D191): chosen in the look, credited.
     await page.getByTestId('space-look').click();
     await page.getByTestId('sky-photo').check();

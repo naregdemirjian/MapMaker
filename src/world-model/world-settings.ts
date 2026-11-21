@@ -6,6 +6,7 @@ import { planetParamsOf, type PlanetParams } from '../terrain/planet.ts';
 import { definitionOf, type PlanetDefinition } from '../planet/model/definition.ts';
 import { cleanStamps, type TerrainStamp } from '../terrain/sculpt.ts';
 import { skyLookOf, type SkyLook } from '../space/sky-look.ts';
+import { solarRowOf, type SolarRow } from '../space/solar.ts';
 import { calendarOf, calendarProblems, gregorian, type Calendar, type CalendarDef } from '../core-time/index.ts';
 import { cleanStatistics, type Statistic } from '../presentation/statistics.ts';
 import { cityFilterOf, type CityFilter } from '../domain/places.ts';
@@ -166,6 +167,8 @@ export interface SpaceSettings {
   catalogue: 'nearby' | 'solar' | 'invented' | 'galaxy'; radiusLy: number; scale?: 'true' | 'compressed';
   /** The solar system where its bodies are (with their orbits), or side by side (D133). */
   layout?: 'orbits' | 'side-by-side';
+  /** How the side-by-side solar system is drawn (D192): sizes, spacing, which moons. */
+  row?: SolarRow;
   /** How the map looks (D130): its stars, sky, grid and names, a flat chart (D131), its realms (D132). Always there when read with spaceSettingsOf. */
   look?: SkyLook;
   invented?: { seed: number; count: number; radiusLy: number; shape: 'sphere' | 'disc' };
@@ -181,7 +184,7 @@ export function spaceSettingsOf(space: MapSpaceRow | null | undefined): SpaceSet
   if (!space || space.kind !== 'space') return null;
   const o = (worldSettings(space) as { space?: Partial<SpaceSettings> }).space ?? {};
   const look = skyLookOf(o.look);
-  if (o.catalogue === 'solar') return { catalogue: 'solar', radiusLy: 50, scale: o.scale === 'true' ? 'true' : 'compressed', layout: o.layout === 'side-by-side' ? 'side-by-side' : 'orbits', look };
+  if (o.catalogue === 'solar') return { catalogue: 'solar', radiusLy: 50, scale: o.scale === 'true' ? 'true' : 'compressed', layout: o.layout === 'side-by-side' ? 'side-by-side' : 'orbits', row: solarRowOf(o.row), look };
   if (o.catalogue === 'invented') {
     const i = (o.invented ?? {}) as Partial<NonNullable<SpaceSettings['invented']>>;
     const num = (v: unknown, lo: number, hi: number, d: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, Math.round(v))) : d);

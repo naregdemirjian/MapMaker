@@ -9,6 +9,7 @@ import { TopBar, Outliner, ToolBar, Inspector, Toasts } from './components/Panel
 import { ShowDialog } from './components/ShowDialog.tsx';
 import { SeaLevelDialog } from './components/SeaLevelDialog.tsx';
 import { SkyLookDialog } from './components/SkyLook.tsx';
+import { SolarRowDialog } from './components/SolarRow.tsx';
 import { MapView } from './components/MapView.tsx';
 import { SpaceView } from './components/SpaceView.tsx';
 import { isSpaceMap } from '../world-model/world-settings.ts';
@@ -91,6 +92,7 @@ export function App() {
       {s.dialog === 'statistics' && <StatisticsDialog />}
       {s.dialog === 'branches' && <BranchesDialog />}
       {s.dialog === 'sky-look' && <SkyLookDialog />}
+      {s.dialog === 'solar-row' && <SolarRowDialog />}
       {s.dialog === 'merge' && <MergeDialog />}
       {s.dialog === 'give-regions' && <GiveRegionsDialog />}
       {s.dialog === 'versions' && <VersionsDialog />}

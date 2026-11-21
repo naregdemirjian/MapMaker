@@ -90,7 +90,7 @@ test('a solar system map: made, its scale chosen and undone; planets held like s
   const engine = new Engine(world);
   cmd.seedProject(world, 'Solar');
   const sp = cmd.createSpaceMap(world, 'The solar system', 'solar').result;
-  assert.deepEqual(spaceSettingsOf(world.get('map_space', sp)), { catalogue: 'solar', radiusLy: 50, scale: 'compressed', layout: 'orbits', look: DEFAULT_SKY });
+  assert.deepEqual(spaceSettingsOf(world.get('map_space', sp)), { catalogue: 'solar', radiusLy: 50, scale: 'compressed', layout: 'orbits', row: { sizes: 'styled', spacing: 'even', moons: 'all', chosen: [] }, look: DEFAULT_SKY });
   const r = cmd.setSolarScale(world, sp, 'true');
   assert.equal(spaceSettingsOf(world.get('map_space', sp))!.scale, 'true');
   world.applyDiffs(invertDiffs(r.diffs));
@@ -167,4 +167,26 @@ test('the solar system laid out side by side and back (one step each, undone); r
   // Given again to the same holder: still since it first had it.
   cmd.holdStars(world, { spaceId: sp, stars: [4], entity: lea, mode: { kind: 'change', t: Y(2300) } });
   assert.equal(gregorian.format(at(2310).get(4)!.since!, 'year'), '2250');
+});
+
+test('the solar system side by side as chosen (D192): sizes, spacing and moons; every body keeps its id', async () => {
+  const { solarRowCatalogue: row, solarRowOf, DEFAULT_SOLAR_ROW } = await import('../src/space/solar.ts');
+  const t = gregorian.fromCivil({ year: 2000 });
+  const base = row(t), size = (c: ReturnType<typeof row>, id: number) => c.byId.get(id)!.size!, x = (c: ReturnType<typeof row>, id: number) => c.byId.get(id)!.x;
+  assert.deepEqual(row(t, DEFAULT_SOLAR_ROW).stars.map((s) => [s.id, s.x, s.size]), base.stars.map((s) => [s.id, s.x, s.size]), 'as chosen by default: as before');
+  // True sizes: Jupiter about eleven Earths across.
+  const trueSize = row(t, { ...DEFAULT_SOLAR_ROW, sizes: 'true' });
+  assert.ok(Math.abs(size(trueSize, 5) / size(trueSize, 3) - 69911 / 6371) < 0.01);
+  const equal = row(t, { ...DEFAULT_SOLAR_ROW, sizes: 'equal' });
+  assert.equal(size(equal, 1), size(equal, 5), 'all alike');
+  // True spacing: Neptune three times as far from the Sun as Saturn; even: one step each.
+  const spaced = row(t, { ...DEFAULT_SOLAR_ROW, spacing: 'true' });
+  assert.ok(Math.abs((x(spaced, 8) - x(spaced, 0)) / (x(spaced, 6) - x(spaced, 0)) - 30.07 / 9.537) < 0.01);
+  assert.ok(Math.abs((x(base, 2) - x(base, 1)) - (x(base, 8) - x(base, 7))) < 1e-9, 'even steps');
+  // Moons: none, or the ones chosen, inner first beneath their planet.
+  assert.equal(row(t, { ...DEFAULT_SOLAR_ROW, moons: 'none' }).stars.filter((s) => s.kind === 'moon').length, 0);
+  const some = row(t, { ...DEFAULT_SOLAR_ROW, moons: 'chosen', chosen: [31, 53, 61] });
+  assert.deepEqual(some.stars.filter((s) => s.kind === 'moon').map((s) => s.name).sort(), ['Ganymede', 'Moon', 'Titan']);
+  assert.equal(some.byId.get(53)!.y, some.byId.get(31)!.y, 'Ganymede alone under Jupiter: in the first place');
+  assert.deepEqual(solarRowOf({ sizes: 'huge', spacing: 'true', moons: 'chosen', chosen: [31, 999, 31] }), { sizes: 'styled', spacing: 'true', moons: 'chosen', chosen: [31] });
 });

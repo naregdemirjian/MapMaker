@@ -61,6 +61,16 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D192. The solar system side by side, as chosen
+
+- **"Sizes and moons…"** over a side-by-side solar system (`SolarRow`, `setSolarRow`): the bodies' sizes as drawn
+  before (picked to read well), all alike, true to each other (Jupiter eleven Earths across) or compressed (by the
+  square root); the row's spacing in even steps, true to the distances from the Sun (the inner planets close
+  together) or compressed; and the moons: all the large ones, none, or those chosen, planet by planet.
+- Every body keeps its id, so who holds what and the lanes between bodies stay as they are.
+- **Not done:** at true sizes the Sun, ten times wider than Jupiter, is held at three Jupiters so the row still
+  shows.
+
 ### D191. The planets as photographed
 
 - **A "Photographic" look for solar system maps** (preset, or "As photographed" under Planets in the look): the Sun,
