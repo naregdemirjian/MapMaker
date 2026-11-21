@@ -61,6 +61,24 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D188. Today's cities: told apart when added again, and offered where "What is shown" asks for them
+
+- **Reported:** today's cities "not in their place", and not appearing when shown from "What is shown". In a new
+  project they were placed and shown right; two causes were found where a project already had cities:
+- **Cities of the same name moved onto each other.** Adding today's cities again (a looser filter, more countries)
+  matched those already in the project by name and country alone. Natural Earth has 63 names twice in one country
+  (Portland in Oregon and Maine, Columbus in Ohio and Georgia, two Suzhous in China…): the second was taken for the
+  first and its placement moved it there. A city of one's own of the same name (a Rome placed elsewhere) was taken
+  for today's city too, and left where it was. Now (`sameCity`, `todaysCitiesMissing`) a city already in the
+  project is a place of today only if it has the same name, country and region (regions are now kept with each
+  city), or, where the region is not known or the city is one's own, if it stands within 60 km of the place.
+- **"What is shown" chose only among cities added.** Its rules (share of the country's people, size, capitals,
+  economic centres) narrow the cities on the map; loosening them showed nothing more when fewer had been added. It
+  now says how many more of today's cities of the countries on the map pass its rules and adds them in one step,
+  and with no cities on the map, says so and opens "Add today's cities".
+- **Not changed:** cities already moved onto a namesake in a project stay as they are (undo, or remove and add
+  again).
+
 ### D187. "Colour countries by closeness" taken out
 
 - Asked for on 21 November: the colouring of today's countries by how close each is to one of them (D174) is taken

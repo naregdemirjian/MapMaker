@@ -9,6 +9,8 @@ The approved architecture is the Claude Doc "Map Maker — Technical Architectur
 
 ## Status at a glance (20 November 2026, Stages 2, 3, 4, 6, 8 to 14 done; Stage 7 mostly done)
 
+- **Today's cities fixed, 21 November** (D188): cities of the same name (two Portlands) no longer moved onto each
+  other when added again, nor a city of one's own taken for today's; "What is shown" offers the cities its rules ask for.
 - **"Colour countries by closeness" taken out, 21 November** (D187), as asked: dialog, renderer, legend and data.
 - **Looks of countries, VI, 21 November** (D186): one light for the map shared by shadows and bevels; countries as
   raised 3D slabs, as tall as a statistic if wanted ("Population of {country}"); shadows and glows of coasts no longer
@@ -507,7 +509,7 @@ worked out afresh, and any difference stops the test.
 | `test/planet-mesh.test.ts` | 5 | The icosahedral mesh (D152): cells, faces, Euler's formula, areas summing to 4π, neighbours mutual and counter-clockwise, levels nesting; point location against brute force; the Laplacian and gradient against spherical harmonics level by level; conservative transport and diffusion; prolongation and restriction; pictures of fields and their round trip |
 | `test/planet-insolation.test.ts` | 3 | Sunlight (D152): Earth's against Berger's values, solstices and polar night; perihelion and the equinox; global means for five presets; a tidally locked planet's dark side; more tilt, sunnier poles |
 | `test/region-maps.test.ts` | 2 | Ready-made maps (D175): the Middle East and Armenia's, their countries where they are, their cities, urban areas, provinces, satellite look and 4K shot |
-| `test/places.test.ts` | 3 | Today's cities (D173): capitals, shares, ranks and world cities from the data; which cities each filter keeps; added as cities that remember them, the map's filter stored |
+| `test/places.test.ts` | 4 | Today's cities (D173): capitals, shares, ranks and world cities from the data; which cities each filter keeps; added as cities that remember them, the map's filter stored; cities of the same name told apart by region or by where they stand (D188) |
 | `test/arrow-step.test.ts` | 1 | The arrow keys' steps of the date viewed (D172): a day, a week, a month, a year; Cmd as Ctrl |
 | `test/statistics.test.ts` | 3 | Statistics (D171): values between dates by a steady share, amount or at once; written as money, people, numbers and shares (up to quintillions and sextillions, D180), and read back from words; a map's statistics filling "{name}" in a shot's texts as history goes |
 | `test/missiles.test.ts` | 3 | Missile salvos (D171): flights along great circles over one event, in flight half way, gone on arrival; strikes where they land and none where one was shot down; each missile arriving at its own moment and a point fading in over its own span (D176) |

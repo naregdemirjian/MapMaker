@@ -57,3 +57,31 @@ test('added as cities that remember what they are; a map\'s filter stored with i
   cmd.setWorldShow(world, spaceId, { cities: { ...DEFAULT_CITY_FILTER, only: [yerevan.id] } });
   assert.deepEqual(cityFilterOfSpace(world.get('map_space', spaceId)).only, [yerevan.id]);
 });
+
+test('cities of the same name are told apart: by region, or by where they stand (D188)', () => {
+  const world = new World();
+  const { spaceId } = cmd.seedProject(world, 'T').result;
+  const usa = places.filter((p) => p.country === 'United States of America');
+  const portlands = usa.filter((p) => p.name === 'Portland');
+  assert.equal(portlands.length, 2, 'Portland, Oregon and Portland, Maine');
+  // Added one at a time: the second is a city of its own, not the first moved.
+  cmd.addCities(world, { spaceId, places: [portlands[0]], mode: { kind: 'correct', t: NEG_INF } });
+  cmd.addCities(world, { spaceId, places: [portlands[1]], mode: { kind: 'correct', t: NEG_INF } });
+  const ids = world.all('entity').filter((e) => e.name === 'Portland').map((e) => e.id);
+  assert.equal(ids.length, 2);
+  const where = (id: string) => world.all('effect').filter((f) => f.kind === 'place' && f.intent.includes(id)).map((f) => JSON.parse(f.intent)).map((i) => [i.lon, i.lat]);
+  assert.deepEqual(ids.map((id) => where(id).length), [1, 1], 'each placed once, where it is');
+  assert.deepEqual(ids.map((id) => placeMetaOf(world.get('entity', id)!.style)?.region).sort(), ['Maine', 'Oregon']);
+  assert.equal(cmd.todaysCitiesMissing(world, spaceId, portlands).length, 0, 'both on the map');
+  // A city of one's own of the same name: the same city only where it stands.
+  const own = cmd.createEntity(world, { type_id: 'settlement', name: 'Rome' }).result;
+  cmd.placeCharacter(world, { spaceId, entity: own, lon: 100, lat: 10, mode: { kind: 'correct', t: NEG_INF } });
+  const rome = find('Rome', 'Italy');
+  assert.deepEqual(cmd.todaysCitiesMissing(world, spaceId, [rome]).map((p) => p.name), ['Rome'], 'a Rome far away is another city');
+  cmd.addCities(world, { spaceId, places: [rome], mode: { kind: 'correct', t: NEG_INF } });
+  assert.equal(world.all('entity').filter((e) => e.name === 'Rome').length, 2);
+  assert.deepEqual(where(own), [[100, 10]], 'one\'s own Rome left where it was');
+  const own2 = cmd.createEntity(world, { type_id: 'settlement', name: 'Lyon' }).result;
+  cmd.placeCharacter(world, { spaceId, entity: own2, lon: 4.85, lat: 45.76, mode: { kind: 'correct', t: NEG_INF } });
+  assert.equal(cmd.todaysCitiesMissing(world, spaceId, [find('Lyon', 'France')]).length, 0, 'one\'s own Lyon where Lyon is: the same city');
+});

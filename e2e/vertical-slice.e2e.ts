@@ -825,8 +825,17 @@ try {
     await page.waitForTimeout(600);
     const names = () => page.evaluate(() => (window as any).__mapmaker.store.renderer.lastCities.map((c: any) => c.name)) as Promise<string[]>;
     assert.ok((await names()).includes('Yerevan'), 'Yerevan on the map');
-    // What is shown: only the cities chosen.
+    // What is shown: its rules show more of today's cities than were added; they are offered and added (D188).
+    const count = () => page.evaluate(() => (window as any).__mapmaker.store.world.all('entity').filter((e: any) => e.type_id === 'settlement').length) as Promise<number>;
+    const before = await count();
     await page.getByTestId('open-show-lakes').click();
+    await page.getByTestId('cities-shown-missing').waitFor({ timeout: 20000 });
+    await page.getByTestId('cities-shown-add-missing').click();
+    await page.getByTestId('cities-shown-missing').waitFor({ state: 'detached', timeout: 30000 });
+    const after = await count();
+    assert.ok(after > before, `the cities the rules show added (${before} then ${after})`);
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('entity').filter((e: any) => e.name === 'Yerevan').length), 1, 'none added twice');
+    // Only the cities chosen.
     await page.getByTestId('cities-shown-only').check();
     await page.getByTestId('cities-shown-search').fill('Tbilisi');
     await page.getByTestId('cities-shown-Tbilisi').check();
@@ -834,7 +843,7 @@ try {
     await page.waitForTimeout(500);
     assert.deepEqual((await names()).filter((n) => made.includes(n)), ['Tbilisi'], 'only the city chosen');
     await screenshot('todays-cities');
-    for (let i = 0; i < 4; i++) await page.getByTestId('undo').click();
+    for (let i = 0; i < 5; i++) await page.getByTestId('undo').click();
     await page.waitForFunction(() => !(window as any).__mapmaker.store.world.all('entity').some((e: any) => e.name === 'Yerevan'));
     await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 0, lat: 0, zoom: 0, rotation: 0, projection: 'equirectangular' }));
   });

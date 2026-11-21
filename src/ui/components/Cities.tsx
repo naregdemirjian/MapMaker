@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
 import { decodePlaces, pickPlaces, placeMetaOf, cityFilterOf, ECONOMIC_LEVELS, type CityFilter, type TodayPlace, type PlacesFile } from '../../domain/places.ts';
-import { cityFilterOfSpace } from '../../world-model/world-settings.ts';
+import { cityFilterOfSpace, basemapSourceOf } from '../../world-model/world-settings.ts';
 import { NEG_INF } from '../../core-time/index.ts';
 import { fmt } from './Panels.tsx';
 
@@ -111,12 +111,32 @@ export function CitiesShownSection({ spaceId }: { spaceId: string }) {
   const save = (next: CityFilter) => s.execute((wd) => cmd.setWorldShow(wd, spaceId, { cities: cityFilterOf(next) }));
   const cities = w.all('entity').filter((e) => e.type_id === 'settlement').sort((a, b) => (placeMetaOf(b.style)?.population ?? 0) - (placeMetaOf(a.style)?.population ?? 0) || a.name.localeCompare(b.name));
   const fromToday = cities.filter((e) => placeMetaOf(e.style)).length;
+  // Today's cities these rules show that are not on the map yet (D188): the rules choose among the cities added, so
+  // those are offered here, to add in one step (of the countries on the map with today's names).
+  const earth = !!space && space.kind === 'sphere' && basemapSourceOf(space) === 'natural-earth';
+  const [all, setAll] = useState<TodayPlace[] | null>(null);
+  useEffect(() => { if (earth) loadPlaces().then(setAll, () => setAll([])); }, [earth]);
+  const onMap = useMemo(() => new Set(w.all('entity').filter((e) => e.type_id === 'polity').map((e) => e.name)), [w, s.journal.head]);
+  const missing = useMemo(() => (all && !f.only && onMap.size ? cmd.todaysCitiesMissing(w, spaceId, pickPlaces(all, onMap, f)) : []), [all, f, onMap, w, spaceId, s.journal.head]);
+  const addMissing = () => {
+    s.set({ busy: `Adding ${missing.length} cities…` });
+    setTimeout(() => {
+      const r = s.execute((wd) => cmd.addCities(wd, { spaceId, places: missing, mode: { kind: 'correct', t: NEG_INF } }));
+      s.set({ busy: null });
+      if (r) s.toast(`Added ${r.length} ${r.length === 1 ? 'city' : 'cities'}.`);
+    }, 30);
+  };
   return (
     <section className="cities-shown" data-testid="cities-shown">
       <h3>Cities shown</h3>
       <label className="check"><input type="radio" checked={!f.only} onChange={() => save({ ...f, only: null })} data-testid="cities-shown-filter" /> As the rules below say{fromToday < cities.length ? ' (cities of your own always show)' : ''}</label>
       <label className="check"><input type="radio" checked={!!f.only} onChange={() => save({ ...f, only: f.only ?? [] })} data-testid="cities-shown-only" /> Only the cities I choose</label>
       {!f.only && <CityFilterControls value={f} onChange={save} testId="show-cities-filter" />}
+      {earth && !cities.length && <p className="muted" data-testid="cities-shown-none">There are no cities on this map yet: the rules choose among the cities added. <button className="link" onClick={() => s.set({ dialog: 'add-cities' })} data-testid="cities-shown-open-add">Add today's cities…</button></p>}
+      {missing.length > 0 && cities.length > 0 && (
+        <p className="cities-missing" data-testid="cities-shown-missing">{missing.length.toLocaleString()} more of today's cities of the countries on this map pass these rules but are not on it ({missing.slice(0, 5).map((p) => p.name).join(', ')}{missing.length > 5 ? '…' : ''}).
+          {' '}<button className="small" onClick={addMissing} data-testid="cities-shown-add-missing">Add {missing.length.toLocaleString()} {missing.length === 1 ? 'city' : 'cities'}</button></p>
+      )}
       {f.only && <>
         <input placeholder="Search cities" value={q} onChange={(e) => setQ(e.target.value)} data-testid="cities-shown-search" />
         <div className="country-list short">

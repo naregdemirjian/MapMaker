@@ -45,16 +45,16 @@ export function decodePlaces(file: PlacesFile): TodayPlace[] {
 }
 
 /** What a city added from today's places remembers (kept in its style as `place`). */
-export interface PlaceMeta { country: string; population: number; sharePct: number; capital: CapitalKind; economic: number; rank: number }
+export interface PlaceMeta { country: string; population: number; sharePct: number; capital: CapitalKind; economic: number; rank: number; region?: string }
 
-export const placeMeta = (p: TodayPlace): PlaceMeta => ({ country: p.country, population: p.population, sharePct: Math.round(p.sharePct * 100) / 100, capital: p.capital, economic: p.economic, rank: p.rank });
+export const placeMeta = (p: TodayPlace): PlaceMeta => ({ country: p.country, population: p.population, sharePct: Math.round(p.sharePct * 100) / 100, capital: p.capital, economic: p.economic, rank: p.rank, ...(p.region ? { region: p.region } : {}) });
 
 export function placeMetaOf(style: string | undefined): PlaceMeta | null {
   if (!style || !style.includes('"place"')) return null;
   try {
     const m = (JSON.parse(style) as { place?: Partial<PlaceMeta> }).place;
     if (!m || typeof m.population !== 'number') return null;
-    return { country: String(m.country ?? ''), population: m.population, sharePct: Number(m.sharePct) || 0, capital: m.capital === 'national' || m.capital === 'regional' ? m.capital : null, economic: Number(m.economic) || 0, rank: Number(m.rank) || 0 };
+    return { country: String(m.country ?? ''), population: m.population, sharePct: Number(m.sharePct) || 0, capital: m.capital === 'national' || m.capital === 'regional' ? m.capital : null, economic: Number(m.economic) || 0, rank: Number(m.rank) || 0, ...(typeof m.region === 'string' && m.region ? { region: m.region } : {}) };
   } catch { return null; }
 }
 
@@ -101,3 +101,28 @@ export const ECONOMIC_LEVELS = [
   { id: 2, name: 'World cities and each country\'s largest city' },
   { id: 1, name: 'World cities and each country\'s three largest' },
 ] as const;
+
+/** Kilometres between two places on the Earth (lon, lat in degrees). */
+export function kmBetween(a: readonly [number, number], b: readonly [number, number]): number {
+  const r = Math.PI / 180, dLat = (b[1] - a[1]) * r, dLon = (b[0] - a[0]) * r;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a[1] * r) * Math.cos(b[1] * r) * Math.sin(dLon / 2) ** 2;
+  return 12742 * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+/**
+ * Which city already in a project is a place of today (D188): one of the same name and country, and of the same
+ * region where both are known (two Portlands in the United States, two Suzhous in China); one of the same name
+ * without a region, or a city of one's own, only where it stands within 60 km of the place. None: a city to add.
+ */
+export function sameCity(p: TodayPlace, cities: ReadonlyArray<{ id: string; name: string; meta: PlaceMeta | null; at: readonly [number, number] | null }>): string | null {
+  const name = p.name.toLowerCase();
+  for (const c of cities) {
+    if (c.name.toLowerCase() !== name) continue;
+    if (c.meta) {
+      if (c.meta.country !== p.country) continue;
+      if (c.meta.region && p.region) { if (c.meta.region === p.region) return c.id; continue; }
+    }
+    if (c.at && kmBetween(c.at, [p.lon, p.lat]) <= 60) return c.id;
+  }
+  return null;
+}

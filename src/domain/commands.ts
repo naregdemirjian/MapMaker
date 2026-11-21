@@ -33,7 +33,7 @@ export type { CharacterIcon } from '../render-engine/icons.ts';
 import { cleanStatistics, type Statistic } from '../presentation/statistics.ts';
 export { FEATURE_KINDS, DEFAULT_FEATURE_STYLE, isFeatureKind, featureStyle, type FeatureKind, type FeatureStyle } from '../render-engine/feature-style.ts';
 import { featureStyle as featureLook } from '../render-engine/feature-style.ts';
-import { cityFilterOf, placeMeta, placeMetaOf, type CityFilter, type TodayPlace } from './places.ts';
+import { cityFilterOf, placeMeta, placeMetaOf, sameCity, type CityFilter, type TodayPlace } from './places.ts';
 import { ringFromMapPoints } from '../render-engine/stroke.ts';
 import { TRANSITION_LOOKS } from '../presentation/sequence.ts';
 import { flatRadiusKm } from '../render-engine/camera.ts';
@@ -2020,18 +2020,34 @@ export function placeCharacter(world: World, o: { spaceId: string; entity: strin
  * event, as the edit mode says. A city already in the project (the same name, and the same country if it is one
  * of today's) is placed on this map if it is not on it yet, else left as it is. One undo step; returns the cities placed.
  */
+/**
+ * Today's places as the cities of a project (D188): for each, the city already in it that is that place (of the same
+ * name, country and region, or standing where the place is), if any, and whether it is on this map.
+ */
+function todaysCitiesIn(world: World, spaceId: string, places: TodayPlace[]): Array<{ p: TodayPlace; id: string | null; here: boolean }> {
+  // Where each city stands (on this map if it is placed here, else wherever it first was), and which are placed here.
+  const placedHere = new Set<string>(), at = new Map<string, [number, number]>();
+  for (const f of world.all('effect')) {
+    if (f.kind !== 'place') continue;
+    const it = parseJSON<PlaceIntent | null>(f.intent, null);
+    if (!it?.entity || typeof it.lon !== 'number' || typeof it.lat !== 'number') continue;
+    if (f.space_id === spaceId) { if (!placedHere.has(it.entity)) at.set(it.entity, [it.lon, it.lat]); placedHere.add(it.entity); }
+    else if (!at.has(it.entity)) at.set(it.entity, [it.lon, it.lat]);
+  }
+  // (Never one of the same name elsewhere: two Portlands in the United States, a Rome of one's own on another map.)
+  const cities = world.all('entity').filter((e) => e.type_id === 'settlement').map((e) => ({ id: e.id, name: e.name, meta: placeMetaOf(e.style), at: at.get(e.id) ?? null }));
+  return places.map((p) => { const id = sameCity(p, cities); return { p, id, here: !!id && placedHere.has(id) }; });
+}
+
+/** Today's places that are not yet cities on a map (D188): what "Add" would add. */
+export function todaysCitiesMissing(world: World, spaceId: string, places: TodayPlace[]): TodayPlace[] {
+  return todaysCitiesIn(world, spaceId, places).filter((x) => !x.here).map((x) => x.p);
+}
+
 export function addCities(world: World, o: { spaceId: string; places: TodayPlace[]; mode: EditMode }): CommandResult<string[]> {
   const space = world.get('map_space', o.spaceId);
   if (!space || space.kind !== 'sphere') throw new Error('Today\'s cities go on round maps.');
-  // Cities already in the project: by name and today's country, or by name for cities of one's own.
-  const known = new Map<string, string>();
-  for (const e of world.all('entity')) {
-    if (e.type_id !== 'settlement') continue;
-    const m = placeMetaOf(e.style);
-    known.set(`${e.name.toLowerCase()}|${m?.country ?? '*'}`, e.id);
-  }
-  const placedHere = new Set(world.all('effect').filter((f) => f.kind === 'place' && f.space_id === o.spaceId).map((f) => parseJSON<PlaceIntent | null>(f.intent, null)?.entity).filter((x): x is string => !!x));
-  const todo = o.places.map((p) => ({ p, id: known.get(`${p.name.toLowerCase()}|${p.country}`) ?? known.get(`${p.name.toLowerCase()}|*`) ?? null })).filter((x) => !x.id || !placedHere.has(x.id));
+  const todo = todaysCitiesIn(world, o.spaceId, o.places).filter((x) => !x.here);
   if (!todo.length) throw new Error(o.places.length ? 'Those cities are already on the map.' : 'Choose some cities.');
   return run(world, `Add ${todo.length === 1 ? todo[0].p.name : `${todo.length} cities`}`, (tx) => {
     let group = tx.world.all('entity_group').find((g) => g.name === 'Today\'s cities')?.id;
