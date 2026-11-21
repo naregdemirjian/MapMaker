@@ -6,6 +6,7 @@
 // panning and zooming cost no geometry work, only drawing; an edit prepares only the parcels it
 // changed; and what stays the same through a stretch of time (who holds what, which borders show)
 // is worked out once for the stretch (LayerSnap), not once per frame.
+import { layerBordersOf, bordersMove, plainBorder, dashPattern, type BorderStyle, type LayerBorders } from './border-look.ts';
 import { countryLookOf, layerLookOf, lookFor, looksPlain, shadowKey, shadowOffset, compositeOf, castOf, awayFromLight, INSIDE, type CountryLook, type Effect, type ShadowEffect, type StrokeEffect } from './country-look.ts';
 import { patternTile, textureTile } from './textures.ts';
 import { geoPath, geoCircle, geoCentroid, geoArea, type GeoPermissibleObjects, type GeoProjection } from 'd3-geo';
@@ -1890,6 +1891,7 @@ export class MapRenderer {
     const style = opts.style ?? DEFAULT_STYLE;
     const arr = world.arrangement(spaceId);
     const u = view.unit;
+    this.frameUnit = u;
     // Carried pictures hold some of the map around the frame (see slide): the sheet must reach that
     // far, and the planet's outline counts as in view when it lies there.
     const m00 = ctx.getTransform();
@@ -2144,7 +2146,7 @@ export class MapRenderer {
     const layout = opts.layout ?? { labels: opts.passes.has('labels'), cities: opts.passes.has('cities') };
     const placesText = opts.passes.has('labels') || opts.passes.has('cities');
     const drawsLayers = opts.passes.has('fills') || opts.passes.has('borders') || (placesText && layout.labels);
-    type LayerStyle = { fillOpacity?: number; borderWidth?: number; clipToLand?: boolean; fill?: TerritoryFill; fronts?: FrontTeeth; frontColor?: string; look?: unknown };
+    type LayerStyle = { fillOpacity?: number; borderWidth?: number; clipToLand?: boolean; fill?: TerritoryFill; fronts?: FrontTeeth; frontColor?: string; look?: unknown; borders?: unknown };
     // How fronts look (D137): the shot's look (the plain one in the working view), or an event's own.
     const tr = opts.transitions;
     const baseLook: FrontLookOptions = {
@@ -2196,6 +2198,8 @@ export class MapRenderer {
       layerSig += `|${layerId}|${layer.style}|${clip ? 1 : 0}${wars.length ? `|w:${wars.map((w) => w.join('>')).join(',')}` : ''}`;
       if (tg.groups.size) animated = true;
       for (const owner of snap.byOwner.keys()) if (fillOf(owner)) anyMedia = true;
+      // (Borders whose dashes march, D183: the picture changes as time on screen passes, as a video's does.)
+      if (bordersMove(layerBordersOf(ls.borders))) anyMedia = true;
     }
 
     this.lastTransitions = prepared.flatMap((p) => [...p.tg.groups.values()].map((g) => ({ style: g.spec.style, progress: g.progress })));
@@ -2555,15 +2559,16 @@ export class MapRenderer {
         if (wantsBorders) for (const { ls, states, snap, tg, clip, wars } of prepared) {
           const width = (ls.borderWidth ?? style.borderWidth) * u;
           const fronts = (on: CanvasRenderingContext2D) => { if (wars.length) this.drawFronts(on, sheet, sp, arr, snap, states, wars, ls.fronts === 'plain', ls.frontColor ?? FRONT_COLOR, Math.max(2.5, 4 * u)); };
-          if (!clip) { this.drawBorders(c, sheet, sp, arr, snap, states, tg, style, width, 'all', boxOf); fronts(c); continue; }
+          const bl = layerBordersOf(ls.borders);
+          if (!clip) { this.drawBorders(c, sheet, sp, arr, snap, states, tg, style, width, 'all', boxOf, bl); fronts(c); continue; }
           // Ending at the coast: drawn in the scratch buffer, masked by the land, then laid on. Where land
           // along the coast takes the look of the territory beside it (D83), an owner's border against
           // nobody is left out in that band (the coastline is the edge there); borders between owners stay.
           const lc = this.scratch(c);
           if (!terrainLand && this.basemapPainter.pathsFor(view, sheet, opts.basemap!).coast === 'mixed') {
-            this.drawBorders(lc, sheet, sp, arr, snap, states, tg, style, width, 'shared', boxOf);
+            this.drawBorders(lc, sheet, sp, arr, snap, states, tg, style, width, 'shared', boxOf, bl);
             const oc = this.scratch(c);
-            this.drawBorders(oc, sheet, sp, arr, snap, states, tg, style, width, 'open');
+            this.drawBorders(oc, sheet, sp, arr, snap, states, tg, style, width, 'open', null, bl);
             const band = this.coastBand(c, view, sheet, opts.basemap!, frameKey, 2 * coastRim(view));
             oc.save();
             oc.setTransform(1, 0, 0, 1, 0, 0);
@@ -2574,7 +2579,7 @@ export class MapRenderer {
             lc.setTransform(1, 0, 0, 1, 0, 0);
             lc.drawImage(oc.canvas as CanvasImageSource, 0, 0);
             lc.restore();
-          } else this.drawBorders(lc, sheet, sp, arr, snap, states, tg, style, width, 'all', boxOf);
+          } else this.drawBorders(lc, sheet, sp, arr, snap, states, tg, style, width, 'all', boxOf, bl);
           fronts(lc);
           this.trimToLand(lc, view, sheet, opts.basemap ?? null, frameKey, false, terrainLand ? terrain : null, seaLevel, cm);
           c.save();
@@ -4356,19 +4361,27 @@ export class MapRenderer {
   private drawBorders(
     ctx: CanvasRenderingContext2D, sheet: Sheet, sp: SheetParcels, arr: Arrangement, snap: LayerSnap, states: Map<number, FaceState>,
     tg: { groups: Map<string, TransitionGroup>; of: Map<number, TransitionGroup> }, style: MapStyle, width: number,
-    which: 'all' | 'shared' | 'open' = 'all', boxOf: ((g: TransitionGroup, pad: number) => Box2) | null = null,
+    which: 'all' | 'shared' | 'open' = 'all', boxOf: ((g: TransitionGroup, pad: number) => Box2) | null = null, look: LayerBorders | null = null,
   ): void {
     const bp = this.borderPaths(sp, sheet, arr, snap, states);
     const stroke = (p: Path2D | BlockPath | null | undefined) => { if (p) this.strokeOnSheet(ctx, p, width); };
+    const u = this.frameUnit;
     ctx.save();
     ctx.strokeStyle = style.border;
     ctx.lineWidth = width;
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
-    // (Owner by owner: each owner's lines are skipped where none of them shows.)
-    if (which !== 'open') for (const p of bp.plain) stroke(p);
-    if (which !== 'shared') for (const p of bp.open) stroke(p);
+    // (Owner by owner: each owner's lines are skipped where none of them shows. In the layer's border styles, D183,
+    // where it has them: one for the borders between countries, one for their edges against nobody.)
+    const between = look && !plainBorder(look.between) ? look.between : null, coast = look && !plainBorder(look.coast) ? look.coast : null;
+    if (which !== 'open') for (const p of bp.plain) if (between) this.strokeBorder(ctx, p, between, width, style.border, u); else stroke(p);
+    if (which !== 'shared') for (const p of bp.open) if (coast) this.strokeBorder(ctx, p, coast, width, style.border, u); else stroke(p);
     if (which === 'open') { ctx.restore(); return; }
+    // Special borders between two named countries (D183), over the others.
+    for (const pr of look?.pairs ?? []) {
+      const p = this.pairPath(sp, sheet, arr, snap, states, pr.a, pr.b);
+      if (p) this.strokeBorder(ctx, p, pr.style, width, style.border, u);
+    }
     for (const [id, g] of tg.groups) {
       const ins = bp.inside.get(id), outs = bp.outside.get(id);
       if (g.advance) {
@@ -4399,6 +4412,111 @@ export class MapRenderer {
       }
     }
     ctx.restore();
+  }
+
+  /**
+   * The borders between two named countries on a sheet (D183): the chains of either one's boundary whose other side
+   * is the other (kept while both keep their parcels and neighbours). Null when they do not meet.
+   */
+  private pairPath(sp: SheetParcels, sheet: Sheet, arr: Arrangement, snap: LayerSnap, states: Map<number, FaceState>, a: string, b: string): BlockPath | null {
+    const all = this.bordersOf(arr, snap, states), ea = all.get(a), eb = all.get(b);
+    if (!ea && !eb) return null;
+    const key = `pair|${a}|${b}|${ea?.key ?? ''}|${eb?.key ?? ''}`;
+    const kept = sp.ownerBorders.get(key);
+    if (kept !== undefined) return kept as BlockPath | null;
+    const geom = parcelGeometry(arr), t = arr.topology();
+    const path = sheet.blocks();
+    let any = false;
+    for (const [e, other] of [[ea, b], [eb, a]] as const) {
+      if (!e) continue;
+      for (const q of e.take) {
+        if (e.open.has(q)) continue;
+        const face = arr.halfEdgeFace(geom.cycle(e.b[q], t).heads[e.b[q + 1]] ^ 1);
+        if (states.get(face)?.value !== other) continue;
+        for (const l of this.chainLines(sp, sheet, geom, e.b[q], e.b[q + 1])) { path.addLine(l); any = true; }
+      }
+    }
+    const p = any ? path : null;
+    sp.ownerBorders.set(key, p);
+    return p;
+  }
+
+  /** A line along a sheet path: `lw` pixels wide, dashed (pixels), the dashes moved by `offset` pixels. */
+  private strokeLine(c: CanvasRenderingContext2D, p: Path2D | BlockPath, lw: number, color: string, dash: number[], offset: number): void {
+    const [k, e, f] = this.place;
+    c.save();
+    c.strokeStyle = color;
+    c.lineCap = 'round';
+    c.lineJoin = 'round';
+    c.transform(k, 0, 0, k, e, f);
+    c.lineWidth = lw / k;
+    c.setLineDash(dash.map((x) => x / k));
+    c.lineDashOffset = offset / k;
+    if (p instanceof BlockPath) p.paint(c, lw / k / 2 + 1, (q) => c.stroke(q));
+    else c.stroke(p);
+    c.restore();
+  }
+
+  /** A buffer of the frame's size for borders drawn apart (doubled, softened), cleared, with the target's transform. */
+  private borderBuf: OffscreenCanvas | null = null;
+  /** Pixels of the frame being drawn to a pixel of a 1920-wide frame. */
+  private frameUnit = 1;
+  private borderLayer(c: CanvasRenderingContext2D): CanvasRenderingContext2D {
+    const W = c.canvas.width, H = c.canvas.height;
+    if (!this.borderBuf || this.borderBuf.width !== W || this.borderBuf.height !== H) this.borderBuf = new OffscreenCanvas(W, H);
+    const g = this.borderBuf.getContext('2d') as unknown as CanvasRenderingContext2D;
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.clearRect(0, 0, W, H);
+    g.globalAlpha = 1;
+    g.globalCompositeOperation = 'source-over';
+    g.setTransform(c.getTransform());
+    return g;
+  }
+
+  /**
+   * A border in a style of its own (D183): a glow and a casing under it, the line (dashed, doubled, sketched), ticks
+   * across it; softened and at its strength. `width`: the layer's width (pixels), `colour`: the map's border colour.
+   */
+  private strokeBorder(c: CanvasRenderingContext2D, p: Path2D | BlockPath, bs: BorderStyle, width: number, colour: string, u: number): void {
+    const w = bs.width === null ? width : bs.width * u, col = bs.color ?? colour;
+    if (w <= 0 || bs.opacity <= 0) return;
+    const dash = dashPattern(bs.dash, w, bs.dashScale), offset = -this.mediaSeconds * bs.march * u;
+    const apart = bs.soft > 0 || bs.double > 0;
+    const g = apart ? this.borderLayer(c) : c;
+    g.save();
+    if (!apart) g.globalAlpha *= bs.opacity;
+    if (bs.casing > 0) this.strokeLine(g, p, w + 2 * bs.casing * u + (bs.double > 0 ? bs.double * u + w : 0), bs.casingColor, [], 0);
+    if (bs.glow > 0) { g.shadowColor = bs.glowColor; g.shadowBlur = bs.glow * u; }
+    if (bs.double > 0) {
+      // Two lines: one as wide as both and the gap, the gap then taken out of it (in the buffer only).
+      const gap = bs.double * u;
+      this.strokeLine(g, p, 2 * w + gap, col, dash, offset);
+      g.shadowBlur = 0;
+      g.globalCompositeOperation = 'destination-out';
+      this.strokeLine(g, p, gap, '#000', [], 0);
+      g.globalCompositeOperation = 'source-over';
+    } else this.strokeLine(g, p, w, col, dash, offset);
+    g.shadowBlur = 0;
+    // Drawn as if by hand: the line again a little to each side, fainter, its dashes out of step.
+    for (let i = 1; i <= bs.sketch; i++) {
+      g.save();
+      const d = (i % 2 ? 1 : -1) * Math.ceil(i / 2) * 0.8 * u;
+      g.translate(d, -d * 0.6);
+      g.globalAlpha *= 0.45;
+      this.strokeLine(g, p, Math.max(0.6, w * 0.7), col, dash.length ? dash : [18 * u, 2.5 * u], offset + i * 7 * u);
+      g.restore();
+    }
+    // Ticks across it: a line as wide as the ticks are long, dashed thin.
+    if (bs.ticks > 0) this.strokeLine(g, p, bs.tickLength * u, col, [Math.max(1, w * 0.8), bs.ticks * u], offset);
+    g.restore();
+    if (apart) {
+      c.save();
+      c.setTransform(1, 0, 0, 1, 0, 0);
+      c.globalAlpha *= bs.opacity;
+      if (bs.soft > 0) c.filter = `blur(${((bs.soft * u) / 2).toFixed(2)}px)`;
+      c.drawImage(g.canvas as CanvasImageSource, 0, 0);
+      c.restore();
+    }
   }
 
   /**

@@ -1,5 +1,6 @@
 // Domain commands: every user action is one of these. Each runs inside a transaction against the
 // in-memory world and returns the exact row diffs to save (and to undo). Commands never draw anything.
+import { layerBordersOf, type LayerBorders } from '../render-engine/border-look.ts';
 import { countryLookOf, layerLookOf, type CountryLook, type LayerLook } from '../render-engine/country-look.ts';
 import { calendarProblems, type CalendarDef } from '../core-time/index.ts';
 import { World, Tx, newId } from '../world-model/world.ts';
@@ -465,6 +466,22 @@ export function setLayerEffects(world: World, id: string, look: LayerLook | null
   if (look && !clean) throw new Error('That is not a look.');
   if (clean) style.look = clean; else delete style.look;
   return run(world, `Change the look of "${layer.name}"`, (tx) => tx.patch('layer', id, { style: JSON.stringify(style) }));
+}
+
+/**
+ * How a territory layer's borders look (D183): a style for those between countries, one for their edges against
+ * nobody, and special borders between two named countries; null takes them away (plain lines again). One undo step.
+ */
+export function setLayerBorders(world: World, id: string, borders: LayerBorders | null): CommandResult {
+  const layer = world.get('layer', id);
+  if (!layer) throw new Error('That layer no longer exists.');
+  const style = parseJSON<Record<string, unknown>>(layer.style, {});
+  const clean = borders ? layerBordersOf(borders) : null;
+  if (clean) {
+    for (const p of clean.pairs) if (!world.get('entity', p.a) || !world.get('entity', p.b)) throw new Error('A special border is between two countries that exist.');
+    style.borders = clean;
+  } else delete style.borders;
+  return run(world, `Change the borders of "${layer.name}"`, (tx) => tx.patch('layer', id, { style: JSON.stringify(style) }));
 }
 
 /**

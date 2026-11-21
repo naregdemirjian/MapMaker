@@ -19,6 +19,7 @@ import { GroupChecks, eventVisible } from './EventGroups.tsx';
 import { CountryLabelSection } from './LabelStyles.tsx';
 import { CountryFillSection, FillSwatch } from './CountryFill.tsx';
 import { CountryLookSection, LayerLookSection } from './LookEditor.tsx';
+import { CountryBordersSection, LayerBordersSection } from './BorderEditor.tsx';
 import { CharacterSection } from './Characters.tsx';
 import { RecordLengthControls, ChangeLength } from './RecordLength.tsx';
 import { eventScreenSeconds, eventTransitionLook, TRANSITION_LOOKS } from '../../presentation/sequence.ts';
@@ -633,6 +634,7 @@ export function Outliner() {
           );
         })}
         {layers.filter((l) => l.id === s.layerId && l.kind === 'partition').map((l) => <LayerLookSection key={`lk-${l.id}`} layerId={l.id} />)}
+        {layers.filter((l) => l.id === s.layerId && l.kind === 'partition').map((l) => <LayerBordersSection key={`lb-${l.id}`} layerId={l.id} />)}
         {layers.filter((l) => l.id === s.layerId).map((l) => {
           const st = parseJSON<{ fronts?: 'second' | 'first' | 'plain'; frontColor?: string }>(l.style, {});
           return (
@@ -760,7 +762,7 @@ function EntityPanel({ id }: { id: string }) {
         </div>
       ))}
       {!changes.length && e.type_id !== 'character' && e.type_id !== 'settlement' && <div className="muted">None yet.</div>}
-      {(e.type_id === 'polity' || e.type_id === 'faction') && <><CountryHistorySection id={id} /><CountryFillSection id={id} /><CountryLookSection id={id} /><CountryLabelSection id={id} /></>}
+      {(e.type_id === 'polity' || e.type_id === 'faction') && <><CountryHistorySection id={id} /><CountryFillSection id={id} /><CountryLookSection id={id} /><CountryBordersSection id={id} /><CountryLabelSection id={id} /></>}
       {(e.type_id === 'character' || e.type_id === 'settlement') && <CharacterSection id={id} />}
       {e.type_id !== 'body' && <RelationsSection id={id} />}
       {e.type_id !== 'body' && <NamesSection id={id} />}

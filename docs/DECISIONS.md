@@ -61,6 +61,25 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D183. Looks of countries, III: border styles, and special borders between two countries
+
+- **A style for a layer's borders** (`src/render-engine/border-look.ts`, `setLayerBorders`): one for the borders
+  between countries, another for their edges against nobody (coasts, unclaimed land). A style has a colour (or the
+  map's), a width (or the layer's), a strength, dashes (dashed, long dashes, dotted, dash and dot, dash and two dots,
+  their length scaled), a double line with its gap, a casing (a wider line under it in another colour, as on atlases),
+  ticks across it (as on old maps' frontiers and railways), a hand-drawn look (up to three strokes a little apart),
+  a soft edge, a glow, and dashes that march along it as time on screen passes. A layer without a style is drawn
+  exactly as before.
+- **Special borders between two named countries** (a ceasefire line, an empire's frontier), each in a style of its
+  own, drawn over the others: the chains of either country's boundary whose other side is the other (`pairPath`,
+  kept while both keep their parcels). Added and set in either country's panel ("Special borders", on the layer
+  being drawn on); a layer's borders under "Borders" in its options.
+- **Drawn:** dashes are set in the frame's pixels whatever the map's scale; a double line is one line as wide as
+  both and the gap, the gap then taken out of it, in a buffer of its own (never out of the map under it), as is a
+  softened line before it is blurred onto the map; ticks are a wide line dashed thin. A layer whose dashes march is
+  drawn again as time on screen passes, as one with a video fill is.
+- **Not yet:** borders around a change under way keep the plain line until the change is over.
+
 ### D182. Looks of countries, II: glows, inner shadows, bevels, gradients, patterns and textures
 
 - **Seven more kinds of effect** in a country's (or layer's) stack: an **inner shadow** (as if sunk into the map),
