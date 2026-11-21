@@ -61,6 +61,23 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D182. Looks of countries, II: glows, inner shadows, bevels, gradients, patterns and textures
+
+- **Seven more kinds of effect** in a country's (or layer's) stack: an **inner shadow** (as if sunk into the map),
+  an **outer glow** (round the country, on the land about it), an **inner glow** along its edge, a **bevel** (light
+  and shade along the edge from the light's angle: raised like a tile, or sunk), a **gradient** (straight or from the
+  middle, at an angle), a **pattern** (stripes, crossed stripes, dots, grid, lines, waves, checks, in a colour, sized
+  and turned) and a **texture** (paper, parchment, canvas, grain, brushed metal, stone). Gradients, patterns and
+  textures have a blend mode of their own (a texture multiplied shades the colour without changing it).
+- **One description of each kind** (`EFFECTS` in `country-look.ts`): its name, its settings (colour, strength,
+  number with its range, or a choice) and their defaults. Checking what is stored and the editor's fields both come
+  from it, so a new kind is added in one place.
+- **Drawn:** outer glows are cast on the land below with the drop shadows (a glow is a shadow that does not move);
+  inner effects are drawn over each country, inside its edge, in the stack's order. An inner shadow is the land all
+  round the country, blurred and moved, seen only within it, worked within the country's own box (a layer of many
+  countries does not blur the whole frame for each); a bevel is two of them, the light's and the shade's. Patterns
+  and textures are tiles made once (`textures.ts`; textures are greys about the middle, the same every time).
+
 ### D181. Looks of countries, I: a stack of effects, elevation, shadows, strokes and blend modes
 
 - **Asked.** The look of countries, borders and on-screen graphics made as customisable as a photo or video editor

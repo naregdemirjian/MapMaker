@@ -6,30 +6,9 @@ import * as cmd from '../../domain/commands.ts';
 import { parseJSON } from '../../temporal-engine/engine.ts';
 import { NumberField } from './Panels.tsx';
 import {
-  BLEND_MODES, EFFECT_DEFAULTS, EFFECT_NAMES, countryLookOf, layerLookOf,
+  BLEND_MODES, BLEND_NAMES, EFFECTS, EFFECT_DEFAULTS, EFFECT_KINDS, EFFECT_NAMES, countryLookOf, layerLookOf,
   type BlendMode, type CountryLook, type Effect, type EffectKind, type LayerLook,
 } from '../../render-engine/country-look.ts';
-
-const BLEND_NAMES: Record<BlendMode, string> = {
-  normal: 'Normal', multiply: 'Multiply', screen: 'Screen', overlay: 'Overlay', 'soft-light': 'Soft light', 'hard-light': 'Hard light',
-  darken: 'Darken', lighten: 'Lighten', 'color-dodge': 'Colour dodge', 'color-burn': 'Colour burn', difference: 'Difference', exclusion: 'Exclusion',
-  hue: 'Hue', saturation: 'Saturation', color: 'Colour', luminosity: 'Luminosity',
-};
-
-/** The settings of each kind of effect: field, label, unit, range and step (a colour when no range). */
-type Field = { key: string; label: string; min?: number; max?: number; step?: number; percent?: boolean; colour?: boolean; choices?: Array<[string, string]> };
-const FIELDS: Record<EffectKind, Field[]> = {
-  shadow: [
-    { key: 'color', label: 'Colour', colour: true }, { key: 'opacity', label: 'Strength (%)', percent: true },
-    { key: 'angle', label: 'Light from (°)', min: -360, max: 360, step: 5 }, { key: 'distance', label: 'Distance', min: 0, max: 200, step: 1 },
-    { key: 'blur', label: 'Blur', min: 0, max: 200, step: 1 }, { key: 'spread', label: 'Spread', min: 0, max: 100, step: 1 },
-  ],
-  stroke: [
-    { key: 'color', label: 'Colour', colour: true }, { key: 'opacity', label: 'Strength (%)', percent: true },
-    { key: 'width', label: 'Width', min: 0, max: 60, step: 0.5 },
-    { key: 'position', label: 'Where', choices: [['inside', 'Inside the edge'], ['center', 'On the edge'], ['outside', 'Outside the edge']] },
-  ],
-};
 
 const EMPTY: CountryLook = { elevation: 0, opacity: 1, effects: [] };
 
@@ -74,18 +53,19 @@ export function LookEditor({ value, onChange, blend, idPrefix }: { value: Countr
             </div>
             {e.on && (
               <div className="effect-fields">
-                {FIELDS[e.kind].map((f) => {
+                {EFFECTS[e.kind].fields.map((f) => {
                   const v = (e as unknown as Record<string, unknown>)[f.key];
-                  if (f.colour) return <label key={f.key}>{f.label}<input type="color" value={v as string} onChange={(ev) => setEffect(i, { [f.key]: ev.target.value } as Partial<Effect>)} /></label>;
-                  if (f.choices) return (
+                  const put = (x: unknown) => setEffect(i, { [f.key]: x } as Partial<Effect>);
+                  if (f.type === 'colour') return <label key={f.key}>{f.label}<input type="color" value={v as string} onChange={(ev) => put(ev.target.value)} data-testid={`${idPrefix}-${e.kind}-${f.key}`} /></label>;
+                  if (f.type === 'choice') return (
                     <label key={f.key}>{f.label}
-                      <select value={v as string} onChange={(ev) => setEffect(i, { [f.key]: ev.target.value } as Partial<Effect>)}>
+                      <select value={v as string} onChange={(ev) => put(ev.target.value)} data-testid={`${idPrefix}-${e.kind}-${f.key}`}>
                         {f.choices.map(([k, n]) => <option key={k} value={k}>{n}</option>)}
                       </select>
                     </label>
                   );
-                  if (f.percent) return <label key={f.key}>{f.label}<NumberField min={0} max={100} step={5} value={Math.round((v as number) * 100)} onCommit={(n) => setEffect(i, { [f.key]: n / 100 } as Partial<Effect>)} /></label>;
-                  return <label key={f.key}>{f.label}<NumberField min={f.min} max={f.max} step={f.step} value={v as number} onCommit={(n) => setEffect(i, { [f.key]: n } as Partial<Effect>)} testId={`${idPrefix}-${e.kind}-${f.key}`} /></label>;
+                  if (f.type === 'percent') return <label key={f.key}>{f.label}<NumberField min={0} max={100} step={5} value={Math.round((v as number) * 100)} onCommit={(n) => put(n / 100)} testId={`${idPrefix}-${e.kind}-${f.key}`} /></label>;
+                  return <label key={f.key}>{f.label}<NumberField min={f.min} max={f.max} step={f.step} value={v as number} onCommit={put} testId={`${idPrefix}-${e.kind}-${f.key}`} /></label>;
                 })}
               </div>
             )}
@@ -95,7 +75,7 @@ export function LookEditor({ value, onChange, blend, idPrefix }: { value: Countr
       <label className="inline">Add an effect
         <select value="" onChange={(ev) => { const k = ev.target.value as EffectKind; if (k) set({ effects: [...value.effects, { ...EFFECT_DEFAULTS[k] } as Effect] }); }} data-testid={`${idPrefix}-add-effect`}>
           <option value="">Choose…</option>
-          {(Object.keys(EFFECT_NAMES) as EffectKind[]).map((k) => <option key={k} value={k}>{EFFECT_NAMES[k]}</option>)}
+          {EFFECT_KINDS.map((k) => <option key={k} value={k}>{EFFECT_NAMES[k]}</option>)}
         </select>
       </label>
     </div>

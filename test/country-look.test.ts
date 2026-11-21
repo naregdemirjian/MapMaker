@@ -56,3 +56,27 @@ test('a country\'s look and a layer\'s look are kept, and undone in one step eac
   world.applyDiffs(invertDiffs(own.diffs));
   assert.throws(() => cmd.setCountryLook(world, 'nobody', null), /no longer exists/);
 });
+
+test('every kind of effect (D182): its defaults kept as they are, its choices and ranges enforced', async () => {
+  const { EFFECTS, EFFECT_KINDS, effectOf, castOf } = await import('../src/render-engine/country-look.ts');
+  for (const k of EFFECT_KINDS) assert.deepEqual(effectOf(EFFECTS[k].defaults), EFFECTS[k].defaults, `${k}: its defaults as they are`);
+  assert.equal((effectOf({ kind: 'pattern', pattern: 'tartan' }) as { pattern: string }).pattern, 'stripes', 'an unknown pattern: the default');
+  assert.equal((effectOf({ kind: 'texture', blend: 'glitter', scale: 99 }) as { blend: string; scale: number }).blend, 'multiply');
+  assert.equal((effectOf({ kind: 'texture', scale: 99 }) as { scale: number }).scale, 8);
+  assert.equal((effectOf({ kind: 'bevel', style: 'sunken', highlightOpacity: 3 }) as { style: string; highlightOpacity: number }).highlightOpacity, 1);
+  // What is cast on the land below: shadows and outer glows (a glow as a shadow without a move); nothing else.
+  assert.deepEqual(castOf(EFFECTS['outer-glow'].defaults), { kind: 'shadow', on: true, color: '#ffe9a6', opacity: 0.7, angle: 0, distance: 0, blur: 18, spread: 2 });
+  assert.equal(castOf(EFFECTS.bevel.defaults), null);
+  assert.equal(castOf({ ...EFFECTS.shadow.defaults, on: false }), null);
+});
+
+test('textures are greys about the middle, the same every time', async () => {
+  const { textureValues } = await import('../src/render-engine/textures.ts');
+  for (const k of ['paper', 'parchment', 'canvas', 'grain', 'metal', 'stone'] as const) {
+    const v = textureValues(k, 64), w = textureValues(k, 64);
+    assert.deepEqual(v, w, `${k}: the same every time`);
+    const mean = v.reduce((a, b) => a + b, 0) / v.length;
+    assert.ok(mean > 0.35 && mean < 0.65, `${k}: about the middle (${mean.toFixed(2)})`);
+    assert.ok(v.every((x) => x >= 0 && x <= 1));
+  }
+});

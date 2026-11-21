@@ -6,7 +6,8 @@
 // panning and zooming cost no geometry work, only drawing; an edit prepares only the parcels it
 // changed; and what stays the same through a stretch of time (who holds what, which borders show)
 // is worked out once for the stretch (LayerSnap), not once per frame.
-import { countryLookOf, layerLookOf, lookFor, looksPlain, shadowKey, shadowOffset, compositeOf, type CountryLook, type ShadowEffect, type StrokeEffect } from './country-look.ts';
+import { countryLookOf, layerLookOf, lookFor, looksPlain, shadowKey, shadowOffset, compositeOf, castOf, awayFromLight, INSIDE, type CountryLook, type Effect, type ShadowEffect, type StrokeEffect } from './country-look.ts';
+import { patternTile, textureTile } from './textures.ts';
 import { geoPath, geoCircle, geoCentroid, geoArea, type GeoPermissibleObjects, type GeoProjection } from 'd3-geo';
 import type { World } from '../world-model/world.ts';
 import type { Engine, FaceState, Assignment, CompiledTransition } from '../temporal-engine/engine.ts';
@@ -758,6 +759,80 @@ export class MapRenderer {
     if (sh.blur > 0) target.filter = `blur(${((sh.blur * u) / 2).toFixed(2)}px)`;
     target.drawImage(tmp.canvas as CanvasImageSource, dx, dy);
     target.restore();
+  }
+
+  /**
+   * A shadow inside a country's edge (D182): the land all round it, in the shadow's colour, blurred and moved by
+   * `dx, dy`, seen only within the country. Worked within the country's box (`box`, device pixels, with room for the
+   * blur and the move) so that a layer of many countries does not blur the whole frame for each.
+   */
+  private innerShadow(target: CanvasRenderingContext2D, tmp: CanvasRenderingContext2D, s: Shape, color: string, opacity: number, dx: number, dy: number, blur: number, box: Box2): void {
+    const [bx, by, bw, bh] = box;
+    if (bw <= 0 || bh <= 0 || opacity <= 0) return;
+    tmp.save();
+    tmp.setTransform(1, 0, 0, 1, 0, 0);
+    tmp.clearRect(bx, by, bw, bh);
+    tmp.fillStyle = color;
+    tmp.fillRect(bx, by, bw, bh);
+    tmp.restore();
+    tmp.save();
+    tmp.globalCompositeOperation = 'destination-out';
+    tmp.fillStyle = '#000';
+    this.fill(tmp, s);
+    tmp.restore();
+    target.save();
+    this.clip(target, s);
+    target.setTransform(1, 0, 0, 1, 0, 0);
+    target.globalAlpha = opacity;
+    if (blur > 0) target.filter = `blur(${(blur / 2).toFixed(2)}px)`;
+    target.drawImage(tmp.canvas as CanvasImageSource, bx, by, bw, bh, bx + dx, by + dy, bw, bh);
+    target.restore();
+  }
+
+  /** An effect drawn inside a country, over its fill (D182); `boxOf(pad)`: the country's box in device pixels, with room. */
+  private insideEffect(c: CanvasRenderingContext2D, tmp: CanvasRenderingContext2D, s: Shape, e: Effect, boxOf: (pad: number) => Box2, u: number): void {
+    if (e.kind === 'inner-shadow') {
+      const [dx, dy] = shadowOffset(e, u);
+      this.innerShadow(c, tmp, s, e.color, e.opacity, dx, dy, e.blur * u, boxOf((e.distance + 3 * e.blur) * u + 4));
+    } else if (e.kind === 'inner-glow') {
+      this.innerShadow(c, tmp, s, e.color, e.opacity, 0, 0, e.blur * u, boxOf(3 * e.blur * u + 4));
+    } else if (e.kind === 'bevel') {
+      // Raised: the edges facing the light lit, those away from it shaded (sunken: the other way round).
+      const [dx, dy] = awayFromLight(e.angle, e.depth, u), box = boxOf((e.depth + 3 * e.size) * u + 4);
+      const lit = e.style === 'raised' ? 1 : -1;
+      this.innerShadow(c, tmp, s, e.highlight, e.highlightOpacity, lit * dx, lit * dy, e.size * u, box);
+      this.innerShadow(c, tmp, s, e.shade, e.shadeOpacity, -lit * dx, -lit * dy, e.size * u, box);
+    } else if (e.kind === 'gradient' || e.kind === 'pattern' || e.kind === 'texture') {
+      if (e.opacity <= 0) return;
+      const [bx, by, bw, bh] = boxOf(0);
+      if (bw <= 0 || bh <= 0) return;
+      c.save();
+      this.clip(c, s);
+      c.setTransform(1, 0, 0, 1, 0, 0);
+      c.globalAlpha = e.opacity;
+      c.globalCompositeOperation = compositeOf(e.blend);
+      if (e.kind === 'gradient') {
+        const cx = bx + bw / 2, cy = by + bh / 2;
+        let g: CanvasGradient;
+        if (e.style === 'radial') g = c.createRadialGradient(cx, cy, 0, cx, cy, Math.max(bw, bh) * 0.55);
+        else {
+          const a = (e.angle * Math.PI) / 180, ux = Math.cos(a), uy = -Math.sin(a), h = Math.abs((bw / 2) * ux) + Math.abs((bh / 2) * uy);
+          g = c.createLinearGradient(cx - ux * h, cy - uy * h, cx + ux * h, cy + uy * h);
+        }
+        g.addColorStop(0, e.from);
+        g.addColorStop(1, e.to);
+        c.fillStyle = g;
+      } else {
+        const tile = e.kind === 'pattern' ? patternTile(e.pattern, e.color, 10 * e.scale * u) : textureTile(e.texture);
+        const p = c.createPattern(tile as unknown as CanvasImageSource, 'repeat');
+        if (!p) { c.restore(); return; }
+        const k = e.kind === 'texture' ? e.scale * Math.max(0.5, u) : 1;
+        p.setTransform(new DOMMatrix().rotateSelf(e.kind === 'pattern' ? e.angle : 0).scaleSelf(k, k));
+        c.fillStyle = p;
+      }
+      c.fillRect(bx, by, bw, bh);
+      c.restore();
+    }
   }
 
   /** A line round a country (D181): inside its edge (clipped to it), on it, or outside it (clipped away from it). */
@@ -2348,18 +2423,27 @@ export class MapRenderer {
               let j = i;
               while (j < order.length && (order[j].look?.elevation ?? 0) === elevation) j++;
               const shadows = new Map<string, { sh: ShadowEffect; shapes: Shape[] }>();
+              // (Drop shadows and outer glows: what a country casts on the land below it.)
               for (let k = i; k < j; k++) for (const e of order[k].look?.effects ?? []) {
-                if (!e.on || e.kind !== 'shadow' || e.opacity <= 0) continue;
-                const key = shadowKey(e);
+                const sh = castOf(e);
+                if (!sh) continue;
+                const key = shadowKey(sh);
                 let g = shadows.get(key);
-                if (!g) shadows.set(key, (g = { sh: e, shapes: [] }));
+                if (!g) shadows.set(key, (g = { sh, shapes: [] }));
                 g.shapes.push(order[k].shape);
               }
               for (const g of shadows.values()) this.castShadow(lc, tmp, g.sh, g.shapes, u);
               for (let k = i; k < j; k++) {
-                lc.globalAlpha = order[k].look?.opacity ?? 1;
-                paintOwner(order[k].owner, order[k].set, order[k].shape);
+                const it = order[k];
+                lc.globalAlpha = it.look?.opacity ?? 1;
+                paintOwner(it.owner, it.set, it.shape);
                 lc.globalAlpha = 1;
+                // Over its fill, inside its edge: overlays, inner shadows and glows, bevels, in the stack's order.
+                const inside = (it.look?.effects ?? []).filter((e) => e.on && INSIDE.has(e.kind));
+                if (inside.length) {
+                  const box = this.screenBox(view, arr, it.set.faces);
+                  for (const e of inside) this.insideEffect(lc, tmp, it.shape, e, (pad) => this.deviceBox(box, cm, pad, lc.canvas.width, lc.canvas.height), u);
+                }
               }
               i = j;
             }
