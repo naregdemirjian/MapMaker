@@ -792,6 +792,52 @@ try {
     assert.match((await page.getByTestId('name-now').textContent()) ?? '', /New Aster/);
   });
 
+  await h.step('Choosing several countries on the map (D189): Ctrl+click adds and takes away one, Shift+drag a box round two, Ctrl+Shift+drag over them', async () => {
+    await page.getByTestId('tool-select').click();
+    await h.setDate('1650');
+    const chosen = () => page.evaluate(() => { const s = (window as any).__mapmaker.store; return s.chosen('entity').map((id: string) => s.world.get('entity', id).name).sort(); }) as Promise<string[]>;
+    // (Both countries in view, nothing chosen.)
+    await page.evaluate(([lon, lat]) => { const s = (window as any).__mapmaker.store; s.set({ selection: null }); s.setCamera({ lon, lat, zoom: 0.5, rotation: 0, projection: 'equirectangular' }); }, [(P.a[0] + P.b[0]) / 2, (P.a[1] + P.b[1]) / 2]);
+    await page.waitForTimeout(500);
+    const [a, b] = [await h.toPage(P.a), await h.toPage(P.b)];
+    assert.deepEqual(await page.evaluate(([pa, pb]) => { const m = (window as any).__mapmaker, s = m.store, B = m.bench; const at = (p: number[]) => s.engine.valueAtPoint(s.spaceId, s.layerId, B.lonLatToVec(p[0], p[1]), s.time); const n = (id: string | null) => (id ? s.world.get('entity', id).name : null); return [n(at(pa)), n(at(pb))]; }, [P.a, P.b]), [A, B], 'the places clicked are theirs');
+    // Ctrl+click: one, then the other added, then the first taken away.
+    await page.mouse.click(a[0], a[1]);
+    await page.keyboard.down('Control');
+    await page.mouse.click(b[0], b[1]);
+    assert.deepEqual(await chosen(), [A, B].sort(), 'Ctrl+click adds');
+    await page.mouse.click(a[0], a[1]);
+    await page.keyboard.up('Control');
+    assert.deepEqual(await chosen(), [B], 'Ctrl+click again takes it away');
+    await page.mouse.click(a[0], a[1]);
+    assert.ok((await chosen()).length <= 1, 'a plain click: one place again');
+    // Shift+drag: a box round both.
+    const x0 = Math.min(a[0], b[0]) - 20, x1 = Math.max(a[0], b[0]) + 20, y0 = Math.min(a[1], b[1]) - 20, y1 = Math.max(a[1], b[1]) + 20;
+    await page.keyboard.down('Shift');
+    await page.mouse.move(x0, y0);
+    await page.mouse.down();
+    await page.mouse.move((x0 + x1) / 2, (y0 + y1) / 2, { steps: 4 });
+    await page.mouse.move(x1, y1, { steps: 4 });
+    await page.mouse.up();
+    await page.keyboard.up('Shift');
+    const boxed = await chosen();
+    assert.ok(boxed.includes(A) && boxed.includes(B), `the box takes both: ${boxed.join(', ')}`);
+    await page.mouse.click(a[0], a[1]);
+    // Ctrl+Shift+drag: every country the pointer passes over.
+    await page.keyboard.down('Control');
+    await page.keyboard.down('Shift');
+    await page.mouse.move(a[0], a[1]);
+    await page.mouse.down();
+    await page.mouse.move(b[0], b[1], { steps: 12 });
+    await page.mouse.up();
+    await page.keyboard.up('Shift');
+    await page.keyboard.up('Control');
+    const painted = await chosen();
+    assert.ok(painted.includes(A) && painted.includes(B), `the stroke takes both: ${painted.join(', ')}`);
+    await h.screenshot('map-multi-select');
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
+  });
+
   await h.step('Working with many: Ctrl/Shift to choose, right-click menus, groups of countries, labels of a group, cities under their country, several events deleted at once', async () => {
     await page.getByTestId('tool-select').click();
     await h.setDate('1650');

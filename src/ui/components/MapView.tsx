@@ -1,3 +1,4 @@
+import { ownersInRect, ownersAlong, ownerAtScreen, type MapAt } from '../map-select.ts';
 import { calendarNow } from '../calendar-now.ts';
 import { MAIN_BRANCH } from '../../world-model/schema.ts';
 import { branchName } from '../../temporal-engine/branches.ts';
@@ -67,7 +68,10 @@ type Drag =
   // The Split tool: a line drawn across a country, or a click on the part that changes hands (map positions; D76).
   | { kind: 'cut'; points: Pt[]; x: number; y: number; moved: number }
   // The region picker: a click on a region, or a box dragged around several (screen pixels; D78).
-  | { kind: 'pickbox'; x: number; y: number; cx: number; cy: number; moved: number };
+  | { kind: 'pickbox'; x: number; y: number; cx: number; cy: number; moved: number }
+  // Choosing several countries (D189): a box dragged with Shift (screen pixels); a stroke with Ctrl and Shift held.
+  | { kind: 'selbox'; x: number; y: number; cx: number; cy: number; moved: number }
+  | { kind: 'selpaint'; last: Pt; ids: string[] };
 
 /** Where the shot preview last drew its texts and the events box (frame pixels), to pick them up. */
 let overlayRects: OverlayRect[] = [];
@@ -530,12 +534,12 @@ export function MapView() {
       }
       ctx.restore();
     } else
-    // Selected owner: outline its territory at the current date.
+    // Selected owner: outline its territory at the current date (every one of several chosen, D189).
     if (s.selection?.kind === 'entity' && s.layerId) {
       const states = s.engine!.partitionState(s.spaceId, s.layerId, s.time);
-      const id = s.selection.id;
+      const ids = new Set(s.multi?.kind === 'entity' && s.multi.ids.includes(s.selection.id) ? s.multi.ids : [s.selection.id]);
       const faces: number[] = [];
-      for (const [f, st] of states) if (st.value === id) faces.push(f);
+      for (const [f, st] of states) if (st.value && ids.has(st.value)) faces.push(f);
       s.renderer.withFaces(ctx, v, arr, faces, (p, px) => { ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 2.5 * px; ctx.setLineDash([6 * px, 4 * px]); ctx.stroke(p); });
     }
     // Selected character: its route through its places (dashed), each place a small ring.
@@ -591,6 +595,11 @@ export function MapView() {
         ctx.save(); ctx.strokeStyle = 'rgba(255,107,107,0.9)'; ctx.lineWidth = 10; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.globalAlpha = 0.5;
         ctx.beginPath(); pts.forEach((q, i) => (i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]))); ctx.stroke(); ctx.restore();
       }
+    }
+    // Choosing countries with a stroke (D189): the pointer ringed.
+    if (drag.current.kind === 'selpaint' && cursor) {
+      ctx.save(); ctx.beginPath(); ctx.arc(cursor[0], cursor[1], 7, 0, Math.PI * 2);
+      ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 2; ctx.stroke(); ctx.restore();
     }
     // A character being dragged: where it will go.
     if (drag.current.kind === 'character' && cursor) {
@@ -686,7 +695,7 @@ export function MapView() {
         ctx.restore();
       }
       const d = drag.current;
-      if (d.kind === 'pickbox' && d.moved >= 4) {
+      if ((d.kind === 'pickbox' || d.kind === 'selbox') && d.moved >= 4) {
         ctx.save(); ctx.setLineDash([5, 4]); ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 1.5;
         ctx.strokeRect(Math.min(d.x, d.cx), Math.min(d.y, d.cy), Math.abs(d.cx - d.x), Math.abs(d.cy - d.y));
         ctx.restore();
@@ -992,8 +1001,20 @@ export function MapView() {
       store.set({ selection: { kind: 'entity', id: who } });
       return;
     }
-    // Select tool: a character's marker is picked up (dragged to move it, clicked to select it).
-    if (!presentation && e.button === 0 && s.tool === 'select') {
+    // Select tool, several countries at once (D189): Shift drags a box round them; Ctrl and Shift together choose every
+    // country the pointer passes over.
+    if (!presentation && e.button === 0 && s.tool === 'select' && e.shiftKey && s.layerId) {
+      if (e.ctrlKey || e.metaKey) {
+        const ids = s.chosen('entity').filter((id) => isCountry(id));
+        drag.current = { kind: 'selpaint', last: p, ids };
+        paintSelect(p, p);
+        setCursor(p);
+      } else drag.current = { kind: 'selbox', x: p[0], y: p[1], cx: p[0], cy: p[1], moved: 0 };
+      return;
+    }
+    // Select tool: a character's marker is picked up (dragged to move it, clicked to select it). (Not with Ctrl held:
+    // Ctrl+click chooses the country there, D189, a city in it or not.)
+    if (!presentation && e.button === 0 && s.tool === 'select' && !(e.ctrlKey || e.metaKey)) {
       const hit = [...s.renderer.lastCharacters, ...s.renderer.lastCities].find((c) => { const q = lonLatToScreen(view, c.lon, c.lat); return !!q && Math.hypot(q[0] - p[0], q[1] - p[1]) <= Math.max(11, 'r' in c ? (c.r as number) * view.unit : 0); });
       if (hit) { drag.current = { kind: 'character', entity: hit.entity, from: p, moved: 0 }; setCursor(p); return; }
     }
@@ -1025,6 +1046,21 @@ export function MapView() {
     if (wantsPan) drag.current = { kind: 'pan', x: e.clientX, y: e.clientY, moved: 0, startX: p[0], startY: p[1] };
   }
 
+  const isCountry = (id: string) => { const t = store.world?.get('entity', id)?.type_id; return t === 'polity' || t === 'faction'; };
+  const mapAt = (): MapAt => ({ engine: store.engine!, world: store.world!, spaceId: store.spaceId, layerId: store.layerId, t: store.time, view });
+  /** Several countries chosen (D189): in the lists and on the map; the last of them the one selected. */
+  function chooseCountries(ids: string[]): void {
+    if (!ids.length) { store.set({ selection: null }); return; }
+    store.set({ multi: ids.length > 1 ? { kind: 'entity', ids } : null, selection: { kind: 'entity', id: ids[ids.length - 1] } });
+  }
+  /** Ctrl and Shift held: every country under the stroke from `a` to `b` added to those chosen. */
+  function paintSelect(a: Pt, b: Pt): void {
+    const d = drag.current;
+    if (d.kind !== 'selpaint') return;
+    const fresh = ownersAlong(mapAt(), a, b).filter((id) => !d.ids.includes(id) && isCountry(id));
+    if (fresh.length) { d.ids = [...d.ids, ...fresh]; chooseCountries(d.ids); }
+  }
+
   /** The text or events box drawn under a point of the frame (the topmost), if any. */
   function overlayAt(p: Pt): OverlayRect | null {
     for (let i = overlayRects.length - 1; i >= 0; i--) {
@@ -1044,7 +1080,8 @@ export function MapView() {
     }
     // (Moved once the pointer is a few pixels from where it went down, however few movements were reported.)
     if (d.kind === 'character') { d.moved = Math.max(d.moved, Math.hypot(p[0] - d.from[0], p[1] - d.from[1])); setCursor(p); return; }
-    if (d.kind === 'pickbox') { d.cx = p[0]; d.cy = p[1]; d.moved = Math.max(d.moved, Math.hypot(p[0] - d.x, p[1] - d.y)); force((n) => n + 1); return; }
+    if (d.kind === 'pickbox' || d.kind === 'selbox') { d.cx = p[0]; d.cy = p[1]; d.moved = Math.max(d.moved, Math.hypot(p[0] - d.x, p[1] - d.y)); force((n) => n + 1); return; }
+    if (d.kind === 'selpaint') { paintSelect(d.last, p); d.last = p; setCursor(p); return; }
     if (d.kind === 'none' && s.tool === 'regions' && !presentation) {
       const ix = regionIndex(store.regionLevel), ll = screenToLonLat(view, p[0], p[1]);
       const r = ix && ll ? ix.at(ll[0], ll[1]) : null;
@@ -1108,6 +1145,14 @@ export function MapView() {
     // While a line is shown adjusted (D148): a click pins a point (or takes a pin away); a drag only moves the map.
     if (d.kind === 'pan' && d.pin) { if (d.moved < 4) togglePin(p); return; }
     if (d.kind === 'erase') { eraseBorders(d.points, view); force((n) => n + 1); return; }
+    // Several countries chosen (D189): those the box touches (a click with Shift: the country there).
+    if (d.kind === 'selbox') {
+      const found = d.moved >= 4 ? ownersInRect(mapAt(), [d.x, d.y, p[0], p[1]]) : [ownerAtScreen(mapAt(), d.x, d.y)].filter((x): x is string => !!x);
+      chooseCountries(found.filter(isCountry));
+      force((n) => n + 1);
+      return;
+    }
+    if (d.kind === 'selpaint') { setCursor(null); return; }
     if (d.kind === 'sculpt') { sculptStroke(d.points); force((n) => n + 1); return; }
     // A character dropped: it is there from the date being viewed (a click just selects it).
     if (d.kind === 'character') {
@@ -1126,6 +1171,19 @@ export function MapView() {
     }
     // A right-click (without dragging) deselects everything.
     if (d.kind === 'pan' && d.moved < 4 && !presentation && e.button === 2) { store.set({ selection: null }); return; }
+    // Ctrl-click (D189): the country there added to those chosen, or taken out of them.
+    if (d.kind === 'pan' && d.moved < 4 && !presentation && e.button === 0 && s.tool === 'select' && (e.ctrlKey || e.metaKey) && s.layerId) {
+      const who = ownerAtScreen(mapAt(), d.startX, d.startY);
+      if (!who || !isCountry(who)) return;
+      // (A place clicked before, inside a country: that country is the first of those chosen.)
+      const sel = store.selection;
+      if (sel?.kind === 'point' && !store.multi) {
+        const first = store.engine!.valueAtPoint(store.spaceId, store.layerId, lonLatToVec(sel.lon, sel.lat), store.time);
+        if (first && first !== who && isCountry(first)) store.set({ selection: { kind: 'entity', id: first } });
+      }
+      store.pick('entity', who, { ctrlKey: true }, []);
+      return;
+    }
     if (d.kind === 'pan' && d.moved < 4 && !presentation && e.button === 0) {
       // An area, line or point under the pointer is chosen (the topmost drawn).
       const [ux, uy] = rotatePoint(d.startX, d.startY, view.width / 2, view.height / 2, -view.rotation);

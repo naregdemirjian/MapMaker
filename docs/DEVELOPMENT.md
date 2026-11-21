@@ -9,6 +9,8 @@ The approved architecture is the Claude Doc "Map Maker — Technical Architectur
 
 ## Status at a glance (20 November 2026, Stages 2, 3, 4, 6, 8 to 14 done; Stage 7 mostly done)
 
+- **Several countries chosen on the map, 21 November** (D189): Ctrl+click adds or removes one, Shift+drag a box
+  round them, Ctrl+Shift+drag over them.
 - **Today's cities fixed, 21 November** (D188): cities of the same name (two Portlands) no longer moved onto each
   other when added again, nor a city of one's own taken for today's; "What is shown" offers the cities its rules ask for.
 - **"Colour countries by closeness" taken out, 21 November** (D187), as asked: dialog, renderer, legend and data.

@@ -61,6 +61,20 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D189. Choosing several countries on the map: Ctrl+click, a box, a stroke
+
+- **Asked for:** choosing several countries on the map itself, not only in the lists (where Ctrl and Shift already
+  chose several, round 3). With the Select tool:
+  - **Ctrl+click** a country: added to those chosen, or taken out of them (Cmd on a Mac); after a plain click on a
+    place, its country is the first of them. A city's marker under the pointer is passed over: the country is meant.
+  - **Shift+drag** a box: every country it touches is chosen (a Shift+click: the country there).
+  - **Ctrl+Shift+drag**: every country the pointer passes over is added, as with a brush, without clicking each.
+- Countries chosen are outlined on the map together and chosen in the lists, so the right-click menu, groups and
+  the other actions on several work on them. A plain drag still moves the map; a plain click still shows the place.
+- **How a box finds its countries** (`src/ui/map-select.ts`): the country under each point of a grid a few pixels
+  apart (at most about 8,000 points), and those of which a whole part (an island) lies inside the box, too small
+  for the grid. About 90 ms for a box over Europe.
+
 ### D188. Today's cities: told apart when added again, and offered where "What is shown" asks for them
 
 - **Reported:** today's cities "not in their place", and not appearing when shown from "What is shown". In a new
