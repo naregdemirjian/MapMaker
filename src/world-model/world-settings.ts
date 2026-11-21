@@ -50,6 +50,8 @@ export interface WorldSettings {
   calendar?: CalendarDef;
   /** Numbers kept over time (D171), shown in shots' texts by their names in braces. */
   statistics?: Statistic[];
+  /** Where the map's one light comes from (D186), degrees (0 from the right, 90 from above): shadows and bevels that take it. */
+  light?: number;
   /** Countries coloured by how close each is to one of them (D174); absent: their own colours. */
   colourBy?: unknown;
 }
@@ -57,6 +59,12 @@ export interface WorldSettings {
 /** A map's statistics (D171), cleaned. */
 export function statisticsOf(space: Pick<MapSpaceRow, 'settings'> | null | undefined): Statistic[] {
   return space ? cleanStatistics(worldSettings(space).statistics) : [];
+}
+
+/** Where a map's light comes from (D186): its own angle, or from the upper left (120°). */
+export function mapLightOf(space: Pick<MapSpaceRow, 'settings'> | null | undefined): number {
+  const v = space ? worldSettings(space).light : undefined;
+  return typeof v === 'number' && Number.isFinite(v) ? ((v % 360) + 360) % 360 : 120;
 }
 
 /** A map's own calendar (D149), if it has one that can be a calendar. */

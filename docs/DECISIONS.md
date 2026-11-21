@@ -61,6 +61,28 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D186. Looks of countries, VI: the map's one light, and countries as raised slabs
+
+- **One light for the map** (`light` in the map's settings, `mapLightOf`, `setMapLight`): drop shadows, inner shadows
+  and bevels can take "the map's light" instead of an angle of their own; turning the light (from the layer's look,
+  or the country's when one of its effects takes it) turns every shadow and bevel that takes it at once. Effects added
+  from now on take it; those stored before keep their own angle (nothing already made changes).
+- **3D slabs** (`extrude` effect): a country raised as a slab, its walls drawn from its place toward an angle (down
+  the frame unless turned) in its own colour darkened, under its fill, which stands on them as the slab's top. Slabs
+  of the same elevation are drawn walls first, then tops, so neighbours hide each other's walls as solid blocks do.
+- **As tall as a statistic:** a slab's height can come from one of the map's statistics (D171), as its share of the
+  highest value of its kind; "Population of {country}" reads each country's own statistic, so one look on the layer
+  raises every country by its own number, and the slabs grow and shrink as history plays (drawn again at each moment).
+  A country without a statistic of the name stays flat.
+- **Fixed: shadows, glows and walls on the sea.** With "clip to land" on (the usual on the Earth), a layer is cut to
+  the land after it is drawn, and with it everything its countries cast on the sea: drop shadows and outer glows of
+  coasts were lost (seen only between countries of different elevations). What countries cast is now drawn a second
+  time after the cut, on canvases of the renderer's own, and laid under the layer where it has no colour of its own:
+  on the sea and on land nobody holds.
+- **Not done:** depth of field and a true perspective (a tilted camera) are left out: slabs are seen from straight
+  above with their walls leaning, as in an isometric drawing. A tall slab behind a lower one at the same elevation is
+  hidden by its top (raise its elevation to show it over its neighbours).
+
 ### D185. Looks of countries, V: looks that move, light sweeps, motion blur and kept looks
 
 - **Changes through history** (`effectAt` in `src/render-engine/country-look.ts`): any number setting of an effect

@@ -4,9 +4,10 @@
 import { useStore } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
 import { parseJSON } from '../../temporal-engine/engine.ts';
+import { mapLightOf, statisticsOf } from '../../world-model/world-settings.ts';
 import { NumberField, DateField } from './Panels.tsx';
 import {
-  BLEND_MODES, BLEND_NAMES, EFFECTS, EFFECT_DEFAULTS, EFFECT_KINDS, EFFECT_NAMES, PRESET_FILE_KIND, countryLookOf, layerLookOf, lookPresetsOf,
+  BLEND_MODES, BLEND_NAMES, EFFECTS, EFFECT_DEFAULTS, EFFECT_KINDS, EFFECT_NAMES, PRESET_FILE_KIND, countryLookOf, layerLookOf, lookPresetsOf, takesMapLight,
   type BlendMode, type CountryLook, type Effect, type EffectKind, type LayerLook, type Motion, type Pulse, type Ease,
 } from '../../render-engine/country-look.ts';
 
@@ -67,6 +68,9 @@ const EMPTY: CountryLook = { elevation: 0, opacity: 1, effects: [] };
 
 /** An editor of a look: `blend` for a layer's. */
 export function LookEditor({ value, onChange, blend, idPrefix }: { value: CountryLook | LayerLook; onChange: (next: CountryLook | LayerLook) => void; blend?: boolean; idPrefix: string }) {
+  const s = useStore();
+  const space = s.world?.get('map_space', s.spaceId);
+  const statNames = statisticsOf(space).map((x) => x.name);
   const set = (patch: Partial<LayerLook>) => onChange({ ...value, ...patch });
   const setEffect = (i: number, patch: Partial<Effect>) => set({ effects: value.effects.map((e, k) => (k === i ? ({ ...e, ...patch } as Effect) : e)) });
   const move = (i: number, by: number) => {
@@ -122,12 +126,19 @@ export function LookEditor({ value, onChange, blend, idPrefix }: { value: Countr
                 })}
               </div>
             )}
+            {e.on && e.kind === 'extrude' && (
+              <label className="slab-stat" title={'A statistic of this map: the slab is as tall as its share of the highest value. "{country}" stands for each country\'s name ("Population of {country}"), so one look raises every country by its own'}>Height from a statistic
+                <input list={`${idPrefix}-stats`} value={e.stat ?? ''} placeholder="(none: the height above)" onChange={(ev) => setEffect(i, { stat: ev.target.value || undefined } as Partial<Effect>)} data-testid={`${idPrefix}-extrude-stat`} />
+                <datalist id={`${idPrefix}-stats`}>{statNames.map((n) => <option key={n} value={n} />)}</datalist>
+              </label>
+            )}
+            {e.on && 'light' in e && e.light === 'map' && <p className="muted small-text">The map's light comes from {mapLightOf(space)}°.</p>}
             {e.on && <EffectMotion e={e} onChange={(patch) => setEffect(i, patch)} idPrefix={`${idPrefix}-${i}`} />}
           </li>
         ))}
       </ul>
       <label className="inline">Add an effect
-        <select value="" onChange={(ev) => { const k = ev.target.value as EffectKind; if (k) set({ effects: [...value.effects, { ...EFFECT_DEFAULTS[k] } as Effect] }); }} data-testid={`${idPrefix}-add-effect`}>
+        <select value="" onChange={(ev) => { const k = ev.target.value as EffectKind; if (k) set({ effects: [...value.effects, { ...EFFECT_DEFAULTS[k], ...(takesMapLight(k) ? { light: 'map' } : {}) } as Effect] }); }} data-testid={`${idPrefix}-add-effect`}>
           <option value="">Choose…</option>
           {EFFECT_KINDS.map((k) => <option key={k} value={k}>{EFFECT_NAMES[k]}</option>)}
         </select>
@@ -193,6 +204,18 @@ function LookPresets({ current, onUse, useLabel, idPrefix }: { current: CountryL
   );
 }
 
+/** Where the map's one light comes from (D186): every shadow and bevel set to the map's light turns with it. */
+function MapLightField({ idPrefix }: { idPrefix: string }) {
+  const s = useStore();
+  const space = s.world?.get('map_space', s.spaceId);
+  if (!space) return null;
+  return (
+    <label className="inline" title="Shadows, inner shadows and bevels set to the map's light fall away from it, all at once">The map's light from (°)
+      <NumberField min={-360} max={360} step={5} value={mapLightOf(space)} onCommit={(n) => s.execute((w) => cmd.setMapLight(w, space.id, n))} testId={`${idPrefix}-map-light`} />
+    </label>
+  );
+}
+
 /** A country's look of its own, in its panel. */
 export function CountryLookSection({ id }: { id: string }) {
   const s = useStore();
@@ -206,6 +229,7 @@ export function CountryLookSection({ id }: { id: string }) {
     <details className="country-look" open={!!own}>
       <summary>{own ? 'Look (its own)' : 'Look (as its layer)'}</summary>
       <LookEditor value={own ?? EMPTY} onChange={(next) => s.execute((w) => cmd.setCountryLook(w, id, next))} idPrefix="country" />
+      {own?.effects.some((x) => 'light' in x && x.light === 'map') && <MapLightField idPrefix="country" />}
       {own && <button className="small" onClick={() => s.execute((w) => cmd.setCountryLook(w, id, null))} data-testid="country-look-reset">Look like its layer again</button>}
       <LookPresets current={own} idPrefix="country" useLabel={targets.length > 1 ? `Give the ${targets.length} chosen a kept look` : 'Give it a kept look'}
         onUse={(look, name) => s.execute((w) => cmd.setCountriesLook(w, targets, look, `the look "${name}"`))} />
@@ -223,6 +247,7 @@ export function LayerLookSection({ layerId }: { layerId: string }) {
     <details className="layer-option layer-look">
       <summary>{look ? 'Look of its countries (set)' : 'Look of its countries'}</summary>
       <LookEditor value={look ?? { ...EMPTY, blend: 'normal' }} blend onChange={(next) => s.execute((w) => cmd.setLayerEffects(w, layerId, next as LayerLook))} idPrefix="layer" />
+      <MapLightField idPrefix="layer" />
       {look && <button className="small" onClick={() => s.execute((w) => cmd.setLayerEffects(w, layerId, null))}>No look</button>}
       <LookPresets current={look} idPrefix="layer" useLabel="Use a kept look" onUse={(kept) => s.execute((w) => cmd.setLayerEffects(w, layerId, { ...kept, blend: look?.blend ?? 'normal' }))} />
     </details>

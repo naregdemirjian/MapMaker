@@ -3,6 +3,8 @@
 // elevation decides whose shadows fall on whose land (higher countries cast onto lower ones; countries of the same
 // elevation never shade each other). Pure data here: what each kind of effect has, how it is stored, checked and
 // merged; the renderer draws it, the interface edits it from the same description of its fields.
+import { statisticAt, type Statistic } from '../presentation/statistics.ts';
+import type { Instant } from '../core-time/index.ts';
 
 /** Blend modes a layer of countries, or an effect, can be laid on with. */
 export const BLEND_MODES = ['normal', 'multiply', 'screen', 'overlay', 'soft-light', 'hard-light', 'darken', 'lighten', 'color-dodge', 'color-burn', 'difference', 'exclusion', 'hue', 'saturation', 'color', 'luminosity'] as const;
@@ -21,17 +23,19 @@ export const TEXTURES = ['paper', 'parchment', 'canvas', 'grain', 'metal', 'ston
 export type TextureKind = (typeof TEXTURES)[number];
 
 /** A shadow cast by the country: light from `angle` degrees (0 from the right, 90 from above), `distance` and `blur` in pixels of a 1920-wide frame, grown by `spread`. */
-export interface ShadowEffect { kind: 'shadow'; on: boolean; color: string; opacity: number; angle: number; distance: number; blur: number; spread: number }
+export interface ShadowEffect { kind: 'shadow'; on: boolean; color: string; opacity: number; angle: number; distance: number; blur: number; spread: number; light?: LightSource }
+/** Where an effect's light comes from (D186): its own angle, or the map's one light shared by every shadow and bevel. */
+export type LightSource = 'own' | 'map';
 /** A line round the country: inside its edge, on it, or outside it; several stack (a white line inside a black one). */
 export interface StrokeEffect { kind: 'stroke'; on: boolean; color: string; opacity: number; width: number; position: 'inside' | 'center' | 'outside' }
 /** A shadow inside the country's edge, as if it were sunk into the map. */
-export interface InnerShadowEffect { kind: 'inner-shadow'; on: boolean; color: string; opacity: number; angle: number; distance: number; blur: number }
+export interface InnerShadowEffect { kind: 'inner-shadow'; on: boolean; color: string; opacity: number; angle: number; distance: number; blur: number; light?: LightSource }
 /** A glow round the country, on the land and sea about it. */
 export interface OuterGlowEffect { kind: 'outer-glow'; on: boolean; color: string; opacity: number; blur: number; spread: number }
 /** A glow inside the country, along its edge. */
 export interface InnerGlowEffect { kind: 'inner-glow'; on: boolean; color: string; opacity: number; blur: number }
 /** Light and shade along the edge: the country raised like a tile, or sunk. */
-export interface BevelEffect { kind: 'bevel'; on: boolean; style: 'raised' | 'sunken'; angle: number; depth: number; size: number; highlight: string; highlightOpacity: number; shade: string; shadeOpacity: number }
+export interface BevelEffect { kind: 'bevel'; on: boolean; style: 'raised' | 'sunken'; angle: number; depth: number; size: number; highlight: string; highlightOpacity: number; shade: string; shadeOpacity: number; light?: LightSource }
 /** Colour running from one to another across the country. */
 export interface GradientEffect { kind: 'gradient'; on: boolean; from: string; to: string; style: 'linear' | 'radial'; angle: number; opacity: number; blend: BlendMode }
 /** Stripes, dots, a grid… over the country (occupied, disputed, under mandate). */
@@ -40,7 +44,13 @@ export interface PatternEffect { kind: 'pattern'; on: boolean; pattern: PatternK
 export interface TextureEffect { kind: 'texture'; on: boolean; texture: TextureKind; opacity: number; scale: number; blend: BlendMode }
 /** A band of light sweeping across the country again and again, as on a newly won prize (D185). */
 export interface ShineEffect { kind: 'shine'; on: boolean; color: string; opacity: number; width: number; angle: number; period: number; pause: number }
-export type Effect = (ShadowEffect | StrokeEffect | InnerShadowEffect | OuterGlowEffect | InnerGlowEffect | BevelEffect | GradientEffect | PatternEffect | TextureEffect | ShineEffect) & {
+/**
+ * The country as a raised slab (D186): its walls `height` pixels (of a 1920-wide frame) toward `angle` (270: down the
+ * frame), in its colour darkened by `shade`. With `stat`, the height is the statistic's share of the highest value of
+ * its kind: "Population of {country}" reads each country's own statistic, all measured against the largest.
+ */
+export interface ExtrudeEffect { kind: 'extrude'; on: boolean; height: number; angle: number; shade: number; stat?: string }
+export type Effect = (ShadowEffect | StrokeEffect | InnerShadowEffect | OuterGlowEffect | InnerGlowEffect | BevelEffect | GradientEffect | PatternEffect | TextureEffect | ShineEffect | ExtrudeEffect) & {
   /** Settings changing over history (D185): from one value to another between two dates. */
   motions?: Motion[];
   /** Settings moving as time on screen passes (D185): a pulse, or a flicker. */
@@ -78,20 +88,21 @@ const C = (key: string, label: string): EffectField => ({ key, label, type: 'col
 const P = (key: string, label: string): EffectField => ({ key, label, type: 'percent' });
 const N = (key: string, label: string, min: number, max: number, step: number): EffectField => ({ key, label, type: 'number', min, max, step });
 const angle = N('angle', 'Light from (°)', -360, 360, 5);
+const light: EffectField = { key: 'light', label: 'Light', type: 'choice', choices: [['own', 'Its own angle'], ['map', "The map's light"]] };
 
 /** Each kind of effect: its name, its settings and their defaults. */
 export const EFFECTS: { [K in EffectKind]: { name: string; fields: EffectField[]; defaults: Extract<Effect, { kind: K }> } } = {
   shadow: {
-    name: 'Drop shadow', fields: [C('color', 'Colour'), P('opacity', 'Strength (%)'), angle, N('distance', 'Distance', 0, 200, 1), N('blur', 'Blur', 0, 200, 1), N('spread', 'Spread', 0, 100, 1)],
-    defaults: { kind: 'shadow', on: true, color: '#000000', opacity: 0.55, angle: 120, distance: 6, blur: 10, spread: 0 },
+    name: 'Drop shadow', fields: [C('color', 'Colour'), P('opacity', 'Strength (%)'), light, angle, N('distance', 'Distance', 0, 200, 1), N('blur', 'Blur', 0, 200, 1), N('spread', 'Spread', 0, 100, 1)],
+    defaults: { kind: 'shadow', on: true, color: '#000000', opacity: 0.55, angle: 120, distance: 6, blur: 10, spread: 0, light: 'own' },
   },
   stroke: {
     name: 'Stroke', fields: [C('color', 'Colour'), P('opacity', 'Strength (%)'), N('width', 'Width', 0, 60, 0.5), { key: 'position', label: 'Where', type: 'choice', choices: [['inside', 'Inside the edge'], ['center', 'On the edge'], ['outside', 'Outside the edge']] }],
     defaults: { kind: 'stroke', on: true, color: '#ffffff', opacity: 1, width: 2, position: 'inside' },
   },
   'inner-shadow': {
-    name: 'Inner shadow', fields: [C('color', 'Colour'), P('opacity', 'Strength (%)'), angle, N('distance', 'Distance', 0, 200, 1), N('blur', 'Blur', 0, 200, 1)],
-    defaults: { kind: 'inner-shadow', on: true, color: '#000000', opacity: 0.5, angle: 120, distance: 5, blur: 10 },
+    name: 'Inner shadow', fields: [C('color', 'Colour'), P('opacity', 'Strength (%)'), light, angle, N('distance', 'Distance', 0, 200, 1), N('blur', 'Blur', 0, 200, 1)],
+    defaults: { kind: 'inner-shadow', on: true, color: '#000000', opacity: 0.5, angle: 120, distance: 5, blur: 10, light: 'own' },
   },
   'outer-glow': {
     name: 'Outer glow', fields: [C('color', 'Colour'), P('opacity', 'Strength (%)'), N('blur', 'Size', 0, 200, 1), N('spread', 'Spread', 0, 100, 1)],
@@ -103,10 +114,10 @@ export const EFFECTS: { [K in EffectKind]: { name: string; fields: EffectField[]
   },
   bevel: {
     name: 'Bevel', fields: [
-      { key: 'style', label: 'Style', type: 'choice', choices: [['raised', 'Raised'], ['sunken', 'Sunken']] }, angle, N('depth', 'Depth', 0, 60, 0.5), N('size', 'Softness', 0, 60, 0.5),
+      { key: 'style', label: 'Style', type: 'choice', choices: [['raised', 'Raised'], ['sunken', 'Sunken']] }, light, angle, N('depth', 'Depth', 0, 60, 0.5), N('size', 'Softness', 0, 60, 0.5),
       C('highlight', 'Light'), P('highlightOpacity', 'Light (%)'), C('shade', 'Shade'), P('shadeOpacity', 'Shade (%)'),
     ],
-    defaults: { kind: 'bevel', on: true, style: 'raised', angle: 120, depth: 3, size: 4, highlight: '#ffffff', highlightOpacity: 0.65, shade: '#000000', shadeOpacity: 0.5 },
+    defaults: { kind: 'bevel', on: true, style: 'raised', angle: 120, depth: 3, size: 4, highlight: '#ffffff', highlightOpacity: 0.65, shade: '#000000', shadeOpacity: 0.5, light: 'own' },
   },
   gradient: {
     name: 'Gradient', fields: [
@@ -125,6 +136,10 @@ export const EFFECTS: { [K in EffectKind]: { name: string; fields: EffectField[]
   shine: {
     name: 'Light sweep', fields: [C('color', 'Colour'), P('opacity', 'Strength (%)'), N('width', 'Width', 10, 800, 5), N('angle', 'Angle (°)', -360, 360, 5), N('period', 'Sweep (s)', 0.3, 30, 0.1), N('pause', 'Pause (s)', 0, 60, 0.1)],
     defaults: { kind: 'shine', on: true, color: '#ffffff', opacity: 0.5, width: 120, angle: 60, period: 1.6, pause: 2.5 },
+  },
+  extrude: {
+    name: '3D slab', fields: [N('height', 'Height', 0, 300, 1), N('angle', 'Walls toward (°)', -360, 360, 5), P('shade', 'Walls darker (%)')],
+    defaults: { kind: 'extrude', on: true, height: 14, angle: 270, shade: 0.45 },
   },
   texture: {
     name: 'Texture', fields: [
@@ -172,6 +187,8 @@ export function effectOf(o: unknown): Effect | null {
     if (!r) return [];
     return [{ field: q.field as string, amount: num(q.amount, 0, r[1] - r[0], 0), period: num(q.period, 0.05, 120, 1), kind: q.kind === 'wiggle' ? 'wiggle' as const : 'sine' as const }];
   }).slice(0, 8);
+  // (A slab's height from a statistic, by its name.)
+  if (e.kind === 'extrude' && typeof e.stat === 'string' && e.stat.trim()) out.stat = e.stat.trim().slice(0, 120);
   if (motions.length) out.motions = motions;
   if (pulses.length) out.pulses = pulses;
   return out as unknown as Effect;
@@ -231,7 +248,7 @@ export function sweepAt(period: number, pause: number, seconds: number): number 
 }
 
 /** Whether a look changes as history goes (its picture is then drawn again at each moment), or as time on screen passes. */
-export const changesInHistory = (l: CountryLook | null) => !!l && l.effects.some((e) => e.on && !!e.motions?.length);
+export const changesInHistory = (l: CountryLook | null) => !!l && l.effects.some((e) => e.on && (!!e.motions?.length || (e.kind === 'extrude' && !!e.stat)));
 export const movesOnScreen = (l: CountryLook | null) => !!l && l.effects.some((e) => e.on && (!!e.pulses?.length || e.kind === 'shine'));
 
 /** A country's look as stored, checked; null when it has none. */
@@ -299,4 +316,31 @@ export function lookPresetsOf(v: unknown): LookPreset[] {
     out.push({ id: typeof o.id === 'string' && o.id ? o.id.slice(0, 64) : `preset-${out.length + 1}`, name, look });
   }
   return out.slice(0, 200);
+}
+
+/** A look in the map's light (D186): effects that take the map's light have its angle. */
+export function litBy<L extends CountryLook>(l: L | null, angle: number): L | null {
+  const mapLit = (e: Effect) => (e.kind === 'shadow' || e.kind === 'inner-shadow' || e.kind === 'bevel') && e.light === 'map';
+  if (!l || !l.effects.some(mapLit)) return l;
+  return { ...l, effects: l.effects.map((e) => (mapLit(e) ? { ...e, angle } : e)) };
+}
+
+/** Whether an effect of this kind can take the map's light (its new ones do, D186). */
+export const takesMapLight = (k: EffectKind) => k === 'shadow' || k === 'inner-shadow' || k === 'bevel';
+
+const escapeRe = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/**
+ * A slab's height at a moment (D186): its own; or, from a statistic, its share of the highest value any statistic of
+ * that name has (with "{country}", any country's), at least none. No statistic of the name: flat.
+ */
+export function slabHeight(e: ExtrudeEffect, country: string, stats: readonly Statistic[], t: Instant): number {
+  if (!e.stat) return e.height;
+  const name = e.stat.replace(/\{country\}/gi, country).toLowerCase();
+  const own = stats.find((x) => x.name.toLowerCase() === name);
+  if (!own) return 0;
+  const like = new RegExp(`^${escapeRe(e.stat).replace(/\\\{country\\\}/gi, '.+')}$`, 'i');
+  let top = 0;
+  for (const x of stats) if (like.test(x.name)) for (const k of x.keys) top = Math.max(top, k.value);
+  const v = statisticAt(own, t) ?? 0;
+  return top > 0 ? e.height * Math.max(0, Math.min(1, v / top)) : 0;
 }

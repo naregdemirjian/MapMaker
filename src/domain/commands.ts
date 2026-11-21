@@ -378,6 +378,15 @@ export function setColourBy(world: World, spaceId: string, by: ColourBy | null):
   return run(world, next ? 'Colour countries by closeness' : 'Colour countries by their own colours', (tx) => { tx.update('map_space', { ...space, settings: JSON.stringify(next ? { ...rest, colourBy: next } : rest) }); });
 }
 
+/** Where a map's light comes from (D186): every shadow and bevel taking the map's light turns with it. */
+export function setMapLight(world: World, spaceId: string, angle: number): CommandResult {
+  const space = world.get('map_space', spaceId);
+  if (!space) throw new Error('That map no longer exists.');
+  if (!Number.isFinite(angle)) throw new Error('The light needs an angle.');
+  const a = ((Math.round(angle) % 360) + 360) % 360;
+  return run(world, `The light from ${a}°`, (tx) => { tx.update('map_space', { ...space, settings: JSON.stringify({ ...worldSettings(space), light: a }) }); });
+}
+
 /** A map's statistics (D171): numbers kept over time and shown in shots' texts as "{name}". The whole list, in one step. */
 export function setMapStatistics(world: World, spaceId: string, stats: Statistic[]): CommandResult {
   const space = world.get('map_space', spaceId);

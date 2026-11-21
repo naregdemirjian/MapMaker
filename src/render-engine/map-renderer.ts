@@ -7,7 +7,7 @@
 // changed; and what stays the same through a stretch of time (who holds what, which borders show)
 // is worked out once for the stretch (LayerSnap), not once per frame.
 import { layerBordersOf, bordersMove, plainBorder, dashPattern, type BorderStyle, type LayerBorders } from './border-look.ts';
-import { countryLookOf, layerLookOf, lookFor, lookAt, looksPlain, shadowKey, shadowOffset, compositeOf, castOf, awayFromLight, sweepAt, rgbaOf, changesInHistory, movesOnScreen, INSIDE, type CountryLook, type Effect, type ShadowEffect, type StrokeEffect } from './country-look.ts';
+import { countryLookOf, layerLookOf, lookFor, lookAt, litBy, slabHeight, looksPlain, shadowKey, shadowOffset, compositeOf, castOf, awayFromLight, sweepAt, rgbaOf, changesInHistory, movesOnScreen, INSIDE, type CountryLook, type Effect, type ShadowEffect, type StrokeEffect } from './country-look.ts';
 import { patternTile, textureTile } from './textures.ts';
 import { geoPath, geoCircle, geoCentroid, geoArea, type GeoPermissibleObjects, type GeoProjection } from 'd3-geo';
 import type { World } from '../world-model/world.ts';
@@ -33,7 +33,7 @@ import { Kept as Weighed } from './kept.ts';
 import { parcelGeometry, type ParcelGeometry, type CycleGeom } from './parcel-geometry.ts';
 import { featureStyle, featureColor, isFeatureKind, type FeatureKind, type FeatureStyle } from './feature-style.ts';
 import { cityShown, placeMetaOf, DEFAULT_CITY_FILTER, type CityFilter } from '../domain/places.ts';
-import { cityFilterOfSpace, colourByOfSpace } from '../world-model/world-settings.ts';
+import { cityFilterOfSpace, colourByOfSpace, mapLightOf, statisticsOf } from '../world-model/world-settings.ts';
 import { closenessColours } from '../domain/affinity.ts';
 import { campaignArrow, smoothLine, lineLength, arrowBodyLength, marksAlong, cutLineBetween, mixColor } from './routes.ts';
 import { shotProgress, eventScreenSeconds, eventTransitionLook, TRANSITION_LOOKS } from '../presentation/sequence.ts';
@@ -859,6 +859,32 @@ export class MapRenderer {
       c.fillRect(bx, by, bw, bh);
       c.restore();
     }
+  }
+
+  /**
+   * The walls of a raised country (D186): its shape in its colour, darkened by `shade`, laid again and again from its
+   * place to `dx, dy` pixels away (the farthest first), so that its fill drawn after stands on them as a slab's top.
+   * Worked within the country's box on the canvas (`box`, device pixels).
+   */
+  private drawSlab(target: CanvasRenderingContext2D, tmp: CanvasRenderingContext2D, s: Shape, color: string, shade: number, dx: number, dy: number, box: Box2): void {
+    const [bx, by, bw, bh] = box, n = Math.min(240, Math.ceil(Math.hypot(dx, dy)));
+    if (bw <= 0 || bh <= 0 || n < 1) return;
+    tmp.save();
+    tmp.setTransform(1, 0, 0, 1, 0, 0);
+    tmp.clearRect(bx, by, bw, bh);
+    tmp.restore();
+    tmp.save();
+    tmp.fillStyle = color;
+    this.fill(tmp, s);
+    tmp.setTransform(1, 0, 0, 1, 0, 0);
+    tmp.globalCompositeOperation = 'source-atop';
+    tmp.fillStyle = `rgba(0,0,0,${Math.max(0, Math.min(1, shade))})`;
+    tmp.fillRect(bx, by, bw, bh);
+    tmp.restore();
+    target.save();
+    target.setTransform(1, 0, 0, 1, 0, 0);
+    for (let k = n; k >= 1; k--) target.drawImage(tmp.canvas as CanvasImageSource, bx, by, bw, bh, bx + (dx * k) / n, by + (dy * k) / n, bw, bh);
+    target.restore();
   }
 
   /** A line round a country (D181): inside its edge (clipped to it), on it, or outside it (clipped away from it). */
@@ -2155,6 +2181,10 @@ export class MapRenderer {
     const colorOf = (v: string | null) => (v ? entities.get(v)?.color ?? '#888888' : null);
     // Countries' looks of their own (D181): elevation, opacity, effects.
     const ownLooks = new Map<string, CountryLook | null>();
+    // (The map's one light, D186, and its statistics, for slabs as tall as one.)
+    const mapRow = world.get('map_space', spaceId), mapLight = mapLightOf(mapRow);
+    let mapStats: ReturnType<typeof statisticsOf> | null = null;
+    const statsNow = () => (mapStats ??= statisticsOf(mapRow));
     const ownLookOf = (v: string): CountryLook | null => {
       if (!ownLooks.has(v)) ownLooks.set(v, countryLookOf(parseJSON<{ look?: unknown }>(entities.get(v)?.style ?? '{}', {})?.look));
       return ownLooks.get(v)!;
@@ -2419,7 +2449,7 @@ export class MapRenderer {
           const items: Array<{ owner: string; set: FaceSet; shape: Shape; look: CountryLook | null }> = [];
           for (const [owner, set] of snap.byOwner) {
             const shape = this.setPath(sp, sheet, arr, set);
-            if (shape) items.push({ owner, set, shape, look: lookAt(lookFor(ownLookOf(owner), layerLook), t.day + t.ms / 864e5, this.mediaSeconds) });
+            if (shape) items.push({ owner, set, shape, look: litBy(lookAt(lookFor(ownLookOf(owner), layerLook), t.day + t.ms / 864e5, this.mediaSeconds), mapLight) });
           }
           const styled = items.some((it) => !looksPlain(it.look));
           const paintOwner = (owner: string, set: FaceSet, shape: Shape) => {
@@ -2451,6 +2481,9 @@ export class MapRenderer {
           // (on the lower land drawn before), then the countries themselves (over each other's shadows: countries of
           // the same height never shade one another), each at its own opacity.
           const order = styled ? [...items].sort((a, b) => (a.look?.elevation ?? 0) - (b.look?.elevation ?? 0)) : items;
+          // What countries cast beyond their land (shadows, glows, slabs' walls), drawn again after the layer is cut to
+          // the land, so that it still falls on the sea (D186).
+          const spillOps: Array<(target: CanvasRenderingContext2D, scratch: CanvasRenderingContext2D) => void> = [];
           if (!styled) for (const it of items) paintOwner(it.owner, it.set, it.shape);
           else {
             const tmp = this.scratch(c);
@@ -2468,7 +2501,20 @@ export class MapRenderer {
                 if (!g) shadows.set(key, (g = { sh, shapes: [] }));
                 g.shapes.push(order[k].shape);
               }
-              for (const g of shadows.values()) this.castShadow(lc, tmp, g.sh, g.shapes, u);
+              for (const g of shadows.values()) {
+                this.castShadow(lc, tmp, g.sh, g.shapes, u);
+                if (clip) spillOps.push((target, scratch) => this.castShadow(target, scratch, g.sh, g.shapes, u));
+              }
+              // (3D slabs, D186: the walls of each country raised, over the shadows on the land below and under the tops.)
+              for (let k = i; k < j; k++) for (const e of order[k].look?.effects ?? []) {
+                if (!e.on || e.kind !== 'extrude') continue;
+                const h = slabHeight(e, entities.get(order[k].owner)?.name ?? '', e.stat ? statsNow() : [], t);
+                if (h <= 0) continue;
+                const a = (e.angle * Math.PI) / 180, box = this.deviceBox(this.screenBox(view, arr, order[k].set.faces), cm, 0, lc.canvas.width, lc.canvas.height);
+                const slab = [order[k].shape, colorOf(order[k].owner) ?? '#888888', e.shade, Math.cos(a) * h * u, -Math.sin(a) * h * u, box] as const;
+                this.drawSlab(lc, tmp, ...slab);
+                if (clip) spillOps.push((target, scratch) => this.drawSlab(target, scratch, ...slab));
+              }
               for (let k = i; k < j; k++) {
                 const it = order[k];
                 lc.globalAlpha = it.look?.opacity ?? 1;
@@ -2501,6 +2547,22 @@ export class MapRenderer {
             lc.restore();
           }
           if (clip) this.trimToLand(lc, view, sheet, opts.basemap ?? null, frameKey, true, terrainLand ? terrain : null, seaLevel, cm);
+          // (Shadows, glows and walls cut away with the sea, D186: laid under the layer where it has no colour of its own.
+          // Not on frames so large that the spare canvases are too few to hold them.)
+          if (spillOps.length && lc.canvas.width * lc.canvas.height * 3 <= 40_000_000) {
+            const spill = this.ownCanvas(0, c), scratch = this.ownCanvas(1, c);
+            for (const op of spillOps) op(spill, scratch);
+            spill.save();
+            spill.setTransform(1, 0, 0, 1, 0, 0);
+            spill.globalCompositeOperation = 'destination-out';
+            spill.drawImage(lc.canvas as CanvasImageSource, 0, 0);
+            spill.restore();
+            c.save();
+            c.setTransform(1, 0, 0, 1, 0, 0);
+            c.globalAlpha = ls.fillOpacity ?? 0.78;
+            c.drawImage(spill.canvas as CanvasImageSource, 0, 0);
+            c.restore();
+          }
           c.save();
           c.setTransform(1, 0, 0, 1, 0, 0);
           c.globalAlpha = ls.fillOpacity ?? 0.78;
@@ -4497,6 +4559,21 @@ export class MapRenderer {
 
   /** A buffer of the frame's size for borders drawn apart (doubled, softened), cleared, with the target's transform. */
   private borderBuf: OffscreenCanvas | null = null;
+  /** Canvases of the renderer's own, cleared, the size of `c` (not from the pool of scratch canvases, which rotate). */
+  private ownCanvas(i: number, c: CanvasRenderingContext2D): CanvasRenderingContext2D {
+    const W = c.canvas.width, H = c.canvas.height;
+    let b = this.ownBufs[i];
+    if (!b || b.width !== W || b.height !== H) b = this.ownBufs[i] = new OffscreenCanvas(W, H);
+    const g = b.getContext('2d') as unknown as CanvasRenderingContext2D;
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.clearRect(0, 0, W, H);
+    g.globalAlpha = 1;
+    g.globalCompositeOperation = 'source-over';
+    g.filter = 'none';
+    g.setTransform(c.getTransform());
+    return g;
+  }
+  private ownBufs: OffscreenCanvas[] = [];
   /** Pixels of the frame being drawn to a pixel of a 1920-wide frame. */
   private frameUnit = 1;
   private borderLayer(c: CanvasRenderingContext2D): CanvasRenderingContext2D {

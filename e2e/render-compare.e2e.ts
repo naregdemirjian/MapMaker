@@ -1032,6 +1032,59 @@ try {
     assert.ok(Math.max(...r.worst) === 0, `frame after frame the picture drawn afresh (${r.worst.join(', ')} pixels differ)`);
   });
 
+  await h.step('Looks (D181, D186): the layer cut to the land, a raised country\'s shadow and slab still fall on the sea beyond its coast; the map\'s light turned, the shadow turns with it; undone', async () => {
+    const W = 900, H = 600;
+    const r = await page.evaluate(({ W, H }) => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const view = B.makeView({ lon: 11, lat: 39.5, zoom: 5, rotation: 0, projection: 'equirectangular' }, W, H);
+      const P = (lon: number, lat: number) => view.projection([lon, lat]) as [number, number];
+      const fresh = new B.MapRenderer();
+      const c = new OffscreenCanvas(W, H).getContext('2d', { willReadFrequently: true }) as OffscreenCanvasRenderingContext2D;
+      const t = B.gregorian.fromCivil({ year: 2000 });
+      const draw = () => { fresh.render(c, view, s.world, s.engine, s.spaceId, t, { passes: new Set(['background', 'land', 'fills']), transparent: false, layerIds: [s.layerId], basemap: s.basemap, show: { rivers: false } }); return c.getImageData(0, 0, W, H).data; };
+      const darker = (a: Uint8ClampedArray, b: Uint8ClampedArray, x0: number, y0: number, x1: number, y1: number) => {
+        let n = 0, all = 0;
+        for (let y = Math.round(y0); y < y1; y++) for (let x = Math.round(x0); x < x1; x++) { const i = (y * W + x) * 4; all++; if (a[i] + a[i + 1] + a[i + 2] - (b[i] + b[i + 1] + b[i + 2]) > 30) n++; }
+        return Math.round((100 * n) / Math.max(1, all));
+      };
+      const layer = s.world.get('layer', s.layerId);
+      const clipped = JSON.parse(layer.style || '{}').clipToLand !== false;
+      const plain = draw();
+      // Along the west coasts of Sardinia and Corsica, and along their east coasts.
+      const seaBox = (): [number, number, number, number] => { const [x0, y0] = P(7.2, 42.8), [x1, y1] = P(8.6, 39.2); return [x0, y0, x1, y1]; };
+      const eastBox = (): [number, number, number, number] => { const [x0, y0] = P(9.4, 42.8), [x1, y1] = P(10.2, 39.2); return [x0, y0, x1, y1]; };
+      s.execute((w: any) => B.commands.setLayerEffects(w, s.layerId, { elevation: 0, opacity: 1, blend: 'normal', effects: [
+        { kind: 'shadow', on: true, color: '#000000', opacity: 0.9, angle: 0, distance: 60, blur: 2, spread: 0, light: 'map' },
+      ] }));
+      s.execute((w: any) => B.commands.setMapLight(w, s.spaceId, 0));
+      const east = draw();
+      s.execute((w: any) => B.commands.setMapLight(w, s.spaceId, 180));
+      const west = draw();
+      s.execute((w: any) => B.commands.setLayerEffects(w, s.layerId, { elevation: 0, opacity: 1, blend: 'normal', effects: [
+        { kind: 'extrude', on: true, height: 40, angle: 270, shade: 0.6 },
+      ] }));
+      const slab = draw();
+      // (South of Sicily's coast: the slab's walls hang over the sea there.)
+      const [sx0, sy0] = P(13, 37.0), [sx1, sy1] = P(14.5, 36.75);
+      const changed = (a: Uint8ClampedArray, b: Uint8ClampedArray, x0: number, y0: number, x1: number, y1: number) => {
+        let n = 0, all = 0;
+        for (let y = Math.round(y0); y < y1; y++) for (let x = Math.round(x0); x < x1; x++) { const i = (y * W + x) * 4; all++; if (Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]) > 30) n++; }
+        return Math.round((100 * n) / Math.max(1, all));
+      };
+      return { clipped, lightFromEast: [darker(plain, east, ...seaBox()), darker(plain, east, ...eastBox())], lightFromWest: [darker(plain, west, ...seaBox()), darker(plain, west, ...eastBox())], slab: changed(plain, slab, sx0, sy0, sx1, sy1) };
+    }, { W, H });
+    console.log(`    shadows on the sea west of Sardinia and Corsica with the light in the east: ${r.lightFromEast[0]} %, east of them ${r.lightFromEast[1]} %; light in the west: ${r.lightFromWest[0]} % and ${r.lightFromWest[1]} %; a slab's walls on the sea south of Sicily: ${r.slab} %`);
+    assert.ok(r.clipped, 'the layer is cut to the land');
+    assert.ok(r.lightFromEast[0] >= 5, `light from the east: shadows on the sea to the west (${r.lightFromEast[0]} %)`);
+    assert.ok(r.lightFromWest[1] >= 5 && r.lightFromWest[0] < r.lightFromEast[0], `the light turned to the west: the shadows to the east (${r.lightFromWest.join(' and ')} %)`);
+    assert.ok(r.slab >= 10, `a slab's walls over the sea below the coast (${r.slab} %)`);
+    // Undone: the looks and both turns of the light.
+    const left = () => page.evaluate(() => { const s = (window as any).__mapmaker.store; return { look: JSON.parse(s.world.get('layer', s.layerId).style || '{}').look ?? null, light: JSON.parse(s.world.get('map_space', s.spaceId).settings || '{}').light ?? null }; });
+    await h.saved();
+    for (let i = 0; i < 8 && Object.values(await left()).some((v) => v !== null); i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.deepEqual(await left(), { look: null, light: null }, 'undone');
+  });
+
   await h.finish();
 } catch (e) {
   await h.finish(e);
