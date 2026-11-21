@@ -95,10 +95,20 @@ Follows from D2. The test drives the real interface exactly as a person would.
   `terrain/biomes.ts`): each biome's colour well inside it, blended across the borders over about 2.5 °C and
   0.07 of moisture, so forest thins to grassland and tundra greys into ice as on the ground. Close in, the
   cover's colours (the Earth's too) are blended smoothly between its cells, not in steps along them.
-- **Not done.** A generated planet's heights are themselves smooth below about three cells (60 km): close in
-  its mountains are broad and soft, because that is all its elevation holds. The next step is finer elevation
-  worked out for the place in view from the planet's own definition. Rivers on generated planets still follow
-  the cells in straight pieces.
+- **Tried and not kept: finer heights for generated planets from their definition.** A generated planet's
+  heights are a formula (D97), so the place in view could be worked out from it more finely than the grid's 20 km
+  cells, as the Earth's finer heights are fetched. Tried on 21 November and withdrawn before it was committed, for
+  three reasons seen in the pictures. (1) The formula holds nothing below about three cells: its finest waves are
+  60 km and more, so worked out exactly it is the same smooth land the grid already gives when read smoothly.
+  (2) Worked out exactly it shows its own seams: where the second-nearest plate changes, the height of a mountain
+  belt steps, and that step is a cliff along an arc, which the grid's cells soften away. (3) Giving the mountain
+  belts ridges and valleys by more waves of noise (plain ones, and ones that weaken on slopes as erosion models
+  do) looked either like a grain or like lumps: made-up texture again, the thing this decision removes.
+- **Not done.** So a generated planet's mountains are broad and soft close in, because that is all its elevation
+  holds. Believable ridges and valleys have to be in the heights themselves: rivers cutting the land when the
+  planet is made (the simulated planets' landscape stage, D155, does this on a coarse mesh), at a finer grid
+  than 20 km. That would change a planet's heights, so it would be a choice when making a planet, not a change
+  to existing ones. Rivers on generated planets still follow the cells in straight pieces.
 
 ### D193. Galaxies as painted pictures, drafted while working and baked
 
