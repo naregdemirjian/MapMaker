@@ -1,5 +1,6 @@
 // Domain commands: every user action is one of these. Each runs inside a transaction against the
 // in-memory world and returns the exact row diffs to save (and to undo). Commands never draw anything.
+import { countryLookOf, layerLookOf, type CountryLook, type LayerLook } from '../render-engine/country-look.ts';
 import { calendarProblems, type CalendarDef } from '../core-time/index.ts';
 import { World, Tx, newId } from '../world-model/world.ts';
 import {
@@ -439,6 +440,34 @@ export function setLayerLook(world: World, id: string, patch: { fillOpacity?: nu
 }
 
 /**
+ * A country's look of its own (D181): its elevation, the opacity of its fill and its stack of effects (shadows,
+ * strokes…); null takes it away (the country then has its layer's look). One undo step.
+ */
+export function setCountryLook(world: World, id: string, look: CountryLook | null): CommandResult {
+  const e = world.get('entity', id);
+  if (!e) throw new Error('That country no longer exists.');
+  const next: EntityStyle = { ...entityStyle(e) };
+  const clean = look ? countryLookOf(look) : null;
+  if (look && !clean) throw new Error('That is not a look.');
+  if (clean) next.look = clean; else delete next.look;
+  return run(world, clean ? `Change the look of ${e.name}` : `${e.name} looks like its layer again`, (tx) => tx.patch('entity', id, { style: JSON.stringify(next) }));
+}
+
+/**
+ * A territory layer's look (D181): the elevation, opacity and effects of its countries without a look of their own,
+ * and the blend mode it is laid on the map with; null takes it away. One undo step.
+ */
+export function setLayerEffects(world: World, id: string, look: LayerLook | null): CommandResult {
+  const layer = world.get('layer', id);
+  if (!layer) throw new Error('That layer no longer exists.');
+  const style = parseJSON<Record<string, unknown>>(layer.style, {});
+  const clean = look ? layerLookOf(look) : null;
+  if (look && !clean) throw new Error('That is not a look.');
+  if (clean) style.look = clean; else delete style.look;
+  return run(world, `Change the look of "${layer.name}"`, (tx) => tx.patch('layer', id, { style: JSON.stringify(style) }));
+}
+
+/**
  * How a territory layer is filled (D88): solid, or see-through stripes, crossed stripes or dots in each
  * owner's colour (occupation and control over the political map).
  */
@@ -500,6 +529,8 @@ export interface EntityStyle {
   locked?: boolean;
   /** A character as a unit (D90): the country or faction it belongs to (drawn in its colour), and how its route is shown. */
   side?: string; route?: RouteStyle;
+  /** Its look beyond its colour (D181): elevation, opacity, a stack of effects. */
+  look?: CountryLook;
 }
 
 export function entityStyle(e: { style?: string } | null | undefined): EntityStyle {

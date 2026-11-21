@@ -498,3 +498,13 @@ p.small { font-size: 11.5px; }
 .colour-by-ramp .ramp { display: inline-block; width: 220px; height: 12px; border-radius: 3px; }
 .swatch { display: inline-block; width: 14px; height: 14px; border-radius: 3px; vertical-align: middle; }
 .colour-by-list td { padding: 2px 6px; }
+
+/* Looks of countries (D181): the stack of effects. */
+.look-editor .effects { list-style: none; margin: 6px 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.look-editor .effect { border: 1px solid var(--line, #2a3442); border-radius: 6px; padding: 6px; }
+.look-editor .effect.off { opacity: 0.6; }
+.look-editor .effect-head { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+.look-editor .effect-head .buttons { display: flex; gap: 2px; }
+.look-editor .effect-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; margin-top: 6px; }
+.look-editor .effect-fields input[type=number], .look-editor .effect-fields select { width: 100%; }
+.country-look, .layer-look { margin: 8px 0; }

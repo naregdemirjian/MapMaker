@@ -61,6 +61,30 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D181. Looks of countries, I: a stack of effects, elevation, shadows, strokes and blend modes
+
+- **Asked.** The look of countries, borders and on-screen graphics made as customisable as a photo or video editor
+  makes a layer: shadows, and which country's shadow sits on top, among much else (planned in six steps: effects,
+  more effects, borders, graphics, motion, light and depth; colour grading left out at the user's wish).
+- **A stack of effects** (`src/render-engine/country-look.ts`): a country's look is its elevation, the strength of
+  its fill and an ordered list of effects, each turned on or off and set on its own, like a layer's styles in a
+  photo editor. A layer has a look too: that of its countries without one of their own, and the blend mode the layer
+  is laid on the map with. Stored in the country's style (`setCountryLook`) and the layer's (`setLayerEffects`),
+  checked and kept in range; one undo step each. A country or layer without a look is drawn exactly as before.
+- **Elevation decides whose shadow falls on whom.** Countries are painted lowest first; at each elevation, the
+  shadows its countries cast are laid on the land drawn before (the lower countries), then the countries themselves:
+  so a raised country shades its neighbours, and countries of the same elevation never shade each other.
+- **Drop shadows**: colour, strength, the angle the light comes from, distance, blur and spread; countries sharing a
+  shadow are drawn in one pass (a layer's shadow costs one blur, not one a country). **Strokes**: inside the edge,
+  on it or outside it, as many as wanted (a gold line inside a black one), drawn over the fills at their own
+  strength. **Blend modes**: the layer laid on the map multiplied, screened, overlaid… (the relief through the
+  colours). **Fill strength** per country, its effects keeping theirs.
+- **In the interface:** "Look" in a country's panel and "Look of its countries" under the layer: elevation, fill,
+  blend, the effects listed with their settings, turned on and off, moved up and down, copied and removed, and
+  "Add an effect".
+- **Not yet:** shadows end at the coast where territory does (clipped to the land with the fills); SVG frames draw
+  countries without their looks; a country in the middle of an animated change is drawn without its effects.
+
 ### D180. Five large example projects, V: the Galactic Ages, 2026 to 12,000,000; space maps that stay readable
 
 - **The Galactic Ages** (`src/examples/galactic.ts`): twelve million years of a future history on four maps at four

@@ -6,6 +6,7 @@
 // panning and zooming cost no geometry work, only drawing; an edit prepares only the parcels it
 // changed; and what stays the same through a stretch of time (who holds what, which borders show)
 // is worked out once for the stretch (LayerSnap), not once per frame.
+import { countryLookOf, layerLookOf, lookFor, looksPlain, shadowKey, shadowOffset, compositeOf, type CountryLook, type ShadowEffect, type StrokeEffect } from './country-look.ts';
 import { geoPath, geoCircle, geoCentroid, geoArea, type GeoPermissibleObjects, type GeoProjection } from 'd3-geo';
 import type { World } from '../world-model/world.ts';
 import type { Engine, FaceState, Assignment, CompiledTransition } from '../temporal-engine/engine.ts';
@@ -711,6 +712,65 @@ export class MapRenderer {
     c.transform(k, 0, 0, k, e, f);
     c.clip(solid(s.path), rule);
     c.transform(1 / k, 0, 0, 1 / k, -e / k, -f / k);
+  }
+
+  /** Clip to everything but a shape (for lines outside a country's edge). */
+  private clipOutside(c: CanvasRenderingContext2D, s: Shape): void {
+    const p = new Path2D();
+    p.rect(-1e7, -1e7, 2e7, 2e7);
+    p.addPath(solid(s.path));
+    if (!s.onSheet) { c.clip(p, 'evenodd'); return; }
+    const [k, e, f] = this.place;
+    c.transform(k, 0, 0, k, e, f);
+    c.clip(p, 'evenodd');
+    c.transform(1 / k, 0, 0, 1 / k, -e / k, -f / k);
+  }
+
+  /** Stroke a shape's outline `width` screen pixels wide, on the sheet or not. */
+  private strokeShape(c: CanvasRenderingContext2D, s: Shape, width: number): void {
+    if (s.onSheet) { this.strokeOnSheet(c, s.path, width); return; }
+    c.lineWidth = width;
+    c.stroke(solid(s.path));
+  }
+
+  /**
+   * The shadow some countries cast (D181), on the land drawn before them: their shapes, grown by the spread, painted
+   * in the shadow's colour in a buffer, then laid on blurred, moved away from the light, at the shadow's strength.
+   */
+  private castShadow(target: CanvasRenderingContext2D, tmp: CanvasRenderingContext2D, sh: ShadowEffect, shapes: Shape[], u: number): void {
+    tmp.save();
+    tmp.setTransform(1, 0, 0, 1, 0, 0);
+    tmp.clearRect(0, 0, tmp.canvas.width, tmp.canvas.height);
+    tmp.restore();
+    tmp.save();
+    tmp.fillStyle = sh.color;
+    tmp.strokeStyle = sh.color;
+    tmp.lineJoin = 'round';
+    for (const s of shapes) {
+      this.fill(tmp, s);
+      if (sh.spread > 0) this.strokeShape(tmp, s, 2 * sh.spread * u);
+    }
+    tmp.restore();
+    const [dx, dy] = shadowOffset(sh, u);
+    target.save();
+    target.setTransform(1, 0, 0, 1, 0, 0);
+    target.globalAlpha = sh.opacity;
+    if (sh.blur > 0) target.filter = `blur(${((sh.blur * u) / 2).toFixed(2)}px)`;
+    target.drawImage(tmp.canvas as CanvasImageSource, dx, dy);
+    target.restore();
+  }
+
+  /** A line round a country (D181): inside its edge (clipped to it), on it, or outside it (clipped away from it). */
+  private strokeCountry(c: CanvasRenderingContext2D, s: Shape, e: StrokeEffect, u: number): void {
+    c.save();
+    c.strokeStyle = e.color;
+    c.globalAlpha = e.opacity;
+    c.lineJoin = 'round';
+    const w = e.width * u;
+    if (e.position === 'inside') { this.clip(c, s); this.strokeShape(c, s, 2 * w); }
+    else if (e.position === 'outside') { this.clipOutside(c, s); this.strokeShape(c, s, 2 * w); }
+    else this.strokeShape(c, s, w);
+    c.restore();
   }
 
   /** Stroke a sheet path with a line `width` screen pixels wide. */
@@ -1991,6 +2051,12 @@ export class MapRenderer {
       return { style: st, text: labelText(name, st, own) };
     };
     const colorOf = (v: string | null) => (v ? entities.get(v)?.color ?? '#888888' : null);
+    // Countries' looks of their own (D181): elevation, opacity, effects.
+    const ownLooks = new Map<string, CountryLook | null>();
+    const ownLookOf = (v: string): CountryLook | null => {
+      if (!ownLooks.has(v)) ownLooks.set(v, countryLookOf(parseJSON<{ look?: unknown }>(entities.get(v)?.style ?? '{}', {})?.look));
+      return ownLooks.get(v)!;
+    };
     this.pointSizes = resolvePointStyle(world.get('meta', 'point_style')?.value);
     this.cityFilter = cityFilterOfSpace(world.get('map_space', spaceId));
     const labels: LabelInfo[] = [];
@@ -2003,7 +2069,7 @@ export class MapRenderer {
     const layout = opts.layout ?? { labels: opts.passes.has('labels'), cities: opts.passes.has('cities') };
     const placesText = opts.passes.has('labels') || opts.passes.has('cities');
     const drawsLayers = opts.passes.has('fills') || opts.passes.has('borders') || (placesText && layout.labels);
-    type LayerStyle = { fillOpacity?: number; borderWidth?: number; clipToLand?: boolean; fill?: TerritoryFill; fronts?: FrontTeeth; frontColor?: string };
+    type LayerStyle = { fillOpacity?: number; borderWidth?: number; clipToLand?: boolean; fill?: TerritoryFill; fronts?: FrontTeeth; frontColor?: string; look?: unknown };
     // How fronts look (D137): the shot's look (the plain one in the working view), or an event's own.
     const tr = opts.transitions;
     const baseLook: FrontLookOptions = {
@@ -2238,9 +2304,14 @@ export class MapRenderer {
             lc.restore();
           }
           // Every owner's parcels as one shape (those not on this sheet are skipped altogether).
+          const layerLook = layerLookOf(ls.look);
+          const items: Array<{ owner: string; set: FaceSet; shape: Shape; look: CountryLook | null }> = [];
           for (const [owner, set] of snap.byOwner) {
             const shape = this.setPath(sp, sheet, arr, set);
-            if (!shape) continue;
+            if (shape) items.push({ owner, set, shape, look: lookFor(ownLookOf(owner), layerLook) });
+          }
+          const styled = items.some((it) => !looksPlain(it.look));
+          const paintOwner = (owner: string, set: FaceSet, shape: Shape) => {
             const media = fillOf(owner);
             if (media) {
               // Each cluster: its own shape, and a copy of the picture in each place its box shows on screen.
@@ -2260,10 +2331,38 @@ export class MapRenderer {
                 if (!boxes.length && !this.paintMedia(lc, media, cs, this.screenBox(view, arr, cl.set.faces), view.unit)) drawn = false;
               }
               if (!drawn) plain(lc, owner, shape);
-              continue;
+              return;
             }
             const col = colorOf(owner);
             if (col) { lc.fillStyle = look(lc, col); this.fill(lc, shape); }
+          };
+          // With looks of their own (D181): lowest elevation first; at each elevation, the shadows its countries cast
+          // (on the lower land drawn before), then the countries themselves (over each other's shadows: countries of
+          // the same height never shade one another), each at its own opacity.
+          const order = styled ? [...items].sort((a, b) => (a.look?.elevation ?? 0) - (b.look?.elevation ?? 0)) : items;
+          if (!styled) for (const it of items) paintOwner(it.owner, it.set, it.shape);
+          else {
+            const tmp = this.scratch(c);
+            for (let i = 0; i < order.length;) {
+              const elevation = order[i].look?.elevation ?? 0;
+              let j = i;
+              while (j < order.length && (order[j].look?.elevation ?? 0) === elevation) j++;
+              const shadows = new Map<string, { sh: ShadowEffect; shapes: Shape[] }>();
+              for (let k = i; k < j; k++) for (const e of order[k].look?.effects ?? []) {
+                if (!e.on || e.kind !== 'shadow' || e.opacity <= 0) continue;
+                const key = shadowKey(e);
+                let g = shadows.get(key);
+                if (!g) shadows.set(key, (g = { sh: e, shapes: [] }));
+                g.shapes.push(order[k].shape);
+              }
+              for (const g of shadows.values()) this.castShadow(lc, tmp, g.sh, g.shapes, u);
+              for (let k = i; k < j; k++) {
+                lc.globalAlpha = order[k].look?.opacity ?? 1;
+                paintOwner(order[k].owner, order[k].set, order[k].shape);
+                lc.globalAlpha = 1;
+              }
+              i = j;
+            }
           }
           // (A new owner of one colour paints its own land beside the change too: no seam between them.)
           const solidLook = !ls.fill || ls.fill === 'solid';
@@ -2279,8 +2378,21 @@ export class MapRenderer {
           c.save();
           c.setTransform(1, 0, 0, 1, 0, 0);
           c.globalAlpha = ls.fillOpacity ?? 0.78;
+          // (Laid on the map in the layer's blend mode, D181: multiplied, the relief shows through the colours.)
+          c.globalCompositeOperation = compositeOf(layerLook?.blend);
           c.drawImage(lc.canvas as CanvasImageSource, 0, 0);
           c.restore();
+          // The countries' strokes (D181), at their own strength over the fills, in the order of elevation.
+          if (styled && order.some((it) => it.look?.effects.some((e) => e.on && e.kind === 'stroke'))) {
+            const ec = this.scratch(c);
+            ec.lineJoin = 'round';
+            for (const it of order) for (const e of it.look?.effects ?? []) if (e.on && e.kind === 'stroke' && e.width > 0 && e.opacity > 0) this.strokeCountry(ec, it.shape, e, u);
+            if (clip) this.trimToLand(ec, view, sheet, opts.basemap ?? null, frameKey, true, terrainLand ? terrain : null, seaLevel, cm);
+            c.save();
+            c.setTransform(1, 0, 0, 1, 0, 0);
+            c.drawImage(ec.canvas as CanvasImageSource, 0, 0);
+            c.restore();
+          }
           // The advancing front is highlighted on top, at full strength: the glow over the land just taken (D137),
           // then the line along the front.
           // (Within the land where territory ends at the coast: cut once for all of them. Cutting each change's
