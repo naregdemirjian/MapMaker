@@ -1,0 +1,9 @@
+Planet, Sun and Moon textures (2k_*.jpg, 2k_saturn_ring_alpha.png)
+
+Source: Solar System Scope, https://www.solarsystemscope.com/textures/
+Licence: Creative Commons Attribution 4.0 International (CC BY 4.0),
+https://creativecommons.org/licenses/by/4.0/
+
+The files are as downloaded, unchanged. Map Maker draws them on spheres in the
+"Photographic" look of a solar system map and credits Solar System Scope where
+the look is chosen and in the credits written beside exports.

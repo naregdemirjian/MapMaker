@@ -209,5 +209,15 @@
     "credit": "Made with Natural Earth. Free vector and raster map data @ naturalearthdata.com.",
     "usedFor": "The built-up areas of cities on the ready-made maps of the Middle East and of Armenia (D175)",
     "retrieved": "2026-11-20"
+  },
+  {
+    "id": "solar-system-scope",
+    "name": "Solar System Scope planet textures (2k)",
+    "version": "2k set",
+    "source": "https://www.solarsystemscope.com/textures/",
+    "licence": "CC BY 4.0",
+    "credit": "Pictures of the Sun, the planets and the Moon: Solar System Scope (solarsystemscope.com), CC BY 4.0.",
+    "usedFor": "The Sun, the planets and the Moon as photographed on solar system maps (D191)",
+    "retrieved": "2026-11-21"
   }
 ]

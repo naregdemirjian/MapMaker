@@ -3987,6 +3987,15 @@ try {
     await page.getByTestId('tool-select').click();
     await page.waitForFunction(() => { const n = (window as any).__mapmaker.spaceNames() as string[]; return n.includes('MARTIAN REPUBLIC') && n.includes('since 2030'); });
     await h.screenshot('solar-side-by-side');
+    // The planets as photographed (D191): chosen in the look, credited.
+    await page.getByTestId('space-look').click();
+    await page.getByTestId('sky-photo').check();
+    await page.getByTestId('sky-photo-credit').waitFor();
+    assert.match((await page.getByTestId('sky-photo-credit').textContent()) ?? '', /Solar System Scope.*CC BY 4\.0/);
+    await page.locator('[data-testid=sky-look-dialog] .close').click();
+    await page.waitForFunction(() => { const s = (window as any).__mapmaker.store; return JSON.parse(s.world.get('map_space', s.spaceId).settings).space.look.photo === true; });
+    await page.waitForTimeout(1500);
+    await h.screenshot('solar-photographic');
     // Back to the orbits.
     await page.getByTestId('solar-layout').click();
     await page.waitForFunction(() => { const s = (window as any).__mapmaker.store; return JSON.parse(s.world.get('map_space', s.spaceId).settings).space.layout === 'orbits'; });
@@ -3994,7 +4003,7 @@ try {
     // Undone; back to Earth.
     await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
     await page.locator('header select').first().selectOption({ label: 'Earth' });
-    for (let i = 0; i < 14 && (await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.kind === 'space'))); i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    for (let i = 0; i < 24 && (await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.kind === 'space'))); i++) { await page.getByTestId('undo').click(); await h.saved(); }
     assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.kind === 'space')), false);
   });
 

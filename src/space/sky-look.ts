@@ -68,6 +68,8 @@ export interface SkyLook {
   realmFill: number;
   realmBorder: number;
   realmGlow: number;
+  /** The Sun, the planets and the Moon as photographed (D191): spheres wrapped in pictures of them, lit from the Sun. */
+  photo: boolean;
 }
 
 export const DEFAULT_SKY: SkyLook = {
@@ -78,12 +80,13 @@ export const DEFAULT_SKY: SkyLook = {
   background: '#04070d', backgroundGlow: null, nebula: 0, nebulaA: '#5b3a8f', nebulaB: '#1f5f8b', farStars: 1,
   grid: '#8cafdc', gridOpacity: 0.32, names: '#e1e8f5', nameFont: 'sans', dropLines: true,
   chart: false, chartGrid: 'rings', chartSpacing: 0, heights: 'numbers',
-  realms: 'borders', realmFill: 0.22, realmBorder: 1.6, realmGlow: 0.5,
+  realms: 'borders', realmFill: 0.22, realmBorder: 1.6, realmGlow: 0.5, photo: false,
 };
 
 /** Presets: each a whole look (the dialog starts from one, then any part can be changed). */
 export const SKY_PRESETS: Array<{ id: string; name: string; look: Partial<SkyLook> }> = [
   { id: 'natural', name: 'Natural', look: {} },
+  { id: 'photographic', name: 'Photographic (planets as photographed)', look: { photo: true, shape: 'disc', size: 1.5, glow: 0.6, glowStrength: 0.22, background: '#010204', farStars: 1.2 } },
   { id: 'telescope', name: 'Telescope (sharp, with spikes)', look: { shape: 'disc', size: 0.8, glow: 0.7, glowStrength: 0.45, spikes: 6, spikeLength: 1.3, spikeAngle: 30, halo: 0.25, farStars: 1.6, background: '#020308' } },
   { id: 'deep-field', name: 'Deep field (nebulae)', look: { shape: 'soft', glow: 1.6, glowStrength: 0.5, spikes: 4, spikeLength: 0.8, spikeAngle: 45, nebula: 0.75, nebulaA: '#6a2c8f', nebulaB: '#145a7a', farStars: 2, background: '#030308', backgroundGlow: '#0d0a1e' } },
   { id: 'scifi-hud', name: 'Sci-fi display', look: { colours: 'mono', tint: '#5ef2ff', shape: 'ring', size: 1.1, sizeByBrightness: 0.4, glow: 0.8, glowStrength: 0.5, halo: 0.6, background: '#020b12', backgroundGlow: '#06202c', grid: '#36e1ff', gridOpacity: 0.45, names: '#a8f6ff', nameFont: 'mono', farStars: 0.4, realmFill: 0.16, realmBorder: 2, realmGlow: 1 } },
@@ -128,6 +131,7 @@ export function skyLookOf(o: unknown): SkyLook {
     names: colour(x.names, d.names), nameFont: pick(x.nameFont, ['sans', 'serif', 'mono', 'display'] as const, d.nameFont),
     dropLines: typeof x.dropLines === 'boolean' ? x.dropLines : d.dropLines,
     chart: x.chart === true,
+    photo: x.photo === true,
     chartGrid: pick(x.chartGrid, ['rings', 'squares', 'hexes', 'none'] as const, d.chartGrid), chartSpacing: num(x.chartSpacing, 0, 1e6, d.chartSpacing),
     heights: pick(x.heights, ['numbers', 'symbols', 'none'] as const, d.heights),
     realms: pick(x.realms, ['borders', 'glow', 'none'] as const, d.realms),

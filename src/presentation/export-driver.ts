@@ -10,6 +10,7 @@ import { makeView, viewBounds, metresPerPixel, lonLatToScreen, type View } from 
 import { type ShotSettings, type OverlayRect, EVENTS_BOX_ID, timeAt, cameraAt, overlaysAt, drawOverlays, shotTransitions, screenSecondsSince, isVideoFormat, trailsStart } from './sequence.ts';
 import { planVideo, VideoFileEncoder, UploadSink, type VideoPlan } from './video-encoder.ts';
 import { motionBlurOf, blurMoments, FrameAverage } from './motion-blur.ts';
+import { PHOTO_TEXTURES, RING_TEXTURE } from '../space/planet-photos.ts';
 import { videoBytes } from '../export/video-codecs.ts';
 import type { Instant } from '../core-time/index.ts';
 import { encodeTiff, deflateInBrowser } from '../export/tiff.ts';
@@ -420,6 +421,9 @@ export async function runExport(o: {
   const spaceMap = isSpaceMap(o.world.get('map_space', o.shot.spaceId));
   // (Only the map of the stars around the Sun draws the HYG catalogue: invented stars, galaxies and the solar system are made here.)
   const nearbyStars = spaceMap && spaceSettingsOf(o.world.get('map_space', o.shot.spaceId))?.catalogue === 'nearby';
+  // (A solar system as photographed, D191: its pictures loaded before the first frame, and credited.)
+  const solarPhotos = spaceMap && spaceSettingsOf(o.world.get('map_space', o.shot.spaceId))?.catalogue === 'solar' && !!spaceSettingsOf(o.world.get('map_space', o.shot.spaceId))?.look?.photo;
+  if (solarPhotos) await preloadImages([...Object.values(PHOTO_TEXTURES), RING_TEXTURE]);
   if (nearbyStars) { await loadNearbyStars(); await loadExoplanets(); }
   const basemap = await basemapFor(o.world, o.shot.spaceId);
   const terrain = await terrainFor(o.world, o.shot.spaceId, o.shot);
@@ -435,7 +439,7 @@ export async function runExport(o: {
   // (And the photographs of the satellite look, D138, whenever the map is drawn with them.)
   const exportLook = terrainLook(o.world.get('map_space', o.shot.spaceId));
   const photographed = !!terrain?.cover?.photo && !!exportLook?.photo && exportLook.colours && !!PALETTES[exportLook.palette].cover && shown(o.world.get('map_space', o.shot.spaceId), 'export', 'terrain');
-  const drawn = new Set([...(basemap || terrain?.cover ? ['natural-earth'] : []), ...(terrain?.key.startsWith(EARTH_TERRAIN_KEY) ? ['terrain-tiles', 'copernicus-dem'] : []), ...(closeUp ? ['terrain-tiles-close'] : []), ...(photographed ? ['s2cloudless'] : []), ...(nearbyStars ? ['hyg', 'oec'] : []), ...(isPaleoEarth(o.world.get('map_space', o.shot.spaceId)) ? ['paleomap', 'paleomap-plates'] : [])]);
+  const drawn = new Set([...(basemap || terrain?.cover ? ['natural-earth'] : []), ...(terrain?.key.startsWith(EARTH_TERRAIN_KEY) ? ['terrain-tiles', 'copernicus-dem'] : []), ...(closeUp ? ['terrain-tiles-close'] : []), ...(photographed ? ['s2cloudless'] : []), ...(nearbyStars ? ['hyg', 'oec'] : []), ...(solarPhotos ? ['solar-system-scope'] : []), ...(isPaleoEarth(o.world.get('map_space', o.shot.spaceId)) ? ['paleomap', 'paleomap-plates'] : [])]);
   const credits = drawn.size ? (await loadDatasetRecords()).filter((d) => drawn.has(d.id)).map((d) => `${d.name} ${d.version} (${d.licence}): ${d.credit}`) : [];
   const job = await Api.startExport(o.projectId, {
     credits,

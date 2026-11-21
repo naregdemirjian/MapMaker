@@ -9,6 +9,8 @@ import { seeded } from '../presentation/looks.ts';
 import type { GalaxyDust } from './galaxy.ts';
 import { DEFAULT_SKY, NAME_FONTS, hexRgb, mix, starColourIn, type SkyLook } from './sky-look.ts';
 import { territoryField, paintTerritory, territoryBorders, realmLabels, type TerritorySite } from './territory.ts';
+import { PHOTO_TEXTURES, RING_TEXTURE, sphereImage, ringImage, photoSize, type Pixels } from './planet-photos.ts';
+import { imageNow } from '../render-engine/assets.ts';
 
 /**
  * Who holds a star at the moment shown (D111); `fresh` below 1 while it grows into the realm (shots), and
@@ -180,6 +182,8 @@ export class SpaceRenderer {
         ctx.fillRect(foot[0] - 1.2 * u, foot[1] - 0.6 * u, 2.4 * u, 1.2 * u);
       }
     }
+    // (As photographed, D191: the light comes from the Sun as drawn; in the side-by-side row, from the left.)
+    const sunAt = placed.find((p) => p.s.id === 0);
     for (const { s, x, y, k } of placed) {
       // (Planets and moons keep their sizes; a star's size follows its brightness as much as the look says.)
       const natural = s.size ?? starSize(s.absmag);
@@ -193,7 +197,7 @@ export class SpaceRenderer {
       // (How much a star shines out: bright stars fully, faint ones a little; planets in between.)
       const weight = s.color ? 0.55 : s.id === 0 ? 1 : Math.max(0.15, Math.min(1, (9 - s.absmag) / 6));
       const flicker = look.twinkle > 0 && o.seconds !== undefined ? 1 - look.twinkle * 0.55 * (0.5 + 0.5 * Math.sin(o.seconds * (2.2 + 2.6 * hashOf(s.id)) * Math.PI + hashOf(s.id + 7) * 40)) : 1;
-      this.star(ctx, x, y, r, colour, look, weight, flicker, u);
+      if (!(look.photo && s.size && PHOTO_TEXTURES[s.id] && this.photoBody(ctx, s.id, x, y, r * 1.25, sunAt ? [sunAt.x, sunAt.y] : null, look, u))) this.star(ctx, x, y, r, colour, look, weight, flicker, u);
       if (o.planets?.has(s.id)) { ctx.strokeStyle = 'rgba(120,220,200,0.7)'; ctx.lineWidth = Math.max(0.8, 1.1 * u); ctx.setLineDash([2 * u, 2 * u]); ctx.beginPath(); ctx.arc(x, y, r + 4.5 * u, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); }
       if (held && look.colours !== 'owner') { ctx.strokeStyle = held.color; ctx.lineWidth = Math.max(1, 1.6 * u); ctx.beginPath(); ctx.arc(x, y, r + 3 * u, 0, Math.PI * 2); ctx.stroke(); }
       if (o.selected === s.id) { ctx.strokeStyle = '#ffe9a6'; ctx.lineWidth = Math.max(1, 2 * u); ctx.beginPath(); ctx.arc(x, y, r + 7 * u, 0, Math.PI * 2); ctx.stroke(); }
@@ -204,6 +208,81 @@ export class SpaceRenderer {
     ctx.restore();
   }
 
+
+  /**
+   * A body as photographed (D191): its sphere picture (made once for each size), lit from the Sun's side (the Sun
+   * itself glows), Saturn inside its rings. False while its picture is still loading (drawn as a disc meanwhile).
+   */
+  private photoBody(ctx: CanvasRenderingContext2D, id: number, x: number, y: number, r: number, sun: [number, number] | null, look: SkyLook, u: number): boolean {
+    const tex = this.texture(PHOTO_TEXTURES[id]);
+    if (!tex) return false;
+    const d = photoSize(2 * r), key = `${id}|${d}`;
+    let pic = this.spheres.get(key);
+    if (!pic) {
+      if (this.spheres.size > 160) this.spheres.clear();
+      pic = new OffscreenCanvas(d, d);
+      (pic.getContext('2d') as unknown as CanvasRenderingContext2D).putImageData(new ImageData(sphereImage(tex, d) as unknown as Uint8ClampedArray<ArrayBuffer>, d, d), 0, 0);
+      this.spheres.set(key, pic);
+    }
+    // Saturn's rings: tipped toward us, the far half behind the planet, the near half in front.
+    const strip = id === 6 ? this.texture(RING_TEXTURE) : null;
+    const ringD = photoSize(2 * r * 2.3), ringKey = `ring|${ringD}`;
+    let ring = strip ? this.spheres.get(ringKey) : undefined;
+    if (strip && !ring) {
+      ring = new OffscreenCanvas(ringD, ringD);
+      (ring.getContext('2d') as unknown as CanvasRenderingContext2D).putImageData(new ImageData(ringImage(strip, ringD) as unknown as Uint8ClampedArray<ArrayBuffer>, ringD, ringD), 0, 0);
+      this.spheres.set(ringKey, ring);
+    }
+    const R = r * 2.3, tilt = 0.32;
+    const drawRing = (front: boolean) => {
+      if (!ring) return;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x - R, front ? y : y - R * tilt, 2 * R, R * tilt);
+      ctx.clip();
+      ctx.translate(x, y); ctx.scale(1, tilt);
+      ctx.drawImage(ring as unknown as CanvasImageSource, -R, -R, 2 * R, 2 * R);
+      ctx.restore();
+    };
+    ctx.save();
+    if (id === 0 && look.glow > 0) {
+      const G = r * (1.4 + look.glow), g = ctx.createRadialGradient(x, y, r * 0.8, x, y, G);
+      g.addColorStop(0, `rgba(255,214,120,${0.55 * Math.max(0.3, look.glowStrength * 2)})`); g.addColorStop(1, 'rgba(255,170,60,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, G, 0, Math.PI * 2); ctx.fill();
+    }
+    drawRing(false);
+    ctx.drawImage(pic as unknown as CanvasImageSource, x - r, y - r, 2 * r, 2 * r);
+    if (id !== 0) {
+      // Light from the Sun's side, the far side in shadow; a planet straight in line with the Sun lit from the left.
+      let lx = -1, ly = 0;
+      if (sun) { const dx = sun[0] - x, dy = sun[1] - y, n = Math.hypot(dx, dy); if (n > 1e-3) { lx = dx / n; ly = dy / n; } }
+      ctx.beginPath(); ctx.arc(x, y, r + 0.5, 0, Math.PI * 2); ctx.clip();
+      const g = ctx.createRadialGradient(x + lx * r * 0.55, y + ly * r * 0.55, r * 0.15, x - lx * r * 0.2, y - ly * r * 0.2, r * 1.45);
+      g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.55, 'rgba(200,200,200,1)'); g.addColorStop(1, 'rgba(10,10,14,1)');
+      ctx.globalCompositeOperation = 'multiply';
+      ctx.fillStyle = g; ctx.fillRect(x - r - 1, y - r - 1, 2 * r + 2, 2 * r + 2);
+    }
+    ctx.restore();
+    drawRing(true);
+    void u;
+    return true;
+  }
+
+  /** A picture's pixels for wrapping spheres (half size: enough for any disc on screen), once loaded. */
+  private texture(file: string): Pixels | null {
+    const have = this.textures.get(file);
+    if (have) return have;
+    const img = imageNow(file);
+    if (!img) return null;
+    const w = Math.max(1, Math.round(img.naturalWidth / 2)), h = Math.max(1, Math.round(img.naturalHeight / (file === RING_TEXTURE ? 1 : 2)));
+    const c = new OffscreenCanvas(w, h), g = c.getContext('2d', { willReadFrequently: true }) as unknown as CanvasRenderingContext2D;
+    g.drawImage(img, 0, 0, w, h);
+    const px = { data: g.getImageData(0, 0, w, h).data, width: w, height: h };
+    this.textures.set(file, px);
+    return px;
+  }
+  private textures = new Map<string, Pixels>();
+  private spheres = new Map<string, OffscreenCanvas>();
 
   /** The look of the last frame drawn (for the grid and names). */
   private look: SkyLook = DEFAULT_SKY;

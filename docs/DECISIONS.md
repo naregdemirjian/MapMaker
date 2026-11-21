@@ -61,6 +61,20 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D191. The planets as photographed
+
+- **A "Photographic" look for solar system maps** (preset, or "As photographed" under Planets in the look): the Sun,
+  the eight planets and the Moon drawn as spheres wrapped in Solar System Scope's pictures of them (2k,
+  `data/solar-textures`, CC BY 4.0, unchanged, with their licence), lit from the Sun as drawn (in the side-by-side
+  row, from the left), the far side in shadow; Saturn inside its rings, the far half behind it; the Sun glowing.
+- **Drawn quickly** (`src/space/planet-photos.ts`): each sphere's picture is made once for each size (sizes a fifth
+  apart), the light laid over it as it is drawn; while a picture loads the body is drawn as before, and exports load
+  every picture before the first frame.
+- **Credited:** under the option in the look, and among the data credits written beside exports when a solar
+  system map is drawn with it (`solar-system-scope` in `data/datasets.json`).
+- **Not done:** Pluto and the moons other than ours keep their discs (Solar System Scope has no pictures of them);
+  the planets do not turn on their axes.
+
 ### D190. A still events box, and history at an even pace in new shots
 
 - **The events box can keep its size and place** ("Keep its size and place", `EventsBox.keepSize`): it is as tall as

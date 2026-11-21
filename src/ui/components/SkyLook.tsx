@@ -11,6 +11,7 @@ import { SpaceRenderer, type Holding } from '../../space/space-renderer.ts';
 import { makeSpaceView, spaceCamera } from '../../space/space-view.ts';
 import type { StarCatalogue, Star } from '../../space/catalogue.ts';
 import { seeded } from '../../presentation/looks.ts';
+import { PHOTO_CREDIT } from '../../space/planet-photos.ts';
 import { Slider } from './LabelStyles.tsx';
 import { NumberField } from './Panels.tsx';
 
@@ -117,6 +118,11 @@ export function SkyLookDialog() {
           <label className="check"><input type="checkbox" checked={look.dropLines} onChange={(e) => set({ dropLines: e.target.checked })} data-testid="sky-dropLines" /> Lines down to the plane</label>
         )}
 
+        {settings.catalogue === 'solar' && <>
+          <h4>Planets</h4>
+          <label className="check" title="The Sun, the planets and the Moon drawn as spheres wrapped in pictures of them, lit from the Sun; Saturn with its rings"><input type="checkbox" checked={look.photo} onChange={(e) => set({ photo: e.target.checked })} data-testid="sky-photo" /> As photographed</label>
+          {look.photo && <p className="muted small-note" data-testid="sky-photo-credit">{PHOTO_CREDIT}</p>}
+        </>}
         <h4>Stars</h4>
         {choice('Colours', 'colours', COLOURINGS)}
         {look.colours === 'mono' && colour('Colour', 'tint')}
