@@ -70,7 +70,7 @@ export function buildMongols(reg: ProjectRegistry, dataDir: string, name = 'The 
   b.commit(cmd.setLayerClipToLand(b.world, b.layer, true));
   b.commit(cmd.setLayerLook(b.world, b.layer, { fillOpacity: 0.5, borderWidth: 1.6 }));
   b.commit(cmd.setMapCalendar(b.world, b.space, JULIAN));
-  b.commit(cmd.setWorldTerrain(b.world, b.space, { palette: 'atlas', colours: true, relief: true, overTerritories: false, seaFloor: true, strength: 1.2, detail: false, photo: false, fine: true }));
+  b.commit(cmd.setWorldTerrain(b.world, b.space, { palette: 'atlas', colours: true, relief: true, overTerritories: false, seaFloor: true, strength: 1.2, detail: false, photo: false }));
   b.commit(cmd.setWorldShow(b.world, b.space, { minLakeKm2: 2000 }));
   const S = states(b);
   const L = layers(b);

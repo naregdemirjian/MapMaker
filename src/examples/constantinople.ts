@@ -86,7 +86,7 @@ export function buildConstantinople(reg: ProjectRegistry, dataDir: string, name 
   b.commit(cmd.setLayerLook(b.world, b.layer, { fillOpacity: 0.28, borderWidth: 2.6 }));
   b.commit(cmd.setMapCalendar(b.world, b.space, JULIAN));
   // The terrain: the finer heights close in draw the Golden Horn and the city's seven hills (D176).
-  b.commit(cmd.setWorldTerrain(b.world, b.space, { palette: 'natural', colours: true, relief: true, overTerritories: false, seaFloor: true, strength: 1.35, detail: true, photo: false, fine: true }));
+  b.commit(cmd.setWorldTerrain(b.world, b.space, { palette: 'natural', colours: true, relief: true, overTerritories: false, seaFloor: true, strength: 1.35, detail: true, photo: false }));
   b.commit(cmd.setWorldShow(b.world, b.space, { minLakeKm2: 50 }));
   states(b);
   const L = city1453(b);

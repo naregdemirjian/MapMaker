@@ -49,6 +49,47 @@ export function biomeOf(warmth: number, moisture: number): Biome {
   return moisture > 0.72 ? 'rainforest' : moisture > 0.52 ? 'forest' : moisture > 0.36 ? 'savanna' : moisture > 0.2 ? 'steppe' : 'desert';
 }
 
+// The colour of a climate (D194). One kind of land gives way to the next by degrees, as it does on the ground:
+// forest thins to grassland as the rain lessens, tundra greys into ice as it grows colder. The colours of the
+// biomes are laid out over warmth (-45 to 45 °C) and moisture (0 to 1) and blended across their borders, over
+// about 2.5 °C and 0.07 of moisture either side; a place takes the colour of its own warmth and moisture.
+const CW = 289, CM = 161, W0 = -45, W1 = 45;
+let climateColours: Float32Array | null = null;
+function climateTable(): Float32Array {
+  if (climateColours) return climateColours;
+  let t: Float32Array = new Float32Array(CW * CM * 3);
+  for (let j = 0; j < CM; j++) for (let i = 0; i < CW; i++) {
+    const c = BIOMES[biomeOf(W0 + ((W1 - W0) * i) / (CW - 1), j / (CM - 1))];
+    t.set(c, (j * CW + i) * 3);
+  }
+  // (Blurred: three passes of a running mean each way, about a bell curve.)
+  const pass = (src: Float32Array, n: number, stride: number, count: number, lines: number, lineStride: number, r: number): Float32Array => {
+    const out = new Float32Array(src.length);
+    for (let l = 0; l < lines; l++) for (let q = 0; q < 3; q++) {
+      const at = (k: number) => src[l * lineStride + Math.max(0, Math.min(count - 1, k)) * stride + q];
+      let sum = 0;
+      for (let k = -r; k <= r; k++) sum += at(k);
+      for (let k = 0; k < count; k++) { out[l * lineStride + k * stride + q] = sum / n; sum += at(k + r + 1) - at(k - r); }
+    }
+    return out;
+  };
+  for (let p = 0; p < 3; p++) {
+    t = pass(t, 9, 3, CW, CM, CW * 3, 4);
+    t = pass(t, 13, CW * 3, CM, CW, 3, 6);
+  }
+  climateColours = t;
+  return t;
+}
+/** The colour of land of a warmth (°C) and moisture (0 to 1): its biome's, blended into its neighbours' near their borders. */
+export function climateColour(warmth: number, moisture: number): [number, number, number] {
+  const t = climateTable();
+  const x = Math.max(0, Math.min(CW - 1.001, ((warmth - W0) / (W1 - W0)) * (CW - 1))), y = Math.max(0, Math.min(CM - 1.001, moisture * (CM - 1)));
+  const i = Math.floor(x), j = Math.floor(y), fx = x - i, fy = y - j, k = (j * CW + i) * 3;
+  const out: [number, number, number] = [0, 0, 0];
+  for (let q = 0; q < 3; q++) out[q] = (t[k + q] * (1 - fx) + t[k + 3 + q] * fx) * (1 - fy) + (t[k + CW * 3 + q] * (1 - fx) + t[k + CW * 3 + 3 + q] * fx) * fy;
+  return out;
+}
+
 /** Warmth (°C, a year's mean) at a latitude and height: 28 at the equator, about 1 at 60°, -20 at 80°. */
 export const warmthAt = (latDeg: number, metres: number) => 28 - 0.0075 * latDeg * latDeg - 0.0065 * Math.max(0, metres);
 
@@ -168,10 +209,10 @@ export function biomeColours(grid: ElevationGrid, radiusKm: number, climate: Cli
       const rain = equatorRain(lat) * climate.wetness;
       const moisture = Math.min(1, rain + (1 - rain) * belt * (0.3 + 0.7 * air[k]));
       const warmth = warmthAt(lat, e) + climate.warmth;
-      let c: readonly number[] = icy && e > 0 ? BIOMES.ice : BIOMES[biomeOf(warmth, moisture)];
+      let c: readonly number[] = icy && e > 0 ? BIOMES.ice : climateColour(warmth, moisture);
       // Bare rock above the trees on high ground (snow comes from the warmth: ice).
       if (e > 2800 && c !== BIOMES.ice) { const t = Math.min(1, (e - 2800) / 1500); c = c.map((v, q) => v + (BIOMES.rock[q] - v) * t); }
-      out[k * 4] = c[0]; out[k * 4 + 1] = c[1]; out[k * 4 + 2] = c[2]; out[k * 4 + 3] = 255;
+      out[k * 4] = Math.round(c[0]); out[k * 4 + 1] = Math.round(c[1]); out[k * 4 + 2] = Math.round(c[2]); out[k * 4 + 3] = 255;
     }
   }
   // Borders between biomes blended: two passes of averaging with the four neighbours.

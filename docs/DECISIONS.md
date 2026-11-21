@@ -61,6 +61,45 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D194. Relief from the heights alone; land cover that changes by degrees
+
+- **Why.** Asked for: terrain and satellite maps realistic at every zoom, with relief that shows the actual
+  elevation and nothing else: no generic noise, no exaggerated bumps, no artificial textures; plains smooth,
+  mountains as rugged as they are; relief fading away at extreme close-up; on fictional worlds too, worked out
+  from the world's own heights. This **withdraws D141** (ground made up by the graphics card below the heights'
+  own detail: fine relief and a mottling of the colours) **and D146** (coasts bent by noise below the grid's
+  cells). The option "Fine ground close in" is gone from the terrain's settings; a look kept with it reads as any
+  other.
+- **The ground between the heights' cells.** Seen from afar a pixel covers many cells and reads their mean, as
+  before. Close in, where a cell is wider than a pixel, the shader now reads the smooth surface through the
+  cells' own heights (a Catmull-Rom patch over the sixteen cells around a place: at a cell's centre exactly the
+  cell's height, a plane given back exactly) and shades it by that surface's exact slope. Nothing is added to
+  the heights, so a plain is flat to the pixel; nothing runs straight from cell to cell, so there is no crease
+  in the shading along the cells and a coast the heights decide is a smooth curve where they put it (the height
+  is kept within the four nearest cells', so a cliff raises no rim beside it). `smoothHeightAt`
+  (`terrain/grid.ts`) is the same arithmetic for tests.
+- **How strongly.** From afar slopes are measured across tens of kilometres and come out gentle: they are still
+  exaggerated more the farther the view, or no mountains would show on a map of a continent. Close in, measured
+  across half a kilometre or less, they are now the ground's own and drawn as they are (before: one and a half
+  times). `reliefExaggeration` (`terrain/look.ts`).
+- **Where the heights have no more to say.** Once one cell of the heights is wider than 32 pixels the relief
+  fades, to none at 160 pixels a cell (`reliefFade`): closer than that, shading would only spread one slope
+  across the screen. With the Earth's finer heights on (about 40 m) that is beyond any zoom in use; with the
+  bundled 10 km heights alone it fades between about 300 m and 60 m to a pixel; on a generated planet (20 km
+  cells) between about 600 m and 125 m. (Over photographs the relief already fades close in, D138.)
+- **Heights held exactly.** The heights' textures are whole floats where the graphics card can read them
+  smoothly (half floats hold a height above 2,048 m only to two metres and above 4,096 m to four: steps that
+  would show as terraces in slopes measured across 40 m cells in high mountains).
+- **Land cover by degrees.** A generated planet's land cover was one flat colour for each biome, with hard
+  edges between them. The colour now comes from the place's own warmth and moisture (`climateColour`,
+  `terrain/biomes.ts`): each biome's colour well inside it, blended across the borders over about 2.5 °C and
+  0.07 of moisture, so forest thins to grassland and tundra greys into ice as on the ground. Close in, the
+  cover's colours (the Earth's too) are blended smoothly between its cells, not in steps along them.
+- **Not done.** A generated planet's heights are themselves smooth below about three cells (60 km): close in
+  its mountains are broad and soft, because that is all its elevation holds. The next step is finer elevation
+  worked out for the place in view from the planet's own definition. Rivers on generated planets still follow
+  the cells in straight pieces.
+
 ### D193. Galaxies as painted pictures, drafted while working and baked
 
 - **Why.** A galaxy map drew its galaxy as 18,000 faint points (D116): a haze with no arms to speak of, and slow to
@@ -1799,6 +1838,8 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ### D146. Close in, coasts and the lie of the land bend below the grid's cells
 
+- **Withdrawn by D194** (21 November 2026): relief and coasts now come from the heights alone.
+
 - **Asked.** Enhance all the maps; detailed when zoomed in. Left undone by D141: a generated planet's coast
   close in ran from cell to cell of its heights (cells of about 20 km) in smooth scallops with corners, and
   made-up heights could not move it, since its shelves are steep.
@@ -1916,6 +1957,8 @@ Follows from D2. The test drives the real interface exactly as a person would.
   between at half; pixel for pixel as ever without heights or when not asked).
 
 ### D141. Fine ground close in: made up below the heights' own detail
+
+- **Withdrawn by D194** (21 November 2026): relief and coasts now come from the heights alone.
 
 - **Asked.** Enhance all the maps; detailed when zoomed in.
 - **Found.** Close in, every terrain look went soft where the heights ended: a planet's cells are about 20 km, the

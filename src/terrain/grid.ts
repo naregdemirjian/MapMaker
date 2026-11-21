@@ -109,6 +109,36 @@ export function heightAt(grid: ElevationGrid, lon: number, lat: number): number 
   return (top * (1 - ty) + bottom * ty) * grid.step;
 }
 
+/**
+ * The ground between the grid's cells (D194), as the terrain shader reads it close in: the smooth surface
+ * through the cells' own heights (a Catmull-Rom patch over the sixteen cells around the place). The height
+ * (metres; kept within the four nearest cells' heights, so a cliff raises no rim beside it) and its rise per
+ * cell eastward and southward. At a cell's centre the height is the cell's own; a plane is given back exactly;
+ * the slope has no break from one cell to the next.
+ */
+export function smoothHeightAt(grid: ElevationGrid, lon: number, lat: number): { height: number; east: number; south: number } {
+  const { width: w, height: h, data } = grid;
+  const fx = ((lon + 180) / 360) * w - 0.5, fy = ((90 - lat) / 180) * h - 0.5;
+  const x0 = Math.floor(fx), y0 = Math.floor(fy), tx = fx - x0, ty = fy - y0;
+  const weights = (f: number): [number[], number[]] => [
+    [(-f * f * f + 2 * f * f - f) / 2, (3 * f * f * f - 5 * f * f + 2) / 2, (-3 * f * f * f + 4 * f * f + f) / 2, (f * f * f - f * f) / 2],
+    [(-3 * f * f + 4 * f - 1) / 2, (9 * f * f - 10 * f) / 2, (-9 * f * f + 8 * f + 1) / 2, (3 * f * f - 2 * f) / 2],
+  ];
+  const [wx, dx] = weights(tx), [wy, dy] = weights(ty);
+  let height = 0, east = 0, south = 0, lo = Infinity, hi = -Infinity;
+  for (let b = 0; b < 4; b++) {
+    const row = Math.max(0, Math.min(h - 1, y0 - 1 + b)) * w;
+    let r = 0, rx = 0;
+    for (let a = 0; a < 4; a++) {
+      const v = data[row + ((((x0 - 1 + a) % w) + w) % w)];
+      r += wx[a] * v; rx += dx[a] * v;
+      if ((a === 1 || a === 2) && (b === 1 || b === 2)) { if (v < lo) lo = v; if (v > hi) hi = v; }
+    }
+    height += wy[b] * r; east += wy[b] * rx; south += dy[b] * r;
+  }
+  return { height: Math.max(lo, Math.min(hi, height)) * grid.step, east: east * grid.step, south: south * grid.step };
+}
+
 /** The name of Earth's grid's content (part of what a picture of it is kept by). */
 export const EARTH_TERRAIN_KEY = 'earth-4096';
 let earth: Promise<ElevationGrid> | null = null;

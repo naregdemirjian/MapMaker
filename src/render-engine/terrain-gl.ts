@@ -10,7 +10,7 @@
 // view or a picture for an export are all made the same way. One WebGL context serves every renderer;
 // each renderer keeps its last pictures (TerrainPictures).
 import type { ElevationGrid } from '../terrain/grid.ts';
-import { PALETTES, rampUniform, LIGHT, type TerrainLook } from '../terrain/look.ts';
+import { PALETTES, rampUniform, LIGHT, EXAGGERATION, type TerrainLook } from '../terrain/look.ts';
 import type { TerrainCover } from '../terrain/cover.ts';
 import type { DetailGrid } from '../terrain/detail.ts';
 import type { PhotoRegion } from '../terrain/photo.ts';
@@ -130,11 +130,11 @@ uniform sampler2D u_override;
 uniform int u_useOverride;
 uniform sampler2D u_cover;
 uniform int u_useCover;
+uniform vec2 u_coverTex;
 uniform sampler2D u_detail;
 uniform int u_useDetail;
 uniform vec4 u_detailBox;
 uniform vec2 u_detailTex;
-uniform int u_fine;
 uniform sampler2D u_world;
 uniform int u_useWorld;
 uniform sampler2D u_photo;
@@ -168,20 +168,52 @@ vec3 rampLand(float e) {
   return c;
 }
 
-// Smooth noise in space (−1 to 1) with its slope each way (after Inigo Quilez's value noise with derivatives).
-float hash3(vec3 p) {
-  p = fract(p * 0.3183099 + 0.1);
-  p *= 17.0;
-  return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+// The heights between the grid's cells: the smooth surface through the cells' own heights (a Catmull-Rom
+// patch over the sixteen cells around a place), and its slope: the height (kept within the four nearest
+// cells' heights, so a cliff raises no rim beside it), and the rise per cell eastward and southward. "round":
+// the grid goes round the planet (its columns wrap); a region's grid stops at its edges.
+vec3 smoothHeight(sampler2D tex, vec2 size, vec2 su, bool round) {
+  vec2 tc = su * size - 0.5;
+  vec2 i0 = floor(tc), f = tc - i0, f2 = f * f, f3 = f2 * f;
+  vec4 wx = 0.5 * vec4(-f3.x + 2.0 * f2.x - f.x, 3.0 * f3.x - 5.0 * f2.x + 2.0, -3.0 * f3.x + 4.0 * f2.x + f.x, f3.x - f2.x);
+  vec4 wy = 0.5 * vec4(-f3.y + 2.0 * f2.y - f.y, 3.0 * f3.y - 5.0 * f2.y + 2.0, -3.0 * f3.y + 4.0 * f2.y + f.y, f3.y - f2.y);
+  vec4 dx = 0.5 * vec4(-3.0 * f2.x + 4.0 * f.x - 1.0, 9.0 * f2.x - 10.0 * f.x, -9.0 * f2.x + 8.0 * f.x + 1.0, 3.0 * f2.x - 2.0 * f.x);
+  vec4 dy = 0.5 * vec4(-3.0 * f2.y + 4.0 * f.y - 1.0, 9.0 * f2.y - 10.0 * f.y, -9.0 * f2.y + 8.0 * f.y + 1.0, 3.0 * f2.y - 2.0 * f.y);
+  ivec2 n = ivec2(size), base = ivec2(i0) - 1;
+  float h = 0.0, hx = 0.0, hy = 0.0, lo = 1e9, hi = -1e9;
+  for (int b = 0; b < 4; b++) {
+    int y = clamp(base.y + b, 0, n.y - 1);
+    float r = 0.0, rx = 0.0;
+    for (int a = 0; a < 4; a++) {
+      int x = base.x + a;
+      x = round ? x - n.x * int(floor(float(x) / float(n.x))) : clamp(x, 0, n.x - 1);
+      float v = texelFetch(tex, ivec2(x, y), 0).r;
+      r += wx[a] * v; rx += dx[a] * v;
+      if ((a == 1 || a == 2) && (b == 1 || b == 2)) { lo = min(lo, v); hi = max(hi, v); }
+    }
+    h += wy[b] * r; hx += wy[b] * rx; hy += dy[b] * r;
+  }
+  return vec3(clamp(h, lo, hi), hx, hy);
 }
-vec4 noised(vec3 x) {
-  vec3 p = floor(x), w = fract(x);
-  vec3 u = w * w * w * (w * (w * 6.0 - 15.0) + 10.0), du = 30.0 * w * w * (w * (w - 2.0) + 1.0);
-  float a = hash3(p), b = hash3(p + vec3(1.0, 0.0, 0.0)), c = hash3(p + vec3(0.0, 1.0, 0.0)), d = hash3(p + vec3(1.0, 1.0, 0.0));
-  float e = hash3(p + vec3(0.0, 0.0, 1.0)), f = hash3(p + vec3(1.0, 0.0, 1.0)), g = hash3(p + vec3(0.0, 1.0, 1.0)), h = hash3(p + vec3(1.0));
-  float k0 = a, k1 = b - a, k2 = c - a, k3 = e - a, k4 = a - b - c + d, k5 = a - c - e + g, k6 = a - b - e + f, k7 = -a + b + c - d + e - f - g + h;
-  return vec4(-1.0 + 2.0 * (k0 + k1 * u.x + k2 * u.y + k3 * u.z + k4 * u.x * u.y + k5 * u.y * u.z + k6 * u.z * u.x + k7 * u.x * u.y * u.z),
-    2.0 * du * vec3(k1 + k4 * u.y + k6 * u.z + k7 * u.y * u.z, k2 + k5 * u.z + k4 * u.x + k7 * u.z * u.x, k3 + k6 * u.x + k5 * u.y + k7 * u.x * u.y));
+
+// The land cover between its cells, close in: its colours blended smoothly over the sixteen cells around a place
+// (a cubic B-spline), so that one kind of land gives way to the next in a soft curve, not in steps along the cells.
+vec3 smoothCover(vec2 uv) {
+  vec2 tc = uv * u_coverTex - 0.5;
+  vec2 i0 = floor(tc), f = tc - i0, f2 = f * f, f3 = f2 * f, g = 1.0 - f;
+  vec4 wx = vec4(g.x * g.x * g.x, 3.0 * f3.x - 6.0 * f2.x + 4.0, -3.0 * f3.x + 3.0 * f2.x + 3.0 * f.x + 1.0, f3.x) / 6.0;
+  vec4 wy = vec4(g.y * g.y * g.y, 3.0 * f3.y - 6.0 * f2.y + 4.0, -3.0 * f3.y + 3.0 * f2.y + 3.0 * f.y + 1.0, f3.y) / 6.0;
+  ivec2 n = ivec2(u_coverTex), base = ivec2(i0) - 1;
+  vec3 c = vec3(0.0);
+  for (int b = 0; b < 4; b++) {
+    int y = clamp(base.y + b, 0, n.y - 1);
+    for (int a = 0; a < 4; a++) {
+      int x = base.x + a;
+      x -= n.x * int(floor(float(x) / float(n.x)));
+      c += wx[a] * wy[b] * texelFetch(u_cover, ivec2(x, y), 0).rgb;
+    }
+  }
+  return c;
 }
 
 void main() {
@@ -209,47 +241,40 @@ void main() {
   bool inP = u_usePhoto == 1 && all(greaterThan(uvP, vec2(0.0))) && all(lessThan(uvP, vec2(1.0)));
   vec2 su = inD ? uvD : uv, sgx = inD ? gxD : gx, sgy = inD ? gyD : gy;
   const float R = 6371008.8;
-  // Metres to a pixel, and to a cell of the grid read here.
+  // Metres to a pixel.
   float mpp = (abs(gx.y) + abs(gy.y)) * PI * R;
-  float cell = (inD ? u_detailBox.w / max(u_detailTex.y, 1.0) : PI / u_tex.y) * R;
-  // Close in, below the grid's cells (D146): the place the heights are read at wanders by smooth noise, so that
-  // coasts and the lie of the land bend as real ones do instead of running straight from cell to cell: waves
-  // two cells long moving it by up to three tenths of a cell, then each half as long and half as far, down to
-  // waves of a few pixels (the finest fading in as the view comes closer). Laid out in space on the planet's
-  // surface (the same at every visit); it fades in as a cell grows from four to twelve pixels, so views from
-  // afar are as before.
-  float bend = u_fine == 1 && ok ? smoothstep(4.0, 12.0, cell / max(mpp, 1e-6)) : 0.0;
-  if (bend > 0.0) {
-    float lonB = ll.x + u_lonRef;
-    vec3 PB = vec3(cos(lat) * cos(lonB), cos(lat) * sin(lonB), sin(lat));
-    vec2 shift = vec2(0.0);
-    float lamB = 4.0 * cell, amp = 0.3;
-    for (int o = 0; o < 9; o++) {
-      lamB *= 0.5;
-      if (lamB < 3.0 * mpp) break;
-      vec3 q = PB * (R / lamB);
-      shift += amp * smoothstep(3.0 * mpp, 6.0 * mpp, lamB) * vec2(noised(q + 31.7).x, noised(q + 71.3).x);
-      amp *= 0.5;
-    }
-    su += bend * shift / (inD ? u_detailTex : u_tex);
-  }
   // What one pixel covers of the grid (at least a cell): slopes are measured across that much. (A
   // grid's width and height are angles: the whole planet's, or the region's.)
   vec2 span = inD ? u_detailBox.zw : vec2(2.0 * PI, PI);
   vec2 foot = max(abs(sgx) + abs(sgy), 1.0 / (inD ? u_detailTex : u_tex));
-  float e, eW, eE, eN, eS;
-  if (inD) {
-    e = textureGrad(u_detail, su, sgx, sgy).r;
-    eW = textureGrad(u_detail, su - vec2(foot.x, 0.0), sgx, sgy).r;
-    eE = textureGrad(u_detail, su + vec2(foot.x, 0.0), sgx, sgy).r;
-    eN = textureGrad(u_detail, su - vec2(0.0, foot.y), sgx, sgy).r;
-    eS = textureGrad(u_detail, su + vec2(0.0, foot.y), sgx, sgy).r;
-  } else {
-    e = textureGrad(u_elev, su, sgx, sgy).r;
-    eW = textureGrad(u_elev, su - vec2(foot.x, 0.0), sgx, sgy).r;
-    eE = textureGrad(u_elev, su + vec2(foot.x, 0.0), sgx, sgy).r;
-    eN = textureGrad(u_elev, su - vec2(0.0, foot.y), sgx, sgy).r;
-    eS = textureGrad(u_elev, su + vec2(0.0, foot.y), sgx, sgy).r;
+  // The height, and how fast it rises eastward and southward (metres across the whole grid). Seen from afar a
+  // pixel covers many cells: their mean (the texture's smaller copies), slopes measured across what the pixel
+  // covers. Close in (D194), where a cell is wider than a pixel, the smooth surface through the cells' own heights
+  // and its exact slope: nothing is added to the heights, and nothing runs straight from cell to cell.
+  vec2 texN = inD ? u_detailTex : u_tex;
+  vec2 cellsPerPx = (abs(sgx) + abs(sgy)) * texN;
+  float closeIn = 1.0 - smoothstep(0.5, 1.0, max(cellsPerPx.x, cellsPerPx.y));
+  float e = 0.0, dEdu = 0.0, dEdv = 0.0;
+  if (closeIn < 1.0) {
+    float eW, eE, eN, eS;
+    if (inD) {
+      e = textureGrad(u_detail, su, sgx, sgy).r;
+      eW = textureGrad(u_detail, su - vec2(foot.x, 0.0), sgx, sgy).r;
+      eE = textureGrad(u_detail, su + vec2(foot.x, 0.0), sgx, sgy).r;
+      eN = textureGrad(u_detail, su - vec2(0.0, foot.y), sgx, sgy).r;
+      eS = textureGrad(u_detail, su + vec2(0.0, foot.y), sgx, sgy).r;
+    } else {
+      e = textureGrad(u_elev, su, sgx, sgy).r;
+      eW = textureGrad(u_elev, su - vec2(foot.x, 0.0), sgx, sgy).r;
+      eE = textureGrad(u_elev, su + vec2(foot.x, 0.0), sgx, sgy).r;
+      eN = textureGrad(u_elev, su - vec2(0.0, foot.y), sgx, sgy).r;
+      eS = textureGrad(u_elev, su + vec2(0.0, foot.y), sgx, sgy).r;
+    }
+    dEdu = (eE - eW) / (2.0 * foot.x); dEdv = (eS - eN) / (2.0 * foot.y);
+  }
+  if (closeIn > 0.0) {
+    vec3 sm = inD ? smoothHeight(u_detail, u_detailTex, su, false) : smoothHeight(u_elev, u_tex, su, true);
+    e = mix(e, sm.x, closeIn); dEdu = mix(dEdu, sm.y * texN.x, closeIn); dEdv = mix(dEdv, sm.z * texN.y, closeIn);
   }
   // Height above the sea of the moment: where a coastline is drawn, never below 0.5 m on its land
   // and never above -0.5 m off it (see heightAboveSea in terrain/sea-level.ts).
@@ -286,45 +311,23 @@ void main() {
   // changes from pixel to pixel is worked out from the slope of the terrain, not from neighbouring
   // pixels: that would depend on where the picture starts, and a kept picture with room around the
   // view must be the picture drawn afresh.)
-  float dEdu = (eE - eW) / (2.0 * foot.x), dEdv = (eS - eN) / (2.0 * foot.y);
   float perPixel = abs(dEdu * sgx.x + dEdv * sgx.y) + abs(dEdu * sgy.x + dEdv * sgy.y);
   float landA = closeA >= 0.0 ? closeA : clamp(rel / max(perPixel, 1e-3) + 0.5, 0.0, 1.0);
   if (!ok) { outColor = vec4(0.0); return; }
   if (u_mode == 4) { outColor = vec4(landA); return; }
   if (u_mode == 5) { outColor = vec4(over); return; }
-  float dxm = 2.0 * foot.x * span.x * R * max(cos(lat), 0.05);
+  // The ground's own slope: its rise per metre eastward and northward.
+  float slopeE = dEdu / (span.x * R * max(cos(lat), 0.05)), slopeN = -dEdv / (span.y * R);
+  // Seen from farther away, slopes are measured over longer distances and come out gentler: the relief is
+  // exaggerated more, so mountains read at every zoom. Close in the slopes are the ground's own, drawn as
+  // they are (D194: no exaggeration once they are measured across about half a kilometre or less).
   float dym = 2.0 * foot.y * span.y * R;
-  // Seen from farther away, slopes are measured over longer distances and come out gentler: the
-  // relief is exaggerated more, so it reads the same at every zoom. Close in on finer heights (D101)
-  // the slopes are nearer their true steepness and are exaggerated less.
-  float exag = u_exag * max(0.25, sqrt(dym / 20000.0));
-  // Finer than the heights (D141): below the grid's own cells the ground is made up, wave upon wave each half
-  // the size of the last, from the cells' size down to two pixels (the finest fading in as the view comes
-  // closer): slopes of its own, steeper where the land itself is steep and all but flat on plains and under
-  // the sea, and a faint mottling. Laid out in space, on the planet's surface: no seam, the same at every visit.
-  vec2 fineSlope = vec2(0.0);
-  float mottle = 0.0;
-  if (u_fine == 1 && ok && 4.0 * mpp < cell) {
-    float lon = ll.x + u_lonRef;
-    vec3 P = vec3(cos(lat) * cos(lon), cos(lat) * sin(lon), sin(lat));
-    vec3 E = vec3(-sin(lon), cos(lon), 0.0), N = vec3(-sin(lat) * cos(lon), -sin(lat) * sin(lon), cos(lat));
-    float steep = length(vec2((eE - eW) / dxm, (eN - eS) / dym));
-    float rough = clamp(steep * 4.0, 0.04, 1.0) * (rel < 0.0 ? 0.06 : 1.0);
-    float ridged = smoothstep(0.08, 0.5, rough);
-    float lam = cell;
-    for (int o = 0; o < 10; o++) {
-      lam *= 0.5;
-      if (lam < 2.0 * mpp) break;
-      vec4 nz = noised(P * (R / lam) + float(o) * 17.3);
-      float w = smoothstep(2.0 * mpp, 4.0 * mpp, lam);
-      // (In steep country the waves are folded into ridges and valleys, as water cuts them; rolling elsewhere.)
-      vec3 slope = mix(nz.yzw, -sign(nz.x) * nz.yzw * 1.6, ridged);
-      fineSlope += w * 0.11 * rough * vec2(dot(slope, E), dot(slope, N));
-      mottle += w * mix(nz.x, 1.0 - 2.0 * abs(nz.x), ridged) * (o < 2 ? 0.5 : 0.3);
-    }
-  }
-  vec3 n = normalize(vec3((-(eE - eW) / dxm - fineSlope.x) * exag, (-(eN - eS) / dym - fineSlope.y) * exag, 1.0));
+  float exag = u_exag * max(1.0 / 6.0, sqrt(dym / 20000.0));
+  vec3 n = normalize(vec3(-slopeE * exag, -slopeN * exag, 1.0));
   float shade = dot(n, u_light) - u_light.z;
+  // Closer than the heights have anything to say (D194), where one cell of them is many pixels wide, the relief
+  // fades away: from 32 pixels to a cell, to none at 160.
+  shade *= 1.0 - smoothstep(32.0, 160.0, 1.0 / max(cellsPerPx.y, 1e-6));
   if (rel < 0.0) shade *= u_seaRelief;
   if (u_mode == 3) {
     float d = shade * 1.5;
@@ -333,10 +336,14 @@ void main() {
     return;
   }
   // The land's colour: from its land cover in the satellite look (D100), else by its height.
-  vec3 land = u_useCover == 1 && u_mode != 0 ? textureGrad(u_cover, uv, gx, gy).rgb : rampLand(max(rel, 0.0));
+  vec3 land = rampLand(max(rel, 0.0));
+  if (u_useCover == 1 && u_mode != 0) {
+    vec2 coverPerPx = (abs(gx) + abs(gy)) * u_coverTex;
+    float coverClose = 1.0 - smoothstep(0.5, 1.0, max(coverPerPx.x, coverPerPx.y));
+    land = coverClose < 1.0 ? textureGrad(u_cover, uv, gx, gy).rgb : vec3(0.0);
+    if (coverClose > 0.0) land = mix(land, smoothCover(uv), coverClose);
+  }
   vec3 col = u_mode == 1 ? land : u_mode == 0 ? rampSea(min(rel, 0.0)) : mix(rampSea(min(rel, 0.0)), land, landA);
-  // (The made-up ground's mottling, D141: the land a little lighter and darker in patches, the sea hardly.)
-  col *= 1.0 + clamp(mottle, -1.5, 1.5) * (u_mode == 0 ? 0.012 : mix(0.012, 0.04, u_mode == 1 ? 1.0 : landA));
   // The Earth as photographed (D138): the picture of the whole planet, and over it the photographs of the
   // region in view where they are in (fading in over their picture's edge). Land and sea alike are the
   // photograph's wherever the terrain is today's: not where the sea of the moment has taken land or left it
@@ -362,17 +369,17 @@ void main() {
   outColor = vec4(col, 1.0);
 }`;
 
-const UNIFORMS = ['u_elev', 'u_tex', 'u_size', 'u_offset', 'u_inv', 'u_S', 'u_origin', 'u_lonRef', 'u_proj', 'u_mode', 'u_shadeTint', 'u_exag', 'u_seaRelief', 'u_light', 'u_sea', 'u_seaN', 'u_land', 'u_landN', 'u_seaLevel', 'u_mask', 'u_useMask', 'u_closeCoast', 'u_override', 'u_useOverride', 'u_cover', 'u_useCover', 'u_detail', 'u_useDetail', 'u_detailBox', 'u_detailTex', 'u_world', 'u_useWorld', 'u_photo', 'u_usePhoto', 'u_photoBox', 'u_fine'] as const;
+const UNIFORMS = ['u_elev', 'u_tex', 'u_size', 'u_offset', 'u_inv', 'u_S', 'u_origin', 'u_lonRef', 'u_proj', 'u_mode', 'u_shadeTint', 'u_exag', 'u_seaRelief', 'u_light', 'u_sea', 'u_seaN', 'u_land', 'u_landN', 'u_seaLevel', 'u_mask', 'u_useMask', 'u_closeCoast', 'u_override', 'u_useOverride', 'u_cover', 'u_useCover', 'u_coverTex', 'u_detail', 'u_useDetail', 'u_detailBox', 'u_detailTex', 'u_world', 'u_useWorld', 'u_photo', 'u_usePhoto', 'u_photoBox'] as const;
 type UniformName = (typeof UNIFORMS)[number];
 
-/** The relief's exaggeration at strength 1 (slopes ten kilometres across are gentle). */
-const EXAGGERATION = 6;
 
 class TerrainGL {
   private textures = new WeakMap<ElevationGrid, WebGLTexture>();
   private maskTexture: WebGLTexture | null = null;
   private overrides = new WeakMap<Uint8Array, WebGLTexture>();
   private covers = new WeakMap<object, WebGLTexture>();
+  /** How many cells each cover's texture has (after any halving). */
+  private coverSizes = new WeakMap<object, [number, number]>();
   /** The finer grids' textures (D101), the last few: let go explicitly as the view moves on. */
   private details: Array<{ grid: DetailGrid; tex: WebGLTexture }> = [];
   /** The Earth as photographed (D138): the whole planet's picture, and the last few regions' (let go as the view moves on). */
@@ -382,11 +389,13 @@ class TerrainGL {
   readonly canvas: OffscreenCanvas;
   readonly gl: WebGL2RenderingContext;
   readonly max: number;
+  private readonly exact: boolean;
 
   private constructor(canvas: OffscreenCanvas, gl: WebGL2RenderingContext, program: WebGLProgram) {
     this.canvas = canvas;
     this.gl = gl;
     this.u = Object.fromEntries(UNIFORMS.map((n) => [n, gl.getUniformLocation(program, n)])) as Record<UniformName, WebGLUniformLocation | null>;
+    this.exact = !!gl.getExtension('OES_texture_float_linear');
     this.max = Math.min(gl.getParameter(gl.MAX_TEXTURE_SIZE) as number, (gl.getParameter(gl.MAX_VIEWPORT_DIMS) as Int32Array)[0], (gl.getParameter(gl.MAX_RENDERBUFFER_SIZE) as number));
   }
 
@@ -430,7 +439,11 @@ class TerrainGL {
     return tex;
   }
 
-  /** The grid as a texture: heights in metres (half floats), with copies halved again and again for zoomed-out views. */
+  /**
+   * The grid as a texture: heights in metres, with copies halved again and again for zoomed-out views. Whole
+   * floats where the graphics card can read them smoothly (D194: half floats hold a height above 2,048 m only to
+   * two metres, above 4,096 m to four: steps that show as terraces in slopes measured close in), else half floats.
+   */
   private texture(grid: ElevationGrid, keep = true): WebGLTexture {
     let t = this.textures.get(grid);
     if (t) return t;
@@ -451,7 +464,7 @@ class TerrainGL {
     while (w > this.max || h > this.max) halve();
     let lv = 0;
     for (;;) {
-      gl.texImage2D(gl.TEXTURE_2D, lv, gl.R16F, w, h, 0, gl.RED, gl.FLOAT, level);
+      gl.texImage2D(gl.TEXTURE_2D, lv, this.exact ? gl.R32F : gl.R16F, w, h, 0, gl.RED, gl.FLOAT, level);
       if (w === 1 && h === 1) break;
       halve();
       lv++;
@@ -538,6 +551,7 @@ class TerrainGL {
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       this.covers.set(c.pixels, t);
+      this.coverSizes.set(c.pixels, [w, h]);
     } else gl.bindTexture(gl.TEXTURE_2D, t);
     gl.activeTexture(gl.TEXTURE0);
   }
@@ -638,12 +652,13 @@ class TerrainGL {
     gl.uniform1i(u.u_useOverride, over ? 1 : 0);
     gl.uniform1i(u.u_cover, 3);
     gl.uniform1i(u.u_useCover, cover ? 1 : 0);
+    const coverSize = cover ? this.coverSizes.get(cover.pixels) ?? [cover.width, cover.height] : [1, 1];
+    gl.uniform2f(u.u_coverTex, coverSize[0], coverSize[1]);
     const rad = Math.PI / 180;
     gl.uniform1i(u.u_detail, 4);
     gl.uniform1i(u.u_useDetail, detail ? 1 : 0);
     gl.uniform4f(u.u_detailBox, detail ? detail.west * rad : 0, detail ? detail.north * rad : 0, detail ? detail.width * detail.dLon * rad : 1, detail ? detail.height * detail.dLat * rad : 1);
     gl.uniform2f(u.u_detailTex, detail ? Math.min(detail.width, this.max) : 1, detail ? Math.min(detail.height, this.max) : 1);
-    gl.uniform1i(u.u_fine, look.fine ? 1 : 0);
     gl.uniform1i(u.u_world, 5);
     gl.uniform1i(u.u_useWorld, world ? 1 : 0);
     gl.uniform1i(u.u_photo, 6);

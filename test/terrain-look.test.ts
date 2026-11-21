@@ -7,7 +7,8 @@ import { World } from '../src/world-model/world.ts';
 import * as cmd from '../src/domain/commands.ts';
 import { invertDiffs } from '../src/world-model/schema.ts';
 import { terrainLook, terrainSourceOf, worldSettings } from '../src/world-model/world-settings.ts';
-import { terrainLookOf, rampAt, rampUniform, invertPlane, slopeShade, PALETTES, DEFAULT_TERRAIN_LOOK, LIGHT } from '../src/terrain/look.ts';
+import { terrainLookOf, rampAt, rampUniform, invertPlane, slopeShade, reliefExaggeration, reliefFade, PALETTES, DEFAULT_TERRAIN_LOOK, LIGHT } from '../src/terrain/look.ts';
+import { smoothHeightAt, heightAt, type ElevationGrid } from '../src/terrain/grid.ts';
 import { PASS_DEFS } from '../src/presentation/export-driver.ts';
 import { ALL_PASSES } from '../src/render-engine/map-renderer.ts';
 
@@ -107,4 +108,63 @@ test('exports: terrain colours belong to the background pass, drawn between the 
   assert.deepEqual(bg.passes, ['background', 'terrain', 'graticule']);
   assert.deepEqual(all.passes, ALL_PASSES);
   assert.ok(ALL_PASSES.indexOf('terrain') > ALL_PASSES.indexOf('background') && ALL_PASSES.indexOf('terrain') < ALL_PASSES.indexOf('land'));
+});
+
+test('relief from the heights alone (D194): the smooth ground between cells, its exact slope, no rim at a cliff', () => {
+  const w = 72, h = 36, cell = 360 / w;
+  const grid = (f: (lon: number, lat: number) => number): ElevationGrid => {
+    const data = new Int16Array(w * h);
+    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) data[j * w + i] = Math.round(f(-180 + (i + 0.5) * cell, 90 - (j + 0.5) * cell));
+    return { width: w, height: h, step: 1, data };
+  };
+  // At a cell's centre: the cell's own height. A plain: flat, no slope anywhere.
+  const hills = grid((lon, lat) => 1500 + 900 * Math.sin((lon * Math.PI) / 40) * Math.cos((lat * Math.PI) / 30));
+  for (const [i, j] of [[10, 12], [40, 20], [71, 5]]) assert.equal(smoothHeightAt(hills, -180 + (i + 0.5) * cell, 90 - (j + 0.5) * cell).height, hills.data[j * w + i]);
+  const plain = grid(() => 300);
+  for (const [lon, lat] of [[3.3, 41.7], [-120.1, -33.2], [179.9, 10]]) { const s = smoothHeightAt(plain, lon, lat); assert.ok(s.height === 300 && Math.abs(s.east) < 1e-9 && Math.abs(s.south) < 1e-9, JSON.stringify(s)); }
+  // A slope the same everywhere is given back exactly: its height at any place, and its rise per cell.
+  const ramp = grid((lon, lat) => 2000 + 40 * lat);
+  for (const [lon, lat] of [[1.2, 12.3], [77.7, -41.9], [-30.1, 3.14]]) {
+    const s = smoothHeightAt(ramp, lon, lat);
+    assert.ok(Math.abs(s.height - (2000 + 40 * lat)) < 1e-6 && Math.abs(s.south + 40 * cell) < 1e-9 && Math.abs(s.east) < 1e-9, `${JSON.stringify(s)} at ${lon}, ${lat}`);
+  }
+  // The slope has no break from one cell to the next (the straight-line reading has: a crease along every cell).
+  const edge = -180 + 20 * cell + cell / 2;
+  const before = smoothHeightAt(hills, edge - 1e-7, 22.2), after = smoothHeightAt(hills, edge + 1e-7, 22.2);
+  assert.ok(Math.abs(before.east - after.east) < 1e-3 && Math.abs(before.south - after.south) < 1e-3, `no crease (${before.east} and ${after.east})`);
+  const crease = (heightAt(hills, edge, 22.2) - heightAt(hills, edge - 0.5, 22.2)) - (heightAt(hills, edge + 0.5, 22.2) - heightAt(hills, edge, 22.2));
+  assert.ok(Math.abs(crease) > 1, `the straight-line reading turns a corner there (${crease.toFixed(1)} m)`);
+  // Between cells it follows the land itself more closely than straight lines do.
+  let smoothErr = 0, straightErr = 0;
+  for (let k = 0; k < 400; k++) {
+    const lon = -170 + ((k * 37.7) % 340), lat = -60 + ((k * 13.3) % 120), real = 1500 + 900 * Math.sin((lon * Math.PI) / 40) * Math.cos((lat * Math.PI) / 30);
+    smoothErr += Math.abs(smoothHeightAt(hills, lon, lat).height - real); straightErr += Math.abs(heightAt(hills, lon, lat) - real);
+  }
+  assert.ok(smoothErr < straightErr * 0.35, `closer to the land than straight lines (${(smoothErr / 400).toFixed(1)} m against ${(straightErr / 400).toFixed(1)} m)`);
+  // A cliff: nothing rises above the plateau or dips below the sea beside it.
+  const cliff = grid((lon) => (lon > 0 ? 800 : -200));
+  for (let lon = -12; lon <= 12; lon += 0.37) { const v = smoothHeightAt(cliff, lon, 7.7).height; assert.ok(v >= -200 && v <= 800, `${v} at ${lon}`); }
+  // Round the planet: the 180th meridian is no edge.
+  const round = smoothHeightAt(hills, 179.999, 12), round2 = smoothHeightAt(hills, -179.999, 12);
+  assert.ok(Math.abs(round.height - round2.height) < 0.5 && Math.abs(round.east - round2.east) < 0.5);
+});
+
+test('relief as it is drawn (D194): the ground\'s own slopes close in, more from afar, none closer than the heights speak', () => {
+  // Measured across half a kilometre or less: the ground's own slope, as it is.
+  assert.equal(reliefExaggeration(1, 76), 1);
+  assert.equal(reliefExaggeration(1, 500), 1);
+  assert.equal(reliefExaggeration(2, 300), 2);
+  // Across the bundled heights' two cells (about 20 km): six times; across 80 km, twelve.
+  assert.ok(Math.abs(reliefExaggeration(1, 20000) - 6) < 1e-9 && Math.abs(reliefExaggeration(1, 80000) - 12) < 1e-9);
+  assert.ok(reliefExaggeration(1, 5000) > reliefExaggeration(1, 2000));
+  // All of it while a cell is up to 32 pixels wide, fading to none at 160.
+  assert.equal(reliefFade(1), 1); assert.equal(reliefFade(32), 1); assert.equal(reliefFade(160), 0); assert.equal(reliefFade(4000), 0);
+  assert.ok(reliefFade(64) > reliefFade(96) && reliefFade(96) > reliefFade(128) && Math.abs(reliefFade(96) - 0.5) < 1e-9);
+  // A 30° mountainside close in is shaded by its true slope: darker facing away from the light, lighter facing it.
+  const away = slopeShade(-0.577, 0.577, reliefExaggeration(1, 100)), toward = slopeShade(0.577, -0.577, reliefExaggeration(1, 100));
+  assert.ok(away < -0.3 && toward > 0.15, `${away}, ${toward}`);
+  // A plain's slope of a metre in a kilometre: nothing to see.
+  assert.ok(Math.abs(slopeShade(0.001, 0, reliefExaggeration(1, 100))) < 0.002);
+  // The option to make ground up is gone: a look kept with it reads as any other.
+  assert.equal('fine' in terrainLookOf({ ...DEFAULT_TERRAIN_LOOK, fine: true } as never)!, false);
 });

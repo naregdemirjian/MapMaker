@@ -28,7 +28,7 @@ for (const def of REGION_MAPS) {
     const made = buildRegionMap(def, data, (fn) => fn(world, engine).result)!;
     const space = world.get('map_space', made.spaceId)!;
     const look = terrainLook(space)!;
-    assert.ok(look.photo && look.detail && look.fine && look.palette === 'satellite', 'the Earth as photographed, at its finest');
+    assert.ok(look.photo && look.detail && look.palette === 'satellite', 'the Earth as photographed, at its finest');
     const owner = (lon: number, lat: number) => { const v = engine.valueAtPoint(made.spaceId, made.layerId, lonLatToVec(lon, lat), gregorian.fromCivil({ year: 2026 })); return v ? world.get('entity', v)!.name : null; };
     const cities = new Set(world.all('entity').filter((e) => e.type_id === 'settlement').map((e) => e.name));
     if (def.id === 'armenia') {

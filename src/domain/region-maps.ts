@@ -78,7 +78,7 @@ export function buildRegionMap(def: RegionMap, data: RegionData, exec: <T>(fn: (
   let layerId = '';
   exec((w) => {
     layerId = w.all('layer').find((l) => l.space_id === spaceId && l.kind === 'partition')!.id;
-    return cmd.setWorldTerrain(w, spaceId, { palette: 'satellite', colours: true, relief: true, overTerritories: false, seaFloor: true, strength: 1.15, detail: true, photo: true, fine: true });
+    return cmd.setWorldTerrain(w, spaceId, { palette: 'satellite', colours: true, relief: true, overTerritories: false, seaFloor: true, strength: 1.15, detail: true, photo: true });
   });
   exec((w) => cmd.setLayerLook(w, layerId, { fillOpacity: def.fillOpacity, borderWidth: def.borderWidth }));
   exec((w) => cmd.setLayerClipToLand(w, layerId, true));

@@ -812,44 +812,70 @@ try {
     assert.equal(r.sea, 0, 'none of it over the sea');
   });
 
-  await h.step('Close in, a coast the terrain decides bends below the grid\'s cells: within half a cell of where the heights put it, the same every time; straight as the heights have it with the fine ground off or from afar (D146)', async () => {
+  await h.step('Relief from the heights alone (D194): a plain flat to the pixel close in; a hill shaded smoothly with no crease along the cells; a straight coast straight, a round island\'s coast where the heights put it; the same every time; relief gone where one cell fills the view', async () => {
     const W = 900, H = 600;
     const r = await page.evaluate(({ W, H }) => {
       const m = (window as any).__mapmaker, s = m.store, B = m.bench;
-      // Heights with cells a quarter of a degree wide: land east of 17.5 °W, sea west of it. A straight coast.
-      const gw = 1440, gh = 720, data = new Int16Array(gw * gh);
-      for (let j = 0; j < gh; j++) for (let i = 0; i < gw; i++) data[j * gw + i] = -180 + (i + 0.5) * 0.25 > -17.5 ? 400 : -400;
-      const grid = { width: gw, height: gh, step: 1, data };
-      const look = (fine: boolean) => ({ colours: true, relief: true, overTerritories: false, seaFloor: true, strength: 1, palette: 'natural', detail: false, photo: false, fine });
-      // Where the coast is in each row of the picture: the first pixel from the west that is land (greener than blue).
-      const coast = (zoom: number, fine: boolean) => {
-        const view = B.makeView({ lon: -17.5, lat: -15, zoom, rotation: 0, projection: 'equirectangular' }, W, H);
+      // Heights with cells a quarter of a degree wide.
+      const gw = 1440, gh = 720;
+      const make = (f: (lon: number, lat: number) => number) => {
+        const data = new Int16Array(gw * gh);
+        for (let j = 0; j < gh; j++) for (let i = 0; i < gw; i++) data[j * gw + i] = Math.round(f(-180 + (i + 0.5) * 0.25, 90 - (j + 0.5) * 0.25));
+        return { width: gw, height: gh, step: 1, data };
+      };
+      const far = (lon: number, lat: number) => Math.hypot((lon - 20) * Math.cos((10 * Math.PI) / 180), lat - 10);
+      const plain = make(() => 300), hill = make((lon, lat) => 200 + 1500 * Math.exp(-(far(lon, lat) ** 2) / (2 * 0.6 * 0.6)));
+      const straight = make((lon) => (lon > 20 ? 400 : -400)), island = make((lon, lat) => 700 * (1.6 - far(lon, lat)));
+      const draw = (grid: unknown, key: string, zoom: number, relief = true) => {
+        const view = B.makeView({ lon: 20, lat: 10, zoom, rotation: 0, projection: 'equirectangular' }, W, H);
         const c = new OffscreenCanvas(W, H).getContext('2d', { willReadFrequently: true }) as OffscreenCanvasRenderingContext2D;
-        new B.MapRenderer().render(c, view, s.world, s.engine, s.spaceId, B.gregorian.fromCivil({ year: 1990 }), { passes: new Set(['background', 'terrain']), transparent: false, layerIds: [], basemap: null, show: { rivers: false }, terrain: { grid, key: 'test-coast', look: look(fine), seaLevel: 0 } });
-        const d = c.getImageData(0, 0, W, H).data;
-        const xs: number[] = [];
-        for (let y = 20; y < H - 20; y += 2) { let x = 0; while (x < W && !(d[(y * W + x) * 4 + 1] > d[(y * W + x) * 4 + 2])) x++; xs.push(x); }
-        const cell = Math.abs(view.projection([-17.25, -15])![0] - view.projection([-17.5, -15])![0]);
-        const mean = xs.reduce((a, b) => a + b, 0) / xs.length;
-        return { xs, cell, mean, spread: Math.max(...xs) - Math.min(...xs), off: Math.max(...xs.map((x) => Math.abs(x - W / 2))) };
+        const look = { colours: true, relief, overTerritories: false, seaFloor: true, strength: 1, palette: 'natural', detail: false, photo: false };
+        new B.MapRenderer().render(c, view, s.world, s.engine, s.spaceId, B.gregorian.fromCivil({ year: 1990 }), { passes: new Set(['background', 'terrain']), transparent: false, layerIds: [], basemap: null, show: { rivers: false }, terrain: { grid, key, look, seaLevel: 0 } });
+        const cell = Math.abs(view.projection([20.25, 10])![0] - view.projection([20, 10])![0]);
+        return { d: c.getImageData(0, 0, W, H).data, cell, view };
       };
-      const plain = coast(6.5, false), bent = coast(6.5, true), again = coast(6.5, true), far = coast(2, true), farPlain = coast(2, false);
-      return {
-        cell: Math.round(plain.cell), plainSpread: plain.spread, plainOff: plain.off,
-        bentSpread: bent.spread, bentOff: bent.off, bentMean: Math.round(Math.abs(bent.mean - W / 2)),
-        same: bent.xs.every((x, i) => x === again.xs[i]), turns: (() => { let n = 0, way = 0; for (let i = 1; i < bent.xs.length; i++) { const d = Math.sign(bent.xs[i] - bent.xs[i - 1]); if (d && way && d !== way) n++; if (d) way = d; } return n; })(),
-        farCell: far.cell, farSame: far.xs.every((x, i) => x === farPlain.xs[i]),
-      };
+      const light = (d: Uint8ClampedArray, x: number, y: number) => d[(y * W + x) * 4] + d[(y * W + x) * 4 + 1] + d[(y * W + x) * 4 + 2];
+      // 1. A plain close in: one colour (but for the map's own thin lines).
+      const p = draw(plain, 'd194-plain', 6.5);
+      const counts = new Map<number, number>();
+      for (let y = 0; y < H; y += 3) for (let x = 0; x < W; x += 3) { const v = light(p.d, x, y); counts.set(v, (counts.get(v) ?? 0) + 1); }
+      const most = Math.max(...counts.values()), all = [...counts.values()].reduce((a, b) => a + b, 0);
+      // 2. A hill between cells: shaded, and smoothly: no jump in lightness from a pixel to the next along a row or a column through it.
+      const hl = draw(hill, 'd194-hill', 6.5);
+      let jump = 0, lo = Infinity, hi = -Infinity;
+      for (const y of [H / 2 - 37, H / 2 + 11, H / 2 + 53]) for (let x = 40; x < W - 41; x++) { const a = light(hl.d, x, y), b = light(hl.d, x + 1, y); jump = Math.max(jump, Math.abs(a - b)); lo = Math.min(lo, a); hi = Math.max(hi, a); }
+      for (const x of [W / 2 - 61, W / 2 + 29]) for (let y = 40; y < H - 41; y++) jump = Math.max(jump, Math.abs(light(hl.d, x, y) - light(hl.d, x, y + 1)));
+      const again = draw(hill, 'd194-hill', 6.5);
+      let same = true;
+      for (let k = 0; k < hl.d.length; k += 97) if (hl.d[k] !== again.d[k]) { same = false; break; }
+      // 3. A straight coast along a line between cells: straight, and where the heights put it.
+      const st = draw(straight, 'd194-straight', 6.5);
+      const coastOf = (d: Uint8ClampedArray, y: number) => { let x = 0; while (x < W && !(d[(y * W + x) * 4 + 1] > d[(y * W + x) * 4 + 2])) x++; return x; };
+      const xs: number[] = [];
+      for (let y = 20; y < H - 20; y += 2) xs.push(coastOf(st.d, y));
+      // 4. A round island (its heights falling evenly to the sea): its west coast on the circle the heights put it on.
+      const is = draw(island, 'd194-island', 6.5);
+      const perDeg = is.cell / 0.25;
+      let off = 0;
+      for (let y = Math.round(H / 2 - 1.2 * perDeg); y <= H / 2 + 1.2 * perDeg; y += 3) {
+        const dy = (y - H / 2) / perDeg, want = W / 2 - (Math.sqrt(1.6 * 1.6 - dy * dy) / Math.cos((10 * Math.PI) / 180)) * perDeg;
+        off = Math.max(off, Math.abs(coastOf(is.d, y) - want));
+      }
+      // 5. Closer than the heights have anything to say, the relief is gone: the same picture with relief and without.
+      const differ = (zoom: number) => { const a = draw(hill, 'd194-hill', zoom, true), b = draw(hill, 'd194-hill', zoom, false); let n = 0, sum = 0; for (let y = 30; y < H - 30; y += 5) for (let x = 30; x < W - 30; x += 5) { sum += Math.abs(light(a.d, x, y) - light(b.d, x, y)); n++; } return { mean: sum / n, cell: a.cell }; };
+      const near = differ(5), closest = differ(9.3);
+      return { cell: Math.round(p.cell), flat: most / all, jump, range: hi - lo, same, spread: Math.max(...xs) - Math.min(...xs), straightOff: Math.max(...xs.map((x) => Math.abs(x - W / 2))), islandOff: off, near, closest };
     }, { W, H });
-    console.log(`    a cell ${r.cell} px wide: the coast straight to ${r.plainSpread} px with the fine ground off (${r.plainOff} px off the heights' coast); with it on it wanders over ${r.bentSpread} px, at most ${r.bentOff} px off (${r.bentMean} px on average), turning ${r.turns} times; the same again: ${r.same}; from afar (a cell ${r.farCell.toFixed(1)} px) as without: ${r.farSame}`);
+    console.log(`    a cell ${r.cell} px wide: a plain one colour over ${(r.flat * 100).toFixed(1)}% of it; a hill's shading ${r.range} of 765 from dark to light, never more than ${r.jump} from a pixel to the next; a straight coast straight to ${r.spread} px, ${r.straightOff} px off; an island's coast within ${r.islandOff.toFixed(1)} px of its circle; relief changes the picture by ${r.near.mean.toFixed(1)} with cells ${Math.round(r.near.cell)} px wide and by ${r.closest.mean.toFixed(2)} at ${Math.round(r.closest.cell)} px`);
     assert.ok(r.cell > 40, `close in: a cell many pixels wide (${r.cell})`);
-    assert.ok(r.plainSpread <= 2 && r.plainOff <= 3, `off: the coast as the heights have it (${r.plainSpread} px, ${r.plainOff} px off)`);
-    assert.ok(r.bentSpread >= 0.15 * r.cell, `on: the coast bends (over ${r.bentSpread} px of a ${r.cell} px cell)`);
-    assert.ok(r.bentOff <= 0.62 * r.cell, `never far from where the heights put it (${r.bentOff} px of a ${r.cell} px cell)`);
-    assert.ok(r.bentMean <= 0.2 * r.cell, `and about it on average (${r.bentMean} px)`);
-    assert.ok(r.turns >= 6, `in bends of several sizes (${r.turns} turns)`);
-    assert.ok(r.same, 'the same coast every time');
-    assert.ok(r.farCell < 4 && r.farSame, 'from afar nothing is made up');
+    assert.ok(r.flat > 0.97, `a plain is flat: one colour (${(r.flat * 100).toFixed(1)}% of it)`);
+    assert.ok(r.range > 60, `the hill is shaded (${r.range})`);
+    assert.ok(r.jump <= 6, `smoothly, with no crease along the cells (${r.jump} at most between neighbours)`);
+    assert.ok(r.same, 'the same picture every time');
+    assert.ok(r.spread <= 2 && r.straightOff <= 3, `a straight coast is straight, where the heights put it (${r.spread} px, ${r.straightOff} px off)`);
+    assert.ok(r.islandOff <= 0.15 * r.cell, `the island's coast on its circle (${r.islandOff.toFixed(1)} px of a ${r.cell} px cell)`);
+    assert.ok(r.near.mean > 1, `relief shows where the heights have something to say (${r.near.mean.toFixed(1)})`);
+    assert.ok(r.closest.cell > 200 && r.closest.mean < 0.5, `and is gone where one cell fills the view (${r.closest.mean.toFixed(2)} at ${Math.round(r.closest.cell)} px a cell)`);
   });
 
   await h.step('The globe: every place where the flat map has it, lit; nothing beyond its edge or from its far side; a pole and the 180° meridian without a seam; the flat picture kept while it turns, and the whole frame between changes', async () => {

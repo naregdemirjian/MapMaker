@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { biomeOf, warmthAt, rainBelt, seaDistance, airMoisture, biomeColours, climateOf, BIOMES, EARTH_CLIMATE } from '../src/terrain/biomes.ts';
+import { biomeOf, warmthAt, rainBelt, seaDistance, airMoisture, biomeColours, climateColour, climateOf, BIOMES, EARTH_CLIMATE } from '../src/terrain/biomes.ts';
 import { planetParamsOf, PLANET_PRESETS } from '../src/terrain/planet.ts';
 import { planetPreview } from '../src/terrain/planet-preview.ts';
 import { PALETTES, rampAt } from '../src/terrain/look.ts';
@@ -124,4 +124,22 @@ test('Earth\'s land cover ships as a 4096 × 2048 WebP picture, credited to Natu
   const ne = (JSON.parse(readFileSync('data/datasets.json', 'utf8')) as Array<{ id: string; usedFor: string; sources: Array<{ file: string }> }>).find((d) => d.id === 'natural-earth')!;
   assert.match(ne.usedFor, /earth-cover-4096\.webp/);
   assert.ok(ne.sources.some((s) => s.file === 'NE1_LR_LC.zip'));
+});
+
+test('the colour of a climate (D194): each biome\'s own well inside it, one giving way to the next by degrees', () => {
+  const far = (a: readonly number[], b: readonly number[]) => Math.max(...a.map((v, q) => Math.abs(v - b[q])));
+  // Well inside a biome: its own colour.
+  for (const [w, m] of [[26, 0.95], [25, 0.05], [10, 0.8], [10, 0.05], [-1, 0.6], [-11, 0.5], [-30, 0.5], [24, 0.44]] as const) {
+    assert.ok(far(climateColour(w, m), BIOMES[biomeOf(w, m)]) < 6, `${biomeOf(w, m)} at ${w} °C, ${m}: ${climateColour(w, m).map(Math.round)}`);
+  }
+  // At the border of forest and grassland (moisture 0.45 at 10 °C): half way between their colours.
+  const mid = climateColour(10, 0.45), half = BIOMES.forest.map((v, q) => (v + BIOMES.grass[q]) / 2);
+  assert.ok(far(mid, half) < 8, `between forest and grassland (${mid.map(Math.round)} for ${half})`);
+  // No step anywhere: a tenth of a degree or a hundredth of moisture changes the colour by a few parts in 255 at most.
+  let step = 0;
+  for (let w = -40; w < 40; w += 0.1) for (const m of [0.1, 0.3, 0.5, 0.8]) step = Math.max(step, far(climateColour(w, m), climateColour(w + 0.1, m)));
+  for (let m = 0; m < 0.99; m += 0.01) for (const w of [-10, 2, 12, 25]) step = Math.max(step, far(climateColour(w, m), climateColour(w, m + 0.01)));
+  assert.ok(step < 10, `by degrees (the largest step ${step.toFixed(1)} of 255)`);
+  // Beyond the table's ends: the last colours.
+  assert.ok(far(climateColour(-80, 0.5), BIOMES.ice) < 2 && far(climateColour(60, 2), BIOMES.rainforest) < 2);
 });

@@ -25,19 +25,13 @@ export interface TerrainLook {
    */
   photo: boolean;
   /**
-   * Close in, below the heights' own detail, ground made up by the graphics card (D141): fine relief, rougher
-   * where the land is steep, a faint mottling of the colours, and coasts that bend below the grid's cells
-   * (D146); the same at every visit. Off: the heights as they are, soft close in.
-   */
-  fine: boolean;
-  /**
    * A generated planet's land coloured by the simulated planets' climate, water and biome models on its own heights
    * (D169) rather than by its latitude and height alone (D100).
    */
   climate: boolean;
 }
 
-export const DEFAULT_TERRAIN_LOOK: TerrainLook = { colours: true, relief: true, overTerritories: false, seaFloor: true, strength: 1, palette: 'natural', detail: true, photo: true, fine: true, climate: false };
+export const DEFAULT_TERRAIN_LOOK: TerrainLook = { colours: true, relief: true, overTerritories: false, seaFloor: true, strength: 1, palette: 'natural', detail: true, photo: true, climate: false };
 export const STRENGTH_MIN = 0.25, STRENGTH_MAX = 4;
 
 /** A stored look, completed and checked (anything unknown takes its default); null when there is none. */
@@ -49,7 +43,7 @@ export function terrainLookOf(raw: unknown): TerrainLook | null {
   return {
     colours: bool(r.colours, d.colours), relief: bool(r.relief, d.relief), overTerritories: bool(r.overTerritories, d.overTerritories),
     seaFloor: bool(r.seaFloor, d.seaFloor), strength, palette: typeof r.palette === 'string' && r.palette in PALETTES ? (r.palette as TerrainPalette) : d.palette,
-    detail: bool(r.detail, d.detail), photo: bool(r.photo, d.photo), fine: bool(r.fine, d.fine), climate: bool(r.climate, d.climate),
+    detail: bool(r.detail, d.detail), photo: bool(r.photo, d.photo), climate: bool(r.climate, d.climate),
   };
 }
 
@@ -173,6 +167,29 @@ export const LIGHT: [number, number, number] = (() => {
   const az = (315 * Math.PI) / 180, alt = (35 * Math.PI) / 180;
   return [Math.sin(az) * Math.cos(alt), Math.cos(az) * Math.cos(alt), Math.sin(alt)];
 })();
+
+/** The relief's exaggeration at strength 1 where slopes are measured across twenty kilometres. */
+export const EXAGGERATION = 6;
+
+/**
+ * How much slopes are exaggerated for shading (D194), as the terrain shader has it. Seen from afar slopes are
+ * measured across long distances (`baseline`, metres: what two pixels cover, at least two cells of the heights)
+ * and come out gentle: they are exaggerated more, so mountains read at every zoom. Close in, measured across
+ * about half a kilometre or less, they are the ground's own and drawn as they are (times the look's strength).
+ */
+export function reliefExaggeration(strength: number, baseline: number): number {
+  return EXAGGERATION * strength * Math.max(1 / 6, Math.sqrt(baseline / 20000));
+}
+
+/**
+ * How much of the relief is drawn when one cell of the heights is `pixelsPerCell` pixels wide (D194): all of it up
+ * to 32, none from 160. Closer than that the heights have nothing more to say, and shading them would only spread
+ * one slope across the screen.
+ */
+export function reliefFade(pixelsPerCell: number): number {
+  const t = Math.min(1, Math.max(0, (pixelsPerCell - 32) / (160 - 32)));
+  return 1 - t * t * (3 - 2 * t);
+}
 
 /**
  * The shading of a slope: 0 on level ground, up to about +0.6 facing the light and down to -0.6 facing
