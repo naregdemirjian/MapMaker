@@ -9,6 +9,7 @@ The approved architecture is the Claude Doc "Map Maker — Technical Architectur
 
 ## Status at a glance (20 November 2026, Stages 2, 3, 4, 6, 8 to 14 done; Stage 7 mostly done)
 
+- **"Colour countries by closeness" taken out, 21 November** (D187), as asked: dialog, renderer, legend and data.
 - **Looks of countries, VI, 21 November** (D186): one light for the map shared by shadows and bevels; countries as
   raised 3D slabs, as tall as a statistic if wanted ("Population of {country}"); shadows and glows of coasts no longer
   cut away with the sea. The last of the six steps (colour grading left out, as asked).
@@ -53,9 +54,7 @@ The approved architecture is the Claude Doc "Map Maker — Technical Architectur
 - **Two ready-made maps, 20 November** (D175): "New map" makes the Middle East today or Armenia and its neighbours
   as photographed from space at the finest detail, with today's borders, the built-up areas of cities, today's
   cities and capitals (Armenia's provinces too) and a 4K shot of each, ready to export.
-- **Countries coloured by closeness, 20 November** (D174): "Colour countries by closeness…" in a map's options colours
-  today's countries by how close each is to one of them, militarily, economically, religiously, by language or
-  overall, with a legend in shots; their own colours come back in one step.
+- **Countries coloured by closeness, 20 November** (D174): taken out again on 21 November (D187).
 - **Today's cities and capitals, 20 November** (D173): 7,289 places from Natural Earth, added under Cities
   ("Add today's cities…") or with today's countries; "What is shown" chooses which a map shows, by share of the
   country's people, size, capitals and economic centres, or only the cities ticked.
@@ -508,7 +507,6 @@ worked out afresh, and any difference stops the test.
 | `test/planet-mesh.test.ts` | 5 | The icosahedral mesh (D152): cells, faces, Euler's formula, areas summing to 4π, neighbours mutual and counter-clockwise, levels nesting; point location against brute force; the Laplacian and gradient against spherical harmonics level by level; conservative transport and diffusion; prolongation and restriction; pictures of fields and their round trip |
 | `test/planet-insolation.test.ts` | 3 | Sunlight (D152): Earth's against Berger's values, solstices and polar night; perihelion and the equinox; global means for five presets; a tidally locked planet's dark side; more tilt, sunnier poles |
 | `test/region-maps.test.ts` | 2 | Ready-made maps (D175): the Middle East and Armenia's, their countries where they are, their cities, urban areas, provinces, satellite look and 4K shot |
-| `test/affinity.test.ts` | 3 | Closeness of today's countries (D174): every name in the data one of today's; alliances, blocs, religions and languages scored; a map coloured and back |
 | `test/places.test.ts` | 3 | Today's cities (D173): capitals, shares, ranks and world cities from the data; which cities each filter keeps; added as cities that remember them, the map's filter stored |
 | `test/arrow-step.test.ts` | 1 | The arrow keys' steps of the date viewed (D172): a day, a week, a month, a year; Cmd as Ctrl |
 | `test/statistics.test.ts` | 3 | Statistics (D171): values between dates by a steady share, amount or at once; written as money, people, numbers and shares (up to quintillions and sextillions, D180), and read back from words; a map's statistics filling "{name}" in a shot's texts as history goes |

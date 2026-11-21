@@ -492,12 +492,7 @@ p.small { font-size: 11.5px; }
 .city-filter { display: flex; flex-direction: column; gap: 6px; margin: 6px 0; }
 .city-filter label { display: flex; flex-direction: column; gap: 2px; }
 .cities-shown { margin-top: 12px; }
-/* Colour by closeness (D174) */
-.colour-by-kinds { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
-.colour-by-ramp { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
-.colour-by-ramp .ramp { display: inline-block; width: 220px; height: 12px; border-radius: 3px; }
 .swatch { display: inline-block; width: 14px; height: 14px; border-radius: 3px; vertical-align: middle; }
-.colour-by-list td { padding: 2px 6px; }
 
 /* Looks of countries (D181): the stack of effects. */
 .look-editor .effects { list-style: none; margin: 6px 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }

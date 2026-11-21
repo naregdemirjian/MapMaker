@@ -33,8 +33,7 @@ import { Kept as Weighed } from './kept.ts';
 import { parcelGeometry, type ParcelGeometry, type CycleGeom } from './parcel-geometry.ts';
 import { featureStyle, featureColor, isFeatureKind, type FeatureKind, type FeatureStyle } from './feature-style.ts';
 import { cityShown, placeMetaOf, DEFAULT_CITY_FILTER, type CityFilter } from '../domain/places.ts';
-import { cityFilterOfSpace, colourByOfSpace, mapLightOf, statisticsOf } from '../world-model/world-settings.ts';
-import { closenessColours } from '../domain/affinity.ts';
+import { cityFilterOfSpace, mapLightOf, statisticsOf } from '../world-model/world-settings.ts';
 import { campaignArrow, smoothLine, lineLength, arrowBodyLength, marksAlong, cutLineBetween, mixColor } from './routes.ts';
 import { shotProgress, eventScreenSeconds, eventTransitionLook, TRANSITION_LOOKS } from '../presentation/sequence.ts';
 import { iconById, iconOfStyle, unitOfStyle, drawIcon, type CharacterIcon, type RouteStyle } from './icons.ts';
@@ -2146,18 +2145,6 @@ export class MapRenderer {
 
     // Each name as it is at this moment (names can change over time).
     const entities = new Map(world.all('entity').map((e) => { const n = engine.nameAt(e.id, t); return [e.id, n ? { ...e, name: n } : e]; }));
-    // Coloured by closeness to one country (D174): each of today's countries by how close it is, the rest grey.
-    const colourBy = colourByOfSpace(world.get('map_space', spaceId));
-    if (colourBy) {
-      const colours = closenessColours(colourBy, world.all('entity').map((e) => ({ id: e.id, type_id: e.type_id, name: e.name, nameNow: entities.get(e.id)?.name })));
-      for (const [id, color] of colours) {
-        const e = entities.get(id)!;
-        // (A picture filling it gives way to the colour.)
-        const st = parseJSON<Record<string, unknown>>(e.style ?? '{}', {}) ?? {};
-        delete st.fill;
-        entities.set(id, { ...e, color, style: JSON.stringify(st) });
-      }
-    }
     this.mediaSeconds = opts.mediaSeconds ?? 0;
     this.mediaChannel = opts.mediaChannel ?? 'live';
     // Pictures and videos filling territory, by owner.

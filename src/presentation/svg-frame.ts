@@ -24,8 +24,7 @@ import { preloadImages, prepareVideos, imageNow, videoNow, drawImageFit } from '
 import { eventsBoxOf } from './events-box.ts';
 import { timeAt, type ShotSettings } from './sequence.ts';
 import { GRADES, drawPaper, vignetteOf } from './looks.ts';
-import { isSpaceMap, spaceSettingsOf, calendarOfSpace, colourByOfSpace } from '../world-model/world-settings.ts';
-import { closenessColours } from '../domain/affinity.ts';
+import { isSpaceMap, spaceSettingsOf, calendarOfSpace } from '../world-model/world-settings.ts';
 import { loadNearbyStars } from '../space/catalogue.ts';
 import { loadExoplanets } from '../space/exoplanets.ts';
 import { parseJSON } from '../temporal-engine/engine.ts';
@@ -224,9 +223,6 @@ export async function svgFrame(o: SvgFrameOptions): Promise<SvgFrame> {
       const c = pen.asContext();
       c.translate(W / 2, H / 2); c.rotate((view!.rotation * Math.PI) / 180); c.translate(-W / 2, -H / 2);
     };
-    // Coloured by closeness (D174), as the renderer does.
-    const colourBy = colourByOfSpace(world.get('map_space', shot.spaceId));
-    const byCloseness = colourBy ? closenessColours(colourBy, world.all('entity').map((e) => ({ id: e.id, type_id: e.type_id, name: e.name, nameNow: engine.nameAt(e.id, t) ?? undefined }))) : null;
     const fillLayers: string[] = [], borderLayers: string[] = [];
     let n = 0;
     for (const layerId of globe ? [] : options.layerIds) {
@@ -243,7 +239,7 @@ export async function svgFrame(o: SvgFrameOptions): Promise<SvgFrame> {
       const polys = territoryPolygons(world, engine, shot.spaceId, layerId, t);
       const arr = world.arrangements.get(shot.spaceId);
       const nameOf = (id: string) => engine.nameAt(id, t) ?? world.get('entity', id)?.name ?? id;
-      const colourOf = (id: string) => byCloseness?.get(id) ?? world.get('entity', id)?.color ?? '#888888';
+      const colourOf = (id: string) => world.get('entity', id)?.color ?? '#888888';
       const lines = new Map<string, { shared: Position[][]; open: Position[][] }>();
       if (arr) for (const [owner, faces] of byOwner) lines.set(owner, borderLines(arr, states, owner, faces));
       const multi = (ls: Position[][]): string => (ls.length ? path({ type: 'MultiLineString', coordinates: ls }) ?? '' : '');

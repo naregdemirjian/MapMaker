@@ -61,6 +61,15 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D187. "Colour countries by closeness" taken out
+
+- Asked for on 21 November: the colouring of today's countries by how close each is to one of them (D174) is taken
+  out whole: its dialog, the button in a map's options, the renderer's recolouring, the legend in shots and SVG
+  frames, the command, the data of alliances, blocs, religions and languages (`src/domain/affinity*.ts`), its tests
+  and its step in the interface test.
+- A project that stored the setting keeps it in the map's settings, unread: its countries are drawn in their own
+  colours. Nothing else read the data.
+
 ### D186. Looks of countries, VI: the map's one light, and countries as raised slabs
 
 - **One light for the map** (`light` in the map's settings, `mapLightOf`, `setMapLight`): drop shadows, inner shadows
