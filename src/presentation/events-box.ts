@@ -1,5 +1,6 @@
 // The "current events" box of a shot: the events happening at the frame's date, with the date and
 // time, in a box the user styles freely (or on a graphic of their own). Drawn with the text overlays.
+import { graphicStyleOf, drawPanel, panelPath, writeText, accentInset, type GraphicStyle } from './graphic-style.ts';
 import { type Instant, type Calendar, compare, fromStore, gregorian, type Precision } from '../core-time/index.ts';
 import type { World } from '../world-model/world.ts';
 import { isBaseEvent } from '../world-model/schema.ts';
@@ -40,6 +41,10 @@ export interface EventsBox {
   height: number;
   /** Hidden while no event is listed (D176): no box with only its title and the date between events. */
   hideWhenEmpty: boolean;
+  /** Its look (D184): panel and text; absent, as before. */
+  style?: GraphicStyle;
+  /** How an event comes into the list (D184). */
+  itemEnter?: 'fade' | 'slide' | 'blur';
 }
 
 export const DEFAULT_EVENTS_BOX: EventsBox = {
@@ -149,7 +154,7 @@ export function drawEventsBox(ctx: CanvasRenderingContext2D | OffscreenCanvasRen
     }
   }
   const lineH = (r: { size: number; kind: string }) => r.size * (r.kind === 'title' ? 1.5 : 1.3);
-  const contentH = rows.reduce((h, r) => h + lineH(r), 0);
+  const contentH = rows.reduce((h, r) => h + lineH(r), 0) * (box.style ? graphicStyleOf(box.style).text.lineHeight / 1.25 : 1);
   const img = imageNow(box.image);
   // Wrapped around the graphic: the box has the graphic's proportions (until the picture has loaded,
   // it fits the text).
@@ -166,6 +171,18 @@ export function drawEventsBox(ctx: CanvasRenderingContext2D | OffscreenCanvasRen
     ctx.globalAlpha = box.imageOpacity;
     ctx.drawImage(img!, x, y, w, h);
     ctx.restore();
+  } else if (box.style) {
+    // In a style of its own (D184): shaped, with its gradient, glass, grain, shadow, glow and accent bar.
+    const gs = graphicStyleOf(box.style);
+    drawPanel(ctx, x, y, w, h, box.radius * u, box.backgroundOpacity > 0 ? withAlpha(box.background, box.backgroundOpacity) : null, gs.panel, u, box.borderWidth > 0 ? { color: box.borderColor, width: box.borderWidth * u } : undefined);
+    if (img) {
+      ctx.save();
+      panelPath(ctx, x, y, w, h, box.radius * u, gs.panel.shape);
+      ctx.clip();
+      ctx.globalAlpha = box.imageOpacity;
+      drawImageFit(ctx, img, x, y, w, h, box.imageFit === 'wrap' ? 'stretch' : box.imageFit);
+      ctx.restore();
+    }
   } else {
     const r = Math.min(box.radius * u, w / 2, h / 2);
     ctx.beginPath();
@@ -188,10 +205,30 @@ export function drawEventsBox(ctx: CanvasRenderingContext2D | OffscreenCanvasRen
   let cy = y + pad;
   let firstLineOfEvent = true;
   let prevKind = '';
+  const gs = box.style ? graphicStyleOf(box.style) : null;
+  const inset = gs ? accentInset(gs.panel, u) : 0;
   for (const row of rows) {
-    const lh = lineH(row);
+    const lh = lineH(row) * (gs ? gs.text.lineHeight / 1.25 : 1);
     const mid = cy + lh / 2;
     ctx.globalAlpha = row.alpha;
+    if (gs) {
+      // (Styled, D184: an event coming in slides or comes into focus as it fades in.)
+      ctx.save();
+      const p = row.alpha, ix = box.itemEnter === 'slide' && p < 1 ? -(1 - p) * (1 - p) * 40 * u : 0;
+      if (box.itemEnter === 'blur' && p < 1) ctx.filter = `blur(${((1 - p) * 6 * u).toFixed(1)}px)`;
+      const left = x + pad + inset + ix;
+      if (row.kind === 'title') { ctx.font = fontOf(box.font, 700, row.size); writeText(ctx, row.text, left, mid, row.size, box.titleColor, { ...gs.text, spacing: gs.text.spacing + 12 }, u); }
+      else if (row.kind === 'date') { ctx.font = fontOf(box.font, 600, row.size); writeText(ctx, row.text, left, mid, row.size, box.dateColor, gs.text, u); }
+      else {
+        if (row.kind === 'event' && prevKind !== 'event-cont') { ctx.fillStyle = box.accentColor; ctx.beginPath(); ctx.arc(left + 4 * u, mid, 4 * u, 0, Math.PI * 2); ctx.fill(); }
+        ctx.font = fontOf(box.font, row.kind === 'event' ? 600 : 400, row.size);
+        writeText(ctx, row.text, left + 16 * u, mid, row.size, box.textColor, row.kind === 'event' ? gs.text : { ...gs.text, upper: false }, u);
+      }
+      ctx.restore();
+      prevKind = row.kind === 'event' ? 'event-cont' : row.kind;
+      cy += lh;
+      continue;
+    }
     if (row.kind === 'title') { ctx.font = fontOf(box.font, 700, row.size); ctx.fillStyle = box.titleColor; (ctx as CanvasRenderingContext2D & { letterSpacing?: string }).letterSpacing = `${(row.size * 0.12).toFixed(1)}px`; ctx.fillText(row.text, x + pad, mid); (ctx as CanvasRenderingContext2D & { letterSpacing?: string }).letterSpacing = '0px'; }
     else if (row.kind === 'date') { ctx.font = fontOf(box.font, 600, row.size); ctx.fillStyle = box.dateColor; ctx.fillText(row.text, x + pad, mid); }
     else {

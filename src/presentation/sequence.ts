@@ -1,6 +1,7 @@
 // Shots (sequences): presentation recipes that point at the world and never copy it.
 // A shot maps screen time (frames) to historical time through its time-remap keys, and to a camera
 // through its camera keys. Shot data lives in the `sequence` table, apart from the world data.
+import { graphicStyleOf, drawPanel, writeText, animState, lineProgress, accentInset, ANIMS_IN, ANIMS_OUT, type GraphicStyle, type AnimIn, type AnimOut } from './graphic-style.ts';
 import { type Instant, type Calendar, lerp, fromJSONValue, toJSONValue, gregorian, compare, diffMs, MONTHS as MONTH_NAMES, type Precision } from '../core-time/index.ts';
 import { type Camera, interpolateCamera } from '../render-engine/camera.ts';
 import { fillStatistics, type Statistic } from './statistics.ts';
@@ -17,12 +18,14 @@ export interface Overlay {
   inFrame: number; outFrame: number; fade: number; datePrecision: Precision;
   /** A text box of the user's own (D107): its look, when it shows, how it comes and goes, a place it points to. Absent on the date and the title. */
   box?: TextBox;
+  /** Its look (D184): the panel's shape, gradient, glass, grain, shadow, glow and accent; the text's shadow, gradient, spacing; lines coming in one after another. Absent: as before. */
+  style?: GraphicStyle;
 }
 
 /** When a text box shows: seconds into the shot (to null: until the end), or while history is between two dates (to null: from then on). */
 export type TextTiming = { by: 'shot'; from: number; to: number | null } | { by: 'history'; from: [number, number]; to: [number, number] | null };
-export type TextEnter = 'none' | 'fade' | 'rise' | 'pop' | 'type';
-export type TextExit = 'none' | 'fade' | 'sink';
+export type TextEnter = AnimIn;
+export type TextExit = AnimOut;
 
 /** A text box (D107). Its text, size, colour, background, place and alignment are the overlay's own. */
 export interface TextBox {
@@ -61,8 +64,8 @@ export function textBoxOf(b: Partial<TextBox> | null | undefined): TextBox {
     font: typeof o.font === 'string' && o.font.trim() ? o.font : d.font, weight: num(o.weight, 100, 900, d.weight), italic: o.italic === true,
     wrap: num(o.wrap, 0, 20000, d.wrap), outline: typeof o.outline === 'string' && o.outline ? o.outline : null, outlineWidth: num(o.outlineWidth, 0, 60, d.outlineWidth),
     padding: num(o.padding, 0, 400, d.padding), radius: num(o.radius, 0, 400, d.radius), timing,
-    enter: (['none', 'fade', 'rise', 'pop', 'type'] as const).includes(o.enter as TextEnter) ? (o.enter as TextEnter) : d.enter,
-    exit: (['none', 'fade', 'sink'] as const).includes(o.exit as TextExit) ? (o.exit as TextExit) : d.exit,
+    enter: (ANIMS_IN as readonly string[]).includes(o.enter as string) ? (o.enter as TextEnter) : d.enter,
+    exit: (ANIMS_OUT as readonly string[]).includes(o.exit as string) ? (o.exit as TextExit) : d.exit,
     seconds: num(o.seconds, 0, 60, d.seconds),
     anchor: Array.isArray(o.anchor) && o.anchor.length === 2 && o.anchor.every((x) => typeof x === 'number' && Number.isFinite(x)) ? [o.anchor[0], o.anchor[1]] : null,
     pointer: typeof o.pointer === 'string' ? o.pointer : '',
@@ -446,11 +449,13 @@ const easeOutBack = (p: number) => { const c1 = 1.70158, c3 = c1 + 1, q = Math.m
  */
 function drawTextBox(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, it: OverlayDraw, width: number, height: number, unit: number, project?: (lon: number, lat: number) => [number, number] | null): OverlayRect | null {
   const o = it.overlay, b = o.box!, size = Math.max(1, o.size * unit);
+  const gs = o.style ? graphicStyleOf(o.style) : null;
   const family = /[\s,]/.test(b.font) && !b.font.includes('"') ? `"${b.font}"` : b.font;
   ctx.save();
   ctx.font = `${b.italic ? 'italic ' : ''}${Math.round(b.weight)} ${size}px ${family}, "Segoe UI", Arial, sans-serif`;
-  const lines = wrapText(it.text, b.wrap * unit, (x) => ctx.measureText(x).width);
-  const lineH = size * 1.25, pad = b.padding * unit;
+  if (gs && 'letterSpacing' in ctx) (ctx as unknown as { letterSpacing: string }).letterSpacing = `${((gs.text.spacing / 100) * size).toFixed(1)}px`;
+  const lines = wrapText(gs?.text.upper ? it.text.toLocaleUpperCase() : it.text, b.wrap * unit, (x) => ctx.measureText(x).width);
+  const lineH = size * (gs?.text.lineHeight ?? 1.25), pad = b.padding * unit;
   const w = Math.max(1, ...lines.map((l) => ctx.measureText(l).width)), h = lines.length * lineH;
   const x = o.x * width, y = o.y * height;
   const left = o.align === 'left' ? x : o.align === 'center' ? x - w / 2 : x - w;
@@ -462,7 +467,14 @@ function drawTextBox(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingCon
   else if (b.enter === 'type') shown = Math.round(enter * lines.reduce((n, l) => n + [...l].length, 0));
   if (b.exit === 'fade') alpha *= exit;
   else if (b.exit === 'sink') { alpha *= exit; dy += (1 - easeOut(exit)) * size * 0.9; }
-  const box = { x: left - pad, y: y - h / 2 - pad + dy, w: w + 2 * pad, h: h + 2 * pad };
+  // (Slides, growing, blurring and wiping in and out, D184.)
+  let dx = 0, blur = 0, wipe = 1;
+  for (const [kind, p] of [[b.enter, enter], [b.exit, exit]] as const) {
+    if (!['slide-left', 'slide-right', 'slide-up', 'scale', 'blur', 'wipe'].includes(kind) || (gs && gs.stagger > 0 && kind !== 'wipe' && kind !== 'scale')) continue;
+    const st = animState(kind, p, size);
+    dx += st.dx; dy += st.dy; scale *= st.scale; blur += st.blur; alpha *= st.alpha; wipe = Math.min(wipe, st.wipe);
+  }
+  const box = { x: left - pad + dx, y: y - h / 2 - pad + dy, w: w + 2 * pad, h: h + 2 * pad };
   if (alpha <= 0.002) { ctx.restore(); return null; }
   ctx.globalAlpha = Math.min(1, alpha);
   if (b.anchor && project) {
@@ -493,7 +505,10 @@ function drawTextBox(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingCon
     const cx = box.x + box.w / 2, cy = box.y + box.h / 2;
     ctx.translate(cx, cy); ctx.scale(scale, scale); ctx.translate(-cx, -cy);
   }
-  if (o.background) {
+  if (wipe < 1) { ctx.beginPath(); ctx.rect(box.x, box.y - box.h, box.w * wipe, box.h * 3); ctx.clip(); }
+  if (blur > 0.05) ctx.filter = `blur(${blur.toFixed(1)}px)`;
+  if (gs) drawPanel(ctx, box.x, box.y, box.w, box.h, b.radius * unit, o.background, gs.panel, unit);
+  else if (o.background) {
     ctx.fillStyle = o.background;
     ctx.beginPath();
     ctx.roundRect(box.x, box.y, box.w, box.h, Math.min(b.radius * unit, box.w / 2, box.h / 2));
@@ -503,14 +518,30 @@ function drawTextBox(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingCon
   ctx.textAlign = o.align;
   ctx.lineJoin = 'round';
   let left0 = shown;
+  const inset = gs ? accentInset(gs.panel, unit) : 0;
   lines.forEach((line, i) => {
     let text = line;
     if (Number.isFinite(left0)) { const chars = [...line]; text = chars.slice(0, Math.max(0, left0)).join(''); left0 -= chars.length; }
     if (!text) return;
     const ly = y - h / 2 + dy + lineH * (i + 0.5);
-    if (b.outline && b.outlineWidth > 0) { ctx.strokeStyle = b.outline; ctx.lineWidth = 2 * b.outlineWidth * unit; ctx.strokeText(text, x, ly); }
+    if (gs) {
+      // Line after line (D184): each comes in on its own, a little after the one before.
+      let lx = x + dx + (o.align === 'left' ? inset : 0);
+      ctx.save();
+      if (gs.stagger > 0) {
+        const p = lineProgress(enter, i, lines.length, gs.stagger, b.seconds);
+        const st = animState(['slide-left', 'slide-right', 'slide-up', 'blur', 'rise', 'fade'].includes(b.enter) ? b.enter : 'fade', p, size);
+        ctx.globalAlpha *= st.alpha;
+        lx += st.dx;
+        if (st.blur > 0.05) ctx.filter = `blur(${st.blur.toFixed(1)}px)`;
+        writeText(ctx, text, lx, ly + st.dy, size, o.color, { ...gs.text, upper: false }, unit, b.outline && b.outlineWidth > 0 ? { color: b.outline, width: 2 * b.outlineWidth * unit } : undefined);
+      } else writeText(ctx, text, lx, ly, size, o.color, { ...gs.text, upper: false }, unit, b.outline && b.outlineWidth > 0 ? { color: b.outline, width: 2 * b.outlineWidth * unit } : undefined);
+      ctx.restore();
+      return;
+    }
+    if (b.outline && b.outlineWidth > 0) { ctx.strokeStyle = b.outline; ctx.lineWidth = 2 * b.outlineWidth * unit; ctx.strokeText(text, x + dx, ly); }
     ctx.fillStyle = o.color;
-    ctx.fillText(text, x, ly);
+    ctx.fillText(text, x + dx, ly);
   });
   ctx.restore();
   return { id: o.id, ...box };
@@ -569,6 +600,19 @@ export function drawOverlays(ctx: CanvasRenderingContext2D | OffscreenCanvasRend
     const lay = /\{[^}]+\}/.test(o.text) ? steadyLayout(ctx, it.text) : { width: ctx.measureText(it.text).width, runs: [{ text: it.text, x: 0, cell: null }] };
     const w = lay.width;
     const left = o.align === 'left' ? x : o.align === 'center' ? x - w / 2 : x - w;
+    const gs = o.style ? graphicStyleOf(o.style) : null;
+    if (gs) {
+      // In a style of its own (D184): the date's or the title's panel and letters.
+      const pad = size * 0.35, inset = accentInset(gs.panel, unit);
+      drawPanel(ctx, left - pad - inset, y - size * 0.75, w + pad * 2 + inset, size * 1.5, size * 0.2, o.background, gs.panel, unit);
+      for (const r of lay.runs) {
+        ctx.textAlign = r.cell === null ? 'left' : 'center';
+        writeText(ctx, r.text, r.cell === null ? left + r.x : left + r.x + r.cell / 2, y, size, o.color, { ...gs.text, upper: gs.text.upper, spacing: 0 }, unit);
+      }
+      ctx.restore();
+      rects.push({ id: o.id, x: left - size * 0.35 - inset, y: y - size * 0.75, w: w + size * 0.7 + inset, h: size * 1.5 });
+      continue;
+    }
     if (o.background) {
       const pad = size * 0.35;
       ctx.fillStyle = o.background;

@@ -61,6 +61,23 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D184. Looks of countries, IV: the look of a shot's graphics (events box, text boxes, date, title)
+
+- **One style for a shot's graphics** (`src/presentation/graphic-style.ts`): the events box, each text box, and the
+  date and title can each have one. The panel: its shape (rounded, square, cut corners, a pill, a tab), a gradient,
+  frosted glass (the map behind it blurred), grain, a shadow, a glow, an accent bar on a side. The text: a shadow, a
+  gradient, spacing between letters, capitals, line height. A graphic without a style is drawn exactly as before.
+- **Coming in and going:** text boxes can now also slide in from the left, the right or below, grow, come into focus
+  from a blur and be wiped in, and go by sliding, blurring or wiping; with a style, their lines can come in one after
+  another (a stagger in seconds). Events coming into the events box can slide or come into focus as they fade in.
+- **Templates** set a whole look at once, colours and font with it: a news lower third (white, red bar), documentary
+  (dark frosted glass, a gold rule, a serif), a game display (cut corners, a cyan glow, capitals), parchment (grained
+  paper, brown ink) and minimal (letters with a shadow, no panel).
+- **In the interface:** "Style" under the events box, in each text box, and "Style of the date and title" in the
+  shot's settings: the templates' buttons, then the panel's and the text's settings.
+- **Not yet:** glass needs the map under it in the same picture (an export's overlay pass drawn on its own shows the
+  panel without it).
+
 ### D183. Looks of countries, III: border styles, and special borders between two countries
 
 - **A style for a layer's borders** (`src/render-engine/border-look.ts`, `setLayerBorders`): one for the borders

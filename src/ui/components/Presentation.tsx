@@ -1,3 +1,5 @@
+import { GraphicStyleEditor } from './GraphicStyleEditor.tsx';
+import { ANIMS_IN, ANIMS_OUT, ANIM_NAMES } from '../../presentation/graphic-style.ts';
 import { useEffect, useRef, useState } from 'react';
 import { useStore, useLive, store } from '../store.ts';
 import { Api } from '../api.ts';
@@ -331,6 +333,13 @@ export function ShotEditor() {
               <label>Distance from the edge<NumberField min={0} max={500} step={1} value={box.margin} onCommit={(n) => setBox({ margin: n })} /></label>
               <label>Fixed height (0 = fit)<NumberField min={0} max={2000} step={10} value={box.height} onCommit={(n) => setBox({ height: n })} /></label>
             </div>
+            <h4>Style</h4>
+            <GraphicStyleEditor value={box.style} idPrefix="events-box"
+              onChange={(st) => setBox({ style: st })}
+              onTemplate={(tp) => setBox({ style: tp.style, titleColor: tp.colors.title, accentColor: tp.colors.accent, textColor: tp.colors.text, dateColor: tp.colors.text, background: tp.colors.background, backgroundOpacity: tp.colors.backgroundOpacity, font: tp.colors.font })} />
+            <label>Events come in<select value={box.itemEnter ?? 'fade'} onChange={(e) => setBox({ itemEnter: e.target.value as 'fade' })} data-testid="events-box-item-enter">
+              <option value="fade">Fading in</option><option value="slide">Sliding in</option><option value="blur">Coming into focus</option>
+            </select></label>
             <h4>Your own graphic</h4>
             <div className="buttons">
               <label className="file-button">{box.image ? 'Replace the graphic…' : 'Use a picture of your own…'}<input type="file" accept="image/*" onChange={(e) => uploadBoxImage(e.target.files?.[0])} data-testid="events-box-image" /></label>
@@ -383,6 +392,12 @@ export function ShotEditor() {
           {dateOverlay && <label>Date detail<select value={dateOverlay.datePrecision} onChange={(e) => update({ overlays: shot.overlays.map((o) => (o.kind === 'date' ? { ...o, datePrecision: e.target.value as Precision } : o)) })}>
             <option value="year">Year</option><option value="month">Month</option><option value="day">Day</option><option value="minute">Hour and minute</option><option value="second">Seconds</option>
           </select></label>}
+          {shot.overlays.some((o) => !o.box) && <details>
+            <summary>Style of the date and title{shot.overlays.some((o) => !o.box && o.style) ? ' (set)' : ''}</summary>
+            <GraphicStyleEditor value={shot.overlays.find((o) => !o.box && o.style)?.style} idPrefix="date-title"
+              onChange={(st) => update({ overlays: shot.overlays.map((o) => (o.box ? o : { ...o, style: st })) })}
+              onTemplate={(tp) => update({ overlays: shot.overlays.map((o) => (o.box ? o : { ...o, style: tp.style, color: tp.colors.text, background: tp.colors.backgroundOpacity > 0 ? rgbaOf(tp.colors.background, tp.colors.backgroundOpacity) : null })) })} />
+          </details>}
           <label>Title<input value={title?.text ?? ''} placeholder="(none)" onChange={(e) => {
             const text = e.target.value;
             const rest = shot.overlays.filter((o) => o.id !== 'title');
@@ -502,10 +517,10 @@ function TextBoxEditor({ o, shot, update, camera }: { o: Overlay; shot: ShotSett
       </>}
       <div className="two">
         <label>Comes in<select value={b.enter} onChange={(e) => set({}, { enter: e.target.value as TextEnter })} data-testid="text-box-enter">
-          <option value="none">At once</option><option value="fade">Fading in</option><option value="rise">Rising</option><option value="pop">Popping up</option><option value="type">Typed out</option>
+          {ANIMS_IN.map((a) => <option key={a} value={a}>{ANIM_NAMES[a]}</option>)}
         </select></label>
         <label>Goes<select value={b.exit} onChange={(e) => set({}, { exit: e.target.value as TextExit })} data-testid="text-box-exit">
-          <option value="none">At once</option><option value="fade">Fading out</option><option value="sink">Sinking</option>
+          {ANIMS_OUT.map((a) => <option key={a} value={a}>{ANIM_NAMES[a]}</option>)}
         </select></label>
         <label>Taking (seconds)<NumberField min={0} max={60} step={0.1} value={b.seconds} onCommit={(n) => set({}, { seconds: n })} testId="text-box-seconds" /></label>
       </div>
@@ -517,6 +532,12 @@ function TextBoxEditor({ o, shot, update, camera }: { o: Overlay; shot: ShotSett
         </div>
         <label>Pointer colour<input type="color" value={b.pointer || o.color} onChange={(e) => set({}, { pointer: e.target.value })} /></label>
       </> : <div className="buttons"><button className="small" onClick={() => { set({}, { anchor: [camera.lon, camera.lat] }); s.set({ pickCallout: o.id }); }}>Point it at a place…</button></div>}
+      <details className="text-box-style">
+        <summary>Style{o.style ? ' (set)' : ''}</summary>
+        <GraphicStyleEditor value={o.style} idPrefix="text-box"
+          onChange={(st) => update({ overlays: shot.overlays.map((x) => (x.id === o.id ? { ...x, style: st } : x)) })}
+          onTemplate={(tp) => update({ overlays: shot.overlays.map((x) => (x.id === o.id ? { ...x, style: tp.style, color: tp.colors.text, background: tp.colors.backgroundOpacity > 0 ? rgbaOf(tp.colors.background, tp.colors.backgroundOpacity) : null, box: { ...b, font: tp.colors.font } } : x)) })} />
+      </details>
       <div className="buttons"><button className="small danger" onClick={() => update({ overlays: shot.overlays.filter((x) => x.id !== o.id) })} data-testid="text-box-delete">Delete this text</button></div>
     </details>
   );
