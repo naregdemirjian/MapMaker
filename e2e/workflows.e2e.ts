@@ -2056,6 +2056,18 @@ try {
     await h.screenshot('overlays-dragged');
     await page.getByTestId('undo').click();
     await page.waitForFunction((x) => JSON.parse((window as any).__mapmaker.store.world.all('sequence')[0].settings).overlays.find((o: any) => o.kind === 'date').x === x, before.x);
+    // Kept still (D190): set to keep its size and place, the box stays where and as large as it is.
+    await page.getByTestId('events-box-fit').selectOption('cover');
+    await h.saved();
+    await page.getByTestId('events-box-keep-size').check();
+    await h.saved();
+    assert.equal((await settings()).eventsBox.keepSize, true);
+    const still = async () => { await page.waitForTimeout(400); return (await rects()).find((r) => r.id === 'events-box')!; };
+    const s0 = await still();
+    await page.getByTestId('frame-slider').fill('20');
+    const s1 = await still();
+    assert.ok(Math.abs(s0.x - s1.x) < 1 && Math.abs(s0.y - s1.y) < 1 && Math.abs(s0.w - s1.w) < 1 && Math.abs(s0.h - s1.h) < 1, `the box stays put (${JSON.stringify(s0)} then ${JSON.stringify(s1)})`);
+    await page.getByTestId('frame-slider').fill('0');
     // Hide the box again for the following steps.
     await page.getByTestId('events-box-show').uncheck();
     await h.saved();

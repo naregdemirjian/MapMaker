@@ -45,6 +45,11 @@ export interface EventsBox {
   style?: GraphicStyle;
   /** How an event comes into the list (D184). */
   itemEnter?: 'fade' | 'slide' | 'blur';
+  /**
+   * The box keeps its size and place (D190): as tall as `maxEvents` events need (each name on one line, shortened
+   * with "…" if long; descriptions on two), so events come and go inside it and it never grows, shrinks or moves.
+   */
+  keepSize?: boolean;
 }
 
 export const DEFAULT_EVENTS_BOX: EventsBox = {
@@ -112,6 +117,14 @@ export function currentEvents(world: World, box: EventsBox, t: Instant, secondsS
   return out.slice(0, Math.max(0, box.maxEvents)).map(({ start: _s, ...rest }) => rest);
 }
 
+/** A line of text shortened with "…" to fit `width`. */
+function ellipsize(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, text: string, width: number): string {
+  if (ctx.measureText(text).width <= width) return text;
+  let lo = 0, hi = text.length;
+  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (ctx.measureText(`${text.slice(0, mid).trimEnd()}…`).width <= width) lo = mid; else hi = mid - 1; }
+  return `${text.slice(0, lo).trimEnd()}…`;
+}
+
 function wrap(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, text: string, width: number, maxLines = 3): string[] {
   const words = text.split(/\s+/).filter(Boolean);
   const lines: string[] = [];
@@ -147,14 +160,18 @@ export function drawEventsBox(ctx: CanvasRenderingContext2D | OffscreenCanvasRen
   ctx.save();
   for (const e of events) {
     ctx.font = fontOf(box.font, 600, box.textSize * u);
-    for (const l of wrap(ctx, e.name, inner - 16 * u)) rows.push({ kind: 'event', text: l, size: box.textSize * u, alpha: e.alpha });
+    for (const l of box.keepSize ? [ellipsize(ctx, e.name, inner - 16 * u)] : wrap(ctx, e.name, inner - 16 * u)) rows.push({ kind: 'event', text: l, size: box.textSize * u, alpha: e.alpha });
     if (box.showDescription && e.description.trim()) {
       ctx.font = fontOf(box.font, 400, box.textSize * 0.72 * u);
       for (const l of wrap(ctx, e.description.trim().split('\n')[0], inner - 16 * u, 2)) rows.push({ kind: 'desc', text: l, size: box.textSize * 0.72 * u, alpha: e.alpha });
     }
   }
   const lineH = (r: { size: number; kind: string }) => r.size * (r.kind === 'title' ? 1.5 : 1.3);
-  const contentH = rows.reduce((h, r) => h + lineH(r), 0) * (box.style ? graphicStyleOf(box.style).text.lineHeight / 1.25 : 1);
+  const spacing = box.style ? graphicStyleOf(box.style).text.lineHeight / 1.25 : 1;
+  // (Kept still, D190: room for as many events as it lists at most, each name a line and its description two.)
+  const roomFor = (n: number) => (box.title.trim() ? lineH({ size: box.titleSize * u, kind: 'title' }) : 0) + (box.showDate ? lineH({ size: box.dateSize * u, kind: 'date' }) : 0)
+    + n * (lineH({ size: box.textSize * u, kind: 'event' }) + (box.showDescription ? 2 * lineH({ size: box.textSize * 0.72 * u, kind: 'desc' }) : 0));
+  const contentH = (box.keepSize ? roomFor(Math.max(1, box.maxEvents)) : rows.reduce((h, r) => h + lineH(r), 0)) * spacing;
   const img = imageNow(box.image);
   // Wrapped around the graphic: the box has the graphic's proportions (until the picture has loaded,
   // it fits the text).

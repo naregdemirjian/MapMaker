@@ -304,7 +304,8 @@ export function defaultShot(spaceId: string, camera: Camera, start: Instant, end
   const frames = Math.max(2, Math.round(fps * seconds));
   return {
     spaceId, width: 1920, height: 1080, fps, frames,
-    time: [{ frame: 0, at: toJSONValue(start), ease: 'smooth' }, { frame: frames - 1, at: toJSONValue(end), ease: 'smooth' }],
+    // (History at an even pace by default, D190: a year takes as long at the start as in the middle; the camera eases.)
+    time: [{ frame: 0, at: toJSONValue(start), ease: 'linear' }, { frame: frames - 1, at: toJSONValue(end), ease: 'linear' }],
     camera: [{ frame: 0, camera: { ...camera }, ease: 'smooth' }, { frame: frames - 1, camera: { ...camera }, ease: 'smooth' }],
     overlays: [{
       id: 'date', kind: 'date', text: '{date}', x: 0.05, y: 0.9, size: 44, color: '#f4efe6', background: 'rgba(8,14,22,0.55)',

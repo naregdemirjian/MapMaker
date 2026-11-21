@@ -25,6 +25,15 @@ test('screen seconds since a historical instant, with even and eased pacing', ()
   }
 });
 
+test('a new shot paces history evenly; its camera eases (D190)', () => {
+  const shot = defaultShot('space', cam, Y(1900), Y(2000), 25, 10);
+  assert.deepEqual(shot.time.map((k) => k.ease), ['linear', 'linear']);
+  assert.deepEqual(shot.camera.map((k) => k.ease), ['smooth', 'smooth']);
+  // A quarter of the way through: a quarter of the century.
+  const quarter = timeAt(shot, Math.round((shot.frames - 1) / 4)).day;
+  assert.ok(Math.abs(quarter - (Y(1900).day + (Y(2000).day - Y(1900).day) / 4)) < 200, 'a quarter of the century a quarter of the way');
+});
+
 test('shot transitions: defaults fill in, saved settings win', () => {
   const shot = defaultShot('space', cam, Y(1900), Y(2000));
   assert.deepEqual(shotTransitions(shot), DEFAULT_TRANSITIONS);

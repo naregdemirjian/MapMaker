@@ -76,3 +76,19 @@ test('an events box set to hide while empty (D176) draws nothing between events'
   assert.equal(calls.length, 0, 'nothing drawn');
   assert.notEqual(drawEventsBox(ctx, 1920, 1080, 1, eventsBoxOf({ show: true }), t, []), null, 'as before when not asked: the date alone');
 });
+
+test('an events box kept still (D190): the same size and place with none, one or many events', async () => {
+  const { drawEventsBox } = await import('../src/presentation/events-box.ts');
+  const ctx = new Proxy({}, { get: (_t, k) => (k === 'measureText' ? (s: string) => ({ width: s.length * 10 }) : typeof k === 'string' && ['save', 'restore', 'fillText', 'fill', 'fillRect', 'beginPath', 'roundRect', 'stroke', 'moveTo', 'lineTo', 'arc', 'closePath', 'rect', 'clip', 'drawImage', 'arcTo', 'quadraticCurveTo', 'translate', 'scale', 'setTransform'].includes(k) ? () => undefined : undefined), set: () => true }) as unknown as CanvasRenderingContext2D;
+  const t = gregorian.fromCivil({ year: 1453, month: 5, day: 29 });
+  const ev = (name: string) => ({ id: name, name, description: '', alpha: 1, typeColor: null } as never);
+  const long = 'A very long name of an event that would take three lines or more in the box';
+  for (const corner of ['bottom-right', 'top-left'] as const) {
+    const still = eventsBoxOf({ show: true, keepSize: true, maxEvents: 3, corner });
+    const boxes = [[], [ev('One')], [ev('One'), ev(long), ev('Three')]].map((es) => drawEventsBox(ctx, 1920, 1080, 1, still, t, es));
+    assert.deepEqual(boxes[1], boxes[0], `${corner}: one event, the same box as none`);
+    assert.deepEqual(boxes[2], boxes[0], `${corner}: three, one of them long, the same box`);
+  }
+  const moving = eventsBoxOf({ show: true, maxEvents: 3 });
+  assert.notDeepEqual(drawEventsBox(ctx, 1920, 1080, 1, moving, t, [ev('One')]), drawEventsBox(ctx, 1920, 1080, 1, moving, t, []), 'not asked: it grows as before');
+});

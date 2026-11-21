@@ -61,6 +61,15 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D190. A still events box, and history at an even pace in new shots
+
+- **The events box can keep its size and place** ("Keep its size and place", `EventsBox.keepSize`): it is as tall as
+  the most events it lists need (its "Most events listed"), each event's name on one line (shortened with "…" if
+  long) and its description on two, so events come and go inside it and it never grows, shrinks or moves, however
+  many it shows. Without it, the box grows and shrinks with its events as before.
+- **New shots pace history evenly** (`defaultShot`): a year takes as long at the start of a shot as in its middle;
+  the camera still eases in and out. Shots made before keep their pacing; "Pacing" in a shot still chooses either.
+
 ### D189. Choosing several countries on the map: Ctrl+click, a box, a stroke
 
 - **Asked for:** choosing several countries on the map itself, not only in the lists (where Ctrl and Shift already

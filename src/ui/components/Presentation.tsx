@@ -306,6 +306,7 @@ export function ShotEditor() {
               <label>Most events listed<NumberField min={0} max={20} step={1} value={box.maxEvents} onCommit={(n) => setBox({ maxEvents: Math.round(n) })} /></label>
               <label>Events without an end stay (s)<NumberField min={0} max={60} step={0.5} value={box.linger} onCommit={(n) => setBox({ linger: n })} /></label>
             </div>
+            <label className="check" title="The box is as tall as the most events it lists need (each name on one line, shortened if long), so events come and go inside it and it never grows, shrinks or moves"><input type="checkbox" checked={!!box.keepSize} onChange={(e) => setBox({ keepSize: e.target.checked })} data-testid="events-box-keep-size" /> Keep its size and place (room for {box.maxEvents} {box.maxEvents === 1 ? 'event' : 'events'})</label>
             <label>Fade in and out (s)<NumberField min={0} max={10} step={0.1} value={box.fade} onCommit={(n) => setBox({ fade: n })} /></label>
             <label className="check"><input type="checkbox" checked={box.showDescription} onChange={(e) => setBox({ showDescription: e.target.checked })} /> Show each event's description</label>
             <label className="check"><input type="checkbox" checked={box.hideWhenEmpty} onChange={(e) => setBox({ hideWhenEmpty: e.target.checked })} data-testid="events-box-hide-empty" /> Hide the box while no event is listed</label>
