@@ -61,6 +61,44 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D195. Generated border shifts between a change's before and after
+
+- **Why.** Where a border moves in many small shifts (a war over months), there is no time to draw each one.
+  Asked for: draw the before and the after, and have the shifts in between generated as real changes of the
+  border at steps of time chosen, at random, the other side pushing back in places, the side that gains in the
+  end gaining more and more. Not an animation of a border moving (those exist: D136, D137): history itself.
+- **What is drawn, what is generated.** The after is a change drawn in an event, as always: land one country
+  gains (the before is the map just before it). "Generate border shifts…" on that change in the event's panel
+  asks for a step every so many days, weeks, months or years, the date by which the gainer holds all of it,
+  how much the other side pushes back and how ragged the front is. It then writes a change for every step
+  (`generateBorderShifts`, `domain/commands.ts`): land to the gainer, and land given back to whoever held it
+  before the event; the drawn change itself moves to the end date, where the gainer holds everything (the
+  event lasts at least until then). At most 60 steps. One step to undo.
+- **Where the border stands at a step** (`domain/border-shifts.ts`). How far the gainer has come at each place
+  is the change's field of arrival times (D136: the front travels through the land itself from the border with
+  the gainer's own land, or from the points the change was set to spread from; round bays, down arms, never
+  across a gap). To it a field of smooth chance is added that changes from step to step: where it runs ahead the
+  gainer has pushed on; where it falls behind what was reached a step before, the other side holds that land
+  again. The front's own level rises evenly, so the gainer gains on the whole; a step that would leave it no
+  more land than the last takes less of its chance until it does. Patches smaller than about a two-hundredth of
+  the change go with the land around them (no enclave of a few kilometres, no island far ahead of the front).
+  With push-back at 0 the border only ever advances. The same settings and pattern number give the same shifts;
+  "Another version" takes the next number.
+- **Into the map.** Each step's border is cut into the parcels (lines that end at the change's edge are carried a
+  little past it so they meet it), and every piece of the change is the gainer's if the step has reached most of
+  it, else its former holder's. Pieces are followed from step to step by where they lie, not by their numbers:
+  the parcel map gives a piece cut from a parcel no change refers to its parent's number or a sibling's, so a
+  lineage would lose them (found by the tests: the shifts stopped after two steps).
+- **Afterwards.** The event's panel shows the one change with its shifts counted, not every step. "Change the
+  shifts…" makes them again in place of the old ones (other settings, another version); "Remove the shifts" puts
+  the change back at its own date, spreading as it did. The generated changes are ordinary changes: the
+  timeline, the events box, exports and the engine treat them as drawn ones.
+- **Not done.** One gainer for a change: a change that gives land to several countries, or to nobody, is refused
+  (generate for each country's change in turn). Steps are instant shifts of the border; they do not each
+  animate. Lines cut for shifts that were made again or removed stay in the parcel map until tidied (D151).
+  A change across the 180th meridian is not handled specially. The shifts do not mind terrain (the animated
+  fronts can, D142).
+
 ### D194. Relief from the heights alone; land cover that changes by degrees
 
 - **Why.** Asked for: terrain and satellite maps realistic at every zoom, with relief that shows the actual

@@ -7,14 +7,17 @@ import { World, Tx, newId } from '../world-model/world.ts';
 import {
   Engine, canonicalFaces, leafDescendants, childrenMap, hashFaces, parseJSON, effectTime, eventStart, type Resolution, type TransitionSpec, type AnnexIntent, type PlaceIntent, type RenameIntent, type ShapeIntent, type RelateIntent, type SystemIntent, type LaneIntent, laneKey, type FeatureAnimStyle, isFeatureAnim,
 } from '../temporal-engine/engine.ts';
-import { type Instant, toStore, fromStore, NEG_INF, compare, isFiniteInstant } from '../core-time/index.ts';
+import { type Instant, toStore, fromStore, NEG_INF, compare, isFiniteInstant, addMs, stepDate } from '../core-time/index.ts';
 import { branchAt, branchCuts, seenAt, branchName, branchAndBelow, branchLine } from '../temporal-engine/branches.ts';
 import {
   BASE_EVENT_ID, MAIN_BRANCH, SCHEMA_VERSION, baseEventOf, isBaseEvent, type RowDiff, type EffectRow, type EventRow, type EntityRow, type LayerKind, type FeatureRow, type RelationRow,
 } from '../world-model/schema.ts';
-import { type Vec3, vecToLonLat, normalize } from '../geo-kernel/vec.ts';
+import { type Vec3, vecToLonLat, normalize, lonLatToVec } from '../geo-kernel/vec.ts';
 import { TopologyError, type PathStep } from '../geo-kernel/arrangement.ts';
-import { worldSettings, terrainSourceOf, simOf, EARTH_RADIUS_KM, type BasemapSource, type ShowSet, type ShowSettings } from '../world-model/world-settings.ts';
+import { worldSettings, terrainSourceOf, simOf, calendarOfSpace, EARTH_RADIUS_KM, type BasemapSource, type ShowSet, type ShowSettings } from '../world-model/world-settings.ts';
+import { frontSourceOf } from '../render-engine/front-source.ts';
+import { buildFrontField, frontLines, reachedAt } from '../render-engine/front-field.ts';
+import { borderShiftSteps, shiftDates, MAX_SHIFT_STEPS, type ShiftStep } from './border-shifts.ts';
 import { definitionOf, definitionProblems, canonicalDefinition, type PlanetDefinition } from '../planet/model/definition.ts';
 import { skyLookOf, type SkyLook } from '../space/sky-look.ts';
 import { solarRowOf, type SolarRow } from '../space/solar.ts';
@@ -1994,6 +1997,193 @@ export function annex(world: World, engine: Engine, o: { spaceId: string; layerI
     const basis = engine.basisFor(row, o.from);
     tx.patch('effect', id, { resolution: JSON.stringify({ set: [[basis, o.to]] }), basis_hash: hashFaces(basis) });
     return id;
+  });
+}
+
+// ---------------------------------------------------------------- generated border shifts (D195)
+
+/** How a change's border shifts were generated (kept with the change, to make them again or take them away). */
+export interface BorderShifts {
+  /** When the change itself was, before it was moved to the end of its shifts. */
+  from: [number, number]; until: [number, number];
+  every: { n: number; unit: 'day' | 'week' | 'month' | 'year' };
+  pushBack: number; roughness: number; seed: number;
+  /** How many dated steps were made (the change itself, at `until`, is one more). */
+  steps: number;
+  /** How the change spread before (given back when the shifts are taken away). */
+  transition: string;
+}
+
+export interface BorderShiftInput {
+  effectId: string;
+  /** A step this often, from the change's own date. */
+  every: { n: number; unit: 'day' | 'week' | 'month' | 'year' };
+  /** The date by which the gainer holds all of the change. */
+  until: Instant;
+  /** How much the other side pushes back (0 to 1), how ragged the front is (0 to 1), and a number for the pattern. */
+  pushBack: number; roughness: number; seed: number;
+  /** How near a border a new one snaps to it (radians). */
+  snap: number;
+}
+
+/** The generated shifts of a change, if it has any. */
+export function borderShiftsOf(world: World, effectId: string): BorderShifts | null {
+  const ef = world.get('effect', effectId);
+  const made = ef ? (parseJSON<{ shifts?: BorderShifts }>(ef.intent, {}).shifts ?? null) : null;
+  return made && Array.isArray(made.from) && Array.isArray(made.until) ? made : null;
+}
+
+/** The changes generated as a change's shifts, in order of time. */
+export function generatedShifts(world: World, effectId: string): EffectRow[] {
+  return world.all('effect').filter((f) => { const i = parseJSON<{ op?: string; of?: string }>(f.intent, {}); return i.op === 'shift' && i.of === effectId; })
+    .sort((a, b) => (a.at_day ?? 0) - (b.at_day ?? 0) || (a.at_ms ?? 0) - (b.at_ms ?? 0));
+}
+
+type LonLatRings = Array<Array<[number, number]>>;
+/** Whether a place lies within a parcel's outline (its rings filled by the even-odd rule). */
+function withinRings(rings: LonLatRings, x: number, y: number): boolean {
+  let inside = false;
+  for (const r of rings) for (let q = 0, p = r.length - 1; q < r.length; p = q++) {
+    const a = r[p], b = r[q];
+    if ((a[1] > y) !== (b[1] > y) && x < ((b[0] - a[0]) * (y - a[1])) / (b[1] - a[1]) + a[0]) inside = !inside;
+  }
+  return inside;
+}
+function boxOfRings(rings: LonLatRings): [number, number, number, number] {
+  let w = Infinity, e = -Infinity, s = Infinity, n = -Infinity;
+  for (const r of rings) for (const [x, y] of r) { if (x < w) w = x; if (x > e) e = x; if (y < s) s = y; if (y > n) n = y; }
+  return [w, s, e, n];
+}
+/** Places inside a parcel: those of a grid over it that fall within it (a finer grid if few do; for a sliver, middles of its corners). */
+function placesIn(rings: LonLatRings): Array<[number, number]> {
+  const [w, s, e, n] = boxOfRings(rings), out: Array<[number, number]> = [];
+  for (const N of [5, 11, 23]) {
+    out.length = 0;
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+      const x = w + ((i + 0.5) / N) * (e - w), y = s + ((j + 0.5) / N) * (n - s);
+      if (withinRings(rings, x, y)) out.push([x, y]);
+    }
+    if (out.length >= 3) return out;
+  }
+  if (out.length) return out;
+  const r = rings[0] ?? [];
+  for (let q = 1; q + 1 < r.length && out.length < 3; q++) {
+    const x = (r[0][0] + r[q][0] + r[q + 1][0]) / 3, y = (r[0][1] + r[q][1] + r[q + 1][1]) / 3;
+    if (withinRings(rings, x, y)) out.push([x, y]);
+  }
+  return out;
+}
+/** Whether most of a parcel has been reached at a step (looked at in the places given). */
+function mostlyReached(places: Array<[number, number]>, step: ShiftStep): boolean {
+  let yes = 0;
+  for (const [x, y] of places) if (reachedAt(step.field, x, y, step.level)) yes++;
+  return places.length > 0 && yes * 2 >= places.length;
+}
+
+/**
+ * Border shifts generated for a change in an event (D195). The change says what one country gains; between its
+ * date and `until`, at every step of time asked for, the land the gainer holds by then is worked out
+ * (domain/border-shifts.ts: a front through the land from its own border, with the other side pushing back here
+ * and there) and written as a change of its own: land to the gainer, and land given back to who held it before.
+ * The change itself moves to `until`, where the gainer holds all of it. The parcels are cut along each step's
+ * border. Shifts generated before for the same change are replaced. One step to undo.
+ */
+export function generateBorderShifts(world: World, engine: Engine, o: BorderShiftInput): CommandResult<{ steps: number }> {
+  const ef = world.get('effect', o.effectId), ev = ef ? world.get('event', ef.event_id) : undefined;
+  if (!ef || !ev || ef.kind !== 'assign' || !ef.space_id || !ef.layer_id) throw new Error('Choose a change of territory to generate border shifts for.');
+  if (isBaseEvent(ev.id)) throw new Error('Border shifts are generated for a change in an event: the event says when they begin.');
+  const intent = parseJSON<Record<string, unknown>>(ef.intent, {});
+  if (intent.op === 'shift') throw new Error('This change is one of the generated shifts: generate them from the change they lead up to.');
+  const res = parseJSON<Resolution>(ef.resolution, { set: [] });
+  if (res.set.length !== 1 || !res.set[0][1]) throw new Error('Border shifts are generated for land one country gains: this change gives land to several, or to nobody.');
+  const [faces, owner] = res.set[0] as [number[], string];
+  const spaceId = ef.space_id, layerId = ef.layer_id;
+  const made = borderShiftsOf(world, ef.id);
+  const start = made ? fromStore(made.from[0], made.from[1]) : effectTime(ef, ev);
+  if (!isFiniteInstant(start) || !isFiniteInstant(o.until) || compare(o.until, start) <= 0) throw new Error('The shifts need an end after the date of the change.');
+  const n = Math.round(o.every.n);
+  if (!(n >= 1)) throw new Error('A step is at least one day, week, month or year long.');
+  const cal = calendarOfSpace(world.get('map_space', spaceId));
+  const next = (t: Instant) => (o.every.unit === 'week' ? stepDate(t, 'day', 7 * n, cal) : stepDate(t, o.every.unit, n, cal));
+  const dates = shiftDates(start, o.until, next, (a, b) => compare(a, b) < 0);
+  if (dates.length > MAX_SHIFT_STEPS) throw new Error(`That would be more than ${MAX_SHIFT_STEPS} steps: choose longer steps, or an earlier end.`);
+  const pushBack = Math.max(0, Math.min(1, o.pushBack)), roughness = Math.max(0, Math.min(1, o.roughness)), seed = Math.abs(Math.round(o.seed)) % 2147483647;
+  // Who held what just before the change.
+  const states = engine.partitionState(spaceId, layerId, addMs(start, -1));
+  return run(world, 'Generate border shifts', (tx) => {
+    for (const f of generatedShifts(world, ef.id)) tx.remove('effect', f.id);
+    const arr0 = world.arrangement(spaceId);
+    const first = new Map<number, string | null>();
+    for (const l of leafDescendants(arr0, faces)) first.set(l, states.get(l)?.value ?? null);
+    const changing = [...first.keys()].filter((l) => first.get(l) !== owner);
+    if (!changing.length) throw new Error('This change gives its country no land it did not hold already.');
+    refuseLocked(world, [owner, ...new Set(changing.map((l) => first.get(l)))]);
+    // The change's parcels as they are cut step by step: each piece with who held it before the change and who
+    // holds it now. (A piece is known by where it lies: when a parcel is cut, its pieces are found in the parcel
+    // they were cut from by a place inside them, whatever numbers the parcel map gives them.)
+    interface Piece { rings: LonLatRings; box: [number, number, number, number]; before: string | null; held: string | null }
+    let pieces: Piece[] = changing.map((l) => { const rings = arr0.faceRingsLonLat(l), before = first.get(l) ?? null; return { rings, box: boxOfRings(rings), before, held: before }; });
+    const pieceAt = (x: number, y: number) => pieces.find((q) => x >= q.box[0] && x <= q.box[2] && y >= q.box[1] && y <= q.box[3] && withinRings(q.rings, x, y));
+    // Where the gainer comes from: its own border with the change, or the points the change was drawn to spread from.
+    const spec = parseJSON<TransitionSpec | null>(ef.transition, null);
+    const points = spec?.style === 'advance' && spec.origin ? [spec.origin, ...(spec.origins ?? [])].map((q) => lonLatToVec(q[0], q[1])) : [];
+    const src = frontSourceOf(arr0, changing, owner, { origin: points[0] ?? null, ...(points.length > 1 ? { origins: points } : {}) }, points.length ? 'advance' : 'border', states);
+    const field = src ? buildFrontField(src.rings, src.source, { roughness, seed, cells: 160 }) : null;
+    if (!field) throw new Error('This change is too small, or too large, to generate border shifts across.');
+    const steps = borderShiftSteps(field, { steps: dates.length, pushBack, seed });
+    const reach = 2.5 * Math.max(field.dlon, field.dlat);
+    for (let i = 0; i < steps.length; i++) {
+      const st = steps[i];
+      // The step's border: cut into the parcels (lines that end at the change's edge carried a little past it,
+      // so that they meet the edge whatever its bends).
+      const closed: Vec3[][] = [], open: Vec3[][] = [];
+      for (const line of frontLines(st.field, st.level)) {
+        if (line.length < 2) continue;
+        const a = line[0], z = line[line.length - 1];
+        if (line.length > 3 && a[0] === z[0] && a[1] === z[1]) { closed.push(line.slice(0, -1).map((q) => lonLatToVec(q[0], q[1]))); continue; }
+        const beyond = (p: [number, number], q: [number, number]): [number, number] => { const d = Math.hypot(p[0] - q[0], p[1] - q[1]) || 1; return [p[0] + ((p[0] - q[0]) / d) * reach, Math.max(-89.9, Math.min(89.9, p[1] + ((p[1] - q[1]) / d) * reach))]; };
+          open.push([beyond(a, line[1]), ...line, beyond(z, line[line.length - 2])].map((q) => lonLatToVec(q[0], q[1])));
+      }
+      if (closed.length) tx.kernel(spaceId, (arr) => arr.insertPaths(closed, { closed: true, snap: o.snap }));
+      if (open.length) tx.kernel(spaceId, (arr) => arr.insertPaths(open, { closed: false, snap: o.snap }));
+      const arr = world.arrangement(spaceId);
+      // Every piece of the change: the gainer's if the step has reached most of it, else its holder before the change.
+      const sets = new Map<string | null, number[]>(), now: Piece[] = [];
+      for (const leaf of leafDescendants(arr, faces)) {
+        const rings = arr.faceRingsLonLat(leaf), places = placesIn(rings);
+        const from = places.length ? pieceAt(places[0][0], places[0][1]) : undefined;
+        if (!from) continue;
+        const to = mostlyReached(places, st) ? owner : from.before;
+        now.push({ rings, box: boxOfRings(rings), before: from.before, held: to });
+        if (to !== from.held) { const list = sets.get(to); if (list) list.push(leaf); else sets.set(to, [leaf]); }
+      }
+      pieces = now;
+      if (!sets.size) continue;
+      const entries = [...sets].map(([value, leaves]): [number[], string | null] => [canonicalFaces(arr, leaves), value]);
+      // (The gainer's land first: it names the change.)
+      entries.sort((x, y) => (x[1] === owner ? 0 : 1) - (y[1] === owner ? 0 : 1));
+      const id = insertAssignEffect(tx, { eventId: ev.id, spaceId, layerId, faces: entries[0][0], value: entries[0][1], at: dates[i], intent: { op: 'shift', of: ef.id, step: i + 1 } });
+      if (entries.length > 1) tx.patch('effect', id, { resolution: JSON.stringify({ set: entries } satisfies Resolution) });
+    }
+    // The change itself: at the end, where the gainer holds all of it (and the event lasts at least until then).
+    const until = toStore(o.until);
+    const { shifts: _old, ...rest } = intent;
+    const kept: BorderShifts = { from: toStore(start), until, every: { n, unit: o.every.unit }, pushBack, roughness, seed, steps: steps.length, transition: made ? made.transition : ef.transition };
+    tx.patch('effect', ef.id, { at_day: until[0], at_ms: until[1], transition: '', intent: JSON.stringify({ ...rest, shifts: kept }) });
+    const end = ev.end_day === null || ev.end_ms === null ? null : fromStore(ev.end_day, ev.end_ms);
+    if (!end || compare(end, o.until) < 0) tx.patch('event', ev.id, { end_day: until[0], end_ms: until[1] });
+    return { steps: steps.length };
+  });
+}
+
+/** A change's generated shifts taken away: the change is at its own date again, spreading as it did before. */
+export function removeBorderShifts(world: World, effectId: string): CommandResult {
+  const ef = world.get('effect', effectId), made = borderShiftsOf(world, effectId);
+  if (!ef || !made) throw new Error('This change has no generated border shifts.');
+  return run(world, 'Remove generated border shifts', (tx) => {
+    for (const f of generatedShifts(world, effectId)) tx.remove('effect', f.id);
+    const { shifts: _old, ...rest } = parseJSON<Record<string, unknown>>(ef.intent, {});
+    tx.patch('effect', effectId, { at_day: made.from[0], at_ms: made.from[1], transition: made.transition ?? '', intent: JSON.stringify(rest) });
   });
 }
 

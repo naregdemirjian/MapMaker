@@ -919,7 +919,7 @@ function EventPanel({ id }: { id: string }) {
         </div>
       </>}
       <h4>Changes</h4>
-      {effects.map((f) => (
+      {effects.filter((f) => parseJSON<{ op?: string }>(f.intent, {}).op !== 'shift').map((f) => (
         <div key={f.id} className="effect">
           <div>{isUntracked(f) && <span className="date">{fmt(fromStore(f.at_day!, f.at_ms ?? 0))} · </span>}{describeEffect(s, f)}</div>
           {base && isUntracked(f) && <div className="effect-tools"><button className="small" onClick={() => s.setTime(fromStore(f.at_day!, f.at_ms ?? 0))}>Go to</button><button className="small danger" onClick={() => s.execute((wd) => cmd.deleteEffect(wd, f.id))}>Remove</button></div>}
@@ -935,6 +935,18 @@ function EventPanel({ id }: { id: string }) {
                 </select>
               </label>
               <button className="small danger" onClick={() => s.execute((wd) => cmd.deleteEffect(wd, f.id))}>Remove</button>
+{(() => {
+                // Border shifts generated between before and after (D195): for land one country gains.
+                if (f.kind !== 'assign') return null;
+                const sets = parseJSON<Resolution>(f.resolution, { set: [] }).set, made = cmd.borderShiftsOf(w, f.id);
+                if (sets.length !== 1 || !sets[0][1]) return null;
+                return (
+                  <span className="change-length" data-testid="change-shifts">
+                    {made && <span className="muted">Border shifts: {cmd.generatedShifts(w, f.id).length} generated, every {made.every.n === 1 ? made.every.unit : `${made.every.n} ${made.every.unit}s`}</span>}
+                    <button className="small" onClick={() => s.set({ dialog: 'border-shifts', shiftsFor: f.id })} data-testid="shifts-open" title="Instead of all at once: the border moved there step by step, as real changes, the other side pushing back here and there">{made ? 'Change the shifts…' : 'Generate border shifts…'}</button>
+                  </span>
+                );
+              })()}
               <ChangeLength f={f} ev={e} />
               {(() => {
                 // An expansion's starting points (D91): more of them, and it spreads from all at once.

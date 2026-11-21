@@ -838,6 +838,81 @@ try {
     await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
   });
 
+
+  await h.step('Border shifts generated between a change\'s before and after (D195): a step every two months, real changes; more of the land each time from the gainer\'s border, some retaken; all of it at the end; another version, removed, undone', async () => {
+    await page.getByTestId('mode-world').click();
+    const before = await page.evaluate(() => (window as any).__mapmaker.store.world.all('entity').length);
+    // Two countries side by side in the southern Indian Ocean, and a war in which the first takes all of the second (drawn as one change).
+    const ids = await page.evaluate(() => {
+      const m = (window as any).__mapmaker, s = m.store, C = m.bench.commands, V = m.bench.lonLatToVec;
+      const ring = (x0: number, y0: number, x1: number, y1: number) => { const out: unknown[] = []; const side = (ax: number, ay: number, bx: number, by: number) => { for (let k = 0; k < 10; k++) out.push(V(ax + ((bx - ax) * k) / 10, ay + ((by - ay) * k) / 10)); }; side(x0, y0, x1, y0); side(x1, y0, x1, y1); side(x1, y1, x0, y1); side(x0, y1, x0, y0); return out; };
+      const never = { day: -Infinity, ms: 0 };
+      const a = s.execute((w: any) => C.createEntity(w, { type_id: 'polity', name: 'Shiftland', color: '#2f6fd6' }));
+      const b = s.execute((w: any) => C.createEntity(w, { type_id: 'polity', name: 'Holdfast', color: '#d6a12f' }));
+      s.execute((w: any, en: any) => C.paintTerritory(w, en, { spaceId: s.spaceId, layerId: s.layerId, ring: ring(80, -50, 90, -40), value: a, snap: 1e-8, mode: { kind: 'correct', t: never } }));
+      s.execute((w: any, en: any) => C.paintTerritory(w, en, { spaceId: s.spaceId, layerId: s.layerId, ring: ring(90, -50, 100, -40), value: b, snap: 1e-8, mode: { kind: 'correct', t: never } }));
+      const war = s.execute((w: any) => C.createEvent(w, { name: 'The Holdfast War', start: m.bench.gregorian.fromCivil({ year: 1500, month: 1, day: 1 }) }));
+      s.execute((w: any, en: any) => C.paintTerritory(w, en, { spaceId: s.spaceId, layerId: s.layerId, ring: ring(90, -50, 100, -40), value: a, snap: 1e-8, mode: { kind: 'new', eventId: war } }));
+      s.set({ selection: { kind: 'event', id: war } });
+      return { a, b, war };
+    });
+    await h.saved();
+    const owner = (lon: number, lat: number, date: string) => h.hook<string | null>('ownerAt', lon, lat, date);
+    assert.equal(await owner(95, -45, '1 February 1500'), 'Shiftland', 'as drawn: all at once');
+    // The share of Holdfast's old land Shiftland holds on a date, looked at in 400 places.
+    const share = (date: string) => page.evaluate((date) => { const m = (window as any).__mapmaker; let n = 0; for (let j = 0; j < 20; j++) for (let i = 0; i < 20; i++) if (m.ownerAt(90 + (i + 0.5) / 2, -50 + (j + 0.5) / 2, date) === 'Shiftland') n++; return n / 400; }, date);
+    // From the change in the event's panel: a step every two months for a year.
+    await page.getByTestId('event-panel').waitFor();
+    await page.getByTestId('shifts-open').click();
+    await page.getByTestId('border-shifts-dialog').waitFor();
+    await page.getByTestId('shifts-every').fill('2');
+    assert.match((await page.getByTestId('shifts-count').textContent()) ?? '', /^6 steps, then the last at 1 January 1501/);
+    await page.getByTestId('shifts-pushback').fill('80');
+    await page.getByTestId('shifts-generate').click();
+    await page.getByTestId('shifts-made').waitFor();
+    await h.saved();
+    assert.match((await page.getByTestId('shifts-made').textContent()) ?? '', /6 generated shifts now, every 2 months until 1 January 1501/);
+    const dates = ['15 January 1500', '15 March 1500', '15 May 1500', '15 July 1500', '15 September 1500', '15 November 1500'];
+    const shares: number[] = [];
+    for (const d of dates) shares.push(await share(d));
+    for (let i = 1; i < shares.length; i++) assert.ok(shares[i] > shares[i - 1], `more of it at every step (${shares.map((v) => v.toFixed(2)).join(', ')})`);
+    assert.ok(shares[0] > 0 && shares[0] < 0.4 && shares[5] > 0.6 && shares[5] < 1, `from a little to nearly all (${shares.map((v) => v.toFixed(2)).join(', ')})`);
+    assert.equal(await share('31 December 1499'), 0, 'none before the war');
+    assert.equal(await share('2 January 1501'), 1, 'all of it at the end');
+    assert.equal(await owner(90.5, -45, '15 March 1500'), 'Shiftland', 'from its own border first');
+    assert.equal(await owner(99.5, -45, '15 March 1500'), 'Holdfast');
+    // Somewhere Holdfast takes land back between two steps.
+    const back = await page.evaluate((dates) => { const m = (window as any).__mapmaker; let n = 0; for (let q = 1; q < dates.length; q++) for (let j = 0; j < 20; j++) for (let i = 0; i < 20; i++) { const lon = 90 + (i + 0.5) / 2, lat = -50 + (j + 0.5) / 2; if (m.ownerAt(lon, lat, dates[q - 1]) === 'Shiftland' && m.ownerAt(lon, lat, dates[q]) === 'Holdfast') n++; } return n; }, dates);
+    assert.ok(back > 0, `land retaken here and there (${back} of the places looked at)`);
+    // On the map, half way: both countries' colours inside the land fought over.
+    await page.getByTestId('shifts-close').click();
+    await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 92, lat: -45, zoom: 3.2, rotation: 0, projection: 'equirectangular' }));
+    await h.setDate('15 July 1500');
+    await page.waitForTimeout(400);
+    await h.screenshot('border-shifts-half-way');
+    // The panel: one change with its shifts, not seven.
+    assert.match((await page.getByTestId('change-shifts').textContent()) ?? '', /Border shifts: [5-6] generated, every 2 months/);
+    assert.equal(await page.getByTestId('shifts-open').count(), 1);
+    // Another version: other shifts in their place; removed: all at once again.
+    await page.getByTestId('shifts-open').click();
+    await page.getByTestId('shifts-another').click();
+    await page.waitForFunction(() => /pattern 2\)/.test(document.querySelector('[data-testid=shifts-made]')?.textContent ?? ''));
+    await h.saved();
+    const other: number[] = [];
+    for (const d of dates) other.push(await share(d));
+    assert.notDeepEqual(other, shares, 'another version');
+    assert.equal(await share('2 January 1501'), 1);
+    await page.getByTestId('shifts-remove').click();
+    await page.waitForFunction(() => !document.querySelector('[data-testid=shifts-made]'));
+    await h.saved();
+    assert.equal(await share('15 January 1500'), 1, 'removed: all at once again');
+    await page.getByTestId('shifts-close').click();
+    // Undone, step by step, to before the two countries.
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
+    for (let i = 0; i < 12 && (await page.evaluate(() => (window as any).__mapmaker.store.world.all('entity').length)) > before; i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('entity').length), before);
+    await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 0, lat: 20, zoom: 0, rotation: 0, projection: 'equirectangular' }));
+  });
   await h.step('Working with many: Ctrl/Shift to choose, right-click menus, groups of countries, labels of a group, cities under their country, several events deleted at once', async () => {
     await page.getByTestId('tool-select').click();
     await h.setDate('1650');

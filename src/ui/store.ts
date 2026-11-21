@@ -182,6 +182,8 @@ class AppStore {
   recordEventId: string | null = null;
   /** A change whose expansion is given another starting point by the next click on the map (D91). */
   pickOrigin: string | null = null;
+  /** The change whose border shifts are being generated (D195: the dialog is open on it). */
+  shiftsFor: string | null = null;
   /** A callout (D107) whose place is chosen by the next click on the shot's preview: its overlay id. */
   pickCallout: string | null = null;
   /** What each change recorded into an event does: at once, or spreading for how long, and how (D86; kept on this computer). */
