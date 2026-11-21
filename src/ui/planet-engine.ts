@@ -19,7 +19,7 @@ import type { ElevationGrid } from '../terrain/grid.ts';
 /** Workers for a pool: one fewer than the processor's threads (the interface keeps one), from one to eight. */
 export const defaultWorkers = () => Math.max(1, Math.min(8, (navigator.hardwareConcurrency || 2) - 1));
 
-const newWorker = (): WorkerLike => new Worker(new URL('planet-worker.js', document.baseURI), { type: 'module' }) as unknown as WorkerLike;
+export const newWorker = (): WorkerLike => new Worker(new URL('planet-worker.js', document.baseURI), { type: 'module' }) as unknown as WorkerLike;
 
 let shared: Pipeline | null = null;
 

@@ -34,7 +34,8 @@ a { color: var(--accent); cursor: pointer; }
 .small-note { font-size: 12px; margin-top: 10px; }
 .date-input.bad { border-color: var(--danger); }
 
-.app { display: grid; height: 100vh; grid-template-columns: 250px 1fr 310px; grid-template-rows: 46px 1fr 150px; grid-template-areas: "top top top" "left center right" "bottom bottom bottom"; }
+/* (Clipped, not scrollable: a crowded top bar wider than the window must never let the whole page slide sideways.) */
+.app { overflow: clip; display: grid; height: 100vh; grid-template-columns: 250px 1fr 310px; grid-template-rows: 46px 1fr 150px; grid-template-areas: "top top top" "left center right" "bottom bottom bottom"; }
 .topbar { grid-area: top; display: flex; align-items: center; gap: 6px; padding: 0 10px; background: var(--panel); border-bottom: 1px solid var(--line); }
 .brand { font-weight: 700; letter-spacing: 0.02em; }
 .project-name { color: var(--muted); max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -507,3 +508,7 @@ p.small { font-size: 11.5px; }
 /* The solar system side by side (D192): moons chosen by planet. */
 .solar-row-moons { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 6px 0; }
 .solar-row-planet { display: flex; flex-direction: column; gap: 2px; min-width: 110px; }
+/* Baking a galaxy's picture (D193). */
+.map-hud .galaxy-bake { display: inline-flex; align-items: center; gap: 6px; background: var(--panel2); border: 1px solid var(--line); padding: 2px 7px; border-radius: 5px; cursor: pointer; pointer-events: auto; color: var(--text); font-size: 12px; white-space: nowrap; margin: 0; }
+.map-hud .galaxy-bake.on { border-color: var(--accent); }
+.map-hud .galaxy-bake input { margin: 0; }

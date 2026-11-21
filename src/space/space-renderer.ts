@@ -7,6 +7,8 @@ import { gregorian, type Instant } from '../core-time/index.ts';
 import { starColour, starSize, type StarCatalogue, type Star } from './catalogue.ts';
 import { seeded } from '../presentation/looks.ts';
 import type { GalaxyDust } from './galaxy.ts';
+import type { GalaxyImage } from './galaxy-pictures.ts';
+import { galaxyGL } from './galaxy-gl.ts';
 import { DEFAULT_SKY, NAME_FONTS, hexRgb, mix, starColourIn, type SkyLook } from './sky-look.ts';
 import { territoryField, paintTerritory, territoryBorders, realmLabels, type TerritorySite } from './territory.ts';
 import { PHOTO_TEXTURES, RING_TEXTURE, sphereImage, ringImage, photoSize, type Pixels } from './planet-photos.ts';
@@ -49,6 +51,8 @@ export interface SpaceDrawOptions {
   planets?: ReadonlySet<number>;
   /** A galaxy's glow, and its arms' names (D116). */
   dust?: GalaxyDust;
+  /** A galaxy's picture (D193), drawn on the galactic plane instead of the glow of points once there is one. */
+  picture?: GalaxyImage | null;
   armNames?: Array<{ name: string; at: Vec3 }>;
   /** How the map looks (D130, D131, D132); absent: the natural look. */
   look?: SkyLook;
@@ -140,8 +144,10 @@ export class SpaceRenderer {
       ctx.restore();
       return;
     }
-    if (!o.transparent && !o.dust && look.farStars > 0) this.farStars(ctx, view, look.farStars);
-    if (o.dust && o.only !== 'names') this.dust(ctx, view, o.dust);
+    // (Round a galaxy's picture: the faint stars and galaxies far beyond it, fewer than round a star map.)
+    if (!o.transparent && (o.picture ? true : !o.dust) && look.farStars > 0) this.farStars(ctx, view, o.picture ? look.farStars * 0.6 : look.farStars);
+    if (o.picture && o.only !== 'names') this.galaxyPicture(ctx, view, o.picture, look, !!o.transparent);
+    else if (o.dust && o.only !== 'names') this.dust(ctx, view, o.dust);
     if (o.grid && o.only !== 'names') {
       if (view.chart && look.chartGrid !== 'rings') this.chartGrid(ctx, view, cat?.radiusLy ?? 50, look, o.rings);
       else this.grid(ctx, view, cat?.radiusLy ?? 50, o.rings, o.axisLabel);
@@ -558,6 +564,95 @@ export class SpaceRenderer {
       ctx.fillText(n.text, n.x, n.y);
     }
     ctx.restore();
+  }
+
+  private pictureLayer: OffscreenCanvas | null = null;
+  private pictureKey = '';
+  /**
+   * A galaxy as its picture (D193): the picture laid on the galactic plane and seen from the camera. Drawn once
+   * for a view onto a layer of its own (in the picture's pixels at their finest, whatever the canvas's scale), then
+   * added to the sky: its light over the sky's. On a transparent frame or a light sky the light becomes the
+   * layer's opacity instead, so the galaxy stands on whatever is behind it.
+   */
+  private galaxyPicture(ctx: CanvasRenderingContext2D, view: SpaceView, pic: GalaxyImage, look: SkyLook, transparent: boolean): void {
+    const m = ctx.getTransform(), k = Math.max(0.25, Math.hypot(m.a, m.b));
+    const W = Math.max(1, Math.ceil(view.width * k)), H = Math.max(1, Math.ceil(view.height * k));
+    if (!this.pictureLayer || this.pictureLayer.width !== W || this.pictureLayer.height !== H) { this.pictureLayer = new OffscreenCanvas(W, H); this.pictureKey = ''; }
+    const [br, bg, bb] = hexRgb(look.background);
+    const alpha = transparent || 0.299 * br + 0.587 * bg + 0.114 * bb > 128;
+    const c = view.camera, key = `${pic.version}|${c.lon}|${c.lat}|${c.zoom}|${c.rotation}|${c.target?.join(',') ?? ''}|${view.scale}|${view.chart ? 1 : 0}|${alpha ? 1 : 0}`;
+    if (key !== this.pictureKey) { this.paintPicture(view, pic, W, H, k, alpha); this.pictureKey = key; }
+    ctx.save();
+    if (!alpha) ctx.globalCompositeOperation = 'screen';
+    ctx.drawImage(this.pictureLayer, 0, 0, view.width, view.height);
+    ctx.restore();
+  }
+  private paintPicture(view: SpaceView, pic: GalaxyImage, W: number, H: number, k: number, alpha: boolean): void {
+    const g = this.pictureLayer!.getContext('2d')!;
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1;
+    g.clearRect(0, 0, W, H);
+    // The graphics card lays the picture on the plane in one go; without it, the plane is drawn in pieces below.
+    const card = galaxyGL()?.draw(pic, view, W, H, k, alpha) ?? null;
+    if (card) g.drawImage(card, 0, 0);
+    else this.picturePieces(g, view, pic, k);
+    // Seen from near its edge the flat picture thins to a line: the bulge stands out of the plane, a round glow.
+    if (!view.chart) {
+      const tilt = 1 - Math.abs(view.forward[2]), p = view.project([0, 0, 0]);
+      if (tilt > 0.3 && p) {
+        const t = Math.min(1, (tilt - 0.3) / 0.6), r = Math.max(2, pic.bulge * 2.6 * view.scale * p[2] * k);
+        const grad = g.createRadialGradient(p[0] * k, p[1] * k, 0, p[0] * k, p[1] * k, r);
+        grad.addColorStop(0, `rgba(255,236,196,${(0.9 * t).toFixed(3)})`); grad.addColorStop(0.35, `rgba(255,214,150,${(0.4 * t).toFixed(3)})`); grad.addColorStop(1, 'rgba(255,190,120,0)');
+        g.globalCompositeOperation = 'lighter';
+        g.fillStyle = grad;
+        g.fillRect(p[0] * k - r, p[1] * k - r, 2 * r, 2 * r);
+        g.globalCompositeOperation = 'source-over';
+      }
+    }
+    if (alpha && !card) {
+      // The light as opacity: as bright over black as before, and clear where there is none.
+      const id = g.getImageData(0, 0, W, H), px = id.data;
+      for (let i = 0; i < px.length; i += 4) {
+        if (!px[i + 3]) continue;
+        const a = Math.max(px[i], px[i + 1], px[i + 2]);
+        if (!a) { px[i + 3] = 0; continue; }
+        px[i] = (px[i] * 255) / a; px[i + 1] = (px[i + 1] * 255) / a; px[i + 2] = (px[i + 2] * 255) / a; px[i + 3] = (a * px[i + 3]) / 255;
+      }
+      g.putImageData(id, 0, 0);
+    }
+  }
+  /** The picture on its plane without the graphics card: in pieces, each a parallelogram. */
+  private picturePieces(g: OffscreenCanvasRenderingContext2D, view: SpaceView, pic: GalaxyImage, k: number): void {
+    // (Plain smoothing: the copy of the picture nearest the screen's fineness is chosen below, so nothing is drawn much smaller than it is.)
+    g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'low';
+    const E = pic.extent;
+    // The smallest copy of the picture still as fine as the screen (a larger one drawn small would flicker as the view moves).
+    let level = pic.levels[0];
+    for (const l of pic.levels) if (l.size / (2 * E) >= view.scale * k * 0.9) level = l;
+    const S = level.size;
+    const P = (u: number, v: number) => view.project([-E + u * 2 * E, E - v * 2 * E, 0]);
+    // The plane in pieces, each drawn as a parallelogram: pieces are halved until perspective bends them by less than a
+    // pixel (a flat chart is one piece), and overlap their neighbours by a hair so that no seam shows.
+    const piece = (u0: number, v0: number, u1: number, v1: number, depth: number): void => {
+      const a = P(u0, v0), b = P(u1, v0), c = P(u0, v1), d = P(u1, v1);
+      const split = (): void => {
+        const um = (u0 + u1) / 2, vm = (v0 + v1) / 2;
+        piece(u0, v0, um, vm, depth + 1); piece(um, v0, u1, vm, depth + 1); piece(u0, vm, um, v1, depth + 1); piece(um, vm, u1, v1, depth + 1);
+      };
+      if (!a || !b || !c || !d) { if (depth < 6) split(); return; }
+      if (Math.max(a[0], b[0], c[0], d[0]) < -2 || Math.min(a[0], b[0], c[0], d[0]) > view.width + 2 || Math.max(a[1], b[1], c[1], d[1]) < -2 || Math.min(a[1], b[1], c[1], d[1]) > view.height + 2) return;
+      const bend = Math.hypot(a[0] + d[0] - b[0] - c[0], a[1] + d[1] - b[1] - c[1]) * k;
+      if (depth < 7 && (bend > 1.2 || (!view.chart && depth < 1))) { split(); return; }
+      const e1x = (b[0] - a[0] + d[0] - c[0]) / 2, e1y = (b[1] - a[1] + d[1] - c[1]) / 2, e2x = (c[0] - a[0] + d[0] - b[0]) / 2, e2y = (c[1] - a[1] + d[1] - b[1]) / 2;
+      const ox = (a[0] + b[0] + c[0] + d[0]) / 4 - (e1x + e2x) / 2, oy = (a[1] + b[1] + c[1] + d[1]) / 4 - (e1y + e2y) / 2;
+      const sx = u0 * S, sy = v0 * S, sw = (u1 - u0) * S, sh = (v1 - v0) * S;
+      const padU = Math.min(sw / 2, (1.0 * sw) / Math.max(1e-6, Math.hypot(e1x, e1y) * k)), padV = Math.min(sh / 2, (1.0 * sh) / Math.max(1e-6, Math.hypot(e2x, e2y) * k));
+      const x0 = Math.max(0, sx - padU), x1 = Math.min(S, sx + sw + padU), y0 = Math.max(0, sy - padV), y1 = Math.min(S, sy + sh + padV);
+      g.setTransform((e1x * k) / sw, (e1y * k) / sw, (e2x * k) / sh, (e2y * k) / sh, ox * k, oy * k);
+      g.drawImage(level.image, x0, y0, x1 - x0, y1 - y0, x0 - sx, y0 - sy, x1 - x0, y1 - y0);
+    };
+    piece(0, 0, 1, 1, 0);
+    g.setTransform(1, 0, 0, 1, 0, 0);
   }
 
   private dustLayer: OffscreenCanvas | null = null;

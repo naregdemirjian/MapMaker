@@ -26,6 +26,7 @@ import { SpaceRenderer } from '../space/space-renderer.ts';
 import { loadNearbyStars } from '../space/catalogue.ts';
 import { loadExoplanets } from '../space/exoplanets.ts';
 import { spaceScene } from '../space/scene.ts';
+import { galaxyImageNow, galaxyImageReady } from '../space/galaxy-pictures.ts';
 import { holdingsAt, lanesFor, warsAmong } from '../space/realms.ts';
 import { loadPaleo, paleoGridAt, ageOf, glacialSeaAt, type PaleoSet } from '../terrain/paleo.ts';
 import { stampsAt } from '../terrain/sculpt.ts';
@@ -372,7 +373,7 @@ export function drawSpaceFrame(ctx: CanvasRenderingContext2D, world: World, engi
   if (all || back || (names && shot.labels) || realms || lanes) {
     spaceRenderer ??= new SpaceRenderer();
     spaceRenderer.render(ctx, view, scene.cat, {
-      rings: scene.rings, axisLabel: scene.axisLabel, orbits: scene.orbits, realmReach: scene.realmReach, dust: scene.dust, armNames: scene.armNames, planets: all ? scene.planets : undefined,
+      rings: scene.rings, axisLabel: scene.axisLabel, orbits: scene.orbits, realmReach: scene.realmReach, dust: scene.dust, picture: scene.galaxy ? galaxyImageNow(scene.galaxy, true) : undefined, armNames: scene.armNames, planets: all ? scene.planets : undefined,
       transparent: all ? shot.transparent : !def.background, grid: !scene.row && shot.graticule && (all || back), dropLines: all && scene.dropLines !== false, names: shot.labels && (all || names) ? 'auto' : 'none', row: scene.row,
       only: all ? undefined : back ? 'background' : realms ? 'realms' : lanes ? 'lanes' : 'names',
       holdings: holdingsAt(world, engine, shot.spaceId, t, (t0) => screenSecondsSince(shot, frame, t0)), lanes: lanesFor(world, engine, shot.spaceId, t),
@@ -424,6 +425,9 @@ export async function runExport(o: {
   // (A solar system as photographed, D191: its pictures loaded before the first frame, and credited.)
   const solarPhotos = spaceMap && spaceSettingsOf(o.world.get('map_space', o.shot.spaceId))?.catalogue === 'solar' && !!spaceSettingsOf(o.world.get('map_space', o.shot.spaceId))?.look?.photo;
   if (solarPhotos) await preloadImages([...Object.values(PHOTO_TEXTURES), RING_TEXTURE]);
+  // (A galaxy's picture, D193: baked before the first frame, so every frame has it at full detail.)
+  const galaxyDrawn = spaceMap ? spaceSettingsOf(o.world.get('map_space', o.shot.spaceId))?.galaxy : undefined;
+  if (galaxyDrawn && spaceSettingsOf(o.world.get('map_space', o.shot.spaceId))?.catalogue === 'galaxy') await galaxyImageReady(galaxyDrawn, true).catch(() => null);
   if (nearbyStars) { await loadNearbyStars(); await loadExoplanets(); }
   const basemap = await basemapFor(o.world, o.shot.spaceId);
   const terrain = await terrainFor(o.world, o.shot.spaceId, o.shot);

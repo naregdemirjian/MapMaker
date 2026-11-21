@@ -5,7 +5,7 @@ import type { SpaceSettings } from '../world-model/world-settings.ts';
 import { nearbyStarsNow, type StarCatalogue } from './catalogue.ts';
 import { solarCatalogue, solarOrbits, scalePoint, solarRowCatalogue, solarRowLines, ROW_RADIUS, ROW_STEP, SOLAR_RADIUS_AU } from './solar.ts';
 import { inventedStarsCached } from './invented.ts';
-import { galaxyCached, type GalaxyDust } from './galaxy.ts';
+import { galaxyCached, type GalaxyDust, type GalaxySettings } from './galaxy.ts';
 import { exoplanetsNow, type ExoplanetList } from './exoplanets.ts';
 
 /** The stars that have known planets (kept with the list). */
@@ -25,6 +25,8 @@ export interface SpaceScene {
   unit: 'ly' | 'au';
   /** A galaxy's glow and the names of its arms (D116). */
   dust?: GalaxyDust;
+  /** The galaxy drawn (D193: its picture is asked for with galaxyImageNow). */
+  galaxy?: GalaxySettings;
   armNames?: Array<{ name: string; at: Vec3 }>;
   /** Lines from each star down to the plane (not on a galaxy: it is flat). */
   dropLines?: boolean;
@@ -59,7 +61,7 @@ export function spaceScene(settings: SpaceSettings | null, t: Instant, onLoad?: 
     const rings = Array.from({ length: Math.floor(R / step + 1e-9) }, (_, i) => ({ r: step * (i + 1), label: `${(step * (i + 1)).toLocaleString('en-GB')} ly` }));
     // (A held system's realm reaches about half way to its neighbours.)
     const systems = Math.max(1, g.cat.stars.filter((s) => s.minor).length);
-    return { cat: g.cat, radius: R, rings, axisLabel: null, unit: 'ly', dust: g.dust, armNames: g.arms, dropLines: false, realmReach: Math.max(R / 200, (0.9 * R) / Math.sqrt(systems)), middle: [0, 0, 0] };
+    return { cat: g.cat, radius: R, rings, axisLabel: null, unit: 'ly', dust: g.dust, galaxy: settings.galaxy, armNames: g.arms, dropLines: false, realmReach: Math.max(R / 200, (0.9 * R) / Math.sqrt(systems)), middle: [0, 0, 0] };
   }
   const planets = exoplanetsNow(onLoad);
   return { cat: nearbyStarsNow(onLoad), radius: settings?.radiusLy ?? 50, unit: 'ly', planets: planets ? hostsOf(planets) : undefined };

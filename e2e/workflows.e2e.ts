@@ -4055,7 +4055,7 @@ try {
     assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.kind === 'space')), false);
   });
 
-  await h.step('The Milky Way: the whole galaxy, its arms and places; the Orion Nebula found and its panel; star systems held in a box by a country; a frame of it; another galaxy of one\'s own; undone', async () => {
+  await h.step('The Milky Way: the whole galaxy, its arms and places; its picture as a draft, baked at full detail and kept, drawn without the graphics card (D193); the Orion Nebula found and its panel; star systems held in a box by a country; a frame of it; another galaxy of one\'s own; undone', async () => {
     await page.getByTestId('mode-world').click();
     await page.getByRole('button', { name: '+ Map' }).click();
     await page.getByTestId('new-map-milkyway').check();
@@ -4072,7 +4072,44 @@ try {
       return { middle: at(x + 6, y + 6), sky: at(r.left + 12, r.top + 12) };
     }, mid);
     assert.ok(glow.middle > 300 && glow.sky < 60, `bright in the middle, dark sky (${glow.middle}, ${glow.sky})`);
+    // The galaxy as a picture (D193): a draft while working, painted in workers; the middle bright, old yellow
+    // stars round it, an arm by the Sun bluer than they are.
+    await page.waitForFunction(() => (window as any).__mapmaker.galaxyPicture()?.size === 1024, undefined, { timeout: 120000 });
+    assert.equal(await page.getByTestId('galaxy-bake').getAttribute('data-state'), 'draft');
+    const sunAt = (await page.evaluate(() => (window as any).__mapmaker.starToPage(0))) as [number, number];
+    const colours = () => page.evaluate(([mx, my, sx, sy]) => {
+      const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement, r = c.getBoundingClientRect(), k = c.width / r.width;
+      // (The mean colour of a small square, clear of the place's own dot.)
+      const at = (px: number, py: number) => { const d = c.getContext('2d')!.getImageData(Math.round((px - r.left) * k) - 4, Math.round((py - r.top) * k) - 4, 9, 9).data; const o = [0, 0, 0]; for (let i = 0; i < d.length; i += 4) { o[0] += d[i]; o[1] += d[i + 1]; o[2] += d[i + 2]; } return o.map((v) => v / 81); };
+      // (Round the middle: a quarter of the way from the middle to the Sun; the arms: half as far again beyond the Sun.)
+      return { middle: at(mx + 10, my + 10), bulge: at(mx + (sx - mx) * 0.2, my + (sy - my) * 0.2), sky: at(r.left + 14, r.top + 14) };
+    }, [mid[0], mid[1], sunAt[0], sunAt[1]]);
+    const draft = await colours();
+    assert.ok(draft.middle[0] > 200 && draft.bulge[0] > draft.bulge[2] * 1.15 && draft.sky[0] + draft.sky[1] + draft.sky[2] < 60, `a bright middle, yellow round it, dark sky (${JSON.stringify(draft)})`);
     await h.screenshot('milky-way');
+    // Baked: painted at full detail and kept; the same galaxy, only finer.
+    await page.getByTestId('galaxy-baked').check();
+    await page.waitForFunction(() => document.querySelector('[data-testid=galaxy-bake]')?.getAttribute('data-state') === 'done', undefined, { timeout: 600000 });
+    assert.deepEqual(await page.evaluate(() => { const p = (window as any).__mapmaker.galaxyPicture(); return [p.size, p.baked]; }), [4096, true]);
+    assert.match((await page.getByTestId('galaxy-bake').textContent()) ?? '', /Baked at full detail/);
+    await page.waitForTimeout(150);
+    const baked = await colours();
+    for (const part of ['middle', 'bulge'] as const) for (let c = 0; c < 3; c++) assert.ok(Math.abs(baked[part][c] - draft[part][c]) < 45, `baked, the same galaxy at ${part} (${JSON.stringify(baked)} against ${JSON.stringify(draft)})`);
+    await h.screenshot('milky-way-baked');
+    // Kept on this computer for the next time.
+    await page.waitForFunction(() => new Promise((resolve) => { const r = indexedDB.open('mapmaker-galaxies', 1); r.onsuccess = () => { try { const q = r.result.transaction('pictures').objectStore('pictures').count(); q.onsuccess = () => resolve(q.result >= 1); q.onerror = () => resolve(false); } catch { resolve(false); } }; r.onerror = () => resolve(false); }), undefined, { timeout: 120000 });
+    // Without the graphics card the picture is drawn in pieces: the same to the eye.
+    await page.evaluate(() => { const m = (window as any).__mapmaker; m.setGalaxyGL(false); m.store.setCamera({ ...m.store.camera, zoom: m.store.camera.zoom + 0.0001 }); });
+    await page.waitForTimeout(250);
+    const pieces = await colours();
+    await page.evaluate(() => { const m = (window as any).__mapmaker; m.setGalaxyGL(true); m.store.setCamera({ ...m.store.camera, zoom: 0 }); });
+    for (const part of ['middle', 'bulge'] as const) for (let c = 0; c < 3; c++) assert.ok(Math.abs(pieces[part][c] - baked[part][c]) < 30, `in pieces, the same picture at ${part} (${JSON.stringify(pieces)} against ${JSON.stringify(baked)})`);
+    assert.ok(pieces.sky[0] + pieces.sky[1] + pieces.sky[2] < 60);
+    // A draft again (the baked picture stays kept), and baked again at once.
+    await page.getByTestId('galaxy-baked').uncheck();
+    await page.waitForFunction(() => (window as any).__mapmaker.galaxyPicture()?.size === 1024);
+    await page.getByTestId('galaxy-baked').check();
+    await page.waitForFunction(() => (window as any).__mapmaker.galaxyPicture()?.baked === true);
     // A place found by search: its kind and distances.
     await page.getByTestId('search').fill('orion nebula');
     await page.getByTestId('search-result').filter({ hasText: 'Orion Nebula' }).first().click();
@@ -4127,7 +4164,7 @@ try {
     // Undone; back to Earth.
     await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
     await page.locator('header select').first().selectOption({ label: 'Earth' });
-    for (let i = 0; i < 10 && (await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.kind === 'space'))); i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    for (let i = 0; i < 14 && (await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.kind === 'space'))); i++) { await page.getByTestId('undo').click(); await h.saved(); }
     assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.kind === 'space')), false);
   });
 

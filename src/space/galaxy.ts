@@ -23,6 +23,8 @@ export interface GalaxySettings {
   systems: number;
   /** A galaxy of one's own: how many arms, how tightly wound (degrees), its size (light-years) and whether it has a bar. */
   arms: number; pitch: number; radiusLy: number; bar: boolean;
+  /** Its picture painted at full detail and kept, instead of the draft made while working (D193). */
+  baked?: boolean;
 }
 export const DEFAULT_GALAXY: GalaxySettings = { kind: 'milkyway', seed: 1, systems: 600, arms: 4, pitch: 14, radiusLy: 50000, bar: true };
 
@@ -41,6 +43,8 @@ export interface GalaxyModel {
   bulge: number; disc: number; thickness: number;
   /** Where the Sun (or the home system) is. */
   home: Vec3;
+  /** Arms only painted (D193): where the map's arms leave the far side of the disc bare, never used to place star systems. */
+  paintArms?: GalaxyArm[];
 }
 
 // (Reid et al. 2014, table 2, with R0 = 8.34 kpc: scaled to the Sun's distance used here.)
@@ -57,6 +61,12 @@ const MILKY_WAY: GalaxyModel = {
   bar: { half: 4.5 * KPC, width: 1.3 * KPC, angle: 27 },
   bulge: 1.1 * KPC, disc: 2.6 * KPC, thickness: 1000,
   home: [-SUN_FROM_CENTRE_LY, 0, 0],
+  // (The far side of the galaxy is little known: two outer arms as pictures of the whole galaxy draw them, branching from
+  // the Sagittarius–Carina and Scutum–Centaurus arms and winding out round the far side.)
+  paintArms: [
+    { name: '', rRef: 13.5 * KPC, betaRef: 180, pitch: 11, from: 85, to: 330, width: 2100, weight: 0.7 },
+    { name: '', rRef: 13.5 * KPC, betaRef: 90, pitch: 11, from: 20, to: 330, width: 2100, weight: 0.6 },
+  ],
 };
 
 /** The Milky Way's places: name, kind, galactic longitude and latitude (degrees), distance from the Sun (light-years), another name. */
@@ -143,7 +153,7 @@ const gauss = (rnd: () => number) => Math.sqrt(-2 * Math.log(1 - rnd())) * Math.
  * A point of the galaxy drawn at random as its stars lie: in the bar and bulge, along an arm, or in the
  * disc between them. Also says which (0 bulge, 1 arm, 2 disc), for its colour.
  */
-function samplePoint(m: GalaxyModel, rnd: () => number, parts = { bulge: 0.13, arms: 0.55 }): { p: Vec3; part: 0 | 1 | 2 } {
+export function samplePoint(m: GalaxyModel, rnd: () => number, parts = { bulge: 0.13, arms: 0.55 }): { p: Vec3; part: 0 | 1 | 2 } {
   const x = rnd();
   if (x < parts.bulge) {
     if (m.bar && rnd() < 0.6) {
@@ -237,7 +247,7 @@ export function galaxyCatalogue(g: GalaxySettings): StarCatalogue {
 /** Galaxy catalogues once made (by their settings). */
 const made = new Map<string, { cat: StarCatalogue; dust: GalaxyDust; arms: Array<{ name: string; at: Vec3 }>; model: GalaxyModel }>();
 export function galaxyCached(g: GalaxySettings): { cat: StarCatalogue; dust: GalaxyDust; arms: Array<{ name: string; at: Vec3 }>; model: GalaxyModel } {
-  const key = JSON.stringify(g.kind === 'milkyway' ? [g.kind, g.seed, g.systems] : g);
+  const key = JSON.stringify(g.kind === 'milkyway' ? [g.kind, g.seed, g.systems] : [g.kind, g.seed, g.systems, g.arms, g.pitch, g.radiusLy, g.bar]);
   let c = made.get(key);
   if (!c) {
     const model = galaxyModel(g);

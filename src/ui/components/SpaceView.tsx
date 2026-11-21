@@ -8,6 +8,8 @@ import * as cmd from '../../domain/commands.ts';
 import { makeSpaceView, orbitCamera, panSpaceCamera, turnChart, type SpaceView as View3 } from '../../space/space-view.ts';
 import { SpaceRenderer, type DrawnStar } from '../../space/space-renderer.ts';
 import { spaceScene } from '../../space/scene.ts';
+import { galaxyImageNow, galaxyBakeState, onGalaxyPictures } from '../../space/galaxy-pictures.ts';
+import '../galaxy-workers.ts';
 import { primaryOf as starPrimary, systemOf as starSystem } from '../../space/catalogue.ts';
 import { fmt } from './Panels.tsx';
 import { spaceSettingsOf } from '../../world-model/world-settings.ts';
@@ -48,6 +50,8 @@ export function SpaceView() {
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+  // (A galaxy's picture, D193: drawn again when its draft or its bake is ready.)
+  useEffect(() => onGalaxyPictures(() => force((n) => n + 1)), []);
   const space = s.world?.get('map_space', s.spaceId) ?? null;
   const settings = spaceSettingsOf(space);
   // (The scene depends on the moment shown: the planets move; it is worked out below, once the time is known.)
@@ -88,7 +92,7 @@ export function SpaceView() {
     renderer.current.render(ctx, view, cat, {
       transparent: !!shot?.transparent, grid: !scene.row && (shot ? shot.graticule : true), dropLines: scene.dropLines !== false, row: scene.row,
       names: shot && !shot.labels ? 'none' : 'auto', selected: shot ? null : laneFrom ?? (s.selection?.kind === 'star' ? s.selection.id : null), holdings, lanes,
-      rings: scene.rings, axisLabel: scene.axisLabel, orbits: scene.orbits, realmReach: scene.realmReach, dust: scene.dust, armNames: scene.armNames, planets: scene.planets,
+      rings: scene.rings, axisLabel: scene.axisLabel, orbits: scene.orbits, realmReach: scene.realmReach, dust: scene.dust, picture: scene.galaxy ? galaxyImageNow(scene.galaxy) : undefined, armNames: scene.armNames, planets: scene.planets,
       look, wars, seconds: shot ? s.shotFrame / shot.fps : undefined,
     });
     // The box being drawn with the Star systems tool.
@@ -231,6 +235,13 @@ export function SpaceView() {
         <div className="map-hud">
           <div className="scalebar space-note" data-testid="space-note">{settings?.catalogue === 'galaxy' && settings.galaxy && cat ? galaxyNote(settings.galaxy, cat, scene.rings?.[0]?.label ?? '') : settings?.catalogue === 'invented' && cat ? `${cat.stars.length} invented stars within ${cat.radiusLy} light-years · seed ${settings.invented?.seed}` : scene.unit === 'au' ? (scene.row ? `The Sun, the planets and their large moons side by side on ${fmt(time)}` : `The Sun and the planets on ${fmt(time)} · ${settings?.scale === 'true' ? 'distances true to scale' : 'distances compressed'}`) : cat ? `${cat.stars.length} stars within ${cat.radiusLy} light-years${scene.planets ? ` · ${scene.planets.size} with known planets (dotted rings)` : ''} · rings every 10 ly` : 'Loading the stars…'}</div>
           {settings?.catalogue === 'galaxy' && settings.galaxy && space && <button className="small space-scale" onClick={() => store.execute((w) => cmd.setGalaxy(w, space.id, { ...settings.galaxy!, seed: settings.galaxy!.seed + 1 }))} data-testid="galaxy-again" title={settings.galaxy.kind === 'milkyway' ? 'Star systems elsewhere along the arms, from the next seed (held systems and lanes keep their numbers)' : 'Another galaxy from the next seed (held systems and lanes keep their numbers)'}>{settings.galaxy.kind === 'milkyway' ? 'Other star systems' : 'Another galaxy'} (seed {settings.galaxy.seed + 1})</button>}
+          {settings?.catalogue === 'galaxy' && settings.galaxy && space && (() => {
+            const g = settings.galaxy, bake = galaxyBakeState(g);
+            return <label className={`small space-scale galaxy-bake ${g.baked ? 'on' : ''}`} data-testid="galaxy-bake" data-state={g.baked ? bake.state : 'draft'} title="While you work the galaxy is a quick draft. Baked, it is painted once at full detail and kept on this computer as one picture, so it costs nothing to draw. Exports always use the baked picture.">
+              <input type="checkbox" checked={!!g.baked} onChange={(e) => store.execute((w) => cmd.setGalaxyBaked(w, space.id, e.target.checked))} data-testid="galaxy-baked" />
+              {!g.baked ? 'Bake the galaxy (full detail)' : bake.state === 'done' ? 'Baked at full detail' : bake.state === 'failed' ? 'The bake failed: untick and tick again' : `Baking… ${Math.round(bake.progress * 100)}%`}
+            </label>;
+          })()}
           {settings?.catalogue === 'invented' && settings.invented && space && <button className="small space-scale" onClick={() => store.execute((w) => cmd.setInventedStars(w, space.id, { ...settings.invented!, seed: settings.invented!.seed + 1 }))} data-testid="invented-again" title="Other stars from the next seed (held stars and lanes keep their numbers)">Other stars (seed {settings.invented.seed + 1})</button>}
           {scene.unit === 'au' && space && !scene.row && <button className="small space-scale" onClick={() => store.execute((w) => cmd.setSolarScale(w, space.id, settings?.scale === 'true' ? 'compressed' : 'true'))} data-testid="solar-scale" title="True to scale, the inner planets crowd round the Sun; compressed, every orbit has room">{settings?.scale === 'true' ? 'Compress the distances' : 'Distances true to scale'}</button>}
           {scene.unit === 'au' && space && scene.row && <button className="small space-scale" onClick={() => store.set({ dialog: 'solar-row' })} data-testid="solar-row-open" title="Sizes true to each other or alike, spacing true to the distances or even, and which moons">Sizes and moons…</button>}

@@ -173,7 +173,7 @@ export interface SpaceSettings {
   look?: SkyLook;
   invented?: { seed: number; count: number; radiusLy: number; shape: 'sphere' | 'disc' };
   /** A galaxy map (D116): the Milky Way or one's own, its star systems and shape. */
-  galaxy?: { kind: 'milkyway' | 'invented'; seed: number; systems: number; arms: number; pitch: number; radiusLy: number; bar: boolean };
+  galaxy?: { kind: 'milkyway' | 'invented'; seed: number; systems: number; arms: number; pitch: number; radiusLy: number; bar: boolean; baked?: boolean };
 }
 
 /** Whether a map is a map of the stars (D110). */
@@ -194,7 +194,7 @@ export function spaceSettingsOf(space: MapSpaceRow | null | undefined): SpaceSet
   if (o.catalogue === 'galaxy') {
     const g = (o.galaxy ?? {}) as Partial<NonNullable<SpaceSettings['galaxy']>>;
     const num = (v: unknown, lo: number, hi: number, d: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);
-    const gal = { kind: g.kind === 'invented' ? 'invented' as const : 'milkyway' as const, seed: Math.round(num(g.seed, 1, 1e9, 1)), systems: Math.round(num(g.systems, 0, 5000, 600)), arms: Math.round(num(g.arms, 1, 8, 4)), pitch: num(g.pitch, 4, 40, 14), radiusLy: Math.round(num(g.radiusLy, 1000, 500000, 50000)), bar: g.bar !== false };
+    const gal = { kind: g.kind === 'invented' ? 'invented' as const : 'milkyway' as const, seed: Math.round(num(g.seed, 1, 1e9, 1)), systems: Math.round(num(g.systems, 0, 5000, 600)), arms: Math.round(num(g.arms, 1, 8, 4)), pitch: num(g.pitch, 4, 40, 14), radiusLy: Math.round(num(g.radiusLy, 1000, 500000, 50000)), bar: g.bar !== false, ...(g.baked === true ? { baked: true } : {}) };
     return { catalogue: 'galaxy', radiusLy: gal.kind === 'milkyway' ? 60000 : Math.round(gal.radiusLy * 1.2), galaxy: gal, look };
   }
   return { catalogue: 'nearby', radiusLy: typeof o.radiusLy === 'number' && o.radiusLy > 0 ? o.radiusLy : 50, look };

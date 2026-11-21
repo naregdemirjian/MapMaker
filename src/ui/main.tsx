@@ -1,4 +1,7 @@
 import { createRoot } from 'react-dom/client';
+import { setGalaxyGL } from '../space/galaxy-gl.ts';
+import { forgetBakedGalaxies, galaxyBakeState, galaxyImageNow } from '../space/galaxy-pictures.ts';
+import { spaceSettingsOf as galaxySettingsOf } from '../world-model/world-settings.ts';
 import { App } from './App.tsx';
 import { store } from './store.ts';
 import { gregorian } from '../core-time/index.ts';
@@ -30,6 +33,14 @@ function shown(width: number, height: number) {
 // A small read-only window into the live state, used by the automated interface tests.
 // It changes nothing; everything the tests do to the project goes through the interface itself.
 (window as unknown as { __mapmaker: unknown }).__mapmaker = {
+  // (Galaxy pictures, D193: for the tests, drawing without the graphics card, and forgetting what was baked.)
+  setGalaxyGL, forgetBakedGalaxies,
+  /** The picture the galaxy map shown draws now: how large, and whether it is the baked one. */
+  galaxyPicture() {
+    const g = galaxySettingsOf(store.world?.get('map_space', store.spaceId) ?? null)?.galaxy;
+    const im = g ? galaxyImageNow(g) : null;
+    return im ? { size: im.size, baked: im.baked, bake: galaxyBakeState(g!) } : null;
+  },
   store,
   /** For the performance benchmarks (bench/): the commands, dates and the export, to drive large projects directly. */
   /**

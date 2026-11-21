@@ -61,6 +61,56 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D193. Galaxies as painted pictures, drafted while working and baked
+
+- **Why.** A galaxy map drew its galaxy as 18,000 faint points (D116): a haze with no arms to speak of, and slow to
+  move (every point drawn again for each view). What was asked for: a galaxy that looks like the well-known pictures of
+  the Milky Way from above, made by the program and not from a photograph; looks first, speed second; rough while
+  working, and "baked" into one picture at full detail.
+- **The painter** (`src/space/galaxy-picture.ts`). The galaxy is painted from its model (the same arms, bar and bulge
+  the map's star systems and names follow) as seen from far above its plane: the bar and bulge of old yellow stars, a
+  white-hot middle; the arms' young blue-white stars, bright on their inner edge and fading outward, broken into clouds
+  (noise drawn out along spirals, and round clouds of every size); dust in lanes along the arms' inner edges, in
+  feathers more open than the arms, in broad dark gaps between arms and in swirls into the middle, dimming blue light
+  most so that what shows through is brown; pink gas glowing in ragged patches along the lanes and in some six hundred
+  clouds strung along the arms (white at their hearts), with blue-white clusters among them; sixty thousand single
+  bright stars in their own colours, and a grain. Light is added up and then rolled off softly, so bright parts do
+  not burn out. Everything is worked out from the place in light-years, never from the pixel, and noise finer than
+  a pixel is left out: the same galaxy small and large is the same picture with less or more of its detail. Pure
+  arithmetic with a seed: the same bytes every time, in Node, the browser and a worker, in whatever bands.
+- **The Milky Way's far side.** The arms measured from the Sun (Reid et al. 2014) leave the far half of the disc
+  almost bare, which a picture of the whole galaxy cannot be. Two outer arms are painted there (`paintArms`: they
+  branch from the Sagittarius–Carina and Scutum–Centaurus arms as artists' pictures of the galaxy draw them); they
+  place no star systems, so every system of every existing map is where it was. Major arms are painted wider and
+  stronger than minor ones (the picture is of two great arms and lesser ones between, as the Milky Way is thought
+  to be).
+- **Draft and bake** (`src/space/galaxy-pictures.ts`). While working the map shows a draft 1,024 pixels across, made
+  in about a second by the workers (a rough 256-pixel one first, at once; the glow of points until then). **"Bake the
+  galaxy"** on the map paints it 4,096 pixels across, row by row in the workers with its progress shown (about 15
+  seconds on four cores), and keeps it on this computer (IndexedDB, as a PNG, so what is kept is exactly what was
+  painted): opened again, it is only read back. The setting is kept with the map (undoable). A picture depends only
+  on the galaxy's shape, so the Milky Way is baked once for every project, and other star systems from another seed
+  keep the picture. **Exports always bake first**, whatever the map says: a film is never made from the draft.
+- **Drawing it** (`src/space/galaxy-gl.ts`, `space-renderer.ts`). Either way the galaxy is one picture on the
+  galactic plane. The graphics card lays it there in true perspective in one go (a grid of points placed where the
+  camera sees them, mipmaps and anisotropic filtering, so it is clean seen small or at a slant); without WebGL2 the
+  plane is drawn in pieces on the canvas, each a parallelogram, halved until perspective bends them by about a pixel.
+  The result is kept for the view and added to the sky as light (on a transparent frame or a light sky its light
+  becomes its opacity instead). Seen from near its edge the bulge stands out of the plane as a round glow. Faint far
+  stars are now drawn round a galaxy too.
+- **Measured** (orbiting the Milky Way at 1040 × 710 in the test browser, which has no graphics card): 77 ms a frame
+  with the points before, 37 ms with the picture, draft or baked alike; with a graphics card the picture is one
+  textured plane. Painting: 2.7 s for the draft and 40 s for the bake on one thread, divided among the workers.
+- **Found on the way.** With a crowded top bar wider than the window, a control scrolled into view by the browser
+  could slide the whole interface sideways by a few pixels (the page was hidden beyond its edge, not clipped): the
+  interface is now clipped (`.app { overflow: clip }`), so it cannot scroll at all.
+- **Not done.** Zoomed far into the baked picture it softens (34 light-years to a pixel): finer pieces painted on
+  demand for the part in view would keep it sharp, and the painter has the detail for about three more levels.
+  Seen exactly edge-on the disc is a line with the bulge's glow (no thickness or dust lane across it). Baked
+  pictures are kept per computer, not in the project file: another computer bakes again (the setting travels).
+  The painter's settings (how dusty, how pink, the colours) are fixed; satellites such as the Magellanic Clouds are
+  places on the map, not painted.
+
 ### D192. The solar system side by side, as chosen
 
 - **"Sizes and moons…"** over a side-by-side solar system (`SolarRow`, `setSolarRow`): the bodies' sizes as drawn

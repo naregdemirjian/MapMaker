@@ -277,6 +277,19 @@ export function setGalaxy(world: World, spaceId: string, galaxy: GalaxyChoice): 
 }
 
 /**
+ * A galaxy map's picture baked or not (D193): painted at full detail and kept as one picture, or the draft
+ * made while working. The galaxy itself, what is held in it and its lanes stay as they are.
+ */
+export function setGalaxyBaked(world: World, spaceId: string, baked: boolean): CommandResult {
+  const space = world.get('map_space', spaceId);
+  const o = space ? (worldSettings(space) as { space?: Record<string, unknown> }) : null;
+  if (!space || space.kind !== 'space' || o?.space?.catalogue !== 'galaxy') throw new Error('Only a galaxy map has a picture to bake.');
+  const galaxy = { ...(o.space.galaxy as Record<string, unknown>) };
+  if (baked) galaxy.baked = true; else delete galaxy.baked;
+  return run(world, baked ? 'Bake the galaxy' : 'Draw the galaxy as a draft', (tx) => tx.update('map_space', { ...space, settings: JSON.stringify({ ...o, space: { ...o.space, galaxy } }) }));
+}
+
+/**
  * An invented star map made again from other settings (D114): another seed, more or fewer stars, another
  * size or shape. Stars keep their numbers, so what is held and the lanes stay with the same numbers.
  */
