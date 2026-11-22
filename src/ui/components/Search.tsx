@@ -6,7 +6,7 @@ import { search, fold, type SearchResult } from '../../domain/search.ts';
 import { mapGeoJSON, eventsCSV, entitiesCSV, relationsCSV, featuresCSV, isoDate } from '../../domain/data-export.ts';
 import { type Instant, compare, fromStore } from '../../core-time/index.ts';
 import { isFeatureKind } from '../../render-engine/feature-style.ts';
-import { DateField, fmt } from './Panels.tsx';
+import { DateField, fmt } from '../inputs.tsx';
 import { spaceSettingsOf } from '../../world-model/world-settings.ts';
 import { spaceScene } from '../../space/scene.ts';
 import { findStars, type Star } from '../../space/catalogue.ts';

@@ -1,7 +1,7 @@
 // The look of a shot's graphics (D184): the events box, a text box. Templates set a whole look at once; then the
 // panel (shape, gradient, frosted glass, grain, shadow, glow, accent bar), the text (shadow, gradient, spacing,
 // capitals, line height) and lines coming in one after another.
-import { NumberField } from './Panels.tsx';
+import { NumberField } from '../inputs.tsx';
 import { DEFAULT_GRAPHIC, GRAPHIC_TEMPLATES, graphicStyleOf, type GraphicStyle, type GraphicTemplate, type PanelShape, type Shade } from '../../presentation/graphic-style.ts';
 
 const SHADE: Shade = { color: '#000000', opacity: 0.5, blur: 12, x: 0, y: 4 };

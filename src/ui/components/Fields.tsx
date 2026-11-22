@@ -7,7 +7,7 @@ import { DEFAULT_SOURCES, FIELD_TYPES, fieldLayerStyleOf, fieldSourceOf, lifespa
 import { DISASTERS, planDisaster, type DisasterId } from '../../domain/disasters.ts';
 import { terrainSourceOf } from '../../world-model/world-settings.ts';
 import { fieldsDrawable } from '../../render-engine/fields-gl.ts';
-import { fmt } from './Panels.tsx';
+import { fmt } from '../inputs.tsx';
 
 /** The field layers of the map viewed, in their order. */
 export function fieldLayers(s: ReturnType<typeof useStore>) {

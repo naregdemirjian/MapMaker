@@ -7,7 +7,7 @@ import { useStore } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
 import { readGeoJSON, guessNameKey, countriesOf, yearOfFileName, guessDateKeys, datedShapesOf, type ImportedFile } from '../../domain/geojson-import.ts';
 import { gregorian, NEG_INF, type Instant } from '../../core-time/index.ts';
-import { DateField, fmt } from './Panels.tsx';
+import { DateField, fmt } from '../inputs.tsx';
 
 interface Chosen { name: string; file: ImportedFile; t: Instant | null }
 

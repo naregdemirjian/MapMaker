@@ -6,7 +6,10 @@ import { WorkspaceBar, Splitter, StatusBar, frameStyle } from './shell/Shell.tsx
 import { arrowStep } from '../core-time/steps.ts';
 import { calendarNow } from './calendar-now.ts';
 import { useStore, store } from './store.ts';
-import { TopBar, DateBar, Outliner, ToolStrip, ToolOptions, Inspector, Toasts, QuickStart } from './components/Panels.tsx';
+import { TopBar, DateBar, Toasts } from './shell/Bars.tsx';
+import { Outliner } from './panels/Lists.tsx';
+import { ToolStrip, ToolOptions } from './shell/Tools.tsx';
+import { Inspector, QuickStart } from './panels/Properties.tsx';
 import { ShortcutsDialog } from './shell/MenuBar.tsx';
 import { commandForKey } from './commands.ts';
 import { toolForKey } from './tools.ts';

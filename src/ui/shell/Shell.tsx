@@ -4,7 +4,7 @@ import { useRef } from 'react';
 import { useStore, store } from '../store.ts';
 import { WORKSPACES, DEFAULT_LAYOUTS, dragged, tracks, type Side } from './layout.ts';
 import { SearchBox } from '../components/Search.tsx';
-import { MapChooser } from '../components/Panels.tsx';
+import { MapChooser } from './Bars.tsx';
 import { TOOLS } from '../tools.ts';
 
 /** The workspaces, and what belongs to every one of them: search, undo and redo, folding panels away. */

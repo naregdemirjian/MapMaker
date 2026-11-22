@@ -18,7 +18,7 @@ import { spaceCamera } from '../../space/space-view.ts';
 import { LABEL_FONTS } from '../../render-engine/label-style.ts';
 import { PROJECTIONS, type ProjectionName, type Camera } from '../../render-engine/camera.ts';
 import { parseJSON } from '../../temporal-engine/engine.ts';
-import { DateField, NumberField } from './Panels.tsx';
+import { DateField, NumberField } from '../inputs.tsx';
 import { currentShot } from './MapView.tsx';
 import { TransitionLookControls } from './TransitionLook.tsx';
 import { isBaseEvent, MAIN_BRANCH } from '../../world-model/schema.ts';

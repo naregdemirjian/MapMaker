@@ -7,7 +7,7 @@ import { isBaseEvent } from '../../world-model/schema.ts';
 import { eventsHere, listedHere } from '../events-here.ts';
 import type { TransitionSpec } from '../../temporal-engine/engine.ts';
 import { lonLatToVec } from '../../geo-kernel/vec.ts';
-import { DateField, fmt } from './Panels.tsx';
+import { DateField, fmt } from '../inputs.tsx';
 import { loadDatasetRecords, type DatasetRecord } from '../../render-engine/basemap.ts';
 import { GroupChecks } from './EventGroups.tsx';
 import { FeaturePrompt } from './Features.tsx';

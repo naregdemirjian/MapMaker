@@ -11,7 +11,7 @@ import type { ElevationGrid } from '../../terrain/grid.ts';
 import { lonLatToVec } from '../../geo-kernel/vec.ts';
 import { gregorian, lerp, NEG_INF, type Instant } from '../../core-time/index.ts';
 import { TRANSITION_LOOKS, withTransitionLook, type ShotTransitions } from '../../presentation/sequence.ts';
-import { NumberField } from './Panels.tsx';
+import { NumberField } from '../inputs.tsx';
 
 interface Sample { world: World; engine: Engine; space: string; layer: string; start: Instant; end: Instant }
 let sample: Sample | null = null;

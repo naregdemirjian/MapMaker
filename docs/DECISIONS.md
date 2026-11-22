@@ -61,6 +61,24 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D213. Tidy: Panels.tsx broken up, windows' names typed, shared colours named (interface stage 8)
+
+- **`Panels.tsx` (1,200 lines, everything from the date field to Properties) is gone**, its parts moved unchanged by
+  what they are: `ui/inputs.tsx` (the date and number inputs every panel uses, and `fmt`), `ui/shell/Bars.tsx` (the
+  top bar, the map chooser, the date bar, the messages), `ui/shell/Tools.tsx` (the tool strip, the options bar and
+  each tool's options), `ui/panels/Lists.tsx` (the lists at the left) and `ui/panels/Properties.tsx` (Properties and
+  its panels). Every import that pointed into it now points to where its part went. Nothing a person sees changed;
+  every test id is where it was. (The inputs are `inputs.tsx`, not "fields", so as not to be taken for
+  `components/Fields.tsx`, the field layers.)
+- **The windows' names are typed** (`DialogName` in `store.ts`): a window opened by a misspelt name is caught when
+  the interface is built, not found missing when someone clicks.
+- **Colours used in more than one place are named** at the top of `styles.css` (`--on-accent`, `--input-bg`,
+  `--hover-bg`, `--muted2`, `--sel`, `--danger-text`, … 14 of them, beside the ten already there), so a restyle
+  changes them in one place. The colours used once stay where they are; the canvas-drawn timeline and map keep
+  their own colours in code, for the polish stage to bring together.
+- This ends the interface plan's eight stages (D196 to D213). The polish stage (look, spacing, icons, themes) is to be
+  planned with the user.
+
 ### D212. Present and Export: the shot's settings in tabs; the shots as clips (interface stage 7)
 
 - **Tabs over the shot's settings** in the Present workspace: All · Shot · Camera and timing (Timing, Camera) · Look

@@ -2,7 +2,7 @@
 import { ResetButton } from '../shell/Reset.tsx';
 import { useEffect, useState } from 'react';
 import { useStore } from '../store.ts';
-import { NumberField } from './Panels.tsx';
+import { NumberField } from '../inputs.tsx';
 import * as cmd from '../../domain/commands.ts';
 import { resolveLabelStyle, labelFont, labelText, LABEL_FONTS, DEFAULT_LABEL_STYLE, type LabelStyle, type CountryLabel } from '../../render-engine/label-style.ts';
 

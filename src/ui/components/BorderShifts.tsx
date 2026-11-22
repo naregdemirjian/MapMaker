@@ -12,7 +12,7 @@ import { parseJSON, effectTime, eventEnd, type Resolution } from '../../temporal
 import { compare, fromStore, stepDate, type Instant } from '../../core-time/index.ts';
 import { calendarOfSpace } from '../../world-model/world-settings.ts';
 import { shiftDates, MAX_SHIFT_STEPS } from '../../domain/border-shifts.ts';
-import { DateField } from './Panels.tsx';
+import { DateField } from '../inputs.tsx';
 
 type Unit = 'day' | 'week' | 'month' | 'year';
 

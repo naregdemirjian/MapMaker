@@ -5,7 +5,7 @@ import { useStore } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
 import { parseJSON } from '../../temporal-engine/engine.ts';
 import { mapLightOf, statisticsOf } from '../../world-model/world-settings.ts';
-import { NumberField, DateField } from './Panels.tsx';
+import { NumberField, DateField } from '../inputs.tsx';
 import {
   BLEND_MODES, BLEND_NAMES, EFFECTS, EFFECT_DEFAULTS, EFFECT_KINDS, EFFECT_NAMES, PRESET_FILE_KIND, countryLookOf, layerLookOf, lookPresetsOf, takesMapLight,
   type BlendMode, type CountryLook, type Effect, type EffectKind, type LayerLook, type Motion, type Pulse, type Ease,

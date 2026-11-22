@@ -4,7 +4,7 @@
 import { useStore, store } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
 import { fromStore, compare } from '../../core-time/index.ts';
-import { fmt } from './Panels.tsx';
+import { fmt } from '../inputs.tsx';
 import { CharacterIconSection, UnitSection } from './CharacterIcons.tsx';
 import { isBaseEvent } from '../../world-model/schema.ts';
 

@@ -2,7 +2,7 @@
 import { useStore } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
 import { isBaseEvent } from '../../world-model/schema.ts';
-import { fmt } from './Panels.tsx';
+import { fmt } from '../inputs.tsx';
 import { placementMode } from './Characters.tsx';
 import { starColour, starKind, galacticOf, systemOf } from '../../space/catalogue.ts';
 import { exoplanetsNow, foundBy, planetSize } from '../../space/exoplanets.ts';

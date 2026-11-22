@@ -6,7 +6,7 @@ import * as cmd from '../../domain/commands.ts';
 import { decodePlaces, pickPlaces, placeMetaOf, cityFilterOf, ECONOMIC_LEVELS, type CityFilter, type TodayPlace, type PlacesFile } from '../../domain/places.ts';
 import { cityFilterOfSpace, basemapSourceOf } from '../../world-model/world-settings.ts';
 import { NEG_INF } from '../../core-time/index.ts';
-import { fmt } from './Panels.tsx';
+import { fmt } from '../inputs.tsx';
 
 let loading: Promise<TodayPlace[]> | null = null;
 export const loadPlaces = () => (loading ??= fetch('data/natural-earth/places-10m.json').then(async (r) => decodePlaces(await r.json() as PlacesFile)));

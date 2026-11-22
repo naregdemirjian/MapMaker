@@ -9,7 +9,7 @@ import { type Instant, compare, fromStore } from '../../core-time/index.ts';
 import { eventsHere } from '../events-here.ts';
 import { lonLatToVec } from '../../geo-kernel/vec.ts';
 import { lineFromMapPoints } from '../../render-engine/stroke.ts';
-import { DateField, fmt } from './Panels.tsx';
+import { DateField, fmt } from '../inputs.tsx';
 import { TypeDot, TypeSelect } from './EventTypes.tsx';
 import { defaultEnd } from '../../domain/event-types.ts';
 

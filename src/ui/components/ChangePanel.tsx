@@ -11,7 +11,7 @@ import { PropGroup } from '../shell/Group.tsx';
 import { InlineDialog } from '../shell/DialogFrame.tsx';
 import { BorderShiftsDialog } from './BorderShifts.tsx';
 import { ChangeLength } from './RecordLength.tsx';
-import { fmt } from './Panels.tsx';
+import { fmt } from '../inputs.tsx';
 
 type S = ReturnType<typeof useStore>;
 

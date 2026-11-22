@@ -1,7 +1,7 @@
 // Every command of the interface in one list (D197): its name, its shortcut, when it can be used, what it
 // does. The menu bar is drawn from it, the keyboard runs it, and the list of shortcuts is read from it, so a
 // command has one home and one description.
-import { store, type AppStore, type MenuItem } from './store.ts';
+import { store, type AppStore, type MenuItem, type DialogName } from './store.ts';
 import { WORKSPACES, type Side } from './shell/layout.ts';
 import { matches, type KeyLike } from './shell/shortcuts.ts';
 import { stepChange } from './components/Timeline.tsx';
@@ -25,7 +25,7 @@ export interface Command {
 const world = (s: AppStore) => s.mode === 'world';
 const space = (s: AppStore) => s.world?.get('map_space', s.spaceId);
 const earth = (s: AppStore) => { const sp = space(s); return !!sp && basemapSourceOf(sp) === 'natural-earth'; };
-const dialog = (name: string) => (s: AppStore) => s.set({ dialog: name });
+const dialog = (name: DialogName) => (s: AppStore) => s.set({ dialog: name });
 const politicalChosen = (s: AppStore) => s.chosen('entity').filter((id) => { const t = s.world?.get('entity', id)?.type_id; return t === 'polity' || t === 'faction'; });
 
 /** The date to compare with when comparing is switched on: the day before the last change (so the line shows what the map was before it), else a century earlier. */

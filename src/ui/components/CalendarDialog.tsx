@@ -7,7 +7,7 @@ import { useStore } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
 import { calendarDefOf } from '../../world-model/world-settings.ts';
 import { gregorian, instant, calendarOf, calendarProblems, CALENDAR_TEMPLATES, type CalendarDef } from '../../core-time/index.ts';
-import { DateField, NumberField } from './Panels.tsx';
+import { DateField, NumberField } from '../inputs.tsx';
 
 const copy = (d: CalendarDef): CalendarDef => JSON.parse(JSON.stringify(d)) as CalendarDef;
 

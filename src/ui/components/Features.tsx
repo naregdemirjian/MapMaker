@@ -11,7 +11,7 @@ import { isBaseEvent } from '../../world-model/schema.ts';
 import { eventsHere } from '../events-here.ts';
 import { featureStyle, featureColor, isFeatureKind, DEFAULT_FEATURE_STYLE, type FeatureKind, type FeatureStyle } from '../../render-engine/feature-style.ts';
 import { parseJSON, type FeatureAnimStyle } from '../../temporal-engine/engine.ts';
-import { DateField, fmt } from './Panels.tsx';
+import { DateField, fmt } from '../inputs.tsx';
 import { FieldTypeChoice } from './Fields.tsx';
 import { FIELD_TYPES, type FieldType } from '../../domain/fields.ts';
 import { PicturesSection } from './Pictures.tsx';

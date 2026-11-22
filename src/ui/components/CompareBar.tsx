@@ -2,7 +2,7 @@
 // swapped, and side by side or across a line. Over the map, beside what it controls.
 import { useStore } from '../store.ts';
 import { branchTree, branchName } from '../../temporal-engine/branches.ts';
-import { DateField } from './Panels.tsx';
+import { DateField } from '../inputs.tsx';
 
 export function CompareBar() {
   const s = useStore();

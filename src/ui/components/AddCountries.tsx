@@ -5,7 +5,7 @@ import { useStore } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
 import { decodeCountries, COUNTRY_GROUP_COLORS, type CountryShape, type CountriesFile } from '../../domain/countries.ts';
 import { NEG_INF } from '../../core-time/index.ts';
-import { fmt } from './Panels.tsx';
+import { fmt } from '../inputs.tsx';
 import { CityFilterControls, loadPlaces } from './Cities.tsx';
 import { pickPlaces, type CityFilter } from '../../domain/places.ts';
 

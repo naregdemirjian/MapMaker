@@ -6,7 +6,7 @@ import { useStore, store } from '../store.ts';
 import { countryPeriodChanges, periodAround, stepPeriod, periodLabel, type PeriodChanges, type PeriodSpec } from '../../domain/history-view.ts';
 import type { World } from '../../world-model/world.ts';
 import type { Engine } from '../../temporal-engine/engine.ts';
-import { fmt } from './Panels.tsx';
+import { fmt } from '../inputs.tsx';
 import { isBaseEvent } from '../../world-model/schema.ts';
 
 export const GAINED_COLOR = '#5fe08a';

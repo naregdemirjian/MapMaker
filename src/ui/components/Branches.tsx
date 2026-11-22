@@ -6,7 +6,7 @@ import * as cmd from '../../domain/commands.ts';
 import { MAIN_BRANCH, isBaseEvent } from '../../world-model/schema.ts';
 import { branchTree, branchName, branchStart, branchAndBelow } from '../../temporal-engine/branches.ts';
 import { fromStore, type Instant } from '../../core-time/index.ts';
-import { DateField } from './Panels.tsx';
+import { DateField } from '../inputs.tsx';
 import { calendarNow } from '../calendar-now.ts';
 
 const indent = (depth: number) => '   '.repeat(depth);

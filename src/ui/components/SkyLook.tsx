@@ -13,7 +13,7 @@ import type { StarCatalogue, Star } from '../../space/catalogue.ts';
 import { seeded } from '../../presentation/looks.ts';
 import { PHOTO_CREDIT } from '../../space/planet-photos.ts';
 import { Slider } from './LabelStyles.tsx';
-import { NumberField } from './Panels.tsx';
+import { NumberField } from '../inputs.tsx';
 
 /** A small patch of sky for the presets' pictures: stars of every kind, and two realms meeting. */
 const SAMPLE = (() => {

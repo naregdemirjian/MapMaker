@@ -11,7 +11,7 @@ import { spaceScene } from '../../space/scene.ts';
 import { galaxyImageNow, galaxyBakeState, onGalaxyPictures } from '../../space/galaxy-pictures.ts';
 import '../galaxy-workers.ts';
 import { primaryOf as starPrimary, systemOf as starSystem } from '../../space/catalogue.ts';
-import { fmt } from './Panels.tsx';
+import { fmt } from '../inputs.tsx';
 import { spaceSettingsOf } from '../../world-model/world-settings.ts';
 import { cameraAt, timeAt, moveOverlay, withStillCamera, screenSecondsSince } from '../../presentation/sequence.ts';
 import { drawShotOverlays, lookStyles } from '../../presentation/export-driver.ts';

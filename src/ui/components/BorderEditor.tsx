@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { useStore } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
 import { parseJSON } from '../../temporal-engine/engine.ts';
-import { NumberField } from './Panels.tsx';
+import { NumberField } from '../inputs.tsx';
 import { DASHES, DASH_NAMES, DEFAULT_BORDER, layerBordersOf, pairKey, type BorderStyle, type DashKind, type LayerBorders } from '../../render-engine/border-look.ts';
 
 /** An editor of one border style. */

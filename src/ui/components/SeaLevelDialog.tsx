@@ -7,7 +7,7 @@ import * as cmd from '../../domain/commands.ts';
 import { seaLevelPoints } from '../../world-model/world-settings.ts';
 import { seaLevelAt, SEA_LEVEL_MIN, SEA_LEVEL_MAX, type SeaLevelPoint } from '../../terrain/sea-level.ts';
 import { gregorian, type Instant } from '../../core-time/index.ts';
-import { DateField, NumberField } from './Panels.tsx';
+import { DateField, NumberField } from '../inputs.tsx';
 
 const at = (p: SeaLevelPoint): Instant => ({ day: p.day, ms: p.ms });
 /** "120 m below today's", "today's", "40 m above today's". */

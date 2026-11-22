@@ -7,7 +7,7 @@ import * as cmd from '../../domain/commands.ts';
 import { statisticsOf } from '../../world-model/world-settings.ts';
 import { fromJSONValue, toJSONValue } from '../../core-time/index.ts';
 import { STAT_EASES, STAT_FORMATS, formatStatistic, parseAmount, type Statistic } from '../../presentation/statistics.ts';
-import { DateField } from './Panels.tsx';
+import { DateField } from '../inputs.tsx';
 
 function AmountField({ value, onCommit, testId }: { value: number; onCommit: (n: number) => void; testId?: string }) {
   const [text, setText] = useState<string | null>(null);

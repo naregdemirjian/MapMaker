@@ -38,6 +38,34 @@ import type { TLTrack } from './timeline-layout.ts';
 /** How freehand outlines are cleaned up, at first and when put back (D207). */
 export const DEFAULT_STROKE: StrokeSettings = { smoothness: 1, irregularity: 0, precision: 1.2, seed: 1 };
 export type Mode = 'world' | 'present';
+/** The windows that open over everything (tidy stage, D213): one name each, so a misspelt one is caught when built. */
+export type DialogName =
+  | 'add-cities'
+  | 'add-countries'
+  | 'border-shifts'
+  | 'branches'
+  | 'calendar'
+  | 'data-export'
+  | 'data-sources'
+  | 'event-types'
+  | 'getting-started'
+  | 'give-regions'
+  | 'health'
+  | 'import-borders'
+  | 'label-style'
+  | 'merge'
+  | 'new-event'
+  | 'new-layer'
+  | 'new-world'
+  | 'planet-studio'
+  | 'sea-level'
+  | 'settings'
+  | 'shortcuts'
+  | 'show'
+  | 'sky-look'
+  | 'solar-row'
+  | 'statistics'
+  | 'versions';
 /** One line of a right-click menu: an action, a heading, or a divider. */
 export type MenuItem = { label: string; run: () => void; danger?: boolean; testId?: string; shortcut?: string; disabled?: boolean; checked?: boolean } | { heading: string } | 'divider';
 
@@ -271,7 +299,7 @@ export class AppStore {
    * goes round again from the start of the timeline at its end.
    */
   historyPlay = { on: false, yearsPerSecond: 1 / 365.2425, loop: false };
-  dialog: string | null = null;
+  dialog: DialogName | null = null;
   /** The Planet Studio (D156): the simulated planet's map it edits (null: a new planet), and a name to start with. */
   studioSpaceId: string | null = null;
   studioName = '';

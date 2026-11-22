@@ -9,7 +9,7 @@ import * as cmd from '../../domain/commands.ts';
 import { parseJSON, effectTime, eventEnd, transitionEnd, type TransitionSpec } from '../../temporal-engine/engine.ts';
 import { compare, stepDate, type Instant } from '../../core-time/index.ts';
 import type { EffectRow, EventRow } from '../../world-model/schema.ts';
-import { DateField, fmt } from './Panels.tsx';
+import { DateField, fmt } from '../inputs.tsx';
 
 const UNITS: Array<[LengthUnit, string]> = [['day', 'days'], ['month', 'months'], ['year', 'years']];
 

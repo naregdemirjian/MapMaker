@@ -5,7 +5,7 @@ import * as cmd from '../../domain/commands.ts';
 import { fromStore } from '../../core-time/index.ts';
 import { parseJSON } from '../../temporal-engine/engine.ts';
 import { placementMode } from './Characters.tsx';
-import { fmt } from './Panels.tsx';
+import { fmt } from '../inputs.tsx';
 import { isBaseEvent } from '../../world-model/schema.ts';
 
 export function NamesSection({ id }: { id: string }) {

@@ -7,7 +7,7 @@ import * as cmd from '../../domain/commands.ts';
 import { type Instant, compare, fromStore, NEG_INF } from '../../core-time/index.ts';
 import { eventsHere } from '../events-here.ts';
 import { RELATION_KINDS, relationFrom, type RelationKind } from '../../domain/relations.ts';
-import { DateField, fmt } from './Panels.tsx';
+import { DateField, fmt } from '../inputs.tsx';
 
 /** The ways a relationship can be chosen from this entity's side: the kind, and whether this entity is the second party. */
 const CHOICES: Array<{ key: string; kind: RelationKind; reverse: boolean; label: string }> = RELATION_KINDS.flatMap((k) => (k.mutual
