@@ -4868,12 +4868,12 @@ try {
     const ws = () => page.evaluate(() => (window as any).__mapmaker.store.workspaceNow());
     await page.getByTestId('reset-workspace').click();
     await page.getByTestId('workspace-map').click();
-    assert.equal(Math.round((await box('.bottom')).height), 150);
+    assert.equal(Math.round((await box('.bottom')).height), 190);
     // History: the same panels, a tall timeline.
     await page.getByTestId('workspace-history').click();
     assert.equal(await ws(), 'history');
     await page.getByTestId('reset-workspace').click();
-    assert.equal(Math.round((await box('.bottom')).height), 300);
+    assert.equal(Math.round((await box('.bottom')).height), 340);
     // World: the map's own settings at the right, no longer under the list of maps.
     await page.getByTestId('workspace-world').click();
     await page.getByTestId('map-setup').waitFor();
@@ -4909,7 +4909,7 @@ try {
     await h.screenshot('workspace-map-folded');
     // Kept on this computer: the same after loading the page again.
     const kept = await page.evaluate(() => JSON.parse(localStorage.getItem('mapmaker.layouts')!).map);
-    assert.deepEqual(kept, { left: 310, right: 310, bottom: 150, hidden: ['right', 'bottom'] });
+    assert.deepEqual(kept, { left: 310, right: 310, bottom: 190, hidden: ['right', 'bottom'] });
     await page.getByTestId('toggle-right').click();
     await page.getByTestId('toggle-bottom').click();
     await page.getByTestId('splitter-left').dblclick();
@@ -5112,6 +5112,101 @@ try {
     await page.locator('[data-testid="layer-row"]', { hasText: 'Battles' }).locator('span').first().click();
     assert.deepEqual(await groups(), ['Layer']);
     await page.getByTestId('tool-select').click();
+  });
+
+  await h.step('The timeline: events in a track for each group, folded and opened; found, snapped, zoomed; an event dragged to another date (D201)', async () => {
+    const st = <T,>(f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`) as Promise<T>;
+    await page.getByTestId('workspace-history').click();
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
+    await page.getByTestId('tool-select').click();
+    await page.getByTestId('timeline-fit').click();
+    // The head: play, the date viewed and comparing, finding, snapping, the groups, zoom.
+    for (const id of ['history-play', 'current-date', 'compare-toggle', 'timeline-find', 'timeline-snap', 'timeline-zoom-in', 'timeline-zoom-out', 'timeline-fit'])
+      assert.equal(await page.getByTestId('timeline-head').getByTestId(id).count(), 1, id);
+    // Two events put in a group of their own: a track for it, the rest on "Other events".
+    const names = await st<string[]>(`s.world.all('event').filter((e) => s.engine.lists(e) && !e.id.startsWith('evt_base')).sort((a, b) => a.start_day - b.start_day).map((e) => e.name)`);
+    assert.ok(names.length >= 4, `events to lay out (${names.length})`);
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ eventFilter: null }));
+    const before = await page.getByTestId('timeline-tracks').locator('.tl-track-head').count();
+    await page.getByTestId('group-filter-button').click();
+    await page.getByTestId('new-group-name').fill('Track test');
+    await page.getByTestId('new-group-create').click();
+    await h.saved();
+    await page.locator('.group-popover .close').click();
+    for (const n of names.slice(0, 2)) {
+      await page.getByTestId(`event-row-${n}`).click();
+      await page.getByTestId('event-group-Track test').check();
+      await h.saved();
+    }
+    await page.getByTestId('timeline-fit').click();
+    const head = page.getByTestId('track-Track test');
+    await head.waitFor();
+    assert.match((await head.textContent())!, /Track test\s*2$/);
+    assert.ok(await page.getByTestId('timeline-tracks').locator('.tl-track-head').count() >= before, 'a track more, or as many (the two were the only ones of theirs)');
+    const laid = () => st<{ tracks: Array<{ id: string; y: number; height: number; folded: boolean; bars: Array<{ ids: string[]; x0: number; x1: number; lane: number }>; marks: number[] }>; top: number }>('s.timelineLaid');
+    const gid = await st<string>(`s.world.all('event_group').find((g) => g.name === 'Track test').id`);
+    let mine = (await laid()).tracks.find((t) => t.id === gid)!;
+    assert.equal(mine.bars.reduce((n, b) => n + b.ids.length, 0), 2, 'its two events lie on it');
+    await h.screenshot('timeline-tracks');
+    // Folded: a thin line of marks; opened again.
+    await head.click();
+    mine = (await laid()).tracks.find((t) => t.id === gid)!;
+    assert.ok(mine.folded && mine.height <= 12 && mine.marks.length === 2, JSON.stringify(mine));
+    assert.equal(await head.getAttribute('aria-expanded'), 'false');
+    await head.click();
+    mine = (await laid()).tracks.find((t) => t.id === gid)!;
+    assert.equal(mine.folded, false);
+    // Under the events: the strip of changes and branches, opened and folded.
+    await page.getByTestId('track-other').click();
+    assert.equal(await page.getByTestId('track-other').getAttribute('aria-expanded'), 'true');
+    await h.screenshot('timeline-other-open');
+    await page.getByTestId('track-other').click();
+    // Zoom by the buttons, and back to the whole history.
+    const span = () => st<number>('s.timeline.end - s.timeline.start');
+    const whole = await span();
+    await page.getByTestId('timeline-zoom-in').click();
+    assert.ok(Math.abs((await span()) / whole - 1 / 1.6) < 0.01);
+    await page.getByTestId('timeline-zoom-out').click();
+    await page.getByTestId('timeline-zoom-out').click();
+    assert.ok((await span()) > whole * 1.5);
+    await page.getByTestId('timeline-fit').click();
+    assert.ok(Math.abs((await span()) / whole - 1) < 0.01);
+    // Finding and snapping are kept as they are set.
+    await page.getByTestId('timeline-find').fill(names[0].slice(0, 5));
+    assert.equal(await st<string>('s.timelineFind'), names[0].slice(0, 5));
+    await page.getByTestId('timeline-find').press('Escape');
+    assert.equal(await st<string>('s.timelineFind'), '');
+    assert.equal(await page.getByTestId('timeline-snap').getAttribute('aria-pressed'), 'true');
+    // A click on an event's bar chooses it; dragged (Alt: without snapping), it moves to another date; undone, it is back.
+    const canvas = (await page.getByTestId('timeline').boundingBox())!;
+    const l = await laid();
+    mine = l.tracks.find((t) => t.id === gid)!;
+    const bar = mine.bars.find((b) => b.ids.length === 1)!;
+    const id = bar.ids[0];
+    const at: [number, number] = [canvas.x + bar.x0 + 3, canvas.y + l.top + mine.y + 3 + bar.lane * 20 + 7];
+    await page.mouse.click(at[0], at[1]);
+    assert.deepEqual(await st('s.selection'), { kind: 'event', id });
+    const startOf = () => st<number>(`s.world.get('event', ${JSON.stringify(id)}).start_day`);
+    const day0 = await startOf();
+    const yearsPerPx = whole / canvas.width;
+    await page.keyboard.down('Alt');
+    await page.mouse.move(at[0], at[1]);
+    await page.mouse.down();
+    await page.mouse.move(at[0] + 30, at[1], { steps: 5 });
+    await page.mouse.move(at[0] + 60, at[1], { steps: 5 });
+    await page.mouse.up();
+    await page.keyboard.up('Alt');
+    await h.saved();
+    const moved = ((await startOf()) - day0) / 365.2425;
+    assert.ok(Math.abs(moved - 60 * yearsPerPx) <= Math.max(2 * yearsPerPx, 0.01), `moved by sixty pixels of time (${moved} years, ${60 * yearsPerPx} expected)`);
+    await h.screenshot('timeline-event-dragged');
+    await page.getByTestId('undo').click();
+    await h.saved();
+    assert.equal(await startOf(), day0);
+    // (The group made for this step is taken away again: one undo for each of what was done.)
+    for (let i = 0; i < 3; i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await st<number>(`s.world.all('event_group').filter((g) => g.name === 'Track test').length`), 0);
+    await page.getByTestId('workspace-map').click();
   });
 
   await h.step('History Health lists the overlap, nothing else; no browser errors', async () => {

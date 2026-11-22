@@ -161,6 +161,21 @@ function CurrentDate() {
   return <DateField value={s.time} onChange={(t) => t && s.setTime(t)} testId="current-date" live steady={{ yearSizer: yearSizer(s.timeline.start, s.timeline.end, calendarNow()), dayOnly: s.historyPlay.on }} />;
 }
 
+/** The date viewed, with the steps to the changes before and after it, and comparing two dates: in the timeline's head (D201). */
+export function DateBar() {
+  const s = useStore();
+  return (
+    <div className="datebar">
+          <button onClick={() => stepChange(-1)} title="Previous change">◀</button>
+          <CurrentDate />
+          <button onClick={() => stepChange(1)} title="Next change">▶</button>
+          <button className={s.compare.on ? 'on' : ''} onClick={() => command('compare').run(s)}
+            title="Compare two dates: the date viewed on the left of a line across the map, another date on the right (drag the line)" data-testid="compare-toggle">Compare</button>
+
+        </div>
+  );
+}
+
 export function TopBar() {
   const s = useStore();
   const w = s.world!;
@@ -183,16 +198,6 @@ export function TopBar() {
         {spaces.map((sp) => <option key={sp.id} value={sp.id}>{sp.name}</option>)}
       </select>
       {s.mode === 'world' && <BranchSwitcher />}
-      {s.mode === 'world' && (
-        <div className="datebar">
-          <button onClick={() => stepChange(-1)} title="Previous change">◀</button>
-          <CurrentDate />
-          <button onClick={() => stepChange(1)} title="Next change">▶</button>
-          <button className={s.compare.on ? 'on' : ''} onClick={() => command('compare').run(s)}
-            title="Compare two dates: the date viewed on the left of a line across the map, another date on the right (drag the line)" data-testid="compare-toggle">Compare</button>
-
-        </div>
-      )}
       <div className="spacer" />
     </header>
   );

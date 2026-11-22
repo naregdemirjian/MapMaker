@@ -6,7 +6,7 @@ import { WorkspaceBar, Splitter, StatusBar, frameStyle } from './shell/Shell.tsx
 import { arrowStep } from '../core-time/steps.ts';
 import { calendarNow } from './calendar-now.ts';
 import { useStore, store } from './store.ts';
-import { TopBar, Outliner, ToolStrip, ToolOptions, Inspector, Toasts, QuickStart } from './components/Panels.tsx';
+import { TopBar, DateBar, Outliner, ToolStrip, ToolOptions, Inspector, Toasts, QuickStart } from './components/Panels.tsx';
 import { ShortcutsDialog } from './shell/MenuBar.tsx';
 import { commandForKey } from './commands.ts';
 import { toolForKey } from './tools.ts';
@@ -91,7 +91,7 @@ export function App() {
         {isSpaceMap(s.world.get('map_space', s.spaceId)) ? <SpaceView /> : <MapView />}
       </main>
       {!hidden.includes('right') && (s.mode === 'world' ? <Inspector /> : <ShotEditor only={workspace === 'export' ? 'export' : undefined} />)}
-      {!hidden.includes('bottom') && <footer className="bottom">{s.mode === 'world' ? <Timeline /> : <ShotTimeline />}</footer>}
+      {!hidden.includes('bottom') && <footer className="bottom">{s.mode === 'world' ? <Timeline head={<DateBar />} /> : <ShotTimeline />}</footer>}
       <Splitter side="left" frame={frame} />
       <Splitter side="right" frame={frame} />
       <Splitter side="bottom" frame={frame} />

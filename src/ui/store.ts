@@ -34,6 +34,7 @@ import { lonLatToVec, type Vec3 } from '../geo-kernel/vec.ts';
 import type { StrokeSettings } from '../render-engine/stroke.ts';
 
 import { type Workspace, type Layouts, type PanelLayout, type Side, type ListTab, type ListTabs, DEFAULT_LAYOUTS, presents, loadLayouts, saveLayouts, loadWorkspace, saveWorkspace, loadListTabs, saveListTabs } from './shell/layout.ts';
+import type { TLTrack } from './timeline-layout.ts';
 export type Mode = 'world' | 'present';
 /** One line of a right-click menu: an action, a heading, or a divider. */
 export type MenuItem = { label: string; run: () => void; danger?: boolean; testId?: string; shortcut?: string; disabled?: boolean; checked?: boolean } | { heading: string } | 'divider';
@@ -149,6 +150,11 @@ export class AppStore {
     saveListTabs(this.listTabs);
     this.set({ listFilter: '' });
   }
+  /** The timeline (D201): whether dragging snaps, and what is looked for among its events. */
+  timelineSnap = true;
+  timelineFind = '';
+  /** The timeline's tracks as last laid out (pixels from the left edge of its picture; `top`: where the first begins). Not watched. */
+  timelineLaid: { tracks: TLTrack[]; top: number } | null = null;
   togglePanel(side: Side) {
     const h = this.layouts[this.workspaceNow()].hidden;
     this.setLayout({ hidden: h.includes(side) ? h.filter((x) => x !== side) : [...h, side] });

@@ -37,6 +37,29 @@ a { color: var(--accent); cursor: pointer; }
 /* (Clipped, not scrollable: a crowded top bar wider than the window must never let the whole page slide sideways.) */
 .app { overflow: clip; display: grid; height: 100vh; grid-template-columns: var(--tools, 44px) var(--left, 250px) minmax(0, 1fr) var(--right, 310px); grid-template-rows: 40px 32px var(--options, 36px) minmax(0, 1fr) var(--bottom, 150px) 24px; grid-template-areas: "top top top top" "workspaces workspaces workspaces workspaces" "tools options options options" "tools left center right" "bottom bottom bottom bottom" "status status status status"; }
 .topbar { grid-area: top; display: flex; align-items: center; gap: 6px; padding: 0 10px; background: var(--panel); border-bottom: 1px solid var(--line); }
+/* The timeline: its head, the tracks' heads, the tracks (D201). */
+.timeline { display: flex; flex-direction: column; }
+.tl-head { flex: none; height: 30px; display: flex; align-items: center; gap: 5px; padding: 0 8px; background: var(--panel); border-bottom: 1px solid var(--line); min-width: 0; }
+.tl-head button { height: 22px; padding: 0 8px; }
+.tl-head select { width: auto; padding: 1px 4px; font-size: 12px; height: 22px; }
+.tl-head .datebar input { width: 190px; height: 22px; }
+.tl-head .tl-find { width: 150px; height: 22px; padding: 1px 6px; }
+.tl-head .group-filter { position: relative; top: auto; right: auto; }
+.tl-body { flex: 1; min-height: 0; display: flex; }
+.tl-heads { flex: none; display: flex; flex-direction: column; background: var(--panel); border-right: 1px solid var(--line); font-size: 12px; }
+.tl-heads-ruler { flex: none; display: flex; align-items: center; padding: 0 8px; color: var(--muted); font-size: 11px; border-bottom: 1px solid var(--line); box-sizing: border-box; }
+.tl-heads-tracks { position: relative; overflow: hidden; flex: none; }
+.tl-track-head { position: absolute; left: 0; right: 0; display: flex; align-items: flex-start; gap: 5px; padding: 3px 6px 0; border: none; border-bottom: 1px solid rgba(255,255,255,0.07); border-radius: 0; background: none; text-align: left; overflow: hidden; }
+.tl-track-head:hover:not(:disabled) { background: var(--panel2); }
+.tl-track-head .swatch { margin-top: 2px; flex: none; }
+.tl-track-head .tl-track-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-track-head.folded { padding-top: 0; font-size: 9.5px; line-height: 11px; align-items: center; color: var(--muted); }
+.tl-track-head.folded .swatch { width: 7px; height: 7px; margin-top: 0; }
+.tl-other-head { flex: none; display: flex; align-items: flex-start; gap: 5px; padding: 0 6px; border: none; border-top: 1px solid var(--line); border-radius: 0; background: var(--panel2); color: var(--muted); font-size: 9.5px; line-height: 11px; text-align: left; overflow: hidden; }
+.tl-other-head[aria-expanded=true] { font-size: 11px; line-height: 20px; }
+.tl-other-names { display: flex; flex-direction: column; }
+.tl-canvas { flex: 1; min-width: 0; min-height: 0; position: relative; overflow: hidden; }
+.tl-canvas canvas { position: absolute; left: 0; top: 0; }
 /* Properties in groups that fold (D200). */
 .prop-group { border: 1px solid var(--line); border-radius: 6px; margin: 0 0 8px; background: var(--panel2); }
 .prop-head { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; border: none; background: none; border-radius: 6px; padding: 7px 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; font-size: 11px; color: var(--muted); }

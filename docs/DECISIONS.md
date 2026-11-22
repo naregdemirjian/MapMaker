@@ -61,6 +61,39 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D201. The timeline: events first, a track for each group, the rest in a strip below (interface stage 6)
+
+Sixth stage of D196's plan, as settled with the drawings: events have the timeline, everything else is
+secondary, and hundreds of events must stay findable.
+
+- **A track for each group of events** (`src/ui/timeline-layout.ts`, `Timeline.tsx`): an event lies on the track
+  of the first of its groups (its other groups are stripes on its bar, as before); events in no group are on
+  "Other events" (just "Events" when there are no groups). Each track has a **head** at the left (its colour,
+  name and how many events it has); a click folds the track to a thin line that only marks where its events lie,
+  so many groups fit. Folded or not is kept with the project's view (`store.collapsed`, `tl:<group>`). The tracks
+  scroll (Ctrl or Alt + wheel, the wheel over the heads, or dragging with the middle button) under a ruler that
+  stays.
+- **Many events in a track**: packed in lanes with their names; where that would take more than six lanes, the
+  bars are drawn without names (a name only where the next bar leaves it room); where even that would not fit,
+  events that touch are **run together into blocks** that say how many they hold. A click on a block zooms in on
+  it until its events come apart.
+- **Under the events, a strip for the rest**: the dates of changes and where branches split off. Folded (the
+  default) it is a line of ticks; opened, a row each.
+- **A head above**: play, speed and going round; the steps to the changes before and after, the date viewed and
+  Compare (these left the top bar); **Find** (events whose names hold what is typed stand out, the rest dim;
+  blocks say how many of theirs match); **Snap**; the groups shown; zoom out, in, and Fit.
+- **Snapping**: the playhead while it is dragged, and an event while it is dragged, are drawn to the starts and
+  ends of events and the dates of changes within seven pixels (`snap`); Alt goes without; the Snap button turns
+  it off.
+- **Events are dragged**: by the bar to another date (its length kept), by either end to make it longer or
+  shorter (an event with an end). The bar follows while dragged; let go, it is one change of the event (one
+  undo), the same as changing its dates in Properties. A click without dragging chooses the event, as before.
+- The picture of everything but the playhead is still kept between changes; laying the tracks out is done once
+  for each state of what they show (`store.timelineLaid` holds the last, for tests and for later use).
+- Left for later in this stage's follow-up: events nested inside longer ones of their group, dragging an event
+  to another track to change its group, reordering tracks, right-click menus on the timeline, and shots as
+  clips in Present (stage 7).
+
 ### D200. Properties in groups that fold; a layer in Properties (interface stage 5, first part)
 
 Fifth stage of D196's plan, in parts. The right panel showed a country or an event as one long stack.

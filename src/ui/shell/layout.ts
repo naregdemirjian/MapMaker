@@ -20,9 +20,9 @@ export interface PanelLayout { left: number; right: number; bottom: number; hidd
 export type Layouts = Record<Workspace, PanelLayout>;
 
 export const DEFAULT_LAYOUTS: Layouts = {
-  map: { left: 250, right: 310, bottom: 150, hidden: [] },
-  history: { left: 270, right: 330, bottom: 300, hidden: [] },
-  world: { left: 230, right: 350, bottom: 110, hidden: [] },
+  map: { left: 250, right: 310, bottom: 190, hidden: [] },
+  history: { left: 270, right: 330, bottom: 340, hidden: [] },
+  world: { left: 230, right: 350, bottom: 130, hidden: [] },
   present: { left: 250, right: 310, bottom: 150, hidden: [] },
   export: { left: 230, right: 380, bottom: 110, hidden: [] },
 };

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useStore, useLive, store } from '../store.ts';
 import {
   type Instant, type Calendar, toApproxYear, fromApproxYear, gregorian, formatYear, floorTo, instant, add, compare, fromStore, MS_PER_DAY, DEEP_BEFORE_YEAR, PRESENT_YEAR,
@@ -7,7 +7,9 @@ import { calendarNow } from '../calendar-now.ts';
 import { listedHere } from '../events-here.ts';
 import { branchLine, branchStart } from '../../temporal-engine/branches.ts';
 import * as cmd from '../../domain/commands.ts';
-import { GroupFilter, eventFilterSet } from './EventGroups.tsx';
+import { GroupFilter, eventFilterSet, sortedGroups } from './EventGroups.tsx';
+import { layoutTracks, barAt, snap, LANE, BAR, type TLEvent, type TLTrack } from '../timeline-layout.ts';
+import { nameMatches } from '../shell/layout.ts';
 import { typeColor } from '../../domain/event-types.ts';
 
 /** Widths of event names on the timeline (one font), measured once each. */
@@ -21,8 +23,7 @@ function labelWidth(ctx: CanvasRenderingContext2D, label: string): number {
   return w;
 }
 
-const RULER = 26;
-const LANE = 20;
+const RULER = 22;
 
 type Unit = { years: number; kind: 'year' | 'month' | 'day' | 'hour' | 'minute' | 'second' | 'ms'; step: number };
 
@@ -149,15 +150,44 @@ function ticks(start: number, end: number, u: Unit, cal: Calendar = gregorian): 
   return out;
 }
 
-export function Timeline() {
+const HEADS = 150, OTHER_FOLDED = 12, OTHER_OPEN = 46;
+const FONT = '11px "Segoe UI", Inter, Arial, sans-serif';
+let measurer: CanvasRenderingContext2D | null = null;
+/** The width of a name on the timeline. */
+function nameWidth(label: string): number {
+  if (!measurer) { measurer = new OffscreenCanvas(1, 1).getContext('2d') as unknown as CanvasRenderingContext2D; measurer.font = FONT; }
+  return labelWidth(measurer, label);
+}
+
+/** What the timeline shows, worked out once for each state of it. */
+interface Laid {
+  tracks: TLTrack[];
+  height: number;
+  /** A track's name, colour and how many events it has in all. */
+  info: Map<string, { name: string; color: string; total: number }>;
+  /** Where things snap to, in years, in order. */
+  snaps: number[];
+}
+
+/**
+ * The timeline (D201). Events come first: every group of events has a track of its own, with a head at the
+ * left that folds it to a thin line; the tracks scroll when they are taller than their room. Under them, a
+ * strip for everything else (the dates of changes, where branches split off), folded to a line until wanted.
+ * Above, play, the date viewed, a find box, snapping and zoom.
+ */
+export function Timeline({ head }: { head?: React.ReactNode }) {
   const s = useLive();
   useHistoryPlayer();
   const ref = useRef<HTMLCanvasElement | null>(null);
   const wrap = useRef<HTMLDivElement | null>(null);
   const [w, setW] = useState(800);
   const [h, setH] = useState(150);
-  const drag = useRef<null | { kind: 'scrub' } | { kind: 'pan'; x: number; start: number; end: number }>(null);
-  const bars = useRef<Array<{ id: string; x0: number; x1: number; y: number }>>([]);
+  const [scroll, setScroll] = useState(0);
+  /** An event being dragged: where it would be, in years. */
+  const [preview, setPreview] = useState<null | { id: string; ys: number; ye: number | null }>(null);
+  type Drag = { kind: 'scrub' } | { kind: 'pan'; x: number; y: number; start: number; end: number; scroll: number }
+    | { kind: 'bar'; id: string; mode: 'move' | 'start' | 'end'; x: number; ys: number; ye: number | null; moved: boolean };
+  const drag = useRef<Drag | null>(null);
 
   useEffect(() => {
     const el = wrap.current!;
@@ -169,9 +199,51 @@ export function Timeline() {
   const { start, end } = s.timeline;
   const xOf = (y: number) => ((y - start) / (end - start)) * w;
   const yearAt = (x: number) => start + (x / w) * (end - start);
+  const world = s.world!;
+  const otherOpen = s.collapsed.includes('tl:other');
+  const otherH = otherOpen ? OTHER_OPEN : OTHER_FOLDED;
+  const tracksH = Math.max(0, h - RULER - otherH);
+  const find = s.timelineFind.trim();
+
+  const layKey = [world.serial, world.tableRevision('event'), world.tableRevision('event_group'), world.tableRevision('event_group_member'), world.tableRevision('branch'), s.branch, s.spaceId,
+    (s.eventFilter ?? ['*']).join(','), s.collapsed.filter((k) => k.startsWith('tl:')).join(','), start, end, w, preview ? `${preview.id}:${preview.ys}:${preview.ye}` : '', s.engine?.revision ?? 0].join('|');
+  const lay = useMemo((): Laid => {
+    const filter = eventFilterSet();
+    const groups = sortedGroups(world), order = new Map(groups.map((g, i) => [g.id, i]));
+    const info: Laid['info'] = new Map();
+    const evs: TLEvent[] = [], snaps: number[] = [];
+    for (const e of world.all('event')) {
+      if (!listedHere(e) || !cmd.eventShown(world, e.id, filter)) continue;
+      // An event lies on the track of the first of its groups.
+      const gs = cmd.groupsOfEvent(world, e.id).filter((g) => order.has(g)).sort((x, y) => order.get(x)! - order.get(y)!);
+      const track = gs[0] ?? cmd.UNGROUPED;
+      const t = info.get(track);
+      if (t) t.total++; else { const g = groups.find((x) => x.id === track); info.set(track, { name: g?.name ?? 'Events', color: g?.color ?? '#4f7ca8', total: 1 }); }
+      const moved = preview?.id === e.id ? preview : null;
+      const ys = moved ? moved.ys : toApproxYear(fromStore(e.start_day, e.start_ms));
+      const ye = moved ? moved.ye ?? ys : e.end_day !== null ? toApproxYear(fromStore(e.end_day, e.end_ms ?? 0)) : ys;
+      if (!moved) { snaps.push(ys); if (ye !== ys) snaps.push(ye); }
+      const x0 = xOf(ys), x1 = Math.max(xOf(ye), x0 + 8);
+      if (x1 < -300 || x0 > w + 300) continue;
+      evs.push({ id: e.id, x0, x1, labelW: nameWidth(e.variant_group && !e.variant_active ? `${e.name} (inactive alternative)` : e.name), track });
+    }
+    for (const t of s.engine!.changeInstants()) snaps.push(toApproxYear(t));
+    snaps.sort((x, y) => x - y);
+    // The groups in their order, then the events in no group ("Other events" beside groups, "Events" alone).
+    const ids = [...groups.map((g) => g.id).filter((id) => info.has(id)), ...(info.has(cmd.UNGROUPED) ? [cmd.UNGROUPED] : [])];
+    if (info.has(cmd.UNGROUPED) && ids.length > 1) info.get(cmd.UNGROUPED)!.name = 'Other events';
+    const laid = layoutTracks(evs, ids.map((id) => ({ id, folded: s.collapsed.includes(`tl:${id}`) })));
+    return { ...laid, info, snaps };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layKey]);
+  const maxScroll = Math.max(0, lay.height - tracksH);
+  const scrolled = Math.min(scroll, maxScroll);
+
+  // (Where the bars lie, for whoever asks from outside: the tests, and lists that scroll the timeline to an event.)
+  store.timelineLaid = { tracks: lay.tracks, top: RULER - scrolled };
 
   /** Everything but the playhead, kept as a picture until something it shows changes (dragging through time redraws the playhead only). */
-  const still = useRef<{ key: string; canvas: OffscreenCanvas; bars: Array<{ id: string; x0: number; x1: number; y: number }> } | null>(null);
+  const still = useRef<{ key: string; canvas: OffscreenCanvas } | null>(null);
 
   useLayoutEffect(() => {
     const c = ref.current;
@@ -179,89 +251,114 @@ export function Timeline() {
     const dpr = window.devicePixelRatio || 1;
     const W = Math.max(1, Math.round(w * dpr)), H = Math.max(1, Math.round(h * dpr));
     if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
-    const world = s.world;
-    const key = [world.serial, world.tableRevision('event'), world.tableRevision('event_type'), world.tableRevision('event_group'), world.tableRevision('event_group_member'), world.tableRevision('map_space'), world.tableRevision('branch'), s.branch, s.spaceId, s.engine!.revision, start, end, W, H, dpr,
-      s.selection?.kind === 'event' ? s.selection.id : '', s.recordEventId ?? '', (s.eventFilter ?? ['*']).join(',')].join('|');
+    const key = [layKey, world.tableRevision('event_type'), world.tableRevision('map_space'), h, scrolled, otherOpen, find, s.selection?.kind === 'event' ? s.selection.id : '', s.recordEventId ?? ''].join('|');
     if (!still.current || still.current.key !== key) {
       const canvas = still.current && still.current.canvas.width === W && still.current.canvas.height === H ? still.current.canvas : new OffscreenCanvas(W, H);
       const ctx = canvas.getContext('2d') as unknown as CanvasRenderingContext2D;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = '#10161d';
-    ctx.fillRect(0, 0, w, h);
-    ctx.fillStyle = '#18212b';
-    ctx.fillRect(0, 0, w, RULER);
-    const u = chooseUnit((end - start) / w);
-    ctx.font = '11px "Segoe UI", Inter, Arial, sans-serif';
-    ctx.textBaseline = 'middle';
-    for (const tk of ticks(start, end, u, calendarNow())) {
-      const x = xOf(tk.t);
-      ctx.strokeStyle = 'rgba(255,255,255,0.10)';
-      ctx.beginPath(); ctx.moveTo(x + 0.5, RULER); ctx.lineTo(x + 0.5, h); ctx.stroke();
-      ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-      ctx.beginPath(); ctx.moveTo(x + 0.5, RULER - 7); ctx.lineTo(x + 0.5, RULER); ctx.stroke();
-      ctx.fillStyle = '#aab6c3';
-      ctx.fillText(tk.label, x + 4, 11);
-    }
-    // Where the branch viewed (and the branches it comes from) split off (D150): a line in its colour, its name on the ruler.
-    for (const id of branchLine(world, s.branch)) {
-      const b = world.get('branch', id);
-      if (!b) continue;
-      const x = xOf(toApproxYear(branchStart(b)));
-      if (x < -2 || x > w + 2) continue;
-      ctx.strokeStyle = b.color;
-      ctx.lineWidth = 2;
-      ctx.setLineDash([2, 3]);
-      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.lineWidth = 1;
-      // (Its name on the ruler, on a backing of its own over the ticks.)
-      const label = `⑂ ${b.name}`, lw = labelWidth(ctx, label);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.fillStyle = '#10161d';
+      ctx.fillRect(0, 0, w, h);
       ctx.fillStyle = '#18212b';
-      ctx.fillRect(x + 2, 3, lw + 6, 16);
-      ctx.fillStyle = b.color;
-      ctx.fillText(label, x + 5, 11);
+      ctx.fillRect(0, 0, w, RULER);
+      const u = chooseUnit((end - start) / w);
+      ctx.font = FONT;
+      ctx.textBaseline = 'middle';
+      for (const tk of ticks(start, end, u, calendarNow())) {
+        const x = xOf(tk.t);
+        ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+        ctx.beginPath(); ctx.moveTo(x + 0.5, RULER); ctx.lineTo(x + 0.5, h); ctx.stroke();
+        ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+        ctx.beginPath(); ctx.moveTo(x + 0.5, RULER - 7); ctx.lineTo(x + 0.5, RULER); ctx.stroke();
+        ctx.fillStyle = '#aab6c3';
+        ctx.fillText(tk.label, x + 4, 10);
+      }
+      // The events, track by track, in the room between the ruler and the strip below.
+      ctx.save();
+      ctx.beginPath(); ctx.rect(0, RULER, w, tracksH); ctx.clip();
+      ctx.translate(0, RULER - scrolled);
+      const groupColor = new Map(world.all('event_group').map((g) => [g.id, g.color]));
+      lay.tracks.forEach((t, i) => {
+        if (t.y + t.height < scrolled || t.y > scrolled + tracksH) return;
+        const color = lay.info.get(t.id)?.color ?? '#4f7ca8';
+        if (i % 2) { ctx.fillStyle = 'rgba(255,255,255,0.025)'; ctx.fillRect(0, t.y, w, t.height); }
+        ctx.fillStyle = 'rgba(255,255,255,0.07)';
+        ctx.fillRect(0, t.y + t.height - 1, w, 1);
+        if (t.folded) {
+          // Folded: only where its events lie.
+          ctx.fillStyle = color;
+          ctx.globalAlpha = 0.85;
+          for (const x of t.marks) if (x > -4 && x < w + 4) ctx.fillRect(x, t.y + 3, 3, t.height - 6);
+          ctx.globalAlpha = 1;
+          return;
+        }
+        for (const b of t.bars) {
+          if (b.hit1 < -4 || b.x0 > w + 4) continue;
+          const y = t.y + 3 + b.lane * LANE;
+          if (b.ids.length > 1) {
+            // Events run together: a block that says how many.
+            const hits = find ? b.ids.filter((id) => nameMatches(world.get('event', id)?.name ?? '', find)).length : b.ids.length;
+            ctx.globalAlpha = find && !hits ? 0.25 : 1;
+            ctx.fillStyle = '#31475c';
+            ctx.beginPath(); ctx.roundRect(b.x0, y, b.x1 - b.x0, BAR, 3); ctx.fill();
+            ctx.fillStyle = color;
+            ctx.fillRect(b.x0, y, b.x1 - b.x0, 3);
+            const label = find && hits ? `${hits} of ${b.ids.length} events` : `${b.ids.length} events`;
+            ctx.fillStyle = '#e8eef4';
+            if (b.x1 - b.x0 > nameWidth(label) + 8) ctx.fillText(label, Math.max(b.x0, 0) + 4, y + BAR / 2 + 1);
+            else if (b.x1 - b.x0 > nameWidth(String(b.ids.length)) + 6) ctx.fillText(String(b.ids.length), b.x0 + 3, y + BAR / 2 + 1);
+            ctx.globalAlpha = 1;
+            continue;
+          }
+          const e = world.get('event', b.ids[0]);
+          if (!e) continue;
+          const inactive = !!e.variant_group && !e.variant_active;
+          const selected = s.selection?.kind === 'event' && s.selection.id === e.id;
+          ctx.globalAlpha = (inactive ? 0.4 : 1) * (find && !nameMatches(e.name, find) ? 0.25 : 1);
+          ctx.fillStyle = s.recordEventId === e.id ? '#d1495b' : selected ? '#ffd166' : typeColor(world, e.type_id) ?? '#4f7ca8';
+          ctx.beginPath(); ctx.roundRect(b.x0, y, b.x1 - b.x0, BAR, 3); ctx.fill();
+          // The colours of its other groups, as stripes along the bar's top edge.
+          const gs = cmd.groupsOfEvent(world, e.id).filter((g) => g !== t.id);
+          gs.forEach((g, k) => { ctx.fillStyle = groupColor.get(g) ?? '#888'; const gw = (b.x1 - b.x0) / gs.length; ctx.fillRect(b.x0 + k * gw, y, gw, 3); });
+          if (b.label) {
+            const label = inactive ? `${e.name} (inactive alternative)` : e.name, tw = nameWidth(label);
+            ctx.fillStyle = selected && b.x1 - b.x0 > tw + 8 ? '#1d1603' : '#e8eef4';
+            ctx.fillText(label, b.x1 - b.x0 > tw + 8 ? Math.max(b.x0, 0) + 4 : b.x1 + 4, y + BAR / 2 + 1);
+          }
+          ctx.globalAlpha = 1;
+        }
+      });
+      ctx.restore();
+      // Under the events: the dates of changes and where branches split off (a line of ticks while folded).
+      const oy = h - otherH;
+      ctx.fillStyle = '#18212b';
+      ctx.fillRect(0, oy, w, otherH);
+      ctx.fillStyle = 'rgba(255,255,255,0.14)';
+      ctx.fillRect(0, oy, w, 1);
+      ctx.fillStyle = 'rgba(255,209,102,0.8)';
+      for (const t of s.engine!.changeInstants()) {
+        const x = xOf(toApproxYear(t));
+        if (x >= 0 && x <= w) ctx.fillRect(x - 0.5, oy + 3, 1.5, otherOpen ? 16 : otherH - 5);
+      }
+      // Where the branch viewed (and the branches it comes from) split off (D150): a line in its colour, its name below (on the ruler while the strip is folded).
+      for (const id of branchLine(world, s.branch)) {
+        const b = world.get('branch', id);
+        if (!b) continue;
+        const x = xOf(toApproxYear(branchStart(b)));
+        if (x < -2 || x > w + 2) continue;
+        ctx.strokeStyle = b.color;
+        ctx.lineWidth = 2;
+        ctx.setLineDash([2, 3]);
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.lineWidth = 1;
+        const label = `⑂ ${b.name}`, lw = nameWidth(label), ly = otherOpen ? oy + 24 : 2;
+        ctx.fillStyle = '#18212b';
+        ctx.fillRect(x + 2, ly, lw + 6, 16);
+        ctx.fillStyle = b.color;
+        ctx.fillText(label, x + 5, ly + 8);
+      }
+      still.current = { key, canvas };
     }
-    // change markers
-    ctx.fillStyle = 'rgba(255,209,102,0.7)';
-    for (const t of s.engine!.changeInstants()) {
-      const x = xOf(toApproxYear(t));
-      if (x >= 0 && x <= w) ctx.fillRect(x - 0.5, RULER - 4, 1.5, 4);
-    }
-    // event bars in lanes
-    const filter = eventFilterSet();
-    const events = s.world.all('event').filter((e) => listedHere(e) && cmd.eventShown(s.world!, e.id, filter)).sort((a, b) => a.start_day - b.start_day || a.start_ms - b.start_ms);
-    const groupColor = new Map(s.world.all('event_group').map((g) => [g.id, g.color]));
-    const laneEnds: number[] = [];
-    const found: Array<{ id: string; x0: number; x1: number; y: number }> = [];
-    for (const e of events) {
-      const ys = toApproxYear(fromStore(e.start_day, e.start_ms));
-      const ye = e.end_day !== null ? toApproxYear(fromStore(e.end_day, e.end_ms ?? 0)) : ys;
-      const x0 = xOf(ys), x1 = Math.max(xOf(ye), x0 + 8);
-      if (x1 < -200 || x0 > w + 200) continue;
-      let lane = laneEnds.findIndex((le) => le < x0 - 4);
-      if (lane === -1) { lane = laneEnds.length; laneEnds.push(0); }
-      ctx.font = '11px "Segoe UI", Inter, Arial, sans-serif';
-      const label = e.variant_group && !e.variant_active ? `${e.name} (inactive alternative)` : e.name;
-      const tw = labelWidth(ctx, label);
-      laneEnds[lane] = Math.max(x1, x0 + tw + 10);
-      const y = RULER + 6 + lane * LANE;
-      if (y + LANE > h) continue;
-      const selected = s.selection?.kind === 'event' && s.selection.id === e.id;
-      const recording = s.recordEventId === e.id;
-      ctx.globalAlpha = e.variant_group && !e.variant_active ? 0.4 : 1;
-      ctx.fillStyle = recording ? '#d1495b' : selected ? '#ffd166' : typeColor(world, e.type_id) ?? '#4f7ca8';
-      ctx.beginPath(); ctx.roundRect(x0, y, x1 - x0, LANE - 6, 3); ctx.fill();
-      // The colours of the event's groups, as stripes along the bar's top edge.
-      const gs = cmd.groupsOfEvent(s.world, e.id);
-      gs.forEach((g, i) => { ctx.fillStyle = groupColor.get(g) ?? '#888'; const gw = (x1 - x0) / gs.length; ctx.fillRect(x0 + i * gw, y, gw, 3); });
-      ctx.fillStyle = '#e8eef4';
-      ctx.fillText(label, Math.max(x0, 0) + (x1 - x0 > tw + 8 ? 4 : x1 - x0 + 4), y + (LANE - 6) / 2);
-      ctx.globalAlpha = 1;
-      found.push({ id: e.id, x0, x1: Math.max(x1, x0 + tw + 8), y });
-    }
-      still.current = { key, canvas, bars: found };
-    }
-    bars.current = still.current.bars;
     const ctx = c.getContext('2d')!;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.drawImage(still.current.canvas, 0, 0);
@@ -284,8 +381,8 @@ export function Timeline() {
     ctx.beginPath(); ctx.moveTo(px - 6, 0); ctx.lineTo(px + 6, 0); ctx.lineTo(px, 8); ctx.fill();
   });
 
-  function timeAtX(x: number): Instant {
-    const y = yearAt(Math.max(0, Math.min(w, x)));
+  /** A date for a place along the timeline, as fine as the zoom shows. */
+  function timeAtYear(y: number): Instant {
     const t = fromApproxYear(y);
     const msPerPx = ((end - start) / w) * 365.2425 * MS_PER_DAY;
     if (msPerPx > MS_PER_DAY) return instant(Math.round(t.day + t.ms / MS_PER_DAY));
@@ -293,6 +390,9 @@ export function Timeline() {
     if (msPerPx > 1000) return instant(t.day, Math.round(t.ms / 1000) * 1000);
     return t;
   }
+  /** A year drawn to the nearest event's start or end or date of a change within a few pixels (Alt: as it is). */
+  const snapped = (y: number, e: { altKey: boolean }) => (store.timelineSnap && !e.altKey ? snap(y, lay.snaps, (7 / w) * (end - start)) : y);
+  const timeAtX = (x: number, e: { altKey: boolean }) => timeAtYear(snapped(yearAt(Math.max(0, Math.min(w, x))), e));
 
   const localX = (e: { clientX: number }) => e.clientX - ref.current!.getBoundingClientRect().left;
   const localY = (e: { clientY: number }) => e.clientY - ref.current!.getBoundingClientRect().top;
@@ -300,26 +400,62 @@ export function Timeline() {
   function onDown(e: React.PointerEvent<HTMLCanvasElement>) {
     e.currentTarget.setPointerCapture(e.pointerId);
     const x = localX(e), y = localY(e);
-    if (e.button === 1 || e.button === 2 || e.shiftKey) { drag.current = { kind: 'pan', x, start, end }; return; }
-    const hit = bars.current.find((b) => x >= b.x0 && x <= b.x1 && y >= b.y && y <= b.y + LANE - 6);
+    if (e.button === 1 || e.button === 2 || e.shiftKey) { drag.current = { kind: 'pan', x, y, start, end, scroll: scrolled }; return; }
+    const hit = y >= RULER && y < h - otherH ? barAt(lay.tracks, x, y - RULER + scrolled) : null;
+    if (hit && hit.bar.ids.length > 1) {
+      // A block of events run together: closer in, to see them apart.
+      const a = yearAt(hit.bar.x0), b = yearAt(hit.bar.x1), pad = Math.max((b - a) * 0.15, (end - start) * 0.01);
+      store.set({ timeline: { start: a - pad, end: b + pad } });
+      return;
+    }
     if (hit) {
-      const ev = store.world!.get('event', hit.id)!;
-      store.set({ selection: { kind: 'event', id: hit.id }, time: fromStore(ev.start_day, ev.start_ms) });
+      const ev = store.world!.get('event', hit.bar.ids[0])!;
+      const ys = toApproxYear(fromStore(ev.start_day, ev.start_ms)), ye = ev.end_day !== null ? toApproxYear(fromStore(ev.end_day, ev.end_ms ?? 0)) : null;
+      // (Its ends are dragged to make it longer or shorter; the rest of it, to move it.)
+      const mode = ye !== null && Math.abs(x - hit.bar.x1) <= 5 && x <= hit.bar.x1 + 1 ? 'end' : ye !== null && Math.abs(x - hit.bar.x0) <= 5 ? 'start' : 'move';
+      drag.current = { kind: 'bar', id: ev.id, mode, x, ys, ye, moved: false };
       return;
     }
     drag.current = { kind: 'scrub' };
-    store.setTime(timeAtX(x));
+    store.setTime(timeAtX(x, e));
   }
 
   function onMove(e: React.PointerEvent<HTMLCanvasElement>) {
     const d = drag.current;
     if (!d) return;
     const x = localX(e);
-    if (d.kind === 'scrub') store.setTime(timeAtX(x), true);
-    else {
+    if (d.kind === 'scrub') store.setTime(timeAtX(x, e), true);
+    else if (d.kind === 'pan') {
       const dy = ((x - d.x) / w) * (d.end - d.start);
+      setScroll(Math.max(0, Math.min(maxScroll, d.scroll - (localY(e) - d.y))));
       store.set({ timeline: { start: d.start - dy, end: d.end - dy } });
+    } else {
+      if (!d.moved && Math.abs(x - d.x) < 4) return;
+      d.moved = true;
+      const by = ((x - d.x) / w) * (end - start);
+      let ys = d.ys, ye = d.ye;
+      if (d.mode === 'end') ye = Math.max(d.ys, snapped(d.ye! + by, e));
+      else if (d.mode === 'start') ys = Math.min(d.ye!, snapped(d.ys + by, e));
+      else { ys = snapped(d.ys + by, e); if (ye !== null) ye += ys - d.ys; }
+      setPreview({ id: d.id, ys, ye });
     }
+  }
+
+  function onUp() {
+    const d = drag.current;
+    drag.current = null;
+    if (d?.kind !== 'bar') return;
+    const ev = store.world!.get('event', d.id);
+    if (!ev) { setPreview(null); return; }
+    if (!d.moved || !preview) {
+      // A click: the event chosen, at its start.
+      store.set({ selection: { kind: 'event', id: d.id }, time: fromStore(ev.start_day, ev.start_ms) });
+      return;
+    }
+    const patch = d.mode === 'end' ? { end: timeAtYear(preview.ye!) } : d.mode === 'start' ? { start: timeAtYear(preview.ys) } : { start: timeAtYear(preview.ys), ...(preview.ye !== null ? { end: timeAtYear(preview.ye) } : {}) };
+    store.execute((wd) => cmd.updateEvent(wd, d.id, patch));
+    store.set({ selection: { kind: 'event', id: d.id } });
+    setPreview(null);
   }
 
   useEffect(() => {
@@ -328,36 +464,74 @@ export function Timeline() {
       e.preventDefault();
       const x = localX(e);
       const { start: a, end: b } = store.timeline;
+      // Ctrl or Alt: up and down through the tracks.
+      if (e.ctrlKey || e.altKey) { setScroll((v) => Math.max(0, Math.min(maxScroll, v + e.deltaY))); return; }
       if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
         const dy = ((e.deltaX || e.deltaY) / w) * (b - a);
         store.set({ timeline: { start: a + dy, end: b + dy } });
         return;
       }
-      const f = Math.exp(e.deltaY / 300);
-      const pivot = a + (x / w) * (b - a);
-      let span = (b - a) * f;
-      span = Math.max(1e-12, Math.min(5e13, span));
-      const na = pivot - ((pivot - a) / (b - a)) * span;
-      store.set({ timeline: { start: na, end: na + span } });
+      zoomBy(Math.exp(e.deltaY / 300), x);
     };
     el.addEventListener('wheel', wheel, { passive: false });
     return () => el.removeEventListener('wheel', wheel);
   });
+  /** Closer in or further out about a place along the timeline (its middle, from the buttons). */
+  function zoomBy(f: number, x = w / 2) {
+    const { start: a, end: b } = store.timeline;
+    const pivot = a + (x / w) * (b - a);
+    const span = Math.max(1e-12, Math.min(5e13, (b - a) * f));
+    const na = pivot - ((pivot - a) / (b - a)) * span;
+    store.set({ timeline: { start: na, end: na + span } });
+  }
 
   return (
-    <div className="timeline" ref={wrap}>
-      <canvas
-        ref={ref}
-        style={{ width: w, height: h }}
-        onPointerDown={onDown}
-        onPointerMove={onMove}
-        onPointerUp={() => (drag.current = null)}
-        onDoubleClick={() => { store.fitTimeline(); store.notify(); }}
-        onContextMenu={(e) => e.preventDefault()}
-        data-testid="timeline"
-      />
-      <div className="history-play"><HistoryPlayControls /></div>
-      <GroupFilter />
+    <div className="timeline">
+      <div className="tl-head" data-testid="timeline-head">
+        <HistoryPlayControls />
+        {head}
+        <div className="spacer" />
+        <input type="search" className="tl-find" placeholder="Find an event" value={s.timelineFind} onChange={(e) => store.set({ timelineFind: e.target.value })} onKeyDown={(e) => { if (e.key === 'Escape') store.set({ timelineFind: '' }); }}
+          title="Events whose names hold what is typed stand out; the others are dimmed" aria-label="Find an event on the timeline" data-testid="timeline-find" />
+        <button className={`small ${s.timelineSnap ? 'on' : ''}`} onClick={() => store.set({ timelineSnap: !s.timelineSnap })} aria-pressed={s.timelineSnap} data-testid="timeline-snap"
+          title="Snapping: the playhead and the events dragged are drawn to the starts and ends of events and the dates of changes nearby (hold Alt to go without)">Snap</button>
+        <GroupFilter />
+        <button className="small" onClick={() => zoomBy(1.6)} title="Further out" aria-label="Zoom the timeline out" data-testid="timeline-zoom-out">−</button>
+        <button className="small" onClick={() => zoomBy(1 / 1.6)} title="Closer in" aria-label="Zoom the timeline in" data-testid="timeline-zoom-in">+</button>
+        <button className="small" onClick={() => { store.fitTimeline(); store.notify(); }} title="The whole history (double-click the timeline)" data-testid="timeline-fit">Fit</button>
+      </div>
+      <div className="tl-body">
+        <div className="tl-heads" style={{ width: HEADS }} onWheel={(e) => setScroll((v) => Math.max(0, Math.min(maxScroll, v + e.deltaY)))} data-testid="timeline-tracks">
+          <div className="tl-heads-ruler" style={{ height: RULER }}>{lay.tracks.length > 1 ? `${lay.tracks.length} tracks` : ''}</div>
+          <div className="tl-heads-tracks" style={{ height: tracksH }}>
+            {lay.tracks.map((t) => {
+              const info = lay.info.get(t.id)!;
+              return (
+                <button key={t.id} className={`tl-track-head ${t.folded ? 'folded' : ''}`} style={{ top: t.y - scrolled, height: t.height }} aria-expanded={!t.folded} onClick={() => store.toggleCollapsed(`tl:${t.id}`)}
+                  title={`${info.name}: ${info.total} ${info.total === 1 ? 'event' : 'events'}. Click to ${t.folded ? 'open' : 'fold'} the track.`} data-testid={`track-${info.name}`}>
+                  <span className="twisty" aria-hidden="true">{t.folded ? '▸' : '▾'}</span><span className="swatch" style={{ background: info.color }} /><span className="tl-track-name">{info.name}</span><span className="muted">{info.total}</span>
+                </button>
+              );
+            })}
+          </div>
+          <button className="tl-other-head" style={{ height: otherH }} aria-expanded={otherOpen} onClick={() => store.toggleCollapsed('tl:other')} title="The dates of changes and where branches split off" data-testid="track-other">
+            <span className="twisty" aria-hidden="true">{otherOpen ? '▾' : '▸'}</span>{otherOpen ? <span className="tl-other-names"><span>Changes</span><span>Branches</span></span> : <span>Changes, branches</span>}
+          </button>
+        </div>
+        <div className="tl-canvas" ref={wrap}>
+          <canvas
+            ref={ref}
+            style={{ width: w, height: h }}
+            onPointerDown={onDown}
+            onPointerMove={onMove}
+            onPointerUp={onUp}
+            onPointerCancel={() => { drag.current = null; setPreview(null); }}
+            onDoubleClick={() => { store.fitTimeline(); store.notify(); }}
+            onContextMenu={(e) => e.preventDefault()}
+            data-testid="timeline"
+          />
+        </div>
+      </div>
     </div>
   );
 }
