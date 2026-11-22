@@ -49,6 +49,8 @@ export type Selection =
   | { kind: 'shot'; id: string }
   | { kind: 'feature'; id: string }
   | { kind: 'layer'; id: string }
+  // One change of an event (D210): its animation, length, starting points and border shifts in Properties.
+  | { kind: 'change'; id: string }
   /** A star on a space map (D110), by its catalogue id. */
   | { kind: 'star'; id: number }
   | null;

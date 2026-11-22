@@ -12,6 +12,7 @@ import { layoutTracks, barAt, snap, LANE, BAR, type TLEvent, type TLTrack } from
 import { openMenu, eventMenu } from './ContextMenu.tsx';
 import type { MenuItem } from '../store.ts';
 import { nameMatches } from '../shell/layout.ts';
+import { changesAt, changeTime } from './ChangePanel.tsx';
 import { typeColor } from '../../domain/event-types.ts';
 
 /** Widths of event names on the timeline (one font), measured once each. */
@@ -257,7 +258,7 @@ export function Timeline({ head }: { head?: React.ReactNode }) {
     const dpr = window.devicePixelRatio || 1;
     const W = Math.max(1, Math.round(w * dpr)), H = Math.max(1, Math.round(h * dpr));
     if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
-    const key = [layKey, world.tableRevision('event_type'), world.tableRevision('map_space'), h, scrolled, otherOpen, find, s.selection?.kind === 'event' ? s.selection.id : '', s.recordEventId ?? ''].join('|');
+    const key = [layKey, world.tableRevision('event_type'), world.tableRevision('map_space'), h, scrolled, otherOpen, find, s.selection?.kind === 'event' || s.selection?.kind === 'change' ? s.selection.id : '', world.tableRevision('effect'), s.recordEventId ?? ''].join('|');
     if (!still.current || still.current.key !== key) {
       const canvas = still.current && still.current.canvas.width === W && still.current.canvas.height === H ? still.current.canvas : new OffscreenCanvas(W, H);
       const ctx = canvas.getContext('2d') as unknown as CanvasRenderingContext2D;
@@ -344,6 +345,13 @@ export function Timeline({ head }: { head?: React.ReactNode }) {
       for (const t of s.engine!.changeInstants()) {
         const x = xOf(toApproxYear(t));
         if (x >= 0 && x <= w) ctx.fillRect(x - 0.5, oy + 3, 1.5, otherOpen ? 16 : otherH - 5);
+      }
+      // (The change chosen, brighter and wider: D210.)
+      const chosenAt = s.selection?.kind === 'change' ? (() => { const f = world.get('effect', (s.selection as { id: string }).id); return f ? changeTime(world, f) : null; })() : null;
+      if (chosenAt) {
+        const x = xOf(toApproxYear(chosenAt));
+        ctx.fillStyle = '#ffffff';
+        if (x >= -2 && x <= w + 2) ctx.fillRect(x - 1.5, oy + 2, 3, otherOpen ? 18 : otherH - 3);
       }
       // Where the branch viewed (and the branches it comes from) split off (D150): a line in its colour, its name below (on the ruler while the strip is folded).
       for (const id of branchLine(world, s.branch)) {
@@ -433,8 +441,22 @@ export function Timeline({ head }: { head?: React.ReactNode }) {
       drag.current = { kind: 'bar', id: ev.id, mode, x, y, ys, ye, moved: false, track: hit.track.id, across: false };
       return;
     }
+    if (y >= h - otherH && pickChange(x)) return;
     drag.current = { kind: 'scrub' };
     store.setTime(timeAtX(x, e));
+  }
+
+  /** A change's tick in the strip under the events, clicked (D210): to its date, and the change chosen, in Properties. */
+  function pickChange(x: number): boolean {
+    let best: Instant | null = null, bd = 6;
+    for (const t of store.engine!.changeInstants()) { const d = Math.abs(xOf(toApproxYear(t)) - x); if (d < bd) { bd = d; best = t; } }
+    if (!best) return false;
+    const sel = store.selection, world = store.world!;
+    const prefer = sel?.kind === 'event' ? sel.id : sel?.kind === 'change' ? world.get('effect', sel.id)?.event_id ?? null : null;
+    const here = changesAt(world, best, prefer);
+    store.setTime(best);
+    if (here.length) store.set({ selection: { kind: 'change', id: here[0].id } });
+    return true;
   }
 
   function onMove(e: React.PointerEvent<HTMLCanvasElement>) {

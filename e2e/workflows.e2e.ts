@@ -196,7 +196,8 @@ try {
     const bp = await h.toPage(P.b);
     await h.drawLasso(blob(bp[0], bp[1], 40, 35));
     await page.getByTestId('recording').getByRole('button', { name: 'Stop' }).click();
-    await page.getByTestId('transition-style').first().selectOption('fade');
+    await page.getByTestId('change-row').first().click(); // (the change, in Properties: D210)
+    await page.getByTestId('transition-style').selectOption('fade');
     await h.saved();
     assert.equal(await h.ownerAt(P.b, '2003'), A, 'under halfway through the fade');
     assert.equal(await h.ownerAt(P.b, '2007'), null, 'past halfway');
@@ -870,10 +871,11 @@ try {
     assert.equal(await owner(95, -45, '1 February 1500'), 'Shiftland', 'as drawn: all at once');
     // The share of Holdfast's old land Shiftland holds on a date, looked at in 400 places.
     const share = (date: string) => page.evaluate((date) => { const m = (window as any).__mapmaker; let n = 0; for (let j = 0; j < 20; j++) for (let i = 0; i < 20; i++) if (m.ownerAt(90 + (i + 0.5) / 2, -50 + (j + 0.5) / 2, date) === 'Shiftland') n++; return n / 400; }, date);
-    // From the change in the event's panel: a step every two months for a year.
+    // From the change chosen in the event's panel (D210: in Properties, its Border shifts group): a step every two months for a year.
     await page.getByTestId('event-panel').waitFor();
-    await page.getByTestId('shifts-open').click();
-    await page.getByTestId('border-shifts-dialog').waitFor();
+    await page.getByTestId('change-row').click();
+    await page.getByTestId('group-head-change:shifts').click(); // (folded at first)
+    await page.getByTestId('border-shifts-dialog-inline').waitFor();
     await page.getByTestId('shifts-every').fill('2');
     assert.match((await page.getByTestId('shifts-count').textContent()) ?? '', /^6 steps, then the last at 1 January 1501/);
     await page.getByTestId('shifts-pushback').fill('80');
@@ -894,16 +896,17 @@ try {
     const back = await page.evaluate((dates) => { const m = (window as any).__mapmaker; let n = 0; for (let q = 1; q < dates.length; q++) for (let j = 0; j < 20; j++) for (let i = 0; i < 20; i++) { const lon = 90 + (i + 0.5) / 2, lat = -50 + (j + 0.5) / 2; if (m.ownerAt(lon, lat, dates[q - 1]) === 'Shiftland' && m.ownerAt(lon, lat, dates[q]) === 'Holdfast') n++; } return n; }, dates);
     assert.ok(back > 0, `land retaken here and there (${back} of the places looked at)`);
     // On the map, half way: both countries' colours inside the land fought over.
-    await page.getByTestId('shifts-close').click();
     await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 92, lat: -45, zoom: 3.2, rotation: 0, projection: 'equirectangular' }));
     await h.setDate('15 July 1500');
     await page.waitForTimeout(400);
     await h.screenshot('border-shifts-half-way');
-    // The panel: one change with its shifts, not seven.
+    // The change's panel says so; the event's lists one change with its shifts, not seven.
     assert.match((await page.getByTestId('change-shifts').textContent()) ?? '', /Border shifts: [5-6] generated, every 2 months/);
-    assert.equal(await page.getByTestId('shifts-open').count(), 1);
+    await page.getByTestId('change-back').click();
+    assert.equal(await page.getByTestId('change-row').count(), 1);
+    assert.match((await page.getByTestId('change-row').locator('..').textContent()) ?? '', /border shifts/);
     // Another version: other shifts in their place; removed: all at once again.
-    await page.getByTestId('shifts-open').click();
+    await page.getByTestId('change-row').click();
     await page.getByTestId('shifts-another').click();
     await page.waitForFunction(() => /pattern 2\)/.test(document.querySelector('[data-testid=shifts-made]')?.textContent ?? ''));
     await h.saved();
@@ -915,7 +918,6 @@ try {
     await page.waitForFunction(() => !document.querySelector('[data-testid=shifts-made]'));
     await h.saved();
     assert.equal(await share('15 January 1500'), 1, 'removed: all at once again');
-    await page.getByTestId('shifts-close').click();
     // Undone, step by step, to before the two countries.
     await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
     for (let i = 0; i < 12 && (await page.evaluate(() => (window as any).__mapmaker.store.world.all('entity').length)) > before; i++) { await page.getByTestId('undo').click(); await h.saved(); }
@@ -1484,13 +1486,17 @@ try {
       '1 January 1964 to 1 January 1966 (until the next change recorded)',
       '1 January 1966 to 1 January 1970 (until the next change recorded)',
     ]);
-    await page.getByTestId('change-length').nth(2).selectOption('for');
+    // (The third chosen, in Properties: D210.)
+    await page.getByTestId('change-row').nth(2).click();
+    await page.getByTestId('change-panel').waitFor();
+    assert.match((await page.getByTestId('change-when').textContent()) ?? '', /^Change 3 of 3/);
+    await page.getByTestId('change-length').selectOption('for');
     await page.getByTestId('change-for-n').fill('2');
     await page.getByTestId('change-for-n').press('Enter');
-    await page.waitForFunction(() => document.querySelectorAll('[data-testid=change-span]')[2]?.textContent === '1 January 1966 to 1 January 1968');
+    await page.waitForFunction(() => document.querySelector('[data-testid=change-span]')?.textContent === '1 January 1966 to 1 January 1968');
     await h.screenshot('record-lengths');
     // The last made an expansion, then from two points at once (D91): the second chosen by a click on the map.
-    await page.getByTestId('transition-style').nth(2).selectOption('advance');
+    await page.getByTestId('transition-style').selectOption('advance');
     await page.getByTestId('add-origin').click();
     await page.mouse.click(cx + 190, cy - 170);
     await page.waitForFunction(() => /2 points at once/.test(document.querySelector('[data-testid=change-origins]')?.textContent ?? ''));
@@ -1500,9 +1506,18 @@ try {
     assert.deepEqual(pincer.for, { n: 2, unit: 'year' }, 'its length kept');
     await page.getByTestId('clear-origins').click();
     await page.waitForFunction(() => /one point/.test(document.querySelector('[data-testid=change-origins]')?.textContent ?? ''));
+    // The second change's tick in the timeline's strip of changes, clicked: that change chosen, at its date (D210).
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ timeline: { start: 1950, end: 1980 } }));
+    await page.waitForTimeout(150);
+    const tl = (await page.getByTestId('timeline').boundingBox())!;
+    await page.mouse.click(tl.x + tl.width * (1964 - 1950) / 30, tl.y + tl.height - 4);
+    await page.waitForFunction(() => /^Change 2 of 3/.test(document.querySelector('[data-testid=change-when]')?.textContent ?? ''));
+    assert.match((await page.getByTestId('change-when').textContent()) ?? '', /1 January 1964/);
+    assert.ok(await page.evaluate(() => { const m = (window as any).__mapmaker, t = m.store.time, g = m.bench.gregorian.fromCivil({ year: 1964, month: 1, day: 1 }); return t.day === g.day && t.ms === g.ms; }), 'at its date');
     // Back as it was: changes happen at once when recorded; the event deleted.
     await page.getByTestId('record-when').selectOption('instant');
     await page.getByTestId('recording').getByRole('button', { name: 'Stop' }).click();
+    await page.getByTestId('change-back').click();
     page.once('dialog', (d) => void d.accept());
     await page.getByRole('button', { name: 'Delete event' }).click();
     await h.saved();

@@ -11,7 +11,7 @@ import { calendarNow } from '../calendar-now.ts';
 import { isBaseEvent, MAIN_BRANCH, type EffectRow } from '../../world-model/schema.ts';
 import { listedHere } from '../events-here.ts';
 import { basemapSourceOf, worldSettings, terrainSourceOf, sculptOf, isSpaceMap, isGeologicalMap, simOf, statisticsOf } from '../../world-model/world-settings.ts';
-import { parseJSON, leafDescendants, isUntracked, resolutionOf, type Resolution, type TransitionSpec } from '../../temporal-engine/engine.ts';
+import { parseJSON, isUntracked, resolutionOf, type TransitionSpec } from '../../temporal-engine/engine.ts';
 import type { World } from '../../world-model/world.ts';
 import { lonLatToVec } from '../../geo-kernel/vec.ts';
 import { stepChange } from './Timeline.tsx';
@@ -21,7 +21,8 @@ import { CountryFillSection, FillSwatch } from './CountryFill.tsx';
 import { CountryLookSection, LayerLookSection } from './LookEditor.tsx';
 import { CountryBordersSection, LayerBordersSection } from './BorderEditor.tsx';
 import { CharacterSection } from './Characters.tsx';
-import { RecordLengthControls, ChangeLength } from './RecordLength.tsx';
+import { RecordLengthControls, changeSpanText } from './RecordLength.tsx';
+import { ChangePanel, changesOf, describeEffect, animationName } from './ChangePanel.tsx';
 import { eventScreenSeconds, eventTransitionLook, TRANSITION_LOOKS } from '../../presentation/sequence.ts';
 import { openMenu, entityMenu, groupMenu, eventMenu } from './ContextMenu.tsx';
 import { CountryHistorySection } from './CountryHistory.tsx';
@@ -818,6 +819,7 @@ export function Inspector() {
       {sel?.kind === 'point' && <PointPanel lon={sel.lon} lat={sel.lat} />}
       {sel?.kind === 'feature' && <FeaturePanel id={sel.id} />}
       {sel?.kind === 'layer' && <LayerPanel id={sel.id} />}
+      {sel?.kind === 'change' && <ChangePanel id={sel.id} />}
       {sel?.kind === 'star' && <StarPanel id={sel.id} />}
     </aside>
   );
@@ -955,44 +957,6 @@ function changeRows(w: World, changes: EffectRow[]): Array<{ key: string; eventI
   return rows.sort((a, b) => (a.time ? (b.time ? compare(a.time, b.time) : 1) : b.time ? -1 : 0));
 }
 
-function describeEffect(s: ReturnType<typeof useStore>, f: EffectRow): string {
-  const w = s.world!;
-  const name = (v: string | null) => (v ? w.get('entity', v)?.name ?? '(deleted)' : 'nobody');
-  if (f.kind === 'annex') {
-    const i = parseJSON<{ from: string; to: string }>(f.intent, { from: '', to: '' });
-    return `${name(i.to)} annexes everything ${name(i.from)} holds`;
-  }
-  if (f.kind === 'rename') {
-    const i = parseJSON<{ entity: string; name: string }>(f.intent, { entity: '', name: '' });
-    return `${name(i.entity)} is called ${i.name}`;
-  }
-  if (f.kind === 'relate') {
-    const i = parseJSON<{ relation: string; on?: boolean }>(f.intent, { relation: '' });
-    const r = w.get('relation', i.relation);
-    const what = r ? cmd.describeRelation(w, r) : '(a deleted relationship)';
-    return `${i.on ? 'Begins' : 'Ends'}: ${what}${f.at_day !== null ? ` (at ${fmt(fromStore(f.at_day, f.at_ms ?? 0), 'minute')})` : ''}`;
-  }
-  if (f.kind === 'shape') {
-    const i = parseJSON<{ feature: string; off?: boolean }>(f.intent, { feature: '' });
-    const ft = w.get('feature', i.feature);
-    const what = ft ? `"${ft.name}"` : '(deleted)';
-    const layer = f.layer_id ? w.get('layer', f.layer_id)?.name ?? '' : '';
-    return `${layer ? `${layer}: ` : ''}${i.off ? `${what} ends` : `${what} takes its shape`}${f.at_day !== null ? ` (at ${fmt(fromStore(f.at_day, f.at_ms ?? 0), 'minute')})` : ''}`;
-  }
-  if (f.kind === 'place') {
-    const i = parseJSON<{ entity: string; lon?: number; lat?: number; off?: boolean }>(f.intent, { entity: '' });
-    return i.off ? `${name(i.entity)} leaves the map` : `${name(i.entity)} is at ${Math.abs(i.lat ?? 0).toFixed(2)}°${(i.lat ?? 0) >= 0 ? 'N' : 'S'}, ${Math.abs(i.lon ?? 0).toFixed(2)}°${(i.lon ?? 0) >= 0 ? 'E' : 'W'}`;
-  }
-  const res = parseJSON<Resolution>(f.resolution, { set: [] });
-  const arr = f.space_id ? w.arrangements.get(f.space_id) : undefined;
-  const parts = res.set.map(([faces, v]) => {
-    const n = arr ? leafDescendants(arr, faces).size : faces.length;
-    return `${n} parcel${n === 1 ? '' : 's'} → ${name(v)}`;
-  });
-  const layer = f.layer_id ? w.get('layer', f.layer_id)?.name : '';
-  return `${layer}: ${parts.join('; ')}${f.at_day !== null ? ` (at ${fmt(fromStore(f.at_day, f.at_ms ?? 0), 'minute')})` : ''}`;
-}
-
 function EventPanel({ id }: { id: string }) {
   const s = useStore();
   const w = s.world!;
@@ -1004,28 +968,11 @@ function EventPanel({ id }: { id: string }) {
   useEffect(() => { setName(e?.name ?? ''); setDesc(e?.description ?? ''); }, [id, e?.name, e?.description]);
   if (!e) return null;
   const base = isBaseEvent(id);
-  const effects = w.all('effect').filter((f) => f.event_id === id).sort((a, b) => a.ordinal - b.ordinal);
+  const effects = changesOf(w, id);
   const start = fromStore(e.start_day, e.start_ms);
   const end = e.end_day !== null ? fromStore(e.end_day, e.end_ms ?? 0) : null;
   const variants = e.variant_group ? w.all('event').filter((x) => x.variant_group === e.variant_group) : [];
   const owners = w.all('entity').filter((x) => x.type_id === 'polity' || x.type_id === 'faction');
-  const setTransition = (f: EffectRow, style: string) => {
-    const old = parseJSON<TransitionSpec | null>(f.transition, null);
-    let spec: TransitionSpec | null = null;
-    if (style === 'advance') spec = { style: 'advance', origin: old?.origin ?? regionCentre(s, f), easing: 'smooth' };
-    else if (style === 'border') spec = { style: 'border', easing: 'smooth' };
-    else if (style === 'dissolve') spec = { style: 'dissolve', easing: 'smooth' };
-    else if (style === 'fade') spec = { style: 'fade' };
-    // How long it takes is kept (D86); in an event without an end, a change that starts to spread takes a year until chosen otherwise.
-    if (spec) {
-      if (old?.until) spec.until = old.until;
-      else if (old?.for) spec.for = old.for;
-      else if (!end) spec.for = { n: 1, unit: 'year' };
-      if (old?.next) spec.next = true;
-      if (spec.style === 'advance' && old?.origins) spec.origins = old.origins;
-    }
-    s.execute((wd) => cmd.setEffectTransition(wd, f.id, spec));
-  };
   return (
     <div className="panel" data-testid="event-panel">
       <h3>{base ? 'Starting map and changes without an event' : e.name}</h3>
@@ -1085,52 +1032,23 @@ function EventPanel({ id }: { id: string }) {
         </PropGroup>
       </>}
       <PropGroup id="event:changes" title="Changes">
-      {effects.filter((f) => parseJSON<{ op?: string }>(f.intent, {}).op !== 'shift').map((f) => (
-        <div key={f.id} className="effect">
-          <div>{isUntracked(f) && <span className="date">{fmt(fromStore(f.at_day!, f.at_ms ?? 0))} · </span>}{describeEffect(s, f)}</div>
-          {base && isUntracked(f) && <div className="effect-tools"><button className="small" onClick={() => s.setTime(fromStore(f.at_day!, f.at_ms ?? 0))}>Go to</button><button className="small danger" onClick={() => s.execute((wd) => cmd.deleteEffect(wd, f.id))}>Remove</button></div>}
-          {!base && f.layer_id && f.kind !== 'shape' && (
+      {/* Each change chosen here (D210) shows in Properties with its animation, length, starting points and border shifts. */}
+      {effects.map((f) => {
+        const span = base ? null : changeSpanText(f, e), style = parseJSON<TransitionSpec | null>(f.transition, null)?.style;
+        const shifts = !base && cmd.borderShiftsOf(w, f.id);
+        return (
+          <div key={f.id} className="effect">
+            <button className="change-row" onClick={() => s.set({ selection: { kind: 'change', id: f.id } })} data-testid="change-row" title="Its animation, how long it takes and its border shifts, in Properties">
+              {isUntracked(f) && <span className="date">{fmt(fromStore(f.at_day!, f.at_ms ?? 0))} · </span>}{describeEffect(s, f)}
+            </button>
+            {(span || shifts) && <div className="muted change-sum">{span && <>{animationName(style)} · <span data-testid="change-span">{span}</span></>}{shifts && <span>{span ? ' · ' : ''}border shifts</span>}</div>}
             <div className="effect-tools">
-              <label className="inline">Animation
-                <select value={parseJSON<TransitionSpec | null>(f.transition, null)?.style ?? 'instant'} onChange={(ev) => setTransition(f, ev.target.value)} data-testid="transition-style">
-                  <option value="instant">Instant</option>
-                  <option value="border">Advancing front (through the land from the border)</option>
-                  <option value="advance">Expansion (from where it was drawn)</option>
-                  <option value="dissolve">Dissolve (in patches)</option>
-                  <option value="fade">Fade</option>
-                </select>
-              </label>
-              <button className="small danger" onClick={() => s.execute((wd) => cmd.deleteEffect(wd, f.id))}>Remove</button>
-{(() => {
-                // Border shifts generated between before and after (D195): for land one country gains.
-                if (f.kind !== 'assign') return null;
-                const sets = parseJSON<Resolution>(f.resolution, { set: [] }).set, made = cmd.borderShiftsOf(w, f.id);
-                if (sets.length !== 1 || !sets[0][1]) return null;
-                return (
-                  <span className="change-length" data-testid="change-shifts">
-                    {made && <span className="muted">Border shifts: {cmd.generatedShifts(w, f.id).length} generated, every {made.every.n === 1 ? made.every.unit : `${made.every.n} ${made.every.unit}s`}</span>}
-                    <button className="small" onClick={() => s.set({ dialog: 'border-shifts', shiftsFor: f.id })} data-testid="shifts-open" title="Instead of all at once: the border moved there step by step, as real changes, the other side pushing back here and there">{made ? 'Change the shifts…' : 'Generate border shifts…'}</button>
-                  </span>
-                );
-              })()}
-              <ChangeLength f={f} ev={e} />
-              {(() => {
-                // An expansion's starting points (D91): more of them, and it spreads from all at once.
-                const sp = parseJSON<TransitionSpec | null>(f.transition, null);
-                if (sp?.style !== 'advance' || !sp.origin) return null;
-                const n = 1 + (sp.origins?.length ?? 0);
-                return (
-                  <span className="change-length" data-testid="change-origins">
-                    <span className="muted">Spreads from {n === 1 ? 'one point' : `${n} points at once`}</span>
-                    <button className="small" onClick={() => { s.set({ pickOrigin: f.id }); s.toast('Click on the map where it also starts from.'); }} data-testid="add-origin">{s.pickOrigin === f.id ? 'Click the map…' : 'Add a starting point'}</button>
-                    {n > 1 && <button className="small" onClick={() => s.execute((wd) => cmd.clearTransitionOrigins(wd, f.id))} data-testid="clear-origins">Only the first</button>}
-                  </span>
-                );
-              })()}
+              {base && isUntracked(f) && <button className="small" onClick={() => s.setTime(fromStore(f.at_day!, f.at_ms ?? 0))}>Go to</button>}
+              {(!base || isUntracked(f)) && <button className="small danger" onClick={() => s.execute((wd) => cmd.deleteEffect(wd, f.id))}>Remove</button>}
             </div>
-          )}
-        </div>
-      ))}
+          </div>
+        );
+      })}
       {!effects.length && <div className="muted">No changes yet. Use “Record into this event” and draw on the map.</div>}
       {!base && owners.length > 0 && <RenameInEvent eventId={id} owners={owners} />}
       {!base && owners.length >= 2 && (
@@ -1182,19 +1100,6 @@ function RenameInEvent({ eventId, owners }: { eventId: string; owners: Array<{ i
       <button disabled={!who || !name.trim() || name.trim() === now} onClick={add} title="From the event's start the country is called so (its label on the map too)" data-testid="rename-event-add">Add renaming</button>
     </div>
   );
-}
-
-function regionCentre(s: ReturnType<typeof useStore>, f: EffectRow): [number, number] {
-  const w = s.world!;
-  if (!f.space_id) return [0, 0];
-  const arr = w.arrangement(f.space_id);
-  const res = parseJSON<Resolution>(f.resolution, { set: [] });
-  let x = 0, y = 0, z = 0;
-  for (const [faces] of res.set) for (const leaf of leafDescendants(arr, faces)) for (const cyc of arr.faceCycles(leaf)) for (const vid of cyc) {
-    const v = arr.v(vid); x += v[0]; y += v[1]; z += v[2];
-  }
-  const n = Math.hypot(x, y, z) || 1;
-  return [Math.atan2(y, x) * 180 / Math.PI, Math.asin(z / n) * 180 / Math.PI];
 }
 
 function PointPanel({ lon, lat }: { lon: number; lat: number }) {

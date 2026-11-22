@@ -60,7 +60,15 @@ export function RecordLengthControls() {
   );
 }
 
-/** In the event's panel: how long one of its changes takes. Nothing for a change that happens at once. */
+/** When a change spreads, written out ("1 January 1964 to 1 January 1966"); null for one that happens at once. */
+export function changeSpanText(f: EffectRow, ev: EventRow): string | null {
+  const spec = parseJSON<TransitionSpec | null>(f.transition, null);
+  if (!spec || spec.style === 'instant') return null;
+  const start = effectTime(f, ev), end = transitionEnd(spec, start, ev);
+  return `${end && compare(end, start) > 0 ? `${fmt(start)} to ${fmt(end)}` : `at once on ${fmt(start)}`}${spec.next ? ' (until the next change recorded)' : ''}`;
+}
+
+/** In a change's Properties: how long it takes. Nothing for a change that happens at once. */
 export function ChangeLength({ f, ev }: { f: EffectRow; ev: EventRow }) {
   const s = useStore();
   const spec = parseJSON<TransitionSpec | null>(f.transition, null);
@@ -92,7 +100,7 @@ export function ChangeLength({ f, ev }: { f: EffectRow; ev: EventRow }) {
           {UNITS.map(([u, name]) => <option key={u} value={u}>{name}</option>)}
         </select>
       </>}
-      <span className="muted" data-testid="change-span">{end && compare(end, start) > 0 ? `${fmt(start)} to ${fmt(end)}` : `at once on ${fmt(start)}`}{spec.next ? ' (until the next change recorded)' : ''}</span>
+      <span className="muted" data-testid="change-span">{changeSpanText(f, ev)}</span>
     </span>
   );
 }

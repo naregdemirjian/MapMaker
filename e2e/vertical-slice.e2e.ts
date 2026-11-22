@@ -481,6 +481,8 @@ try {
     await page.getByTestId('event-panel').waitFor();
     await page.getByTestId('event-panel-end').fill('1455');
     await page.getByTestId('event-panel-end').press('Enter');
+    await page.getByTestId('change-row').first().click(); // (the change, in Properties: D210)
+    await page.getByTestId('change-panel').waitFor();
     await page.getByTestId('transition-style').selectOption('advance');
     await saved();
     await setDate('1 July 1452');

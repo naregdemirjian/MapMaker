@@ -61,6 +61,23 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D210. A change of an event selected in Properties (interface stage 5, last step)
+
+- **A change can be selected** (`selection.kind === 'change'`, the effect's id): from its line in the event's list
+  of changes, or by clicking its tick in the timeline's strip of changes (the date goes there; of several changes at
+  that moment, the selected event's first; a generated border shift stands for the change it was made from). The
+  chosen change's tick is drawn brighter.
+- **Its Properties** (`ChangePanel.tsx`): "← event" back to its event; what it does; group **Change** (which of the
+  event's changes and when, go to its date, previous and next change, remove); group **Animation** (how it happens,
+  how long it takes, an expansion's starting points); group **Border shifts** for land one country gains (the
+  generator's settings in place: the window's contents inside `InlineDialog`, its Close button left out, test ids
+  ending in `-inline`).
+- **The event's list of changes** is a list again: each change's line (click to choose it), under it how it happens
+  and when it spreads ("Fade · 1 January 1964 to 1 January 1966", "border shifts"), and Remove. The settings that
+  were crowded under every line (animation, length, starting points, shifts) are only in the change's Properties.
+- `describeEffect`, `regionCentre` and the animation choice (`setChangeAnimation`) moved from `Panels.tsx` to
+  `ChangePanel.tsx`, with `changesOf`, `changeTime` and `changesAt`.
+
 ### D209. The timeline's menus and drags; the map's settings in place in Properties (interface stages 5 and 6, continued)
 
 - **Right-click on the timeline**: on an event's bar, the event's own menu (go to its date, add to a group, delete)

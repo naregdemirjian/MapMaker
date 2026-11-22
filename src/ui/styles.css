@@ -220,6 +220,12 @@ table.shortcuts kbd { font: inherit; background: var(--panel2); border: 1px soli
 .effect-tools { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px; margin-top: 6px; }
 .effect-tools label.inline { margin: 0; }
 .effect-tools .danger { margin: 0; }
+.effect-tools:empty { display: none; }
+/* A change of an event (D210): its line chosen to show it in Properties. */
+.effect button.change-row { display: block; width: 100%; background: none; border: none; padding: 0; margin: 0; color: inherit; text-align: left; font: inherit; cursor: pointer; }
+.effect button.change-row:hover { color: var(--accent); }
+.effect .change-sum { margin-top: 3px; font-size: 11px; }
+button.link.back { display: block; margin-bottom: 6px; }
 .annex select { width: 100%; margin: 3px 0; }
 .timeline { height: 100%; background: #10161d; position: relative; }
 .timeline canvas { display: block; cursor: col-resize; }
