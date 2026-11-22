@@ -1095,8 +1095,11 @@ export function createEventGroup(world: World, name: string, color?: string): Co
   if (world.all('event_group').some((g) => g.name.toLowerCase() === n.toLowerCase())) throw new Error(`There is already a group called "${n}".`);
   return run(world, `Create event group "${n}"`, (tx) => {
     const id = newId('grp');
-    const count = world.all('event_group').length;
-    tx.insert('event_group', { id, name: n, color: color ?? GROUP_COLORS[count % GROUP_COLORS.length], sort_order: count, created_seq: world.nextSeq('event_group') });
+    const groups = world.all('event_group');
+    const count = groups.length;
+    // After the last group (D209): with groups taken away, their count could tie with one still there.
+    const last = groups.reduce((m, g) => Math.max(m, g.sort_order), -1);
+    tx.insert('event_group', { id, name: n, color: color ?? GROUP_COLORS[count % GROUP_COLORS.length], sort_order: last + 1, created_seq: world.nextSeq('event_group') });
     return id;
   });
 }
@@ -1136,6 +1139,27 @@ export function updateEventGroup(world: World, id: string, patch: { name?: strin
   if (patch.name !== undefined && !name) throw new Error('Give the group a name.');
   if (name && world.all('event_group').some((o) => o.id !== id && o.name.toLowerCase() === name.toLowerCase())) throw new Error(`There is already a group called "${name}".`);
   return run(world, `Change event group "${g.name}"`, (tx) => { tx.patch('event_group', id, { ...(name ? { name } : {}), ...(patch.color ? { color: patch.color } : {}) }); });
+}
+
+/** Put the event groups in this order (D209: the timeline's tracks, top to bottom); groups not named keep their places after. */
+export function orderEventGroups(world: World, ids: string[]): CommandResult {
+  const all = world.all('event_group').sort((a, b) => a.sort_order - b.sort_order || a.created_seq - b.created_seq);
+  const order = [...ids.filter((id) => all.some((g) => g.id === id)), ...all.map((g) => g.id).filter((id) => !ids.includes(id))];
+  return run(world, 'Reorder event groups', (tx) => { order.forEach((id, i) => { if (world.get('event_group', id)!.sort_order !== i) tx.patch('event_group', id, { sort_order: i }); }); });
+}
+
+/** Move an event from one group to another (D209: dragged onto another track); `to` null: into no group but those it has besides. */
+export function moveEventToGroup(world: World, eventId: string, from: string | null, to: string | null): CommandResult {
+  const ev = world.get('event', eventId);
+  if (!ev || isBaseEvent(ev.id)) throw new Error('Choose an event first.');
+  if (to && !world.get('event_group', to)) throw new Error('That group no longer exists.');
+  const now = groupsOfEvent(world, eventId);
+  const next = [...new Set([...(to ? [to] : []), ...now.filter((g) => g !== from)])];
+  const name = to ? world.get('event_group', to)!.name : 'no group';
+  return run(world, `"${ev.name}" to ${to ? `"${name}"` : name}`, (tx) => {
+    for (const m of world.all('event_group_member').filter((x) => x.event_id === eventId)) if (!next.includes(m.group_id)) tx.remove('event_group_member', m.id);
+    for (const g of next) insertMember(tx, g, eventId);
+  });
 }
 
 /** Delete a group. Its events stay; they only leave the group. */

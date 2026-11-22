@@ -1,4 +1,5 @@
 import { useStore } from '../store.ts';
+import { DialogFrame } from '../shell/DialogFrame.tsx';
 import { PRESETS, presetOf, type PresetName, type ViewSettings } from '../view-settings.ts';
 
 /** One setting: its name, a line saying what it trades, and its choices. */
@@ -23,9 +24,7 @@ export function SettingsDialog() {
   const set = (patch: Partial<ViewSettings>) => s.setViewSettings({ ...v, ...patch });
   const preset = presetOf(v);
   return (
-    <div className="modal-back" onPointerDown={(e) => e.target === e.currentTarget && s.set({ dialog: null })}>
-      <div className="modal wide" role="dialog" aria-label="Settings" data-testid="settings-dialog">
-        <div className="modal-head"><h2>Settings</h2><button className="close" onClick={() => s.set({ dialog: null })} aria-label="Close">×</button></div>
+    <DialogFrame title={'Settings'} testId="settings-dialog" wide onClose={() => s.set({ dialog: null })}>
         <h4>Speed of the working view</h4>
         <p className="muted">
           How the map is drawn on this computer while you work. These settings never change what you can make, and never
@@ -56,8 +55,7 @@ export function SettingsDialog() {
           about="The most detailed coastlines take longer to draw when zoomed far in."
           options={[{ value: 'full', name: 'Most detailed' }, { value: 'medium', name: 'Medium at every zoom' }]} />
         <label className="check setting-check"><input type="checkbox" checked={v.showSpeed} onChange={(e) => set({ showSpeed: e.target.checked })} data-testid="setting-speed" /> Show how long the map takes to draw, and the frames a second the screen gets (in a corner of the map)</label>
-        <div className="modal-actions"><button className="primary" onClick={() => s.set({ dialog: null })} data-testid="settings-close">Done</button></div>
-      </div>
-    </div>
+        <div className="modal-actions close-only"><button className="primary" onClick={() => s.set({ dialog: null })} data-testid="settings-close">Done</button></div>
+    </DialogFrame>
   );
 }

@@ -1,6 +1,7 @@
 // What the map shows (fifth feedback round, D84): while working, and in presentation and exports, each
 // chosen on its own; the smallest lake shown, so the thousands of small lakes can be left out; and the
 // terrain and how it is drawn (D95).
+import { DialogFrame } from '../shell/DialogFrame.tsx';
 import { useMemo, useState } from 'react';
 import { useStore } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
@@ -46,9 +47,7 @@ export function ShowDialog() {
   const planet = terrainSourceOf(space) === 'planet';
   const items = SHOW_ITEMS.filter((it) => (earth || (it.key !== 'lakes' && it.key !== 'coastline' && (it.key !== 'rivers' || planet))) && (it.key !== 'terrain' || !!look));
   return (
-    <div className="modal-back" onPointerDown={(ev) => ev.target === ev.currentTarget && close()}>
-      <div className="modal" role="dialog" aria-label="What is shown" data-testid="show-dialog">
-        <div className="modal-head"><h2>What is shown</h2><button className="close" onClick={close} aria-label="Close">×</button></div>
+    <DialogFrame title={'What is shown'} testId="show-dialog" onClose={close}>
         <p className="muted">On "{space.name}", while you work and in presentation and exports, each on its own: hiding something while you work keeps it in your exports.</p>
         <table className="show-table">
           <thead><tr><th /><th>While working</th><th>In presentation and exports</th></tr></thead>
@@ -71,9 +70,8 @@ export function ShowDialog() {
         )}
         {space.kind === 'sphere' && <CitiesShownSection spaceId={space.id} />}
         {terrainSourceOf(space) && <TerrainSection spaceId={space.id} look={look} earth={terrainSourceOf(space) === 'earth'} planet={terrainSourceOf(space) === 'planet'} />}
-        <div className="modal-actions"><button className="primary" onClick={close}>Close</button></div>
-      </div>
-    </div>
+        <div className="modal-actions close-only"><button className="primary" onClick={close}>Close</button></div>
+    </DialogFrame>
   );
 }
 

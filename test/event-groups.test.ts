@@ -77,6 +77,29 @@ test('event groups: deleting an event removes its memberships; an alternative ve
   assert.throws(() => cmd.setEventGroups(world, 'evt_base', [g]), /Choose an event/);
 });
 
+test('event groups: a new group goes after the last even when others were deleted; reorder and move between groups (D209)', () => {
+  const { world, ev } = project();
+  const a = cmd.createEventGroup(world, 'A').result;
+  const b = cmd.createEventGroup(world, 'B').result;
+  cmd.deleteEventGroup(world, a);
+  const c = cmd.createEventGroup(world, 'C').result;
+  const order = () => world.all('event_group').sort((x, y) => x.sort_order - y.sort_order).map((g) => g.id);
+  assert.notEqual(world.get('event_group', c)!.sort_order, world.get('event_group', b)!.sort_order, 'no tie with a group still there');
+  assert.deepEqual(order(), [b, c]);
+  const r = cmd.orderEventGroups(world, [c]);
+  assert.deepEqual(order(), [c, b], 'named groups first, the rest keep their places after');
+  world.applyDiffs(invertDiffs(r.diffs));
+  assert.deepEqual(order(), [b, c], 'one undo');
+  const war = ev('War', 1200);
+  cmd.setEventGroups(world, war, [b]);
+  const m = cmd.moveEventToGroup(world, war, b, c);
+  assert.deepEqual(cmd.groupsOfEvent(world, war), [c]);
+  world.applyDiffs(invertDiffs(m.diffs));
+  assert.deepEqual(cmd.groupsOfEvent(world, war), [b]);
+  cmd.moveEventToGroup(world, war, b, null);
+  assert.deepEqual(cmd.groupsOfEvent(world, war), [], 'out of every group');
+});
+
 /** Turn a project file into exactly what version 1 of Map Maker wrote. */
 function makeVersion1(file: string): void {
   const db = new DatabaseSync(file);

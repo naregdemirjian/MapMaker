@@ -1,5 +1,6 @@
 // A map's statistics (D171): numbers kept over time, each known at dates and worked out between them, shown in a
 // shot's text boxes and title by name in braces ("{GDP}"), counting as history plays.
+import { DialogFrame } from '../shell/DialogFrame.tsx';
 import { useState } from 'react';
 import { useStore } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
@@ -33,9 +34,7 @@ export function StatisticsDialog() {
   };
   const now = () => toJSONValue(s.time) as [number, number];
   return (
-    <div className="modal-back" onPointerDown={(ev) => ev.target === ev.currentTarget && close()}>
-      <div className="modal wide" role="dialog" aria-label="Statistics" data-testid="statistics-dialog">
-        <div className="modal-head"><h2>Statistics of “{space.name}”</h2><button className="close" onClick={close} aria-label="Close">×</button></div>
+    <DialogFrame label="Statistics" title={<>Statistics of “{space.name}”</>} testId="statistics-dialog" wide onClose={close}>
         <p className="muted">Numbers kept over time: an economy, an army, the dead of a war. Give each its values at dates; between them it is worked out. In a shot's text box or title, write its name in braces, such as {'{GDP}'}, and it counts as history plays.</p>
         {draft.map((st, i) => (
           <div key={i} className="stat-editor" data-testid={`statistic-${i}`}>
@@ -61,7 +60,6 @@ export function StatisticsDialog() {
         <button onClick={() => setDraft([...draft, { name: `Statistic ${draft.length + 1}`, format: 'number', ease: 'linear', keys: [{ at: now(), value: 0 }] }])} data-testid="statistic-add">+ Statistic</button>
         {error && <p className="error">{error}</p>}
         <div className="modal-actions"><button onClick={close}>Cancel</button><button className="primary" onClick={save} data-testid="statistics-save">Save</button></div>
-      </div>
-    </div>
+    </DialogFrame>
   );
 }

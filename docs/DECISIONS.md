@@ -61,6 +61,25 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D209. The timeline's menus and drags; the map's settings in place in Properties (interface stages 5 and 6, continued)
+
+- **Right-click on the timeline**: on an event's bar, the event's own menu (go to its date, add to a group, delete)
+  and "New event on [date]…"; on a block of events run together, "Closer in on these"; on empty time, "New event on
+  [date]…" and "Go to this date". On a track's head: open or fold it, move it up or down, show only its group, show
+  every group, fold the other tracks.
+- **An event dragged up or down onto another group's track** goes into that group and out of the one it was in
+  (`moveEventToGroup`; it keeps its other groups, and shows on the track of the first of them). Dragged sideways at
+  the same time, its date changes too. The track it would go to is lit while dragging. A bar too narrow to hold by
+  its middle is only ever moved (its ends are handles only on bars 18 pixels or wider).
+- **A track's head dragged up or down** puts its group in that place among the tracks (`orderEventGroups`, one
+  undo); a click without dragging still folds it. A new group goes after the last (one more than the highest place,
+  not the count of groups), so groups taken away cannot leave two tied for a place.
+- **The map's settings in place**: with nothing selected, Properties also has What is shown, Sea level over time,
+  Calendar, Statistics and Speed of the working view as groups, folded at first, showing the same contents as the
+  windows the menus open (`DialogFrame` shows a dialog either as a window or, inside `InlineDialog`, in place; test
+  ids in place end in `-inline`). While the same window is open over everything, the group says so instead.
+- The date viewed: the year now stands next to its month (it moved only when its number of figures did).
+
 ### D208. The solar system true to scale and as photographed by default; the Sun grows as it is closed in on; a poster row
 
 - **A new solar system map** is true to scale (distances), as photographed (the photographic look of D191), and

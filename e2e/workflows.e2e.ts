@@ -5209,7 +5209,15 @@ try {
     // Nothing selected (the map's row clicked): the map itself, with its setting-up, no longer under the list of maps (D202).
     await page.getByTestId('map-row-Earth').click();
     await page.getByTestId('map-panel').waitFor();
-    assert.deepEqual(await groups(), ['This map', 'Getting started']);
+    assert.deepEqual(await groups(), ['This map', 'What is shown', 'Sea level over time', 'Calendar', 'Statistics', 'Speed of the working view', 'Getting started']);
+    // The map's settings in place (D209): folded at first; opened, the window's contents, without its frame.
+    assert.equal(await page.getByTestId('settings-dialog-inline').count(), 0);
+    await page.getByTestId('group-head-map:speed').click();
+    await page.getByTestId('settings-dialog-inline').waitFor();
+    assert.equal(await page.locator('.modal').count(), 0, 'not a window over the map');
+    await h.screenshot('properties-map-speed');
+    await page.getByTestId('group-head-map:speed').click();
+    assert.equal(await page.getByTestId('settings-dialog-inline').count(), 0);
     assert.equal(await page.locator('.left [data-testid="open-calendar"]').count(), 0);
     assert.match((await page.getByTestId('map-panel').getByTestId('open-calendar').innerText()), /^Calendar: /);
     await h.screenshot('properties-map');
@@ -5305,8 +5313,47 @@ try {
     await page.getByTestId('undo').click();
     await h.saved();
     assert.equal(await startOf(), day0);
+    // Right-click (D209): on a bar, the event's own menu; on empty time, a new event there.
+    let l2 = await laid();
+    mine = l2.tracks.find((t) => t.id === gid)!;
+    const b2 = mine.bars[0];
+    await page.mouse.click(canvas.x + b2.x0 + 3, canvas.y + l2.top + mine.y + 3 + b2.lane * 20 + 7, { button: 'right' });
+    await page.getByTestId('context-menu').waitFor();
+    assert.ok((await page.getByTestId('context-menu').textContent())!.includes('Go to its date'));
+    await page.keyboard.press('Escape');
+    await page.mouse.click(canvas.x + canvas.width - 30, canvas.y + l2.top + mine.y + mine.height - 2, { button: 'right' });
+    await page.getByTestId('timeline-new-event').click();
+    assert.equal(await st<string>('s.dialog'), 'new-event');
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ dialog: null }));
+    // An event of another track dragged up or down onto the group's track joins the group.
+    l2 = await laid();
+    const other = l2.tracks.find((t) => t.id === '__ungrouped' && !t.folded && t.bars.some((b) => b.ids.length === 1))!;
+    const ob = other.bars.find((b) => b.ids.length === 1)!;
+    mine = l2.tracks.find((t) => t.id === gid)!;
+    const from: [number, number] = [canvas.x + (ob.x0 + ob.x1) / 2, canvas.y + l2.top + other.y + 3 + ob.lane * 20 + 7];
+    await page.mouse.move(from[0], from[1]);
+    await page.mouse.down();
+    await page.mouse.move(from[0], canvas.y + l2.top + mine.y + mine.height / 2, { steps: 8 });
+    await page.mouse.up();
+    await h.saved();
+    assert.ok((await st<string[]>(`s.world.all('event_group_member').filter((m) => m.group_id === ${JSON.stringify(gid)}).map((m) => m.event_id)`)).includes(ob.ids[0]), 'it joined the group');
+    assert.equal((await laid()).tracks.find((t) => t.id === gid)!.bars.reduce((n, b) => n + b.ids.length, 0), 3, 'now on its track');
+    // A track's head: right-click to move it up or down among the tracks.
+    const order = async () => (await laid()).tracks.map((t) => t.id).filter((id) => id !== '__ungrouped');
+    if ((await order()).length > 1) {
+      const o0 = await order();
+      await page.getByTestId('track-Track test').click({ button: 'right' });
+      const up = !(await page.getByTestId('track-move-up').isDisabled());
+      await page.getByTestId(up ? 'track-move-up' : 'track-move-down').click();
+      await h.saved();
+      let o = await order();
+      for (let i = 0; i < 20 && JSON.stringify(o) === JSON.stringify(o0); i++) { await page.waitForTimeout(100); o = await order(); }
+      assert.notDeepEqual(o, o0, `moved ${up ? 'up' : 'down'}`);
+      assert.equal(o.indexOf(gid), o0.indexOf(gid) + (up ? -1 : 1), 'one place along');
+    }
+    await h.screenshot('timeline-menus');
     // (The group made for this step is taken away again: one undo for each of what was done.)
-    for (let i = 0; i < 3; i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    for (let i = 0; i < 12 && (await st<number>(`s.world.all('event_group').filter((g) => g.name === 'Track test').length`)) > 0; i++) { await page.getByTestId('undo').click(); await h.saved(); }
     assert.equal(await st<number>(`s.world.all('event_group').filter((g) => g.name === 'Track test').length`), 0);
     await page.getByTestId('workspace-map').click();
   });

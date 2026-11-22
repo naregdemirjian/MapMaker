@@ -9,6 +9,8 @@ import { branchLine, branchStart } from '../../temporal-engine/branches.ts';
 import * as cmd from '../../domain/commands.ts';
 import { GroupFilter, eventFilterSet, sortedGroups } from './EventGroups.tsx';
 import { layoutTracks, barAt, snap, LANE, BAR, type TLEvent, type TLTrack } from '../timeline-layout.ts';
+import { openMenu, eventMenu } from './ContextMenu.tsx';
+import type { MenuItem } from '../store.ts';
 import { nameMatches } from '../shell/layout.ts';
 import { typeColor } from '../../domain/event-types.ts';
 
@@ -185,8 +187,12 @@ export function Timeline({ head }: { head?: React.ReactNode }) {
   const [scroll, setScroll] = useState(0);
   /** An event being dragged: where it would be, in years. */
   const [preview, setPreview] = useState<null | { id: string; ys: number; ye: number | null }>(null);
+  /** The track an event is dragged onto (another group's), and a track's head being dragged to another place. */
+  const [dropTrack, setDropTrack] = useState<string | null>(null);
+  const [headDrag, setHeadDrag] = useState<null | { id: string; y0: number; dy: number; moved: boolean }>(null);
+  const justDragged = useRef(false);
   type Drag = { kind: 'scrub' } | { kind: 'pan'; x: number; y: number; start: number; end: number; scroll: number }
-    | { kind: 'bar'; id: string; mode: 'move' | 'start' | 'end'; x: number; ys: number; ye: number | null; moved: boolean };
+    | { kind: 'bar'; id: string; mode: 'move' | 'start' | 'end'; x: number; y: number; ys: number; ye: number | null; moved: boolean; track: string; across: boolean };
   const drag = useRef<Drag | null>(null);
 
   useEffect(() => {
@@ -363,6 +369,15 @@ export function Timeline({ head }: { head?: React.ReactNode }) {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.drawImage(still.current.canvas, 0, 0);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // A track an event is dragged onto: lit.
+    const drop = dropTrack ? lay.tracks.find((t) => t.id === dropTrack) : null;
+    if (drop) {
+      const top = RULER - scrolled + drop.y;
+      ctx.fillStyle = 'rgba(79,155,217,0.18)';
+      ctx.fillRect(0, Math.max(RULER, top), w, Math.min(drop.height, h - otherH - top));
+      ctx.strokeStyle = 'rgba(79,155,217,0.8)';
+      ctx.strokeRect(0.5, Math.max(RULER, top) + 0.5, w - 1, Math.min(drop.height, h - otherH - top) - 1);
+    }
     // The other date being compared (Stage 3): a dashed yellow line.
     if (s.compare.on && s.mode === 'world' && !s.compare.same) {
       const cx = xOf(toApproxYear(s.compare.time));
@@ -412,8 +427,10 @@ export function Timeline({ head }: { head?: React.ReactNode }) {
       const ev = store.world!.get('event', hit.bar.ids[0])!;
       const ys = toApproxYear(fromStore(ev.start_day, ev.start_ms)), ye = ev.end_day !== null ? toApproxYear(fromStore(ev.end_day, ev.end_ms ?? 0)) : null;
       // (Its ends are dragged to make it longer or shorter; the rest of it, to move it.)
-      const mode = ye !== null && Math.abs(x - hit.bar.x1) <= 5 && x <= hit.bar.x1 + 1 ? 'end' : ye !== null && Math.abs(x - hit.bar.x0) <= 5 ? 'start' : 'move';
-      drag.current = { kind: 'bar', id: ev.id, mode, x, ys, ye, moved: false };
+      // (A bar too narrow to hold by its middle is only ever moved.)
+      const ends = ye !== null && hit.bar.x1 - hit.bar.x0 >= 18;
+      const mode = ends && Math.abs(x - hit.bar.x1) <= 5 && x <= hit.bar.x1 + 1 ? 'end' : ends && Math.abs(x - hit.bar.x0) <= 5 ? 'start' : 'move';
+      drag.current = { kind: 'bar', id: ev.id, mode, x, y, ys, ye, moved: false, track: hit.track.id, across: false };
       return;
     }
     drag.current = { kind: 'scrub' };
@@ -430,7 +447,13 @@ export function Timeline({ head }: { head?: React.ReactNode }) {
       setScroll(Math.max(0, Math.min(maxScroll, d.scroll - (localY(e) - d.y))));
       store.set({ timeline: { start: d.start - dy, end: d.end - dy } });
     } else {
-      if (!d.moved && Math.abs(x - d.x) < 4) return;
+      const yy = localY(e);
+      // (Dragged up or down onto another group's track, D209: it goes to that group.)
+      const over = d.mode === 'move' && yy >= RULER && yy < h - otherH ? lay.tracks.find((t) => yy - RULER + scrolled >= t.y && yy - RULER + scrolled < t.y + t.height) : undefined;
+      const target = over && over.id !== d.track ? over.id : null;
+      if (target !== dropTrack) setDropTrack(target);
+      if (!d.moved && Math.abs(x - d.x) < 4 && Math.abs(yy - d.y) < 6) return;
+      d.across = Math.abs(x - d.x) >= 4;
       d.moved = true;
       const by = ((x - d.x) / w) * (end - start);
       let ys = d.ys, ye = d.ye;
@@ -447,8 +470,16 @@ export function Timeline({ head }: { head?: React.ReactNode }) {
     if (d?.kind !== 'bar') return;
     const ev = store.world!.get('event', d.id);
     if (!ev) { setPreview(null); return; }
-    if (!d.moved || !preview) {
+    const to = dropTrack;
+    setDropTrack(null);
+    if (to && d.moved) {
+      // Onto another group's track: into that group (and out of the one it was in), and to where it was dragged if it went sideways too.
+      store.execute((wd) => cmd.moveEventToGroup(wd, d.id, d.track === cmd.UNGROUPED ? null : d.track, to === cmd.UNGROUPED ? null : to));
+      if (!d.across || !preview) { setPreview(null); store.set({ selection: { kind: 'event', id: d.id } }); return; }
+    }
+    if (!d.moved || !preview || !d.across) {
       // A click: the event chosen, at its start.
+      setPreview(null);
       store.set({ selection: { kind: 'event', id: d.id }, time: fromStore(ev.start_day, ev.start_ms) });
       return;
     }
@@ -476,6 +507,30 @@ export function Timeline({ head }: { head?: React.ReactNode }) {
     el.addEventListener('wheel', wheel, { passive: false });
     return () => el.removeEventListener('wheel', wheel);
   });
+  /** A group's track dropped at a height among the tracks (D209): its group goes there in the order. */
+  function moveTrack(id: string, at: number) {
+    const groups = lay.tracks.filter((t) => t.id !== cmd.UNGROUPED).map((t) => t.id);
+    const others = groups.filter((g) => g !== id);
+    const tracks = lay.tracks.filter((t) => t.id !== id && t.id !== cmd.UNGROUPED);
+    let i = tracks.findIndex((t) => at < t.y + t.height / 2);
+    if (i < 0) i = tracks.length;
+    others.splice(i, 0, id);
+    if (others.join() !== groups.join()) store.execute((wd) => cmd.orderEventGroups(wd, others));
+  }
+  /** What a track's head offers on a right-click. */
+  function trackMenu(id: string): MenuItem[] {
+    const groups = lay.tracks.filter((t) => t.id !== cmd.UNGROUPED).map((t) => t.id), i = groups.indexOf(id);
+    const move = (to: number) => { const g = groups.filter((x) => x !== id); g.splice(to, 0, id); store.execute((wd) => cmd.orderEventGroups(wd, g)); };
+    const items: MenuItem[] = [{ label: store.collapsed.includes(`tl:${id}`) ? 'Open the track' : 'Fold the track', run: () => store.toggleCollapsed(`tl:${id}`) }];
+    if (id !== cmd.UNGROUPED) {
+      items.push({ label: 'Move up', disabled: i <= 0, testId: 'track-move-up', run: () => move(i - 1) }, { label: 'Move down', disabled: i >= groups.length - 1, testId: 'track-move-down', run: () => move(i + 1) });
+    }
+    items.push('divider',
+      { label: 'Show only this group', run: () => store.set({ eventFilter: [id] }) },
+      { label: 'Show every group', disabled: !store.eventFilter, run: () => store.set({ eventFilter: null }) },
+      { label: 'Fold the other tracks', run: () => store.set({ collapsed: [...store.collapsed.filter((k) => !k.startsWith('tl:') || k === 'tl:other'), ...lay.tracks.filter((t) => t.id !== id).map((t) => `tl:${t.id}`)] }) });
+    return items;
+  }
   /** Closer in or further out about a place along the timeline (its middle, from the buttons). */
   function zoomBy(f: number, x = w / 2) {
     const { start: a, end: b } = store.timeline;
@@ -507,7 +562,12 @@ export function Timeline({ head }: { head?: React.ReactNode }) {
             {lay.tracks.map((t) => {
               const info = lay.info.get(t.id)!;
               return (
-                <button key={t.id} className={`tl-track-head ${t.folded ? 'folded' : ''}`} style={{ top: t.y - scrolled, height: t.height }} aria-expanded={!t.folded} onClick={() => store.toggleCollapsed(`tl:${t.id}`)}
+                <button key={t.id} className={`tl-track-head ${t.folded ? 'folded' : ''} ${headDrag?.id === t.id && headDrag.moved ? 'dragging' : ''}`} style={{ top: t.y - scrolled + (headDrag?.id === t.id ? headDrag.dy : 0), height: t.height }} aria-expanded={!t.folded}
+                  onPointerDown={(e) => { if (e.button !== 0 || t.id === cmd.UNGROUPED) return; e.currentTarget.setPointerCapture(e.pointerId); setHeadDrag({ id: t.id, y0: e.clientY, dy: 0, moved: false }); }}
+                  onPointerMove={(e) => { if (headDrag?.id === t.id) { const dy = e.clientY - headDrag.y0; setHeadDrag({ ...headDrag, dy, moved: headDrag.moved || Math.abs(dy) > 4 }); } }}
+                  onPointerUp={() => { const hd = headDrag; setHeadDrag(null); if (hd?.id === t.id && hd.moved) { justDragged.current = true; moveTrack(t.id, t.y + t.height / 2 + hd.dy); } }}
+                  onClick={() => { if (justDragged.current) { justDragged.current = false; return; } store.toggleCollapsed(`tl:${t.id}`); }}
+                  onContextMenu={(e) => openMenu(e, trackMenu(t.id), lay.info.get(t.id)?.name)}
                   title={`${info.name}: ${info.total} ${info.total === 1 ? 'event' : 'events'}. Click to ${t.folded ? 'open' : 'fold'} the track.`} data-testid={`track-${info.name}`}>
                   <span className="twisty" aria-hidden="true">{t.folded ? '▸' : '▾'}</span><span className="swatch" style={{ background: info.color }} /><span className="tl-track-name">{info.name}</span><span className="muted">{info.total}</span>
                 </button>
@@ -527,7 +587,19 @@ export function Timeline({ head }: { head?: React.ReactNode }) {
             onPointerUp={onUp}
             onPointerCancel={() => { drag.current = null; setPreview(null); }}
             onDoubleClick={() => { store.fitTimeline(); store.notify(); }}
-            onContextMenu={(e) => e.preventDefault()}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              const x = localX(e), y = localY(e);
+              const hit = y >= RULER && y < h - otherH ? barAt(lay.tracks, x, y - RULER + scrolled) : null;
+              const t = timeAtYear(yearAt(x));
+              const here: MenuItem[] = [
+                { label: `New event on ${calendarNow().format(t, 'day')}…`, testId: 'timeline-new-event', run: () => { store.setTime(t); store.set({ dialog: 'new-event' }); } },
+                { label: 'Go to this date', run: () => store.setTime(t) },
+              ];
+              if (hit && hit.bar.ids.length === 1) openMenu(e, [...eventMenu(store.world!, hit.bar.ids), 'divider', ...here], store.world!.get('event', hit.bar.ids[0])?.name);
+              else if (hit) openMenu(e, [{ label: `Closer in on these ${hit.bar.ids.length} events`, run: () => { const a = yearAt(hit.bar.x0), b = yearAt(hit.bar.x1), pad = Math.max((b - a) * 0.15, (end - start) * 0.01); store.set({ timeline: { start: a - pad, end: b + pad } }); } }, 'divider', ...here]);
+              else openMenu(e, here);
+            }}
             data-testid="timeline"
           />
         </div>

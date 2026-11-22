@@ -1,6 +1,7 @@
 // A map's calendar (Stage 13, D149): the Gregorian, or one of its own, started from a template and changed in every
 // part: its months, its leap years, the day its year 1 began, the hours of its day, its week and its eras. Only
 // how dates are written, typed and chosen changes; the moments stored stay as they are.
+import { DialogFrame } from '../shell/DialogFrame.tsx';
 import { useState } from 'react';
 import { useStore } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
@@ -30,9 +31,7 @@ export function CalendarDialog() {
   const num = (v: number | undefined) => (v === undefined ? '' : String(v));
   const optInt = (text: string) => (text.trim() === '' ? undefined : Math.round(Number(text)));
   return (
-    <div className="modal-back" onPointerDown={(ev) => ev.target === ev.currentTarget && close()}>
-      <div className="modal wide calendar-dialog" role="dialog" aria-label="Calendar" data-testid="calendar-dialog">
-        <div className="modal-head"><h2>Calendar of “{space.name}”</h2><button className="close" onClick={close} aria-label="Close">×</button></div>
+    <DialogFrame label="Calendar" title={<>Calendar of “{space.name}”</>} testId="calendar-dialog" wide className="calendar-dialog" onClose={close}>
         <p className="muted">Dates on this map are written, typed and chosen in its calendar: on the timeline, in every date field, in shots and exports. Nothing stored changes, only how the moments are written.</p>
         <label>Start from
           <select value="" onChange={(e) => e.target.value && start(e.target.value)} data-testid="calendar-template">
@@ -117,7 +116,6 @@ export function CalendarDialog() {
           {own && <button onClick={() => { s.execute((wd) => cmd.setMapCalendar(wd, space.id, null)); close(); }} data-testid="calendar-use-gregorian">Use the Gregorian calendar</button>}
           {draft && <button className="primary" disabled={problems.length > 0} onClick={() => { s.execute((wd) => cmd.setMapCalendar(wd, space.id, draft)); close(); }} data-testid="calendar-use">Use this calendar</button>}
         </div>
-      </div>
-    </div>
+    </DialogFrame>
   );
 }

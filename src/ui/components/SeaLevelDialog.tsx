@@ -1,5 +1,6 @@
 // Sea level over time (Stage 8, D96): a map's sea at given dates, rising or falling steadily between
 // them; the coasts, and territory that ends at the coast, follow it.
+import { DialogFrame } from '../shell/DialogFrame.tsx';
 import { calendarNow } from '../calendar-now.ts';
 import { useStore } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
@@ -33,9 +34,7 @@ export function SeaLevelDialog() {
   const change = (i: number, patch: Partial<SeaLevelPoint>) => save(points.map((p, j) => (j === i ? { ...p, ...patch } : p)));
   const iceAge = () => save(ICE_AGE.map(([text, m]) => { const t = gregorian.parse(text)!.instant; return { day: t.day, ms: t.ms, m }; }));
   return (
-    <div className="modal-back" onPointerDown={(ev) => ev.target === ev.currentTarget && close()}>
-      <div className="modal" role="dialog" aria-label="Sea level over time" data-testid="sea-level-dialog">
-        <div className="modal-head"><h2>Sea level over time</h2><button className="close" onClick={close} aria-label="Close">×</button></div>
+    <DialogFrame title={'Sea level over time'} testId="sea-level-dialog" onClose={close}>
         <p className="muted">
           The sea of "{space.name}" at the dates below, in metres above or below today's. Between them it rises or falls
           steadily; before the first and after the last it stays as it is there. At any other level than today's, the
@@ -62,8 +61,7 @@ export function SeaLevelDialog() {
           <button onClick={iceAge} data-testid="sea-ice-age" title="About 130 m lower 21,000 years ago, near today's from about 4000 BCE (a usual reconstruction, rounded)">The end of the last ice age</button>
           {points.length > 0 && <button onClick={() => save([])} data-testid="sea-clear">Today's sea at all times</button>}
         </div>
-        <div className="modal-actions"><button className="primary" onClick={close}>Close</button></div>
-      </div>
-    </div>
+        <div className="modal-actions close-only"><button className="primary" onClick={close}>Close</button></div>
+    </DialogFrame>
   );
 }

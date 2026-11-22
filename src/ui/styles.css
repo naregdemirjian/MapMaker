@@ -58,6 +58,7 @@ a { color: var(--accent); cursor: pointer; }
 .tl-track-head:hover:not(:disabled) { background: var(--panel2); }
 .tl-track-head .swatch { margin-top: 2px; flex: none; }
 .tl-track-head .tl-track-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-track-head.dragging { z-index: 2; background: var(--panel2); box-shadow: 0 2px 8px rgba(0,0,0,0.5); cursor: grabbing; }
 .tl-track-head.folded { padding-top: 0; font-size: 9.5px; line-height: 11px; align-items: center; color: var(--muted); }
 .tl-track-head.folded .swatch { width: 7px; height: 7px; margin-top: 0; }
 .tl-other-head { flex: none; display: flex; align-items: flex-start; gap: 5px; padding: 0 6px; border: none; border-top: 1px solid var(--line); border-radius: 0; background: var(--panel2); color: var(--muted); font-size: 9.5px; line-height: 11px; text-align: left; overflow: hidden; }
@@ -83,6 +84,11 @@ a { color: var(--accent); cursor: pointer; }
 .list-tab.on, .list-tab.on:hover:not(:disabled) { background: var(--panel); color: var(--text); border-bottom-color: var(--accent); filter: none; }
 .list-filter { flex: none; padding: 6px 8px; border-bottom: 1px solid var(--line); }
 .list-filter input { width: 100%; }
+/* A settings window in place in Properties (D209). */
+.inline-dialog .modal-actions.close-only { display: none; }
+.inline-dialog .modal-actions { justify-content: flex-start; flex-wrap: wrap; }
+.inline-dialog table { width: 100%; }
+.inline-dialog h4:first-child { margin-top: 4px; }
 /* Back to the default (D207). */
 .with-reset { display: flex; align-items: center; gap: 3px; }
 .with-reset > input { flex: 1; min-width: 0; }
@@ -414,7 +420,9 @@ label.indent { margin-left: 24px; }
 .steady-date .sd-cell { display: inline-grid; }
 .steady-date .sd-cell > span { grid-area: 1 / 1; }
 .steady-date .sd-size { visibility: hidden; }
-.steady-date .sd-day .sd-text, .steady-date .sd-year .sd-text, .steady-date .sd-time .sd-text { justify-self: end; }
+/* (The year next to its month, D209: it changes width only when its number of figures does.) */
+.steady-date .sd-day .sd-text, .steady-date .sd-time .sd-text { justify-self: end; }
+.steady-date .sd-year .sd-text { justify-self: start; }
 .steady-date .sd-month .sd-text { justify-self: center; }
 .date-calendar-button { position: absolute; right: 3px; top: 50%; transform: translateY(-50%); border: none; background: transparent; color: var(--muted, #8a97a6); padding: 2px 4px; cursor: pointer; line-height: 0; }
 .date-calendar-button:hover { color: #ffd166; }

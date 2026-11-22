@@ -42,6 +42,12 @@ import { BranchSwitcher } from './Branches.tsx';
 import { MenuBar } from '../shell/MenuBar.tsx';
 import { command } from '../commands.ts';
 import { PropGroup } from '../shell/Group.tsx';
+import { InlineDialog } from '../shell/DialogFrame.tsx';
+import { ShowDialog } from './ShowDialog.tsx';
+import { SeaLevelDialog } from './SeaLevelDialog.tsx';
+import { CalendarDialog } from './CalendarDialog.tsx';
+import { StatisticsDialog } from './StatisticsDialog.tsx';
+import { SettingsDialog } from './Settings.tsx';
 import { ResetButton, RangeReset } from '../shell/Reset.tsx';
 import { TOOLS, SPACE_TOOLS, toolsFor, stackOf, type ToolInfo } from '../tools.ts';
 import { LIST_TABS, nameMatches, type ListTab } from '../shell/layout.ts';
@@ -817,6 +823,16 @@ export function Inspector() {
   );
 }
 
+/** A settings window shown in place in Properties (D209), folded at first; while the same window is open over everything, a note instead. */
+function InlineSettings({ id, title, dialog, children }: { id: string; title: string; dialog: string; children: React.ReactNode }) {
+  const s = useStore();
+  return (
+    <PropGroup id={id} title={title} folded>
+      {s.dialog === dialog ? <p className="muted">Open in its own window.</p> : <InlineDialog.Provider value={true}>{children}</InlineDialog.Provider>}
+    </PropGroup>
+  );
+}
+
 /** The map being viewed, in Properties when nothing is selected (D202): what it is, and its setting-up. */
 function MapPanel() {
   const s = useStore();
@@ -830,6 +846,12 @@ function MapPanel() {
         <div className="map-setup" data-testid="map-setup"><MapSetup /></div>
         <button className="link" onClick={() => s.set({ dialog: 'show' })} data-testid="map-open-show" title="What the map shows while you work and in presentations and exports">What the map shows…</button>
       </PropGroup>
+      {/* The map's settings in place (D209), folded until opened; each also opens in its own window from the menus. */}
+      {!isSpaceMap(sp) && <InlineSettings id="map:show" title="What is shown" dialog="show"><ShowDialog /></InlineSettings>}
+      {basemapSourceOf(sp) === 'natural-earth' && <InlineSettings id="map:sea" title="Sea level over time" dialog="sea-level"><SeaLevelDialog /></InlineSettings>}
+      {!isSpaceMap(sp) && <InlineSettings id="map:calendar" title="Calendar" dialog="calendar"><CalendarDialog /></InlineSettings>}
+      {!isSpaceMap(sp) && sp.kind !== 'plane' && <InlineSettings id="map:statistics" title="Statistics" dialog="statistics"><StatisticsDialog /></InlineSettings>}
+      <InlineSettings id="map:speed" title="Speed of the working view" dialog="settings"><SettingsDialog /></InlineSettings>
       <PropGroup id="map:start" title="Getting started"><QuickStart /></PropGroup>
     </div>
   );
