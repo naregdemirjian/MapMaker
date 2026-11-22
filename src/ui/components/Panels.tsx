@@ -41,6 +41,7 @@ import { StarPanel } from './Stars.tsx';
 import { BranchSwitcher } from './Branches.tsx';
 import { MenuBar } from '../shell/MenuBar.tsx';
 import { command } from '../commands.ts';
+import { PropGroup } from '../shell/Group.tsx';
 import { TOOLS, SPACE_TOOLS, toolsFor } from '../tools.ts';
 import { LIST_TABS, nameMatches, type ListTab } from '../shell/layout.ts';
 import { ToolIcon } from '../shell/ToolIcon.tsx';
@@ -573,54 +574,13 @@ export function Outliner() {
           return (
             <div key={l.id} className={`row ${here ? 'sel' : ''}`} data-testid="layer-row">
               <input type="checkbox" checked={!!l.visible} title="Show or hide" onChange={(e) => s.execute((wd) => cmd.updateLayer(wd, l.id, { visible: e.target.checked ? 1 : 0 }))} />
-              <span onClick={() => (field ? s.set({ fieldLayerId: l.id, fieldSource: s.fieldLayerId === l.id ? s.fieldSource : {}, tool: 'field' }) : feat ? s.set({ featureLayerId: l.id, tool: 'feature', reshapeId: null }) : s.set({ layerId: l.id, tool: s.tool === 'feature' || s.tool === 'field' ? 'lasso' : s.tool }))} title="Draw on this layer">{l.name}</span>
+              <span onClick={() => (field ? s.set({ selection: { kind: 'layer', id: l.id }, fieldLayerId: l.id, fieldSource: s.fieldLayerId === l.id ? s.fieldSource : {}, tool: 'field' }) : feat ? s.set({ selection: { kind: 'layer', id: l.id }, featureLayerId: l.id, tool: 'feature', reshapeId: null }) : s.set({ selection: { kind: 'layer', id: l.id }, layerId: l.id, tool: s.tool === 'feature' || s.tool === 'field' ? 'lasso' : s.tool }))} title="Draw on this layer, and show it in Properties">{l.name}</span>
               {feat && <span className="muted"> · {l.kind === 'area' ? 'areas' : l.kind === 'line' ? 'lines' : 'points'}</span>}
               {field && <span className="muted"> · conditions</span>}
               {here && <span className="muted"> · drawing here</span>}
             </div>
           );
         })}
-        {layers.filter((l) => l.id === s.layerId).map((l) => (
-          <label key={`fill-${l.id}`} className="inline layer-option" title="Stripes or dots let the layers under this one show through: for occupation, control or influence over the political map">Fill
-            <select value={parseJSON<{ fill?: string }>(l.style, {}).fill ?? 'solid'} onChange={(e) => s.execute((wd) => cmd.setLayerFill(wd, l.id, e.target.value as 'solid' | 'hatch' | 'cross' | 'dots'))} data-testid="layer-fill">
-              <option value="solid">Solid</option>
-              <option value="hatch">Stripes</option>
-              <option value="cross">Crossed stripes</option>
-              <option value="dots">Dots</option>
-            </select>
-          </label>
-        ))}
-        {layers.filter((l) => l.id === s.layerId && l.kind === 'partition').map((l) => {
-          const st = parseJSON<{ fillOpacity?: number; borderWidth?: number }>(l.style, {});
-          return (
-            <div key={`look-${l.id}`} className="two layer-option">
-              <label title="How strongly the countries' colours cover the map under them, in shots and exports too">Opacity (%)<NumberField min={0} max={100} step={5} value={Math.round((st.fillOpacity ?? 0.78) * 100)} onCommit={(n) => s.execute((wd) => cmd.setLayerLook(wd, l.id, { fillOpacity: n / 100 }))} testId="layer-opacity" /></label>
-              <label title="The width of the borders between countries on this layer (pixels at 1920 wide)">Border width<NumberField min={0} max={20} step={0.25} value={st.borderWidth ?? 1.3} onCommit={(n) => s.execute((wd) => cmd.setLayerLook(wd, l.id, { borderWidth: n }))} testId="layer-border-width" /></label>
-            </div>
-          );
-        })}
-        {layers.filter((l) => l.id === s.layerId && l.kind === 'partition').map((l) => <LayerLookSection key={`lk-${l.id}`} layerId={l.id} />)}
-        {layers.filter((l) => l.id === s.layerId && l.kind === 'partition').map((l) => <LayerBordersSection key={`lb-${l.id}`} layerId={l.id} />)}
-        {layers.filter((l) => l.id === s.layerId).map((l) => {
-          const st = parseJSON<{ fronts?: 'second' | 'first' | 'plain'; frontColor?: string }>(l.style, {});
-          return (
-            <label key={`fronts-${l.id}`} className="inline layer-option" title="Where two countries are at war (Relationships, in a country's panel), the border between them on this layer is drawn as a front line while the war lasts">Front lines
-              <select value={st.fronts ?? 'off'} onChange={(e) => s.execute((wd) => cmd.setLayerFronts(wd, l.id, e.target.value === 'off' ? null : e.target.value as 'second' | 'first' | 'plain'))} data-testid="layer-fronts">
-                <option value="off">None</option>
-                <option value="second" title="Where two countries are at war: teeth into the second of the war (as entered)">Teeth to the 2nd</option>
-                <option value="first" title="Where two countries are at war: teeth into the first of the war">Teeth to the 1st</option>
-                <option value="plain">No teeth</option>
-              </select>
-              {st.fronts && <input type="color" value={st.frontColor ?? '#d62828'} onChange={(e) => s.execute((wd) => cmd.setLayerFronts(wd, l.id, st.fronts!, e.target.value))} title="The colour of the front lines" data-testid="layer-front-color" />}
-            </label>
-          );
-        })}
-        {layers.filter((l) => l.id === s.layerId && currentSpace && terrainSourceOf(currentSpace)).map((l) => (
-          <label key={`clip-${l.id}`} className="check layer-option" title="Territory painted over the sea or lakes is not shown there. Untick for sea claims or maritime zones.">
-            <input type="checkbox" data-testid="clip-to-land" checked={parseJSON<{ clipToLand?: boolean }>(l.style, {}).clipToLand !== false}
-              onChange={(e) => s.execute((wd) => cmd.setLayerClipToLand(wd, l.id, e.target.checked))} /> Territory ends at the coast
-          </label>
-        ))}
       </Section>}
       {on('countries') && <Section title="Countries and factions" onAdd={() => setNewEntity({ name: '', type: 'polity' })} addLabel="New">
         {newEntityForm('countries')}
@@ -700,6 +660,77 @@ function MapSetup() {
   );
 }
 
+/** A layer in Properties (D200): how its countries are filled and look, its borders and front lines, where its territory ends. */
+function LayerPanel({ id }: { id: string }) {
+  const s = useStore();
+  const w = s.world!;
+  const layer = w.get('layer', id);
+  const [name, setName] = useState(layer?.name ?? '');
+  useEffect(() => { setName(layer?.name ?? ''); }, [id, layer?.name]);
+  if (!layer) return null;
+  const currentSpace = w.get('map_space', layer.space_id);
+  const feat = isFeatureKind(layer.kind), field = layer.kind === 'field';
+  // (Only a layer of territory has more than its name and whether it is shown.)
+  const layers = feat || field ? [] : [layer];
+  return (
+    <div className="panel" data-testid="layer-panel">
+      <h3>{layer.name}</h3>
+      <PropGroup id="layer:layer" title="Layer">
+        <div className="muted">{field ? 'Conditions (radiation, fire, floods, heatmaps)' : feat ? (layer.kind === 'area' ? 'Areas' : layer.kind === 'line' ? 'Lines' : 'Points') : layer.kind === 'partition' ? 'Territory: each place held by one country at a time' : 'Territory'}</div>
+        <label>Name<input value={name} onChange={(ev) => setName(ev.target.value)} onBlur={() => name.trim() && name !== layer.name && s.execute((wd) => cmd.updateLayer(wd, id, { name: name.trim() }))} data-testid="layer-name" /></label>
+        <label className="check"><input type="checkbox" checked={!!layer.visible} onChange={(ev) => s.execute((wd) => cmd.updateLayer(wd, id, { visible: ev.target.checked ? 1 : 0 }))} data-testid="layer-visible" /> Shown on the map</label>
+      </PropGroup>
+      {layers.length > 0 && <PropGroup id="layer:fill" title="Fill and look">
+        {layers.map((l) => (
+          <label key={`fill-${l.id}`} className="inline layer-option" title="Stripes or dots let the layers under this one show through: for occupation, control or influence over the political map">Fill
+            <select value={parseJSON<{ fill?: string }>(l.style, {}).fill ?? 'solid'} onChange={(e) => s.execute((wd) => cmd.setLayerFill(wd, l.id, e.target.value as 'solid' | 'hatch' | 'cross' | 'dots'))} data-testid="layer-fill">
+              <option value="solid">Solid</option>
+              <option value="hatch">Stripes</option>
+              <option value="cross">Crossed stripes</option>
+              <option value="dots">Dots</option>
+            </select>
+          </label>
+        ))}
+        {layers.filter((l) => l.kind === 'partition').map((l) => {
+          const st = parseJSON<{ fillOpacity?: number; borderWidth?: number }>(l.style, {});
+          return (
+            <div key={`look-${l.id}`} className="two layer-option">
+              <label title="How strongly the countries' colours cover the map under them, in shots and exports too">Opacity (%)<NumberField min={0} max={100} step={5} value={Math.round((st.fillOpacity ?? 0.78) * 100)} onCommit={(n) => s.execute((wd) => cmd.setLayerLook(wd, l.id, { fillOpacity: n / 100 }))} testId="layer-opacity" /></label>
+              <label title="The width of the borders between countries on this layer (pixels at 1920 wide)">Border width<NumberField min={0} max={20} step={0.25} value={st.borderWidth ?? 1.3} onCommit={(n) => s.execute((wd) => cmd.setLayerLook(wd, l.id, { borderWidth: n }))} testId="layer-border-width" /></label>
+            </div>
+          );
+        })}
+        {layers.filter((l) => l.kind === 'partition').map((l) => <LayerLookSection key={`lk-${l.id}`} layerId={l.id} />)}
+      </PropGroup>}
+      {layers.length > 0 && <PropGroup id="layer:borders" title="Borders and front lines">
+        {layers.filter((l) => l.kind === 'partition').map((l) => <LayerBordersSection key={`lb-${l.id}`} layerId={l.id} />)}
+        {layers.map((l) => {
+          const st = parseJSON<{ fronts?: 'second' | 'first' | 'plain'; frontColor?: string }>(l.style, {});
+          return (
+            <label key={`fronts-${l.id}`} className="inline layer-option" title="Where two countries are at war (Relationships, in a country's panel), the border between them on this layer is drawn as a front line while the war lasts">Front lines
+              <select value={st.fronts ?? 'off'} onChange={(e) => s.execute((wd) => cmd.setLayerFronts(wd, l.id, e.target.value === 'off' ? null : e.target.value as 'second' | 'first' | 'plain'))} data-testid="layer-fronts">
+                <option value="off">None</option>
+                <option value="second" title="Where two countries are at war: teeth into the second of the war (as entered)">Teeth to the 2nd</option>
+                <option value="first" title="Where two countries are at war: teeth into the first of the war">Teeth to the 1st</option>
+                <option value="plain">No teeth</option>
+              </select>
+              {st.fronts && <input type="color" value={st.frontColor ?? '#d62828'} onChange={(e) => s.execute((wd) => cmd.setLayerFronts(wd, l.id, st.fronts!, e.target.value))} title="The colour of the front lines" data-testid="layer-front-color" />}
+            </label>
+          );
+        })}
+      </PropGroup>}
+      {layers.length > 0 && currentSpace && terrainSourceOf(currentSpace) && <PropGroup id="layer:coast" title="Coast">
+        {layers.filter(() => currentSpace && terrainSourceOf(currentSpace)).map((l) => (
+          <label key={`clip-${l.id}`} className="check layer-option" title="Territory painted over the sea or lakes is not shown there. Untick for sea claims or maritime zones.">
+            <input type="checkbox" data-testid="clip-to-land" checked={parseJSON<{ clipToLand?: boolean }>(l.style, {}).clipToLand !== false}
+              onChange={(e) => s.execute((wd) => cmd.setLayerClipToLand(wd, l.id, e.target.checked))} /> Territory ends at the coast
+          </label>
+        ))}
+      </PropGroup>}
+    </div>
+  );
+}
+
 export function Inspector() {
   const s = useStore();
   const sel = s.selection, world = s.workspaceNow() === 'world';
@@ -711,6 +742,7 @@ export function Inspector() {
       {sel?.kind === 'event' && <EventPanel id={sel.id} />}
       {sel?.kind === 'point' && <PointPanel lon={sel.lon} lat={sel.lat} />}
       {sel?.kind === 'feature' && <FeaturePanel id={sel.id} />}
+      {sel?.kind === 'layer' && <LayerPanel id={sel.id} />}
       {sel?.kind === 'star' && <StarPanel id={sel.id} />}
     </aside>
   );
@@ -747,9 +779,11 @@ function EntityPanel({ id }: { id: string }) {
     for (const [f, st] of s.engine!.partitionState(s.spaceId, s.layerId, s.time)) if (st.value === id) { areaSr += arr.faceArea(f); parcels++; }
   }
   const changes = w.rows('effect').filter((f) => resolutionOf(f).set.some(([, v]) => v === id) && inTimelineHere(w, f));
+  const political = e.type_id === 'polity' || e.type_id === 'faction';
   return (
     <div className="panel" data-testid="entity-panel">
       <h3><span className="swatch big" style={{ background: e.color }} /> {e.name}</h3>
+      <PropGroup id="entity:identity" title={political ? 'Country' : e.type_id === 'character' ? 'Character' : e.type_id === 'settlement' ? 'City' : 'Identity'}>
       <label>Name<input value={name} onChange={(ev) => setName(ev.target.value)} onBlur={() => name.trim() && name !== e.name && s.execute((wd) => cmd.updateEntity(wd, id, { name: name.trim() }))} /></label>
       <label>Colour<input type="color" value={e.color} onChange={(ev) => s.execute((wd) => cmd.updateEntity(wd, id, { color: ev.target.value }))} /></label>
       <label>Type<select value={e.type_id} onChange={(ev) => s.execute((wd) => cmd.updateEntity(wd, id, { type_id: ev.target.value }))}>{w.all('entity_type').map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
@@ -758,8 +792,12 @@ function EntityPanel({ id }: { id: string }) {
           <input type="checkbox" checked={cmd.isLocked(w, id)} onChange={(ev) => s.execute((wd) => cmd.setLocked(wd, [id], ev.target.checked))} data-testid="entity-locked" /> Locked: its land and borders stay as they are
         </label>
       )}
+      </PropGroup>
+      <PropGroup id="entity:notes" title="Notes and pictures">
       <label>Notes<textarea rows={5} value={notes} onChange={(ev) => setNotes(ev.target.value)} onBlur={() => notes !== e.notes && s.execute((wd) => cmd.updateEntity(wd, id, { notes }))} /></label>
       <PicturesSection holder={{ kind: 'entity', id }} />
+      </PropGroup>
+      {e.type_id !== 'character' && e.type_id !== 'settlement' && <PropGroup id="entity:territory" title="Territory">
       {e.type_id !== 'character' && e.type_id !== 'settlement' && <div className="stat">On {fmt(s.time)}: {parcels ? `${Math.round(areaSr * (radius / 1000) ** 2).toLocaleString()} km²` : 'no territory'} </div>}
       {(e.type_id === 'polity' || e.type_id === 'faction') && <button onClick={() => s.set({ paintValue: id, tool: 'lasso' })}>Draw territory for {e.name}</button>}
       {e.type_id !== 'character' && e.type_id !== 'settlement' && <h4>Territorial changes</h4>}
@@ -769,10 +807,14 @@ function EntityPanel({ id }: { id: string }) {
         </div>
       ))}
       {!changes.length && e.type_id !== 'character' && e.type_id !== 'settlement' && <div className="muted">None yet.</div>}
-      {(e.type_id === 'polity' || e.type_id === 'faction') && <><CountryHistorySection id={id} /><CountryFillSection id={id} /><CountryLookSection id={id} /><CountryBordersSection id={id} /><CountryLabelSection id={id} /></>}
-      {(e.type_id === 'character' || e.type_id === 'settlement') && <CharacterSection id={id} />}
-      {e.type_id !== 'body' && <RelationsSection id={id} />}
-      {e.type_id !== 'body' && <NamesSection id={id} />}
+      {political && <CountryHistorySection id={id} />}
+      </PropGroup>}
+      {political && <PropGroup id="entity:fill" title="Fill"><CountryFillSection id={id} /></PropGroup>}
+      {political && <PropGroup id="entity:look" title="Look and borders"><CountryLookSection id={id} /><CountryBordersSection id={id} /></PropGroup>}
+      {political && <PropGroup id="entity:label" title="Label"><CountryLabelSection id={id} /></PropGroup>}
+      {(e.type_id === 'character' || e.type_id === 'settlement') && <PropGroup id="entity:onmap" title="On the map"><CharacterSection id={id} /></PropGroup>}
+      {e.type_id !== 'body' && <PropGroup id="entity:relations" title="Relationships"><RelationsSection id={id} /></PropGroup>}
+      {e.type_id !== 'body' && <PropGroup id="entity:names" title="Names over time"><NamesSection id={id} /></PropGroup>}
       <button className="danger" onClick={() => { if (confirm(`Delete ${e.name}? Events that refer to it will be flagged in History Health.`)) { s.execute((wd) => cmd.deleteEntity(wd, id)); s.set({ selection: null }); } }}>Delete</button>
     </div>
   );
@@ -888,10 +930,21 @@ function EventPanel({ id }: { id: string }) {
         );
       })()}
       {!base && <>
+        <PropGroup id="event:event" title="Event">
         <label>Name<input value={name} onChange={(ev) => setName(ev.target.value)} onBlur={() => name.trim() && name !== e.name && s.execute((wd) => cmd.updateEvent(wd, id, { name: name.trim() }))} /></label>
         <label>Type<span className="row-inline"><TypeDot typeId={e.type_id} /><TypeSelect value={e.type_id} onChange={(t) => s.execute((wd) => cmd.updateEvent(wd, id, { type_id: t }))} testId="event-panel-type" /><button className="small" onClick={() => s.set({ dialog: 'event-types' })} title="Make, change and delete event types">Types…</button></span></label>
         <label>Starts<DateField value={start} onChange={(t) => t && s.execute((wd) => cmd.updateEvent(wd, id, { start: t }))} testId="event-panel-start" /></label>
         <label>Ends<DateField value={end} allowEmpty suggest={start} onChange={(t) => s.execute((wd) => cmd.updateEvent(wd, id, { end: t }))} testId="event-panel-end" /></label>
+        <label title="When two events change the same place at the same instant, the higher precedence wins">Precedence<NumberField value={e.precedence} step={1} onCommit={(n) => s.execute((wd) => cmd.updateEvent(wd, id, { precedence: Math.round(n) }))} /></label>
+        <div className="buttons">
+          {s.recordEventId === id
+            ? <button onClick={() => s.set({ recordEventId: null })}>Stop recording</button>
+            : <button onClick={() => s.set({ recordEventId: id, time: compare(s.time, start) < 0 ? start : s.time, tool: s.tool === 'select' ? 'lasso' : s.tool })} title="Every territory you draw goes into this event, without asking" data-testid="record-event">Record into this event</button>}
+          <button onClick={() => s.setTime(start)}>Go to start</button>
+          {end && <button onClick={() => s.setTime(end)}>Go to end</button>}
+        </div>
+        </PropGroup>
+        <PropGroup id="event:presentations" title="In presentations">
         {(() => {
           // In presentations (D92): following the clock, or taking its own time on screen.
           const own = eventScreenSeconds(e.presentation);
@@ -913,20 +966,16 @@ function EventPanel({ id }: { id: string }) {
             {TRANSITION_LOOKS.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
           </select>
         </label>
-        <label title="When two events change the same place at the same instant, the higher precedence wins">Precedence<NumberField value={e.precedence} step={1} onCommit={(n) => s.execute((wd) => cmd.updateEvent(wd, id, { precedence: Math.round(n) }))} /></label>
+        </PropGroup>
+        <PropGroup id="event:description" title="Description and pictures">
         <label>Description<textarea rows={4} value={desc} onChange={(ev) => setDesc(ev.target.value)} onBlur={() => desc !== e.description && s.execute((wd) => cmd.updateEvent(wd, id, { description: desc }))} /></label>
         <PicturesSection holder={{ kind: 'event', id }} />
-        <h4>Groups</h4>
+        </PropGroup>
+        <PropGroup id="event:groups" title="Groups">
         <GroupChecks eventId={id} />
-        <div className="buttons">
-          {s.recordEventId === id
-            ? <button onClick={() => s.set({ recordEventId: null })}>Stop recording</button>
-            : <button onClick={() => s.set({ recordEventId: id, time: compare(s.time, start) < 0 ? start : s.time, tool: s.tool === 'select' ? 'lasso' : s.tool })} title="Every territory you draw goes into this event, without asking" data-testid="record-event">Record into this event</button>}
-          <button onClick={() => s.setTime(start)}>Go to start</button>
-          {end && <button onClick={() => s.setTime(end)}>Go to end</button>}
-        </div>
+        </PropGroup>
       </>}
-      <h4>Changes</h4>
+      <PropGroup id="event:changes" title="Changes">
       {effects.filter((f) => parseJSON<{ op?: string }>(f.intent, {}).op !== 'shift').map((f) => (
         <div key={f.id} className="effect">
           <div>{isUntracked(f) && <span className="date">{fmt(fromStore(f.at_day!, f.at_ms ?? 0))} · </span>}{describeEffect(s, f)}</div>
@@ -982,8 +1031,9 @@ function EventPanel({ id }: { id: string }) {
           <button disabled={!annexFrom || !annexTo || annexFrom === annexTo} onClick={() => s.execute((wd, en) => cmd.annex(wd, en, { spaceId: s.spaceId, layerId: s.layerId, eventId: id, from: annexFrom, to: annexTo }))}>Add annexation</button>
         </div>
       )}
+      </PropGroup>
       {!base && <>
-        <h4>Alternative versions</h4>
+        <PropGroup id="event:versions" title="Alternative versions">
         {variants.map((v) => (
           <div key={v.id} className={`row ${v.id === id ? 'sel' : ''}`}>
             <span onClick={() => s.set({ selection: { kind: 'event', id: v.id } })}>{v.name}</span>
@@ -991,6 +1041,7 @@ function EventPanel({ id }: { id: string }) {
           </div>
         ))}
         <button onClick={async () => { const n = await s.askText('Alternative version', 'Name of the alternative version', `${e.name} (alternative)`, 'Create'); if (n) { const nid = s.execute((wd) => cmd.createVariant(wd, id, n)); if (nid) s.set({ selection: { kind: 'event', id: nid } }); } }}>Create alternative version</button>
+        </PropGroup>
         <button className="danger" onClick={() => { if (confirm(`Delete the event "${e.name}" and its changes?`)) { s.execute((wd) => cmd.deleteEvent(wd, id)); s.set({ selection: null, recordEventId: s.recordEventId === id ? null : s.recordEventId }); } }}>Delete event</button>
       </>}
     </div>

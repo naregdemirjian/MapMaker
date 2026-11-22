@@ -45,6 +45,7 @@ export type Selection =
   | { kind: 'point'; lon: number; lat: number }
   | { kind: 'shot'; id: string }
   | { kind: 'feature'; id: string }
+  | { kind: 'layer'; id: string }
   /** A star on a space map (D110), by its catalogue id. */
   | { kind: 'star'; id: number }
   | null;

@@ -283,6 +283,7 @@ try {
     await page.locator('.modal').waitFor({ state: 'detached' });
     // The test countries are drawn over the Atlantic; their territory is kept over the sea until the
     // coastline clipping step switches clipping back on.
+    await page.locator('[data-testid="layer-row"].sel > span').first().click(); // (the layer drawn on, shown in Properties)
     assert.ok(await page.getByTestId('clip-to-land').isChecked(), 'territory ends at the coast by default');
     await page.getByTestId('clip-to-land').uncheck();
   });
@@ -663,6 +664,7 @@ try {
     const ocean = await canvasPixel([-30, 40]); // open sea, no territory
     for (const p of seaSamples) assert.ok(colourDiff(before.get(String(p.ll))!, ocean) > 20, `unclipped: territory is drawn over the sea (at ${p.ll}: ${before.get(String(p.ll))}; open sea: ${ocean})`);
 
+    await page.locator('[data-testid="layer-row"].sel > span').first().click(); // (the layer drawn on, shown in Properties)
     await page.getByTestId('clip-to-land').check();
     await page.waitForTimeout(150);
     // Once clipped, every label stands on land. Labels are placed by the 1:50m coast in cells of an

@@ -33,6 +33,7 @@ try {
     await page.getByTestId('map-canvas').waitFor();
     // These countries are drawn over the Atlantic: keep their territory over the sea
     // (coastline clipping is checked in the vertical-slice test).
+    await page.locator('[data-testid="layer-row"].sel > span').first().click(); // (the layer drawn on, shown in Properties)
     await page.getByTestId('clip-to-land').uncheck();
     // "Correct this period" applies from the date being viewed: the countries exist from 1400 on.
     await h.setDate('1400');
@@ -104,16 +105,20 @@ try {
       return w === 'mixed' ? nearA >= 10 && nearB >= 10 : nearA <= 3;
     }, [ap[0], ap[1] + 24, colA, colB, want] as const, { timeout: 8000 });
     // (The occupation lies at sea: the layer is let cover the sea for this, and set back after.)
+    await page.locator('[data-testid="layer-row"].sel > span').first().click(); // (the layer drawn on, shown in Properties)
     await page.getByTestId('clip-to-land').uncheck();
     await h.saved();
     await across('occupier');
+    await page.locator('[data-testid="layer-row"].sel > span').first().click(); // (the layer drawn on, shown in Properties)
     await page.getByTestId('layer-fill').selectOption('hatch');
     await h.saved();
     await across('mixed');
     await h.screenshot('occupation-hatched');
+    await page.locator('[data-testid="layer-row"].sel > span').first().click(); // (the layer drawn on, shown in Properties)
     await page.getByTestId('layer-fill').selectOption('solid');
     await h.saved();
     await across('occupier');
+    await page.locator('[data-testid="layer-row"].sel > span').first().click(); // (the layer drawn on, shown in Properties)
     await page.getByTestId('clip-to-land').check();
     await h.saved();
     // Hide the political layer: only military control is drawn.
@@ -1841,6 +1846,7 @@ try {
     // Front lines (D89): on the political layer, the border between the two is a front line while they are at war.
     await page.locator('.left .row', { hasText: 'Political' }).locator('span', { hasText: 'Political' }).click();
     await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null, tool: 'select' }));
+    await page.locator('[data-testid="layer-row"].sel > span').first().click(); // (the layer drawn on, shown in Properties)
     await page.getByTestId('layer-fronts').selectOption('second');
     await h.saved();
     const [idA, idB] = await page.evaluate(([a, b]) => { const w = (window as any).__mapmaker.store.world; const id = (n: string) => w.all('entity').find((e: any) => e.name === n).id; return [id(a), id(b)]; }, [A, B] as const);
@@ -1880,6 +1886,7 @@ try {
     await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastFronts.length === 0);
     await page.waitForTimeout(200);
     assert.ok((await redNear()) < 3, 'none in peace');
+    await page.locator('[data-testid="layer-row"].sel > span').first().click(); // (the layer drawn on, shown in Properties)
     await page.getByTestId('layer-fronts').selectOption('off');
     await h.saved();
     await page.evaluate((c) => (window as any).__mapmaker.store.setCamera(c), camera);
@@ -2607,6 +2614,7 @@ try {
     const diff = (a: number[], b: number[]) => Math.max(...a.map((v, i) => Math.abs(v - b[i])));
     // A country on the military control layer, whose territory ends at the coast, over the North Sea and the land around it.
     await page.locator('.left .row', { hasText: 'Military control' }).locator('span', { hasText: 'Military control' }).click();
+    await page.locator('[data-testid="layer-row"].sel > span').first().click(); // (the layer drawn on, shown in Properties)
     assert.ok(await page.getByTestId('clip-to-land').isChecked(), 'territory on this layer ends at the coast');
     const seaPlaces: LL[] = [[3, 55.5], [2, 56.6], [4.5, 56.6], [3.5, 54.4]], landPlaces: LL[] = [[-1, 52.7], [-2, 54.6], [8, 52.4], [6.6, 52.8]];
     for (const ll of [...seaPlaces, ...landPlaces]) for (const layer of ['Political', 'Military control']) assert.equal(await h.ownerOnLayer(ll, '1450', layer), null, `nobody holds ${ll} on ${layer}`);
@@ -2693,6 +2701,7 @@ try {
     }
     assert.ok(Math.max(...landPx.map((v, k) => Math.abs(v - seaPx[k]))) > 25, `land (${landPx}) and sea (${seaPx}) look different`);
     // Territory ends at the planet's own coast, as on Earth.
+    await page.locator('[data-testid="layer-row"].sel > span').first().click(); // (the layer drawn on, shown in Properties)
     assert.ok(await page.getByTestId('clip-to-land').isChecked(), 'territory ends at the coast');
     await h.screenshot('planet');
     // Undone: the planet is gone, and with it the map viewed: the first map is shown instead (not a blank page).
@@ -5057,6 +5066,52 @@ try {
     assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('mapmaker.listTabs')!)), { map: 'events', history: 'events', world: 'all' });
     // (All lists again for the steps after this one.)
     await page.evaluate(() => (window as any).__mapmaker.store.setListTab('all', true));
+  });
+
+  await h.step('Properties in groups that fold and stay folded; a layer in Properties (D200)', async () => {
+    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
+    await page.getByTestId('tool-select').click();
+    // A country: its properties in named groups.
+    await page.getByTestId(`entity-row-${A}`).click();
+    const groups = () => page.locator('aside.right .prop-head').allTextContents().then((t) => t.map((x) => x.replace(/^[▾▸]/, '').trim()));
+    assert.deepEqual(await groups(), ['Country', 'Notes and pictures', 'Territory', 'Fill', 'Look and borders', 'Label', 'Relationships', 'Names over time']);
+    await page.getByTestId('relations').waitFor();
+    // Folded, a group stays folded for the next country too, and after loading the project again.
+    await page.getByTestId('group-head-entity:relations').click();
+    assert.equal(await page.getByTestId('relations').count(), 0);
+    assert.equal(await page.getByTestId('group-head-entity:relations').getAttribute('aria-expanded'), 'false');
+    await page.getByTestId(`entity-row-${B}`).click();
+    await page.getByTestId('entity-panel').getByText(B).first().waitFor();
+    assert.equal(await page.getByTestId('relations').count(), 0, 'still folded for another country');
+    await page.getByTestId('country-fill').waitFor();
+    await h.screenshot('properties-groups');
+    await page.getByTestId('group-head-entity:relations').click();
+    await page.getByTestId('relations').waitFor();
+    // An event's too.
+    const ev = (await page.locator('.left [data-testid^="event-row-"]').first().getAttribute('data-testid'))!;
+    await page.getByTestId(ev).click();
+    assert.deepEqual((await groups()).slice(0, 2), ['Event', 'In presentations']);
+    assert.ok((await groups()).includes('Changes'));
+    // A layer: clicking its name shows it in Properties, with what used to lie in the list under it.
+    await page.locator('[data-testid="layer-row"]', { hasText: 'Political' }).locator('span').first().click();
+    await page.getByTestId('layer-panel').waitFor();
+    assert.deepEqual(await groups(), ['Layer', 'Fill and look', 'Borders and front lines', 'Coast']);
+    assert.equal(await page.locator('.left [data-testid="layer-fill"]').count(), 0, 'no longer in the list');
+    assert.equal(await page.getByTestId('layer-panel').getByTestId('layer-fill').inputValue(), 'solid');
+    assert.equal(await page.getByTestId('layer-name').inputValue(), 'Political');
+    // Its name and whether it is shown are changed there (one undo each).
+    await page.getByTestId('layer-visible').uncheck();
+    await h.saved();
+    assert.equal(await page.locator('[data-testid="layer-row"]', { hasText: 'Political' }).locator('input[type=checkbox]').isChecked(), false);
+    await page.getByTestId('undo').click();
+    await h.saved();
+    assert.equal(await page.getByTestId('layer-visible').isChecked(), true);
+    await h.screenshot('properties-layer');
+    // A layer of points has only its name and whether it is shown.
+    await page.locator('[data-testid="layer-row"]', { hasText: 'Battles' }).locator('span').first().click();
+    assert.deepEqual(await groups(), ['Layer']);
+    await page.getByTestId('tool-select').click();
   });
 
   await h.step('History Health lists the overlap, nothing else; no browser errors', async () => {

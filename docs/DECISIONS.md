@@ -61,6 +61,26 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D200. Properties in groups that fold; a layer in Properties (interface stage 5, first part)
+
+Fifth stage of D196's plan, in parts. The right panel showed a country or an event as one long stack.
+
+- **Groups** (`shell/Group.tsx`, `PropGroup`): a country is Country (name, colour, type, lock), Notes and
+  pictures, Territory (area, its changes, changes over a period), Fill, Look and borders, Label, Relationships,
+  Names over time; a character or a city has On the map; an event is Event (name, type, dates, precedence,
+  record, go to), In presentations, Description and pictures, Groups, Changes, Alternative versions. A group
+  folds by its head; folded or not is remembered by the group's name for the kind of thing (fold Relationships
+  and it is folded for every country), with the project's view (`store.collapsed`, keys `prop:<kind>:<group>`).
+  All start open, so nothing is hidden until the user hides it. The sections inside are the ones there were
+  (the same test ids); a section's own heading is not drawn under a group of the same name.
+- **A layer is a thing that can be selected** (`selection.kind === 'layer'`): clicking its name in the Layers
+  list draws on it as before and shows it in Properties (`LayerPanel`): Layer (name, shown), Fill and look (fill
+  pattern, opacity, border width, the look of its countries), Borders and front lines, Coast (territory ends at
+  the coast). These lay in the list under the layer drawn on; the list is now only a list. A layer's name can
+  be changed there (it could not be changed anywhere before).
+- Next parts: the map's own properties when nothing is selected (the settings dialogs as groups), and a change
+  of an event as a thing selected.
+
 ### D199. The lists at the left by tabs, with a filter (interface stage 4)
 
 Fourth stage of D196's plan. The left panel was seven lists in one scroll.
