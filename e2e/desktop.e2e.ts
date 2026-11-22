@@ -29,6 +29,9 @@ const launch = async (): Promise<{ app: ElectronApplication; page: Page }> => {
   });
   const page = await app.firstWindow();
   await page.waitForLoadState('domcontentloaded');
+  // (The lists at the left all in one column, as these steps expect.)
+  await page.waitForFunction(() => !!(window as any).__mapmaker);
+  await page.evaluate(() => (window as any).__mapmaker.store.setListTab('all', true));
   return { app, page };
 };
 

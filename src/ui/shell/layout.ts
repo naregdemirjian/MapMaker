@@ -70,3 +70,37 @@ export function saveWorkspace(w: Workspace): void {
 export function tracks(l: PanelLayout): Record<Side, number> {
   return { left: l.hidden.includes('left') ? 0 : l.left, right: l.hidden.includes('right') ? 0 : l.right, bottom: l.hidden.includes('bottom') ? 0 : l.bottom };
 }
+
+// The lists at the left (D199): one at a time, by tabs, or all of them in one column.
+export type ListTab = 'maps' | 'layers' | 'countries' | 'places' | 'areas' | 'events' | 'all';
+export const LIST_TABS: Array<{ id: ListTab; name: string; hint: string }> = [
+  { id: 'maps', name: 'Maps', hint: 'The maps of this project' },
+  { id: 'layers', name: 'Layers', hint: 'The layers of the map being viewed: which are shown, which is drawn on' },
+  { id: 'countries', name: 'Countries', hint: 'Countries and factions, and the groups they are kept in' },
+  { id: 'places', name: 'Places', hint: 'Characters, cities and other points on the map' },
+  { id: 'areas', name: 'Areas', hint: 'Areas, lines and points drawn on feature layers' },
+  { id: 'events', name: 'Events', hint: 'The events of the timeline being viewed' },
+  { id: 'all', name: 'All', hint: 'Every list in one column' },
+];
+/** The list each workspace on the world opens with. */
+export const DEFAULT_LIST_TABS: Record<'map' | 'history' | 'world', ListTab> = { map: 'countries', history: 'events', world: 'maps' };
+export type ListTabs = typeof DEFAULT_LIST_TABS;
+
+export function cleanListTabs(raw: unknown): ListTabs {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const one = (k: keyof ListTabs): ListTab => (LIST_TABS.some((t) => t.id === r[k]) ? (r[k] as ListTab) : DEFAULT_LIST_TABS[k]);
+  return { map: one('map'), history: one('history'), world: one('world') };
+}
+const KEY_TABS = 'mapmaker.listTabs';
+export function loadListTabs(): ListTabs {
+  try { return cleanListTabs(JSON.parse(localStorage.getItem(KEY_TABS) ?? 'null')); } catch { return { ...DEFAULT_LIST_TABS }; }
+}
+export function saveListTabs(v: ListTabs): void {
+  try { localStorage.setItem(KEY_TABS, JSON.stringify(v)); } catch { /* storage may be unavailable */ }
+}
+
+/** Whether a name answers what is typed in a list's filter (every word of it, in any order, whatever the case). */
+export function nameMatches(name: string, filter: string): boolean {
+  const n = name.toLowerCase();
+  return filter.toLowerCase().split(/\s+/).filter(Boolean).every((word) => n.includes(word));
+}

@@ -61,6 +61,24 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D199. The lists at the left by tabs, with a filter (interface stage 4)
+
+Fourth stage of D196's plan. The left panel was seven lists in one scroll.
+
+- **Tabs** (`LIST_TABS` in `shell/layout.ts`, drawn by `Outliner`): Maps, Layers, Countries, Places (characters,
+  cities and others), Areas, Events, and **All** (every list in one column, as before). Each workspace on the
+  world keeps its own tab (`store.listTabs`, kept on this computer in `mapmaker.listTabs`): Map opens on
+  Countries, History on Events, World on Maps.
+- **A filter by name** above the lists of countries, places and events: the names holding every word typed, in
+  any order, whatever the case (`nameMatches`). While filtering, countries and places are listed flat (cities
+  that stand in a country among them, without groups). Esc, another tab or another workspace empties it.
+- The lists themselves are unchanged (the same rows, test ids and right-click menus), so the tabs only choose
+  which are drawn. **All stays** as a tab: an outline of the whole project is useful, and the tests written
+  before the tabs run in it (their harness chooses it once, `setListTab('all', true)`); the tabs and the filter
+  have a step of their own.
+- Still to leave the lists (stage 5, into Properties): a layer's fill, opacity, borders, look and front lines,
+  and the map's setting-up under Maps.
+
 ### D198. A tool strip down the left edge, the tool's options in a bar of their own (interface stage 3)
 
 Third stage of D196's plan. The tools were up to thirteen buttons of text in a row that wrapped over the map,

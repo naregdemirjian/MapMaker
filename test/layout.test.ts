@@ -1,7 +1,7 @@
 // Workspaces' layouts (D196).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cleanLayouts, DEFAULT_LAYOUTS, dragged, tracks, presents, WORKSPACES, LIMITS } from '../src/ui/shell/layout.ts';
+import { cleanLayouts, DEFAULT_LAYOUTS, dragged, tracks, presents, WORKSPACES, LIMITS, cleanListTabs, DEFAULT_LIST_TABS, LIST_TABS, nameMatches } from '../src/ui/shell/layout.ts';
 
 test('layouts: whatever was stored is made valid', () => {
   assert.deepEqual(cleanLayouts(null), DEFAULT_LAYOUTS);
@@ -26,4 +26,13 @@ test('layouts: an edge dragged resizes its panel within its limits', () => {
 test('layouts: a folded panel takes no room; shots belong to Present and Export', () => {
   assert.deepEqual(tracks({ left: 250, right: 310, bottom: 150, hidden: ['left', 'bottom'] }), { left: 0, right: 310, bottom: 0 });
   assert.deepEqual(WORKSPACES.filter((w) => presents(w.id)).map((w) => w.id), ['present', 'export']);
+});
+
+test('lists: the tab of each workspace made valid when read; a filter matches every word in any order', () => {
+  assert.deepEqual(cleanListTabs(null), DEFAULT_LIST_TABS);
+  assert.deepEqual(cleanListTabs({ map: 'events', history: 'nonsense', world: 'all', present: 'maps' }), { map: 'events', history: DEFAULT_LIST_TABS.history, world: 'all' });
+  assert.ok(nameMatches('Kingdom of Testa', 'testa king'));
+  assert.ok(nameMatches('Kingdom of Testa', '  '));
+  assert.ok(!nameMatches('Kingdom of Testa', 'testa duchy'));
+  assert.deepEqual(LIST_TABS.map((t) => t.id), ['maps', 'layers', 'countries', 'places', 'areas', 'events', 'all']);
 });

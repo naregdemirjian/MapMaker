@@ -42,6 +42,7 @@ import { BranchSwitcher } from './Branches.tsx';
 import { MenuBar } from '../shell/MenuBar.tsx';
 import { command } from '../commands.ts';
 import { TOOLS, SPACE_TOOLS, toolsFor } from '../tools.ts';
+import { LIST_TABS, nameMatches, type ListTab } from '../shell/layout.ts';
 import { ToolIcon } from '../shell/ToolIcon.tsx';
 import { branchName } from '../../temporal-engine/branches.ts';
 
@@ -449,9 +450,12 @@ function LockMark({ testId }: { testId?: string }) {
   );
 }
 
-const EntityRows = memo(function EntityRows({ section }: { sig: string; section: 'countries' | 'characters' | 'cities' }) {
+const EntityRows = memo(function EntityRows({ section, filter }: { sig: string; section: 'countries' | 'characters' | 'cities'; filter: string }) {
   const s = store, w = s.world!;
-  const items = outlinerLists(s).items[section];
+  // (With a filter the list is flat: the things whose names answer it, cities in countries among them, without the groups.)
+  const lists = outlinerLists(s);
+  const flat = (): OutlinerItem[] => (section === 'countries' ? lists.political : section === 'characters' ? lists.characters : lists.others).filter((e) => nameMatches(e.name, filter)).map((e) => ({ kind: 'entity', e, depth: 0, cities: 0 }));
+  const items = filter.trim() ? flat() : lists.items[section];
   const order = items.filter((it): it is Extract<OutlinerItem, { kind: 'entity' }> => it.kind === 'entity').map((it) => it.e.id);
   const chosen = new Set(s.chosen('entity'));
   return <>{items.map((it) => {
@@ -485,9 +489,9 @@ const EntityRows = memo(function EntityRows({ section }: { sig: string; section:
 });
 
 /** The rows of the list of events (those the group filter shows). Drawn again only when `sig` changes. */
-const EventRows = memo(function EventRows(_: { sig: string }) {
+const EventRows = memo(function EventRows({ filter }: { sig: string; filter: string }) {
   const s = store, w = s.world!;
-  const shown = sortedEvents(w).filter((e) => eventVisible(w, e.id));
+  const shown = sortedEvents(w).filter((e) => eventVisible(w, e.id) && (!filter.trim() || nameMatches(e.name, filter)));
   const order = shown.map((e) => e.id);
   const chosenEv = new Set(s.chosen('event'));
   return <>{shown.map((e) => (
@@ -539,9 +543,21 @@ export function Outliner() {
       <button onClick={() => setNewEntity(null)}>Cancel</button>
     </div>
   );
+  const tab = s.listTabNow(), filter = s.listFilter;
+  const on = (...tabs: ListTab[]) => tab === 'all' || tabs.includes(tab);
+  const filtered = tab === 'countries' || tab === 'places' || tab === 'events' || tab === 'all';
   return (
-    <aside className="left">
-      <Section title="Maps" onAdd={() => s.set({ dialog: 'new-world' })} addLabel="Map">
+    <aside className="left with-tabs">
+      <div className="list-tabs" role="tablist" aria-label="Lists" data-testid="list-tabs">
+        {LIST_TABS.map((t) => <button key={t.id} role="tab" aria-selected={t.id === tab} className={`list-tab ${t.id === tab ? 'on' : ''}`} title={t.hint} onClick={() => s.setListTab(t.id)} data-testid={`list-tab-${t.id}`}>{t.name}</button>)}
+      </div>
+      {filtered && (
+        <div className="list-filter">
+          <input type="search" placeholder="Filter by name" value={filter} onChange={(e) => s.set({ listFilter: e.target.value })} onKeyDown={(e) => { if (e.key === 'Escape') s.set({ listFilter: '' }); }} data-testid="list-filter" aria-label="Filter the lists by name" />
+        </div>
+      )}
+      <div className="lists">
+      {on('maps') && <Section title="Maps" onAdd={() => s.set({ dialog: 'new-world' })} addLabel="Map">
         {w.all('map_space').sort((a, b) => a.sort_order - b.sort_order).map((sp) => (
           <div key={sp.id} className={`row ${sp.id === s.spaceId ? 'sel' : ''}`} onClick={() => { const before = s.spaceId; s.set({ spaceId: sp.id, layerId: w.all('layer').find((l) => l.space_id === sp.id && l.kind === 'partition')?.id ?? '' }); s.mapChanged(before); }}>
             {sp.name}<span className="muted"> · {sp.kind === 'plane' ? `flat, ${(worldSettings(sp) as { widthKm?: number }).widthKm?.toLocaleString() ?? '?'} km wide` : `radius ${Math.round((sp.radius_m ?? 0) / 1000).toLocaleString()} km`}</span>
@@ -549,8 +565,8 @@ export function Outliner() {
         ))}
         {s.workspaceNow() !== 'world' && <MapSetup />}
         <button className="link pad-link" onClick={() => s.set({ dialog: 'data-export' })} data-testid="open-data-export" title="The map at a date as GeoJSON; events, countries, relationships and features as CSV">Export data (GeoJSON, CSV)…</button>
-      </Section>
-      <Section title="Layers" onAdd={() => s.set({ dialog: 'new-layer' })} addLabel="Layer">
+      </Section>}
+      {on('layers') && <Section title="Layers" onAdd={() => s.set({ dialog: 'new-layer' })} addLabel="Layer">
         {layers.map((l) => {
           const feat = isFeatureKind(l.kind), field = l.kind === 'field';
           const here = field ? s.tool === 'field' && s.fieldLayerId === l.id : feat ? s.tool === 'feature' && s.featureLayerId === l.id : l.id === s.layerId;
@@ -605,41 +621,42 @@ export function Outliner() {
               onChange={(e) => s.execute((wd) => cmd.setLayerClipToLand(wd, l.id, e.target.checked))} /> Territory ends at the coast
           </label>
         ))}
-      </Section>
-      <Section title="Countries and factions" onAdd={() => setNewEntity({ name: '', type: 'polity' })} addLabel="New">
+      </Section>}
+      {on('countries') && <Section title="Countries and factions" onAdd={() => setNewEntity({ name: '', type: 'polity' })} addLabel="New">
         {newEntityForm('countries')}
-        <EntityRows sig={entitySig} section="countries" />
+        <EntityRows sig={entitySig} section="countries" filter={filter} />
         {political.length > 0 && <div className="muted small-hint">Ctrl or Shift + click to choose several; right-click for quick actions.</div>}
         <button className="link pad-link" onClick={async () => { const name = await s.askText('New group', 'Name of the group (for example "My nations" or "Europe")', '', 'Create group'); if (name) s.execute((wd) => cmd.createEntityGroup(wd, name, s.chosen('entity'))); }} data-testid="new-entity-group">New group{s.chosen('entity').length > 1 ? ` of the ${s.chosen('entity').length} chosen` : ''}…</button>
         {political.length > 0 && <button className="link pad-link" onClick={() => s.set({ dialog: 'label-style' })} data-testid="open-label-style">Label style for all countries…</button>}
         {currentSpace && basemapSourceOf(currentSpace) === 'natural-earth' && <button className="link pad-link" onClick={() => s.set({ dialog: 'add-countries' })} data-testid="open-add-countries">Add today's countries…</button>}
         {currentSpace && !isSpaceMap(currentSpace) && <button className="link pad-link" onClick={() => s.set({ dialog: 'import-borders' })} data-testid="open-import-borders" title="GeoJSON maps of borders, one for each date: their countries and how their land changed between them">Import borders from files…</button>}
         {!political.length && !newEntity && <div className="muted pad">None yet.</div>}
-      </Section>
-      <Section title="Characters" onAdd={() => setNewEntity({ name: '', type: 'character' })} addLabel="Character">
+      </Section>}
+      {on('places') && <Section title="Characters" onAdd={() => setNewEntity({ name: '', type: 'character' })} addLabel="Character">
         {newEntityForm('characters')}
-        <EntityRows sig={entitySig} section="characters" />
+        <EntityRows sig={entitySig} section="characters" filter={filter} />
         {!characters.length && !(newEntity?.type === 'character') && <div className="muted pad">None yet. Characters are points on the map that move over time.</div>}
-      </Section>
-      <Section title="Cities and others" onAdd={() => setNewEntity({ name: '', type: 'settlement' })} addLabel="City">
+      </Section>}
+      {on('places') && <Section title="Cities and others" onAdd={() => setNewEntity({ name: '', type: 'settlement' })} addLabel="City">
         {newEntityForm('cities')}
-        <EntityRows sig={entitySig} section="cities" />
+        <EntityRows sig={entitySig} section="cities" filter={filter} />
         {!others.length && newEntity?.type !== 'settlement' && <div className="muted pad">None yet. Cities are points on the map, founded and abandoned at dates.</div>}
         {others.length > looseOthers.length && <div className="muted small-hint">Cities in a country are listed under it.</div>}
         {currentSpace && basemapSourceOf(currentSpace) === 'natural-earth' && <button className="link pad-link" onClick={() => s.set({ dialog: 'add-cities' })} data-testid="open-add-cities" title="Present-day cities and capitals, chosen by their share of their country's people, size, capital or economic importance">Add today's cities…</button>}
-      </Section>
-      <Section title="Areas, lines and points" onAdd={() => (featureLayers(s).length ? s.set({ tool: 'feature' }) : s.set({ dialog: 'new-layer' }))} addLabel="Draw">
+      </Section>}
+      {on('areas') && <Section title="Areas, lines and points" onAdd={() => (featureLayers(s).length ? s.set({ tool: 'feature' }) : s.set({ dialog: 'new-layer' }))} addLabel="Draw">
         <FeatureRows />
-      </Section>
-      <Section title="Events" onAdd={() => s.set({ dialog: 'new-event' })} addLabel="Event">
-        <EventRows sig={eventSig} />
+      </Section>}
+      {on('events') && <Section title="Events" onAdd={() => s.set({ dialog: 'new-event' })} addLabel="Event">
+        <EventRows sig={eventSig} filter={filter} />
         {events.length > 1 && <div className="muted small-hint">Ctrl or Shift + click to choose several; Delete or right-click to delete them.</div>}
         {!events.length && <div className="muted pad">No events yet.</div>}
         <button className="link pad-link" onClick={() => s.set({ dialog: 'event-types' })} data-testid="open-event-types">Event types…</button>
         {hiddenEvents > 0 && (
           <div className="muted pad" data-testid="events-hidden">{hiddenEvents} hidden by the group filter · <button className="link" onClick={() => s.set({ eventFilter: null })}>show all</button></div>
         )}
-      </Section>
+      </Section>}
+      </div>
     </aside>
   );
 }

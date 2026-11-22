@@ -33,7 +33,7 @@ import { setAssetBase } from '../render-engine/assets.ts';
 import { lonLatToVec, type Vec3 } from '../geo-kernel/vec.ts';
 import type { StrokeSettings } from '../render-engine/stroke.ts';
 
-import { type Workspace, type Layouts, type PanelLayout, type Side, DEFAULT_LAYOUTS, presents, loadLayouts, saveLayouts, loadWorkspace, saveWorkspace } from './shell/layout.ts';
+import { type Workspace, type Layouts, type PanelLayout, type Side, type ListTab, type ListTabs, DEFAULT_LAYOUTS, presents, loadLayouts, saveLayouts, loadWorkspace, saveWorkspace, loadListTabs, saveListTabs } from './shell/layout.ts';
 export type Mode = 'world' | 'present';
 /** One line of a right-click menu: an action, a heading, or a divider. */
 export type MenuItem = { label: string; run: () => void; danger?: boolean; testId?: string; shortcut?: string; disabled?: boolean; checked?: boolean } | { heading: string } | 'divider';
@@ -127,8 +127,8 @@ export class AppStore {
   }
   setWorkspace(w: Workspace) {
     saveWorkspace(w);
-    if (presents(w)) this.set({ workspace: w, ...(this.mode === 'present' ? {} : { mode: 'present' as const, historyPlay: { ...this.historyPlay, on: false } }) });
-    else this.set({ workspace: w, ...(this.mode === 'world' ? {} : { mode: 'world' as const, presentCamera: null, playing: false }) });
+    if (presents(w)) this.set({ workspace: w, listFilter: '', ...(this.mode === 'present' ? {} : { mode: 'present' as const, historyPlay: { ...this.historyPlay, on: false } }) });
+    else this.set({ workspace: w, listFilter: '', ...(this.mode === 'world' ? {} : { mode: 'world' as const, presentCamera: null, playing: false }) });
   }
   /** Changes the layout of the workspace being worked in (kept on this computer). */
   setLayout(patch: Partial<PanelLayout> | null) {
@@ -136,6 +136,17 @@ export class AppStore {
     this.layouts = { ...this.layouts, [w]: patch ? { ...this.layouts[w], ...patch } : { ...DEFAULT_LAYOUTS[w] } };
     saveLayouts(this.layouts);
     this.set({});
+  }
+  /** The list shown at the left in each workspace on the world (D199), and what is typed in its filter. */
+  listTabs: ListTabs = loadListTabs();
+  listFilter = '';
+  listTabNow(): ListTab { const w = this.workspaceNow(); return w === 'map' || w === 'history' || w === 'world' ? this.listTabs[w] : 'all'; }
+  setListTab(tab: ListTab, everywhere = false) {
+    const w = this.workspaceNow();
+    if (everywhere) this.listTabs = { map: tab, history: tab, world: tab };
+    else if (w === 'map' || w === 'history' || w === 'world') this.listTabs = { ...this.listTabs, [w]: tab };
+    saveListTabs(this.listTabs);
+    this.set({ listFilter: '' });
   }
   togglePanel(side: Side) {
     const h = this.layouts[this.workspaceNow()].hidden;

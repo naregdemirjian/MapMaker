@@ -5014,6 +5014,51 @@ try {
     await page.getByTestId('shortcuts-dialog').getByRole('button', { name: 'Close' }).click();
   });
 
+  await h.step('The lists at the left by tabs, one at a time, each workspace with its own; a filter by name (D199)', async () => {
+    const heads = () => page.locator('.left .section-head > span:first-child').allTextContents();
+    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
+    // All: every list in one column (as the steps before this one had it).
+    assert.deepEqual(await heads(), ['Maps', 'Layers', 'Countries and factions', 'Characters', 'Cities and others', 'Areas, lines and points', 'Events']);
+    // One list at a time.
+    await page.getByTestId('list-tab-countries').click();
+    assert.deepEqual(await heads(), ['Countries and factions']);
+    await page.getByTestId(`entity-row-${A}`).waitFor();
+    assert.equal(await page.getByTestId('layer-row').count(), 0);
+    await page.getByTestId('list-tab-places').click();
+    assert.deepEqual(await heads(), ['Characters', 'Cities and others']);
+    await page.getByTestId('list-tab-layers').click();
+    assert.deepEqual(await heads(), ['Layers']);
+    assert.ok(await page.getByTestId('layer-row').count() >= 1);
+    assert.equal(await page.getByTestId('list-filter').count(), 0, 'no filter where there is no list of names');
+    await h.screenshot('list-tab-layers');
+    // The filter: the names that hold every word typed, whatever the case; Esc clears it.
+    await page.getByTestId('list-tab-countries').click();
+    const all = await page.locator('.left [data-testid^="entity-row-"]').count();
+    await page.getByTestId('list-filter').fill('testa KING');
+    assert.deepEqual(await page.locator('.left [data-testid^="entity-row-"]').allTextContents().then((t) => t.map((x) => x.trim())), [A]);
+    await h.screenshot('list-filter');
+    await page.getByTestId('list-filter').press('Escape');
+    assert.equal(await page.locator('.left [data-testid^="entity-row-"]').count(), all);
+    await page.getByTestId('list-tab-events').click();
+    const events = await page.locator('.left [data-testid^="event-row-"]').count();
+    assert.ok(events >= 2, `events listed (${events})`);
+    const first = (await page.locator('.left [data-testid^="event-row-"]').first().getAttribute('data-testid'))!.replace('event-row-', '');
+    await page.getByTestId('list-filter').fill(first);
+    assert.ok(await page.locator('.left [data-testid^="event-row-"]').count() < events || events === 1);
+    await page.getByTestId(`event-row-${first}`).waitFor();
+    // Each workspace keeps its own list: History opens on its own, the map's stays; kept after loading again.
+    await page.getByTestId('workspace-history').click();
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.listTabNow()), 'all');
+    await page.getByTestId('list-tab-events').click();
+    await page.getByTestId('workspace-map').click();
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.listTabNow()), 'events');
+    assert.equal(await page.getByTestId('list-filter').inputValue(), '', 'changing workspace or list empties the filter');
+    assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('mapmaker.listTabs')!)), { map: 'events', history: 'events', world: 'all' });
+    // (All lists again for the steps after this one.)
+    await page.evaluate(() => (window as any).__mapmaker.store.setListTab('all', true));
+  });
+
   await h.step('History Health lists the overlap, nothing else; no browser errors', async () => {
     await page.getByTestId('workspace-map').click();
     await page.getByTestId('health').click();

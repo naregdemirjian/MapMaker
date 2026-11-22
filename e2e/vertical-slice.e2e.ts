@@ -241,6 +241,8 @@ try {
     // Everything worked out from what was there before is also worked out afresh, and must be the same (see main.tsx).
     await page.waitForFunction(() => !!(window as any).__mapmaker);
     await page.evaluate(() => (window as any).__mapmaker.verify());
+    // (The lists at the left all in one column, as these steps expect; their tabs are tested in the workflows.)
+    await page.evaluate(() => (window as any).__mapmaker.store.setListTab('all', true));
     await page.getByTestId('project-name').fill('Vertical Slice Test');
     await screenshot('project-picker');
     await page.getByTestId('project-create').click();

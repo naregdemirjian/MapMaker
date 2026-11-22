@@ -37,6 +37,15 @@ a { color: var(--accent); cursor: pointer; }
 /* (Clipped, not scrollable: a crowded top bar wider than the window must never let the whole page slide sideways.) */
 .app { overflow: clip; display: grid; height: 100vh; grid-template-columns: var(--tools, 44px) var(--left, 250px) minmax(0, 1fr) var(--right, 310px); grid-template-rows: 40px 32px var(--options, 36px) minmax(0, 1fr) var(--bottom, 150px) 24px; grid-template-areas: "top top top top" "workspaces workspaces workspaces workspaces" "tools options options options" "tools left center right" "bottom bottom bottom bottom" "status status status status"; }
 .topbar { grid-area: top; display: flex; align-items: center; gap: 6px; padding: 0 10px; background: var(--panel); border-bottom: 1px solid var(--line); }
+/* The lists at the left, by tabs (D199). */
+.left.with-tabs { display: flex; flex-direction: column; overflow: hidden; }
+.left .lists { flex: 1; min-height: 0; overflow-y: auto; }
+.list-tabs { display: flex; flex-wrap: wrap; flex: none; border-bottom: 1px solid var(--line); background: var(--bg); }
+.list-tab { border: none; border-radius: 0; background: none; color: var(--muted); padding: 6px 8px; font-size: 12px; font-weight: 600; border-bottom: 2px solid transparent; }
+.list-tab:hover:not(:disabled) { background: var(--panel); color: var(--text); }
+.list-tab.on, .list-tab.on:hover:not(:disabled) { background: var(--panel); color: var(--text); border-bottom-color: var(--accent); filter: none; }
+.list-filter { flex: none; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.list-filter input { width: 100%; }
 /* The tool strip and the tool's options (D198). */
 .tool-strip { grid-area: tools; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px 0; background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; scrollbar-width: none; }
 .tool-slot { display: contents; }

@@ -142,6 +142,8 @@ export class Harness {
     // Everything worked out from what was there before is also worked out afresh, and must be the same (see main.tsx).
     await this.page.waitForFunction(() => !!(window as any).__mapmaker);
     await this.page.evaluate(() => (window as any).__mapmaker.verify());
+    // (The lists at the left all in one column, as the steps written before their tabs expect; the tabs have a step of their own.)
+    await this.page.evaluate(() => (window as any).__mapmaker.store.setListTab('all', true));
   }
 
   watch(p: Page): Page {
