@@ -35,8 +35,29 @@ a { color: var(--accent); cursor: pointer; }
 .date-input.bad { border-color: var(--danger); }
 
 /* (Clipped, not scrollable: a crowded top bar wider than the window must never let the whole page slide sideways.) */
-.app { overflow: clip; display: grid; height: 100vh; grid-template-columns: 250px 1fr 310px; grid-template-rows: 46px 1fr 150px; grid-template-areas: "top top top" "left center right" "bottom bottom bottom"; }
+.app { overflow: clip; display: grid; height: 100vh; grid-template-columns: var(--left, 250px) minmax(0, 1fr) var(--right, 310px); grid-template-rows: 40px 32px minmax(0, 1fr) var(--bottom, 150px) 24px; grid-template-areas: "top top top" "workspaces workspaces workspaces" "left center right" "bottom bottom bottom" "status status status"; }
 .topbar { grid-area: top; display: flex; align-items: center; gap: 6px; padding: 0 10px; background: var(--panel); border-bottom: 1px solid var(--line); }
+/* The frame (D196): workspaces, the edges panels are resized by, the status bar. */
+.workspace-bar { grid-area: workspaces; display: flex; align-items: center; gap: 6px; padding: 0 10px; background: var(--bg); border-bottom: 1px solid var(--line); min-width: 0; }
+.workspace-bar button { padding: 3px 9px; }
+.workspaces { display: flex; align-self: stretch; gap: 2px; }
+.workspaces .workspace { border: none; border-radius: 0; background: none; color: var(--muted); padding: 0 14px; border-bottom: 2px solid transparent; font-weight: 600; }
+.workspaces .workspace:hover:not(:disabled) { background: var(--panel); color: var(--text); }
+.workspaces .workspace.on, .workspaces .workspace.on:hover:not(:disabled) { background: var(--panel); color: var(--text); border-bottom-color: var(--accent); filter: none; }
+.panel-toggles { display: inline-flex; gap: 3px; margin-left: 6px; }
+.panel-toggles .panel-toggle { padding: 2px 6px; background: var(--panel2); color: var(--muted); border-color: var(--line); font-weight: 400; }
+.panel-toggles .panel-toggle.on { color: var(--text); }
+.splitter { z-index: 6; touch-action: none; }
+.splitter:hover, .splitter:active { background: var(--accent); opacity: 0.55; }
+.splitter-left { grid-area: left; justify-self: end; width: 5px; margin-right: -3px; cursor: col-resize; }
+.splitter-right { grid-area: right; justify-self: start; width: 5px; margin-left: -3px; cursor: col-resize; }
+.splitter-bottom { grid-area: bottom; align-self: start; height: 5px; margin-top: -3px; cursor: row-resize; }
+.status-bar { grid-area: status; display: flex; align-items: center; gap: 10px; padding: 0 8px 0 10px; background: var(--panel); border-top: 1px solid var(--line); font-size: 12px; min-width: 0; }
+.status-hint { flex: 1; min-width: 0; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.status-hint b { color: var(--text); font-weight: 600; }
+.status-bar button.small { padding: 0 7px; line-height: 18px; }
+.map-setup .world-options { padding: 4px 0 8px; }
+.map-setup button.link.pad-link { padding: 4px 0 8px; display: block; }
 .brand { font-weight: 700; letter-spacing: 0.02em; }
 .project-name { color: var(--muted); max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .seg { display: inline-flex; }
@@ -365,7 +386,7 @@ input.count { width: 56px; padding: 2px 4px; }
 
 /* How the stars look (D130): docked at the side, the map in view and still usable behind it. */
 .modal-back.see-through { background: transparent; pointer-events: none; justify-content: flex-end; align-items: stretch; }
-.modal-back.see-through > .modal { pointer-events: auto; margin: 52px 12px 12px; max-height: calc(100vh - 64px); }
+.modal-back.see-through > .modal { pointer-events: auto; margin: 80px 12px 34px; max-height: calc(100vh - 114px); }
 .modal.sky-look { width: 392px; }
 .sky-presets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
 .sky-preset { padding: 0; display: flex; flex-direction: column; align-items: stretch; overflow: hidden; background: var(--panel2); }

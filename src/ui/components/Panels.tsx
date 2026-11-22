@@ -29,7 +29,6 @@ import { NamesSection } from './Names.tsx';
 import { FeatureToolOptions, FeaturePanel, FeatureRows, featureLayers } from './Features.tsx';
 import { FieldToolOptions, DisasterToolOptions } from './Fields.tsx';
 import { RelationsSection } from './Relations.tsx';
-import { SearchBox } from './Search.tsx';
 import { PicturesSection } from './Pictures.tsx';
 import { TypeDot, TypeSelect } from './EventTypes.tsx';
 import { CalendarPopover, stepDate } from './DatePicker.tsx';
@@ -168,7 +167,6 @@ function defaultCompareTime(s: ReturnType<typeof useStore>): Instant {
 export function TopBar() {
   const s = useStore();
   const w = s.world!;
-  const problems = s.problemCount();
   const spaces = w.all('map_space').sort((a, b) => a.sort_order - b.sort_order);
   const switchSpace = (id: string) => {
     const layer = w.all('layer').find((l) => l.space_id === id && l.kind === 'partition');
@@ -183,11 +181,7 @@ export function TopBar() {
     <header className="topbar">
       <div className="brand">Map Maker</div>
       <div className="project-name" title={s.projectDir}>{s.projectId}</div>
-      <div className="seg">
-        <button className={s.mode === 'world' ? 'on' : ''} onClick={() => s.set({ mode: 'world', presentCamera: null, playing: false })} data-testid="mode-world">World-building</button>
-        <button className={s.mode === 'present' ? 'on' : ''} onClick={() => s.set({ mode: 'present', historyPlay: { ...s.historyPlay, on: false } })} data-testid="mode-present">Presentation</button>
-      </div>
-      <select value={s.spaceId} onChange={(e) => switchSpace(e.target.value)} title="Which map you are looking at">
+      <select value={s.spaceId} onChange={(e) => switchSpace(e.target.value)} title="Which map you are looking at" data-testid="map-select">
         {spaces.map((sp) => <option key={sp.id} value={sp.id}>{sp.name}</option>)}
       </select>
       {s.mode === 'world' && <BranchSwitcher />}
@@ -202,13 +196,7 @@ export function TopBar() {
         </div>
       )}
       <div className="spacer" />
-      <SearchBox />
-      <button disabled={!s.journal.canUndo} title={s.journal.undoLabel ? `Undo: ${s.journal.undoLabel} (Ctrl+Z)` : 'Nothing to undo'} onClick={() => s.undo()} data-testid="undo">Undo</button>
-      <button disabled={!s.journal.canRedo} title={s.journal.redoLabel ? `Redo: ${s.journal.redoLabel} (Ctrl+Y)` : 'Nothing to redo'} onClick={() => s.redo()} data-testid="redo">Redo</button>
       <button onClick={() => s.set({ dialog: 'versions' })} title="Save a named version, restore versions and backups">Versions</button>
-      <button className={problems ? 'warn' : ''} onClick={() => s.set({ dialog: 'health' })} data-testid="health">
-        History Health{problems ? ` (${problems})` : ' ✓'}
-      </button>
       <button onClick={() => s.set({ dialog: 'show' })} title="What the map shows while you work and in presentation and exports: borders, names, lakes (and from what size)…" data-testid="open-show">Show…</button>
       <button onClick={() => s.set({ dialog: 'settings' })} title="Settings: how fast and how sharp the map is drawn while you work (never changes an export)" data-testid="settings">Settings</button>
       <button onClick={() => s.closeProject()} title="Back to the project list">Projects</button>
@@ -216,7 +204,7 @@ export function TopBar() {
   );
 }
 
-const TOOLS: Array<{ id: Tool; name: string; hint: string }> = [
+export const TOOLS: Array<{ id: Tool; name: string; hint: string }> = [
   { id: 'select', name: 'Select', hint: 'Click to inspect a place; drag to move the map; wheel to zoom; Alt+wheel to rotate. Several countries: Ctrl+click adds or removes one, Shift+drag a box round them, Ctrl+Shift+drag over them.' },
   { id: 'lasso', name: 'Territory brush', hint: 'Draw around an area freehand. It is given to the owner chosen on the right.' },
   { id: 'polygon', name: 'Precise shape', hint: 'Click points; double-click or Enter to finish; Esc to cancel.' },
@@ -571,32 +559,7 @@ export function Outliner() {
             {sp.name}<span className="muted"> · {sp.kind === 'plane' ? `flat, ${(worldSettings(sp) as { widthKm?: number }).widthKm?.toLocaleString() ?? '?'} km wide` : `radius ${Math.round((sp.radius_m ?? 0) / 1000).toLocaleString()} km`}</span>
           </div>
         ))}
-        {currentSpace && isSpaceMap(currentSpace) && (
-          <button className="link pad-link" onClick={() => s.set({ dialog: 'sky-look' })} data-testid="open-sky-look" title="The stars' colours, shapes, glows and spikes, the sky, the lines and names, a flat chart, and how realms are drawn">How the stars look…</button>
-        )}
-        {currentSpace && simOf(currentSpace) && (
-          <button className="link pad-link" onClick={() => s.set({ dialog: 'planet-studio', studioSpaceId: currentSpace.id })} data-testid="open-planet-studio" title="The planet's star, orbit, interior, air, water and history: change them and simulate its history again">Open in the Planet Studio…</button>
-        )}
-        {currentSpace && currentSpace.kind !== 'plane' && !isSpaceMap(currentSpace) && (
-          <div className="world-options">
-            {!isGeologicalMap(currentSpace) && <label className="check" title="Land, lakes and coastlines from Natural Earth, drawn under the territories">
-              <input type="checkbox" data-testid="basemap-toggle" checked={basemapSourceOf(currentSpace) === 'natural-earth'}
-                onChange={(e) => s.execute((wd) => cmd.setWorldBasemap(wd, currentSpace.id, e.target.checked ? 'natural-earth' : 'none'))} /> Earth's geography
-            </label>}
-            {basemapSourceOf(currentSpace) === 'natural-earth' && (
-              <label className="check" title="Today's country borders as a drawing aid. Never exported.">
-                <input type="checkbox" data-testid="reference-borders-toggle" checked={s.referenceBorders} onChange={(e) => s.set({ referenceBorders: e.target.checked })} /> Present-day borders (guide)
-              </label>
-            )}
-            <button className="link" onClick={() => s.set({ dialog: 'show' })} data-testid="open-show-lakes" title="Terrain, which lakes are shown (from what size), coastlines, and the rest">Terrain, lakes and what is shown…</button>
-            {basemapSourceOf(currentSpace) === 'natural-earth' && (
-              <button className="link" onClick={() => s.set({ dialog: 'sea-level' })} data-testid="open-sea-level" title="The sea higher or lower than today's at dates you choose; the coasts follow it">Sea level over time…</button>
-            )}
-            <button className="link" onClick={() => s.set({ dialog: 'calendar' })} data-testid="open-calendar" title="The calendar this map's dates are written, typed and chosen in: the Gregorian, or one of its own">Calendar: {calendarNow().name}…</button>
-            <button className="link" onClick={() => s.set({ dialog: 'statistics' })} data-testid="open-statistics" title="Numbers kept over time (an economy, an army, the dead of a war), shown counting in shots' texts as {name}">Statistics ({statisticsOf(currentSpace).length})…</button>
-            <button className="link" onClick={() => s.set({ dialog: 'data-sources' })} data-testid="data-sources">Data sources and credits</button>
-          </div>
-        )}
+        {s.workspaceNow() !== 'world' && <MapSetup />}
         <button className="link pad-link" onClick={() => s.set({ dialog: 'data-export' })} data-testid="open-data-export" title="The map at a date as GeoJSON; events, countries, relationships and features as CSV">Export data (GeoJSON, CSV)…</button>
       </Section>
       <Section title="Layers" onAdd={() => s.set({ dialog: 'new-layer' })} addLabel="Layer">
@@ -693,12 +656,52 @@ export function Outliner() {
   );
 }
 
+/**
+ * The setting-up of the map being viewed: its geography, terrain and lakes, sea level, calendar, statistics,
+ * the look of its stars, its planet. Under the list of maps, or (in the World workspace) at the right.
+ */
+function MapSetup() {
+  const s = useStore();
+  const currentSpace = s.world!.get('map_space', s.spaceId);
+  return (
+    <>
+        {currentSpace && isSpaceMap(currentSpace) && (
+          <button className="link pad-link" onClick={() => s.set({ dialog: 'sky-look' })} data-testid="open-sky-look" title="The stars' colours, shapes, glows and spikes, the sky, the lines and names, a flat chart, and how realms are drawn">How the stars look…</button>
+        )}
+        {currentSpace && simOf(currentSpace) && (
+          <button className="link pad-link" onClick={() => s.set({ dialog: 'planet-studio', studioSpaceId: currentSpace.id })} data-testid="open-planet-studio" title="The planet's star, orbit, interior, air, water and history: change them and simulate its history again">Open in the Planet Studio…</button>
+        )}
+        {currentSpace && currentSpace.kind !== 'plane' && !isSpaceMap(currentSpace) && (
+          <div className="world-options">
+            {!isGeologicalMap(currentSpace) && <label className="check" title="Land, lakes and coastlines from Natural Earth, drawn under the territories">
+              <input type="checkbox" data-testid="basemap-toggle" checked={basemapSourceOf(currentSpace) === 'natural-earth'}
+                onChange={(e) => s.execute((wd) => cmd.setWorldBasemap(wd, currentSpace.id, e.target.checked ? 'natural-earth' : 'none'))} /> Earth's geography
+            </label>}
+            {basemapSourceOf(currentSpace) === 'natural-earth' && (
+              <label className="check" title="Today's country borders as a drawing aid. Never exported.">
+                <input type="checkbox" data-testid="reference-borders-toggle" checked={s.referenceBorders} onChange={(e) => s.set({ referenceBorders: e.target.checked })} /> Present-day borders (guide)
+              </label>
+            )}
+            <button className="link" onClick={() => s.set({ dialog: 'show' })} data-testid="open-show-lakes" title="Terrain, which lakes are shown (from what size), coastlines, and the rest">Terrain, lakes and what is shown…</button>
+            {basemapSourceOf(currentSpace) === 'natural-earth' && (
+              <button className="link" onClick={() => s.set({ dialog: 'sea-level' })} data-testid="open-sea-level" title="The sea higher or lower than today's at dates you choose; the coasts follow it">Sea level over time…</button>
+            )}
+            <button className="link" onClick={() => s.set({ dialog: 'calendar' })} data-testid="open-calendar" title="The calendar this map's dates are written, typed and chosen in: the Gregorian, or one of its own">Calendar: {calendarNow().name}…</button>
+            <button className="link" onClick={() => s.set({ dialog: 'statistics' })} data-testid="open-statistics" title="Numbers kept over time (an economy, an army, the dead of a war), shown counting in shots' texts as {name}">Statistics ({statisticsOf(currentSpace).length})…</button>
+            <button className="link" onClick={() => s.set({ dialog: 'data-sources' })} data-testid="data-sources">Data sources and credits</button>
+          </div>
+        )}
+    </>
+  );
+}
+
 export function Inspector() {
   const s = useStore();
-  const sel = s.selection;
+  const sel = s.selection, world = s.workspaceNow() === 'world';
   return (
     <aside className="right">
-      {!sel && <QuickStart />}
+      {world && <div className="panel map-setup" data-testid="map-setup"><h3>This map</h3><MapSetup /></div>}
+      {!sel && !world && <QuickStart />}
       {sel?.kind === 'entity' && <EntityPanel id={sel.id} />}
       {sel?.kind === 'event' && <EventPanel id={sel.id} />}
       {sel?.kind === 'point' && <PointPanel lon={sel.lon} lat={sel.lat} />}

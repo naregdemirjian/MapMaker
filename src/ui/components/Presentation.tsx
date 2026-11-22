@@ -1,6 +1,6 @@
 import { GraphicStyleEditor } from './GraphicStyleEditor.tsx';
 import { ANIMS_IN, ANIMS_OUT, ANIM_NAMES } from '../../presentation/graphic-style.ts';
-import { useEffect, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { useStore, useLive, store } from '../store.ts';
 import { Api } from '../api.ts';
 import * as cmd from '../../domain/commands.ts';
@@ -82,7 +82,7 @@ export function ShotsPanel() {
   );
 }
 
-export function ShotEditor() {
+export function ShotEditor({ only }: { only?: 'export' } = {}) {
   const s = useStore();
   const w = s.world!;
   const shot = currentShot();
@@ -183,6 +183,7 @@ export function ShotEditor() {
     <aside className="right" data-testid="shot-editor">
       <SizeEstimate shot={shot} passes={passes} estimateKey={estimateKey} onEstimate={setEstimate} />
       <div className="panel shot-panel">
+        <GroupsShown.Provider value={only === 'export' ? EXPORT_GROUPS : null}>
         <Group title="Shot">
           <label>Name<input value={name} onChange={(e) => setName(e.target.value)} onBlur={() => name.trim() && name !== row.name && s.execute((wd) => cmd.updateSequence(wd, row.id, { name: name.trim() }))} /></label>
           {(w.all('branch').length > 0 || (shot.branch && shot.branch !== MAIN_BRANCH)) && (
@@ -459,6 +460,7 @@ export function ShotEditor() {
           </div>
           {svgSaved && <div className="ok-box" data-testid="svg-result">Saved <span className="path">{svgSaved}</span></div>}
         </Group>
+        </GroupsShown.Provider>
         <button className="danger" onClick={() => { if (confirm(`Delete the shot "${row.name}"?`)) { s.execute((wd) => cmd.deleteSequence(wd, row.id)); s.set({ shotId: null }); } }}>Delete shot</button>
       </div>
     </aside>
@@ -587,8 +589,14 @@ function VideoCheck({ shot, onPlan }: { shot: ShotSettings; onPlan: (p: { key: s
   return null;
 }
 
+/** The groups of a shot's settings shown (null: all of them). The Export workspace shows those of the export alone. */
+const GroupsShown = createContext<string[] | null>(null);
+const EXPORT_GROUPS = ['Shot', 'Output quality', 'Export'];
+
 /** A collapsible group of settings. */
 function Group({ title, children, open = true }: { title: string; children: React.ReactNode; open?: boolean }) {
+  const only = useContext(GroupsShown);
+  if (only && !only.includes(title)) return null;
   return (
     <details className="settings-group" open={open}>
       <summary>{title}</summary>

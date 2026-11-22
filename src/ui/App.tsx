@@ -1,7 +1,8 @@
 import { CalendarDialog } from './components/CalendarDialog.tsx';
 import { StatisticsDialog } from './components/StatisticsDialog.tsx';
 import { BranchesDialog } from './components/Branches.tsx';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
+import { WorkspaceBar, Splitter, StatusBar, frameStyle } from './shell/Shell.tsx';
 import { arrowStep } from '../core-time/steps.ts';
 import { calendarNow } from './calendar-now.ts';
 import { useStore, store } from './store.ts';
@@ -66,18 +67,25 @@ export function App() {
     return () => window.removeEventListener('keydown', key);
   }, []);
 
+  const frame = useRef<HTMLDivElement | null>(null);
+  const workspace = s.workspaceNow(), hidden = s.layouts[workspace].hidden;
   if (!s.world) return <><ProjectPicker /><Toasts />{s.busy && <div className="busy">{s.busy}</div>}</>;
 
   return (
-    <div className={`app mode-${s.mode}`}>
+    <div className={`app mode-${s.mode} workspace-${workspace}`} style={frameStyle(s)} ref={frame}>
       <TopBar />
-      {s.mode === 'world' ? <Outliner /> : <ShotsPanel />}
+      <WorkspaceBar />
+      {!hidden.includes('left') && (s.mode === 'world' ? <Outliner /> : <ShotsPanel />)}
       <main className="center">
         {s.mode === 'world' && <ToolBar />}
         {isSpaceMap(s.world.get('map_space', s.spaceId)) ? <SpaceView /> : <MapView />}
       </main>
-      {s.mode === 'world' ? <Inspector /> : <ShotEditor />}
-      <footer className="bottom">{s.mode === 'world' ? <Timeline /> : <ShotTimeline />}</footer>
+      {!hidden.includes('right') && (s.mode === 'world' ? <Inspector /> : <ShotEditor only={workspace === 'export' ? 'export' : undefined} />)}
+      {!hidden.includes('bottom') && <footer className="bottom">{s.mode === 'world' ? <Timeline /> : <ShotTimeline />}</footer>}
+      <Splitter side="left" frame={frame} />
+      <Splitter side="right" frame={frame} />
+      <Splitter side="bottom" frame={frame} />
+      <StatusBar />
       <EditPrompt />
       <AskDialog />
       <ContextMenu />

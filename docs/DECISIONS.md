@@ -61,6 +61,51 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D196. The interface is rebuilt around workspaces, one Properties panel and a real timeline (stage 1: the frame)
+
+The interface had grown feature by feature: a flat row of buttons along the top, a left column of lists, settings
+and actions in one scroll, two dozen dialogs, tool options lying over the map, a fixed layout. It is rebuilt in
+stages, structure first and looks afterwards, after the programs it is used beside (Premiere Pro and After
+Effects: workspaces, panels, a timeline with tracks and snapping; Photoshop: a tool strip and an options bar;
+Figma: one Properties panel). The plan, approved on 22 November 2026:
+
+1. **The frame** (this record): workspaces, panels that resize and fold away, a status bar.
+2. **Commands and a menu bar**: one list of commands (name, shortcut, when it can be used) behind the menus
+   (File, Edit, View, Map, History, Window, Help), the keyboard and the right-click menus; the top bar's buttons
+   move into it.
+3. **A tool strip** down the left edge (icons, groups, one-key shortcuts) and the tool's options in a bar of
+   their own, no longer over the map.
+4. **Tabs at the left** (Maps, Layers, Countries, People and places, Areas, Events), each a list with a filter;
+   no settings among them.
+5. **Properties** at the right for whatever is chosen (a country, an event, a change, a layer, a place, a shot),
+   in groups that fold and stay folded; with nothing chosen, the map's own. The settings dialogs become groups
+   there; dialogs stay only for making things and for Versions.
+6. **The timeline**: play and the date in its head, tracks with names (events, changes, branches), snapping,
+   event bars dragged to move and retime them, a zoom bar, right-click menus.
+7. **Present and Export**: a shot's settings sorted into tabs; the export in its own workspace; shots as clips.
+8. **Tidying**: `Panels.tsx` broken up, colours and sizes as variables. Then the look itself, as its own plan.
+
+Stage 1 as built:
+
+- **Workspaces** (`src/ui/shell/layout.ts`, `Shell.tsx`): Map, History, World, Present, Export, in a bar under
+  the top bar. A workspace is an arrangement of the same panels, not a separate program: Present and Export are
+  the presentation mode there always was (`store.mode` stays, so everything that asks "world or shot?" is
+  untouched), Map, History and World are the world. `store.workspaceNow()` is the workspace being worked in:
+  the one chosen, or the nearest that fits the mode (a search result still switches the mode by itself).
+  For now History is the Map workspace with a tall timeline; World shows the map's own setting-up ("This map":
+  geography, terrain and lakes, sea level, calendar, statistics, the stars' look, the Planet Studio) at the
+  right instead of under the list of maps; Export shows only a shot's output quality and export. Each fills
+  out in its later stage.
+- **Panels resize and fold away**: the edges of the left panel, the right panel and the timeline are dragged
+  (within limits; a double click gives the first size back), and three buttons fold each away; Reset puts the
+  workspace back. Sizes are kept per workspace on this computer (`mapmaker.layouts`), validated when read like
+  the view settings. While an edge is dragged only the frame's CSS measures change; the store hears of the new
+  size once, when the edge is let go (the map is laid out anew by the browser, not rendered by React, per pixel).
+- **A status bar** along the bottom: what the tool in hand does (the hint that was only a tooltip), and
+  History Health. Search, Undo and Redo sit in the workspace bar.
+- Tests find things by `data-testid`, and every one stays on its control wherever it moves; the two mode
+  buttons became `workspace-map` and `workspace-present`, the map chooser gained `map-select`.
+
 ### D195. Generated border shifts between a change's before and after
 
 - **Why.** Where a border moves in many small shifts (a war over months), there is no time to draw each one.

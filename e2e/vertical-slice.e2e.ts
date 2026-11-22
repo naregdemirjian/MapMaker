@@ -492,7 +492,7 @@ try {
   let first: { dir: string; manifest: any } | null = null;
   await step('Make a shot of the event and export a preview image sequence', async () => {
     await page.locator('.left .row', { hasText: EVENT }).click();
-    await page.getByTestId('mode-present').click();
+    await page.getByTestId('workspace-present').click();
     await page.getByTestId('new-shot').click();
     await page.getByTestId('shot-editor').waitFor();
     await page.getByTestId('shot-seconds').fill('1');
@@ -542,7 +542,7 @@ try {
   await step('Export the same shot again after reloading: identical pixels', async () => {
     await page.reload();
     await page.getByText('Vertical Slice Test').click();
-    await page.getByTestId('mode-present').click();
+    await page.getByTestId('workspace-present').click();
     await page.locator('.left .row', { hasText: 'Shot 1' }).click();
     await page.getByTestId('shot-editor').waitFor();
     const second = await runExport('export-preview');
@@ -564,7 +564,7 @@ try {
 
   await step('Shot transitions: as recorded, none at all, or every change restyled (an advancing front from the border)', async () => {
     const drawn = () => page.evaluate(() => (window as any).__mapmaker.store.renderer.lastTransitions as Array<{ style: string; progress: number }>);
-    await page.getByTestId('mode-present').click();
+    await page.getByTestId('workspace-present').click();
     await page.getByTestId('shot-editor').waitFor();
     await page.getByTestId('frame-slider').fill('12');
     await page.waitForTimeout(100);
@@ -613,11 +613,11 @@ try {
     await page.getByTestId('transition-mode').selectOption('recorded');
     await page.getByTestId('transition-restyle').uncheck();
     await page.evaluate(() => (window as any).__mapmaker.store.flush());
-    await page.getByTestId('mode-world').click();
+    await page.getByTestId('workspace-map').click();
   });
 
   await step('Coastline clipping: territory over the sea disappears, territory on land stays', async () => {
-    await page.getByTestId('mode-world').click();
+    await page.getByTestId('workspace-map').click();
     await page.getByTestId('map-canvas').waitFor();
     await setDate('2000');
     const b = decodeBasemap(JSON.parse(readFileSync(join(ROOT, 'data', 'natural-earth', 'ne-110m.json'), 'utf8')) as BasemapFile);
@@ -719,7 +719,7 @@ try {
   });
 
   await step("A country filled with a flag (France) instead of its colour", async () => {
-    await page.getByTestId('mode-world').click().catch(() => undefined);
+    await page.getByTestId('workspace-map').click().catch(() => undefined);
     await page.locator('.left .row', { hasText: A }).click();
     await setDate('1451');
     await page.getByTestId('label-shown').uncheck(); // the label would cover the point measured
@@ -745,7 +745,7 @@ try {
   });
 
   await step("Add today's countries: all of Europe with their flags, as an event", async () => {
-    await page.getByTestId('mode-world').click().catch(() => undefined);
+    await page.getByTestId('workspace-map').click().catch(() => undefined);
     await setDate('1460');
     await page.getByTestId('open-add-countries').click();
     await page.getByTestId('add-countries').waitFor();
@@ -877,7 +877,7 @@ try {
   });
 
   await step('History Health reports no problems', async () => {
-    await page.getByTestId('mode-world').click();
+    await page.getByTestId('workspace-map').click();
     await page.getByTestId('health').click();
     await page.getByText('No problems found').waitFor();
     await screenshot('history-health');

@@ -33,6 +33,7 @@ import { setAssetBase } from '../render-engine/assets.ts';
 import { lonLatToVec, type Vec3 } from '../geo-kernel/vec.ts';
 import type { StrokeSettings } from '../render-engine/stroke.ts';
 
+import { type Workspace, type Layouts, type PanelLayout, type Side, DEFAULT_LAYOUTS, presents, loadLayouts, saveLayouts, loadWorkspace, saveWorkspace } from './shell/layout.ts';
 export type Mode = 'world' | 'present';
 /** One line of a right-click menu: an action, a heading, or a divider. */
 export type MenuItem = { label: string; run: () => void; danger?: boolean; testId?: string } | { heading: string } | 'divider';
@@ -115,6 +116,31 @@ class AppStore {
   }
   journal: JournalState = { head: 0, canUndo: false, canRedo: false, undoLabel: null, redoLabel: null };
   mode: Mode = 'world';
+  /** The workspace chosen (D196). Read it with `workspaceNow`: the mode can be changed from elsewhere (a search result opens the world). */
+  workspace: Workspace = loadWorkspace();
+  layouts: Layouts = loadLayouts();
+  /** The workspace being worked in: the one chosen, or the nearest that fits the mode. */
+  workspaceNow(): Workspace {
+    const w = this.workspace;
+    if (this.mode === 'present') return presents(w) ? w : 'present';
+    return presents(w) ? 'map' : w;
+  }
+  setWorkspace(w: Workspace) {
+    saveWorkspace(w);
+    if (presents(w)) this.set({ workspace: w, ...(this.mode === 'present' ? {} : { mode: 'present' as const, historyPlay: { ...this.historyPlay, on: false } }) });
+    else this.set({ workspace: w, ...(this.mode === 'world' ? {} : { mode: 'world' as const, presentCamera: null, playing: false }) });
+  }
+  /** Changes the layout of the workspace being worked in (kept on this computer). */
+  setLayout(patch: Partial<PanelLayout> | null) {
+    const w = this.workspaceNow();
+    this.layouts = { ...this.layouts, [w]: patch ? { ...this.layouts[w], ...patch } : { ...DEFAULT_LAYOUTS[w] } };
+    saveLayouts(this.layouts);
+    this.set({});
+  }
+  togglePanel(side: Side) {
+    const h = this.layouts[this.workspaceNow()].hidden;
+    this.setLayout({ hidden: h.includes(side) ? h.filter((x) => x !== side) : [...h, side] });
+  }
   spaceId = '';
   layerId = '';
   time: Instant = gregorian.fromCivil({ year: 2000 });
