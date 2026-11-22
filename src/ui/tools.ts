@@ -4,10 +4,14 @@ import type { Tool } from './store.ts';
 import type { World } from '../world-model/world.ts';
 import { terrainSourceOf, isSpaceMap } from '../world-model/world-settings.ts';
 
-export interface ToolInfo { id: Tool; key: string; group: 'select' | 'draw' | 'borders' | 'things' | 'land' | 'space'; name: string; hint: string }
+export interface ToolInfo { id: Tool; key: string; group: 'select' | 'draw' | 'borders' | 'things' | 'land' | 'space'; name: string; hint: string; stack?: string }
+
+/** Tools stacked in one place on the strip (D205): the one last used shows, the others slide out from it. */
+export const STACKS: Record<string, Tool[]> = { territory: ['lasso', 'pen', 'polygon'] };
+export const stackOf = (id: Tool): string | null => Object.keys(STACKS).find((k) => STACKS[k].includes(id)) ?? null;
 
 export const TOOLS: ToolInfo[] = [
-  { id: 'select', key: 'V', group: 'select', name: 'Select', hint: 'Click to inspect a place; drag to move the map; wheel to zoom; Alt+wheel to rotate. Several countries: Ctrl+click adds or removes one, Shift+drag a box round them, Ctrl+Shift+drag over them.' },
+  { id: 'select', key: 'V', group: 'select', name: 'Select', hint: 'Click to inspect a place; drag to move the map; wheel to zoom. Several countries: Ctrl+click adds or removes one, Shift+drag a box round them, Ctrl+Shift+drag over them.' },
   { id: 'lasso', key: 'B', group: 'draw', name: 'Territory brush', hint: 'Draw around an area freehand. It is given to the owner chosen on the right.' },
   { id: 'polygon', key: 'G', group: 'draw', name: 'Precise shape', hint: 'Click points; double-click or Enter to finish; Esc to cancel.' },
   { id: 'pen', key: 'P', group: 'draw', name: 'Border pen', hint: 'Draw a border at your own pace: drag or click, let go, pan and zoom, carry on later. Enter finishes; Backspace takes back the last piece. Drafts are kept with the project.' },

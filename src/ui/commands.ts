@@ -53,6 +53,8 @@ export const COMMANDS: Command[] = [
   { id: 'settings', name: 'Settings: speed of the working view…', run: dialog('settings') },
   // View
   { id: 'show', name: 'What the map shows…', run: dialog('show') },
+  { id: 'guide-countries', name: 'Guides: today\'s country borders', enabled: (s) => world(s) && earth(s), checked: (s) => s.referenceBorders, run: (s) => s.set({ referenceBorders: !s.referenceBorders }) },
+  { id: 'guide-states', name: 'Guides: today\'s states and provinces', enabled: (s) => world(s) && !!space(s) && space(s)!.kind === 'sphere' && !isSpaceMap(space(s)), checked: (s) => s.guideStates, run: (s) => s.set({ guideStates: !s.guideStates }) },
   { id: 'compare', name: 'Compare two dates', enabled: world, checked: (s) => s.compare.on, run: (s) => s.set({ compare: { ...s.compare, on: !s.compare.on, time: s.compare.on ? s.compare.time : defaultCompareTime(s) } }) },
   panel('left', 'Lists at the left'),
   panel('right', 'Panel at the right'),
@@ -89,7 +91,7 @@ export const command = (id: string): Command => { const c = BY_ID.get(id); if (!
 export const MENUS: Array<{ id: string; name: string; items: string[] }> = [
   { id: 'file', name: 'File', items: ['projects', 'versions', '-', 'import-borders', 'data-export'] },
   { id: 'edit', name: 'Edit', items: ['undo', 'redo', '-', 'delete', 'merge', '-', 'settings'] },
-  { id: 'view', name: 'View', items: ['show', 'compare', '-', 'panel-left', 'panel-right', 'panel-bottom'] },
+  { id: 'view', name: 'View', items: ['show', 'compare', '-', 'guide-countries', 'guide-states', '-', 'panel-left', 'panel-right', 'panel-bottom'] },
   { id: 'map', name: 'Map', items: ['new-map', 'new-layer', '-', 'add-countries', 'add-cities', '-', 'label-style', 'statistics'] },
   { id: 'history', name: 'History', items: ['new-event', 'event-types', 'branches', '-', 'play', 'previous-change', 'next-change', '-', 'health'] },
   { id: 'window', name: 'Window', items: [...WORKSPACES.map((w) => `workspace-${w.id}`), '-', 'reset-workspace'] },
@@ -123,6 +125,6 @@ export const OTHER_SHORTCUTS: Array<[string, string]> = [
   ['Enter', 'Finish the shape or the border being drawn'],
   ['Esc', 'Cancel what is being drawn'],
   ['Backspace', 'Border pen: take back the last piece'],
-  ['Wheel', 'Zoom the map or the timeline (Alt+wheel turns the map)'],
+  ['Wheel', 'Zoom the map or the timeline'],
   ['Double-click the timeline', 'Fit the whole history'],
 ];

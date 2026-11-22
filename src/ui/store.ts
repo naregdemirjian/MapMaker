@@ -35,6 +35,8 @@ import type { StrokeSettings } from '../render-engine/stroke.ts';
 
 import { type Workspace, type Layouts, type PanelLayout, type Side, type ListTab, type ListTabs, DEFAULT_LAYOUTS, presents, loadLayouts, saveLayouts, loadWorkspace, saveWorkspace, loadListTabs, saveListTabs } from './shell/layout.ts';
 import type { TLTrack } from './timeline-layout.ts';
+/** How freehand outlines are cleaned up, at first and when put back (D207). */
+export const DEFAULT_STROKE: StrokeSettings = { smoothness: 1, irregularity: 0, precision: 1.2, seed: 1 };
 export type Mode = 'world' | 'present';
 /** One line of a right-click menu: an action, a heading, or a divider. */
 export type MenuItem = { label: string; run: () => void; danger?: boolean; testId?: string; shortcut?: string; disabled?: boolean; checked?: boolean } | { heading: string } | 'divider';
@@ -234,7 +236,7 @@ export class AppStore {
   /** What each change recorded into an event does: at once, or spreading for how long, and how (D86; kept on this computer). */
   recordLength: RecordLength = loadRecordLength();
   cameras = new Map<string, Camera>();
-  stroke: StrokeSettings = { smoothness: 1, irregularity: 0, precision: 1.2, seed: 1 };
+  stroke: StrokeSettings = { ...DEFAULT_STROKE };
   /** The smart brushes (D148): whether lines drawn are adjusted, how, and how strongly each feature draws them (kept on this computer). */
   smart: SmartSettings = loadSmart();
   setSmart(v: SmartSettings) { this.smart = v; saveSmart(v); this.notify(); }
@@ -266,7 +268,7 @@ export class AppStore {
    * Playing history in the world-building view: on or off, how fast (years of history a second) and whether it
    * goes round again from the start of the timeline at its end.
    */
-  historyPlay = { on: false, yearsPerSecond: 10, loop: false };
+  historyPlay = { on: false, yearsPerSecond: 1 / 365.2425, loop: false };
   dialog: string | null = null;
   /** The Planet Studio (D156): the simulated planet's map it edits (null: a new planet), and a name to start with. */
   studioSpaceId: string | null = null;
@@ -317,6 +319,8 @@ export class AppStore {
   private coverLoading = false;
   /** Show present-day country borders over the land while drawing (never exported). */
   referenceBorders = false;
+  /** Today's states and provinces drawn over the working map as guides (D206). */
+  guideStates = false;
   private queue: Promise<unknown> = Promise.resolve();
   private halted = false;
   private toastSeq = 0;

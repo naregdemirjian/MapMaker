@@ -25,6 +25,15 @@ export interface Star {
   minor?: boolean;
   /** The body it goes round (a moon's planet, D117): shown only once the view sets it apart from that body. */
   around?: number;
+  /**
+   * Its true radius in the map's units (D208: the solar system true to scale): drawn at least this big, so that it
+   * grows as it is closed in on; never smaller than a dot that can be found.
+   */
+  radius?: number;
+  /** Drawn with its disc to the left of its place, only its right edge reaching it (the Sun at the edge of a poster row, D208). */
+  limb?: boolean;
+  /** A dwarf planet (drawn in its own row below the planets, D208). */
+  dwarf?: boolean;
 }
 
 export interface StarCatalogue { radiusLy: number; stars: Star[]; byId: Map<number, Star> }

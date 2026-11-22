@@ -1,12 +1,13 @@
 // Editing the look of country labels: the general style (all labels) and each country's own.
+import { ResetButton } from '../shell/Reset.tsx';
 import { useEffect, useState } from 'react';
 import { useStore } from '../store.ts';
 import { NumberField } from './Panels.tsx';
 import * as cmd from '../../domain/commands.ts';
-import { resolveLabelStyle, labelFont, labelText, LABEL_FONTS, type LabelStyle, type CountryLabel } from '../../render-engine/label-style.ts';
+import { resolveLabelStyle, labelFont, labelText, LABEL_FONTS, DEFAULT_LABEL_STYLE, type LabelStyle, type CountryLabel } from '../../render-engine/label-style.ts';
 
 /** A slider that previews while dragging and saves once, when let go (one undo step). */
-export function Slider({ value, min, max, step, onCommit, format, testId }: { value: number; min: number; max: number; step: number; onCommit: (v: number) => void; format?: (v: number) => string; testId?: string }) {
+export function Slider({ value, min, max, step, onCommit, format, testId, def }: { value: number; min: number; max: number; step: number; onCommit: (v: number) => void; format?: (v: number) => string; testId?: string; def?: number }) {
   const [v, setV] = useState(value);
   useEffect(() => setV(value), [value]);
   const commit = () => { if (v !== value) onCommit(v); };
@@ -14,6 +15,7 @@ export function Slider({ value, min, max, step, onCommit, format, testId }: { va
     <span className="slider">
       <input type="range" min={min} max={max} step={step} value={v} onChange={(e) => setV(Number(e.target.value))} onPointerUp={commit} onKeyUp={commit} onBlur={commit} data-testid={testId} />
       <span className="slider-value">{format ? format(v) : v}</span>
+      {def !== undefined && <ResetButton def={format ? format(def) : def} at={value === def} onReset={() => { setV(def); if (value !== def) onCommit(def); }} testId={testId ? `${testId}-reset` : undefined} />}
     </span>
   );
 }
@@ -30,19 +32,19 @@ export function LabelStyleEditor({ value, onChange, idPrefix }: { value: LabelSt
         <label>Weight<select value={value.weight} onChange={(e) => onChange({ weight: Number(e.target.value) })} data-testid={`${idPrefix}-weight`}>
           <option value={300}>Light</option><option value={400}>Regular</option><option value={600}>Semibold</option><option value={700}>Bold</option><option value={900}>Black</option>
         </select></label>
-        <label>Opacity<Slider value={value.opacity} min={0} max={1} step={0.05} onCommit={(v) => onChange({ opacity: v })} format={(v) => `${Math.round(v * 100)}%`} /></label>
+        <label>Opacity<Slider value={value.opacity} def={DEFAULT_LABEL_STYLE.opacity} min={0} max={1} step={0.05} onCommit={(v) => onChange({ opacity: v })} format={(v) => `${Math.round(v * 100)}%`} /></label>
       </div>
       <div className="checks">
         <label className="check"><input type="checkbox" checked={value.italic} onChange={(e) => onChange({ italic: e.target.checked })} /> Italic</label>
         <label className="check"><input type="checkbox" checked={value.uppercase} onChange={(e) => onChange({ uppercase: e.target.checked })} data-testid={`${idPrefix}-uppercase`} /> CAPITALS</label>
       </div>
-      <label>Letter spacing<Slider value={value.letterSpacing} min={-0.1} max={0.6} step={0.01} onCommit={(v) => onChange({ letterSpacing: v })} format={(v) => v.toFixed(2)} /></label>
+      <label>Letter spacing<Slider value={value.letterSpacing} def={DEFAULT_LABEL_STYLE.letterSpacing} min={-0.1} max={0.6} step={0.01} onCommit={(v) => onChange({ letterSpacing: v })} format={(v) => v.toFixed(2)} /></label>
       <div className="two">
         <label>Colour<input type="color" value={value.color} onChange={(e) => onChange({ color: e.target.value })} data-testid={`${idPrefix}-color`} /></label>
         <label>Outline colour<input type="color" value={value.haloColor} onChange={(e) => onChange({ haloColor: e.target.value })} /></label>
       </div>
-      <label>Outline width<Slider value={value.haloWidth} min={0} max={0.5} step={0.01} onCommit={(v) => onChange({ haloWidth: v })} format={(v) => (v === 0 ? 'none' : v.toFixed(2))} /></label>
-      <label>Size<Slider value={value.sizeScale} min={0.2} max={4} step={0.05} onCommit={(v) => onChange({ sizeScale: v })} format={(v) => `${Math.round(v * 100)}%`} testId={`${idPrefix}-size`} /></label>
+      <label>Outline width<Slider value={value.haloWidth} def={DEFAULT_LABEL_STYLE.haloWidth} min={0} max={0.5} step={0.01} onCommit={(v) => onChange({ haloWidth: v })} format={(v) => (v === 0 ? 'none' : v.toFixed(2))} /></label>
+      <label>Size<Slider value={value.sizeScale} def={DEFAULT_LABEL_STYLE.sizeScale} min={0.2} max={4} step={0.05} onCommit={(v) => onChange({ sizeScale: v })} format={(v) => `${Math.round(v * 100)}%`} testId={`${idPrefix}-size`} /></label>
       <div className="two">
         <label>Smallest (px)<input type="number" min={2} max={400} value={value.minSize} onChange={(e) => Number(e.target.value) > 0 && onChange({ minSize: Number(e.target.value) })} /></label>
         <label>Largest (px)<input type="number" min={2} max={400} value={value.maxSize} onChange={(e) => Number(e.target.value) > 0 && onChange({ maxSize: Number(e.target.value) })} /></label>
@@ -81,8 +83,8 @@ export function LabelStyleDialog({ onClose }: { onClose: () => void }) {
         <h4>Cities and characters</h4>
         <p className="muted">They grow as you zoom in and shrink as you zoom out; city names too small to read are left out. Their size overall:</p>
         <div className="two">
-          <label>Cities (%)<NumberField min={25} max={400} step={5} value={Math.round(cmd.pointStyle(w).city * 100)} onCommit={(n) => s.execute((wd) => cmd.setPointStyle(wd, { city: n / 100 }))} testId="city-size" /></label>
-          <label>Characters (%)<NumberField min={25} max={400} step={5} value={Math.round(cmd.pointStyle(w).character * 100)} onCommit={(n) => s.execute((wd) => cmd.setPointStyle(wd, { character: n / 100 }))} testId="character-size" /></label>
+          <label>Cities (%)<NumberField min={25} max={400} step={5} value={Math.round(cmd.pointStyle(w).city * 100)} def={100} onCommit={(n) => s.execute((wd) => cmd.setPointStyle(wd, { city: n / 100 }))} testId="city-size" /></label>
+          <label>Characters (%)<NumberField min={25} max={400} step={5} value={Math.round(cmd.pointStyle(w).character * 100)} def={100} onCommit={(n) => s.execute((wd) => cmd.setPointStyle(wd, { character: n / 100 }))} testId="character-size" /></label>
         </div>
         <div className="modal-actions">
           <button onClick={() => s.execute((wd) => cmd.setGeneralLabelStyle(wd, Object.fromEntries(Object.keys(stored).map((k) => [k, null]))))} disabled={!Object.keys(stored).length}>Reset to default</button>

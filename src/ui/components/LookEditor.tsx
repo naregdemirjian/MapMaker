@@ -83,10 +83,10 @@ export function LookEditor({ value, onChange, blend, idPrefix }: { value: Countr
     <div className="look-editor" data-testid={`${idPrefix}-look`}>
       <div className="two">
         <label title="Higher countries are drawn over lower ones and cast their shadows on them; countries of the same elevation never shade each other">Elevation
-          <NumberField min={-100} max={100} step={1} value={value.elevation} onCommit={(n) => set({ elevation: Math.round(n) })} testId={`${idPrefix}-elevation`} />
+          <NumberField min={-100} max={100} step={1} value={value.elevation} def={0} onCommit={(n) => set({ elevation: Math.round(n) })} testId={`${idPrefix}-elevation`} />
         </label>
         <label title="How strongly the fill shows; its effects keep their own strength">Fill (%)
-          <NumberField min={0} max={100} step={5} value={Math.round(value.opacity * 100)} onCommit={(n) => set({ opacity: n / 100 })} testId={`${idPrefix}-fill-opacity`} />
+          <NumberField min={0} max={100} step={5} value={Math.round(value.opacity * 100)} def={100} onCommit={(n) => set({ opacity: n / 100 })} testId={`${idPrefix}-fill-opacity`} />
         </label>
       </div>
       {blend && (
@@ -121,8 +121,8 @@ export function LookEditor({ value, onChange, blend, idPrefix }: { value: Countr
                       </select>
                     </label>
                   );
-                  if (f.type === 'percent') return <label key={f.key}>{f.label}<NumberField min={0} max={100} step={5} value={Math.round((v as number) * 100)} onCommit={(n) => put(n / 100)} testId={`${idPrefix}-${e.kind}-${f.key}`} /></label>;
-                  return <label key={f.key}>{f.label}<NumberField min={f.min} max={f.max} step={f.step} value={v as number} onCommit={put} testId={`${idPrefix}-${e.kind}-${f.key}`} /></label>;
+                  if (f.type === 'percent') return <label key={f.key}>{f.label}<NumberField min={0} max={100} step={5} value={Math.round((v as number) * 100)} def={Math.round(((EFFECT_DEFAULTS[e.kind] as unknown as Record<string, number>)[f.key] ?? 0) * 100)} onCommit={(n) => put(n / 100)} testId={`${idPrefix}-${e.kind}-${f.key}`} /></label>;
+                  return <label key={f.key}>{f.label}<NumberField min={f.min} max={f.max} step={f.step} value={v as number} def={(EFFECT_DEFAULTS[e.kind] as unknown as Record<string, number>)[f.key]} onCommit={put} testId={`${idPrefix}-${e.kind}-${f.key}`} /></label>;
                 })}
               </div>
             )}

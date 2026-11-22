@@ -4,6 +4,7 @@ import { useRef } from 'react';
 import { useStore, store } from '../store.ts';
 import { WORKSPACES, DEFAULT_LAYOUTS, dragged, tracks, type Side } from './layout.ts';
 import { SearchBox } from '../components/Search.tsx';
+import { MapChooser } from '../components/Panels.tsx';
 import { TOOLS } from '../tools.ts';
 
 /** The workspaces, and what belongs to every one of them: search, undo and redo, folding panels away. */
@@ -21,6 +22,7 @@ export function WorkspaceBar() {
           <button key={w.id} role="tab" aria-selected={w.id === now} className={`workspace ${w.id === now ? 'on' : ''}`} title={w.hint} onClick={() => s.setWorkspace(w.id)} data-testid={`workspace-${w.id}`}>{w.name}</button>
         ))}
       </div>
+      <MapChooser />
       <div className="spacer" />
       <SearchBox />
       <button disabled={!s.journal.canUndo} title={s.journal.undoLabel ? `Undo: ${s.journal.undoLabel} (Ctrl+Z)` : 'Nothing to undo'} onClick={() => s.undo()} data-testid="undo">Undo</button>

@@ -1,4 +1,5 @@
 // How a country's territory is filled: its colour, a picture (a flag or your own), or a video.
+import { RangeReset } from '../shell/Reset.tsx';
 import { useEffect, useState } from 'react';
 import { useStore, store } from '../store.ts';
 import { Api } from '../api.ts';
@@ -102,7 +103,7 @@ export function CountryFillSection({ id }: { id: string }) {
             <option value="near">One picture, and a copy for pieces farther than…</option>
           </select></label>
           {fill.pieces === 'near' && <label className="range-row">Pieces farther apart than <b>{(fill.gapKm ?? 500).toLocaleString()} km</b> get their own copy
-            <input type="range" min={0} max={100} step={1} value={kmToSlider(fill.gapKm ?? 500)} onChange={(ev) => save({ ...fill, gapKm: sliderToKm(Number(ev.target.value)) })} data-testid="fill-gap" />
+            <input type="range" min={0} max={100} step={1} value={kmToSlider(fill.gapKm ?? 500)} onChange={(ev) => save({ ...fill, gapKm: sliderToKm(Number(ev.target.value)) })} data-testid="fill-gap" /><RangeReset def={kmToSlider(500)} value={kmToSlider(fill.gapKm ?? 500)} />
           </label>}
         </>}
         {fill.fit === 'tile' && <label>Pattern size (px)<input type="number" min={4} max={2000} value={fill.tileSize ?? 120} onChange={(ev) => Number(ev.target.value) > 0 && save({ ...fill, tileSize: Number(ev.target.value) })} /></label>}

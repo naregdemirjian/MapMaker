@@ -61,6 +61,86 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D208. The solar system true to scale and as photographed by default; the Sun grows as it is closed in on; a poster row
+
+- **A new solar system map** is true to scale (distances), as photographed (the photographic look of D191), and
+  side by side as a poster (below). Maps made before keep what they stored.
+- **True to scale, sizes too**: each body carries its true radius in au (`Star.radius`, from `RADIUS_KM`) and is drawn
+  that big on screen, so the Sun is a small dot from afar and grows as it is closed in on; never smaller than a dot
+  that can be found (3 pixels the Sun, 1.8 a planet, 1.1 a moon), names as before. The moons are at their true
+  distances from their planets (`MOON_ORBIT_KM`), and so are the circles of their orbits. Compressed is as it was.
+  A solar system closes in sixteen doublings instead of six, far enough to see the Sun and the planets as globes.
+- **Side by side as a poster** (`RowSizes` 'poster', the first choice in "Sizes and moons…"), after the user's
+  picture: true sizes, the Sun too (ten Jupiters across),
+  its disc off to the left so that only its edge shows (`Star.limb`); the planets in a row at even steps, their
+  names slanting up from them; the dwarf planets in a row of their own below, names slanting down: Ceres between
+  Mars and Jupiter, Pluto and Eris past Neptune (`DWARFS`: Ceres and Eris exist only in this row, where where they
+  are does not matter; Pluto keeps its id, so who holds it is kept). New maps show no moons in it.
+
+### D207. A button beside every adjustable value puts it back to its default
+
+`NumberField` and `Slider` take `def`; with it a small rewind button follows the field and puts the value back
+(greyed while it is the default already). A bare `<input type="range">` gets `RangeReset` straight after it,
+which sets the slider as if dragged there, so its own handler is used unchanged (`shell/Reset.tsx`). Defaults
+come from the defaults the settings already have: the layer's (the political layer's 78 % and 1.4, another
+layer's 60 % and 1), `DEFAULT_BORDER`, the effects' own defaults, `DEFAULT_LABEL_STYLE`, `DEFAULT_SKY`,
+`DEFAULT_EVENTS_BOX`, `DEFAULT_GRAPHIC`, the chosen map look's, the smart brush's, the brush settings'
+(`DEFAULT_STROKE`, now in the store). Values that are not settings (dates, a calendar's months, sea-level
+points, a camera's frame) have none; nor yet the few sliders that hold their value until let go (terrain
+strength, an icon's size, a transition's amounts).
+
+### D206. Guides: today's country borders and today's states and provinces (View menu)
+
+The View menu has "Guides: today's country borders" (the present-day borders that were a checkbox under the
+map, Earth maps only) and "Guides: today's states and provinces" (any globe): the Regions tool's own Natural
+Earth outlines drawn thin and dashed over the working map, never in shots or exports (`src/ui/guides.ts`). They
+are kept simplified at four levels of detail (0.4°, 0.08°, 0.015°, full) chosen by the zoom, and only rings whose
+box is in view are drawn, so they cost little while the map moves.
+
+### D205. The territory brush, the precise shape and the border pen stacked in one place on the tool strip
+
+As in Photoshop: one button shows the one of the three last used, with a mark at its corner; resting the pointer
+on it (a third of a second) or holding it pressed slides the three out beside it, each with its name and key
+(`STACKS` in `tools.ts`, `ToolStack` in `Panels.tsx`). The keys B, G and P still take each in hand directly.
+Tests take a stacked tool with `chooseTool`, which rests the pointer on the stack when the tool is under another.
+
+### D204. Splitting: a country split before is split again; a line a little short reaches the edge; an event renames a country
+
+- **The split refused lines that plainly crossed a country** ("The line does not cut … in two") when the country
+  had been split or changed before at an earlier date. Who held each piece was read before the line cut the map;
+  when the line divides a parcel that no change names, the kernel keeps that parcel's id for one piece and makes
+  the other its *sibling*, which the reading made before the cut does not know, so that piece counted as
+  nobody's and the line seemed not to divide the country. Who holds what is now read after the cut (the engine
+  follows lineage as it is then). A test splits a country twice at two dates.
+- **A line that stops a little short** of the country's edge at either end (by up to a third of its length) is
+  carried on straight to the edge (`reachEdge`): drawn a touch short, or ending over the sea where a country's
+  land is shown ending at the coast while its parcels reach further out. A line stopping in the middle of the
+  country still divides nothing and is refused as before.
+- **An event can rename a country**: under its changes, "Rename a country" (which country, its new name) adds a
+  renaming from the event's start, listed with its other changes, moved and deleted with it, one undo. (Renames
+  could already belong to an event recorded into, but nothing offered it.)
+
+### D203. Corrections after using the new interface (22 November)
+
+From the user's first use of stages 1 to 6:
+
+- **The top bar is thin** (24 pixels, as in DaVinci Resolve): the name, the menus, the project's name at the
+  right, the text the same size as before. The map chooser and the branch chooser moved to the workspace bar
+  (`MapChooser`).
+- **History plays a day a second at first**, and as slowly as real time: 1 second, 1 minute, 1 hour, 6 hours,
+  1 day and 1 week a second come before the speeds there were.
+- **Space applies** "What does this drawing mean?", as Enter does (and the other prompts after drawing: a
+  split, an area or line); not while typing in a field.
+- The hints "Ctrl or Shift + click to choose several…" under the lists are gone (the shortcuts list has them).
+- **Alt and the wheel no longer turn the map** (it was too easily done by accident); the map is turned in a
+  shot's camera.
+- **The date viewed**: the year was set at the right of a cell as wide as the longest year of the whole
+  timeline, which on a timeline reaching into deep time ("400,000 years ago") pushed it under the calendar
+  button. Only years written as dates count now (from 9999 BCE), and the steady cells end before the button.
+- **Layer rows**: the whole row chooses a layer (not only its name), and a second click lets it go (Properties
+  shows the map again). The highlighted row is the layer chosen; the layer drawn on has a bar at its left
+  ("drawing here"), so the political layer is no longer always highlighted.
+
 ### D202. The map itself in Properties when nothing is selected (interface stage 5, second part)
 
 - With nothing selected, Properties shows **the map being viewed** (`MapPanel`): what it is, and its setting-up

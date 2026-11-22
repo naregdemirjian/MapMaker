@@ -68,13 +68,15 @@ export function WhenChooser({ when, setWhen }: { when: When; setWhen: (w: When) 
   </>;
 }
 
-/** Enter applies, Escape closes (not while typing in a text box or choosing in a list). */
+/** Enter or Space applies, Escape closes (not while typing in a text box or choosing in a list). */
 export function useKeys(confirm: () => void, close: () => void) {
   useEffect(() => {
     const key = (ev: KeyboardEvent) => {
       if (ev.key === 'Escape') { ev.preventDefault(); close(); return; }
-      if (ev.key !== 'Enter' || ev.shiftKey) return;
+      // Enter or Space applies (Space only while not typing in a field).
       const tag = (ev.target as HTMLElement)?.tagName;
+      const space = ev.key === ' ' && !ev.ctrlKey && !ev.metaKey && !ev.altKey && tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT';
+      if (!space && (ev.key !== 'Enter' || ev.shiftKey)) return;
       if (tag === 'TEXTAREA' || tag === 'SELECT') return;
       ev.preventDefault();
       confirm();

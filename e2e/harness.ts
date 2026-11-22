@@ -167,6 +167,18 @@ export class Harness {
     }
   }
 
+  /**
+   * Take a tool in hand from the tool strip (D205): its own button, or, for a tool stacked under another, the
+   * stack's button rested on until the others slide out.
+   */
+  async chooseTool(id: string): Promise<void> {
+    const b = this.page.getByTestId(`tool-${id}`);
+    if (await b.count() && await b.isVisible()) { await b.click(); return; }
+    await this.page.locator('[data-testid^="tool-stack-"]', { has: this.page.locator('.tool') }).first().hover();
+    await b.waitFor();
+    await b.click();
+  }
+
   async screenshot(name: string): Promise<void> {
     await this.page.waitForTimeout(150);
     await capture(this.page, join(this.out, `${String(++this.shotNo).padStart(2, '0')}-${name}.png`));

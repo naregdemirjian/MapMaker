@@ -285,7 +285,7 @@ try {
     await page.locator('.modal').waitFor({ state: 'detached' });
     // The test countries are drawn over the Atlantic; their territory is kept over the sea until the
     // coastline clipping step switches clipping back on.
-    await page.locator('[data-testid="layer-row"].sel > span').first().click(); // (the layer drawn on, shown in Properties)
+    await page.evaluate(() => { const s = (window as any).__mapmaker.store; s.set({ selection: { kind: 'layer', id: s.layerId } }); }); // (the layer drawn on, shown in Properties)
     assert.ok(await page.getByTestId('clip-to-land').isChecked(), 'territory ends at the coast by default');
     await page.getByTestId('clip-to-land').uncheck();
   });
@@ -295,7 +295,7 @@ try {
     await page.getByTestId('new-entity-name').fill(A);
     await page.getByTestId('new-entity-create').click();
     await page.getByTestId('entity-panel').waitFor();
-    await page.getByTestId('tool-lasso').click();
+    await page.getByTestId('tool-stack-territory').hover(); await page.getByTestId('tool-lasso').click();
     assert.equal(await page.getByTestId('paint-owner').inputValue(), await entityId(A), 'the new country is chosen in "Give to"');
     // The countries exist from the year 900 on: "correct this period" applies from the date being viewed.
     await setDate('900');
@@ -324,7 +324,7 @@ try {
     await page.getByRole('button', { name: '+ New' }).click();
     await page.getByTestId('new-entity-name').fill(B);
     await page.getByTestId('new-entity-create').click();
-    await page.getByTestId('tool-lasso').click();
+    await page.getByTestId('tool-stack-territory').hover(); await page.getByTestId('tool-lasso').click();
     const { cx, cy } = await centre();
     await drawLasso(blob(cx + 75, cy, 100, 75));
     await page.getByTestId('choice-correct').click();
@@ -396,7 +396,7 @@ try {
     await page.getByTestId('event-create').click();
     await page.getByTestId('recording').waitFor();
     await expectDate('1 January 1450', 'creating the event moves to its start date');
-    await page.getByTestId('tool-lasso').click();
+    await page.getByTestId('tool-stack-territory').hover(); await page.getByTestId('tool-lasso').click();
     await page.getByTestId('paint-owner').selectOption({ label: B });
     const { cx, cy } = await centre();
     await drawLasso(blob(cx - 75, cy, 40, 34));
@@ -422,7 +422,7 @@ try {
     assert.equal(await ownerAt(P.conq, '1 January 1450'), B);
     await setDate('1300');
     // Drawing over the area at an earlier date: the prompt says how long such a change would last.
-    await page.getByTestId('tool-lasso').click();
+    await page.getByTestId('tool-stack-territory').hover(); await page.getByTestId('tool-lasso').click();
     const c = await toPage(P.conq);
     await drawLasso(blob(c[0], c[1], 12, 10));
     assert.match((await page.getByTestId('new-change-lasts').textContent()) ?? '', /until 1 January 1450, when “Test border war” changes it/);
@@ -666,7 +666,7 @@ try {
     const ocean = await canvasPixel([-30, 40]); // open sea, no territory
     for (const p of seaSamples) assert.ok(colourDiff(before.get(String(p.ll))!, ocean) > 20, `unclipped: territory is drawn over the sea (at ${p.ll}: ${before.get(String(p.ll))}; open sea: ${ocean})`);
 
-    await page.locator('[data-testid="layer-row"].sel > span').first().click(); // (the layer drawn on, shown in Properties)
+    await page.evaluate(() => { const s = (window as any).__mapmaker.store; s.set({ selection: { kind: 'layer', id: s.layerId } }); }); // (the layer drawn on, shown in Properties)
     await page.getByTestId('clip-to-land').check();
     await page.waitForTimeout(150);
     // Once clipped, every label stands on land. Labels are placed by the 1:50m coast in cells of an

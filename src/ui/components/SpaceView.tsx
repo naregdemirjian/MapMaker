@@ -217,7 +217,9 @@ export function SpaceView() {
     if (!el) return;
     const wheel = (e: WheelEvent) => {
       e.preventDefault();
-      const next = { ...camera, zoom: Math.max(-1.5, Math.min(6, camera.zoom - e.deltaY / 400)) };
+      // (A solar system closes in much further, D208: true to scale, far enough to see the Sun and the planets as globes.)
+      const most = settings?.catalogue === 'solar' ? 16 : 6;
+      const next = { ...camera, zoom: Math.max(-1.5, Math.min(most, camera.zoom - e.deltaY / 400)) };
       if (shot) {
         store.setLive({ presentCamera: next });
         clearTimeout(wheelTimer.current);

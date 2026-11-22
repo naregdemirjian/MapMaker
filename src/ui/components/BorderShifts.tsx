@@ -2,6 +2,7 @@
 // border in between, step by step, as real changes. The dialog sets how long a step is, when the gainer holds
 // all of it, how much the other side pushes back and how ragged the front is; "Another version" tries the
 // next pattern of chance. Made again or taken away at any time; one step to undo.
+import { RangeReset } from '../shell/Reset.tsx';
 import { useState } from 'react';
 import { useStore } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
@@ -59,10 +60,10 @@ export function BorderShiftsDialog() {
         <label>Until (all of it is {gainer}'s)<DateField value={until} onChange={(t) => setUntil(t)} testId="shifts-until" cal={cal} /></label>
         <div className={problem ? 'error' : 'muted'} data-testid="shifts-count">{problem ?? `${steps} ${steps === 1 ? 'step' : 'steps'}, then the last at ${fmt(until!)}.`}</div>
         <label className="range-row">The other side pushes back: <b>{Math.round(pushBack * 100)}%</b>
-          <input type="range" min={0} max={100} step={5} value={Math.round(pushBack * 100)} onChange={(e) => setPushBack(Number(e.target.value) / 100)} data-testid="shifts-pushback" title="0%: the border only ever advances. 100%: it is thrown back often, and far" />
+          <input type="range" min={0} max={100} step={5} value={Math.round(pushBack * 100)} onChange={(e) => setPushBack(Number(e.target.value) / 100)} data-testid="shifts-pushback" title="0%: the border only ever advances. 100%: it is thrown back often, and far" /><RangeReset def={50} value={Math.round(pushBack * 100)} />
         </label>
         <label className="range-row">How ragged the front is: <b>{Math.round(roughness * 100)}%</b>
-          <input type="range" min={0} max={100} step={5} value={Math.round(roughness * 100)} onChange={(e) => setRoughness(Number(e.target.value) / 100)} data-testid="shifts-roughness" />
+          <input type="range" min={0} max={100} step={5} value={Math.round(roughness * 100)} onChange={(e) => setRoughness(Number(e.target.value) / 100)} data-testid="shifts-roughness" /><RangeReset def={35} value={Math.round(roughness * 100)} />
         </label>
         <div className="buttons">
           <button className="primary" disabled={!!problem} onClick={() => generate()} data-testid="shifts-generate">{made ? 'Generate again' : 'Generate'}</button>

@@ -1,9 +1,10 @@
 // The smart brushes in the interface (Stage 12, D148): their settings in the drawing tools' options, and the
 // panel shown while a line just drawn is adjusted (its weights moved live, its side swapped, the line used,
 // kept as drawn, or dropped).
+import { RangeReset } from '../shell/Reset.tsx';
 import { useStore } from '../store.ts';
 import { smartOffered } from '../smart-input.ts';
-import { SMART_FEATURES, SMART_MIN_RADIUS, SMART_MAX_RADIUS, type SmartSettings } from '../smart-settings.ts';
+import { SMART_FEATURES, SMART_MIN_RADIUS, SMART_MAX_RADIUS, DEFAULT_SMART, DEFAULT_WEIGHTS, type SmartSettings } from '../smart-settings.ts';
 import type { SmartWeights } from '../../render-engine/smart-brush.ts';
 import type { MapSpaceRow } from '../../world-model/schema.ts';
 
@@ -25,14 +26,14 @@ export function SmartWeightsControls() {
       {featuresOn(space, sm.mode).map((f) => (
         <label key={f.key} title={f.hint}>{f.name}
           <span className="row-inline amount">
-            <input type="range" min={0} max={100} step={5} value={Math.round(sm.weights[f.key] * 100)} onChange={(e) => weight(f.key, Number(e.target.value) / 100)} data-testid={`smart-${f.key}`} />
+            <input type="range" min={0} max={100} step={5} value={Math.round(sm.weights[f.key] * 100)} onChange={(e) => weight(f.key, Number(e.target.value) / 100)} data-testid={`smart-${f.key}`} /><RangeReset def={Math.round(DEFAULT_WEIGHTS[f.key] * 100)} value={Math.round(sm.weights[f.key] * 100)} />
             <span className="muted amount-value">{Math.round(sm.weights[f.key] * 100)}</span>
           </span>
         </label>
       ))}
       <label title="How far either side of your stroke the line may go (on screen)">Search radius
         <span className="row-inline amount">
-          <input type="range" min={SMART_MIN_RADIUS} max={SMART_MAX_RADIUS} step={1} value={sm.radius} onChange={(e) => set({ radius: Number(e.target.value) })} data-testid="smart-radius" />
+          <input type="range" min={SMART_MIN_RADIUS} max={SMART_MAX_RADIUS} step={1} value={sm.radius} onChange={(e) => set({ radius: Number(e.target.value) })} data-testid="smart-radius" /><RangeReset def={DEFAULT_SMART.radius} value={sm.radius} />
           <span className="muted amount-value">{sm.radius} px</span>
         </span>
       </label>

@@ -108,8 +108,10 @@ function PaintPrompt({ p }: { p: Extract<PendingEdit, { kind: 'paint' }> }) {
   useEffect(() => {
     const key = (ev: KeyboardEvent) => {
       if (ev.key === 'Escape') { ev.preventDefault(); close(); return; }
-      if (ev.key !== 'Enter' || ev.shiftKey) return;
+      // Enter or Space applies (Space only while not typing in a field).
       const tag = (ev.target as HTMLElement)?.tagName;
+      const space = ev.key === ' ' && !ev.ctrlKey && !ev.metaKey && !ev.altKey && tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT';
+      if (!space && (ev.key !== 'Enter' || ev.shiftKey)) return;
       if (tag === 'TEXTAREA' || tag === 'SELECT') return;
       ev.preventDefault();
       confirm();
@@ -163,7 +165,7 @@ function PaintPrompt({ p }: { p: Extract<PendingEdit, { kind: 'paint' }> }) {
         <div className="muted" data-testid="correct-explained">Changes the map from {fmt(s.time)} on, without making an event; earlier dates stay as they are. {lasts}</div>
       </div>
       <div className="muted small-note">Correcting a border's shape for all time is done by dragging its points with the Border points tool.</div>
-      <div className="modal-actions"><button onClick={close}>Cancel</button><button className="primary" onClick={confirm} data-testid="confirm-edit">Apply <span className="key">Enter</span></button></div>
+      <div className="modal-actions"><button onClick={close}>Cancel</button><button className="primary" onClick={confirm} data-testid="confirm-edit">Apply <span className="key">Enter</span> <span className="key">Space</span></button></div>
     </Modal>
   );
 }

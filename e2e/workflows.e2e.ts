@@ -33,12 +33,12 @@ try {
     await page.getByTestId('map-canvas').waitFor();
     // These countries are drawn over the Atlantic: keep their territory over the sea
     // (coastline clipping is checked in the vertical-slice test).
-    await page.locator('[data-testid="layer-row"].sel > span').first().click(); // (the layer drawn on, shown in Properties)
+    await page.evaluate(() => { const s = (window as any).__mapmaker.store; s.set({ selection: { kind: 'layer', id: s.layerId } }); }); // (the layer drawn on, shown in Properties)
     await page.getByTestId('clip-to-land').uncheck();
     // "Correct this period" applies from the date being viewed: the countries exist from 1400 on.
     await h.setDate('1400');
     await h.newCountry(A);
-    await page.getByTestId('tool-polygon').click();
+    await h.chooseTool('polygon');
     const { cx, cy } = await h.centre();
     const corners: Array<[number, number]> = [[cx - 200, cy - 90], [cx + 40, cy - 110], [cx + 70, cy + 60], [cx - 60, cy + 120], [cx - 220, cy + 40]];
     for (const [x, y] of corners) await page.mouse.click(x, y);
@@ -56,11 +56,15 @@ try {
 
   await h.step('A second country, an occupation on a custom layer, hiding layers', async () => {
     await h.newCountry(B);
-    await page.getByTestId('tool-lasso').click();
+    await h.chooseTool('lasso');
     const { cx, cy } = await h.centre();
     await h.drawLasso(blob(cx + 200, cy, 110, 90));
     await page.getByTestId('choice-correct').click();
-    await page.getByTestId('confirm-edit').click();
+    // (Space applies, as Enter does.)
+    await page.getByTestId('confirm-edit').focus();
+    await page.getByTestId('confirm-edit').evaluate((b) => (b as HTMLElement).blur());
+    await page.keyboard.press('Space');
+    await page.getByTestId('confirm-edit').waitFor({ state: 'detached' });
     P.b = await h.toLL([cx + 220, cy]);
     await h.waitOwner(P.b, '1500', B);
     // A custom layer for military control.
@@ -70,7 +74,7 @@ try {
     await page.getByTestId('new-layer-name').press('Enter');
     await page.locator('.left .row', { hasText: 'Military control' }).getByText('drawing here').waitFor();
     // Base: everyone controls their own land; then B occupies part of A in 1700.
-    await page.getByTestId('tool-lasso').click();
+    await h.chooseTool('lasso');
     await page.getByTestId('paint-owner').selectOption({ label: A });
     await h.drawLasso(blob(cx - 80, cy, 170, 130));
     await page.getByTestId('choice-correct').click();
@@ -80,7 +84,7 @@ try {
     await page.getByTestId('event-start').fill('1700');
     await page.getByTestId('event-start').press('Enter');
     await page.getByTestId('event-create').click();
-    await page.getByTestId('tool-lasso').click();
+    await h.chooseTool('lasso');
     await page.getByTestId('paint-owner').selectOption({ label: B });
     const ap = await h.toPage(P.a);
     await h.drawLasso(blob(ap[0], ap[1], 45, 40));
@@ -105,20 +109,20 @@ try {
       return w === 'mixed' ? nearA >= 10 && nearB >= 10 : nearA <= 3;
     }, [ap[0], ap[1] + 24, colA, colB, want] as const, { timeout: 8000 });
     // (The occupation lies at sea: the layer is let cover the sea for this, and set back after.)
-    await page.locator('[data-testid="layer-row"].sel > span').first().click(); // (the layer drawn on, shown in Properties)
+    await page.evaluate(() => { const s = (window as any).__mapmaker.store; s.set({ selection: { kind: 'layer', id: s.layerId } }); }); // (the layer drawn on, shown in Properties)
     await page.getByTestId('clip-to-land').uncheck();
     await h.saved();
     await across('occupier');
-    await page.locator('[data-testid="layer-row"].sel > span').first().click(); // (the layer drawn on, shown in Properties)
+    await page.evaluate(() => { const s = (window as any).__mapmaker.store; s.set({ selection: { kind: 'layer', id: s.layerId } }); }); // (the layer drawn on, shown in Properties)
     await page.getByTestId('layer-fill').selectOption('hatch');
     await h.saved();
     await across('mixed');
     await h.screenshot('occupation-hatched');
-    await page.locator('[data-testid="layer-row"].sel > span').first().click(); // (the layer drawn on, shown in Properties)
+    await page.evaluate(() => { const s = (window as any).__mapmaker.store; s.set({ selection: { kind: 'layer', id: s.layerId } }); }); // (the layer drawn on, shown in Properties)
     await page.getByTestId('layer-fill').selectOption('solid');
     await h.saved();
     await across('occupier');
-    await page.locator('[data-testid="layer-row"].sel > span').first().click(); // (the layer drawn on, shown in Properties)
+    await page.evaluate(() => { const s = (window as any).__mapmaker.store; s.set({ selection: { kind: 'layer', id: s.layerId } }); }); // (the layer drawn on, shown in Properties)
     await page.getByTestId('clip-to-land').check();
     await h.saved();
     // Hide the political layer: only military control is drawn.
@@ -137,7 +141,7 @@ try {
     await page.getByTestId('event-start').fill('1800');
     await page.getByTestId('event-start').press('Enter');
     await page.getByTestId('event-create').click();
-    await page.getByTestId('tool-lasso').click();
+    await h.chooseTool('lasso');
     await page.getByTestId('paint-owner').selectOption({ label: B });
     const ep = await h.toPage(P.aEdge);
     await h.drawLasso(blob(ep[0], ep[1], 30, 25));
@@ -187,7 +191,7 @@ try {
     await page.getByTestId('event-end').fill('2010');
     await page.getByTestId('event-end').press('Enter');
     await page.getByTestId('event-create').click();
-    await page.getByTestId('tool-lasso').click();
+    await h.chooseTool('lasso');
     await page.getByTestId('paint-owner').selectOption({ label: 'Nobody (clear territory)' });
     const bp = await h.toPage(P.b);
     await h.drawLasso(blob(bp[0], bp[1], 40, 35));
@@ -210,7 +214,7 @@ try {
     assert.equal(await h.ownerAt(P.a, '1500'), null, 'Aster starts blank at the same coordinates');
     await h.newCountry(C);
     await h.setDate('1400');
-    await page.getByTestId('tool-lasso').click();
+    await h.chooseTool('lasso');
     const ap = await h.toPage(P.a);
     await h.drawLasso(blob(ap[0], ap[1], 60, 50));
     await page.getByTestId('choice-correct').click();
@@ -288,7 +292,7 @@ try {
   await h.step('Zooming in the middle of a brush stroke does not change the shape being drawn', async () => {
     await page.locator('.left .row', { hasText: 'Political' }).locator('span').first().click();
     await h.newCountry('Zoomland');
-    await page.getByTestId('tool-lasso').click();
+    await h.chooseTool('lasso');
     const { cx, cy } = await h.centre();
     // A circle on the map, about 120 px across at the current zoom, planned in map positions.
     const c = await h.toLL([cx + 220, cy + 140]);
@@ -373,7 +377,7 @@ try {
 
   await h.step('Border pen: draw in pieces, zoom between them, close and reopen, carry on, finish', async () => {
     await h.setDate('1985');
-    await page.getByTestId('tool-pen').click();
+    await h.chooseTool('pen');
     await page.getByTestId('paint-owner').selectOption({ label: 'Zoomland' });
     const { cx, cy } = await h.centre();
     // A square planned in map positions.
@@ -411,7 +415,7 @@ try {
     await page.locator('.project-row').first().click();
     await page.getByTestId('map-canvas').waitFor();
     await page.waitForFunction(() => (window as any).__mapmaker.store.drafts.length === 1);
-    await page.getByTestId('tool-pen').click();
+    await h.chooseTool('pen');
     assert.equal(await page.getByTestId('draft-name').inputValue(), 'Zoomland claim');
     assert.equal(await draftPoints(), afterPiece1 + 1, 'every point survived closing the app');
     // Finish with Enter, apply with Enter.
@@ -466,7 +470,7 @@ try {
     const distToRhine = distTo([rhine.line]), distToRiver = distTo(rhine.all);
     // (The side drawn beside the river: what lies near it, away from the corners.)
     const eastSide = (line: number[][]) => line.filter((p) => p[1] > 48.45 && p[1] < 48.85 && distToRhine(p) < 0.12);
-    await page.getByTestId('tool-lasso').click();
+    await h.chooseTool('lasso');
     await page.getByTestId('paint-owner').selectOption({ label: A });
     assert.equal(await page.getByTestId('smart-brush').locator('summary').innerText(), 'Smart brush ▾');
     await page.getByTestId('smart-brush').locator('summary').click();
@@ -520,7 +524,7 @@ try {
     // Ridges, for the border pen along the Pyrenees, a little north of the main ridge.
     await page.evaluate(() => { const s = (window as any).__mapmaker.store; s.setCamera({ lon: 0.5, lat: 42.75, zoom: 5, rotation: 0, projection: 'equirectangular' }); s.terrainOf(s.world.get('map_space', s.spaceId)); });
     await page.waitForFunction(() => !!(window as any).__mapmaker.store.earthTerrain, null, { timeout: 60000 });
-    await page.getByTestId('tool-pen').click();
+    await h.chooseTool('pen');
     await page.getByTestId('smart-brush').locator('summary').click();
     await page.getByTestId('smart-brush').getByTestId('smart-rivers').fill('0');
     await page.getByTestId('smart-brush').getByTestId('smart-ridges').fill('100');
@@ -593,7 +597,7 @@ try {
     await page.getByTestId('tool-select').click();
     for (let i = 0; i < 2; i++) { await page.getByTestId('undo').click(); await h.saved(); }
     assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('entity').some((e: any) => e.name === 'Strategoburg')), false);
-    await page.getByTestId('tool-lasso').click();
+    await h.chooseTool('lasso');
     await page.getByTestId('smart-brush').locator('summary').click();
     await page.getByTestId('smart-geography').check();
     await page.getByTestId('smart-on').uncheck();
@@ -1509,7 +1513,7 @@ try {
     await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: -150, lat: -30, zoom: 3, rotation: 0, projection: 'equirectangular' }));
     await h.setDate('1930');
     await h.newCountry('Splitland');
-    await page.getByTestId('tool-lasso').click();
+    await h.chooseTool('lasso');
     const { cx, cy } = await h.centre();
     await h.drawLasso(blob(cx, cy, 150, 100));
     await page.getByTestId('choice-correct').waitFor();
@@ -1593,7 +1597,7 @@ try {
     await h.setDate('2000');
     // Choosing a country in the list makes it the territory brush's owner.
     await page.getByTestId('entity-row-Zoomland').click();
-    await page.getByTestId('tool-lasso').click();
+    await h.chooseTool('lasso');
     const zoomland = await page.evaluate(() => (window as any).__mapmaker.store.world.all('entity').find((e: any) => e.name === 'Zoomland').id);
     assert.equal(await page.getByTestId('paint-owner').inputValue(), zoomland, 'the brush gives land to the country selected');
     await page.getByTestId('tool-regions').click();
@@ -1850,7 +1854,7 @@ try {
     // Front lines (D89): on the political layer, the border between the two is a front line while they are at war.
     await page.locator('.left .row', { hasText: 'Political' }).locator('span', { hasText: 'Political' }).click();
     await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null, tool: 'select' }));
-    await page.locator('[data-testid="layer-row"].sel > span').first().click(); // (the layer drawn on, shown in Properties)
+    await page.evaluate(() => { const s = (window as any).__mapmaker.store; s.set({ selection: { kind: 'layer', id: s.layerId } }); }); // (the layer drawn on, shown in Properties)
     await page.getByTestId('layer-fronts').selectOption('second');
     await h.saved();
     const [idA, idB] = await page.evaluate(([a, b]) => { const w = (window as any).__mapmaker.store.world; const id = (n: string) => w.all('entity').find((e: any) => e.name === n).id; return [id(a), id(b)]; }, [A, B] as const);
@@ -1890,7 +1894,7 @@ try {
     await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastFronts.length === 0);
     await page.waitForTimeout(200);
     assert.ok((await redNear()) < 3, 'none in peace');
-    await page.locator('[data-testid="layer-row"].sel > span').first().click(); // (the layer drawn on, shown in Properties)
+    await page.evaluate(() => { const s = (window as any).__mapmaker.store; s.set({ selection: { kind: 'layer', id: s.layerId } }); }); // (the layer drawn on, shown in Properties)
     await page.getByTestId('layer-fronts').selectOption('off');
     await h.saved();
     await page.evaluate((c) => (window as any).__mapmaker.store.setCamera(c), camera);
@@ -2304,7 +2308,7 @@ try {
     assert.match((await page.locator('.left .row', { hasText: 'Old Town' }).textContent()) ?? '', /flat, 10 km wide/);
     // A square with the precise shape tool: drawn, owned, straight.
     await h.newCountry('Guild Quarter');
-    await page.getByTestId('tool-polygon').click();
+    await h.chooseTool('polygon');
     const { cx, cy } = await h.centre();
     for (const [x, y] of [[cx - 80, cy - 60], [cx + 80, cy - 60], [cx + 80, cy + 60]]) await page.mouse.click(x, y);
     await page.mouse.dblclick(cx - 80, cy + 60);
@@ -2618,13 +2622,13 @@ try {
     const diff = (a: number[], b: number[]) => Math.max(...a.map((v, i) => Math.abs(v - b[i])));
     // A country on the military control layer, whose territory ends at the coast, over the North Sea and the land around it.
     await page.locator('.left .row', { hasText: 'Military control' }).locator('span', { hasText: 'Military control' }).click();
-    await page.locator('[data-testid="layer-row"].sel > span').first().click(); // (the layer drawn on, shown in Properties)
+    await page.evaluate(() => { const s = (window as any).__mapmaker.store; s.set({ selection: { kind: 'layer', id: s.layerId } }); }); // (the layer drawn on, shown in Properties)
     assert.ok(await page.getByTestId('clip-to-land').isChecked(), 'territory on this layer ends at the coast');
     const seaPlaces: LL[] = [[3, 55.5], [2, 56.6], [4.5, 56.6], [3.5, 54.4]], landPlaces: LL[] = [[-1, 52.7], [-2, 54.6], [8, 52.4], [6.6, 52.8]];
     for (const ll of [...seaPlaces, ...landPlaces]) for (const layer of ['Political', 'Military control']) assert.equal(await h.ownerOnLayer(ll, '1450', layer), null, `nobody holds ${ll} on ${layer}`);
     await h.setDate('1400');
     await h.newCountry('Dogger Folk');
-    await page.getByTestId('tool-polygon').click();
+    await h.chooseTool('polygon');
     const corners: LL[] = [[-3, 51], [9, 51], [9, 58], [-3, 58]];
     for (const ll of corners) { const q = await h.toPage(ll); await page.mouse.click(q[0], q[1]); }
     const end = await h.toPage(corners[3]);
@@ -2706,7 +2710,7 @@ try {
     }
     assert.ok(Math.max(...landPx.map((v, k) => Math.abs(v - seaPx[k]))) > 25, `land (${landPx}) and sea (${seaPx}) look different`);
     // Territory ends at the planet's own coast, as on Earth.
-    await page.locator('[data-testid="layer-row"].sel > span').first().click(); // (the layer drawn on, shown in Properties)
+    await page.evaluate(() => { const s = (window as any).__mapmaker.store; s.set({ selection: { kind: 'layer', id: s.layerId } }); }); // (the layer drawn on, shown in Properties)
     assert.ok(await page.getByTestId('clip-to-land').isChecked(), 'territory ends at the coast');
     await h.screenshot('planet');
     // Undone: the planet is gone, and with it the map viewed: the first map is shown instead (not a blank page).
@@ -4007,6 +4011,11 @@ try {
     await page.getByTestId('new-map-solar-note').waitFor();
     await page.getByRole('button', { name: 'Create map' }).click();
     await page.waitForFunction(() => { const s = (window as any).__mapmaker.store; const m = s.world.get('map_space', s.spaceId); return m?.kind === 'space' && JSON.parse(m.settings).space.catalogue === 'solar'; });
+    // A new solar system (D208): true to scale and as photographed.
+    const made = await page.evaluate(() => { const s = (window as any).__mapmaker.store; return JSON.parse(s.world.get('map_space', s.spaceId).settings).space; });
+    assert.equal(made.scale, 'true');
+    assert.equal(made.look.photo, true);
+    assert.equal(made.row.sizes, 'poster');
     await h.setDate('1 January 2030');
     await page.waitForFunction(() => !!(window as any).__mapmaker.starToPage(3));
     const hook = <T,>(name: string, ...args: unknown[]) => page.evaluate(([n, a]) => (window as any).__mapmaker[n as string](...(a as unknown[])), [name, args] as const) as Promise<T>;
@@ -4015,7 +4024,8 @@ try {
     assert.ok(Math.hypot(sun[0] - middle[0], sun[1] - middle[1]) < 1, 'the Sun in the middle');
     const names = await page.evaluate(() => (window as any).__mapmaker.spaceNames() as string[]);
     const named = ['Mercury', 'Venus', 'Earth', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto'].filter((n) => names.includes(n));
-    assert.ok(named.length >= 7 && names.includes('Jupiter') && names.includes('Neptune'), `the planets named (${names.join(', ')})`);
+    // (True to scale, D208, the inner planets crowd round the Sun from afar: their names make room for one another.)
+    assert.ok(named.length >= 5 && names.includes('Jupiter') && names.includes('Neptune'), `the planets named (${names.join(', ')})`);
     assert.match((await page.getByTestId('space-note').textContent()) ?? '', /The Sun and the planets on 1 January 2030/);
     // Half a year on, the Earth is on the other side of the Sun; Neptune has hardly moved.
     const earth0 = await hook<[number, number]>('starToPage', 3), neptune0 = await hook<[number, number]>('starToPage', 8);
@@ -4025,18 +4035,26 @@ try {
     const side = (p: [number, number]) => [p[0] - middle[0], p[1] - middle[1]];
     const [a, b] = [side(earth0), side(earth1)];
     assert.ok(a[0] * b[0] + a[1] * b[1] < 0, `the Earth across the Sun after half a year (${earth0} to ${earth1})`);
-    assert.ok(Math.hypot(neptune1[0] - neptune0[0], neptune1[1] - neptune0[1]) < Math.hypot(earth1[0] - earth0[0], earth1[1] - earth0[1]) / 5, 'Neptune hardly moved');
+    // (True to scale, half a year carries the Earth two au across and Neptune about half an au along its orbit.)
+    assert.ok(Math.hypot(neptune1[0] - neptune0[0], neptune1[1] - neptune0[1]) < Math.hypot(earth1[0] - earth0[0], earth1[1] - earth0[1]) / 2.5, 'Neptune hardly moved');
     await h.screenshot('solar-system');
-    // True to scale: the inner planets close in round the Sun.
-    const marsCompressed = await hook<[number, number]>('starToPage', 4);
-    await page.getByTestId('solar-scale').click();
-    await page.waitForFunction(() => { const s = (window as any).__mapmaker.store; return JSON.parse(s.world.get('map_space', s.spaceId).settings).space.scale === 'true'; });
-    await page.waitForTimeout(200);
+    // True to scale: the inner planets close in round the Sun; compressed, further out.
     const marsTrue = await hook<[number, number]>('starToPage', 4);
+    // The Sun at its true size (D208): a small dot from afar, growing as it is closed in on.
+    const sunFar = await hook<number>('starRadius', 0);
+    await page.evaluate(() => { const s = (window as any).__mapmaker.store; s.setCamera({ ...s.camera, zoom: 12 }); });
+    await page.waitForTimeout(1500);
+    const sunNear = await hook<number>('starRadius', 0);
+    assert.ok(sunNear > sunFar * 3, `the Sun grows as it is closed in on (${sunFar} to ${sunNear} pixels)`);
+    await h.screenshot('solar-true-scale-close');
+    await page.evaluate(() => { const s = (window as any).__mapmaker.store; s.setCamera({ ...s.camera, zoom: 0 }); });
+    await page.waitForTimeout(300);
+    await page.getByTestId('solar-scale').click();
+    await page.waitForFunction(() => { const s = (window as any).__mapmaker.store; return JSON.parse(s.world.get('map_space', s.spaceId).settings).space.scale === 'compressed'; });
+    await page.waitForTimeout(200);
+    const marsCompressed = await hook<[number, number]>('starToPage', 4);
     assert.ok(Math.hypot(marsTrue[0] - middle[0], marsTrue[1] - middle[1]) < Math.hypot(marsCompressed[0] - middle[0], marsCompressed[1] - middle[1]) * 0.6, 'Mars nearer the Sun when true to scale');
     // Mars's panel: its distance from the Sun on the date viewed.
-    await page.getByTestId('solar-scale').click();
-    await page.waitForTimeout(200);
     const mars = await hook<[number, number]>('starToPage', 4);
     await page.mouse.click(mars[0], mars[1]);
     await page.getByTestId('star-panel').waitFor();
@@ -4055,8 +4073,25 @@ try {
     await page.evaluate(() => { const s = (window as any).__mapmaker.store; s.set({ selection: null }); s.setCamera({ ...s.camera, zoom: 0, rotation: 0, target: undefined }); });
     await page.getByTestId('solar-layout').click();
     await page.waitForFunction(() => { const s = (window as any).__mapmaker.store; return JSON.parse(s.world.get('map_space', s.spaceId).settings).space.layout === 'side-by-side'; });
-    await page.waitForTimeout(200);
+    await page.waitForTimeout(1500);
     assert.equal(await page.getByTestId('solar-scale').count(), 0, 'no choice of scale side by side');
+    // As a poster at first (D208): the Sun's edge at the left, the planets in a row, the dwarf planets below.
+    const poster = await Promise.all([0, 3, 4, 5, 8, 9, 101, 102].map((id) => hook<[number, number] | null>('starToPage', id)));
+    assert.ok(poster.every((p) => p), 'all drawn, Ceres and Eris too');
+    const [psun, pearth, pmars, pjup, pnep, pluto, ceres, eris] = poster as Array<[number, number]>;
+    assert.ok(Math.abs(pearth[1] - pjup[1]) < 1 && Math.abs(pnep[1] - pjup[1]) < 1, 'the planets in a row');
+    assert.ok(pluto[1] > pjup[1] + 15 && Math.abs(ceres[1] - pluto[1]) < 1 && Math.abs(eris[1] - pluto[1]) < 1, 'the dwarf planets in a row below');
+    assert.ok(ceres[0] > pmars[0] && ceres[0] < pjup[0], 'Ceres between Mars and Jupiter');
+    assert.ok(psun[0] < pearth[0] - (await hook<number>('starRadius', 0)) * 0.5, 'the Sun\'s disc off to the left');
+    assert.ok((await hook<number>('starRadius', 0)) > (await hook<number>('starRadius', 5)) * 6, 'the Sun far larger than Jupiter');
+    await h.screenshot('solar-poster');
+    // As drawn to read well (D133): the Sun at the left, the planets in a row at even steps, the Moon below the Earth.
+    await page.getByTestId('solar-row-open').click();
+    await page.getByTestId('solar-row-sizes').selectOption('styled');
+    await page.getByTestId('solar-row-moons').selectOption('all');
+    await page.locator('[data-testid=solar-row-dialog] .modal-actions button').click();
+    await page.waitForFunction(() => { const s = (window as any).__mapmaker.store; return JSON.parse(s.world.get('map_space', s.spaceId).settings).space.row?.sizes === 'styled'; });
+    await page.waitForTimeout(300);
     const row = await Promise.all([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 31].map((id) => hook<[number, number]>('starToPage', id)));
     const step = row[2][0] - row[1][0];
     for (let i = 1; i <= 9; i++) {
@@ -4922,7 +4957,7 @@ try {
     await page.getByTestId('splitter-left').dblclick();
     assert.equal(Math.round((await box('.left')).width), 250);
     // The status bar says what the tool in hand does.
-    await page.getByTestId('tool-lasso').click();
+    await h.chooseTool('lasso');
     assert.match((await page.getByTestId('status-hint').textContent())!, /^Territory brush \(B\) · Draw around an area/);
     await page.getByTestId('tool-select').click();
     await h.screenshot('workspace-map');
@@ -4960,6 +4995,18 @@ try {
     await page.getByTestId('menu-view').click();
     await page.getByTestId('command-panel-bottom').click();
     await page.locator('.bottom').waitFor();
+    // Guides (D206): today's country borders, and today's states and provinces, over the working map.
+    await page.getByTestId('menu-view').click();
+    assert.equal(await page.getByTestId('command-guide-states').isDisabled(), false);
+    await page.getByTestId('command-guide-states').click();
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.guideStates), true);
+    await page.waitForFunction(() => document.querySelectorAll('[data-testid="map-canvas"]').length > 0);
+    await page.waitForTimeout(1500);
+    await h.screenshot('guides-states');
+    await page.getByTestId('menu-view').click();
+    assert.match((await page.getByTestId('command-guide-states').textContent())!, /✓/);
+    await page.getByTestId('command-guide-states').click();
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.guideStates), false);
     // The keyboard: workspaces, the next and the previous change, a new event.
     await page.locator('main.center').click({ position: { x: 5, y: 5 }, button: 'right' }).catch(() => undefined);
     await page.keyboard.press('Alt+2');
@@ -4976,6 +5023,10 @@ try {
       const t2 = await store('JSON.stringify(s.time)');
       assert.ok(t0 !== t1 || t1 !== t2, 'the date steps from change to change');
     }
+    // History plays as slowly as real time, and a day a second is among the speeds (it is the first chosen in a new session).
+    const speeds = await page.getByTestId('history-speed').locator('option').allTextContents();
+    assert.equal(speeds[0], 'Real time (1 second/s)');
+    assert.ok(speeds.includes('1 day/s'));
     await page.keyboard.press('Control+e');
     assert.equal(await store('s.dialog'), 'new-event');
     await page.evaluate(() => (window as any).__mapmaker.store.set({ dialog: null }));
@@ -4997,6 +5048,8 @@ try {
     // The strip is a narrow column at the far left; its tools are icons named for those who cannot see them.
     const strip = await box('[data-testid="tool-strip"]');
     assert.ok(strip.x === 0 && strip.width <= 48 && strip.height > 300, JSON.stringify(strip));
+    await h.chooseTool('lasso');
+    await page.getByTestId('tool-select').click();
     assert.equal(await page.getByTestId('tool-lasso').getAttribute('aria-label'), 'Territory brush');
     assert.match((await page.getByTestId('tool-lasso').getAttribute('title'))!, /^Territory brush \(B\)/);
     assert.equal(await page.getByTestId('tool-lasso').locator('svg').count(), 1);
@@ -5009,6 +5062,19 @@ try {
     await page.getByTestId('options-bar').getByTestId('paint-owner').waitFor();
     await page.keyboard.press('p');
     assert.equal(await tool(), 'pen');
+    // Stacked (D205): the territory brush, the border pen and the precise shape take one place, the one last used
+    // showing; resting the pointer on it slides out the three.
+    assert.equal(await page.getByTestId('tool-stack-territory').getByTestId('tool-pen').count(), 1, 'the pen shows now');
+    assert.equal(await page.getByTestId('tool-lasso').count(), 0, 'the brush is under it');
+    await page.getByTestId('tool-stack-territory').hover();
+    await page.getByTestId('tool-flyout-territory').waitFor();
+    assert.deepEqual((await page.getByTestId('tool-flyout-territory').locator('.tool-flyout-name').allTextContents()), ['Territory brush', 'Precise shape', 'Border pen']);
+    await h.screenshot('tool-stack');
+    await page.getByTestId('tool-polygon').click();
+    assert.equal(await tool(), 'polygon');
+    await page.getByTestId('tool-flyout-territory').waitFor({ state: 'detached' });
+    assert.equal(await page.getByTestId('tool-stack-territory').getByTestId('tool-polygon').count(), 1, 'the precise shape shows now');
+    await page.locator('main.center').hover();
     await page.keyboard.press('e');
     assert.equal(await tool(), 'erase');
     // Whichever tool, the map keeps its size and place.
@@ -5114,7 +5180,29 @@ try {
     await page.getByTestId('undo').click();
     await h.saved();
     assert.equal(await page.getByTestId('layer-visible').isChecked(), true);
+    // Beside a value, a button puts it back to its default (D207): greyed while it is there already.
+    const width = page.getByTestId('layer-border-width'), widthReset = page.getByTestId('layer-border-width-reset');
+    const before = await width.inputValue();
+    await width.fill('3.5');
+    await width.press('Enter');
+    await h.saved();
+    assert.equal(await widthReset.isDisabled(), false);
+    await widthReset.click();
+    await h.saved();
+    assert.equal(await width.inputValue(), '1.4', 'the political layer\'s own border width');
+    assert.equal(await widthReset.isDisabled(), true);
+    await width.fill(before);
+    await width.press('Enter');
+    await h.saved();
     await h.screenshot('properties-layer');
+    // The whole row chooses it (not only its name); a second click lets it go again.
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
+    await page.locator('[data-testid="layer-row"]', { hasText: 'Political' }).click({ position: { x: 200, y: 8 } });
+    await page.locator('[data-testid="layer-row"].sel', { hasText: 'Political' }).waitFor();
+    await page.locator('[data-testid="layer-row"]', { hasText: 'Political' }).click({ position: { x: 200, y: 8 } });
+    await page.getByTestId('map-panel').waitFor();
+    assert.equal(await page.locator('[data-testid="layer-row"].sel').count(), 0, 'no layer chosen');
+    assert.equal(await page.locator('[data-testid="layer-row"].drawing', { hasText: 'Political' }).count(), 1, 'still the layer drawn on');
     // A layer of points has only its name and whether it is shown.
     await page.locator('[data-testid="layer-row"]', { hasText: 'Battles' }).locator('span').first().click();
     assert.deepEqual(await groups(), ['Layer']);
@@ -5220,6 +5308,29 @@ try {
     // (The group made for this step is taken away again: one undo for each of what was done.)
     for (let i = 0; i < 3; i++) { await page.getByTestId('undo').click(); await h.saved(); }
     assert.equal(await st<number>(`s.world.all('event_group').filter((g) => g.name === 'Track test').length`), 0);
+    await page.getByTestId('workspace-map').click();
+  });
+
+  await h.step('An event renames a country: from the event\'s start it is called so; one undo (D204)', async () => {
+    const st = <T,>(f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`) as Promise<T>;
+    await page.getByTestId('workspace-history').click();
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
+    const ev = await st<{ id: string; name: string; day: number }>(`(() => { const e = s.world.all('event').filter((e) => s.engine.lists(e) && !e.id.startsWith('evt_base')).sort((a, b) => a.start_day - b.start_day)[0]; return { id: e.id, name: e.name, day: e.start_day }; })()`);
+    await page.getByTestId(`event-row-${ev.name}`).click();
+    const testa = await st<string>(`s.world.all('entity').find((e) => e.name === ${JSON.stringify(A)}).id`);
+    await page.getByTestId('rename-event-who').selectOption({ label: A });
+    assert.equal(await page.getByTestId('rename-event-name').inputValue(), A, 'starts from its name then');
+    await page.getByTestId('rename-event-name').fill('Testan Empire');
+    await page.getByTestId('rename-event-add').click();
+    await h.saved();
+    const at = (d: number) => st<string>(`s.engine.nameAt(${JSON.stringify(testa)}, { day: ${d}, ms: 0 })`);
+    assert.equal(await at(ev.day + 1), 'Testan Empire', 'called so from the event on');
+    assert.notEqual(await at(ev.day - 1), 'Testan Empire', 'not before it');
+    assert.match((await page.getByTestId('event-panel').textContent())!, /Kingdom of Testa is called Testan Empire/, 'one of the event\'s changes');
+    await h.screenshot('rename-in-event');
+    await page.getByTestId('undo').click();
+    await h.saved();
+    assert.notEqual(await at(ev.day + 1), 'Testan Empire');
     await page.getByTestId('workspace-map').click();
   });
 

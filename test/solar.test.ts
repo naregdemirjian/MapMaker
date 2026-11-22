@@ -6,7 +6,7 @@ import { gregorian } from '../src/core-time/index.ts';
 import { World } from '../src/world-model/world.ts';
 import * as cmd from '../src/domain/commands.ts';
 import { spaceSettingsOf } from '../src/world-model/world-settings.ts';
-import { DEFAULT_SKY } from '../src/space/sky-look.ts';
+import { DEFAULT_SKY, presetLook } from '../src/space/sky-look.ts';
 
 const T = (y: number, m = 1, d = 1) => centuriesSinceJ2000(gregorian.fromCivil({ year: y, month: m, day: d }));
 const lon = (p: number[]) => (((Math.atan2(p[1], p[0]) * 180) / Math.PI) + 360) % 360;
@@ -90,11 +90,12 @@ test('a solar system map: made, its scale chosen and undone; planets held like s
   const engine = new Engine(world);
   cmd.seedProject(world, 'Solar');
   const sp = cmd.createSpaceMap(world, 'The solar system', 'solar').result;
-  assert.deepEqual(spaceSettingsOf(world.get('map_space', sp)), { catalogue: 'solar', radiusLy: 50, scale: 'compressed', layout: 'orbits', row: { sizes: 'styled', spacing: 'even', moons: 'all', chosen: [] }, look: DEFAULT_SKY });
-  const r = cmd.setSolarScale(world, sp, 'true');
-  assert.equal(spaceSettingsOf(world.get('map_space', sp))!.scale, 'true');
+  // (Made true to scale, as photographed and as a poster side by side, D208.)
+  assert.deepEqual(spaceSettingsOf(world.get('map_space', sp)), { catalogue: 'solar', radiusLy: 50, scale: 'true', layout: 'orbits', row: { sizes: 'poster', spacing: 'even', moons: 'none', chosen: [] }, look: presetLook('photographic') });
+  const r = cmd.setSolarScale(world, sp, 'compressed');
+  assert.equal(spaceSettingsOf(world.get('map_space', sp))!.scale, 'compressed');
   world.applyDiffs(invertDiffs(r.diffs));
-  assert.equal(spaceSettingsOf(world.get('map_space', sp))!.scale, 'compressed', 'undone');
+  assert.equal(spaceSettingsOf(world.get('map_space', sp))!.scale, 'true', 'undone');
   const stars = cmd.createSpaceMap(world, 'Stars').result;
   assert.throws(() => cmd.setSolarScale(world, stars, 'true'), /Only the solar system/);
   const mars = cmd.createEntity(world, { type_id: 'polity', name: 'Martian Congressional Republic' }).result;
@@ -149,7 +150,7 @@ test('the solar system laid out side by side and back (one step each, undone); r
   const r = cmd.setSolarLayout(world, sp, 'side-by-side');
   assert.equal(r.label, 'The solar system side by side');
   assert.equal(spaceSettingsOf(world.get('map_space', sp))!.layout, 'side-by-side');
-  assert.equal(spaceSettingsOf(world.get('map_space', sp))!.scale, 'compressed', 'its scale kept for when it goes back');
+  assert.equal(spaceSettingsOf(world.get('map_space', sp))!.scale, 'true', 'its scale kept for when it goes back');
   world.applyDiffs(invertDiffs(r.diffs));
   assert.equal(spaceSettingsOf(world.get('map_space', sp))!.layout, 'orbits');
   const nearby = cmd.createSpaceMap(world, 'Nearby').result;

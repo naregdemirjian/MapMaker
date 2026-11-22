@@ -1,5 +1,5 @@
-import { useState, useEffect, memo } from 'react';
-import { useStore, useLive, store, type Tool } from '../store.ts';
+import { useState, useEffect, useRef, memo } from 'react';
+import { useStore, useLive, store, DEFAULT_STROKE, type Tool } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
 import { SCULPT_TOOLS } from '../../terrain/sculpt.ts';
 import { BIOMES, type Biome } from '../../terrain/biomes.ts';
@@ -42,7 +42,8 @@ import { BranchSwitcher } from './Branches.tsx';
 import { MenuBar } from '../shell/MenuBar.tsx';
 import { command } from '../commands.ts';
 import { PropGroup } from '../shell/Group.tsx';
-import { TOOLS, SPACE_TOOLS, toolsFor } from '../tools.ts';
+import { ResetButton, RangeReset } from '../shell/Reset.tsx';
+import { TOOLS, SPACE_TOOLS, toolsFor, stackOf, type ToolInfo } from '../tools.ts';
 import { LIST_TABS, nameMatches, type ListTab } from '../shell/layout.ts';
 import { ToolIcon } from '../shell/ToolIcon.tsx';
 import { branchName } from '../../temporal-engine/branches.ts';
@@ -137,12 +138,14 @@ function SteadyDate({ t, yearSizer, dayOnly }: { t: Instant; yearSizer: string; 
 /** The widest a year of the timeline can be written (its digits as 0s: all figures are the same width). */
 export function yearSizer(startYear: number, endYear: number, cal: Calendar = gregorian): string {
   const label = (y: number) => (cal === gregorian ? formatYear(y) : cal.yearLabel(cal.toCivil(fromApproxYear(y)).year));
-  const a = label(Math.floor(startYear)), b = label(Math.ceil(endYear));
+  // (Only the years written as dates count: deep time is written as how long ago, never in the steady cells.)
+  const lo = Math.max(DEEP_BEFORE_YEAR, Math.min(Math.floor(startYear), 99999)), hi = Math.max(DEEP_BEFORE_YEAR, Math.min(Math.ceil(endYear), 99999));
+  const a = label(lo), b = label(hi);
   return (a.length >= b.length ? a : b).replace(/\d/g, '0');
 }
 
 /** A number box that saves when you press Enter or leave it, not on every keystroke. */
-export function NumberField({ value, onCommit, min, max, step, testId, title }: { value: number; onCommit: (n: number) => void; min?: number; max?: number; step?: number; testId?: string; title?: string }) {
+export function NumberField({ value, onCommit, min, max, step, testId, title, def }: { value: number; onCommit: (n: number) => void; min?: number; max?: number; step?: number; testId?: string; title?: string; def?: number }) {
   const [text, setText] = useState(String(value));
   useEffect(() => setText(String(value)), [value]);
   const commit = () => {
@@ -152,7 +155,10 @@ export function NumberField({ value, onCommit, min, max, step, testId, title }: 
     if (c !== value) onCommit(c);
     setText(String(c));
   };
-  return <input type="number" value={text} min={min} max={max} step={step} title={title} onChange={(e) => setText(e.target.value)} onBlur={commit} onKeyDown={(e) => e.key === 'Enter' && commit()} data-testid={testId} />;
+  const input = <input type="number" value={text} min={min} max={max} step={step} title={title} onChange={(e) => setText(e.target.value)} onBlur={commit} onKeyDown={(e) => e.key === 'Enter' && commit()} data-testid={testId} />;
+  // (With a default: a button beside it puts it back, D207.)
+  if (def === undefined) return input;
+  return <span className="with-reset">{input}<ResetButton def={def} at={value === def} onReset={() => { setText(String(def)); if (value !== def) onCommit(def); }} testId={testId ? `${testId}-reset` : undefined} /></span>;
 }
 
 /** The date being viewed (follows the timeline as it is scrubbed). */
@@ -176,7 +182,8 @@ export function DateBar() {
   );
 }
 
-export function TopBar() {
+/** Which map is viewed, and which timeline of it (in the workspace bar, D203). */
+export function MapChooser() {
   const s = useStore();
   const w = s.world!;
   const spaces = w.all('map_space').sort((a, b) => a.sort_order - b.sort_order);
@@ -190,15 +197,24 @@ export function TopBar() {
     s.mapChanged(before);
   };
   return (
-    <header className="topbar">
-      <div className="brand">Map Maker</div>
-      <MenuBar />
-      <div className="project-name" title={s.projectDir}>{s.projectId}</div>
+    <span className="map-chooser">
       <select value={s.spaceId} onChange={(e) => switchSpace(e.target.value)} title="Which map you are looking at" data-testid="map-select">
         {spaces.map((sp) => <option key={sp.id} value={sp.id}>{sp.name}</option>)}
       </select>
       {s.mode === 'world' && <BranchSwitcher />}
+    </span>
+  );
+}
+
+/** The bar along the top (D203): the name and the menus, thin, as in a video editor. */
+export function TopBar() {
+  const s = useStore();
+  return (
+    <header className="topbar">
+      <div className="brand">Map Maker</div>
+      <MenuBar />
       <div className="spacer" />
+      <div className="project-name" title={s.projectDir}>{s.projectId}</div>
     </header>
   );
 }
@@ -235,15 +251,65 @@ function PenControls() {
 export function ToolStrip() {
   const s = useStore();
   const tools = toolsFor(s.world!, s.spaceId);
+  // Stacked tools take one place, at the first of them (D205).
+  const slots: Array<{ tools: ToolInfo[]; stack: string | null }> = [];
+  for (const t of tools) {
+    const k = stackOf(t.id), last = slots[slots.length - 1];
+    if (k && last?.stack === k) last.tools.push(t); else slots.push({ tools: [t], stack: k });
+  }
   return (
     <div className="tool-strip" role="toolbar" aria-label="Tools" aria-orientation="vertical" data-testid="tool-strip">
-      {tools.map((t, i) => (
-        <span key={t.id} className="tool-slot">
-          {i > 0 && tools[i - 1].group !== t.group && <span className="tool-sep" />}
-          <button className={`tool ${s.tool === t.id ? 'on' : ''}`} title={`${t.name} (${t.key})\n${t.hint}`} aria-label={t.name} aria-pressed={s.tool === t.id} onClick={() => s.set({ tool: t.id })} data-testid={`tool-${t.id}`}><ToolIcon id={t.id} /></button>
+      {slots.map((slot, i) => (
+        <span key={slot.tools[0].id} className="tool-slot">
+          {i > 0 && slots[i - 1].tools[0].group !== slot.tools[0].group && <span className="tool-sep" />}
+          {slot.stack && slot.tools.length > 1 ? <ToolStack stack={slot.stack} tools={slot.tools} /> : <ToolButton t={slot.tools[0]} />}
         </span>
       ))}
     </div>
+  );
+}
+
+function ToolButton({ t, stacked, onPointerDown }: { t: ToolInfo; stacked?: boolean; onPointerDown?: (e: React.PointerEvent) => void }) {
+  const s = useStore();
+  return (
+    <button className={`tool ${s.tool === t.id ? 'on' : ''} ${stacked ? 'stacked' : ''}`} title={`${t.name} (${t.key})${stacked ? ' · hold or rest the pointer on it for the others' : ''}\n${t.hint}`} aria-label={t.name} aria-pressed={s.tool === t.id}
+      onClick={() => s.set({ tool: t.id })} onPointerDown={onPointerDown} data-testid={`tool-${t.id}`}><ToolIcon id={t.id} /></button>
+  );
+}
+
+/** The last tool used of each stack: the one it shows. */
+const stackFace = new Map<string, Tool>();
+
+/**
+ * Tools stacked in one place (D205), as in Photoshop: the one last used shows, with a mark at its corner;
+ * resting the pointer on it, or holding it pressed, slides the others out beside it, each with its key.
+ */
+function ToolStack({ stack, tools }: { stack: string; tools: ToolInfo[] }) {
+  const s = useStore();
+  const [open, setOpen] = useState<null | { left: number; top: number }>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const slot = useRef<HTMLSpanElement | null>(null);
+  if (tools.some((t) => t.id === s.tool)) stackFace.set(stack, s.tool);
+  const face = tools.find((t) => t.id === stackFace.get(stack)) ?? tools[0];
+  const show = () => { const r = slot.current?.getBoundingClientRect(); if (r) setOpen({ left: r.right + 2, top: r.top }); };
+  const later = (ms: number, f: () => void) => { if (timer.current) clearTimeout(timer.current); timer.current = setTimeout(f, ms); };
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+  return (
+    <span className="tool-stack" ref={slot} data-testid={`tool-stack-${stack}`}
+      onPointerEnter={() => later(350, show)} onPointerLeave={() => later(200, () => setOpen(null))}>
+      <ToolButton t={face} stacked onPointerDown={() => later(300, show)} />
+      {open && (
+        <div className="tool-flyout" role="menu" aria-label="Tools stacked here" style={{ left: open.left, top: open.top }} data-testid={`tool-flyout-${stack}`}
+          onPointerEnter={() => { if (timer.current) clearTimeout(timer.current); }}>
+          {tools.map((t) => (
+            <button key={t.id} role="menuitemradio" aria-checked={s.tool === t.id} className={`tool-flyout-item ${s.tool === t.id ? 'on' : ''}`} title={t.hint}
+              onClick={() => { stackFace.set(stack, t.id); s.set({ tool: t.id }); setOpen(null); }} data-testid={t.id === face.id ? undefined : `tool-${t.id}`}>
+              <span className="tool-flyout-mark">{s.tool === t.id ? '■' : ''}</span><ToolIcon id={t.id} size={16} /><span className="tool-flyout-name">{t.name}</span><span className="tool-flyout-key">{t.key}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </span>
   );
 }
 
@@ -298,9 +364,9 @@ export function ToolOptions() {
             <details className="brush-settings">
               <summary title="How freehand outlines are cleaned up">Brush settings ▾</summary>
               <div className="popover">
-                <label title="Rounds the corners of your outline">Smoothing <input type="range" min={0} max={4} step={1} value={s.stroke.smoothness} onChange={(e) => s.set({ stroke: { ...s.stroke, smoothness: Number(e.target.value) } })} /></label>
-                <label title="Adds natural-looking irregularity. It is fixed once drawn and never changes afterwards.">Irregularity <input type="range" min={0} max={20} step={1} value={s.stroke.irregularity} onChange={(e) => s.set({ stroke: { ...s.stroke, irregularity: Number(e.target.value), seed: (s.stroke.seed % 9973) + 1 } })} /></label>
-                <label title="Higher keeps more of the small wiggles in your outline">Detail <input type="range" min={0.3} max={6} step={0.1} value={7 - s.stroke.precision} onChange={(e) => s.set({ stroke: { ...s.stroke, precision: 7 - Number(e.target.value) } })} /></label>
+                <label title="Rounds the corners of your outline">Smoothing <input type="range" min={0} max={4} step={1} value={s.stroke.smoothness} onChange={(e) => s.set({ stroke: { ...s.stroke, smoothness: Number(e.target.value) } })} /><RangeReset def={DEFAULT_STROKE.smoothness} value={s.stroke.smoothness} /></label>
+                <label title="Adds natural-looking irregularity. It is fixed once drawn and never changes afterwards.">Irregularity <input type="range" min={0} max={20} step={1} value={s.stroke.irregularity} onChange={(e) => s.set({ stroke: { ...s.stroke, irregularity: Number(e.target.value), seed: (s.stroke.seed % 9973) + 1 } })} /><RangeReset def={DEFAULT_STROKE.irregularity} value={s.stroke.irregularity} /></label>
+                <label title="Higher keeps more of the small wiggles in your outline">Detail <input type="range" min={0.3} max={6} step={0.1} value={7 - s.stroke.precision} onChange={(e) => s.set({ stroke: { ...s.stroke, precision: 7 - Number(e.target.value) } })} /><RangeReset def={7 - DEFAULT_STROKE.precision} value={7 - s.stroke.precision} /></label>
               </div>
             </details>
           )}
@@ -575,10 +641,12 @@ export function Outliner() {
         {layers.map((l) => {
           const feat = isFeatureKind(l.kind), field = l.kind === 'field';
           const here = field ? s.tool === 'field' && s.fieldLayerId === l.id : feat ? s.tool === 'feature' && s.featureLayerId === l.id : l.id === s.layerId;
+          const chosen = s.selection?.kind === 'layer' && s.selection.id === l.id;
           return (
-            <div key={l.id} className={`row ${here ? 'sel' : ''}`} data-testid="layer-row">
-              <input type="checkbox" checked={!!l.visible} title="Show or hide" onChange={(e) => s.execute((wd) => cmd.updateLayer(wd, l.id, { visible: e.target.checked ? 1 : 0 }))} />
-              <span onClick={() => (field ? s.set({ selection: { kind: 'layer', id: l.id }, fieldLayerId: l.id, fieldSource: s.fieldLayerId === l.id ? s.fieldSource : {}, tool: 'field' }) : feat ? s.set({ selection: { kind: 'layer', id: l.id }, featureLayerId: l.id, tool: 'feature', reshapeId: null }) : s.set({ selection: { kind: 'layer', id: l.id }, layerId: l.id, tool: s.tool === 'feature' || s.tool === 'field' ? 'lasso' : s.tool }))} title="Draw on this layer, and show it in Properties">{l.name}</span>
+            <div key={l.id} className={`row ${chosen ? 'sel' : ''} ${here ? 'drawing' : ''}`} data-testid="layer-row" title={chosen ? 'Click again to stop showing it in Properties' : 'Draw on this layer, and show it in Properties'}
+              onClick={() => { if (chosen) { s.set({ selection: null }); return; } (field ? s.set({ selection: { kind: 'layer', id: l.id }, fieldLayerId: l.id, fieldSource: s.fieldLayerId === l.id ? s.fieldSource : {}, tool: 'field' }) : feat ? s.set({ selection: { kind: 'layer', id: l.id }, featureLayerId: l.id, tool: 'feature', reshapeId: null }) : s.set({ selection: { kind: 'layer', id: l.id }, layerId: l.id, tool: s.tool === 'feature' || s.tool === 'field' ? 'lasso' : s.tool })); }}>
+              <input type="checkbox" checked={!!l.visible} title="Show or hide" onClick={(e) => e.stopPropagation()} onChange={(e) => s.execute((wd) => cmd.updateLayer(wd, l.id, { visible: e.target.checked ? 1 : 0 }))} />
+              <span className="layer-name">{l.name}</span>
               {feat && <span className="muted"> · {l.kind === 'area' ? 'areas' : l.kind === 'line' ? 'lines' : 'points'}</span>}
               {field && <span className="muted"> · conditions</span>}
               {here && <span className="muted"> · drawing here</span>}
@@ -589,7 +657,6 @@ export function Outliner() {
       {on('countries') && <Section title="Countries and factions" onAdd={() => setNewEntity({ name: '', type: 'polity' })} addLabel="New">
         {newEntityForm('countries')}
         <EntityRows sig={entitySig} section="countries" filter={filter} />
-        {political.length > 0 && <div className="muted small-hint">Ctrl or Shift + click to choose several; right-click for quick actions.</div>}
         <button className="link pad-link" onClick={async () => { const name = await s.askText('New group', 'Name of the group (for example "My nations" or "Europe")', '', 'Create group'); if (name) s.execute((wd) => cmd.createEntityGroup(wd, name, s.chosen('entity'))); }} data-testid="new-entity-group">New group{s.chosen('entity').length > 1 ? ` of the ${s.chosen('entity').length} chosen` : ''}…</button>
         {political.length > 0 && <button className="link pad-link" onClick={() => s.set({ dialog: 'label-style' })} data-testid="open-label-style">Label style for all countries…</button>}
         {currentSpace && basemapSourceOf(currentSpace) === 'natural-earth' && <button className="link pad-link" onClick={() => s.set({ dialog: 'add-countries' })} data-testid="open-add-countries">Add today's countries…</button>}
@@ -613,7 +680,6 @@ export function Outliner() {
       </Section>}
       {on('events') && <Section title="Events" onAdd={() => s.set({ dialog: 'new-event' })} addLabel="Event">
         <EventRows sig={eventSig} filter={filter} />
-        {events.length > 1 && <div className="muted small-hint">Ctrl or Shift + click to choose several; Delete or right-click to delete them.</div>}
         {!events.length && <div className="muted pad">No events yet.</div>}
         <button className="link pad-link" onClick={() => s.set({ dialog: 'event-types' })} data-testid="open-event-types">Event types…</button>
         {hiddenEvents > 0 && (
@@ -699,8 +765,8 @@ function LayerPanel({ id }: { id: string }) {
           const st = parseJSON<{ fillOpacity?: number; borderWidth?: number }>(l.style, {});
           return (
             <div key={`look-${l.id}`} className="two layer-option">
-              <label title="How strongly the countries' colours cover the map under them, in shots and exports too">Opacity (%)<NumberField min={0} max={100} step={5} value={Math.round((st.fillOpacity ?? 0.78) * 100)} onCommit={(n) => s.execute((wd) => cmd.setLayerLook(wd, l.id, { fillOpacity: n / 100 }))} testId="layer-opacity" /></label>
-              <label title="The width of the borders between countries on this layer (pixels at 1920 wide)">Border width<NumberField min={0} max={20} step={0.25} value={st.borderWidth ?? 1.3} onCommit={(n) => s.execute((wd) => cmd.setLayerLook(wd, l.id, { borderWidth: n }))} testId="layer-border-width" /></label>
+              <label title="How strongly the countries' colours cover the map under them, in shots and exports too">Opacity (%)<NumberField min={0} max={100} step={5} value={Math.round((st.fillOpacity ?? 0.78) * 100)} def={l.export_pass === 'political' ? 78 : 60} onCommit={(n) => s.execute((wd) => cmd.setLayerLook(wd, l.id, { fillOpacity: n / 100 }))} testId="layer-opacity" /></label>
+              <label title="The width of the borders between countries on this layer (pixels at 1920 wide)">Border width<NumberField min={0} max={20} step={0.25} value={st.borderWidth ?? 1.3} def={l.export_pass === 'political' ? 1.4 : 1} onCommit={(n) => s.execute((wd) => cmd.setLayerLook(wd, l.id, { borderWidth: n }))} testId="layer-border-width" /></label>
             </div>
           );
         })}
@@ -956,7 +1022,7 @@ function EventPanel({ id }: { id: string }) {
         <label>Type<span className="row-inline"><TypeDot typeId={e.type_id} /><TypeSelect value={e.type_id} onChange={(t) => s.execute((wd) => cmd.updateEvent(wd, id, { type_id: t }))} testId="event-panel-type" /><button className="small" onClick={() => s.set({ dialog: 'event-types' })} title="Make, change and delete event types">Types…</button></span></label>
         <label>Starts<DateField value={start} onChange={(t) => t && s.execute((wd) => cmd.updateEvent(wd, id, { start: t }))} testId="event-panel-start" /></label>
         <label>Ends<DateField value={end} allowEmpty suggest={start} onChange={(t) => s.execute((wd) => cmd.updateEvent(wd, id, { end: t }))} testId="event-panel-end" /></label>
-        <label title="When two events change the same place at the same instant, the higher precedence wins">Precedence<NumberField value={e.precedence} step={1} onCommit={(n) => s.execute((wd) => cmd.updateEvent(wd, id, { precedence: Math.round(n) }))} /></label>
+        <label title="When two events change the same place at the same instant, the higher precedence wins">Precedence<NumberField value={e.precedence} def={0} step={1} onCommit={(n) => s.execute((wd) => cmd.updateEvent(wd, id, { precedence: Math.round(n) }))} /></label>
         <div className="buttons">
           {s.recordEventId === id
             ? <button onClick={() => s.set({ recordEventId: null })}>Stop recording</button>
@@ -1044,6 +1110,7 @@ function EventPanel({ id }: { id: string }) {
         </div>
       ))}
       {!effects.length && <div className="muted">No changes yet. Use “Record into this event” and draw on the map.</div>}
+      {!base && owners.length > 0 && <RenameInEvent eventId={id} owners={owners} />}
       {!base && owners.length >= 2 && (
         <div className="annex">
           <h4>Annexation (keeps its intention)</h4>
@@ -1065,6 +1132,32 @@ function EventPanel({ id }: { id: string }) {
         </PropGroup>
         <button className="danger" onClick={() => { if (confirm(`Delete the event "${e.name}" and its changes?`)) { s.execute((wd) => cmd.deleteEvent(wd, id)); s.set({ selection: null, recordEventId: s.recordEventId === id ? null : s.recordEventId }); } }}>Delete event</button>
       </>}
+    </div>
+  );
+}
+
+/** A country renamed by an event (D204): from the event's start, a change of the event like its others. */
+function RenameInEvent({ eventId, owners }: { eventId: string; owners: Array<{ id: string; name: string }> }) {
+  const s = useStore();
+  const [who, setWho] = useState('');
+  const [name, setName] = useState('');
+  const ev = s.world!.get('event', eventId);
+  if (!ev) return null;
+  const start = fromStore(ev.start_day, ev.start_ms);
+  const now = who ? s.engine!.nameAt(who, start) ?? s.world!.get('entity', who)?.name ?? '' : '';
+  const add = () => {
+    if (!who || !name.trim()) return;
+    if (s.execute((wd) => cmd.renameFrom(wd, { entity: who, name, mode: { kind: 'new', eventId, at: null } }))) { setName(''); setWho(''); }
+  };
+  return (
+    <div className="rename-in-event" data-testid="rename-in-event">
+      <h4>Rename a country</h4>
+      <select value={who} onChange={(e) => { setWho(e.target.value); const n = e.target.value ? s.engine!.nameAt(e.target.value, start) ?? s.world!.get('entity', e.target.value)?.name ?? '' : ''; setName(n); }} data-testid="rename-event-who">
+        <option value="">Which country…</option>
+        {owners.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+      </select>
+      <input value={name} placeholder={who ? `New name of ${now}` : 'New name'} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') add(); }} data-testid="rename-event-name" />
+      <button disabled={!who || !name.trim() || name.trim() === now} onClick={add} title="From the event's start the country is called so (its label on the map too)" data-testid="rename-event-add">Add renaming</button>
     </div>
   );
 }

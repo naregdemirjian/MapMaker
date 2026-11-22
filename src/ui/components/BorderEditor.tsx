@@ -12,7 +12,7 @@ import { DASHES, DASH_NAMES, DEFAULT_BORDER, layerBordersOf, pairKey, type Borde
 export function BorderStyleEditor({ value, onChange, idPrefix }: { value: BorderStyle; onChange: (next: BorderStyle) => void; idPrefix: string }) {
   const set = (patch: Partial<BorderStyle>) => onChange({ ...value, ...patch });
   const n = (key: keyof BorderStyle, label: string, min: number, max: number, step: number, title?: string) => (
-    <label title={title}>{label}<NumberField min={min} max={max} step={step} value={value[key] as number} onCommit={(x) => set({ [key]: x } as Partial<BorderStyle>)} testId={`${idPrefix}-${key}`} /></label>
+    <label title={title}>{label}<NumberField min={min} max={max} step={step} value={value[key] as number} def={typeof DEFAULT_BORDER[key] === 'number' ? DEFAULT_BORDER[key] as number : undefined} onCommit={(x) => set({ [key]: x } as Partial<BorderStyle>)} testId={`${idPrefix}-${key}`} /></label>
   );
   return (
     <div className="border-style effect-fields" data-testid={`${idPrefix}-style`}>
@@ -23,9 +23,9 @@ export function BorderStyleEditor({ value, onChange, idPrefix }: { value: Border
         </span>
       </label>
       <label title="Width (empty: the layer's border width)">Width
-        <NumberField min={0} max={40} step={0.25} value={value.width ?? 0} onCommit={(x) => set({ width: x > 0 ? x : null })} testId={`${idPrefix}-width`} />
+        <NumberField min={0} max={40} step={0.25} value={value.width ?? 0} def={DEFAULT_BORDER.width ?? 0} onCommit={(x) => set({ width: x > 0 ? x : null })} testId={`${idPrefix}-width`} />
       </label>
-      <label>Strength (%)<NumberField min={0} max={100} step={5} value={Math.round(value.opacity * 100)} onCommit={(x) => set({ opacity: x / 100 })} /></label>
+      <label>Strength (%)<NumberField min={0} max={100} step={5} value={Math.round(value.opacity * 100)} def={Math.round(DEFAULT_BORDER.opacity * 100)} onCommit={(x) => set({ opacity: x / 100 })} /></label>
       <label>Dashes
         <select value={value.dash} onChange={(e) => set({ dash: e.target.value as DashKind })} data-testid={`${idPrefix}-dash`}>
           {DASHES.map((d) => <option key={d} value={d}>{DASH_NAMES[d]}</option>)}

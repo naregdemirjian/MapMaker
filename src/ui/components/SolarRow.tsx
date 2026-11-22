@@ -20,6 +20,7 @@ export function SolarRowDialog() {
         <div className="modal-head"><h2>Side by side</h2><button className="close" onClick={close} aria-label="Close">×</button></div>
         <p className="muted">How the Sun, the planets and their moons are drawn in a row. Who holds each body, and the lanes between them, stay as they are.</p>
         <label>Sizes<select value={row.sizes} onChange={(e) => set({ sizes: e.target.value as RowSizes })} data-testid="solar-row-sizes">
+          <option value="poster">As a poster: true sizes, the Sun at the edge, the dwarf planets below</option>
           <option value="styled">As drawn to read well</option>
           <option value="equal">All alike</option>
           <option value="true">True to each other (Jupiter eleven Earths across; the Sun held smaller)</option>

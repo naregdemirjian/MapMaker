@@ -35,14 +35,19 @@ a { color: var(--accent); cursor: pointer; }
 .date-input.bad { border-color: var(--danger); }
 
 /* (Clipped, not scrollable: a crowded top bar wider than the window must never let the whole page slide sideways.) */
-.app { overflow: clip; display: grid; height: 100vh; grid-template-columns: var(--tools, 44px) var(--left, 250px) minmax(0, 1fr) var(--right, 310px); grid-template-rows: 40px 32px var(--options, 36px) minmax(0, 1fr) var(--bottom, 150px) 24px; grid-template-areas: "top top top top" "workspaces workspaces workspaces workspaces" "tools options options options" "tools left center right" "bottom bottom bottom bottom" "status status status status"; }
-.topbar { grid-area: top; display: flex; align-items: center; gap: 6px; padding: 0 10px; background: var(--panel); border-bottom: 1px solid var(--line); }
+.app { overflow: clip; display: grid; height: 100vh; grid-template-columns: var(--tools, 44px) var(--left, 250px) minmax(0, 1fr) var(--right, 310px); grid-template-rows: 24px 32px var(--options, 36px) minmax(0, 1fr) var(--bottom, 150px) 24px; grid-template-areas: "top top top top" "workspaces workspaces workspaces workspaces" "tools options options options" "tools left center right" "bottom bottom bottom bottom" "status status status status"; }
+.topbar { grid-area: top; display: flex; align-items: center; gap: 4px; padding: 0 8px; background: var(--panel); border-bottom: 1px solid var(--line); min-width: 0; }
+.topbar .brand { font-size: 13px; margin-right: 2px; }
+.topbar .project-name { font-size: 12px; }
+.map-chooser { display: inline-flex; align-items: center; gap: 4px; margin-left: 10px; }
+.map-chooser select { height: 24px; padding: 1px 6px; max-width: 200px; }
 /* The timeline: its head, the tracks' heads, the tracks (D201). */
 .timeline { display: flex; flex-direction: column; }
 .tl-head { flex: none; height: 30px; display: flex; align-items: center; gap: 5px; padding: 0 8px; background: var(--panel); border-bottom: 1px solid var(--line); min-width: 0; }
 .tl-head button { height: 22px; padding: 0 8px; }
 .tl-head select { width: auto; padding: 1px 4px; font-size: 12px; height: 22px; }
-.tl-head .datebar input { width: 190px; height: 22px; }
+.tl-head .datebar .date-field { width: 220px; }
+.tl-head .datebar input { width: 100%; height: 22px; }
 .tl-head .tl-find { width: 150px; height: 22px; padding: 1px 6px; }
 .tl-head .group-filter { position: relative; top: auto; right: auto; }
 .tl-body { flex: 1; min-height: 0; display: flex; }
@@ -78,6 +83,12 @@ a { color: var(--accent); cursor: pointer; }
 .list-tab.on, .list-tab.on:hover:not(:disabled) { background: var(--panel); color: var(--text); border-bottom-color: var(--accent); filter: none; }
 .list-filter { flex: none; padding: 6px 8px; border-bottom: 1px solid var(--line); }
 .list-filter input { width: 100%; }
+/* Back to the default (D207). */
+.with-reset { display: flex; align-items: center; gap: 3px; }
+.with-reset > input { flex: 1; min-width: 0; }
+.reset-default { flex: none; padding: 2px 3px; line-height: 0; border: none; background: none; color: var(--muted); border-radius: 3px; }
+.reset-default:hover:not(:disabled) { color: var(--accent2); background: var(--panel2); border: none; }
+.reset-default:disabled { opacity: 0.25; }
 /* The tool strip and the tool's options (D198). */
 .tool-strip { grid-area: tools; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px 0; background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; scrollbar-width: none; }
 .tool-slot { display: contents; }
@@ -85,6 +96,18 @@ a { color: var(--accent); cursor: pointer; }
 .tool-strip .tool:hover:not(:disabled) { background: var(--panel2); border-color: var(--line); }
 .tool-strip .tool.on, .tool-strip .tool.on:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); color: #06121e; }
 .tool-strip .tool svg { pointer-events: none; }
+/* Stacked tools (D205): a mark at the corner; the others slide out beside it. */
+.tool-stack { position: relative; display: block; }
+.tool-strip .tool.stacked { position: relative; }
+.tool-strip .tool.stacked::after { content: ''; position: absolute; right: 2px; bottom: 2px; border: 3px solid transparent; border-right-color: currentColor; border-bottom-color: currentColor; opacity: 0.75; }
+.tool-flyout { position: fixed; z-index: 1000; min-width: 200px; background: #1b2430; border: 1px solid rgba(255,255,255,0.14); border-radius: 6px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); padding: 3px; animation: tool-flyout-in 0.12s ease-out; }
+@keyframes tool-flyout-in { from { opacity: 0; transform: translateX(-6px); } to { opacity: 1; transform: none; } }
+.tool-flyout-item { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; border: none; background: none; padding: 5px 8px; border-radius: 4px; }
+.tool-flyout-item:hover:not(:disabled) { background: rgba(79,155,217,0.25); border: none; }
+.tool-flyout-item svg { pointer-events: none; flex: none; }
+.tool-flyout-mark { width: 10px; font-size: 9px; color: var(--accent); flex: none; }
+.tool-flyout-name { flex: 1; }
+.tool-flyout-key { color: var(--muted); font-size: 12px; }
 .tool-sep { width: 22px; height: 1px; background: var(--line); margin: 3px 0; flex: none; }
 .options-bar { grid-area: options; background: var(--panel); border-bottom: 1px solid var(--line); min-width: 0; }
 .options-bar .tool-options { display: flex; flex-wrap: wrap; align-items: center; background: var(--panel); border-bottom: 1px solid var(--line); min-height: 36px; }
@@ -93,7 +116,7 @@ a { color: var(--accent); cursor: pointer; }
 .options-bar .record-banner { border-bottom: none; border-radius: 5px; margin: 3px 8px 3px auto; padding: 2px 10px; }
 /* The menu bar (D197). */
 .menubar-menus { display: flex; align-self: stretch; align-items: center; margin: 0 8px 0 6px; }
-.menubar-menu { border: none; background: none; border-radius: 4px; padding: 4px 9px; color: var(--text); }
+.menubar-menu { border: none; background: none; border-radius: 3px; padding: 1px 8px; line-height: 18px; color: var(--text); }
 .menubar-menu.open, .menubar-menu:hover:not(:disabled) { background: #1f3346; }
 .context-menu button { display: flex; align-items: center; gap: 6px; }
 .context-menu button:disabled { opacity: 0.4; cursor: default; background: none; }
@@ -146,6 +169,7 @@ table.shortcuts kbd { font: inherit; background: var(--panel2); border: 1px soli
 .row:hover { background: var(--panel2); }
 .row.sel { background: #1f3346; }
 .row.dim { opacity: 0.5; }
+.row.drawing { box-shadow: inset 3px 0 0 var(--accent); }
 .row .date { color: var(--muted); font-variant-numeric: tabular-nums; }
 .row button { margin-left: auto; }
 .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; border: 1px solid rgba(255,255,255,0.25); flex: none; }
@@ -386,7 +410,7 @@ label.indent { margin-left: 24px; }
 .date-field .date-input { flex: 1; min-width: 0; padding-right: 26px; }
 /* A date that stays still as it changes (SteadyDate): the field's own text hidden under it until it is typed in. */
 .date-field .date-input.steady-under { color: transparent; }
-.steady-date { position: absolute; left: 8px; top: 0; bottom: 0; display: flex; align-items: center; gap: 0.32em; pointer-events: none; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--text); }
+.steady-date { position: absolute; left: 8px; right: 26px; overflow: hidden; top: 0; bottom: 0; display: flex; align-items: center; gap: 0.32em; pointer-events: none; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--text); }
 .steady-date .sd-cell { display: inline-grid; }
 .steady-date .sd-cell > span { grid-area: 1 / 1; }
 .steady-date .sd-size { visibility: hidden; }

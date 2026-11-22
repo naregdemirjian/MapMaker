@@ -12,14 +12,14 @@ import { branchAt, branchCuts, seenAt, branchName, branchAndBelow, branchLine } 
 import {
   BASE_EVENT_ID, MAIN_BRANCH, SCHEMA_VERSION, baseEventOf, isBaseEvent, type RowDiff, type EffectRow, type EventRow, type EntityRow, type LayerKind, type FeatureRow, type RelationRow,
 } from '../world-model/schema.ts';
-import { type Vec3, vecToLonLat, normalize, lonLatToVec } from '../geo-kernel/vec.ts';
+import { type Vec3, vecToLonLat, normalize, lonLatToVec, angle, arcDirectionAtEnd } from '../geo-kernel/vec.ts';
 import { TopologyError, type PathStep } from '../geo-kernel/arrangement.ts';
 import { worldSettings, terrainSourceOf, simOf, calendarOfSpace, EARTH_RADIUS_KM, type BasemapSource, type ShowSet, type ShowSettings } from '../world-model/world-settings.ts';
 import { frontSourceOf } from '../render-engine/front-source.ts';
 import { buildFrontField, frontLines, reachedAt } from '../render-engine/front-field.ts';
 import { borderShiftSteps, shiftDates, MAX_SHIFT_STEPS, type ShiftStep } from './border-shifts.ts';
 import { definitionOf, definitionProblems, canonicalDefinition, type PlanetDefinition } from '../planet/model/definition.ts';
-import { skyLookOf, type SkyLook } from '../space/sky-look.ts';
+import { skyLookOf, presetLook, type SkyLook } from '../space/sky-look.ts';
 import { solarRowOf, type SolarRow } from '../space/solar.ts';
 import { terrainLookOf, DEFAULT_TERRAIN_LOOK, type TerrainLook } from '../terrain/look.ts';
 import { cleanSeaLevel, type SeaLevelPoint } from '../terrain/sea-level.ts';
@@ -251,7 +251,8 @@ export function createSpaceMap(world: World, name: string, catalogue: 'nearby' |
   return run(world, catalogue === 'solar' ? `Create solar system map "${name}"` : catalogue === 'galaxy' ? `Create galaxy map "${name}"` : `Create star map "${name}"`, (tx) => {
     const id = createWorldIn(tx, name, 6371.0088, 'none');
     const space = tx.world.get('map_space', id)!;
-    const sp = catalogue === 'solar' ? { catalogue: 'solar', radiusLy: 50, scale: 'compressed' }
+    // (A new solar system, D208: true to scale, as photographed, side by side as a poster.)
+    const sp = catalogue === 'solar' ? { catalogue: 'solar', radiusLy: 50, scale: 'true', look: presetLook('photographic'), row: { sizes: 'poster', spacing: 'even', moons: 'none', chosen: [] } }
       : catalogue === 'invented' ? { catalogue: 'invented', radiusLy: invented!.radiusLy, invented: { ...invented, seed: Math.round(invented!.seed), count: Math.round(invented!.count) } }
       : catalogue === 'galaxy' ? { catalogue: 'galaxy', radiusLy: galaxy!.kind === 'milkyway' ? 60000 : Math.round(galaxy!.radiusLy * 1.2), galaxy: { ...galaxy!, seed: Math.round(galaxy!.seed), systems: Math.round(galaxy!.systems), arms: Math.round(galaxy!.arms) } }
       : { catalogue: 'nearby', radiusLy: 50 };
@@ -1903,6 +1904,34 @@ function ownerReader(arr: ReturnType<World['arrangement']>, states: Map<number, 
 }
 
 /**
+ * Where an end of a split line stops inside the country a little short of its edge (D204: drawn a touch too
+ * short, or ending over the sea where the country's land is shown ending at the coast but its parcels reach
+ * further out), the line is carried on straight to the edge, at most `most` radians: the points to add, going
+ * away from that end. Nothing when the end is outside the country, or the edge is further than that.
+ */
+export function reachEdge(line: Vec3[], atStart: boolean, inside: (p: Vec3) => boolean, most: number): Vec3[] {
+  const n = line.length, end = atStart ? line[0] : line[n - 1];
+  if (n < 2 || !(most > 0) || !inside(end)) return [];
+  // (The direction of the last stretch of the line, not of its last wobble.)
+  let back: Vec3 | null = null;
+  for (let i = 1; i < n; i++) { const p = atStart ? line[i] : line[n - 1 - i]; back = p; if (angle(p, end) > most * 0.15) break; }
+  if (!back || angle(back, end) < 1e-9) return [];
+  const d = arcDirectionAtEnd(back, end);
+  const at = (th: number): Vec3 => normalize([end[0] * Math.cos(th) + d[0] * Math.sin(th), end[1] * Math.cos(th) + d[1] * Math.sin(th), end[2] * Math.cos(th) + d[2] * Math.sin(th)]);
+  const step = most / 48;
+  let lo = 0, hi = 0;
+  for (let th = step; th <= most * (1 + 1e-9); th += step) { if (!inside(at(th))) { hi = th; break; } lo = th; }
+  if (!hi) return [];
+  for (let k = 0; k < 12; k++) { const mid = (lo + hi) / 2; if (inside(at(mid))) lo = mid; else hi = mid; }
+  // (A little past the edge, so that the line meets it however the border is snapped.)
+  const past = Math.min(most, hi + step * 0.25);
+  const out: Vec3[] = [];
+  for (let th = step; th < past; th += step) out.push(at(th));
+  out.push(at(past));
+  return out;
+}
+
+/**
  * Split a country along a line: the line becomes a border (it cuts the parcel map, as an outline
  * does), and the part of the country on the side that was clicked (`pick`: its land reached from
  * there without crossing the line) goes to `to`, an existing owner or a new country. The country is
@@ -1917,10 +1946,18 @@ export function splitTerritory(world: World, engine: Engine, o: { spaceId: strin
   refuseLocked(world, [country, typeof o.to === 'string' ? o.to : null]);
   const name = world.get('entity', country)?.name ?? 'the country';
   if (typeof o.to === 'string' && o.to === country) throw new Error(`That part already belongs to ${name}.`);
+  // Ends that stop a little short of the country's edge are carried on to it (a third of the line's length at most).
+  let length = 0;
+  for (let i = 1; i < o.line.length; i++) length += angle(o.line[i - 1], o.line[i]);
+  const inside = (p: Vec3) => engine.valueAtPoint(o.spaceId, o.layerId, p, o.t) === country;
+  const line = [...reachEdge(o.line, true, inside, length / 3).reverse(), ...o.line, ...reachEdge(o.line, false, inside, length / 3)];
   return run(world, `Split ${name}`, (tx) => {
-    const [path] = tx.kernel(o.spaceId, (arr) => arr.insertPaths([o.line], { closed: false, snap: o.snap }));
+    const [path] = tx.kernel(o.spaceId, (arr) => arr.insertPaths([line], { closed: false, snap: o.snap }));
     const arr = world.arrangement(o.spaceId);
-    const ownerOf = ownerReader(arr, states);
+    // (Who holds what is read again once the line has cut the map (D204): a parcel the line splits that no change
+    // names keeps its id and the other piece becomes its sibling, which the state read before the cut does not
+    // know of; the engine follows lineage as it is now.)
+    const ownerOf = ownerReader(arr, engine.partitionState(o.spaceId, o.layerId, o.t));
     const barrier = new Set(path.map((st) => st.seg));
     // The country's land reached from the click without crossing the line.
     const start = arr.locate(o.pick);

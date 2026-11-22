@@ -190,11 +190,21 @@ export class SpaceRenderer {
     }
     // (As photographed, D191: the light comes from the Sun as drawn; in the side-by-side row, from the left.)
     const sunAt = placed.find((p) => p.s.id === 0);
-    for (const { s, x, y, k } of placed) {
+    for (const { s, x: px, y: py, k } of placed) {
+      let x = px; const y = py;
       // (Planets and moons keep their sizes; a star's size follows its brightness as much as the look says.)
       const natural = s.size ?? starSize(s.absmag);
       const base = s.size ? s.size : MEAN_STAR + (natural - MEAN_STAR) * look.sizeByBrightness;
-      const r = base * look.size * u * Math.sqrt(k) * grow * (s.id === 0 && !s.size ? 1.3 : 1);
+      let r = base * look.size * u * Math.sqrt(k) * grow * (s.id === 0 && !s.size ? 1.3 : 1);
+      // True to scale (D208): as big as it truly is on screen now (growing as it is closed in on), and never smaller
+      // than a dot that can be found.
+      if (s.radius) {
+        const edge = view.project([s.x + s.radius, s.y, s.z]);
+        const truly = edge ? Math.hypot(edge[0] - px, edge[1] - py) : 0;
+        r = Math.max(truly, (s.id === 0 ? 3 : s.kind === 'moon' ? 1.1 : 1.8) * u);
+      }
+      // (A body at the edge of a poster row, D208: its disc to the left, its right edge where it stands.)
+      if (s.limb) x -= r;
       if (o.only === 'names') { this.lastStars.push({ id: s.id, x, y, r }); continue; }
       const held = heldBy(o.holdings, s.id);
       const nat = s.color ?? (s.id === 0 ? '#fff1c9' : starColour(s.spect));
@@ -938,6 +948,23 @@ export class SpaceRenderer {
       ctx.fillText(text, x, y);
     };
     const nameColour = (s: Star) => (s.id === o.selected ? '#ffe9a6' : rgba(look.names, 0.94));
+    // As a poster (D208): each name slanting up from its planet (down from a dwarf planet), the Sun's not written.
+    if (placed.some((p) => p.s.limb)) {
+      for (const { s, x, y } of placed) {
+        if (s.limb || s.around !== undefined) continue;
+        const r = (s.size ?? 4) * look.size * u * grow, down = !!s.dwarf, a = down ? Math.PI / 3 : -Math.PI / 3;
+        ctx.save();
+        ctx.translate(x, y + (down ? r + 6 * u : -r - 6 * u));
+        ctx.rotate(a);
+        write(s.name, 0, 0, nameColour(s), 600, size, 'left');
+        ctx.restore();
+        this.lastNames.push(s.name);
+        const held = heldBy(o.holdings, s.id);
+        if (held) { write(held.name.toUpperCase(), x, y + (down ? -r - 8 * u : r + 12 * u), held.color, 700, size * 0.8, 'center'); this.lastNames.push(held.name.toUpperCase()); }
+      }
+      ctx.restore();
+      return;
+    }
     for (const { s, x, y } of placed) {
       const r = (s.size ?? 4) * look.size * u * grow, held = heldBy(o.holdings, s.id);
       if (s.around === undefined) {

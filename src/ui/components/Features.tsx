@@ -1,6 +1,7 @@
 // Areas, lines and points on feature layers (D71): the tool's options above the map, the question
 // asked once something is drawn, the panel of a chosen feature, the list of features, and the dialog
 // that makes a layer of any kind.
+import { RangeReset } from '../shell/Reset.tsx';
 import { SmartBrushControls } from './SmartBrush.tsx';
 import { useEffect, useState } from 'react';
 import { useStore, store, type PendingEdit } from '../store.ts';
@@ -151,8 +152,10 @@ export function FeaturePrompt({ p }: { p: Extract<PendingEdit, { kind: 'feature'
   useEffect(() => {
     const key = (ev: KeyboardEvent) => {
       if (ev.key === 'Escape') { ev.preventDefault(); close(); return; }
-      if (ev.key !== 'Enter' || ev.shiftKey) return;
+      // Enter or Space applies (Space only while not typing in a field).
       const tag = (ev.target as HTMLElement)?.tagName;
+      const space = ev.key === ' ' && !ev.ctrlKey && !ev.metaKey && !ev.altKey && tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT';
+      if (!space && (ev.key !== 'Enter' || ev.shiftKey)) return;
       if (tag === 'TEXTAREA' || tag === 'SELECT') return;
       ev.preventDefault();
       confirm();
@@ -277,7 +280,7 @@ export function FeaturePanel({ id }: { id: string }) {
         <label className="inline">Colour <input type="color" value={own.color ?? color} onChange={(ev) => look({ color: ev.target.value })} data-testid="feature-color" /></label>
         {own.color && <button className="small" onClick={() => look({ color: undefined } as FeatureStyle)} title={ownerColor ? "Use the colour of the country it belongs to" : "Use the layer's colour"}>{ownerColor ? "Country's colour" : "Layer's colour"}</button>}
         {kind === 'area' && <>
-          <label className="inline" title="0: outline only">Fill <input type="range" min={0} max={1} step={0.05} value={st.fillOpacity ?? 0.25} onChange={(ev) => look({ fillOpacity: Number(ev.target.value) })} /></label>
+          <label className="inline" title="0: outline only">Fill <input type="range" min={0} max={1} step={0.05} value={st.fillOpacity ?? 0.25} onChange={(ev) => look({ fillOpacity: Number(ev.target.value) })} /><RangeReset def={0.25} value={st.fillOpacity ?? 0.25} /></label>
           <label className="inline">Pattern
             <select value={st.hatch ?? 'none'} onChange={(ev) => look({ hatch: ev.target.value as FeatureStyle['hatch'] })} data-testid="feature-hatch">
               <option value="none">None</option><option value="diagonal">Diagonal lines</option><option value="cross">Cross-hatched</option><option value="dots">Dots</option>

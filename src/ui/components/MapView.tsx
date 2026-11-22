@@ -13,6 +13,7 @@ import { isFeatureKind } from '../../render-engine/feature-style.ts';
 import { finishFeatureDrawing } from './Features.tsx';
 import { placementMode } from './Characters.tsx';
 import { regionIndex } from './Regions.tsx';
+import { drawStateGuides } from '../guides.ts';
 import { bordersAt } from '../../domain/border-points.ts';
 import { periodChangesNow, GAINED_COLOR, LOST_COLOR } from './CountryHistory.tsx';
 import { processLasso, densify, orientInteriorLeft, signedArea, splitLoops, simplify, smooth, type Pt, dedupe, ringFromMapPoints } from '../../render-engine/stroke.ts';
@@ -667,6 +668,8 @@ export function MapView() {
       if (cursor && drag.current.kind !== 'pen') { ctx.setLineDash([3, 4]); ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(end[0], end[1]); ctx.lineTo(cursor[0], cursor[1]); ctx.stroke(); }
       ctx.restore();
     }
+    // Today's states and provinces as guides (D206; the working view only).
+    if (s.guideStates && !presentation) { const gx = regionIndex('regions'); if (gx) drawStateGuides(ctx, v, gx); }
     // The region picker: the chosen regions filled lightly, the one under the pointer outlined, the box being dragged.
     if (s.tool === 'regions') {
       const ix = regionIndex(s.regionLevel);
@@ -1333,7 +1336,6 @@ export function MapView() {
   function onWheel(e: WheelEvent) {
     e.preventDefault();
     const p = local(e);
-    if (e.altKey && !presentation) { store.setCamera({ ...camera, rotation: (camera.rotation + (e.deltaY > 0 ? 3 : -3)) % 360 }); return; }
     // (Worked out on the map as it is shown; the meridian held meanwhile is the view's, not the camera's.)
     const { meridian: _held, ...next } = zoomCameraAt(viewCamera, frame.w, frame.h, p[0], p[1], -e.deltaY / 400);
     if (shot) {

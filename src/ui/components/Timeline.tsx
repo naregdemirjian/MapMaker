@@ -538,6 +538,9 @@ export function Timeline({ head }: { head?: React.ReactNode }) {
 
 /** Speeds history can be played at, in years a second, with how they are written. */
 export const HISTORY_SPEEDS: Array<{ yps: number; label: string }> = [
+  // (Down to real time: a second of history a second.)
+  { yps: 1 / 31556952, label: 'Real time (1 second/s)' }, { yps: 60 / 31556952, label: '1 minute/s' }, { yps: 3600 / 31556952, label: '1 hour/s' },
+  { yps: 6 * 3600 / 31556952, label: '6 hours/s' }, { yps: 1 / 365.2425, label: '1 day/s' }, { yps: 7 / 365.2425, label: '1 week/s' },
   { yps: 1 / 12, label: '1 month/s' }, { yps: 0.25, label: '3 months/s' }, { yps: 1, label: '1 year/s' },
   { yps: 2, label: '2 years/s' }, { yps: 5, label: '5 years/s' }, { yps: 10, label: '10 years/s' },
   { yps: 25, label: '25 years/s' }, { yps: 50, label: '50 years/s' }, { yps: 100, label: '100 years/s' },

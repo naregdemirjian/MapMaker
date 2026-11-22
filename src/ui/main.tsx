@@ -106,6 +106,8 @@ function shown(width: number, height: number) {
     const r = c.getBoundingClientRect();
     return [r.left + v.frame.x + st.x, r.top + v.frame.y + st.y];
   },
+  /** How big a star of a space map was drawn (pixels across its radius), or null. */
+  starRadius(id: number) { return shownSpace()?.stars.find((x) => x.id === id)?.r ?? null; },
   /** The star names written on the space map (D110). */
   spaceNames() { return shownSpace()?.names ?? []; },
   /** The middle of the space map's picture on the page (D110), or null. */

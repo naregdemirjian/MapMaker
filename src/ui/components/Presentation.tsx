@@ -1,4 +1,5 @@
 import { GraphicStyleEditor } from './GraphicStyleEditor.tsx';
+import { RangeReset } from '../shell/Reset.tsx';
 import { ANIMS_IN, ANIMS_OUT, ANIM_NAMES } from '../../presentation/graphic-style.ts';
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { useStore, useLive, store } from '../store.ts';
@@ -10,7 +11,7 @@ import { PASS_DEFS, runExport, exportPassesOf, estimateExportBytes, scaledBytes,
 import { svgFrame } from '../../presentation/svg-frame.ts';
 import { planVideo } from '../../presentation/video-encoder.ts';
 import { VIDEO_QUALITIES, formatBitrate, type VideoQuality } from '../../export/video-codecs.ts';
-import { eventsBoxOf, type EventsBox } from '../../presentation/events-box.ts';
+import { eventsBoxOf, DEFAULT_EVENTS_BOX, type EventsBox } from '../../presentation/events-box.ts';
 import { LOOKS, LOOK_IDS, GRADES, resolveLook, type LookId, type GradeId, type ShotLook } from '../../presentation/looks.ts';
 import { isSpaceMap, calendarOfSpace } from '../../world-model/world-settings.ts';
 import { spaceCamera } from '../../space/space-view.ts';
@@ -211,7 +212,7 @@ export function ShotEditor({ only }: { only?: 'export' } = {}) {
           <label title="Several pictures averaged into each exported frame, so what moves is smeared along its way as on film (exports take as many times longer)">Motion blur<select value={shot.motionBlur?.samples ?? 0} onChange={(e) => { const n = Number(e.target.value); update({ motionBlur: n > 1 ? { samples: n, shutter: shot.motionBlur?.shutter ?? 0.5 } : undefined }); }} data-testid="export-motion-blur">
             <option value={0}>None</option><option value={4}>Light (4 pictures a frame)</option><option value={8}>Film (8)</option><option value={16}>Smooth (16)</option>
           </select></label>
-          {shot.motionBlur && <label title="How much of the time between frames the pictures are spread over (half, as a film camera's shutter)">Shutter (%)<NumberField min={5} max={100} step={5} value={Math.round(shot.motionBlur.shutter * 100)} onCommit={(n) => update({ motionBlur: { ...shot.motionBlur!, shutter: n / 100 } })} testId="export-shutter" /></label>}
+          {shot.motionBlur && <label title="How much of the time between frames the pictures are spread over (half, as a film camera's shutter)">Shutter (%)<NumberField min={5} max={100} step={5} value={Math.round(shot.motionBlur.shutter * 100)} def={50} onCommit={(n) => update({ motionBlur: { ...shot.motionBlur!, shutter: n / 100 } })} testId="export-shutter" /></label>}
           <p className="muted" data-testid="export-format-note">{EXPORT_FORMATS.find((f) => f.id === (shot.format ?? 'png'))!.note}</p>
           {video && <>
             <label>Video quality<select value={shot.videoQuality ?? 'good'} onChange={(e) => update({ videoQuality: e.target.value as VideoQuality })} data-testid="export-video-quality">
@@ -235,7 +236,7 @@ export function ShotEditor({ only }: { only?: 'export' } = {}) {
             <div className="row-inline"><span data-testid="shot-audio-name">♪ {shot.audio.name}</span>
               <button className="small" onClick={() => update({ audio: undefined })} data-testid="shot-audio-remove">Remove</button></div>
             <label title="The second of the track heard at the shot's first frame">Track second at the first frame<NumberField min={0} max={36000} step={0.1} value={shot.audio.offset} onCommit={(n) => update({ audio: { ...shot.audio!, offset: Math.max(0, n) } })} testId="shot-audio-offset" /></label>
-            <label>Volume (%)<span className="row-inline amount"><input type="range" min={0} max={100} step={5} value={Math.round(shot.audio.volume * 100)} onChange={(e) => update({ audio: { ...shot.audio!, volume: Number(e.target.value) / 100 } })} data-testid="shot-audio-volume" /><span className="muted amount-value">{Math.round(shot.audio.volume * 100)}</span></span></label>
+            <label>Volume (%)<span className="row-inline amount"><input type="range" min={0} max={100} step={5} value={Math.round(shot.audio.volume * 100)} onChange={(e) => update({ audio: { ...shot.audio!, volume: Number(e.target.value) / 100 } })} data-testid="shot-audio-volume" /><RangeReset def={100} value={Math.round(shot.audio.volume * 100)} /><span className="muted amount-value">{Math.round(shot.audio.volume * 100)}</span></span></label>
           </> : (
             <label className="file-button">Choose a sound file…<input type="file" accept="audio/*,.mp3,.wav,.ogg,.m4a,.aac,.flac,.opus" data-testid="shot-audio-file" onChange={async (e) => {
               const file = e.target.files?.[0];
@@ -254,9 +255,9 @@ export function ShotEditor({ only }: { only?: 'export' } = {}) {
           {spaceMap ? <p className="muted">Drag the preview to turn the view, Shift-drag to move it, scroll to zoom; a double-click on a star turns the view round it.</p> : <label>Projection<select value={shot.camera[0].camera.projection} onChange={(e) => update({ camera: shot.camera.map((k) => ({ ...k, camera: { ...k.camera, projection: e.target.value as ProjectionName } })) })}>
             {shot.camera[0].camera.projection === 'flat' ? <option value="flat">Flat map (plan)</option> : PROJECTIONS.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select></label>}
-          <label>Rotation (degrees)<NumberField min={-360} max={360} step={1} value={Math.round(liveCamera.rotation)} onCommit={(n) => setCamera({ ...liveCamera, rotation: n })} testId="camera-rotation" /></label>
+          <label>Rotation (degrees)<NumberField min={-360} max={360} step={1} value={Math.round(liveCamera.rotation)} def={0} onCommit={(n) => setCamera({ ...liveCamera, rotation: n })} testId="camera-rotation" /></label>
           {shot.camera[0].camera.projection === 'globe' && <>
-            <label>Turn the globe (degrees a second)<NumberField min={-120} max={120} step={1} value={shot.spin ?? 0} onCommit={(n) => update({ spin: n })} testId="globe-spin" /></label>
+            <label>Turn the globe (degrees a second)<NumberField min={-120} max={120} step={1} value={shot.spin ?? 0} def={0} onCommit={(n) => update({ spin: n })} testId="globe-spin" /></label>
             <p className="muted">The planet turns through the shot as the Earth does (west to east) at this speed; negative turns it the other way, 0 holds it still. 15 is one turn in 24 seconds.</p>
           </>}
         </Group>
@@ -295,8 +296,8 @@ export function ShotEditor({ only }: { only?: 'export' } = {}) {
               <option value="bottom-right">Bottom right</option><option value="bottom-left">Bottom left</option><option value="top-right">Top right</option><option value="top-left">Top left</option><option value="custom">Custom</option>
             </select></label>
             {box.corner === 'custom' && <div className="two">
-              <label>Left (% of width)<NumberField min={0} max={100} step={1} value={Math.round(box.x * 100)} onCommit={(n) => setBox({ x: n / 100 })} /></label>
-              <label>Top (% of height)<NumberField min={0} max={100} step={1} value={Math.round(box.y * 100)} onCommit={(n) => setBox({ y: n / 100 })} /></label>
+              <label>Left (% of width)<NumberField min={0} max={100} step={1} value={Math.round(box.x * 100)} def={Math.round(DEFAULT_EVENTS_BOX.x * 100)} onCommit={(n) => setBox({ x: n / 100 })} /></label>
+              <label>Top (% of height)<NumberField min={0} max={100} step={1} value={Math.round(box.y * 100)} def={Math.round(DEFAULT_EVENTS_BOX.y * 100)} onCommit={(n) => setBox({ y: n / 100 })} /></label>
             </div>}
             <label>Heading<input value={box.title} placeholder="(none)" onChange={(e) => setBox({ title: e.target.value })} data-testid="events-box-title" /></label>
             <label className="check"><input type="checkbox" checked={box.showDate} onChange={(e) => setBox({ showDate: e.target.checked })} /> Show the date and time</label>
@@ -304,11 +305,11 @@ export function ShotEditor({ only }: { only?: 'export' } = {}) {
               <option value="year">Year</option><option value="month">Month</option><option value="day">Day</option><option value="minute">Hour and minute</option><option value="second">Seconds</option>
             </select></label>}
             <div className="two">
-              <label>Most events listed<NumberField min={0} max={20} step={1} value={box.maxEvents} onCommit={(n) => setBox({ maxEvents: Math.round(n) })} /></label>
-              <label>Events without an end stay (s)<NumberField min={0} max={60} step={0.5} value={box.linger} onCommit={(n) => setBox({ linger: n })} /></label>
+              <label>Most events listed<NumberField min={0} max={20} step={1} value={box.maxEvents} def={DEFAULT_EVENTS_BOX.maxEvents} onCommit={(n) => setBox({ maxEvents: Math.round(n) })} /></label>
+              <label>Events without an end stay (s)<NumberField min={0} max={60} step={0.5} value={box.linger} def={DEFAULT_EVENTS_BOX.linger} onCommit={(n) => setBox({ linger: n })} /></label>
             </div>
             <label className="check" title="The box is as tall as the most events it lists need (each name on one line, shortened if long), so events come and go inside it and it never grows, shrinks or moves"><input type="checkbox" checked={!!box.keepSize} onChange={(e) => setBox({ keepSize: e.target.checked })} data-testid="events-box-keep-size" /> Keep its size and place (room for {box.maxEvents} {box.maxEvents === 1 ? 'event' : 'events'})</label>
-            <label>Fade in and out (s)<NumberField min={0} max={10} step={0.1} value={box.fade} onCommit={(n) => setBox({ fade: n })} /></label>
+            <label>Fade in and out (s)<NumberField min={0} max={10} step={0.1} value={box.fade} def={DEFAULT_EVENTS_BOX.fade} onCommit={(n) => setBox({ fade: n })} /></label>
             <label className="check"><input type="checkbox" checked={box.showDescription} onChange={(e) => setBox({ showDescription: e.target.checked })} /> Show each event's description</label>
             <label className="check"><input type="checkbox" checked={box.hideWhenEmpty} onChange={(e) => setBox({ hideWhenEmpty: e.target.checked })} data-testid="events-box-hide-empty" /> Hide the box while no event is listed</label>
             {w.all('event_group').length > 0 && <>
@@ -320,10 +321,10 @@ export function ShotEditor({ only }: { only?: 'export' } = {}) {
             <h4>Look</h4>
             <label>Font<select value={box.font} onChange={(e) => setBox({ font: e.target.value })}>{(LABEL_FONTS.includes(box.font) ? LABEL_FONTS : [box.font, ...LABEL_FONTS]).map((f) => <option key={f} value={f}>{f}</option>)}</select></label>
             <div className="two">
-              <label>Heading size<NumberField min={6} max={200} step={1} value={box.titleSize} onCommit={(n) => setBox({ titleSize: n })} /></label>
-              <label>Date size<NumberField min={6} max={200} step={1} value={box.dateSize} onCommit={(n) => setBox({ dateSize: n })} /></label>
-              <label>Event size<NumberField min={6} max={200} step={1} value={box.textSize} onCommit={(n) => setBox({ textSize: n })} /></label>
-              <label>Width<NumberField min={80} max={1920} step={10} value={box.width} onCommit={(n) => setBox({ width: n })} /></label>
+              <label>Heading size<NumberField min={6} max={200} step={1} value={box.titleSize} def={DEFAULT_EVENTS_BOX.titleSize} onCommit={(n) => setBox({ titleSize: n })} /></label>
+              <label>Date size<NumberField min={6} max={200} step={1} value={box.dateSize} def={DEFAULT_EVENTS_BOX.dateSize} onCommit={(n) => setBox({ dateSize: n })} /></label>
+              <label>Event size<NumberField min={6} max={200} step={1} value={box.textSize} def={DEFAULT_EVENTS_BOX.textSize} onCommit={(n) => setBox({ textSize: n })} /></label>
+              <label>Width<NumberField min={80} max={1920} step={10} value={box.width} def={DEFAULT_EVENTS_BOX.width} onCommit={(n) => setBox({ width: n })} /></label>
             </div>
             <div className="two">
               <label>Heading colour<input type="color" value={box.titleColor} onChange={(e) => setBox({ titleColor: e.target.value })} /></label>
@@ -331,13 +332,13 @@ export function ShotEditor({ only }: { only?: 'export' } = {}) {
               <label>Event colour<input type="color" value={box.textColor} onChange={(e) => setBox({ textColor: e.target.value })} /></label>
               <label>Bullet colour<input type="color" value={box.accentColor} onChange={(e) => setBox({ accentColor: e.target.value })} /></label>
               <label>Background<input type="color" value={box.background} onChange={(e) => setBox({ background: e.target.value })} /></label>
-              <label>Background opacity (%)<NumberField min={0} max={100} step={5} value={Math.round(box.backgroundOpacity * 100)} onCommit={(n) => setBox({ backgroundOpacity: n / 100 })} /></label>
+              <label>Background opacity (%)<NumberField min={0} max={100} step={5} value={Math.round(box.backgroundOpacity * 100)} def={Math.round(DEFAULT_EVENTS_BOX.backgroundOpacity * 100)} onCommit={(n) => setBox({ backgroundOpacity: n / 100 })} /></label>
               <label>Border colour<input type="color" value={box.borderColor} onChange={(e) => setBox({ borderColor: e.target.value })} /></label>
-              <label>Border width<NumberField min={0} max={40} step={0.5} value={box.borderWidth} onCommit={(n) => setBox({ borderWidth: n })} /></label>
-              <label>Corner rounding<NumberField min={0} max={200} step={1} value={box.radius} onCommit={(n) => setBox({ radius: n })} /></label>
-              <label>Inner spacing<NumberField min={0} max={200} step={1} value={box.padding} onCommit={(n) => setBox({ padding: n })} /></label>
-              <label>Distance from the edge<NumberField min={0} max={500} step={1} value={box.margin} onCommit={(n) => setBox({ margin: n })} /></label>
-              <label>Fixed height (0 = fit)<NumberField min={0} max={2000} step={10} value={box.height} onCommit={(n) => setBox({ height: n })} /></label>
+              <label>Border width<NumberField min={0} max={40} step={0.5} value={box.borderWidth} def={DEFAULT_EVENTS_BOX.borderWidth} onCommit={(n) => setBox({ borderWidth: n })} /></label>
+              <label>Corner rounding<NumberField min={0} max={200} step={1} value={box.radius} def={DEFAULT_EVENTS_BOX.radius} onCommit={(n) => setBox({ radius: n })} /></label>
+              <label>Inner spacing<NumberField min={0} max={200} step={1} value={box.padding} def={DEFAULT_EVENTS_BOX.padding} onCommit={(n) => setBox({ padding: n })} /></label>
+              <label>Distance from the edge<NumberField min={0} max={500} step={1} value={box.margin} def={DEFAULT_EVENTS_BOX.margin} onCommit={(n) => setBox({ margin: n })} /></label>
+              <label>Fixed height (0 = fit)<NumberField min={0} max={2000} step={10} value={box.height} def={DEFAULT_EVENTS_BOX.height} onCommit={(n) => setBox({ height: n })} /></label>
             </div>
             <h4>Style</h4>
             <GraphicStyleEditor value={box.style} idPrefix="events-box"
@@ -356,7 +357,7 @@ export function ShotEditor({ only }: { only?: 'export' } = {}) {
                 <option value="wrap">Wrap the box around the graphic (the graphic is the box)</option>
                 <option value="cover">Cover the box</option><option value="contain">Fit inside the box</option><option value="stretch">Stretch to the box</option>
               </select></label>
-              <label>Picture opacity (%)<NumberField min={0} max={100} step={5} value={Math.round(box.imageOpacity * 100)} onCommit={(n) => setBox({ imageOpacity: n / 100 })} /></label>
+              <label>Picture opacity (%)<NumberField min={0} max={100} step={5} value={Math.round(box.imageOpacity * 100)} def={Math.round(DEFAULT_EVENTS_BOX.imageOpacity * 100)} onCommit={(n) => setBox({ imageOpacity: n / 100 })} /></label>
               <p className="muted">{box.imageFit === 'wrap'
                 ? 'The box takes your graphic\'s shape; "Width" sets its size. Use "Inner spacing" to keep the text inside its frame.'
                 : 'Tip: set the background opacity to 0 to show only your graphic.'}</p>
@@ -372,12 +373,12 @@ export function ShotEditor({ only }: { only?: 'export' } = {}) {
             <label>Sea colour<input type="color" value={colourParts(look.ocean).hex} onChange={(e) => setLook({ ocean: e.target.value })} data-testid="look-ocean" /></label>
             <label>Land colour<input type="color" value={colourParts(look.land).hex} onChange={(e) => setLook({ land: e.target.value })} data-testid="look-land" /></label>
             <label>Border colour<input type="color" value={colourParts(look.border).hex} onChange={(e) => setLook({ border: e.target.value })} data-testid="look-border" /></label>
-            <label>Border width<NumberField min={0} max={20} step={0.1} value={look.borderWidth} onCommit={(n) => setLook({ borderWidth: n })} testId="look-border-width" /></label>
+            <label>Border width<NumberField min={0} max={20} step={0.1} value={look.borderWidth} def={LOOKS[look.id].look.borderWidth} onCommit={(n) => setLook({ borderWidth: n })} testId="look-border-width" /></label>
             <label>Colour grade<select value={look.grade} onChange={(e) => setLook({ grade: e.target.value as GradeId })} data-testid="look-grade">
               {(Object.keys(GRADES) as GradeId[]).map((g) => <option key={g} value={g}>{GRADES[g].name}</option>)}
             </select></label>
-            <label title="The frame's edges darkened, drawing the eye to the middle">Darker edges<input type="range" min={0} max={1} step={0.05} value={look.vignette} onChange={(e) => setLook({ vignette: Number(e.target.value) })} data-testid="look-vignette" /></label>
-            <label title="The fine grain of paper over the map">Paper grain<input type="range" min={0} max={1} step={0.05} value={look.grain} onChange={(e) => setLook({ grain: Number(e.target.value) })} data-testid="look-grain" /></label>
+            <label title="The frame's edges darkened, drawing the eye to the middle">Darker edges<input type="range" min={0} max={1} step={0.05} value={look.vignette} onChange={(e) => setLook({ vignette: Number(e.target.value) })} data-testid="look-vignette" /><RangeReset def={LOOKS[look.id].look.vignette} value={look.vignette} /></label>
+            <label title="The fine grain of paper over the map">Paper grain<input type="range" min={0} max={1} step={0.05} value={look.grain} onChange={(e) => setLook({ grain: Number(e.target.value) })} data-testid="look-grain" /><RangeReset def={LOOKS[look.id].look.grain} value={look.grain} /></label>
           </div>
           <label className="check"><input type="checkbox" checked={look.blotches} onChange={(e) => setLook({ blotches: e.target.checked })} data-testid="look-blotches" /> Stains of old paper</label>
           {shot.look && Object.keys(shot.look).length > 1 && <div className="buttons"><button className="small" onClick={() => update({ look: { id: look.id } })} data-testid="look-reset">Back to the look's own colours</button></div>}

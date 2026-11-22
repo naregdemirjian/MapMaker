@@ -82,7 +82,7 @@ export function SkyLookDialog() {
     <label className="sky-row" title={title}>{label}<input type="color" value={look[key]} onChange={(e) => set({ [key]: e.target.value })} data-testid={`sky-${key}`} /></label>
   );
   const slider = (label: string, key: keyof SkyLook, min: number, max: number, step: number, format: (v: number) => string = pct, title?: string) => (
-    <label className="sky-row" title={title}>{label}<Slider value={look[key] as number} min={min} max={max} step={step} onCommit={(v) => set({ [key]: v })} format={format} testId={`sky-${key}`} /></label>
+    <label className="sky-row" title={title}>{label}<Slider value={look[key] as number} def={typeof DEFAULT_SKY[key] === 'number' ? DEFAULT_SKY[key] as number : undefined} min={min} max={max} step={step} onCommit={(v) => set({ [key]: v })} format={format} testId={`sky-${key}`} /></label>
   );
   const choice = <T extends string>(label: string, key: keyof SkyLook, options: Array<[T, string]>, title?: string) => (
     <label className="sky-row" title={title}>{label}<select value={String(look[key])} onChange={(e) => set({ [key]: e.target.value })} data-testid={`sky-${key}`}>
@@ -111,7 +111,7 @@ export function SkyLookDialog() {
         {look.chart ? <>
           {choice('Grid', 'chartGrid', GRIDS, 'The chart\'s lines: rings round the middle, squares or numbered hexes')}
           {look.chartGrid !== 'rings' && look.chartGrid !== 'none' && (
-            <label className="sky-row" title="Light-years between the lines (0: as the rings, every 10 light-years on a map of nearby stars)">Every (light-years)<NumberField value={look.chartSpacing} min={0} max={1e6} step={1} onCommit={(v) => set({ chartSpacing: v })} testId="sky-chartSpacing" /></label>
+            <label className="sky-row" title="Light-years between the lines (0: as the rings, every 10 light-years on a map of nearby stars)">Every (light-years)<NumberField value={look.chartSpacing} def={DEFAULT_SKY.chartSpacing} min={0} max={1e6} step={1} onCommit={(v) => set({ chartSpacing: v })} testId="sky-chartSpacing" /></label>
           )}
           {choice('Heights above the plane', 'heights', [['numbers', 'As numbers (light-years)'], ['symbols', 'As marks (filled: above)'], ['none', 'Not shown']], 'How far above or below the plane each star stands, beside it')}
         </> : (

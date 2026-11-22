@@ -109,6 +109,51 @@ test('splitting to an existing country, in a new event, as a correction; the lin
   assert.deepEqual(s.engine.conflicts.filter((c) => c.kind === 'broken'), []);
 });
 
+test('a line stopping a little short of the edge on either side is carried on to it; one stopping in the middle is not (D204)', () => {
+  const s = setup();
+  // Aldmark is 20 degrees across: a line of 14 degrees, three short of each edge.
+  const r = cmd.splitTerritory(s.world, s.engine, {
+    spaceId: s.space, layerId: s.layer, line: line([[-7, 1], [7, 1]]), pick: lonLatToVec(0, 6), t: Y(1800), snap: 1e-9,
+    to: { name: 'Northmark' }, mode: { kind: 'change', t: Y(1800) },
+  });
+  const north = r.result.owner;
+  assert.equal(s.at(0, 6, Y(1801)), north);
+  assert.equal(s.at(-9, 6, Y(1801)), north, 'beyond where the line was drawn, to the west');
+  assert.equal(s.at(9, 6, Y(1801)), north, 'and to the east');
+  assert.equal(s.at(-9, -4, Y(1801)), s.A, 'the other side stays');
+  assert.equal(s.at(25, 6, Y(1801)), s.B, 'carried on no further than the edge: Bergholt untouched');
+  // Drawn a little short at one end only (from outside to two degrees short of the far edge).
+  const r2 = cmd.splitTerritory(s.world, s.engine, {
+    spaceId: s.space, layerId: s.layer, line: line([[3, -15], [3, -7], [3, 8]]), pick: lonLatToVec(6, -4), t: Y(1900), snap: 1e-9,
+    to: s.C, mode: { kind: 'change', t: Y(1900) },
+  });
+  assert.equal(r2.result.owner, s.C);
+  assert.equal(s.at(6, -4, Y(1901)), s.C);
+  assert.equal(s.at(0, -4, Y(1901)), s.A);
+  // A stroke ending far short (in the middle) still divides nothing.
+  assert.throws(() => cmd.splitTerritory(s.world, s.engine, {
+    spaceId: s.space, layerId: s.layer, line: line([[-15, -5], [-2, -5]]), pick: lonLatToVec(-5, -8), t: Y(2000), snap: 1e-9,
+    to: { name: 'Nowhere' }, mode: { kind: 'change', t: Y(2000) },
+  }), /does not cut Aldmark in two/);
+});
+
+test('a country split once is split again later along another line (a piece of a parcel no change names, D204)', () => {
+  const s = setup();
+  cmd.splitTerritory(s.world, s.engine, {
+    spaceId: s.space, layerId: s.layer, line: line([[-15, 1], [15, 1]]), pick: lonLatToVec(0, 6), t: Y(1800), snap: 1e-9,
+    to: { name: 'Northmark' }, mode: { kind: 'change', t: Y(1800) },
+  });
+  // The south that is still Aldmark's, cut north to south: before the fix, the new piece was read as nobody's and the line refused.
+  const r = cmd.splitTerritory(s.world, s.engine, {
+    spaceId: s.space, layerId: s.layer, line: line([[3, -15], [3, 15]]), pick: lonLatToVec(6, -4), t: Y(1900), snap: 1e-9,
+    to: s.C, mode: { kind: 'change', t: Y(1900) },
+  });
+  assert.equal(r.result.owner, s.C);
+  assert.equal(s.at(6, -4, Y(1901)), s.C);
+  assert.equal(s.at(0, -4, Y(1901)), s.A);
+  assert.notEqual(s.at(6, 6, Y(1901)), s.C, 'the north is not Aldmark\'s: untouched');
+});
+
 test('merging countries: into one of them, or into a new country in an event; the others hold no land after', () => {
   const s = setup();
   const r = cmd.mergeTerritory(s.world, s.engine, { spaceId: s.space, layerId: s.layer, ids: [s.A, s.B], into: s.A, t: Y(1800), mode: { kind: 'change', t: Y(1800) } });
