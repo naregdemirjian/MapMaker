@@ -37,6 +37,17 @@ a { color: var(--accent); cursor: pointer; }
 /* (Clipped, not scrollable: a crowded top bar wider than the window must never let the whole page slide sideways.) */
 .app { overflow: clip; display: grid; height: 100vh; grid-template-columns: var(--left, 250px) minmax(0, 1fr) var(--right, 310px); grid-template-rows: 40px 32px minmax(0, 1fr) var(--bottom, 150px) 24px; grid-template-areas: "top top top" "workspaces workspaces workspaces" "left center right" "bottom bottom bottom" "status status status"; }
 .topbar { grid-area: top; display: flex; align-items: center; gap: 6px; padding: 0 10px; background: var(--panel); border-bottom: 1px solid var(--line); }
+/* The menu bar (D197). */
+.menubar-menus { display: flex; align-self: stretch; align-items: center; margin: 0 8px 0 6px; }
+.menubar-menu { border: none; background: none; border-radius: 4px; padding: 4px 9px; color: var(--text); }
+.menubar-menu.open, .menubar-menu:hover:not(:disabled) { background: #1f3346; }
+.context-menu button { display: flex; align-items: center; gap: 6px; }
+.context-menu button:disabled { opacity: 0.4; cursor: default; background: none; }
+.context-menu .menu-key { margin-left: auto; padding-left: 18px; color: var(--muted); font-size: 12px; }
+.context-menu .menu-check { width: 12px; flex: none; color: var(--accent); }
+table.shortcuts { border-collapse: collapse; width: 100%; }
+table.shortcuts td { padding: 3px 12px 3px 0; vertical-align: top; }
+table.shortcuts kbd { font: inherit; background: var(--panel2); border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; white-space: nowrap; }
 /* The frame (D196): workspaces, the edges panels are resized by, the status bar. */
 .workspace-bar { grid-area: workspaces; display: flex; align-items: center; gap: 6px; padding: 0 10px; background: var(--bg); border-bottom: 1px solid var(--line); min-width: 0; }
 .workspace-bar button { padding: 3px 9px; }
@@ -247,7 +258,7 @@ label.file-button.small { padding: 3px 8px; font-size: 12px; }
 
 /* Right-click menus */
 .context-menu { position: fixed; z-index: 1000; min-width: 220px; max-width: 320px; background: #1b2430; border: 1px solid rgba(255,255,255,0.14); border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); padding: 4px; }
-.context-menu button { display: block; width: 100%; text-align: left; background: none; border: none; padding: 6px 10px; border-radius: 5px; color: inherit; font: inherit; cursor: pointer; }
+.context-menu button { width: 100%; text-align: left; background: none; border: none; padding: 6px 10px; border-radius: 5px; color: inherit; font: inherit; cursor: pointer; }
 .context-menu button:hover { background: rgba(79,155,217,0.25); }
 .context-menu button.danger { color: #ff8a8a; }
 .context-menu hr { border: none; border-top: 1px solid rgba(255,255,255,0.1); margin: 4px 2px; }

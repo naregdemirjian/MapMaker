@@ -6,7 +6,9 @@ import { WorkspaceBar, Splitter, StatusBar, frameStyle } from './shell/Shell.tsx
 import { arrowStep } from '../core-time/steps.ts';
 import { calendarNow } from './calendar-now.ts';
 import { useStore, store } from './store.ts';
-import { TopBar, Outliner, ToolBar, Inspector, Toasts } from './components/Panels.tsx';
+import { TopBar, Outliner, ToolBar, Inspector, Toasts, QuickStart } from './components/Panels.tsx';
+import { ShortcutsDialog } from './shell/MenuBar.tsx';
+import { commandForKey } from './commands.ts';
 import { ShowDialog } from './components/ShowDialog.tsx';
 import { SeaLevelDialog } from './components/SeaLevelDialog.tsx';
 import { SkyLookDialog } from './components/SkyLook.tsx';
@@ -38,10 +40,11 @@ export function App() {
     const key = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-      // With the border pen, undo and redo act on the draft being drawn only, never on the project.
-      const pen = store.tool === 'pen' && store.mode !== 'present';
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); if (pen) store.penUndoPiece(); else store.undo(); }
-      if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) { e.preventDefault(); if (pen) store.penRedoPiece(); else store.redo(); }
+      // The commands' shortcuts (with the border pen, undo and redo act on the draft being drawn only, never on the project).
+      if (!store.pending && !(e.target as HTMLElement)?.isContentEditable) {
+        const c = commandForKey(e);
+        if (c) { e.preventDefault(); c.run(store); return; }
+      }
       // Space: history plays or pauses (world-building), or the shot (presentation).
       if (e.key === ' ' && !e.ctrlKey && !e.metaKey && !e.altKey && !store.pending && !(e.target as HTMLElement)?.isContentEditable && tag !== 'BUTTON') {
         e.preventDefault();
@@ -109,6 +112,8 @@ export function App() {
       {s.dialog === 'health' && <HealthDialog />}
       {s.dialog === 'data-sources' && <DataSourcesDialog />}
       {s.dialog === 'settings' && <SettingsDialog />}
+      {s.dialog === 'shortcuts' && <ShortcutsDialog />}
+      {s.dialog === 'getting-started' && <div className="modal-back" onClick={() => s.set({ dialog: null })}><div className="modal" role="dialog" aria-label="Getting started" data-testid="getting-started-dialog" onClick={(e) => e.stopPropagation()}><QuickStart /><div className="modal-actions"><button onClick={() => s.set({ dialog: null })}>Close</button></div></div></div>}
       {s.dialog === 'label-style' && <LabelStyleDialog onClose={() => s.set({ dialog: null })} />}
       {s.dialog === 'add-countries' && <AddCountriesDialog onClose={() => s.set({ dialog: null })} />}
       {s.dialog === 'add-cities' && <AddCitiesDialog onClose={() => s.set({ dialog: null })} />}

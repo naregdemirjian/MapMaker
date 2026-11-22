@@ -36,7 +36,7 @@ import type { StrokeSettings } from '../render-engine/stroke.ts';
 import { type Workspace, type Layouts, type PanelLayout, type Side, DEFAULT_LAYOUTS, presents, loadLayouts, saveLayouts, loadWorkspace, saveWorkspace } from './shell/layout.ts';
 export type Mode = 'world' | 'present';
 /** One line of a right-click menu: an action, a heading, or a divider. */
-export type MenuItem = { label: string; run: () => void; danger?: boolean; testId?: string } | { heading: string } | 'divider';
+export type MenuItem = { label: string; run: () => void; danger?: boolean; testId?: string; shortcut?: string; disabled?: boolean; checked?: boolean } | { heading: string } | 'divider';
 
 export type Tool = 'select' | 'lasso' | 'polygon' | 'pen' | 'vertex' | 'place' | 'erase' | 'feature' | 'split' | 'regions' | 'sculpt' | 'field' | 'disaster' | 'systems' | 'lanes';
 export type Selection =
@@ -77,7 +77,7 @@ export interface AdjustState {
   missing: string[];
 }
 
-class AppStore {
+export class AppStore {
   version = 0;
   private listeners = new Set<() => void>();
   appVersion = '';
@@ -153,7 +153,8 @@ class AppStore {
    */
   multi: { kind: 'entity' | 'event'; ids: string[] } | null = null;
   /** The right-click menu that is open. */
-  menu: { x: number; y: number; title?: string; items: MenuItem[] } | null = null;
+  /** A menu open at a place: a right-click menu, or one of the menu bar (`bar`: which). */
+  menu: { x: number; y: number; title?: string; items: MenuItem[]; bar?: string } | null = null;
   /** Folded groups and countries in the lists (remembered per project). */
   collapsed: string[] = [];
   /** The ids chosen now: the several chosen, else the one selected (of that kind). */

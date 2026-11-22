@@ -14,7 +14,7 @@ export function ContextMenu() {
     if (!m) return;
     const close = (e: Event) => {
       if (e instanceof KeyboardEvent && e.key !== 'Escape') return;
-      if (e.type === 'pointerdown' && (e.target as HTMLElement)?.closest?.('.context-menu')) return;
+      if (e.type === 'pointerdown' && (e.target as HTMLElement)?.closest?.('.context-menu, .menubar-menus')) return;
       store.set({ menu: null });
     };
     window.addEventListener('pointerdown', close, true);
@@ -30,7 +30,9 @@ export function ContextMenu() {
       {m.title && <div className="menu-title">{m.title}</div>}
       {m.items.map((it, i) => it === 'divider' ? <hr key={i} />
         : 'heading' in it ? <div key={i} className="menu-heading">{it.heading}</div>
-        : <button key={i} role="menuitem" className={it.danger ? 'danger' : ''} data-testid={it.testId} onClick={() => { store.set({ menu: null }); it.run(); }}>{it.label}</button>)}
+        : <button key={i} role="menuitem" className={it.danger ? 'danger' : ''} disabled={it.disabled} data-testid={it.testId} onClick={() => { store.set({ menu: null }); it.run(); }}>
+            {it.checked !== undefined && <span className="menu-check">{it.checked ? '✓' : ''}</span>}{it.label}{it.shortcut && <span className="menu-key">{it.shortcut}</span>}
+          </button>)}
     </div>
   );
 }

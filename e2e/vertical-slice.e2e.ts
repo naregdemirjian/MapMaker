@@ -375,7 +375,7 @@ try {
   });
 
   await step('Save a named version', async () => {
-    await page.getByRole('button', { name: 'Versions' }).click();
+    await page.getByTestId('menu-file').click(); await page.getByTestId('command-versions').click();
     await page.getByPlaceholder('Version name').fill('Two countries drawn');
     await page.getByRole('button', { name: 'Save version' }).click();
     await page.getByText('Two countries drawn').waitFor();
@@ -430,7 +430,7 @@ try {
   await step('Restore the saved version, then undo the restore', async () => {
     await saved();
     page.once('dialog', (d) => void d.accept());
-    await page.getByRole('button', { name: 'Versions' }).click();
+    await page.getByTestId('menu-file').click(); await page.getByTestId('command-versions').click();
     await page.locator('.modal .row', { hasText: 'Two countries drawn' }).getByRole('button', { name: 'Restore' }).click();
     await waitOwner(P.conq, '1451', A);
     assert.equal(await page.locator('.left .row', { hasText: EVENT }).count(), 0, 'the event recorded after that version is gone');

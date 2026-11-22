@@ -39,6 +39,8 @@ import { typeColor } from '../../domain/event-types.ts';
 import { isFeatureKind } from '../../render-engine/feature-style.ts';
 import { StarPanel } from './Stars.tsx';
 import { BranchSwitcher } from './Branches.tsx';
+import { MenuBar } from '../shell/MenuBar.tsx';
+import { command } from '../commands.ts';
 import { branchName } from '../../temporal-engine/branches.ts';
 
 /** A date as the map being viewed writes it (its own calendar, D149, or the Gregorian). */
@@ -155,15 +157,6 @@ function CurrentDate() {
   return <DateField value={s.time} onChange={(t) => t && s.setTime(t)} testId="current-date" live steady={{ yearSizer: yearSizer(s.timeline.start, s.timeline.end, calendarNow()), dayOnly: s.historyPlay.on }} />;
 }
 
-/** A first date to compare with: the day before the last change up to the date viewed (the map as it
- * was before it), else a century earlier. */
-function defaultCompareTime(s: ReturnType<typeof useStore>): Instant {
-  const last = s.engine?.lastChangeStart(s.time);
-  if (last) return add(last, -1);
-  const cal = calendarNow(), c = cal.toCivil(s.time);
-  try { return cal.fromCivil({ year: c.year - 100, month: c.month, day: Math.min(c.day, cal.daysIn(c.year - 100, c.month)) }); } catch { return cal.fromCivil({ year: c.year - 100 }); }
-}
-
 export function TopBar() {
   const s = useStore();
   const w = s.world!;
@@ -180,6 +173,7 @@ export function TopBar() {
   return (
     <header className="topbar">
       <div className="brand">Map Maker</div>
+      <MenuBar />
       <div className="project-name" title={s.projectDir}>{s.projectId}</div>
       <select value={s.spaceId} onChange={(e) => switchSpace(e.target.value)} title="Which map you are looking at" data-testid="map-select">
         {spaces.map((sp) => <option key={sp.id} value={sp.id}>{sp.name}</option>)}
@@ -190,16 +184,12 @@ export function TopBar() {
           <button onClick={() => stepChange(-1)} title="Previous change">◀</button>
           <CurrentDate />
           <button onClick={() => stepChange(1)} title="Next change">▶</button>
-          <button className={s.compare.on ? 'on' : ''} onClick={() => s.set({ compare: { ...s.compare, on: !s.compare.on, time: s.compare.on ? s.compare.time : defaultCompareTime(s) } })}
+          <button className={s.compare.on ? 'on' : ''} onClick={() => command('compare').run(s)}
             title="Compare two dates: the date viewed on the left of a line across the map, another date on the right (drag the line)" data-testid="compare-toggle">Compare</button>
 
         </div>
       )}
       <div className="spacer" />
-      <button onClick={() => s.set({ dialog: 'versions' })} title="Save a named version, restore versions and backups">Versions</button>
-      <button onClick={() => s.set({ dialog: 'show' })} title="What the map shows while you work and in presentation and exports: borders, names, lakes (and from what size)…" data-testid="open-show">Show…</button>
-      <button onClick={() => s.set({ dialog: 'settings' })} title="Settings: how fast and how sharp the map is drawn while you work (never changes an export)" data-testid="settings">Settings</button>
-      <button onClick={() => s.closeProject()} title="Back to the project list">Projects</button>
     </header>
   );
 }
@@ -711,7 +701,7 @@ export function Inspector() {
   );
 }
 
-function QuickStart() {
+export function QuickStart() {
   return (
     <div className="panel">
       <h3>Getting started</h3>

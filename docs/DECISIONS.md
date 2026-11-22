@@ -61,6 +61,30 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D197. One list of commands behind the menu bar and the keyboard (interface stage 2)
+
+Second stage of D196's plan. Every command of the interface is one entry in `src/ui/commands.ts`: an id, its
+name, its shortcut as menus write it, when it can be used, whether it is ticked, and what it does. Three things
+read that list, so they cannot disagree: the **menu bar** (`src/ui/shell/MenuBar.tsx`: File, Edit, View, Map,
+History, Window, Help, in the top bar beside the name), the **keyboard** (`commandForKey` in `App.tsx`'s key
+handler, with `shell/shortcuts.ts` matching a key press to a written shortcut), and **Help › Keyboard
+shortcuts**, a list made from the commands.
+
+- A menu is the right-click menu's own drawing (`ContextMenu`, `store.menu`), opened under its name
+  (`menu.bar` says which): items gained a shortcut at the right, a tick, and "cannot be used now". With one menu
+  open the others open as the pointer passes over them; a second click or Esc closes.
+- The top bar's buttons went into menus: Projects and Versions to File, Settings to Edit, Show… to View (History
+  Health was already in the status bar and is in History too). The top bar is now the name, the menus, the map
+  chooser, the branch chooser and the date (which moves to the timeline in stage 6).
+- New shortcuts: Alt+1 to Alt+5 for the workspaces, `,` and `.` for the previous and next change, Ctrl+E for a
+  new event. Undo and redo run through their commands (with the border pen they still act on the draft only).
+  Space, Delete and the arrow keys keep their own listening (they have conditions of their own) and are in the
+  list for the menus and the shortcuts page.
+- Commands that only some maps have are greyed, not hidden (Add today's countries on a map without the Earth's
+  geography), so a menu always has the same items in the same places.
+- The lists at the left keep their "+ Map", "+ Layer", "+ Event" buttons and links for now; they are thinned in
+  stage 4. Tests reach a command by its menu: `menu-<menu>` then `command-<id>`.
+
 ### D196. The interface is rebuilt around workspaces, one Properties panel and a real timeline (stage 1: the frame)
 
 The interface had grown feature by feature: a flat row of buttons along the top, a left column of lists, settings

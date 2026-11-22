@@ -212,12 +212,12 @@ try {
     await page.getByTestId('confirm-edit').click();
     await h.waitOwner(P.a, '1500', C);
     await h.screenshot('aster');
-    await page.locator('header select').first().selectOption({ label: 'Earth' });
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
     assert.equal(await h.ownerAt(P.a, '1500'), A, 'Earth is unchanged');
-    await page.locator('header select').first().selectOption({ label: 'Aster' });
+    await page.getByTestId('map-select').selectOption({ label: 'Aster' });
     assert.equal(await h.ownerAt(P.a, '1500'), C);
     assert.equal(await h.ownerAt(P.b, '1500'), null, 'Earth\'s countries never appear on Aster');
-    await page.locator('header select').first().selectOption({ label: 'Earth' });
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
   });
 
   await h.step('Event groups: make groups on the timeline, put events in several, filter what the timeline lists', async () => {
@@ -1179,11 +1179,11 @@ try {
     await page.getByTestId('branch-select').selectOption(br);
     assert.equal(await h.ownerAt(E, '1956'), 'Westria');
     await page.getByTestId('branch-select').selectOption('main');
-    await page.locator('header select').first().selectOption({ label: 'Earth' });
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
   });
   await h.step('Upkeep and sound (D151): borders left by a deleted event tidied away, history unchanged, undone; a shot timed to a sound file, its waveform under the frames, the track copied beside its export', async () => {
     // On the map of the branches step: a stroke in an event, then the event deleted; its borders stay behind.
-    await page.locator('header select').first().selectOption({ label: 'Forks' });
+    await page.getByTestId('map-select').selectOption({ label: 'Forks' });
     const count = () => page.evaluate(() => { const s = (window as any).__mapmaker.store; const arr = s.world.arrangement(s.spaceId); return { faces: arr.leafFaces().length as number, segments: arr.segments.size as number, problems: arr.validate() as string[] }; });
     await page.evaluate(() => {
       const m = (window as any).__mapmaker, s = m.store, B = m.bench, cmd = B.commands;
@@ -1235,7 +1235,7 @@ try {
     // (The shot goes again: later steps make shots of their own.)
     await page.evaluate(() => { const m = (window as any).__mapmaker, s = m.store; const id = s.shotId; s.set({ shotId: null }); s.execute((w: any) => m.bench.commands.deleteSequence(w, id)); });
     await page.getByTestId('workspace-map').click();
-    await page.locator('header select').first().selectOption({ label: 'Earth' });
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
   });
 
   await h.step('Event types: a type of its own with a colour, a usual length and way of spreading; used for a new event and a drawing; renamed; deleted and undone', async () => {
@@ -2308,7 +2308,7 @@ try {
     const kmShown = /km/.test(scale) ? Number(scale.replace(/[^\d.]/g, '')) : Number(scale.replace(/[^\d.]/g, '')) / 1000;
     assert.ok(kmShown > 0 && kmShown <= 10, `a sensible distance on a 10 km plan (${scale})`);
     await h.screenshot('flat-map');
-    await page.locator('header select').first().selectOption({ label: 'Earth' });
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
     assert.notEqual(await page.evaluate(() => (window as any).__mapmaker.store.camera.projection), 'flat', 'Earth is round again');
   });
 
@@ -2321,7 +2321,7 @@ try {
     });
     const before = await state();
     assert.ok(before.carry && before.v.resolution === 1 && before.width === before.shown, `balanced to begin with (${JSON.stringify(before.v)})`);
-    await page.getByTestId('settings').click();
+    await page.getByTestId('menu-edit').click(); await page.getByTestId('command-settings').click();
     await page.getByTestId('settings-dialog').waitFor();
     assert.match(await page.getByTestId('preset-current').innerText(), /Balanced/);
     await page.getByTestId('preset-fastest').click();
@@ -2355,7 +2355,7 @@ try {
     assert.equal(moving.labels, 0, 'names are hidden while the map moves');
     await page.waitForFunction((n) => (window as any).__mapmaker.store.renderer.lastLabels.length === n, still.labels, { timeout: 3000 });
     // One setting changed by hand; then back to how it was.
-    await page.getByTestId('settings').click();
+    await page.getByTestId('menu-edit').click(); await page.getByTestId('command-settings').click();
     await page.getByTestId('setting-names').selectOption('hold');
     assert.match(await page.getByTestId('preset-current').innerText(), /your own choices/);
     await page.getByTestId('preset-balanced').click();
@@ -2374,7 +2374,7 @@ try {
       return { labels: s.renderer.lastLabels.length as number, lakes: s.renderer.basemapPainter.lakeFilter as { show: boolean; minKm2: number }, settings: JSON.parse(space.settings).show ?? {} };
     });
     await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastLabels.length > 0);
-    await page.getByTestId('open-show').click();
+    await page.getByTestId('menu-view').click(); await page.getByTestId('command-show').click();
     await page.getByTestId('show-dialog').waitFor();
     assert.ok(await page.getByTestId('show-working-names').isChecked() && await page.getByTestId('show-export-lakes').isChecked(), 'everything shown to begin with');
     // Rivers (Natural Earth's) drawn to begin with; hidden while working.
@@ -2485,7 +2485,7 @@ try {
     const lit = async () => (await light(tibet)) - (await light(siberia));
     assert.ok(Math.abs(await lit()) < 20, `without terrain the land is one colour (${await lit()})`);
     const show = async (fn: () => Promise<void>) => {
-      await page.getByTestId('open-show').click();
+      await page.getByTestId('menu-view').click(); await page.getByTestId('command-show').click();
       await page.getByTestId('show-dialog').waitFor();
       await fn();
       await page.getByTestId('show-dialog').getByRole('button', { name: 'Close' }).last().click();
@@ -2785,7 +2785,7 @@ try {
       return s.coverOf(space, m.bench.sculpted(g.grid, g.key, JSON.parse(space.settings).sculpt ?? [], space.radius_m / 1000))?.key ?? '';
     });
     assert.doesNotMatch(await coverKey(), /^quick-cover:/);
-    await page.getByTestId('open-show').click();
+    await page.getByTestId('menu-view').click(); await page.getByTestId('command-show').click();
     await page.getByTestId('show-dialog').waitFor();
     await page.getByTestId('terrain-climate').check();
     await page.getByTestId('show-dialog').getByRole('button', { name: 'Close' }).last().click();
@@ -2918,7 +2918,7 @@ try {
     assert.ok(diff(await pixelAt(west), plainEast) <= 12, `nothing upwind (${await pixelAt(west)})`);
     await h.screenshot('conditions-plume');
     // Hidden while working, still in the presentation (and exports).
-    await page.getByTestId('open-show').click();
+    await page.getByTestId('menu-view').click(); await page.getByTestId('command-show').click();
     await page.getByTestId('show-dialog').waitFor();
     await page.getByTestId('show-working-fields').uncheck();
     await page.getByTestId('show-dialog').getByRole('button', { name: 'Close' }).last().click();
@@ -3979,7 +3979,7 @@ try {
     assert.ok(frame.mid.reduce((a, b) => a + b, 0) > 600, `the Sun in its middle (${frame.mid})`);
     // Back to Earth; the shot and the star map undone.
     await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
-    await page.locator('header select').first().selectOption({ label: 'Earth' });
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
     await page.waitForFunction(() => { const s = (window as any).__mapmaker.store; return s.world.get('map_space', s.spaceId)?.kind === 'sphere'; });
     for (let i = 0; i < 10 && (await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.kind === 'space'))); i++) { await page.getByTestId('undo').click(); await h.saved(); }
     assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.kind === 'space')), false, 'the star map undone');
@@ -4092,7 +4092,7 @@ try {
     await page.getByTestId('solar-scale').waitFor();
     // Undone; back to Earth.
     await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
-    await page.locator('header select').first().selectOption({ label: 'Earth' });
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
     for (let i = 0; i < 24 && (await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.kind === 'space'))); i++) { await page.getByTestId('undo').click(); await h.saved(); }
     assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.kind === 'space')), false);
   });
@@ -4125,7 +4125,7 @@ try {
     assert.ok(Math.hypot(other[0] - first[0], other[1] - first[1]) > 2, 'other stars');
     // Undone; back to Earth.
     await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
-    await page.locator('header select').first().selectOption({ label: 'Earth' });
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
     for (let i = 0; i < 6 && (await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.kind === 'space'))); i++) { await page.getByTestId('undo').click(); await h.saved(); }
     assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.kind === 'space')), false);
   });
@@ -4238,7 +4238,7 @@ try {
     await h.screenshot('galaxy-own');
     // Undone; back to Earth.
     await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
-    await page.locator('header select').first().selectOption({ label: 'Earth' });
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
     for (let i = 0; i < 14 && (await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.kind === 'space'))); i++) { await page.getByTestId('undo').click(); await h.saved(); }
     assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.kind === 'space')), false);
   });
@@ -4385,7 +4385,7 @@ try {
     assert.ok(shotOut.same, 'the same frame drawn twice is the same picture');
     assert.ok(shotOut.paths > 0, `an SVG frame with its lines (${shotOut.paths} paths, skipped: ${shotOut.skipped.join(', ')})`);
     // Undone; back to Earth.
-    await page.locator('header select').first().selectOption({ label: 'Earth' });
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
     for (let i = 0; i < 30 && (await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.kind === 'space'))); i++) { await page.getByTestId('undo').click(); await h.saved(); }
     assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.kind === 'space')), false);
   });
@@ -4454,7 +4454,7 @@ try {
     assert.ok(frames.sea.every((x) => x > 0.45 && x < 0.85), `mostly sea at every moment (${frames.sea.map((x) => x.toFixed(2))})`);
     assert.ok(frames.d1 > 0.05 && frames.d2 > 0.05, `each moment its own Earth (${frames.d1.toFixed(3)}, ${frames.d2.toFixed(3)} of the picture differs)`);
     // Undone; back to Earth.
-    await page.locator('header select').first().selectOption({ label: 'Earth' });
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
     for (let i = 0; i < 8 && (await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => JSON.parse(m.settings).paleo))); i++) { await page.getByTestId('undo').click(); await h.saved(); }
     assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => JSON.parse(m.settings).paleo)), false);
     await h.setDate('1900');
@@ -4910,6 +4910,66 @@ try {
     assert.match((await page.getByTestId('status-hint').textContent())!, /^Territory brush · Draw around an area/);
     await page.getByTestId('tool-select').click();
     await h.screenshot('workspace-map');
+  });
+
+  await h.step('The menu bar: every command in a menu with its shortcut; the keyboard runs the same commands (D197)', async () => {
+    const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);
+    await page.getByTestId('workspace-map').click();
+    // Each menu opens under its name; with one open, the next opens as the pointer passes over it.
+    const seen: string[] = [];
+    await page.getByTestId('menu-file').click();
+    for (const m of ['file', 'edit', 'view', 'map', 'history', 'window', 'help']) {
+      await page.getByTestId(`menu-${m}`).hover();
+      await page.waitForFunction((id) => (window as any).__mapmaker.store.menu?.bar === id, m);
+      const ids = await page.locator('[data-testid="context-menu"] button').evaluateAll((els) => els.map((e) => e.getAttribute('data-testid')!));
+      assert.ok(ids.length >= 2, `${m}: ${ids.join(', ')}`);
+      seen.push(...ids);
+    }
+    assert.equal(new Set(seen).size, seen.length, 'no command is in two menus');
+    for (const id of ['command-versions', 'command-undo', 'command-show', 'command-new-map', 'command-new-event', 'command-workspace-history', 'command-shortcuts']) assert.ok(seen.includes(id), id);
+    await h.screenshot('menu-help');
+    await page.keyboard.press('Escape');
+    assert.equal(await store('s.menu'), null);
+    // A menu shows the shortcut and whether the command can be used now.
+    await page.getByTestId('menu-edit').click();
+    assert.match((await page.getByTestId('command-undo').textContent())!, /Undo.*Ctrl\+Z/);
+    assert.equal(await page.getByTestId('command-merge').isDisabled(), true, 'nothing chosen to merge');
+    await page.getByTestId('menu-edit').click();
+    assert.equal(await store('s.menu'), null, 'a second click closes it');
+    // A checked command: the timeline folded away from the View menu and back.
+    await page.getByTestId('menu-view').click();
+    assert.match((await page.getByTestId('command-panel-bottom').textContent())!, /✓/);
+    await page.getByTestId('command-panel-bottom').click();
+    assert.equal(await page.locator('.bottom').count(), 0);
+    await page.getByTestId('menu-view').click();
+    await page.getByTestId('command-panel-bottom').click();
+    await page.locator('.bottom').waitFor();
+    // The keyboard: workspaces, the next and the previous change, a new event.
+    await page.locator('main.center').click({ position: { x: 5, y: 5 }, button: 'right' }).catch(() => undefined);
+    await page.keyboard.press('Alt+2');
+    assert.equal(await store('s.workspaceNow()'), 'history');
+    await page.keyboard.press('Alt+1');
+    assert.equal(await store('s.workspaceNow()'), 'map');
+    const changes = await store('s.engine.changeInstants().length') as number;
+    if (changes >= 2) {
+      const t0 = await store('JSON.stringify(s.time)');
+      await page.keyboard.press('.');
+      const t1 = await store('JSON.stringify(s.time)');
+      await page.keyboard.press(',');
+      await page.keyboard.press(',');
+      const t2 = await store('JSON.stringify(s.time)');
+      assert.ok(t0 !== t1 || t1 !== t2, 'the date steps from change to change');
+    }
+    await page.keyboard.press('Control+e');
+    assert.equal(await store('s.dialog'), 'new-event');
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ dialog: null }));
+    // Help: the list of shortcuts, read from the commands.
+    await page.getByTestId('menu-help').click();
+    await page.getByTestId('command-shortcuts').click();
+    const list = (await page.getByTestId('shortcuts-dialog').textContent())!;
+    for (const k of ['Ctrl+Z', 'Alt+3', 'Space', 'Workspace: World', 'New event']) assert.ok(list.includes(k), k);
+    await h.screenshot('shortcuts');
+    await page.getByTestId('shortcuts-dialog').getByRole('button', { name: 'Close' }).click();
   });
 
   await h.step('History Health lists the overlap, nothing else; no browser errors', async () => {
