@@ -82,6 +82,15 @@ a { color: var(--accent); cursor: pointer; }
 .list-tab { border: none; border-radius: 0; background: none; color: var(--muted); padding: 6px 8px; font-size: 12px; font-weight: 600; border-bottom: 2px solid transparent; }
 .list-tab:hover:not(:disabled) { background: var(--panel); color: var(--text); }
 .list-tab.on, .list-tab.on:hover:not(:disabled) { background: var(--panel); color: var(--text); border-bottom-color: var(--accent); filter: none; }
+/* The shots as clips (D212). */
+.shot-clips { display: flex; gap: 2px; padding: 4px 8px; flex: none; }
+.shot-clip { position: relative; flex-basis: 0; min-width: 48px; height: 30px; display: flex; flex-direction: column; justify-content: center; padding: 0 6px; overflow: hidden; border-radius: 3px; background: #26384a; border: 1px solid #34506a; cursor: pointer; user-select: none; }
+.shot-clip:hover { background: #2d4359; }
+.shot-clip.on { background: #2f5277; border-color: var(--accent); cursor: ew-resize; }
+.shot-clip-name { font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.shot-clip-len { font-size: 10px; color: var(--muted); }
+.shot-clip-head { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #ff5c5c; pointer-events: none; }
+.shot-tabs { border-bottom: 1px solid var(--line); }
 .list-filter { flex: none; padding: 6px 8px; border-bottom: 1px solid var(--line); }
 .list-filter input { width: 100%; }
 /* A settings window in place in Properties (D209). */

@@ -232,7 +232,7 @@ export function Timeline({ head }: { head?: React.ReactNode }) {
       if (!moved) { snaps.push(ys); if (ye !== ys) snaps.push(ye); }
       const x0 = xOf(ys), x1 = Math.max(xOf(ye), x0 + 8);
       if (x1 < -300 || x0 > w + 300) continue;
-      evs.push({ id: e.id, x0, x1, labelW: nameWidth(e.variant_group && !e.variant_active ? `${e.name} (inactive alternative)` : e.name), track });
+      evs.push({ id: e.id, x0, x1, labelW: nameWidth(e.variant_group && !e.variant_active ? `${e.name} (inactive alternative)` : e.name), track, span: [x0, xOf(ye)] });
     }
     for (const t of s.engine!.changeInstants()) snaps.push(toApproxYear(t));
     snaps.sort((x, y) => x - y);
@@ -327,9 +327,24 @@ export function Timeline({ head }: { head?: React.ReactNode }) {
           const gs = cmd.groupsOfEvent(world, e.id).filter((g) => g !== t.id);
           gs.forEach((g, k) => { ctx.fillStyle = groupColor.get(g) ?? '#888'; const gw = (b.x1 - b.x0) / gs.length; ctx.fillRect(b.x0 + k * gw, y, gw, 3); });
           if (b.label) {
+            // (Inside at its start where there is room before the first event within it; else after it.)
             const label = inactive ? `${e.name} (inactive alternative)` : e.name, tw = nameWidth(label);
-            ctx.fillStyle = selected && b.x1 - b.x0 > tw + 8 ? '#1d1603' : '#e8eef4';
-            ctx.fillText(label, b.x1 - b.x0 > tw + 8 ? Math.max(b.x0, 0) + 4 : b.x1 + 4, y + BAR / 2 + 1);
+            const inside = (b.kids?.[0]?.x0 ?? b.x1) - b.x0 > tw + 8;
+            ctx.fillStyle = selected && inside ? '#1d1603' : '#e8eef4';
+            ctx.fillText(label, inside ? Math.max(b.x0, 0) + 4 : b.x1 + 4, y + BAR / 2 + 1);
+          }
+          // The events inside it (D211): narrower bars within it, in their own colours, named where they fit.
+          for (const k of b.kids ?? []) {
+            const ke = world.get('event', k.ids[0]);
+            if (!ke || k.x1 < -2 || k.x0 > w + 2) continue;
+            const kSel = s.selection?.kind === 'event' && s.selection.id === ke.id;
+            ctx.globalAlpha = (ke.variant_group && !ke.variant_active ? 0.4 : 1) * (find && !nameMatches(ke.name, find) ? 0.25 : 1);
+            ctx.fillStyle = 'rgba(8,12,18,0.55)';
+            ctx.fillRect(k.x0, y + 3, k.x1 - k.x0, BAR - 5);
+            ctx.fillStyle = s.recordEventId === ke.id ? '#d1495b' : kSel ? '#ffd166' : typeColor(world, ke.type_id) ?? '#7aa0c8';
+            ctx.fillRect(k.x0 + 1, y + 4, Math.max(1, k.x1 - k.x0 - 2), BAR - 7);
+            if (!kSel) { ctx.fillStyle = 'rgba(255,255,255,0.22)'; ctx.fillRect(k.x0 + 1, y + 4, Math.max(1, k.x1 - k.x0 - 2), BAR - 7); }
+            if (k.label) { ctx.fillStyle = kSel ? '#1d1603' : '#ffffff'; ctx.fillText(ke.name, k.x0 + 3, y + BAR / 2 + 1); }
           }
           ctx.globalAlpha = 1;
         }

@@ -26,6 +26,24 @@ import { branchTree, branchName } from '../../temporal-engine/branches.ts';
 import { audioPlayer, audioPeaks, drawWaveform } from '../audio-track.ts';
 import type { ShotAudio } from '../../presentation/sequence.ts';
 
+/**
+ * The shot editor's tabs in the Present workspace (D212): every group, or those of one kind. Remembered on this
+ * computer. The Export workspace shows only the shot, its output quality and its export.
+ */
+export const SHOT_TABS: Array<{ id: string; name: string; groups: string[] | null }> = [
+  { id: 'all', name: 'All', groups: null },
+  { id: 'shot', name: 'Shot', groups: ['Shot'] },
+  { id: 'camera', name: 'Camera and timing', groups: ['Timing', 'Camera'] },
+  { id: 'look', name: 'Look', groups: ['Look', 'Transitions'] },
+  { id: 'graphics', name: 'Graphics and text', groups: ['Current events box', 'Text'] },
+  { id: 'sound', name: 'Sound', groups: ['Sound'] },
+  { id: 'output', name: 'Output', groups: ['Output quality', 'Export'] },
+];
+const SHOT_TAB_KEY = 'mapmaker.shotTab';
+function loadShotTab(): string {
+  try { const v = localStorage.getItem(SHOT_TAB_KEY); return v && SHOT_TABS.some((t) => t.id === v) ? v : 'all'; } catch { return 'all'; }
+}
+
 function saveShot(id: string, next: ShotSettings) {
   store.execute((w) => cmd.updateSequence(w, id, { settings: next }));
 }
@@ -96,6 +114,7 @@ export function ShotEditor({ only }: { only?: 'export' } = {}) {
   const [videoPlan, setVideoPlan] = useState<{ key: string; error?: string; codec?: string; bitrate?: number; size?: [number, number] } | null>(null);
   const [svgSaved, setSvgSaved] = useState<string | null>(null);
   const [svgBusy, setSvgBusy] = useState(false);
+  const [tab, setTab] = useState(loadShotTab);
   const cancel = useRef(false);
   useEffect(() => setName(row?.name ?? ''), [s.shotId]);
   if (!shot || !row) return <aside className="right"><div className="panel"><h3>Presentation</h3><p className="muted">Create or pick a shot on the left. Its preview appears in the middle; drag and scroll there to frame the view.</p></div></aside>;
@@ -183,8 +202,13 @@ export function ShotEditor({ only }: { only?: 'export' } = {}) {
   return (
     <aside className="right" data-testid="shot-editor">
       <SizeEstimate shot={shot} passes={passes} estimateKey={estimateKey} onEstimate={setEstimate} />
+      {only !== 'export' && (
+        <div className="list-tabs shot-tabs" role="tablist" aria-label="Settings of the shot" data-testid="shot-tabs">
+          {SHOT_TABS.map((t) => <button key={t.id} role="tab" aria-selected={tab === t.id} className={`list-tab ${tab === t.id ? 'on' : ''}`} onClick={() => { setTab(t.id); try { localStorage.setItem(SHOT_TAB_KEY, t.id); } catch { /* (not kept) */ } }} data-testid={`shot-tab-${t.id}`}>{t.name}</button>)}
+        </div>
+      )}
       <div className="panel shot-panel">
-        <GroupsShown.Provider value={only === 'export' ? EXPORT_GROUPS : null}>
+        <GroupsShown.Provider value={only === 'export' ? EXPORT_GROUPS : SHOT_TABS.find((t) => t.id === tab)?.groups ?? null}>
         <Group title="Shot">
           <label>Name<input value={name} onChange={(e) => setName(e.target.value)} onBlur={() => name.trim() && name !== row.name && s.execute((wd) => cmd.updateSequence(wd, row.id, { name: name.trim() }))} /></label>
           {(w.all('branch').length > 0 || (shot.branch && shot.branch !== MAIN_BRANCH)) && (
@@ -637,7 +661,7 @@ export function ShotTimeline() {
     raf.current = requestAnimationFrame(tick);
     return () => { cancelAnimationFrame(raf.current); au?.pause(); };
   }, [s.playing, s.shotId]);
-  if (!shot) return <div className="timeline shot-timeline"><div className="muted pad">No shot selected.</div></div>;
+  if (!shot) return <div className="timeline shot-timeline"><ShotClips /><div className="muted pad">No shot selected.</div></div>;
   const t = timeAt(shot, s.shotFrame);
   return (
     <div className="timeline shot-timeline">
@@ -648,7 +672,48 @@ export function ShotTimeline() {
         <button onClick={() => s.set({ shotFrame: shot.frames - 1, presentCamera: null, playing: false })}>⏭</button>
         <span className="frame-info" data-testid="frame-info">Frame {s.shotFrame + 1} / {shot.frames} · {(s.shotFrame / shot.fps).toFixed(2)} s · <b>{calendarOfSpace(s.world?.get('map_space', shot.spaceId)).format(t, 'minute')}</b></span>
       </div>
+      <ShotClips />
       {shot.audio && <Waveform audio={shot.audio} seconds={shot.frames / shot.fps} at={s.shotFrame / shot.fps} />}
+    </div>
+  );
+}
+
+/**
+ * The shots as clips one after another (D212), as long as they last: a click on one chooses it; on the one chosen, a
+ * click or drag moves to that frame, its playhead showing where the preview is.
+ */
+function ShotClips() {
+  const s = useLive();
+  const drag = useRef(false);
+  const w = s.world;
+  if (!w) return null;
+  const clips = w.all('sequence').sort((a, b) => a.created_seq - b.created_seq).map((sh) => {
+    const st = parseJSON<ShotSettings | null>(sh.settings, null);
+    return { sh, st, secs: st ? st.frames / st.fps : 1 };
+  });
+  if (!clips.length) return null;
+  const frameAt = (el: HTMLElement, x: number, frames: number) => { const r = el.getBoundingClientRect(); return Math.max(0, Math.min(frames - 1, Math.round(((x - r.left) / Math.max(1, r.width)) * (frames - 1)))); };
+  return (
+    <div className="shot-clips" data-testid="shot-clips">
+      {clips.map(({ sh, st, secs }) => {
+        const on = sh.id === s.shotId;
+        return (
+          <div key={sh.id} className={`shot-clip ${on ? 'on' : ''}`} style={{ flexGrow: secs }} data-testid="shot-clip" data-shot={sh.id} title={on ? 'Click or drag to move through the shot' : `Choose “${sh.name}”`}
+            onPointerDown={(e) => {
+              if (!on || !st) { store.set({ shotId: sh.id, shotFrame: 0, presentCamera: null, playing: false, spaceId: st?.spaceId ?? store.spaceId }); return; }
+              e.currentTarget.setPointerCapture(e.pointerId);
+              drag.current = true;
+              store.setLive({ shotFrame: frameAt(e.currentTarget, e.clientX, st.frames), presentCamera: null, playing: false });
+            }}
+            onPointerMove={(e) => { if (drag.current && on && st) store.setLive({ shotFrame: frameAt(e.currentTarget, e.clientX, st.frames), presentCamera: null }); }}
+            onPointerUp={() => { drag.current = false; }}
+            onPointerCancel={() => { drag.current = false; }}>
+            <span className="shot-clip-name">{sh.name}</span>
+            <span className="shot-clip-len">{secs < 10 ? secs.toFixed(1) : Math.round(secs)} s</span>
+            {on && st && <span className="shot-clip-head" style={{ left: `${(s.shotFrame / Math.max(1, st.frames - 1)) * 100}%` }} />}
+          </div>
+        );
+      })}
     </div>
   );
 }

@@ -5268,10 +5268,13 @@ try {
     await head.waitFor();
     assert.match((await head.textContent())!, /Track test\s*2$/);
     assert.ok(await page.getByTestId('timeline-tracks').locator('.tl-track-head').count() >= before, 'a track more, or as many (the two were the only ones of theirs)');
-    const laid = () => st<{ tracks: Array<{ id: string; y: number; height: number; folded: boolean; bars: Array<{ ids: string[]; x0: number; x1: number; lane: number }>; marks: number[] }>; top: number }>('s.timelineLaid');
+    type Bar = { ids: string[]; x0: number; x1: number; lane: number; kids?: Bar[] };
+    const laid = () => st<{ tracks: Array<{ id: string; y: number; height: number; folded: boolean; bars: Bar[]; marks: number[] }>; top: number }>('s.timelineLaid');
+    // (Events on a track: those on its lanes and those drawn inside longer ones, D211.)
+    const onTrack = (t: { bars: Bar[] }) => t.bars.reduce((n, b) => n + b.ids.length + (b.kids?.length ?? 0), 0);
     const gid = await st<string>(`s.world.all('event_group').find((g) => g.name === 'Track test').id`);
     let mine = (await laid()).tracks.find((t) => t.id === gid)!;
-    assert.equal(mine.bars.reduce((n, b) => n + b.ids.length, 0), 2, 'its two events lie on it');
+    assert.equal(onTrack(mine), 2, 'its two events lie on it');
     await h.screenshot('timeline-tracks');
     // Folded: a thin line of marks; opened again.
     await head.click();
@@ -5306,7 +5309,7 @@ try {
     const canvas = (await page.getByTestId('timeline').boundingBox())!;
     const l = await laid();
     mine = l.tracks.find((t) => t.id === gid)!;
-    const bar = mine.bars.find((b) => b.ids.length === 1)!;
+    const bar = mine.bars.find((b) => b.ids.length === 1 && !b.kids) ?? mine.bars[0].kids![0];
     const id = bar.ids[0];
     const at: [number, number] = [canvas.x + bar.x0 + 3, canvas.y + l.top + mine.y + 3 + bar.lane * 20 + 7];
     await page.mouse.click(at[0], at[1]);
@@ -5352,7 +5355,7 @@ try {
     await page.mouse.up();
     await h.saved();
     assert.ok((await st<string[]>(`s.world.all('event_group_member').filter((m) => m.group_id === ${JSON.stringify(gid)}).map((m) => m.event_id)`)).includes(ob.ids[0]), 'it joined the group');
-    assert.equal((await laid()).tracks.find((t) => t.id === gid)!.bars.reduce((n, b) => n + b.ids.length, 0), 3, 'now on its track');
+    assert.equal(onTrack((await laid()).tracks.find((t) => t.id === gid)!), 3, 'now on its track');
     // A track's head: right-click to move it up or down among the tracks.
     const order = async () => (await laid()).tracks.map((t) => t.id).filter((id) => id !== '__ungrouped');
     if ((await order()).length > 1) {
@@ -5393,6 +5396,54 @@ try {
     await page.getByTestId('undo').click();
     await h.saved();
     assert.notEqual(await at(ev.day + 1), 'Testan Empire');
+    await page.getByTestId('workspace-map').click();
+  });
+
+  await h.step('Present: the shot\'s settings in tabs; the shots as clips one after another under the preview (D212)', async () => {
+    const st = <T,>(f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`) as Promise<T>;
+    await page.getByTestId('workspace-present').click();
+    const before = await st<number>(`s.world.all('sequence').length`);
+    await page.getByTestId('new-shot').click();
+    await h.saved();
+    await page.getByTestId('new-shot').click();
+    await h.saved();
+    await page.getByTestId('shot-editor').waitFor();
+    const titles = async () => (await page.locator('.shot-panel > details.settings-group > summary').allTextContents()).map((t) => t.trim());
+    const every = ['Shot', 'Output quality', 'Timing', 'Sound', 'Camera', 'Transitions', 'Current events box', 'Look', 'Text', 'Export'];
+    assert.deepEqual(await titles(), every, 'All: every group');
+    const tabs: Record<string, string[]> = { shot: ['Shot'], camera: ['Timing', 'Camera'], look: ['Transitions', 'Look'], graphics: ['Current events box', 'Text'], sound: ['Sound'], output: ['Output quality', 'Export'] };
+    for (const [id, groups] of Object.entries(tabs)) {
+      await page.getByTestId(`shot-tab-${id}`).click();
+      assert.equal(await page.getByTestId(`shot-tab-${id}`).getAttribute('aria-selected'), 'true');
+      assert.deepEqual(await titles(), groups, id);
+    }
+    await page.getByTestId('shot-tab-look').click();
+    await h.screenshot('shot-tab-look');
+    await page.getByTestId('shot-tab-all').click();
+    assert.deepEqual(await titles(), every);
+    // The Export workspace: no tabs, only what exporting needs.
+    await page.getByTestId('workspace-export').click();
+    assert.equal(await page.getByTestId('shot-tabs').count(), 0);
+    assert.deepEqual(await titles(), ['Shot', 'Output quality', 'Export']);
+    await page.getByTestId('workspace-present').click();
+    // The shots as clips: the one chosen is the last made; a click on another chooses it; on the one chosen, a click goes to that frame.
+    const clips = page.getByTestId('shot-clip');
+    assert.equal(await clips.count(), before + 2);
+    const ids = await clips.evaluateAll((els) => els.map((e) => e.getAttribute('data-shot')));
+    assert.equal(await st<string>('s.shotId'), ids[ids.length - 1]);
+    await clips.nth(ids.length - 2).click();
+    assert.equal(await st<string>('s.shotId'), ids[ids.length - 2]);
+    assert.match((await clips.nth(ids.length - 2).getAttribute('class')) ?? '', /\bon\b/);
+    const box = (await clips.nth(ids.length - 2).boundingBox())!;
+    await page.mouse.click(box.x + box.width * 0.75, box.y + box.height / 2);
+    const frames = await st<number>(`JSON.parse(s.world.get('sequence', s.shotId).settings).frames`);
+    const f = await st<number>('s.shotFrame');
+    assert.ok(Math.abs(f - 0.75 * (frames - 1)) <= 1.5, `frame ${f} of ${frames}`);
+    assert.equal(await page.getByTestId('frame-slider').inputValue(), String(f), 'the slider shows it too');
+    await h.screenshot('shot-clips');
+    // (The two shots taken away again.)
+    for (let i = 0; i < 2; i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await st<number>(`s.world.all('sequence').length`), before);
     await page.getByTestId('workspace-map').click();
   });
 

@@ -1,9 +1,15 @@
 // The timeline's tracks (D201). Events come first: each group of events has a track of its own, its events
 // packed in lanes; a track can be folded to a thin line showing only where its events lie. Where a track's
 // events would not fit a few lanes (zoomed far out over hundreds of them) they are first drawn without their
-// names, and then run together into blocks that say how many they hold. All measures are pixels.
+// names, and then run together into blocks that say how many they hold. An event lying inside a longer one of
+// its track (a battle in its war) is drawn within the longer one's bar instead of on a lane of its own (D211). All
+// measures are pixels.
 
-export interface TLEvent { id: string; x0: number; x1: number; labelW: number; track: string }
+export interface TLEvent {
+  id: string; x0: number; x1: number; labelW: number; track: string;
+  /** Where it really starts and ends (x1 is widened for bars too short to see); a point event: both the same. */
+  span?: [number, number];
+}
 export interface TLBar {
   /** The event, or the events run together (a block). */
   ids: string[];
@@ -12,10 +18,33 @@ export interface TLBar {
   label: boolean;
   /** How far a click counts as on it (the bar and its name). */
   hit1: number;
+  /** The events lying inside it, drawn within its bar (D211). */
+  kids?: TLBar[];
 }
 export interface TLTrack { id: string; y: number; height: number; folded: boolean; bars: TLBar[]; marks: number[]; count: number }
 
 export const LANE = 20, BAR = 14, FOLDED = 12, TRACK_PAD = 5, MAX_LANES = 6, MIN_BAR = 8;
+/** A bar narrower than this holds no events inside it; an event inside is drawn at least this wide. */
+export const NEST_MIN = 30, KID_MIN = 4;
+
+const spanOf = (e: TLEvent): [number, number] => e.span ?? [e.x0, e.x1];
+
+/**
+ * The events lying inside a longer one of the same track (D211): each goes inside the longest that holds it; the
+ * rest stand on their own. Events of the same length never hold each other.
+ */
+export function nest(events: TLEvent[]): { top: TLEvent[]; kids: Map<string, TLEvent[]> } {
+  const len = (e: TLEvent) => { const [a, b] = spanOf(e); return b - a; };
+  const longest = [...events].sort((a, b) => len(b) - len(a) || a.x0 - b.x0);
+  const top: TLEvent[] = [], kids = new Map<string, TLEvent[]>();
+  for (const e of longest) {
+    const [a0, a1] = spanOf(e);
+    const holder = top.find((c) => { const [c0, c1] = spanOf(c); return c1 - c0 >= NEST_MIN && c1 - c0 > a1 - a0 && c0 <= a0 && a1 <= c1; });
+    if (holder) { const l = kids.get(holder.id); if (l) l.push(e); else kids.set(holder.id, [e]); } else top.push(e);
+  }
+  for (const l of kids.values()) l.sort((a, b) => a.x0 - b.x0);
+  return { top, kids };
+}
 
 function pack(items: Array<{ ids: string[]; x0: number; x1: number; extent: number; label: boolean }>): { bars: TLBar[]; lanes: number } {
   const ends: number[] = [], bars: TLBar[] = [];
@@ -28,10 +57,30 @@ function pack(items: Array<{ ids: string[]; x0: number; x1: number; extent: numb
   return { bars, lanes: ends.length };
 }
 
-/** One track's events in lanes: with their names, else without, else run together. */
+/** One track's events in lanes: with their names, else without, else run together; those inside longer ones within them. */
 export function layoutTrack(events: TLEvent[], maxLanes = MAX_LANES): { bars: TLBar[]; lanes: number } {
+  const { top, kids } = nest(events);
+  const laid = layoutTop(top, kids, maxLanes);
+  for (const b of laid.bars) {
+    if (b.ids.length > 1) { for (const id of [...b.ids]) for (const k of kids.get(id) ?? []) b.ids.push(k.id); continue; }
+    const inside = kids.get(b.ids[0]);
+    if (!inside) continue;
+    b.kids = inside.map((k) => {
+      const x0 = Math.max(b.x0, Math.min(k.x0, b.x1 - KID_MIN)), x1 = Math.min(b.x1, Math.max(spanOf(k)[1], x0 + KID_MIN));
+      return { ids: [k.id], x0, x1, lane: b.lane, label: x1 - x0 >= k.labelW + 6, hit1: x1 };
+    });
+  }
+  return laid;
+}
+
+function layoutTop(events: TLEvent[], kids: Map<string, TLEvent[]>, maxLanes: number): { bars: TLBar[]; lanes: number } {
   const evs = [...events].sort((a, b) => a.x0 - b.x0 || a.x1 - b.x1).map((e) => ({ ...e, x1: Math.max(e.x1, e.x0 + MIN_BAR) }));
-  const named = pack(evs.map((e) => ({ ids: [e.id], x0: e.x0, x1: e.x1, extent: Math.max(e.x1, e.x0 + e.labelW + 12), label: true })));
+  // (A bar holding others has its name at its start if there is room before the first of them, else after it.)
+  const extent = (e: TLEvent) => {
+    const first = kids.get(e.id)?.[0];
+    return first && first.x0 - e.x0 < e.labelW + 8 ? e.x1 + e.labelW + 12 : Math.max(e.x1, e.x0 + e.labelW + 12);
+  };
+  const named = pack(evs.map((e) => ({ ids: [e.id], x0: e.x0, x1: e.x1, extent: extent(e), label: true })));
   if (named.lanes <= maxLanes) return named;
   const bare = pack(evs.map((e) => ({ ids: [e.id], x0: e.x0, x1: e.x1, extent: e.x1, label: false })));
   if (bare.lanes <= maxLanes) {
@@ -81,7 +130,10 @@ export function barAt(tracks: TLTrack[], x: number, y: number): { track: TLTrack
     if (t.folded || y < t.y || y >= t.y + t.height) continue;
     for (const b of t.bars) {
       const by = t.y + 3 + b.lane * LANE;
-      if (y >= by && y <= by + BAR && x >= b.x0 && x <= b.hit1) return { track: t, bar: b };
+      if (!(y >= by && y <= by + BAR && x >= b.x0 && x <= b.hit1)) continue;
+      // (One inside it first: the last drawn, on top.)
+      const kid = b.kids && [...b.kids].reverse().find((k) => x >= k.x0 - 1 && x <= k.x1 + 1);
+      return { track: t, bar: kid ?? b };
     }
   }
   return null;

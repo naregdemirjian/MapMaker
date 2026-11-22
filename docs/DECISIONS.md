@@ -61,6 +61,32 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D212. Present and Export: the shot's settings in tabs; the shots as clips (interface stage 7)
+
+- **Tabs over the shot's settings** in the Present workspace: All · Shot · Camera and timing (Timing, Camera) · Look
+  (Transitions, Look) · Graphics and text (Current events box, Text) · Sound · Output (Output quality, Export). All
+  is the first and the default, so nothing is out of reach until a tab is chosen; the tab chosen is kept on this
+  computer (`mapmaker.shotTab`). The Export workspace has no tabs and shows only the shot, its output quality and
+  its export, as before.
+- **The plan's "export groups move to the Export workspace"** is met by the Export workspace showing only those; they
+  stay reachable in Present too (the Output tab, or All), so a shot can be tried and exported without moving.
+- **The shots as clips** under the preview's transport: every shot one after another, as wide as it lasts (at least
+  48 pixels), named with its length; a click on another chooses it (and its map); on the one chosen a click or drag
+  goes to that frame, a red playhead showing the frame previewed. The frame slider stays for single-frame steps.
+
+### D211. Events inside a longer one of their track drawn within it (interface stage 6, last step)
+
+- **Nesting on the timeline** (`nest` in `timeline-layout.ts`): an event lying wholly inside a longer one of the same
+  track (a battle in its war, a truce in it) is drawn within the longer one's bar, not on a lane of its own, so a
+  war and its battles take one lane. Each goes inside the longest event that holds it; only bars 30 pixels or wider
+  hold others; events of the same length never hold each other; a point event inside is drawn 4 pixels wide.
+- **Drawn**: the events inside are narrower bars within the bar, in their own type colours, a little lighter, named
+  where the name fits; the holder's name stands at its start if there is room before the first of them, else after
+  it (and the lanes are packed knowing that). A click finds the one inside first (the later of two overlapping,
+  drawn on top), so it can be chosen, dragged and retimed like any other.
+- **Zoomed far out**, when events run together into blocks, those inside are counted in their holder's block.
+- The tests count a track's events with those inside (`kids` of a bar in `store.timelineLaid`).
+
 ### D210. A change of an event selected in Properties (interface stage 5, last step)
 
 - **A change can be selected** (`selection.kind === 'change'`, the effect's id): from its line in the event's list
