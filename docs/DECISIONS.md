@@ -61,6 +61,27 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D198. A tool strip down the left edge, the tool's options in a bar of their own (interface stage 3)
+
+Third stage of D196's plan. The tools were up to thirteen buttons of text in a row that wrapped over the map,
+their options lying over the map's top edge.
+
+- **The strip** (`ToolStrip` in `Panels.tsx`, icons in `shell/ToolIcon.tsx`): a 44-pixel column at the far left,
+  one icon per tool, in groups with a line between them (select; drawing territory; mending borders; areas,
+  characters and cities; the land; space). An icon's tooltip gives the tool's name, its key and what it does;
+  `aria-label` names it. The icons are plain line drawings made for this (no icon library is added).
+- **A key for each tool**: V select, B territory brush, G precise shape, P border pen, A border points, K split,
+  R regions, E eraser, L areas and lines, C characters and cities, T terrain, D disasters, F conditions, N lanes,
+  S star systems. A key works only for a tool the map has, never while typing in a field, with a dialog open or
+  with Ctrl or Alt held. They are listed under Help › Keyboard shortcuts.
+- **The options bar** (`ToolOptions`): a row under the workspaces, beside the top of the strip (so that options
+  on a second line never lie over a tool), naming the tool in hand and
+  holding what was in the sub-bars (who gets the land, pen drafts, smart brush, brush settings, layers, sculpt
+  brushes, …) and the recording notice. The row keeps one height whichever tool is chosen (the map is not laid out
+  and drawn again when the tool changes); options that need a second line lie over what is below, as before.
+- `src/ui/tools.ts` holds the tools (name, hint, key, group) and which of them a map has (`toolsFor`), out of
+  `Panels.tsx`. Present and Export have no strip and no options bar.
+
 ### D197. One list of commands behind the menu bar and the keyboard (interface stage 2)
 
 Second stage of D196's plan. Every command of the interface is one entry in `src/ui/commands.ts`: an id, its

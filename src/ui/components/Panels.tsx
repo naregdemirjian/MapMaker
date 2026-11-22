@@ -41,6 +41,8 @@ import { StarPanel } from './Stars.tsx';
 import { BranchSwitcher } from './Branches.tsx';
 import { MenuBar } from '../shell/MenuBar.tsx';
 import { command } from '../commands.ts';
+import { TOOLS, SPACE_TOOLS, toolsFor } from '../tools.ts';
+import { ToolIcon } from '../shell/ToolIcon.tsx';
 import { branchName } from '../../temporal-engine/branches.ts';
 
 /** A date as the map being viewed writes it (its own calendar, D149, or the Gregorian). */
@@ -194,23 +196,6 @@ export function TopBar() {
   );
 }
 
-export const TOOLS: Array<{ id: Tool; name: string; hint: string }> = [
-  { id: 'select', name: 'Select', hint: 'Click to inspect a place; drag to move the map; wheel to zoom; Alt+wheel to rotate. Several countries: Ctrl+click adds or removes one, Shift+drag a box round them, Ctrl+Shift+drag over them.' },
-  { id: 'lasso', name: 'Territory brush', hint: 'Draw around an area freehand. It is given to the owner chosen on the right.' },
-  { id: 'polygon', name: 'Precise shape', hint: 'Click points; double-click or Enter to finish; Esc to cancel.' },
-  { id: 'pen', name: 'Border pen', hint: 'Draw a border at your own pace: drag or click, let go, pan and zoom, carry on later. Enter finishes; Backspace takes back the last piece. Drafts are kept with the project.' },
-  { id: 'vertex', name: 'Border points', hint: 'Drag a border point to correct the border shape for all time. Double-click a border to add a point; Delete removes the point under the cursor.' },
-  { id: 'split', name: 'Split', hint: 'Draw a line right across a country, then click the part that changes hands: it goes to a new country or another one, from the date viewed, as a correction or in an event. Esc starts the line again.' },
-  { id: 'regions', name: 'Regions', hint: 'Choose today\'s states and provinces, or today\'s countries, on the map (a click toggles one, a box takes all inside it), then give them to a country, from the date viewed, as a correction or in an event.' },
-  { id: 'erase', name: 'Border eraser', hint: 'Drag across borders to erase them: the country where you start takes the land across each border you cross, from the date viewed (or in the event being recorded). Start outside any country to clear land.' },
-  { id: 'feature', name: 'Areas, lines & points', hint: 'Draw on a layer of areas, lines or points: claims and zones, front lines, roads and arrows, battles and sites. They overlap freely and never change who holds the land.' },
-  { id: 'place', name: 'Characters & cities', hint: 'Click the map to put the chosen character or city there from the date being viewed (a point, no borders). With Select, drag one to move it.' },
-  { id: 'sculpt', name: 'Terrain', hint: 'Sculpt the terrain: raise and lower ground, draw mountain ranges and valleys, make craters and islands, paint land and sea, smooth, flatten, roughen or erode. A stroke changes the base world or holds from the date viewed.' },
-  { id: 'disaster', name: 'Disasters', hint: 'Nuclear strikes, earthquakes, eruptions, floods, wildfires, meteor impacts and droughts: choose one and its size, then click the map. It is placed as an event from the date viewed, its conditions rising and fading by themselves (an impact leaves its crater in the terrain); one undo takes it all back.' },
-  { id: 'field', name: 'Conditions', hint: 'Radiation, fire, smoke and ash, floods, destruction and heatmaps: click the map to place a source on a field layer from the date viewed (or in the event being recorded). It rises, lasts and fades by itself.' },
-  { id: 'lanes', name: 'Lanes', hint: 'On a star map: click a star, then another: a lane between them (a route, a jump lane, a supply line) from the date viewed, belonging to the country or faction chosen. Recorded into an event with a length, it grows from the first star to the second over the event: an expedition or a fleet on its way.' },
-  { id: 'systems', name: 'Star systems', hint: 'On a star map: click a star to give it to the country or faction chosen, from the date viewed (or in the event being recorded); hold Ctrl and drag a box to give every star in it. Their realm glows around the stars they hold.' },
-];
 
 
 /** The border pen's draft: which one, take back a piece, finish, discard, resume another. */
@@ -239,24 +224,37 @@ function PenControls() {
   );
 }
 
-/** The tools that work on a space map (D110); the others draw on the surface of a world. */
-const SPACE_TOOLS: string[] = ['select', 'systems', 'lanes'];
+/** The tools, down the left edge: icons in groups, each with its key (D198). */
+export function ToolStrip() {
+  const s = useStore();
+  const tools = toolsFor(s.world!, s.spaceId);
+  return (
+    <div className="tool-strip" role="toolbar" aria-label="Tools" aria-orientation="vertical" data-testid="tool-strip">
+      {tools.map((t, i) => (
+        <span key={t.id} className="tool-slot">
+          {i > 0 && tools[i - 1].group !== t.group && <span className="tool-sep" />}
+          <button className={`tool ${s.tool === t.id ? 'on' : ''}`} title={`${t.name} (${t.key})\n${t.hint}`} aria-label={t.name} aria-pressed={s.tool === t.id} onClick={() => s.set({ tool: t.id })} data-testid={`tool-${t.id}`}><ToolIcon id={t.id} /></button>
+        </span>
+      ))}
+    </div>
+  );
+}
 
-export function ToolBar() {
+/**
+ * What the tool in hand needs besides its button, in a bar of its own above the map and the panels. The bar
+ * keeps one height whichever tool is chosen, so the map keeps its size and place (a map that changes size is
+ * drawn again in full); options that need a second line lie over the top edge of what is below.
+ */
+export function ToolOptions() {
   const s = useStore();
   const w = s.world!;
   const owners = outlinerLists(s).political;
   const rec = s.recordEventId ? w.get('event', s.recordEventId) : null;
+  const tool = TOOLS.find((t) => t.id === s.tool);
   return (
-    <>
-    <div className="toolbar">
-      {TOOLS.filter((t) => (t.id !== 'sculpt' || terrainSourceOf(w.get('map_space', s.spaceId))) && ((t.id !== 'field' && t.id !== 'disaster') || w.get('map_space', s.spaceId)?.kind === 'sphere') && (!isSpaceMap(w.get('map_space', s.spaceId)) || SPACE_TOOLS.includes(t.id)) && ((t.id !== 'systems' && t.id !== 'lanes') || isSpaceMap(w.get('map_space', s.spaceId)))).map((t) => (
-        <button key={t.id} className={s.tool === t.id ? 'on' : ''} title={t.hint} onClick={() => s.set({ tool: t.id })} data-testid={`tool-${t.id}`}>{t.name}</button>
-      ))}
-    </div>
-    {/* What a tool needs besides its button lies over the top edge of the map, so that the map
-        keeps its size and place whichever tool is chosen (a map that changes size is drawn again in full). */}
+    <div className="options-bar" data-testid="options-bar">
     <div className="tool-options-anchor"><div className="tool-options">
+      <span className="tool-name" data-testid="tool-name">{tool?.name}</span>
       {s.tool === 'systems' && isSpaceMap(w.get('map_space', s.spaceId)) && (
         <div className="toolbar sub" data-testid="systems-options">
           <label className="inline">Give to
@@ -331,7 +329,7 @@ export function ToolBar() {
       </div>
     )}
     </div></div>
-    </>
+    </div>
   );
 }
 

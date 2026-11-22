@@ -6,9 +6,10 @@ import { WorkspaceBar, Splitter, StatusBar, frameStyle } from './shell/Shell.tsx
 import { arrowStep } from '../core-time/steps.ts';
 import { calendarNow } from './calendar-now.ts';
 import { useStore, store } from './store.ts';
-import { TopBar, Outliner, ToolBar, Inspector, Toasts, QuickStart } from './components/Panels.tsx';
+import { TopBar, Outliner, ToolStrip, ToolOptions, Inspector, Toasts, QuickStart } from './components/Panels.tsx';
 import { ShortcutsDialog } from './shell/MenuBar.tsx';
 import { commandForKey } from './commands.ts';
+import { toolForKey } from './tools.ts';
 import { ShowDialog } from './components/ShowDialog.tsx';
 import { SeaLevelDialog } from './components/SeaLevelDialog.tsx';
 import { SkyLookDialog } from './components/SkyLook.tsx';
@@ -44,6 +45,11 @@ export function App() {
       if (!store.pending && !(e.target as HTMLElement)?.isContentEditable) {
         const c = commandForKey(e);
         if (c) { e.preventDefault(); c.run(store); return; }
+        // A plain letter takes its tool in hand (while nothing is being drawn or asked).
+        if (store.mode === 'world' && store.world && !store.dialog && !e.ctrlKey && !e.metaKey && !e.altKey && e.key.length === 1) {
+          const t = toolForKey(e.key, store.world, store.spaceId);
+          if (t) { e.preventDefault(); store.set({ tool: t.id }); return; }
+        }
       }
       // Space: history plays or pauses (world-building), or the shot (presentation).
       if (e.key === ' ' && !e.ctrlKey && !e.metaKey && !e.altKey && !store.pending && !(e.target as HTMLElement)?.isContentEditable && tag !== 'BUTTON') {
@@ -78,9 +84,10 @@ export function App() {
     <div className={`app mode-${s.mode} workspace-${workspace}`} style={frameStyle(s)} ref={frame}>
       <TopBar />
       <WorkspaceBar />
+      {s.mode === 'world' && <ToolOptions />}
+      {s.mode === 'world' && <ToolStrip />}
       {!hidden.includes('left') && (s.mode === 'world' ? <Outliner /> : <ShotsPanel />)}
       <main className="center">
-        {s.mode === 'world' && <ToolBar />}
         {isSpaceMap(s.world.get('map_space', s.spaceId)) ? <SpaceView /> : <MapView />}
       </main>
       {!hidden.includes('right') && (s.mode === 'world' ? <Inspector /> : <ShotEditor only={workspace === 'export' ? 'export' : undefined} />)}

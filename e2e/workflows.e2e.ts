@@ -2504,12 +2504,12 @@ try {
     assert.ok((await light(shelf)) > (await light(deep)) + 25, `the North Sea's shallows (${await pixelAt(shelf)}) lighter than the deep Pacific (${await pixelAt(deep)})`);
     await h.screenshot('terrain');
     // The satellite look (D100): the land's colours from its land cover, a desert sand and a rainforest green.
-    // (Places nothing of this test covers: the Taklamakan desert and Borneo's rainforest.)
-    const sahara: LL = [83, 39], congo: LL = [114, 1];
+    // (Places nothing of this test covers: the Taklamakan desert and New Guinea's rainforest.)
+    const sahara: LL = [83, 39], congo: LL = [140, -6.5];
     for (const ll of [sahara, congo]) assert.equal(await h.ownerAt(ll, '1450'), null, `nobody holds ${ll}`);
     await show(async () => { await page.getByTestId('terrain-palette').selectOption('satellite'); });
     await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastTerrain.cover, null, { timeout: 30000 });
-    const mean = async (ll: LL) => { const px = await patch(ll, 5), c = [0, 0, 0]; for (let i = 0; i < px.length; i += 4) for (let q = 0; q < 3; q++) c[q] += px[i + q] / (px.length / 4); return c; };
+    const mean = async (ll: LL) => { const px = await patch(ll, 2), c = [0, 0, 0]; for (let i = 0; i < px.length; i += 4) for (let q = 0; q < 3; q++) c[q] += px[i + q] / (px.length / 4); return c; };
     let sand = await mean(sahara), forest = await mean(congo);
     for (let i = 0; i < 40 && !(sand[0] > sand[2] + 40 && forest[1] > forest[0] && forest[1] > forest[2]); i++) { await page.waitForTimeout(100); sand = await mean(sahara); forest = await mean(congo); }
     assert.ok(sand[0] > sand[2] + 40 && sand[0] > 150, `the desert at ${sahara} is sand (${sand.map(Math.round)})`);
@@ -4907,7 +4907,7 @@ try {
     assert.equal(Math.round((await box('.left')).width), 250);
     // The status bar says what the tool in hand does.
     await page.getByTestId('tool-lasso').click();
-    assert.match((await page.getByTestId('status-hint').textContent())!, /^Territory brush · Draw around an area/);
+    assert.match((await page.getByTestId('status-hint').textContent())!, /^Territory brush \(B\) · Draw around an area/);
     await page.getByTestId('tool-select').click();
     await h.screenshot('workspace-map');
   });
@@ -4969,6 +4969,48 @@ try {
     const list = (await page.getByTestId('shortcuts-dialog').textContent())!;
     for (const k of ['Ctrl+Z', 'Alt+3', 'Space', 'Workspace: World', 'New event']) assert.ok(list.includes(k), k);
     await h.screenshot('shortcuts');
+    await page.getByTestId('shortcuts-dialog').getByRole('button', { name: 'Close' }).click();
+  });
+
+  await h.step('The tool strip down the left edge, a key for each tool, and the options bar that keeps its height (D198)', async () => {
+    const tool = () => page.evaluate(() => (window as any).__mapmaker.store.tool);
+    const box = async (sel: string) => (await page.locator(sel).boundingBox())!;
+    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
+    await page.getByTestId('tool-select').click();
+    // The strip is a narrow column at the far left; its tools are icons named for those who cannot see them.
+    const strip = await box('[data-testid="tool-strip"]');
+    assert.ok(strip.x === 0 && strip.width <= 48 && strip.height > 300, JSON.stringify(strip));
+    assert.equal(await page.getByTestId('tool-lasso').getAttribute('aria-label'), 'Territory brush');
+    assert.match((await page.getByTestId('tool-lasso').getAttribute('title'))!, /^Territory brush \(B\)/);
+    assert.equal(await page.getByTestId('tool-lasso').locator('svg').count(), 1);
+    // A key takes a tool in hand; the bar above names it and holds its options.
+    const map0 = await box('main.center');
+    await page.locator('main.center').hover();
+    await page.keyboard.press('b');
+    assert.equal(await tool(), 'lasso');
+    assert.equal(await page.getByTestId('tool-name').textContent(), 'Territory brush');
+    await page.getByTestId('options-bar').getByTestId('paint-owner').waitFor();
+    await page.keyboard.press('p');
+    assert.equal(await tool(), 'pen');
+    await page.keyboard.press('e');
+    assert.equal(await tool(), 'erase');
+    // Whichever tool, the map keeps its size and place.
+    assert.deepEqual(await box('main.center'), map0);
+    await h.screenshot('tool-strip');
+    // A star map has its own tools, and a key of a tool it has not does nothing.
+    await page.keyboard.press('v');
+    assert.equal(await tool(), 'select');
+    // Typing in a field is typing, not choosing tools.
+    await page.getByTestId('search').click();
+    await page.keyboard.type('bp');
+    assert.equal(await tool(), 'select');
+    await page.getByTestId('search').fill('');
+    await page.keyboard.press('Escape');
+    // The list of shortcuts names the tools' keys.
+    await page.getByTestId('menu-help').click();
+    await page.getByTestId('command-shortcuts').click();
+    assert.ok((await page.getByTestId('shortcuts-dialog').textContent())!.includes('Tool: Border pen'));
     await page.getByTestId('shortcuts-dialog').getByRole('button', { name: 'Close' }).click();
   });
 

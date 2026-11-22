@@ -4,7 +4,7 @@ import { useRef } from 'react';
 import { useStore, store } from '../store.ts';
 import { WORKSPACES, DEFAULT_LAYOUTS, dragged, tracks, type Side } from './layout.ts';
 import { SearchBox } from '../components/Search.tsx';
-import { TOOLS } from '../components/Panels.tsx';
+import { TOOLS } from '../tools.ts';
 
 /** The workspaces, and what belongs to every one of them: search, undo and redo, folding panels away. */
 export function WorkspaceBar() {
@@ -64,7 +64,8 @@ export function Splitter({ side, frame }: { side: Side; frame: React.RefObject<H
 /** The frame's measures as CSS variables. */
 export function frameStyle(s: ReturnType<typeof useStore>): React.CSSProperties {
   const t = tracks(s.layouts[s.workspaceNow()]);
-  return { '--left': `${t.left}px`, '--right': `${t.right}px`, '--bottom': `${t.bottom}px` } as React.CSSProperties;
+  const world = s.mode === 'world';
+  return { '--left': `${t.left}px`, '--right': `${t.right}px`, '--bottom': `${t.bottom}px`, '--tools': world ? '44px' : '0px', '--options': world ? '36px' : '0px' } as React.CSSProperties;
 }
 
 /** Along the bottom: what the tool in hand does, and the state of the history. */
@@ -76,7 +77,7 @@ export function StatusBar() {
     <div className="status-bar" data-testid="status-bar">
       <span className="status-hint" data-testid="status-hint">
         {s.mode === 'present' ? 'Drag and scroll the preview to frame the shot; drag the date, the title and the boxes on it to place them.'
-          : tool ? <><b>{tool.name}</b> · {tool.hint}</> : null}
+          : tool ? <><b>{tool.name} ({tool.key})</b> · {tool.hint}</> : null}
       </span>
       <button className={`small ${problems ? 'warn' : ''}`} onClick={() => s.set({ dialog: 'health' })} data-testid="health" title="Places where the history contradicts itself, and how to mend them">
         History Health{problems ? ` (${problems})` : ' ✓'}

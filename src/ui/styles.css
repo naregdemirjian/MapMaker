@@ -35,8 +35,21 @@ a { color: var(--accent); cursor: pointer; }
 .date-input.bad { border-color: var(--danger); }
 
 /* (Clipped, not scrollable: a crowded top bar wider than the window must never let the whole page slide sideways.) */
-.app { overflow: clip; display: grid; height: 100vh; grid-template-columns: var(--left, 250px) minmax(0, 1fr) var(--right, 310px); grid-template-rows: 40px 32px minmax(0, 1fr) var(--bottom, 150px) 24px; grid-template-areas: "top top top" "workspaces workspaces workspaces" "left center right" "bottom bottom bottom" "status status status"; }
+.app { overflow: clip; display: grid; height: 100vh; grid-template-columns: var(--tools, 44px) var(--left, 250px) minmax(0, 1fr) var(--right, 310px); grid-template-rows: 40px 32px var(--options, 36px) minmax(0, 1fr) var(--bottom, 150px) 24px; grid-template-areas: "top top top top" "workspaces workspaces workspaces workspaces" "tools options options options" "tools left center right" "bottom bottom bottom bottom" "status status status status"; }
 .topbar { grid-area: top; display: flex; align-items: center; gap: 6px; padding: 0 10px; background: var(--panel); border-bottom: 1px solid var(--line); }
+/* The tool strip and the tool's options (D198). */
+.tool-strip { grid-area: tools; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px 0; background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; scrollbar-width: none; }
+.tool-slot { display: contents; }
+.tool-strip .tool { width: 32px; height: 30px; padding: 0; display: flex; align-items: center; justify-content: center; border-color: transparent; background: none; color: var(--text); flex: none; }
+.tool-strip .tool:hover:not(:disabled) { background: var(--panel2); border-color: var(--line); }
+.tool-strip .tool.on, .tool-strip .tool.on:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); color: #06121e; }
+.tool-strip .tool svg { pointer-events: none; }
+.tool-sep { width: 22px; height: 1px; background: var(--line); margin: 3px 0; flex: none; }
+.options-bar { grid-area: options; background: var(--panel); border-bottom: 1px solid var(--line); min-width: 0; }
+.options-bar .tool-options { display: flex; flex-wrap: wrap; align-items: center; background: var(--panel); border-bottom: 1px solid var(--line); min-height: 36px; }
+.options-bar .tool-name { font-weight: 600; padding: 0 4px 0 12px; white-space: nowrap; }
+.options-bar .toolbar.sub { border-bottom: none; background: none; padding: 3px 8px; }
+.options-bar .record-banner { border-bottom: none; border-radius: 5px; margin: 3px 8px 3px auto; padding: 2px 10px; }
 /* The menu bar (D197). */
 .menubar-menus { display: flex; align-self: stretch; align-items: center; margin: 0 8px 0 6px; }
 .menubar-menu { border: none; background: none; border-radius: 4px; padding: 4px 9px; color: var(--text); }

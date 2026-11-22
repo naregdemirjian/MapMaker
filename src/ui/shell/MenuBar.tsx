@@ -1,5 +1,6 @@
 // The menu bar (D197): File, Edit, View, Map, History, Window, Help, drawn from the list of commands.
 import { useStore, store } from '../store.ts';
+import { TOOLS } from '../tools.ts';
 import { MENUS, COMMANDS, OTHER_SHORTCUTS, menuItems } from '../commands.ts';
 
 export function MenuBar() {
@@ -26,6 +27,7 @@ export function ShortcutsDialog() {
   const rows: Array<[string, string]> = [
     ...COMMANDS.filter((c) => c.shortcut).map((c): [string, string] => [c.shortcut!, c.id.startsWith('workspace-') ? `Workspace: ${c.name}` : c.name.replace(/…$/, '')]),
     ['Ctrl+Shift+Z', 'Redo'],
+    ...TOOLS.map((t): [string, string] => [t.key, `Tool: ${t.name}`]),
     ...OTHER_SHORTCUTS,
   ];
   return (
