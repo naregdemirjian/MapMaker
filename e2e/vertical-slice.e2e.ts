@@ -272,8 +272,10 @@ try {
     await page.waitForFunction(() => (window as any).__mapmaker.store.basemap);
     const land = await canvasPixel([20, 5]), sea = await canvasPixel([-30, 10]);
     assert.ok(colourDiff(land, sea) > 20, `land ${land} and sea ${sea} look different`);
+    await page.locator('[data-testid^="map-row-"].sel').click(); // (the map itself in Properties)
     await page.getByTestId('reference-borders-toggle').check();
     await screenshot('present-day-borders-guide');
+    await page.locator('[data-testid^="map-row-"].sel').click(); // (the map itself in Properties)
     await page.getByTestId('reference-borders-toggle').uncheck();
     await page.getByTestId('data-sources').click();
     await page.getByTestId('dataset-natural-earth').waitFor();
@@ -832,6 +834,7 @@ try {
     // What is shown: its rules show more of today's cities than were added; they are offered and added (D188).
     const count = () => page.evaluate(() => (window as any).__mapmaker.store.world.all('entity').filter((e: any) => e.type_id === 'settlement').length) as Promise<number>;
     const before = await count();
+    await page.locator('[data-testid^="map-row-"].sel').click(); // (the map itself in Properties)
     await page.getByTestId('open-show-lakes').click();
     await page.getByTestId('cities-shown-missing').waitFor({ timeout: 20000 });
     await page.getByTestId('cities-shown-add-missing').click();

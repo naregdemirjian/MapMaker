@@ -23,9 +23,10 @@ The approved architecture is the Claude Doc "Map Maker — Technical Architectur
   by its name and has its options there, no longer in the list. Stage 6 done (D201): **the timeline is
   events first**: a track for each group of events with a head that folds it, events run together into counted
   blocks when zoomed far out, a strip below for changes and branches, and a head with play, the date, Find,
-  Snap and zoom; events are dragged to move and retime them. **Next: the rest of stage 5 (the map's own
-  properties when nothing is selected, with the settings dialogs as groups; a change of an event selected), the
-  timeline's follow-ups listed in D201, then stage 7 (Present and Export).**
+  Snap and zoom; events are dragged to move and retime them. With nothing selected, Properties shows **the map itself**
+  and its setting-up, which left the list of maps (D202). **Next: the settings dialogs as groups in Properties
+  and a change of an event selected (the rest of stage 5), the timeline's follow-ups listed in D201, then
+  stage 7 (Present and Export).**
 - **Generated border shifts, 21 November** (D195): for a change drawn in an event (land one country gains),
   "Generate border shifts…" writes the shifts in between as real dated changes, a step every so many days to
   years: the gainer holds more at every step from its own border, the other side retakes land here and there,

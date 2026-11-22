@@ -61,6 +61,17 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D202. The map itself in Properties when nothing is selected (interface stage 5, second part)
+
+- With nothing selected, Properties shows **the map being viewed** (`MapPanel`): what it is, and its setting-up
+  (Earth's geography, present-day borders as a guide, terrain and lakes, sea level, calendar, statistics, data
+  sources, the look of its stars, its Planet Studio, what it shows), then Getting started as a group that folds.
+  This is so in every workspace on the world (stage 1 had it in World only).
+- The setting-up **left the list of maps**: a map's row views that map and shows it in Properties (it clears
+  the selection). The list of maps is now only a list, like the list of layers.
+- The settings themselves still open as dialogs from there; making them groups in place is the part left of
+  stage 5, with a change of an event as a thing selected.
+
 ### D201. The timeline: events first, a track for each group, the rest in a strip below (interface stage 6)
 
 Sixth stage of D196's plan, as settled with the drawings: events have the timeline, everything else is

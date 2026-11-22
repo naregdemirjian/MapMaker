@@ -1378,6 +1378,7 @@ try {
   await h.step('A map\'s own calendar (D149): started from a template, an era added; dates written, typed, stepped and chosen in it, in the shot preview too; the Gregorian again in one step', async () => {
     const keep = await page.evaluate(() => (window as any).__mapmaker.store.time);
     await h.setDate('1 January 1100');
+    await page.locator('[data-testid^="map-row-"].sel').click(); // (the map itself in Properties)
     assert.equal(await page.getByTestId('open-calendar').innerText(), 'Calendar: Gregorian…');
     await page.getByTestId('open-calendar').click();
     await page.getByTestId('calendar-template').selectOption('world');
@@ -1390,6 +1391,7 @@ try {
     assert.equal(await page.getByTestId('calendar-problems').count(), 0);
     await page.getByTestId('calendar-use').click();
     await page.getByTestId('calendar-dialog').waitFor({ state: 'detached' });
+    await page.locator('[data-testid^="map-row-"].sel').click(); // (the map itself in Properties)
     assert.equal(await page.getByTestId('open-calendar').innerText(), 'Calendar: Calendar of the Founding…');
     // (The date field writes its date afresh just after the calendar or the date changes: waited for, not read at once.)
     const dateIs = async (v: string) => {
@@ -1428,8 +1430,10 @@ try {
     await h.saved();
     assert.equal(await page.evaluate((id) => !!(window as any).__mapmaker.store.world.get('sequence', id), shotId), false);
     // The Gregorian again (one step); the date as it was, written as ever.
+    await page.locator('[data-testid^="map-row-"].sel').click(); // (the map itself in Properties)
     await page.getByTestId('open-calendar').click();
     await page.getByTestId('calendar-use-gregorian').click();
+    await page.locator('[data-testid^="map-row-"].sel').click(); // (the map itself in Properties)
     assert.equal(await page.getByTestId('open-calendar').innerText(), 'Calendar: Gregorian…');
     await dateIs(gregorian.format(W.fromCivil({ year: 120, month: 8, day: 36 }), 'day'));
     await page.evaluate((t) => (window as any).__mapmaker.store.setTime(t), keep);
@@ -2641,6 +2645,7 @@ try {
     // Today's sea: the territory stops at the coast, so the North Sea shows the sea.
     assert.ok(diff(await pixelAt(sea), await pixelAt(land)) > 20, `the North Sea (${await pixelAt(sea)}) is not the land held (${await pixelAt(land)})`);
     // The sea 120 m lower from the date viewed: the North Sea is land, held by the country.
+    await page.locator('[data-testid^="map-row-"].sel').click(); // (the map itself in Properties)
     await page.getByTestId('open-sea-level').click();
     await page.getByTestId('sea-add').click();
     await page.getByTestId('sea-metres-0').fill('-120');
@@ -4853,6 +4858,7 @@ try {
     assert.match(keys[2], /:0\.\d+$/, 'blended between two pictures');
     await h.screenshot('planet-studio-map');
     // Opened again, its settings are the map's.
+    await page.locator('[data-testid^="map-row-"].sel').click(); // (the map itself in Properties)
     await page.getByTestId('open-planet-studio').click();
     await page.getByTestId('planet-studio').waitFor();
     await page.getByTestId('studio-step-air').click();
@@ -4876,6 +4882,7 @@ try {
     assert.equal(Math.round((await box('.bottom')).height), 340);
     // World: the map's own settings at the right, no longer under the list of maps.
     await page.getByTestId('workspace-world').click();
+    await page.locator('[data-testid^="map-row-"].sel').click();
     await page.getByTestId('map-setup').waitFor();
     assert.equal(await page.locator('.left [data-testid="open-calendar"]').count(), 0);
     if (await page.getByTestId('map-setup').getByTestId('open-calendar').count()) {
@@ -5111,6 +5118,13 @@ try {
     // A layer of points has only its name and whether it is shown.
     await page.locator('[data-testid="layer-row"]', { hasText: 'Battles' }).locator('span').first().click();
     assert.deepEqual(await groups(), ['Layer']);
+    // Nothing selected (the map's row clicked): the map itself, with its setting-up, no longer under the list of maps (D202).
+    await page.getByTestId('map-row-Earth').click();
+    await page.getByTestId('map-panel').waitFor();
+    assert.deepEqual(await groups(), ['This map', 'Getting started']);
+    assert.equal(await page.locator('.left [data-testid="open-calendar"]').count(), 0);
+    assert.match((await page.getByTestId('map-panel').getByTestId('open-calendar').innerText()), /^Calendar: /);
+    await h.screenshot('properties-map');
     await page.getByTestId('tool-select').click();
   });
 

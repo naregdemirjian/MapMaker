@@ -565,11 +565,10 @@ export function Outliner() {
       <div className="lists">
       {on('maps') && <Section title="Maps" onAdd={() => s.set({ dialog: 'new-world' })} addLabel="Map">
         {w.all('map_space').sort((a, b) => a.sort_order - b.sort_order).map((sp) => (
-          <div key={sp.id} className={`row ${sp.id === s.spaceId ? 'sel' : ''}`} onClick={() => { const before = s.spaceId; s.set({ spaceId: sp.id, layerId: w.all('layer').find((l) => l.space_id === sp.id && l.kind === 'partition')?.id ?? '' }); s.mapChanged(before); }}>
+          <div key={sp.id} className={`row ${sp.id === s.spaceId ? 'sel' : ''}`} data-testid={`map-row-${sp.name}`} title="View this map, and show it in Properties" onClick={() => { const before = s.spaceId; s.set({ selection: null, spaceId: sp.id, layerId: w.all('layer').find((l) => l.space_id === sp.id && l.kind === 'partition')?.id ?? '' }); s.mapChanged(before); }}>
             {sp.name}<span className="muted"> · {sp.kind === 'plane' ? `flat, ${(worldSettings(sp) as { widthKm?: number }).widthKm?.toLocaleString() ?? '?'} km wide` : `radius ${Math.round((sp.radius_m ?? 0) / 1000).toLocaleString()} km`}</span>
           </div>
         ))}
-        {s.workspaceNow() !== 'world' && <MapSetup />}
         <button className="link pad-link" onClick={() => s.set({ dialog: 'data-export' })} data-testid="open-data-export" title="The map at a date as GeoJSON; events, countries, relationships and features as CSV">Export data (GeoJSON, CSV)…</button>
       </Section>}
       {on('layers') && <Section title="Layers" onAdd={() => s.set({ dialog: 'new-layer' })} addLabel="Layer">
@@ -738,11 +737,10 @@ function LayerPanel({ id }: { id: string }) {
 
 export function Inspector() {
   const s = useStore();
-  const sel = s.selection, world = s.workspaceNow() === 'world';
+  const sel = s.selection;
   return (
     <aside className="right">
-      {world && <div className="panel map-setup" data-testid="map-setup"><h3>This map</h3><MapSetup /></div>}
-      {!sel && !world && <QuickStart />}
+      {!sel && <MapPanel />}
       {sel?.kind === 'entity' && <EntityPanel id={sel.id} />}
       {sel?.kind === 'event' && <EventPanel id={sel.id} />}
       {sel?.kind === 'point' && <PointPanel lon={sel.lon} lat={sel.lat} />}
@@ -750,6 +748,24 @@ export function Inspector() {
       {sel?.kind === 'layer' && <LayerPanel id={sel.id} />}
       {sel?.kind === 'star' && <StarPanel id={sel.id} />}
     </aside>
+  );
+}
+
+/** The map being viewed, in Properties when nothing is selected (D202): what it is, and its setting-up. */
+function MapPanel() {
+  const s = useStore();
+  const sp = s.world!.get('map_space', s.spaceId);
+  if (!sp) return <QuickStart />;
+  return (
+    <div className="panel" data-testid="map-panel">
+      <h3>{sp.name}</h3>
+      <PropGroup id="map:map" title="This map">
+        <div className="muted">{isSpaceMap(sp) ? 'A map of space' : sp.kind === 'plane' ? `A flat map, ${(worldSettings(sp) as { widthKm?: number }).widthKm?.toLocaleString() ?? '?'} km wide` : `A globe, radius ${Math.round((sp.radius_m ?? 0) / 1000).toLocaleString()} km`}</div>
+        <div className="map-setup" data-testid="map-setup"><MapSetup /></div>
+        <button className="link" onClick={() => s.set({ dialog: 'show' })} data-testid="map-open-show" title="What the map shows while you work and in presentations and exports">What the map shows…</button>
+      </PropGroup>
+      <PropGroup id="map:start" title="Getting started"><QuickStart /></PropGroup>
+    </div>
   );
 }
 

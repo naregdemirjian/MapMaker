@@ -122,6 +122,8 @@ table.shortcuts kbd { font: inherit; background: var(--panel2); border: 1px soli
 .status-hint b { color: var(--text); font-weight: 600; }
 .status-bar button.small { padding: 0 7px; line-height: 18px; }
 .map-setup .world-options { padding: 4px 0 8px; }
+.prop-body > .panel { padding: 0; }
+.prop-body > .panel > h3 { display: none; }
 .map-setup button.link.pad-link { padding: 4px 0 8px; display: block; }
 .brand { font-weight: 700; letter-spacing: 0.02em; }
 .project-name { color: var(--muted); max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
