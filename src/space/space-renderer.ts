@@ -213,7 +213,9 @@ export class SpaceRenderer {
       // (How much a star shines out: bright stars fully, faint ones a little; planets in between.)
       const weight = s.color ? 0.55 : s.id === 0 ? 1 : Math.max(0.15, Math.min(1, (9 - s.absmag) / 6));
       const flicker = look.twinkle > 0 && o.seconds !== undefined ? 1 - look.twinkle * 0.55 * (0.5 + 0.5 * Math.sin(o.seconds * (2.2 + 2.6 * hashOf(s.id)) * Math.PI + hashOf(s.id + 7) * 40)) : 1;
-      if (!(look.photo && s.size && PHOTO_TEXTURES[s.id] && this.photoBody(ctx, s.id, x, y, r * 1.25, sunAt ? [sunAt.x, sunAt.y] : null, look, u))) this.star(ctx, x, y, r, colour, look, weight, flicker, u);
+      // (The Sun seen as a star, D217: a blazing point of light with rays; not at the edge of a poster row.)
+      if (s.id === 0 && s.size && look.sunAsStar && !s.limb) { r = this.sunStar(ctx, x, y, look, u, flicker); }
+      else if (!(look.photo && s.size && PHOTO_TEXTURES[s.id] && this.photoBody(ctx, s.id, x, y, r * 1.25, sunAt ? [sunAt.x, sunAt.y] : null, look, u))) this.star(ctx, x, y, r, colour, look, weight, flicker, u);
       if (o.planets?.has(s.id)) { ctx.strokeStyle = 'rgba(120,220,200,0.7)'; ctx.lineWidth = Math.max(0.8, 1.1 * u); ctx.setLineDash([2 * u, 2 * u]); ctx.beginPath(); ctx.arc(x, y, r + 4.5 * u, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); }
       if (held && look.colours !== 'owner') { ctx.strokeStyle = held.color; ctx.lineWidth = Math.max(1, 1.6 * u); ctx.beginPath(); ctx.arc(x, y, r + 3 * u, 0, Math.PI * 2); ctx.stroke(); }
       if (o.selected === s.id) { ctx.strokeStyle = '#ffe9a6'; ctx.lineWidth = Math.max(1, 2 * u); ctx.beginPath(); ctx.arc(x, y, r + 7 * u, 0, Math.PI * 2); ctx.stroke(); }
@@ -327,6 +329,32 @@ export class SpaceRenderer {
       for (let x = ox; x < W; x += tw) ctx.drawImage(tex as unknown as CanvasImageSource, x, oy, tw, th);
       ctx.restore();
     }
+  }
+
+  /**
+   * The Sun as a telescope sees it from far off (D217): a blazing white point, a wide warm glow and long thin rays (as
+   * many as the look's spikes, else four). Returns the radius it counts as for clicks.
+   */
+  private sunStar(ctx: CanvasRenderingContext2D, x: number, y: number, look: SkyLook, u: number, flicker: number): number {
+    const core = 3.2 * u * look.size, G = core * (8 + 10 * look.glow);
+    ctx.save();
+    ctx.globalAlpha = flicker;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, G);
+    g.addColorStop(0, 'rgba(255,250,235,0.95)'); g.addColorStop(0.08, 'rgba(255,236,190,0.55)'); g.addColorStop(0.3, 'rgba(255,214,150,0.16)'); g.addColorStop(1, 'rgba(255,200,120,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, G, 0, Math.PI * 2); ctx.fill();
+    const lines = (look.spikes || 4) / 2, L = core * 26 * look.spikeLength, w = Math.max(0.5 * u, core * 0.32);
+    for (let i = 0; i < lines; i++) {
+      const a = ((look.spikeAngle + (i * 180) / lines) * Math.PI) / 180, dx = Math.cos(a), dy = Math.sin(a);
+      for (const side of [1, -1]) {
+        const tx = x + dx * L * side, ty = y + dy * L * side, ray = ctx.createLinearGradient(x, y, tx, ty);
+        ray.addColorStop(0, 'rgba(255,248,230,0.95)'); ray.addColorStop(0.35, 'rgba(255,236,200,0.35)'); ray.addColorStop(1, 'rgba(255,230,190,0)');
+        ctx.fillStyle = ray;
+        ctx.beginPath(); ctx.moveTo(x - dy * w, y + dx * w); ctx.lineTo(tx, ty); ctx.lineTo(x + dy * w, y - dx * w); ctx.closePath(); ctx.fill();
+      }
+    }
+    ctx.fillStyle = '#fffdf6'; ctx.beginPath(); ctx.arc(x, y, core, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    return core * 2;
   }
 
   /** One star as the look draws it: its glow, spikes, halo, its shape and outline. */

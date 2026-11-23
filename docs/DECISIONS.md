@@ -61,6 +61,50 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D217. Star looks by kind: Basic, Charts, Photographic; the Sun seen as a star
+
+- **Every preset has a kind** (`SkyKind`, `SKY_KINDS`): *Basic* (drawn for the story: Natural, Telescope, Deep
+  field, the displays and themes, Heat, By realm, Minimal), *Charts* (flat, as people draw and print them) and
+  *Photographic* (as cameras and telescopes record it, the planets as photographed). The look window lists them in
+  these three groups (`sky-kind-<kind>`). A chart's kind is always Charts and a chart preset makes the map a chart.
+- **New charts**, after printed star atlases and old maps of the sky: Star atlas (black stars sized by brightness on
+  white, blue squares), Desk atlas (white on deep blue, gold rings), Antique (engraved six-rayed stars in sepia on
+  parchment), Navigator (navy on pale sea-blue), Chalkboard, Ink (technical, rings and hexes).
+- **New photographic looks**: Through a telescope (stars as sharp points with four rays, and the Sun too), Long
+  exposure (soft glowing stars, faint nebulae), Infrared telescope (six rays, warm), Naked eye (small stars, as the
+  night sky looks), beside Photographic.
+- **The Sun as a star** (`sunAsStar`, also a tick under Planets): on a solar map the Sun is drawn as a telescope sees
+  it from far off, a blazing white point with a wide warm glow and long thin rays, instead of a disc or its
+  photographed sphere (except as the edge of a poster row).
+
+### D216. The solar system side by side: how large and how far apart, and Fit screen for each
+
+- **Two multiples on the row** (`SolarRow.scale`, `SolarRow.gap`, kept within 0.1–10 and 0.25–6): every body drawn
+  as many times larger as set, the sizes keeping the choice above them (styled, true, poster…); every body as many
+  times further from the Sun as set, the spacing keeping its choice (even, true, compressed). Sliders (`solar-row-size`,
+  `solar-row-gap`, logarithmic, with a reset) in the Side by side window.
+- **Fit screen under each** (`fitRowScale`, `fitRowGap` in `solar.ts`, for the view's size seen whole):
+  - *Sizes*: every body as large as it can be drawn without touching the next (86% of the room between them; beside a
+    poster's Sun only its edge counts), nor the first moon below it, and none taller than 40% of the view; spacing kept.
+  - *Spacing*: the row from the Sun's edge to the last planet's across 92% of the view's width, the sizes kept; the
+    view is brought to the middle of the row.
+  - Both bring the view home (zoom 0, not turned). Sizes are screen pixels and spacing map units, so each fit is worked
+    out exactly from how the renderer draws them.
+
+### D215. Space views: always level in three dimensions, the middle button moves, ⌂ back to the start, a star found
+
+- **The roll that could not be undone.** A chart turned with a right-drag (or a shot's Rotation) kept its turn in the
+  camera, and the view in three dimensions rolled by it; ⌂ reset only the zoom and what the view circles. Now the
+  working view in three dimensions is always level (the chart's own turn is kept for the chart, not carried into it),
+  and ⌂ (`homeCamera`) brings the view back to where a new map starts: from above the plane at an angle, the whole map
+  in view, not turned (a chart keeps the side it is seen from, turned straight).
+- **The middle button moves the view** in three dimensions (as the right button and Shift-drag do); the left button
+  turns it. On a chart the left and middle buttons move it and the right button turns it, as before.
+- **Finding a star**: a box at the top right of every map of space ("Find a star…", on the solar system "Find a planet
+  or moon…", `space-find`), listing the best matches as you type (`findStars` now ranks names matching exactly, then a
+  word starting so, then the rest; nearest first within each). The one chosen is selected and the view brought to it,
+  close enough to see its neighbours (`cameraToStar`), as is a star chosen from the search box at the top.
+
 ### D214. The desktop app has no title bar of the system's own: Map Maker's top bar is the title bar
 
 - **Why.** On Windows the window's own title bar (white, with only "Map Maker" in it) sat above Map Maker's dark top

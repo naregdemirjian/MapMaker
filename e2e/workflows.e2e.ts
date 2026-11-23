@@ -4019,6 +4019,56 @@ try {
     assert.ok(frame.id);
   });
 
+  await h.step('Space views (D215): the view in three dimensions stays level whatever the chart was turned to; the middle button moves the view; ⌂ back to the start, level; a star found by name and the view brought to it; undone', async () => {
+    const st = <T,>(f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`) as Promise<T>;
+    const hook = <T,>(name: string, ...args: unknown[]) => page.evaluate(([n, a]) => (window as any).__mapmaker[n as string](...(a as unknown[])), [name, args] as const) as Promise<T>;
+    await page.getByTestId('workspace-map').click();
+    await page.getByRole('button', { name: '+ Map' }).click();
+    await page.getByTestId('new-map-stars').check();
+    await page.getByTestId('new-map-name').fill('Level stars');
+    await page.getByRole('button', { name: 'Create map' }).click();
+    await page.waitForFunction(() => !!(window as any).__mapmaker.starToPage(71456));
+    // A turn left from the chart is not carried into three dimensions: Alpha Centauri stays where it was.
+    const before = await hook<[number, number]>('starToPage', 71456);
+    await page.evaluate(() => { const s = (window as any).__mapmaker.store; s.setCamera({ ...s.camera, rotation: 40 }); });
+    await page.waitForTimeout(150);
+    const after = await hook<[number, number]>('starToPage', 71456);
+    assert.ok(Math.hypot(after[0] - before[0], after[1] - before[1]) < 1, `level (${before} then ${after})`);
+    // The middle button moves the view; it does not turn it.
+    const cam0 = await st<{ lon: number; lat: number }>('s.camera');
+    const canvas = (await page.getByTestId('map-canvas').boundingBox())!;
+    await page.mouse.move(canvas.x + canvas.width / 2, canvas.y + canvas.height / 2);
+    await page.mouse.down({ button: 'middle' });
+    await page.mouse.move(canvas.x + canvas.width / 2 + 120, canvas.y + canvas.height / 2 + 40, { steps: 6 });
+    await page.mouse.up({ button: 'middle' });
+    const cam1 = await st<{ lon: number; lat: number; target?: number[] }>('s.camera');
+    assert.deepEqual([cam1.lon, cam1.lat], [cam0.lon, cam0.lat], 'not turned');
+    assert.ok(cam1.target && Math.hypot(cam1.target[0], cam1.target[1], cam1.target[2]) > 1, `moved (${cam1.target})`);
+    // ⌂: back to the start, level, the whole map in view.
+    await page.evaluate(() => { const s = (window as any).__mapmaker.store; s.setCamera({ ...s.camera, lon: 33, lat: -12, zoom: 2.5 }); });
+    await page.getByTestId('space-home').click();
+    const home = await st<{ lon: number; lat: number; zoom: number; rotation: number; target?: number[] }>('s.camera');
+    assert.deepEqual([home.lon, home.lat, home.zoom, home.rotation, home.target ?? null], [-60, 28, 0, 0, null]);
+    // A star found by its name: chosen, in the middle of the view, close enough to see its neighbours.
+    await page.getByTestId('space-find').fill('sirius');
+    const first = page.getByTestId('space-find-result').first();
+    assert.match((await first.textContent()) ?? '', /^Sirius/);
+    await first.click();
+    const sel = await st<{ kind: string; id: number }>('s.selection');
+    assert.equal(sel.kind, 'star');
+    await page.waitForTimeout(150);
+    const at = await hook<[number, number]>('starToPage', sel.id), middle = await hook<[number, number]>('spaceMiddle');
+    assert.ok(Math.hypot(at[0] - middle[0], at[1] - middle[1]) < 1, 'in the middle');
+    assert.ok((await st<number>('s.camera.zoom')) >= 3, 'closer in');
+    assert.equal(await page.getByTestId('star-name').textContent(), 'Sirius');
+    await h.screenshot('star-found');
+    // Back to Earth; the map undone.
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
+    for (let i = 0; i < 6 && (await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.kind === 'space'))); i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.kind === 'space')), false);
+  });
+
   await h.step('The solar system: the planets where they are on the date viewed, moving as the date changes; true or compressed distances; a planet\'s panel; side by side, a planet held and its holder over it; undone', async () => {
     await page.getByTestId('workspace-map').click();
     await page.getByRole('button', { name: '+ Map' }).click();
@@ -4141,6 +4191,28 @@ try {
     assert.ok(Math.abs(ratio - 30.07 / 9.537) < 0.08, `Neptune three times as far as Saturn (${ratio.toFixed(2)})`);
     const shownNames = await page.evaluate(() => (window as any).__mapmaker.spaceNames() as string[]);
     assert.ok(shownNames.includes('Titan') && !shownNames.includes('Io'), `only the moons chosen: ${shownNames.filter((n) => ['Io', 'Titan', 'Moon'].includes(n)).join(', ')}`);
+    // How large and how far apart (D216): every body twice as large; then Fit screen for the spacing (the row from the
+    // Sun to Pluto across the screen, the sizes kept) and for the sizes (as large as they can be without touching).
+    const body = async (id: number) => ({ x: (await hook<[number, number]>('starToPage', id))[0], r: (await hook<number>('starRadius', id)) ?? 0 });
+    const jupiter0 = (await body(5)).r;
+    await page.getByTestId('solar-row-open').click();
+    await page.getByTestId('solar-row-size').fill(String(Math.round(Math.log10(2) * 100)));
+    await page.waitForFunction(() => { const s = (window as any).__mapmaker.store; return Math.abs(JSON.parse(s.world.get('map_space', s.spaceId).settings).space.row.scale - 2) < 0.01; });
+    await page.waitForTimeout(200);
+    assert.ok(Math.abs((await body(5)).r / jupiter0 - 2) < 0.05, 'twice as large');
+    await page.getByTestId('solar-row-gap-fit').click();
+    await page.waitForTimeout(300);
+    const box = (await page.getByTestId('map-canvas').boundingBox())!;
+    const sunB = await body(0), plutoB = await body(9);
+    assert.ok(sunB.x - sunB.r >= box.x - 1 && plutoB.x + plutoB.r <= box.x + box.width + 1, `the row on the screen (${sunB.x - sunB.r} to ${plutoB.x + plutoB.r} in ${box.x} to ${box.x + box.width})`);
+    assert.ok((plutoB.x + plutoB.r) - (sunB.x - sunB.r) > box.width * 0.85, 'across the screen');
+    assert.ok(Math.abs((await body(5)).r / jupiter0 - 2) < 0.05, 'the sizes kept');
+    await page.getByTestId('solar-row-size-fit').click();
+    await page.waitForTimeout(300);
+    const inRow = await Promise.all([0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(body));
+    for (let i = 1; i < inRow.length; i++) assert.ok(inRow[i - 1].x + inRow[i - 1].r <= inRow[i].x - inRow[i].r + 0.5, `bodies ${i - 1} and ${i} apart`);
+    await h.screenshot('solar-row-fitted');
+    await page.locator('[data-testid=solar-row-dialog] .modal-actions button').click();
     // The planets as photographed (D191): chosen in the look, credited.
     await page.getByTestId('space-look').click();
     await page.getByTestId('sky-photo').check();
@@ -4150,6 +4222,20 @@ try {
     await page.waitForFunction(() => { const s = (window as any).__mapmaker.store; return JSON.parse(s.world.get('map_space', s.spaceId).settings).space.look.photo === true; });
     await page.waitForTimeout(1500);
     await h.screenshot('solar-photographic');
+    // The looks by kind (D217): basic, charts, photographic; through a telescope, the Sun a blazing point of light.
+    await page.getByTestId('space-look').click();
+    for (const k of ['basic', 'chart', 'photo']) await page.getByTestId(`sky-kind-${k}`).waitFor();
+    assert.equal(await page.getByTestId('sky-kind-photo').getByTestId('sky-preset-photo-telescope').count(), 1);
+    assert.equal(await page.getByTestId('sky-kind-chart').getByTestId('sky-preset-chart-antique').count(), 1);
+    const sunDisc = (await hook<number>('starRadius', 0)) ?? 0;
+    await page.getByTestId('sky-preset-photo-telescope').click();
+    await page.waitForFunction(() => { const s = (window as any).__mapmaker.store; return JSON.parse(s.world.get('map_space', s.spaceId).settings).space.look.sunAsStar === true; });
+    assert.ok(await page.getByTestId('sky-sunAsStar').isChecked());
+    await page.locator('[data-testid=sky-look-dialog] .close').click();
+    await page.waitForTimeout(400);
+    const sunStar = (await hook<number>('starRadius', 0)) ?? 0;
+    assert.ok(sunStar > 0 && sunStar < sunDisc * 0.6, `the Sun a point of light (${sunStar.toFixed(1)} against ${sunDisc.toFixed(1)})`);
+    await h.screenshot('solar-telescope');
     // Back to the orbits.
     await page.getByTestId('solar-layout').click();
     await page.waitForFunction(() => { const s = (window as any).__mapmaker.store; return JSON.parse(s.world.get('map_space', s.spaceId).settings).space.layout === 'orbits'; });

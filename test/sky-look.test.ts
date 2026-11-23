@@ -1,7 +1,7 @@
 // How space maps look (D130), seen as flat charts (D131), and realms as territories (D132).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_SKY, SKY_PRESETS, presetLook, randomLook, skyLookOf, starColourIn, hexRgb, warmth, hsl } from '../src/space/sky-look.ts';
+import { DEFAULT_SKY, SKY_PRESETS, SKY_KINDS, presetLook, randomLook, skyLookOf, starColourIn, hexRgb, warmth, hsl } from '../src/space/sky-look.ts';
 import { territoryField, territoryBorders, paintTerritory, realmLabels, type TerritorySite } from '../src/space/territory.ts';
 import { makeSpaceView, spaceCamera, turnChart, panSpaceCamera } from '../src/space/space-view.ts';
 import { World } from '../src/world-model/world.ts';
@@ -40,6 +40,12 @@ test('a look as kept is made whole and kept within bounds; every preset is a who
     for (const [k, v] of Object.entries(p.look)) assert.deepEqual(look[k as keyof typeof look], v, `${p.id}: ${k}`);
   }
   assert.ok(SKY_PRESETS.filter((p) => p.look.chart).length >= 3, 'charts among them');
+  // By kind (D217): every look of one; charts are charts; several of each, the photographic ones as photographed.
+  for (const k of SKY_KINDS) assert.ok(SKY_PRESETS.filter((p) => p.kind === k.id).length >= 4, `${k.name}: several looks`);
+  assert.ok(SKY_PRESETS.every((p) => (p.kind === 'chart') === !!p.look.chart), 'a chart is a chart');
+  assert.ok(SKY_PRESETS.filter((p) => p.kind === 'photo').every((p) => presetLook(p.id).photo), 'photographic: as photographed');
+  assert.equal(presetLook('photo-telescope').sunAsStar, true, 'through a telescope, the Sun a star');
+  assert.equal(skyLookOf({ sunAsStar: 'yes' }).sunAsStar, false);
   assert.equal(presetLook('no such').preset, 'natural');
 });
 

@@ -10,6 +10,7 @@ import { DateField, fmt } from '../inputs.tsx';
 import { spaceSettingsOf } from '../../world-model/world-settings.ts';
 import { spaceScene } from '../../space/scene.ts';
 import { findStars, type Star } from '../../space/catalogue.ts';
+import { cameraToStar } from '../../space/space-view.ts';
 import { exoplanetsNow, planetSize } from '../../space/exoplanets.ts';
 
 /** Go to what was found: choose it, and bring the date and the view to where it can be seen. */
@@ -115,10 +116,10 @@ export function SearchBox() {
   const pick = (item: (typeof results)[number]) => {
     if ('r' in item) goToResult(item.r);
     else {
-      // A star or planet: chosen, and the view turned around it.
+      // A star or planet: chosen, and the view brought to it (D215).
       const st = item.star;
       s.set({ selection: { kind: 'star', id: st.id }, mode: 'world', tool: 'select' });
-      s.setCamera({ ...s.camera, target: [st.x, st.y, st.z] });
+      s.setCamera(cameraToStar(s.camera, [st.x, st.y, st.z]));
     }
     setOpen(false); setQ(''); (document.activeElement as HTMLElement | null)?.blur();
   };

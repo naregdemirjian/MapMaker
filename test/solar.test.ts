@@ -91,7 +91,7 @@ test('a solar system map: made, its scale chosen and undone; planets held like s
   cmd.seedProject(world, 'Solar');
   const sp = cmd.createSpaceMap(world, 'The solar system', 'solar').result;
   // (Made true to scale, as photographed and as a poster side by side, D208.)
-  assert.deepEqual(spaceSettingsOf(world.get('map_space', sp)), { catalogue: 'solar', radiusLy: 50, scale: 'true', layout: 'orbits', row: { sizes: 'poster', spacing: 'even', moons: 'none', chosen: [] }, look: presetLook('photographic') });
+  assert.deepEqual(spaceSettingsOf(world.get('map_space', sp)), { catalogue: 'solar', radiusLy: 50, scale: 'true', layout: 'orbits', row: { sizes: 'poster', spacing: 'even', moons: 'none', chosen: [], scale: 1, gap: 1 }, look: presetLook('photographic') });
   const r = cmd.setSolarScale(world, sp, 'compressed');
   assert.equal(spaceSettingsOf(world.get('map_space', sp))!.scale, 'compressed');
   world.applyDiffs(invertDiffs(r.diffs));
@@ -189,5 +189,42 @@ test('the solar system side by side as chosen (D192): sizes, spacing and moons; 
   const some = row(t, { ...DEFAULT_SOLAR_ROW, moons: 'chosen', chosen: [31, 53, 61] });
   assert.deepEqual(some.stars.filter((s) => s.kind === 'moon').map((s) => s.name).sort(), ['Ganymede', 'Moon', 'Titan']);
   assert.equal(some.byId.get(53)!.y, some.byId.get(31)!.y, 'Ganymede alone under Jupiter: in the first place');
-  assert.deepEqual(solarRowOf({ sizes: 'huge', spacing: 'true', moons: 'chosen', chosen: [31, 999, 31] }), { sizes: 'styled', spacing: 'true', moons: 'chosen', chosen: [31] });
+  assert.deepEqual(solarRowOf({ sizes: 'huge', spacing: 'true', moons: 'chosen', chosen: [31, 999, 31] }), { sizes: 'styled', spacing: 'true', moons: 'chosen', chosen: [31], scale: 1, gap: 1 });
+});
+
+test('the solar system side by side (D216): larger and further apart by the multiples set; Fit screen for the spacing and for the sizes', async () => {
+  const { solarRowCatalogue: row, solarRowOf, fitRowGap, fitRowScale, DEFAULT_SOLAR_ROW, ROW_STEP, BODIES } = await import('../src/space/solar.ts');
+  const t = gregorian.fromCivil({ year: 2000 });
+  const base = row(t), big = row(t, { scale: 2.5 }), wide = row(t, { gap: 2 });
+  for (const st of base.stars) {
+    assert.ok(Math.abs(big.byId.get(st.id)!.size! - st.size! * 2.5) < 1e-9, `${st.name} larger`);
+    assert.equal(big.byId.get(st.id)!.x, st.x, 'standing where it stood');
+  }
+  // Twice as far apart, from the Sun.
+  const sun = base.byId.get(0)!.x;
+  assert.ok(Math.abs((wide.byId.get(8)!.x - sun) - 2 * (base.byId.get(8)!.x - sun)) < 1e-9);
+  assert.equal(wide.byId.get(31)!.x, wide.byId.get(3)!.x, 'the Moon under the Earth');
+  assert.deepEqual([solarRowOf({ scale: 99, gap: -1 }).scale, solarRowOf({ scale: 99, gap: -1 }).gap], [10, 0.25], 'kept within their range');
+  // Fit screen for the spacing: in a 1600 by 900 view seen whole, the row from the Sun's edge to the last planet's fills 92% of its width.
+  const W = 1600, H = 900, unit = (Math.min(W, H) * 0.46) / 33, px = (size: number) => size * (W / 1920);
+  for (const r of [DEFAULT_SOLAR_ROW, { ...DEFAULT_SOLAR_ROW, sizes: 'true' as const, spacing: 'true' as const }, { ...DEFAULT_SOLAR_ROW, sizes: 'poster' as const }]) {
+    const fit = fitRowGap(t, r, W, H), c = row(t, { ...r, gap: fit.gap });
+    const inRow = c.stars.filter((st) => !st.around && !st.dwarf).sort((a, b) => a.x - b.x), first = inRow[0], last = inRow[inRow.length - 1];
+    const left = (first.x - fit.target[0]) * unit + W / 2 - (first.limb ? 14 : px(first.size!));
+    const right = (last.x - fit.target[0]) * unit + W / 2 + px(last.size!) + 10;
+    assert.ok(Math.abs(left - W * 0.04) < 1 && Math.abs(right - W * 0.96) < 1, `${r.sizes}: ${left.toFixed(1)} to ${right.toFixed(1)}`);
+  }
+  // Fit screen for the sizes: as large as can be, no two bodies of the row touching, the spacing as it was.
+  const r = { ...DEFAULT_SOLAR_ROW, sizes: 'true' as const, spacing: 'true' as const };
+  const k = fitRowScale(t, r, W, H), c = row(t, { ...r, scale: k });
+  const inRow = c.stars.filter((st) => !st.around && !st.dwarf).sort((a, b) => a.x - b.x);
+  let tightest = Infinity;
+  for (let i = 1; i < inRow.length; i++) {
+    const room = (inRow[i].x - inRow[i - 1].x) * unit, need = px(inRow[i].size!) + px(inRow[i - 1].size!);
+    assert.ok(need < room, `${inRow[i - 1].name} and ${inRow[i].name} apart`);
+    tightest = Math.min(tightest, room / need);
+  }
+  assert.ok(k > 1 || tightest < 1.3, `as large as it can be (×${k.toFixed(2)}, tightest ${tightest.toFixed(2)})`);
+  assert.equal(c.byId.get(8)!.x, row(t, r).byId.get(8)!.x, 'the spacing kept');
+  assert.ok(ROW_STEP > 0 && BODIES.length === 9);
 });

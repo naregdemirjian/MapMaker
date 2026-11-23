@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { decodeStars, findStars, starKind, starColour, starSize, galacticOf, primaryOf, systemOf } from '../src/space/catalogue.ts';
-import { makeSpaceView, orbitCamera, panSpaceCamera, spaceCamera } from '../src/space/space-view.ts';
+import { makeSpaceView, orbitCamera, panSpaceCamera, spaceCamera, homeCamera, cameraToStar } from '../src/space/space-view.ts';
 import { World } from '../src/world-model/world.ts';
 import * as cmd from '../src/domain/commands.ts';
 import { isSpaceMap, spaceSettingsOf } from '../src/world-model/world-settings.ts';
@@ -43,6 +43,27 @@ test('the nearby stars: every star within 50 light-years, the Sun at the middle,
   assert.equal(findStars(cat, 'EPSILON eridani')[0].name, 'Ran');
   assert.equal(findStars(cat, 'barnard')[0].name, "Barnard's Star");
   assert.deepEqual(findStars(cat, '  '), []);
+  // Named exactly so first, then a name with a word starting so, then the rest; nearest first within each (D215).
+  assert.equal(findStars(cat, 'sirius')[0].name, 'Sirius');
+  const prox = findStars(cat, 'proxima');
+  assert.equal(prox[0].name, 'Proxima Centauri');
+  const ce = findStars(cat, 'cen').map((s) => s.name);
+  assert.ok(ce.length > 1 && ce.every((n, i) => i === 0 || n.length > 0));
+});
+
+test('space views (D215): home is the start, level, the whole map; a star brought to the middle, never further out', () => {
+  const turned = { ...spaceCamera(), lon: 31, lat: -40, zoom: 2.2, rotation: 35, target: [3, -2, 1] as [number, number, number] };
+  const home = homeCamera(turned, false);
+  assert.deepEqual([home.lon, home.lat, home.zoom, home.rotation, home.target], [spaceCamera().lon, spaceCamera().lat, 0, 0, undefined]);
+  const chartHome = homeCamera(turned, true);
+  assert.deepEqual([chartHome.lon, chartHome.lat, chartHome.zoom, chartHome.rotation, chartHome.target], [31, -40, 0, 0, undefined], 'a chart keeps its side, turned straight');
+  const to = cameraToStar(spaceCamera(), [8.6, -1.2, 0.4]);
+  assert.deepEqual(to.target, [8.6, -1.2, 0.4]);
+  assert.ok(to.zoom > 3);
+  assert.equal(cameraToStar({ ...spaceCamera(), zoom: 5 }, [1, 1, 1]).zoom, 5, 'never further out');
+  const v = makeSpaceView(to, 1000, 800, 50);
+  const p = v.project([8.6, -1.2, 0.4])!;
+  assert.ok(Math.abs(p[0] - 500) < 1e-6 && Math.abs(p[1] - 400) < 1e-6);
 });
 
 test('stars by their kind: colours, words and sizes', () => {

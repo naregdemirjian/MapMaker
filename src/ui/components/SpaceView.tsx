@@ -5,12 +5,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLive, store } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
-import { makeSpaceView, orbitCamera, panSpaceCamera, turnChart, type SpaceView as View3 } from '../../space/space-view.ts';
+import { makeSpaceView, orbitCamera, panSpaceCamera, turnChart, homeCamera, cameraToStar, type SpaceView as View3 } from '../../space/space-view.ts';
 import { SpaceRenderer, type DrawnStar } from '../../space/space-renderer.ts';
 import { spaceScene } from '../../space/scene.ts';
 import { galaxyImageNow, galaxyBakeState, onGalaxyPictures } from '../../space/galaxy-pictures.ts';
 import '../galaxy-workers.ts';
-import { primaryOf as starPrimary, systemOf as starSystem } from '../../space/catalogue.ts';
+import { primaryOf as starPrimary, systemOf as starSystem, findStars, starKind, type Star, type StarCatalogue } from '../../space/catalogue.ts';
 import { fmt } from '../inputs.tsx';
 import { spaceSettingsOf } from '../../world-model/world-settings.ts';
 import { cameraAt, timeAt, moveOverlay, withStillCamera, screenSecondsSince } from '../../presentation/sequence.ts';
@@ -58,7 +58,7 @@ export function SpaceView() {
   const shot = s.mode === 'present' ? currentShot() : null;
   const presentation = !!shot;
   const frame = shot ? frameRect(shot, size.w, size.h) : { x: 0, y: 0, w: size.w, h: size.h };
-  const camera: Camera = shot ? (s.presentCamera ?? cameraAt(shot, s.shotFrame)) : s.camera;
+  const stored: Camera = shot ? (s.presentCamera ?? cameraAt(shot, s.shotFrame)) : s.camera;
   const time = shot ? timeAt(shot, s.shotFrame) : s.time;
   const scene = spaceScene(settings, time, () => force((n) => n + 1));
   const cat = scene.cat;
@@ -66,6 +66,9 @@ export function SpaceView() {
   const look = settings?.look;
   // (Side by side, D133: always flat.)
   const chart = !!look?.chart || !!scene.row;
+  // (The working view in three dimensions is always level, D215: a turn given to the chart is kept for the chart, not
+  // carried into the stars seen in three dimensions. A shot's own Rotation still turns its picture.)
+  const camera: Camera = !shot && !chart && stored.rotation ? { ...stored, rotation: 0 } : stored;
   const view = makeSpaceView(camera, frame.w, frame.h, scene.radius, chart);
   // Realms and lanes at the moment shown (in a shot, a star newly held grows into its realm).
   // (In a shot, history as the shot's timeline has it, D150.)
@@ -127,7 +130,11 @@ export function SpaceView() {
     store.execute((w) => cmd.updateSequence(w, id, { settings: withStillCamera(sh, cam) }));
     store.set({ presentCamera: null });
   };
-  const setCamera = (next: Camera) => { if (shot) store.setLive({ presentCamera: next }); else store.setCamera(next); };
+  const setCamera = (next: Camera) => {
+    if (shot) store.setLive({ presentCamera: next });
+    // (A level view moved in three dimensions keeps the chart's own turn for when the chart is shown again.)
+    else store.setCamera(!chart && camera !== stored ? { ...next, rotation: stored.rotation } : next);
+  };
 
   function onPointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -138,9 +145,11 @@ export function SpaceView() {
     }
     // The Star systems tool: Ctrl and a drag draws a box around the stars to give.
     if (!presentation && e.button === 0 && store.tool === 'systems' && (e.ctrlKey || e.metaKey)) { drag.current = { kind: 'box', x: p[0], y: p[1], cx: p[0], cy: p[1] }; return; }
-    // (On a chart, D131, a drag moves the chart and a right-drag turns it; in three dimensions, a drag turns the view round and a right-drag moves it.)
+    // (On a chart, D131, a drag moves the chart and a right-drag turns it; in three dimensions, a drag turns the view
+    // round and a drag with the middle or right button, D215, moves it.)
     const other = e.button === 2 || e.shiftKey;
-    drag.current = { kind: chart ? (other ? 'orbit' : 'pan') : other ? 'pan' : 'orbit', x: p[0], y: p[1], moved: 0, start: camera };
+    if (e.button === 1) e.preventDefault();
+    drag.current = { kind: chart ? (other ? 'orbit' : 'pan') : other || e.button === 1 ? 'pan' : 'orbit', x: p[0], y: p[1], moved: 0, start: camera };
   }
   /** The primary star of a star's system (a companion sits where its primary is: a click means the system). */
   const primaryOf = (id: number) => (cat ? starPrimary(cat, id) : id);
@@ -233,6 +242,7 @@ export function SpaceView() {
   return (
     <div className="map-wrap" ref={wrapRef}>
       <canvas ref={canvasRef} className="map-canvas" style={{ width: size.w, height: size.h, cursor: "grab" }} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onDoubleClick={onDoubleClick} onContextMenu={(e) => e.preventDefault()} data-testid="map-canvas" data-space="stars" />
+      {!presentation && cat && <StarFinder cat={cat} solar={scene.unit === 'au'} onPick={(st) => { store.set({ selection: { kind: 'star', id: st.id } }); store.setCamera(cameraToStar(stored, [st.x, st.y, st.z])); }} />}
       {!presentation && (
         <div className="map-hud">
           <div className="scalebar space-note" data-testid="space-note">{settings?.catalogue === 'galaxy' && settings.galaxy && cat ? galaxyNote(settings.galaxy, cat, scene.rings?.[0]?.label ?? '') : settings?.catalogue === 'invented' && cat ? `${cat.stars.length} invented stars within ${cat.radiusLy} light-years · seed ${settings.invented?.seed}` : scene.unit === 'au' ? (scene.row ? `The Sun, the planets and their large moons side by side on ${fmt(time)}` : `The Sun and the planets on ${fmt(time)} · ${settings?.scale === 'true' ? 'distances true to scale' : 'distances compressed'}`) : cat ? `${cat.stars.length} stars within ${cat.radiusLy} light-years${scene.planets ? ` · ${scene.planets.size} with known planets (dotted rings)` : ''} · rings every 10 ly` : 'Loading the stars…'}</div>
@@ -255,8 +265,42 @@ export function SpaceView() {
           <div className="hud-buttons">
             <button title="Zoom in" onClick={() => store.setCamera({ ...camera, zoom: camera.zoom + 0.5 })}>+</button>
             <button title="Zoom out" onClick={() => store.setCamera({ ...camera, zoom: camera.zoom - 0.5 })}>−</button>
-            <button title="Back to the Sun, the whole map in view" onClick={() => store.setCamera({ ...camera, zoom: 0, target: undefined })} data-testid="space-home">⌂</button>
+            <button title="Back to the start: the whole map in view, level, round its middle" onClick={() => store.setCamera(homeCamera(stored, chart))} data-testid="space-home">⌂</button>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Finding a star (D215): a box at the map's top right. What is typed is looked for in the stars' names and other names
+ * (and, on a map of the solar system, the planets' and moons'); the best matches are listed, and the one chosen is
+ * selected and the view brought to it.
+ */
+function StarFinder({ cat, solar, onPick }: { cat: StarCatalogue; solar: boolean; onPick: (st: Star) => void }) {
+  const [q, setQ] = useState('');
+  const [at, setAt] = useState(0);
+  const found = q.trim() ? findStars(cat, q, 8) : [];
+  const pick = (st: Star | undefined) => { if (!st) return; onPick(st); setQ(''); (document.activeElement as HTMLElement | null)?.blur(); };
+  return (
+    <div className="space-find" onPointerDown={(e) => e.stopPropagation()}>
+      <input value={q} placeholder={solar ? 'Find a planet or moon…' : 'Find a star…'} onChange={(e) => { setQ(e.target.value); setAt(0); }}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowDown') { e.preventDefault(); setAt((i) => Math.min(found.length - 1, i + 1)); }
+          else if (e.key === 'ArrowUp') { e.preventDefault(); setAt((i) => Math.max(0, i - 1)); }
+          else if (e.key === 'Enter') pick(found[at]);
+          else if (e.key === 'Escape') setQ('');
+        }} data-testid="space-find" />
+      {q.trim() && (
+        <div className="space-find-results" role="listbox">
+          {found.map((st, i) => (
+            <button key={st.id} role="option" aria-selected={i === at} className={i === at ? 'on' : ''} onMouseEnter={() => setAt(i)} onClick={() => pick(st)} data-testid="space-find-result">
+              <b>{st.name}</b>{st.alt && st.alt !== st.name ? <span className="muted"> {st.alt}</span> : null}
+              <span className="muted"> · {solar ? (st.id === 0 ? 'the Sun' : st.id > 100 ? 'dwarf planet' : st.id < 10 ? 'planet' : 'moon') : `${starKind(st.spect)}, ${st.dist.toFixed(1)} ly`}</span>
+            </button>
+          ))}
+          {!found.length && <div className="muted pad">Nothing called so.</div>}
         </div>
       )}
     </div>

@@ -171,8 +171,14 @@ export const ROW_RADIUS = 33;
 export type RowSizes = 'styled' | 'equal' | 'true' | 'compressed' | 'poster';
 /** Spacing: even steps, true to the distances from the Sun, or compressed (by the square root). */
 export type RowSpacing = 'even' | 'true' | 'compressed';
-export interface SolarRow { sizes: RowSizes; spacing: RowSpacing; moons: 'all' | 'none' | 'chosen'; chosen: number[] }
-export const DEFAULT_SOLAR_ROW: SolarRow = { sizes: 'styled', spacing: 'even', moons: 'all', chosen: [] };
+/**
+ * A row's settings: how sizes and spacing are worked out, then (D216) how much larger every body is drawn (`scale`) and
+ * how far apart they stand (`gap`), each a multiple of what the choice gives; and which moons.
+ */
+export interface SolarRow { sizes: RowSizes; spacing: RowSpacing; moons: 'all' | 'none' | 'chosen'; chosen: number[]; scale: number; gap: number }
+export const DEFAULT_SOLAR_ROW: SolarRow = { sizes: 'styled', spacing: 'even', moons: 'all', chosen: [], scale: 1, gap: 1 };
+/** The range of the size and spacing multiples (D216). */
+export const ROW_SCALE = { min: 0.1, max: 10 }, ROW_GAP = { min: 0.25, max: 6 };
 
 /** A side-by-side solar system's settings as stored, checked. */
 export function solarRowOf(v: unknown): SolarRow {
@@ -183,6 +189,8 @@ export function solarRowOf(v: unknown): SolarRow {
     spacing: (['even', 'true', 'compressed'] as const).includes(o.spacing as RowSpacing) ? (o.spacing as RowSpacing) : 'even',
     moons: o.moons === 'none' || o.moons === 'chosen' ? o.moons : 'all',
     chosen: Array.isArray(o.chosen) ? [...new Set(o.chosen.filter((x): x is number => typeof x === 'number' && ids.has(x)))] : [],
+    scale: typeof o.scale === 'number' && Number.isFinite(o.scale) ? Math.max(ROW_SCALE.min, Math.min(ROW_SCALE.max, o.scale)) : 1,
+    gap: typeof o.gap === 'number' && Number.isFinite(o.gap) ? Math.max(ROW_GAP.min, Math.min(ROW_GAP.max, o.gap)) : 1,
   };
 }
 
@@ -213,29 +221,82 @@ export function rowSize(id: number, sizes: RowSizes, styled: number): number {
   return id === 0 ? 26 : Math.max(id > 10 ? 1.2 : 2, 13 * Math.sqrt(rel));
 }
 
-export function solarRowCatalogue(t: Instant, row: SolarRow = DEFAULT_SOLAR_ROW): StarCatalogue {
+export function solarRowCatalogue(t: Instant, given: Partial<SolarRow> = DEFAULT_SOLAR_ROW): StarCatalogue {
+  const row: SolarRow = { ...DEFAULT_SOLAR_ROW, ...given };
   const T = centuriesSinceJ2000(t), span = BODIES.length * ROW_STEP, x0 = -span / 2, far = Math.max(...BODIES.map((b) => b.el[0]));
-  const xOf = (b: Body, i: number) => (row.spacing === 'true' ? x0 + span * (b.el[0] / far) : row.spacing === 'compressed' ? x0 + span * Math.sqrt(b.el[0] / far) : x0 + (i + 1) * ROW_STEP);
+  // (Spacing and sizes as chosen, then as many times further apart and larger as set, D216: the row grows from the Sun.)
+  const g = row.gap, k = row.scale, along = (x: number) => x0 + (x - x0) * g;
+  const sized = (id: number, styled: number) => rowSize(id, row.sizes, styled) * k;
+  const xOf = (b: Body, i: number) => along(row.spacing === 'true' ? x0 + span * (b.el[0] / far) : row.spacing === 'compressed' ? x0 + span * Math.sqrt(b.el[0] / far) : x0 + (i + 1) * ROW_STEP);
   const poster = row.sizes === 'poster';
   // (As a poster, the Sun's edge just short of Mercury, its disc off to the left.)
-  const stars: Star[] = [{ id: 0, name: 'Sun', alt: '', x: poster ? x0 + ROW_STEP * 0.55 : x0, y: ROW_Y, z: 0, dist: 0, absmag: 4.83, spect: 'G2V', system: 0, color: '#ffd76a', size: rowSize(0, row.sizes, 15), ...(poster ? { limb: true } : {}) }];
+  const stars: Star[] = [{ id: 0, name: 'Sun', alt: '', x: poster ? along(x0 + ROW_STEP * 0.55) : x0, y: ROW_Y, z: 0, dist: 0, absmag: 4.83, spect: 'G2V', system: 0, color: '#ffd76a', size: sized(0, 15), ...(poster ? { limb: true } : {}) }];
   BODIES.forEach((b, i) => {
     const p = bodyAt(b, T);
     // (As a poster, Pluto is with the dwarf planets, below the row, past Neptune.)
     const dwarf = poster && b.id === 9;
-    stars.push({ id: b.id, name: b.name, alt: '', x: dwarf ? x0 + 8.6 * ROW_STEP : xOf(b, i), y: dwarf ? DWARF_Y : ROW_Y, z: 0, dist: Math.hypot(p[0], p[1], p[2]), absmag: 0, spect: '', system: 0, color: b.color, size: rowSize(b.id, row.sizes, b.size * 1.5), ...(dwarf ? { dwarf: true } : {}) });
+    stars.push({ id: b.id, name: b.name, alt: '', x: dwarf ? along(x0 + 8.6 * ROW_STEP) : xOf(b, i), y: dwarf ? DWARF_Y : ROW_Y, z: 0, dist: Math.hypot(p[0], p[1], p[2]), absmag: 0, spect: '', system: 0, color: b.color, size: sized(b.id, b.size * 1.5), ...(dwarf ? { dwarf: true } : {}) });
   });
   if (poster) {
     // Ceres between Mars and Jupiter, Eris past Pluto.
-    const at: Record<number, number> = { 101: x0 + 4.5 * ROW_STEP, 102: x0 + 9.4 * ROW_STEP };
-    for (const d of DWARFS) stars.push({ id: d.id, name: d.name, alt: 'a dwarf planet', x: at[d.id], y: DWARF_Y, z: 0, dist: d.au, absmag: 0, spect: '', system: 0, color: d.color, size: rowSize(d.id, row.sizes, 2), dwarf: true });
+    const at: Record<number, number> = { 101: along(x0 + 4.5 * ROW_STEP), 102: along(x0 + 9.4 * ROW_STEP) };
+    for (const d of DWARFS) stars.push({ id: d.id, name: d.name, alt: 'a dwarf planet', x: at[d.id], y: DWARF_Y, z: 0, dist: d.au, absmag: 0, spect: '', system: 0, color: d.color, size: sized(d.id, 2), dwarf: true });
   }
   const shown = MOONS.filter((m) => row.moons === 'all' || (row.moons === 'chosen' && row.chosen.includes(m.id)));
   for (const m of shown) {
     const planet = stars[m.planet], rank = shown.filter((x) => x.planet === m.planet && x.days < m.days).length;
-    stars.push({ id: m.id, name: m.name, alt: `a moon of ${planet.name}`, x: planet.x, y: ROW_Y - 4.6 - MOON_STEP * rank, z: 0, dist: planet.dist, absmag: 0, spect: '', system: 0, color: m.color, size: rowSize(m.id, row.sizes, 2.8), kind: 'moon', minor: true, around: m.planet });
+    stars.push({ id: m.id, name: m.name, alt: `a moon of ${planet.name}`, x: planet.x, y: ROW_Y - 4.6 - MOON_STEP * rank, z: 0, dist: planet.dist, absmag: 0, spect: '', system: 0, color: m.color, size: sized(m.id, 2.8), kind: 'moon', minor: true, around: m.planet });
   }
   return { radiusLy: ROW_RADIUS, stars, byId: new Map(stars.map((s) => [s.id, s])) };
+}
+
+/** A body's drawn radius in pixels in a row seen whole (zoom 0) in a view this wide, as the renderer draws it. */
+const rowPx = (size: number, width: number, lookSize: number) => size * lookSize * (width / 1920);
+/** Pixels per unit of the row in a view this size, seen whole (zoom 0). */
+const rowUnitPx = (width: number, height: number) => (Math.min(width, height) * 0.46) / ROW_RADIUS;
+
+/** The bodies standing in the row itself, left to right (not the moons, nor the dwarf planets below a poster). */
+function rowBodies(cat: StarCatalogue): Star[] {
+  return cat.stars.filter((st) => !st.around && !st.dwarf).sort((a, b) => a.x - b.x);
+}
+
+/**
+ * Spacing to fit the screen (D216): how far apart the bodies must stand, their sizes as they are, for the row from the
+ * Sun to the last planet to fill a view this size seen whole, and where that view must look (the middle of the row).
+ */
+export function fitRowGap(t: Instant, row: SolarRow, width: number, height: number, lookSize = 1): { gap: number; target: [number, number, number] } {
+  const one = rowBodies(solarRowCatalogue(t, { ...row, gap: 1 })), first = one[0], last = one[one.length - 1];
+  const unit = rowUnitPx(width, height), origin = -(BODIES.length * ROW_STEP) / 2;
+  // (A poster's Sun shows only its edge: the row starts a little left of it; otherwise at the Sun's own edge.)
+  const before = first.limb ? 14 : rowPx(first.size ?? 0, width, lookSize), after = rowPx(last.size ?? 0, width, lookSize) + 10;
+  const want = width * 0.92 - before - after;
+  const gap = Math.max(ROW_GAP.min, Math.min(ROW_GAP.max, want / Math.max(1e-9, (last.x - first.x) * unit)));
+  // (The row grows from where the Sun stands: its left end and its right at that spacing, in units.)
+  const left = origin + (first.x - origin) * gap - before / unit, right = origin + (last.x - origin) * gap + after / unit;
+  return { gap, target: [(left + right) / 2, 0, 0] };
+}
+
+/**
+ * Sizes to fit the screen (D216): every body as large as it can be drawn, the spacing as it is, without two touching
+ * (nor a planet and the first moon below it) and the largest no taller than most of the view, seen whole.
+ */
+export function fitRowScale(t: Instant, row: SolarRow, width: number, height: number, lookSize = 1): number {
+  const cat = solarRowCatalogue(t, { ...row, scale: 1 }), bodies = rowBodies(cat), unit = rowUnitPx(width, height);
+  const px = (st: Star) => rowPx(st.size ?? 0, width, lookSize);
+  let most = Infinity;
+  for (let i = 0; i + 1 < bodies.length; i++) {
+    const a = bodies[i], b = bodies[i + 1], room = (b.x - a.x) * unit * 0.86;
+    // (A poster's Sun is only an edge: the next body's whole width must fit beside it.)
+    const need = a.limb ? 2 * px(b) : px(a) + px(b);
+    if (need > 0) most = Math.min(most, room / need);
+  }
+  for (const st of bodies) {
+    if (st.limb) continue;
+    if (px(st) > 0) most = Math.min(most, (height * 0.4) / px(st));
+    const moon = cat.stars.filter((m) => m.around === st.id).sort((p, q) => q.y - p.y)[0];
+    if (moon) most = Math.min(most, ((st.y - moon.y) * unit * 0.9) / Math.max(1e-9, px(st) + rowPx(moon.size ?? 0, width, lookSize)));
+  }
+  return Math.max(ROW_SCALE.min, Math.min(ROW_SCALE.max, Number.isFinite(most) ? most : 1));
 }
 
 /** The lines of the side-by-side solar system (D133): the row from the Sun to the last planet, and each planet's column of moons. */

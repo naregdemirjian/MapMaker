@@ -6,7 +6,7 @@ import { useLayoutEffect, useRef } from 'react';
 import { useStore } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
 import { spaceSettingsOf } from '../../world-model/world-settings.ts';
-import { SKY_PRESETS, DEFAULT_SKY, presetLook, randomLook, skyLookOf, type SkyLook, type StarColours, type StarShape, type ChartGrid, type NameFont, type RealmStyle } from '../../space/sky-look.ts';
+import { SKY_PRESETS, SKY_KINDS, DEFAULT_SKY, presetLook, randomLook, skyLookOf, type SkyLook, type StarColours, type StarShape, type ChartGrid, type NameFont, type RealmStyle } from '../../space/sky-look.ts';
 import { SpaceRenderer, type Holding } from '../../space/space-renderer.ts';
 import { makeSpaceView, spaceCamera } from '../../space/space-view.ts';
 import type { StarCatalogue, Star } from '../../space/catalogue.ts';
@@ -71,7 +71,6 @@ export function SkyLookDialog() {
   const set = (patch: Partial<SkyLook>) => save({ ...look, ...patch });
   // (A preset of a look keeps the map flat or not as it is; a chart's preset makes it a chart.)
   const preset = (id: string) => { const p = presetLook(id); save({ ...p, chart: p.chart || look.chart }, `Stars: ${SKY_PRESETS.find((x) => x.id === id)?.name ?? id}`); };
-  const looks = SKY_PRESETS.filter((p) => !p.look.chart), charts = SKY_PRESETS.filter((p) => p.look.chart);
   const presetButton = (p: (typeof SKY_PRESETS)[number]) => (
     <button key={p.id} className={`sky-preset ${look.preset === p.id ? 'on' : ''}`} onClick={() => preset(p.id)} title={p.name} data-testid={`sky-preset-${p.id}`}>
       <SkyPicture look={skyLookOf({ ...presetLook(p.id), chart: !!p.look.chart })} w={112} h={64} />
@@ -94,10 +93,13 @@ export function SkyLookDialog() {
       <div className="modal sky-look" role="dialog" aria-label="How the stars look" data-testid="sky-look-dialog">
         <div className="modal-head"><h2>How the stars look</h2><button className="close" onClick={close} aria-label="Close">×</button></div>
         <p className="muted">Start from a look, then change any part of it. The map shows each change as you make it; shots and exports of this map draw it the same way.</p>
-        <h4>Start from</h4>
-        <div className="sky-presets">{looks.map(presetButton)}</div>
-        <h4>Charts</h4>
-        <div className="sky-presets">{charts.map(presetButton)}</div>
+        {/* The looks by kind (D217): drawn for the story, illustrated charts, or as photographed. */}
+        {SKY_KINDS.map((k) => (
+          <section key={k.id} className="sky-kind" data-testid={`sky-kind-${k.id}`}>
+            <h4 title={k.hint}>{k.name}</h4>
+            <div className="sky-presets">{SKY_PRESETS.filter((p) => p.kind === k.id).map(presetButton)}</div>
+          </section>
+        ))}
         <div className="sky-actions">
           <button onClick={() => save(randomLook(Math.random, look.chart), 'Stars: a look by chance')} data-testid="sky-surprise" title="A look made up by chance: sky, stars, lines and names (again for another)">Surprise me</button>
           {look.preset !== 'natural' && <button onClick={() => preset(SKY_PRESETS.some((p) => p.id === look.preset) ? look.preset : 'natural')} data-testid="sky-reset" title="Back to the look as its preset has it">Back to "{SKY_PRESETS.find((p) => p.id === look.preset)?.name.replace(/ \(.*\)$/, '') ?? 'Natural'}"</button>}
@@ -122,6 +124,7 @@ export function SkyLookDialog() {
           <h4>Planets</h4>
           <label className="check" title="The Sun, the planets and the Moon drawn as spheres wrapped in pictures of them, lit from the Sun; Saturn with its rings"><input type="checkbox" checked={look.photo} onChange={(e) => set({ photo: e.target.checked })} data-testid="sky-photo" /> As photographed</label>
           {look.photo && <p className="muted small-note" data-testid="sky-photo-credit">{PHOTO_CREDIT}</p>}
+          <label className="check" title="The Sun drawn as a telescope sees it from far off: a blazing point of light with rays, not a disc"><input type="checkbox" checked={look.sunAsStar} onChange={(e) => set({ sunAsStar: e.target.checked })} data-testid="sky-sunAsStar" /> The Sun as a star</label>
         </>}
         <h4>Stars</h4>
         {choice('Colours', 'colours', COLOURINGS)}

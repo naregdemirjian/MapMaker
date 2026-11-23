@@ -70,6 +70,8 @@ export interface SkyLook {
   realmGlow: number;
   /** The Sun, the planets and the Moon as photographed (D191): spheres wrapped in pictures of them, lit from the Sun. */
   photo: boolean;
+  /** The Sun seen as a star (D217): a blazing point of light with rays, as a telescope sees it from far off, not a disc. */
+  sunAsStar: boolean;
 }
 
 export const DEFAULT_SKY: SkyLook = {
@@ -80,13 +82,26 @@ export const DEFAULT_SKY: SkyLook = {
   background: '#04070d', backgroundGlow: null, nebula: 0, nebulaA: '#5b3a8f', nebulaB: '#1f5f8b', farStars: 1,
   grid: '#8cafdc', gridOpacity: 0.32, names: '#e1e8f5', nameFont: 'sans', dropLines: true,
   chart: false, chartGrid: 'rings', chartSpacing: 0, heights: 'numbers',
-  realms: 'borders', realmFill: 0.22, realmBorder: 1.6, realmGlow: 0.5, photo: false,
+  realms: 'borders', realmFill: 0.22, realmBorder: 1.6, realmGlow: 0.5, photo: false, sunAsStar: false,
 };
 
-/** Presets: each a whole look (the dialog starts from one, then any part can be changed). */
-export const SKY_PRESETS: Array<{ id: string; name: string; look: Partial<SkyLook> }> = [
+/** The kinds of looks (D217): drawn for the story (basic), as an illustrated chart, or as photographed. */
+export type SkyKind = 'basic' | 'chart' | 'photo';
+export const SKY_KINDS: Array<{ id: SkyKind; name: string; hint: string }> = [
+  { id: 'basic', name: 'Basic', hint: 'Looks drawn to tell the story: natural colours, a telescope\'s sharp stars, deep-field nebulae, displays and themes' },
+  { id: 'chart', name: 'Charts', hint: 'Flat charts as people draw and print them: atlases, paper, blueprint, parchment, chalk' },
+  { id: 'photo', name: 'Photographic', hint: 'As cameras and telescopes record it: the planets as photographed, stars as points of light' },
+];
+
+/** Presets: each a whole look (the dialog starts from one, then any part can be changed), of a kind (D217). */
+const PRESETS: Array<{ id: string; name: string; kind?: SkyKind; look: Partial<SkyLook> }> = [
   { id: 'natural', name: 'Natural', look: {} },
-  { id: 'photographic', name: 'Photographic (planets as photographed)', look: { photo: true, shape: 'disc', size: 1.5, glow: 0.6, glowStrength: 0.22, background: '#010204', farStars: 1.2 } },
+  { id: 'photographic', name: 'Photographic (planets as photographed)', kind: 'photo', look: { photo: true, shape: 'disc', size: 1.5, glow: 0.6, glowStrength: 0.22, background: '#010204', farStars: 1.2 } },
+  // Photographic (D217): as cameras and telescopes record the sky.
+  { id: 'photo-telescope', name: 'Through a telescope (the Sun a star)', kind: 'photo', look: { photo: true, sunAsStar: true, shape: 'disc', size: 0.7, sizeByBrightness: 1, glow: 1.1, glowStrength: 0.55, spikes: 4, spikeLength: 1.6, spikeAngle: 45, halo: 0.12, farStars: 2, background: '#000000', names: '#c9d4e3' } },
+  { id: 'photo-long-exposure', name: 'Long exposure (soft, glowing)', kind: 'photo', look: { photo: true, shape: 'soft', size: 1, glow: 1.8, glowStrength: 0.6, nebula: 0.3, nebulaA: '#4a2a5a', nebulaB: '#1b3a52', farStars: 2, background: '#020306', backgroundGlow: '#0a0c14' } },
+  { id: 'photo-infrared', name: 'Infrared telescope (six-pointed stars)', kind: 'photo', look: { photo: true, sunAsStar: true, tint: '#ffcf8a', tintAmount: 0.35, shape: 'disc', size: 0.8, glow: 1.2, glowStrength: 0.5, spikes: 6, spikeLength: 2, spikeAngle: 30, nebula: 0.4, nebulaA: '#7a3b1f', nebulaB: '#2b2350', farStars: 1.8, background: '#030204' } },
+  { id: 'photo-naked-eye', name: 'Naked eye (as the night sky looks)', kind: 'photo', look: { photo: true, shape: 'disc', size: 0.6, sizeByBrightness: 1, glow: 0.8, glowStrength: 0.3, farStars: 1.4, background: '#05070c', backgroundGlow: '#0b1220', names: '#aab6c6' } },
   { id: 'telescope', name: 'Telescope (sharp, with spikes)', look: { shape: 'disc', size: 0.8, glow: 0.7, glowStrength: 0.45, spikes: 6, spikeLength: 1.3, spikeAngle: 30, halo: 0.25, farStars: 1.6, background: '#020308' } },
   { id: 'deep-field', name: 'Deep field (nebulae)', look: { shape: 'soft', glow: 1.6, glowStrength: 0.5, spikes: 4, spikeLength: 0.8, spikeAngle: 45, nebula: 0.75, nebulaA: '#6a2c8f', nebulaB: '#145a7a', farStars: 2, background: '#030308', backgroundGlow: '#0d0a1e' } },
   { id: 'scifi-hud', name: 'Sci-fi display', look: { colours: 'mono', tint: '#5ef2ff', shape: 'ring', size: 1.1, sizeByBrightness: 0.4, glow: 0.8, glowStrength: 0.5, halo: 0.6, background: '#020b12', backgroundGlow: '#06202c', grid: '#36e1ff', gridOpacity: 0.45, names: '#a8f6ff', nameFont: 'mono', farStars: 0.4, realmFill: 0.16, realmBorder: 2, realmGlow: 1 } },
@@ -102,7 +117,15 @@ export const SKY_PRESETS: Array<{ id: string; name: string; look: Partial<SkyLoo
   { id: 'chart-blueprint', name: 'Chart: blueprint', look: { chart: true, chartGrid: 'squares', heights: 'symbols', colours: 'mono', tint: '#eaf4ff', shape: 'ring', size: 1, sizeByBrightness: 0.5, glow: 0, glowStrength: 0, farStars: 0, background: '#123a6b', backgroundGlow: '#1a4c86', grid: '#cfe3ff', gridOpacity: 0.3, names: '#eaf4ff', nameFont: 'mono', dropLines: false, realmFill: 0.16, realmBorder: 2, realmGlow: 0 } },
   { id: 'chart-sectors', name: 'Chart: sectors (hexes)', look: { chart: true, chartGrid: 'hexes', heights: 'none', colours: 'natural', shape: 'disc', size: 1, glow: 0.6, glowStrength: 0.35, farStars: 0.3, background: '#081019', grid: '#6f8fb5', gridOpacity: 0.4, names: '#dfe9f7', nameFont: 'display', dropLines: false, realmFill: 0.3, realmBorder: 2, realmGlow: 0.6 } },
   { id: 'chart-night', name: 'Chart: night', look: { chart: true, chartGrid: 'rings', heights: 'numbers', colours: 'natural', tintAmount: 0.2, tint: '#ffd27a', shape: 'sparkle4', glow: 0.8, glowStrength: 0.4, farStars: 0.6, background: '#0b1530', backgroundGlow: '#142249', grid: '#d8b46a', gridOpacity: 0.3, names: '#f3dca6', nameFont: 'serif', dropLines: false } },
+  // More charts (D217), as star atlases and old maps of the sky are drawn.
+  { id: 'chart-atlas', name: 'Chart: star atlas (black on white)', look: { chart: true, chartGrid: 'squares', heights: 'numbers', colours: 'mono', tint: '#101317', shape: 'disc', size: 1, sizeByBrightness: 1, glow: 0, glowStrength: 0, outline: 1, outlineColour: '#ffffff', farStars: 0, background: '#fbfaf6', grid: '#5a83b8', gridOpacity: 0.4, names: '#1d2430', nameFont: 'serif', dropLines: false, realmFill: 0.15, realmBorder: 2, realmGlow: 0 } },
+  { id: 'chart-desk', name: 'Chart: desk atlas (white on blue)', look: { chart: true, chartGrid: 'rings', heights: 'numbers', colours: 'mono', tint: '#ffffff', shape: 'disc', size: 0.95, sizeByBrightness: 1, glow: 0.3, glowStrength: 0.2, farStars: 0, background: '#173563', grid: '#e8c96a', gridOpacity: 0.45, names: '#f2f5fa', nameFont: 'serif', dropLines: false, realmFill: 0.2, realmBorder: 2, realmGlow: 0 } },
+  { id: 'chart-antique', name: 'Chart: antique (engraved, on parchment)', look: { chart: true, chartGrid: 'rings', heights: 'none', colours: 'mono', tint: '#3a2716', shape: 'sparkle6', size: 1, sizeByBrightness: 0.9, glow: 0, glowStrength: 0, outline: 0.8, outlineColour: '#efe0bb', farStars: 0, background: '#e7d5ab', backgroundGlow: '#f2e6c6', grid: '#7a5a33', gridOpacity: 0.4, names: '#3a2716', nameFont: 'serif', dropLines: false, realmFill: 0.22, realmBorder: 2.2, realmGlow: 0 } },
+  { id: 'chart-navigator', name: 'Chart: navigator', look: { chart: true, chartGrid: 'rings', heights: 'symbols', colours: 'mono', tint: '#13315c', shape: 'sparkle4', size: 1, sizeByBrightness: 0.8, glow: 0, glowStrength: 0, outline: 0.8, outlineColour: '#e6eef0', farStars: 0, background: '#dbe7ea', backgroundGlow: '#eaf1f2', grid: '#2c5a8a', gridOpacity: 0.35, names: '#13315c', nameFont: 'serif', dropLines: false, realmFill: 0.16, realmBorder: 2, realmGlow: 0 } },
+  { id: 'chart-chalk', name: 'Chart: chalkboard', look: { chart: true, chartGrid: 'squares', heights: 'numbers', colours: 'mono', tint: '#f1f3ee', shape: 'cross', size: 0.9, sizeByBrightness: 0.6, glow: 0.25, glowStrength: 0.15, farStars: 0, background: '#26352e', backgroundGlow: '#2e4038', grid: '#e8ece4', gridOpacity: 0.22, names: '#f1f3ee', nameFont: 'display', dropLines: false, realmFill: 0.18, realmBorder: 2, realmGlow: 0.2 } },
+  { id: 'chart-ink', name: 'Chart: ink (technical)', look: { chart: true, chartGrid: 'hexes', heights: 'symbols', colours: 'mono', tint: '#111111', shape: 'ring', size: 0.9, sizeByBrightness: 0.5, glow: 0, glowStrength: 0, farStars: 0, background: '#f6f4ef', grid: '#9b9b9b', gridOpacity: 0.35, names: '#111111', nameFont: 'mono', dropLines: false, realmFill: 0.14, realmBorder: 1.6, realmGlow: 0 } },
 ];
+export const SKY_PRESETS: Array<{ id: string; name: string; kind: SkyKind; look: Partial<SkyLook> }> = PRESETS.map((p) => ({ ...p, kind: p.kind ?? (p.look.chart ? 'chart' : 'basic') }));
 
 const num = (v: unknown, lo: number, hi: number, d: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);
 const colour = (v: unknown, d: string) => (typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? v : d);
@@ -132,6 +155,7 @@ export function skyLookOf(o: unknown): SkyLook {
     dropLines: typeof x.dropLines === 'boolean' ? x.dropLines : d.dropLines,
     chart: x.chart === true,
     photo: x.photo === true,
+    sunAsStar: x.sunAsStar === true,
     chartGrid: pick(x.chartGrid, ['rings', 'squares', 'hexes', 'none'] as const, d.chartGrid), chartSpacing: num(x.chartSpacing, 0, 1e6, d.chartSpacing),
     heights: pick(x.heights, ['numbers', 'symbols', 'none'] as const, d.heights),
     realms: pick(x.realms, ['borders', 'glow', 'none'] as const, d.realms),

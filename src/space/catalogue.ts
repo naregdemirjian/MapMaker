@@ -128,12 +128,23 @@ export function starSize(absmag: number): number {
   return Math.max(1.6, Math.min(7.5, 6.2 - 0.32 * m));
 }
 
-/** Stars whose name or other name holds the text (accents and case ignored), nearest first. */
+/**
+ * Stars whose name or other name ("Tau Ceti" for τ Cet) holds the text, accents and case ignored: first those named
+ * exactly so, then those with a word starting so, then the rest; nearest first within each (D215).
+ */
 export function findStars(cat: StarCatalogue, text: string, limit = 20): Star[] {
-  const norm = (v: string) => v.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  const norm = (v: string) => v.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   const q = norm(text.trim());
   if (!q) return [];
-  return cat.stars.filter((s) => norm(s.name).includes(q) || norm(s.alt).includes(q)).slice(0, limit);
+  const rank = (s: Star): number => {
+    const names = [norm(s.name), norm(s.alt)];
+    if (names.includes(q)) return 0;
+    if (names.some((n) => n.startsWith(q) || n.split(/[\s-]+/).some((w) => w.startsWith(q)))) return 1;
+    return names.some((n) => n.includes(q)) ? 2 : 3;
+  };
+  const found: Array<[number, number, Star]> = [];
+  cat.stars.forEach((s, i) => { const r = rank(s); if (r < 3) found.push([r, i, s]); });
+  return found.sort((a, b) => a[0] - b[0] || a[1] - b[1]).slice(0, limit).map((f) => f[2]);
 }
 
 /** Galactic longitude and latitude of a position (degrees). */

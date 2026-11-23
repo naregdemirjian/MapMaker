@@ -69,6 +69,20 @@ export function makeSpaceView(cam: Camera, width: number, height: number, radius
   return { camera: cam, width, height, unit: width / 1920, scale, project, right, up, forward, target };
 }
 
+/**
+ * Home (D215): the whole map in view from where a new map starts, level (no turn), round its middle; a chart keeps the
+ * side it is seen from (its longitude and latitude are not used) but is turned straight again.
+ */
+export function homeCamera(cam: Camera, chart: boolean): Camera {
+  const start = spaceCamera();
+  return { ...cam, lon: chart ? cam.lon : start.lon, lat: chart ? cam.lat : start.lat, zoom: 0, rotation: 0, target: undefined };
+}
+
+/** The camera brought to a star (D215): turning round it, close enough to see its neighbours (never further out than it was). */
+export function cameraToStar(cam: Camera, p: Vec3, closeness = 0.12): Camera {
+  return { ...cam, target: [p[0], p[1], p[2]], zoom: Math.max(cam.zoom, Math.log2(1 / closeness)) };
+}
+
 /** The camera turned by a drag of (dx, dy) pixels: around the pole sideways, up and down over the plane. */
 export function orbitCamera(cam: Camera, dx: number, dy: number): Camera {
   const lon = ((((cam.lon - dx * 0.35) % 360) + 540) % 360) - 180;

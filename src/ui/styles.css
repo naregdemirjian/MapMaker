@@ -223,6 +223,12 @@ table.shortcuts kbd { font: inherit; background: var(--panel2); border: 1px soli
 /* (The HUD lets the pointer through to the map, except on its buttons.) */
 .map-hud button { pointer-events: auto; }
 .space-note { white-space: nowrap; }
+/* Finding a star on a map of space (D215). */
+.space-find { position: absolute; top: 10px; right: 10px; width: 260px; z-index: 5; }
+.space-find input { width: 100%; background: rgba(8,12,18,0.78); }
+.space-find-results { margin-top: 3px; background: var(--panel); border: 1px solid var(--line); border-radius: 5px; box-shadow: 0 6px 18px rgba(0,0,0,0.45); overflow: hidden; }
+.space-find-results button { display: block; width: 100%; text-align: left; border: none; border-radius: 0; background: none; padding: 5px 9px; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.space-find-results button.on { background: var(--sel); }
 .hud-buttons button { width: 30px; padding: 3px 0; }
 .scalebar { color: var(--text2); font-size: 11px; text-shadow: 0 1px 2px #000; }
 .scalebar div { height: 5px; border: 2px solid var(--text2); border-top: none; margin-bottom: 2px; }
