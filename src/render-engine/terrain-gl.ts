@@ -32,10 +32,13 @@ export interface TerrainFrame {
  * both: each where the terrain has land or sea (with the sea level of the moment, D96);
  * relief: shadows and light alone, see-through;
  * landmask: the land alone, opaque (for ending territory at the coast of the moment);
- * override: where sculpting has changed the terrain, opaque (D98: where Natural Earth's coastline gives way).
+ * override: where sculpting has changed the terrain, opaque (D98: where Natural Earth's coastline gives way);
+ * coastband: a band `band` pixels wide along the inside of the coast, opaque (D221: a border along a coast the terrain
+ * decides), worked out pixel by pixel from how far the coast is by the slope of the ground, as the land's smoothed edge
+ * is (so a picture drawn in parts is the picture drawn whole).
  */
-export type TerrainImageKind = 'sea' | 'land' | 'both' | 'relief' | 'landmask' | 'override';
-const MODES: Record<TerrainImageKind, number> = { sea: 0, land: 1, both: 2, relief: 3, landmask: 4, override: 5 };
+export type TerrainImageKind = 'sea' | 'land' | 'both' | 'relief' | 'landmask' | 'override' | 'coastband';
+const MODES: Record<TerrainImageKind, number> = { sea: 0, land: 1, both: 2, relief: 3, landmask: 4, override: 5, coastband: 6 };
 
 /** Where sculpting has changed the terrain (D98): a mark for each cell of the grid, and a name for the marks. */
 export interface TerrainOverride { data: Uint8Array; key: string }
@@ -53,6 +56,8 @@ export interface TerrainSea {
    * picture saying only where land lies below the sea (polders, the shores of the Dead Sea).
    */
   close?: boolean;
+  /** For a band along the coast (D221): its width in pixels of the canvas. */
+  band?: number;
 }
 const TODAY: TerrainSea = { level: 0, mask: null, maskKey: '' };
 export const PROJ: Partial<Record<ProjectionName, number>> = { equirectangular: 0, mercator: 1, equalEarth: 2, naturalEarth: 3 };
@@ -123,6 +128,7 @@ uniform int u_seaN;
 uniform vec4 u_land[8];
 uniform int u_landN;
 uniform float u_seaLevel;
+uniform float u_band;
 uniform sampler2D u_mask;
 uniform int u_useMask;
 uniform int u_closeCoast;
@@ -315,6 +321,13 @@ void main() {
   float landA = closeA >= 0.0 ? closeA : clamp(rel / max(perPixel, 1e-3) + 0.5, 0.0, 1.0);
   if (!ok) { outColor = vec4(0.0); return; }
   if (u_mode == 4) { outColor = vec4(landA); return; }
+  if (u_mode == 6) {
+    // (How many pixels inland the coast is: by the slope, as the edge is smoothed above; close in on the finer heights,
+    // only the smoothed edge itself.)
+    float dpx = closeA >= 0.0 ? (closeA - 0.5) * 2.0 : rel / max(perPixel, 1e-3);
+    outColor = vec4(clamp(dpx + 0.5, 0.0, 1.0) - clamp(dpx - u_band + 0.5, 0.0, 1.0));
+    return;
+  }
   if (u_mode == 5) { outColor = vec4(over); return; }
   // The ground's own slope: its rise per metre eastward and northward.
   float slopeE = dEdu / (span.x * R * max(cos(lat), 0.05)), slopeN = -dEdv / (span.y * R);
@@ -369,7 +382,7 @@ void main() {
   outColor = vec4(col, 1.0);
 }`;
 
-const UNIFORMS = ['u_elev', 'u_tex', 'u_size', 'u_offset', 'u_inv', 'u_S', 'u_origin', 'u_lonRef', 'u_proj', 'u_mode', 'u_shadeTint', 'u_exag', 'u_seaRelief', 'u_light', 'u_sea', 'u_seaN', 'u_land', 'u_landN', 'u_seaLevel', 'u_mask', 'u_useMask', 'u_closeCoast', 'u_override', 'u_useOverride', 'u_cover', 'u_useCover', 'u_coverTex', 'u_detail', 'u_useDetail', 'u_detailBox', 'u_detailTex', 'u_world', 'u_useWorld', 'u_photo', 'u_usePhoto', 'u_photoBox'] as const;
+const UNIFORMS = ['u_elev', 'u_tex', 'u_size', 'u_offset', 'u_inv', 'u_S', 'u_origin', 'u_lonRef', 'u_proj', 'u_mode', 'u_shadeTint', 'u_exag', 'u_seaRelief', 'u_light', 'u_sea', 'u_seaN', 'u_land', 'u_landN', 'u_seaLevel', 'u_band', 'u_mask', 'u_useMask', 'u_closeCoast', 'u_override', 'u_useOverride', 'u_cover', 'u_useCover', 'u_coverTex', 'u_detail', 'u_useDetail', 'u_detailBox', 'u_detailTex', 'u_world', 'u_useWorld', 'u_photo', 'u_usePhoto', 'u_photoBox'] as const;
 type UniformName = (typeof UNIFORMS)[number];
 
 
@@ -645,6 +658,7 @@ class TerrainGL {
     gl.uniform4fv(u.u_land, rampUniform(pal.land));
     gl.uniform1i(u.u_landN, Math.min(8, pal.land.length));
     gl.uniform1f(u.u_seaLevel, sea.level);
+    gl.uniform1f(u.u_band, sea.band ?? 0);
     gl.uniform1i(u.u_mask, 1);
     gl.uniform1i(u.u_useMask, sea.mask ? 1 : 0);
     gl.uniform1i(u.u_closeCoast, sea.mask && sea.close && detail?.whole ? 1 : 0);
@@ -704,7 +718,7 @@ export class TerrainPictures {
     if (x1 <= x0 || y1 <= y0) return null;
     const w = x1 - x0, h = y1 - y0;
     const { a, b, c, d, e } = f.m;
-    const key = `${gridKey}|${JSON.stringify(look)}|${f.kind}|${f.S}|${f.ox}|${f.oy}|${f.lonRef}|${a},${b},${c},${d},${e},${f.m.f}|${W}x${H}|${x0},${y0},${w}x${h}|${sea.level}|${sea.maskKey}${sea.close ? '|close' : ''}|${over?.key ?? ''}|${cover?.key ?? ''}|${detail?.key ?? ''}|${cover?.photo?.key ?? ''}|${photo?.key ?? ''}`;
+    const key = `${gridKey}|${JSON.stringify(look)}|${f.kind}|${f.S}|${f.ox}|${f.oy}|${f.lonRef}|${a},${b},${c},${d},${e},${f.m.f}|${W}x${H}|${x0},${y0},${w}x${h}|${sea.level}|${sea.maskKey}${sea.close ? '|close' : ''}${sea.band ? `|band${sea.band}` : ''}|${over?.key ?? ''}|${cover?.key ?? ''}|${detail?.key ?? ''}|${cover?.photo?.key ?? ''}|${photo?.key ?? ''}`;
     const k = this.kept.get(kind);
     if (k && k.key === key) return k.out;
     const gl = terrainGL();

@@ -9,7 +9,7 @@
 // land made by the renderer, borders against nobody left out along the coast as the renderer does.
 // What a frame is in the middle of (a change being animated) is shown as the map is at that moment,
 // without the animation; front lines along wars keep their teeth; the look's grade is an SVG filter.
-import { geoPath, type GeoProjection } from 'd3-geo';
+import { geoPath, geoBounds, geoClipRectangle, type GeoProjection } from 'd3-geo';
 import type { World } from '../world-model/world.ts';
 import type { Engine } from '../temporal-engine/engine.ts';
 import type { Instant } from '../core-time/index.ts';
@@ -28,6 +28,8 @@ import { isSpaceMap, spaceSettingsOf, calendarOfSpace } from '../world-model/wor
 import { loadNearbyStars } from '../space/catalogue.ts';
 import { loadExoplanets } from '../space/exoplanets.ts';
 import { parseJSON } from '../temporal-engine/engine.ts';
+import { coastBorderOf, overSeaOf } from '../render-engine/border-look.ts';
+import { chooseScale, pixelsPerDegree, type Box } from '../render-engine/basemap.ts';
 import type { View } from '../render-engine/camera.ts';
 
 type Position = [number, number];
@@ -120,6 +122,13 @@ function projectLines(projection: GeoProjection, lines: Position[][]): Float32Ar
 
 /** GeoJSON polygons (outer rings anticlockwise) as d3 reads them (outer rings clockwise). */
 const forD3 = (polys: Position[][][]): GeoJSON.MultiPolygon => ({ type: 'MultiPolygon', coordinates: polys.map((p) => p.map((r) => r.slice().reverse())) });
+
+/** Whether a box of longitudes and latitudes meets d3's bounds of a shape (which may cross 180°), widened by `pad` degrees. */
+function meets(b: Box, [[w, s], [e, n]]: [[number, number], [number, number]], pad: number): boolean {
+  if (b[3] < s - pad || b[1] > n + pad) return false;
+  if (w <= e) return b[2] >= w - pad && b[0] <= e + pad;
+  return b[2] >= w - pad || b[0] <= e + pad;
+}
 
 /** A picture as an SVG image of the whole frame. */
 const frameImage = (href: string, w: number, h: number) => `<image x="0" y="0" width="${w}" height="${h}" preserveAspectRatio="none" xlink:href="${href}"/>`;
@@ -216,7 +225,26 @@ export async function svgFrame(o: SvgFrameOptions): Promise<SvgFrame> {
       fills: maskDef('land-fills', masks.fills), borders: maskDef('land-borders', masks.borders),
       band: maskDef('coast-band', masks.band), outside: maskDef('outside-coast-band', masks.outsideBand),
     } : null;
+    // Countries whose land carries on over the sea where drawn (D221), and the sea alone (the land turned over) to keep it in.
+    const overSea = new Set(world.all('entity').filter((e) => overSeaOf(e.style)).map((e) => e.id));
+    let seaOnly: boolean | null = null;
+    const seaMask = () => {
+      if (seaOnly === null) {
+        const land = masked ? masks?.borders : null;
+        if (!land) seaOnly = false;
+        else {
+          const o = new OffscreenCanvas(land.width, land.height), g = o.getContext('2d')!;
+          g.fillStyle = '#ffffff'; g.fillRect(0, 0, o.width, o.height);
+          g.globalCompositeOperation = 'destination-out'; g.drawImage(land, 0, 0);
+          seaOnly = maskDef('sea-only', o);
+        }
+      }
+      return seaOnly;
+    };
     const path = geoPath(view.projection as GeoProjection).digits(2);
+    // (Long lines such as coastlines only as far as the frame reaches, turned or not.)
+    const reach = Math.hypot(W, H) / 2 + 64;
+    const framed = geoPath({ stream: (s) => (view!.projection as GeoProjection).stream(geoClipRectangle(W / 2 - reach, H / 2 - reach, W / 2 + reach, H / 2 + reach)(s)) }).digits(2);
     const turned = (pen: SvgPen) => {
       // (The map turned about the frame's middle, as the renderer turns it.)
       if (!view!.rotation) return;
@@ -229,13 +257,17 @@ export async function svgFrame(o: SvgFrameOptions): Promise<SvgFrame> {
       const row = world.get('layer', layerId);
       if (!row || row.kind !== 'partition' || row.space_id !== shot.spaceId) continue;
       n++;
-      const lst = parseJSON<{ fillOpacity?: number; borderWidth?: number; clipToLand?: boolean; fill?: TerritoryFill; fronts?: FrontTeeth; frontColor?: string }>(row.style, {});
+      const lst = parseJSON<{ fillOpacity?: number; borderWidth?: number; clipToLand?: boolean; fill?: TerritoryFill; fronts?: FrontTeeth; frontColor?: string; coastBorder?: unknown }>(row.style, {});
       const clip = !!masks && lst.clipToLand !== false;
-      // (A view all sea shows none of a layer ending at the coast.)
-      if (clip && masks!.coast === 'sea') continue;
+      // How the layer's borders meet the coast (D221).
+      const mode = coastBorderOf(lst);
       const states = engine.partitionState(shot.spaceId, layerId, t);
       const byOwner = new Map<string, number[]>();
       for (const [face, st] of states) if (st.value) { const l = byOwner.get(st.value); if (l) l.push(face); else byOwner.set(st.value, [face]); }
+      // (Owners here whose land carries on over the sea, where the layer ends at the coast.)
+      const seaOwners = new Set(clip ? [...byOwner.keys()].filter((o) => overSea.has(o)) : []);
+      // (A view all sea shows none of a layer ending at the coast, but what is drawn over the sea.)
+      if (clip && masks!.coast === 'sea' && mode !== 'drawn' && !seaOwners.size) continue;
       const polys = territoryPolygons(world, engine, shot.spaceId, layerId, t);
       const arr = world.arrangements.get(shot.spaceId);
       const nameOf = (id: string) => engine.nameAt(id, t) ?? world.get('entity', id)?.name ?? id;
@@ -256,8 +288,6 @@ export async function svgFrame(o: SvgFrameOptions): Promise<SvgFrame> {
         return `url(#${id})`;
       };
       if (options.passes.has('fills')) {
-        const pen = new SvgPen(W, H, `f${n}`), c = pen.asContext();
-        turned(pen);
         // Land along the coast no parcel covers takes the look of the territory beside it (D83): each
         // owner's borders against nobody stroked wide in its colour, kept only in the band along the coast.
         let rim = '';
@@ -274,58 +304,71 @@ export async function svgFrame(o: SvgFrameOptions): Promise<SvgFrame> {
           defs.push(rp.defs());
           rim = rp.body() ? `<g mask="url(#coast-band)">\n${rp.body()}\n</g>` : '';
         }
-        for (const [owner, p] of polys) {
-          const geo = forD3(p), d = path(geo);
-          if (!d) continue;
-          const shape = new SvgPath(d) as unknown as Path2D;
-          const media = entityStyle(world.get('entity', owner) ?? { style: '{}' }).fill;
-          const src = media?.asset && !media.off ? (media.kind === 'video' ? videoNow(media.asset, frame / shot.fps, media, 'export') : media.kind === 'image' ? imageNow(media.asset) : null) : null;
-          if (src && media && arr) {
-            // A picture or video filling the territory (D81), placed piece by piece as frames place it (D82).
-            const img = src as CanvasImageSource & { width: number; height: number };
-            const iw = (src as HTMLVideoElement).videoWidth || img.width, ih = (src as HTMLVideoElement).videoHeight || img.height;
-            let k = 0;
-            for (const pl of pictures.mediaPlacements(view, world, shot.spaceId, byOwner.get(owner) ?? [], media)) {
-              const cg = forD3(facesPolygons(arr, pl.faces)), cd = path(cg);
-              if (!cd) continue;
-              c.save();
-              c.clip(new SvgPath(cd) as unknown as Path2D, 'evenodd');
-              // (One copy of several, where a piece shows more than once: only its own part of the frame.)
-              if (pl.rect) { c.beginPath(); c.rect(pl.rect[0], pl.rect[1], pl.rect[2], pl.rect[3]); c.clip(); }
-              pen.name(`territory-${owner}${k++ ? `-${k}` : ''}`, nameOf(owner));
-              if (media.fit === 'tile') {
-                const pattern = iw && ih ? c.createPattern(src, 'repeat') : null;
-                if (pattern) {
-                  pattern.setTransform(new DOMMatrix().translate(pl.at[0], pl.at[1]).scale(((media.tileSize ?? 120) * u) / iw));
-                  const [[x0, y0], [x1, y1]] = path.bounds(cg);
-                  c.fillStyle = pattern;
-                  c.fillRect(x0, y0, x1 - x0, y1 - y0);
+        // The territories (of `only`, when given; `tag` keeps the names of a second drawing apart).
+        const territories = (prefix: string, only: ReadonlySet<string> | null, tag: string): string => {
+          const pen = new SvgPen(W, H, prefix), c = pen.asContext();
+          turned(pen);
+          for (const [owner, p] of polys) {
+            if (only && !only.has(owner)) continue;
+            const geo = forD3(p), d = path(geo);
+            if (!d) continue;
+            const shape = new SvgPath(d) as unknown as Path2D;
+            const media = entityStyle(world.get('entity', owner) ?? { style: '{}' }).fill;
+            const src = media?.asset && !media.off ? (media.kind === 'video' ? videoNow(media.asset, frame / shot.fps, media, 'export') : media.kind === 'image' ? imageNow(media.asset) : null) : null;
+            if (src && media && arr) {
+              // A picture or video filling the territory (D81), placed piece by piece as frames place it (D82).
+              const img = src as CanvasImageSource & { width: number; height: number };
+              const iw = (src as HTMLVideoElement).videoWidth || img.width, ih = (src as HTMLVideoElement).videoHeight || img.height;
+              let k = 0;
+              for (const pl of pictures.mediaPlacements(view!, world, shot.spaceId, byOwner.get(owner) ?? [], media)) {
+                const cg = forD3(facesPolygons(arr, pl.faces)), cd = path(cg);
+                if (!cd) continue;
+                c.save();
+                c.clip(new SvgPath(cd) as unknown as Path2D, 'evenodd');
+                // (One copy of several, where a piece shows more than once: only its own part of the frame.)
+                if (pl.rect) { c.beginPath(); c.rect(pl.rect[0], pl.rect[1], pl.rect[2], pl.rect[3]); c.clip(); }
+                pen.name(`territory-${owner}${tag}${k++ ? `-${k}` : ''}`, nameOf(owner));
+                if (media.fit === 'tile') {
+                  const pattern = iw && ih ? c.createPattern(src, 'repeat') : null;
+                  if (pattern) {
+                    pattern.setTransform(new DOMMatrix().translate(pl.at[0], pl.at[1]).scale(((media.tileSize ?? 120) * u) / iw));
+                    const [[x0, y0], [x1, y1]] = path.bounds(cg);
+                    c.fillStyle = pattern;
+                    c.fillRect(x0, y0, x1 - x0, y1 - y0);
+                  }
+                } else {
+                  const m = mediaBox(img, media, pl.at, pl.cover);
+                  drawImageFit(c, img, m.box[0], m.box[1], m.box[2], m.box[3], m.fit);
                 }
-              } else {
-                const m = mediaBox(img, media, pl.at, pl.cover);
-                drawImageFit(c, img, m.box[0], m.box[1], m.box[2], m.box[3], m.fit);
+                c.restore();
               }
-              c.restore();
+              continue;
             }
-            continue;
+            pen.name(`territory-${owner}${tag}`, nameOf(owner));
+            c.fillStyle = hatch(colourOf(owner));
+            c.fill(shape, 'evenodd');
           }
-          pen.name(`territory-${owner}`, nameOf(owner));
-          c.fillStyle = hatch(colourOf(owner));
-          c.fill(shape, 'evenodd');
-        }
-        note(pen);
-        defs.push(pen.defs());
-        const body = [rim, pen.body()].filter(Boolean).join('\n');
-        fillLayers.push(layer(`territories-${n}`, `Territories: ${row.name}`, body, `${(lst.fillOpacity ?? 0.78) < 1 ? ` opacity="${num(lst.fillOpacity ?? 0.78, 3)}"` : ''}${clip && masked?.fills ? ' mask="url(#land-fills)"' : ''}`));
+          note(pen);
+          defs.push(pen.defs());
+          return pen.body();
+        };
+        const body = [rim, territories(`f${n}`, null, '')].filter(Boolean).join('\n');
+        const opacity = (lst.fillOpacity ?? 0.78) < 1 ? ` opacity="${num(lst.fillOpacity ?? 0.78, 3)}"` : '';
+        // (Countries whose land carries on over the sea, D221: drawn again, kept to the sea.)
+        const over = clip && masked?.fills && seaOwners.size && seaMask() ? territories(`fs${n}`, seaOwners, '-sea') : '';
+        if (over) fillLayers.push(layer(`territories-${n}`, `Territories: ${row.name}`, `<g mask="url(#land-fills)">\n${body}\n</g>\n<g mask="url(#sea-only)">\n${over}\n</g>`, opacity));
+        else fillLayers.push(layer(`territories-${n}`, `Territories: ${row.name}`, body, `${opacity}${clip && masked?.fills ? ' mask="url(#land-fills)"' : ''}`));
       }
       if (options.passes.has('borders')) {
         const width = (lst.borderWidth ?? style.borderWidth) * u;
-        const stroke = (prefix: string, which: 'shared' | 'open' | 'both') => {
+        type Lines = { shared: Position[][]; open: Position[][] };
+        // (Each owner's lines a stroke takes.)
+        const stroke = (prefix: string, pick: (owner: string, l: Lines) => Position[][]) => {
           const pen = new SvgPen(W, H, prefix), c = pen.asContext();
           turned(pen);
           c.strokeStyle = style.border; c.lineWidth = width; c.lineJoin = 'round'; c.lineCap = 'round';
           for (const [owner, l] of lines) {
-            const d = multi(which === 'both' ? [...l.shared, ...l.open] : l[which]);
+            const d = multi(pick(owner, l));
             if (!d) continue;
             pen.name(`border-${prefix}-${owner}`, `Border of ${nameOf(owner)}`);
             c.stroke(new SvgPath(d) as unknown as Path2D);
@@ -333,10 +376,65 @@ export async function svgFrame(o: SvgFrameOptions): Promise<SvgFrame> {
           defs.push(pen.defs());
           return pen.body();
         };
+        // Edges against nobody drawn whole, out over the sea too (D221): all of them where the layer's borders are drawn as
+        // drawn, else those of countries whose land carries on over the sea. The rest end at the coast with the land.
+        const whole = (owner: string) => clip && (mode === 'drawn' || seaOwners.has(owner));
+        const shared = (_: string, l: Lines) => l.shared, open = (owner: string, l: Lines) => (whole(owner) ? [] : l.open);
         // Along a coast in view, borders against nobody are left out in the band along it (the coastline is the edge there, D83).
-        const body = clip && masks!.coast === 'mixed' && masked?.outside
-          ? [stroke(`bs${n}`, 'shared'), `<g mask="url(#outside-coast-band)">\n${stroke(`bo${n}`, 'open')}\n</g>`].join('\n')
-          : stroke(`b${n}`, 'both');
+        const body = clip && mode === 'drawn' ? stroke(`bs${n}`, shared)
+          : clip && masks!.coast === 'mixed' && masked?.outside
+            ? [stroke(`bs${n}`, shared), `<g mask="url(#outside-coast-band)">\n${stroke(`bo${n}`, open)}\n</g>`].join('\n')
+            : stroke(`b${n}`, (o, l) => [...l.shared, ...open(o, l)]);
+        const over = clip && (mode === 'drawn' || seaOwners.size) ? stroke(`bw${n}`, (o, l) => (whole(o) ? l.open : [])) : '';
+        // The border along the coast (D221): the coastline where the layer's land meets the sea, kept to its countries and
+        // the land beside them along the coast (D83); on a coast the terrain decides, a band along the inside of the land.
+        let coastLine = '';
+        const coastal = clip && mode === 'coast' && masked ? [...polys.keys()].filter((o) => !seaOwners.has(o)) : [];
+        if (coastal.length && masks!.coast === 'mixed' && basemap) {
+          const where = new SvgPen(W, H, `cw${n}`), wc = where.asContext();
+          turned(where);
+          wc.fillStyle = '#ffffff'; wc.strokeStyle = '#ffffff'; wc.lineWidth = 2 * masks!.rim; wc.lineJoin = 'round'; wc.lineCap = 'round';
+          const near: [[number, number], [number, number]][] = [];
+          for (const o of coastal) {
+            const geo = forD3(polys.get(o)!), d = path(geo);
+            if (!d) continue;
+            wc.fill(new SvgPath(d) as unknown as Path2D, 'evenodd');
+            near.push(geoBounds(geo));
+            const od = multi(lines.get(o)?.open ?? []);
+            if (od) wc.stroke(new SvgPath(od) as unknown as Path2D);
+          }
+          // (Only the coastline near those countries, and as far as the frame reaches.)
+          const b = chooseScale(basemap, view);
+          const pad = (2 * masks!.rim + width) / Math.max(1e-9, pixelsPerDegree(view)) + 0.01;
+          const items = near.length ? b.coastline.coordinates.filter((_, i) => near.some((x) => meets(b.boxes.coastline[i], x, pad))) : [];
+          const d = items.length ? framed({ type: 'MultiLineString', coordinates: items }) ?? '' : '';
+          if (d) {
+            defs.push(where.defs());
+            defs.push(`<mask id="coast-where-${n}" maskUnits="userSpaceOnUse" x="0" y="0" width="${W}" height="${H}">\n${where.body()}\n</mask>`);
+            const pen = new SvgPen(W, H, `bc${n}`), c = pen.asContext();
+            turned(pen);
+            c.strokeStyle = style.border; c.lineWidth = width; c.lineJoin = 'round'; c.lineCap = 'round';
+            pen.name(`coast-border-${n}`, 'Border along the coast');
+            c.stroke(new SvgPath(d) as unknown as Path2D);
+            defs.push(pen.defs());
+            coastLine = `<g mask="url(#coast-where-${n})">\n${pen.body()}\n</g>`;
+          }
+        } else if (coastal.length && masks!.coast === 'terrain') {
+          const band = pictures.svgCoastBand(view, shot.spaceId, options, Math.max(1, width));
+          if (band && maskDef(`coast-line-${n}`, band)) {
+            const pen = new SvgPen(W, H, `bc${n}`), c = pen.asContext();
+            turned(pen);
+            c.fillStyle = style.border;
+            for (const o of coastal) {
+              const d = path(forD3(polys.get(o)!));
+              if (!d) continue;
+              pen.name(`coast-border-${n}-${o}`, `Border along the coast of ${nameOf(o)}`);
+              c.fill(new SvgPath(d) as unknown as Path2D, 'evenodd');
+            }
+            defs.push(pen.defs());
+            if (pen.body()) coastLine = `<g mask="url(#coast-line-${n})">\n${pen.body()}\n</g>`;
+          }
+        }
         // Front lines along the wars of the moment (D89): a dark edge, the line, and teeth toward the enemy.
         let fronts = '';
         const wars = lst.fronts && arr ? warsAt(world, engine, t, lst.fronts) : [];
@@ -356,7 +454,9 @@ export async function svgFrame(o: SvgFrameOptions): Promise<SvgFrame> {
           defs.push(pen.defs());
           fronts = pen.body();
         }
-        borderLayers.push(layer(`borders-${n}`, `Borders: ${row.name}`, [body, fronts].filter(Boolean).join('\n'), clip && masked?.borders ? ' mask="url(#land-borders)"' : ''));
+        const inner = [body, fronts].filter(Boolean).join('\n'), beyond = [over, coastLine].filter(Boolean).join('\n');
+        if (beyond && clip && masked?.borders) borderLayers.push(layer(`borders-${n}`, `Borders: ${row.name}`, `<g mask="url(#land-borders)">\n${inner}\n</g>\n${beyond}`));
+        else borderLayers.push(layer(`borders-${n}`, `Borders: ${row.name}`, [inner, beyond].filter(Boolean).join('\n'), clip && masked?.borders ? ' mask="url(#land-borders)"' : ''));
       }
     }
     mapLayers.push(...fillLayers, ...borderLayers);

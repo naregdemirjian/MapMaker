@@ -6,7 +6,7 @@
 // panning and zooming cost no geometry work, only drawing; an edit prepares only the parcels it
 // changed; and what stays the same through a stretch of time (who holds what, which borders show)
 // is worked out once for the stretch (LayerSnap), not once per frame.
-import { layerBordersOf, bordersMove, plainBorder, dashPattern, type BorderStyle, type LayerBorders } from './border-look.ts';
+import { layerBordersOf, bordersMove, plainBorder, dashPattern, coastBorderOf, overSeaOf, type BorderStyle, type LayerBorders } from './border-look.ts';
 import { countryLookOf, layerLookOf, lookFor, lookAt, litBy, slabHeight, looksPlain, shadowKey, shadowOffset, compositeOf, castOf, awayFromLight, sweepAt, rgbaOf, changesInHistory, movesOnScreen, INSIDE, type CountryLook, type Effect, type ShadowEffect, type StrokeEffect } from './country-look.ts';
 import { patternTile, textureTile } from './textures.ts';
 import { geoPath, geoCircle, geoCentroid, geoArea, type GeoPermissibleObjects, type GeoProjection } from 'd3-geo';
@@ -1939,6 +1939,34 @@ export class MapRenderer {
     return { fills: land(true), borders: land(false), band, outsideBand, rim, coast };
   }
 
+  /**
+   * The band along the inside of a coast the terrain decides, `width` pixels wide, white on nothing: the border along
+   * the coast in SVG frames (D221, as terrainCoastLine draws it). Null where the terrain does not decide the coast.
+   */
+  svgCoastBand(view: View, spaceId: string, opts: RenderOptions, width: number): OffscreenCanvas | null {
+    const terrain = opts.terrain && view.camera.projection !== 'flat' && terrainDrawable() ? opts.terrain : null;
+    if (!terrain) return null;
+    const seaLevel = Math.round((terrain.seaLevel ?? 0) * 100) / 100;
+    const closeCoast = closeCoastOf(terrain, opts.basemap, seaLevel);
+    if (!(seaLevel !== 0 || !opts.basemap || !!terrain.override || closeCoast)) return null;
+    const sheet = this.sheetFor(view, spaceId);
+    this.region = null;
+    const c = new OffscreenCanvas(view.width, view.height);
+    const g = c.getContext('2d') as unknown as CanvasRenderingContext2D;
+    if (view.rotation) {
+      g.translate(view.width / 2, view.height / 2);
+      g.rotate((view.rotation * Math.PI) / 180);
+      g.translate(-view.width / 2, -view.height / 2);
+    }
+    const at = g.getTransform();
+    this.layTerrain(g, view, sheet, terrain, 'coastband', at, { ...this.seaOf(g, view, sheet, opts.basemap ?? null, seaLevel, at, closeCoast), band: Math.round(Math.max(1, width) * 4) / 4 });
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.globalCompositeOperation = 'source-in';
+    g.fillStyle = '#ffffff';
+    g.fillRect(0, 0, view.width, view.height);
+    return c;
+  }
+
   // ---------------------------------------------------------------- a frame
 
   render(ctx: CanvasRenderingContext2D, view: View, world: World, engine: Engine, spaceId: string, t: Instant, opts: RenderOptions): void {
@@ -2184,6 +2212,15 @@ export class MapRenderer {
       if (!ownLooks.has(v)) ownLooks.set(v, countryLookOf(parseJSON<{ look?: unknown }>(entities.get(v)?.style ?? '{}', {})?.look));
       return ownLooks.get(v)!;
     };
+    // Countries whose land carries on over the sea where drawn (D221), and their parcels in a layer.
+    const overSea = new Set<string>();
+    for (const e of entities.values()) if (overSeaOf(e.style)) overSea.add(e.id);
+    const seaSetOf = (snap: LayerSnap): FaceSet | null => {
+      if (!overSea.size) return null;
+      const faces: number[] = [], keys: string[] = [];
+      for (const [owner, set] of snap.byOwner) if (overSea.has(owner)) { for (const f of set.faces) faces.push(f); keys.push(set.key); }
+      return faces.length ? { faces, key: `over-sea|${keys.join('|')}` } : null;
+    };
     this.pointSizes = resolvePointStyle(world.get('meta', 'point_style')?.value);
     this.cityStyle = resolveCityStyle(world.get('meta', 'city_style')?.value);
     this.cityFilter = cityFilterOfSpace(world.get('map_space', spaceId));
@@ -2197,7 +2234,7 @@ export class MapRenderer {
     const layout = opts.layout ?? { labels: opts.passes.has('labels'), cities: opts.passes.has('cities') };
     const placesText = opts.passes.has('labels') || opts.passes.has('cities');
     const drawsLayers = opts.passes.has('fills') || opts.passes.has('borders') || (placesText && layout.labels);
-    type LayerStyle = { fillOpacity?: number; borderWidth?: number; clipToLand?: boolean; fill?: TerritoryFill; fronts?: FrontTeeth; frontColor?: string; look?: unknown; borders?: unknown };
+    type LayerStyle = { fillOpacity?: number; borderWidth?: number; clipToLand?: boolean; fill?: TerritoryFill; fronts?: FrontTeeth; frontColor?: string; look?: unknown; borders?: unknown; coastBorder?: unknown };
     // How fronts look (D137): the shot's look (the plain one in the working view), or an event's own.
     const tr = opts.transitions;
     const baseLook: FrontLookOptions = {
@@ -2542,7 +2579,11 @@ export class MapRenderer {
             this.layTerrain(lc, view, sheet, terrain!, 'relief', cm, terrainLand ? this.seaOf(lc, view, sheet, opts.basemap ?? null, seaLevel, cm, closeCoast) : undefined);
             lc.restore();
           }
+          // (Countries whose land carries on over the sea, D221: what they cover over the sea is kept from the cut.)
+          const seaSet = clip ? seaSetOf(snap) : null;
+          const keepSea = seaSet ? this.overSeaPart(lc, view, sheet, sp, arr, seaSet, opts.basemap ?? null, terrainLand ? terrain : null, seaLevel, cm) : null;
           if (clip) this.trimToLand(lc, view, sheet, opts.basemap ?? null, frameKey, true, terrainLand ? terrain : null, seaLevel, cm);
+          if (keepSea) { lc.save(); lc.setTransform(1, 0, 0, 1, 0, 0); lc.drawImage(keepSea.canvas as CanvasImageSource, 0, 0); lc.restore(); }
           // (Shadows, glows and walls cut away with the sea, D186: laid under the layer where it has no colour of its own.
           // Not on frames so large that the spare canvases are too few to hold them.)
           if (spillOps.length && lc.canvas.width * lc.canvas.height * 3 <= 40_000_000) {
@@ -2571,7 +2612,8 @@ export class MapRenderer {
             const ec = this.scratch(c);
             ec.lineJoin = 'round';
             for (const it of order) for (const e of it.look?.effects ?? []) if (e.on && e.kind === 'stroke' && e.width > 0 && e.opacity > 0) this.strokeCountry(ec, it.shape, e, u);
-            if (clip) this.trimToLand(ec, view, sheet, opts.basemap ?? null, frameKey, true, terrainLand ? terrain : null, seaLevel, cm);
+            // (Where the layer's borders are drawn as drawn, D221, so are the countries' strokes: out over the sea too.)
+            if (clip && coastBorderOf(ls) !== 'drawn') this.trimToLand(ec, view, sheet, opts.basemap ?? null, frameKey, true, terrainLand ? terrain : null, seaLevel, cm);
             c.save();
             c.setTransform(1, 0, 0, 1, 0, 0);
             c.drawImage(ec.canvas as CanvasImageSource, 0, 0);
@@ -2660,11 +2702,19 @@ export class MapRenderer {
           // Ending at the coast: drawn in the scratch buffer, masked by the land, then laid on. Where land
           // along the coast takes the look of the territory beside it (D83), an owner's border against
           // nobody is left out in that band (the coastline is the edge there); borders between owners stay.
+          // How the borders meet the coast (D221): along the coastline (drawn after), as drawn, or not at all; the edges
+          // against nobody of countries whose land carries on over the sea are drawn whole, after.
+          const mode = coastBorderOf(ls);
+          const bp = this.borderPaths(sp, sheet, arr, snap, states);
+          const seaOpen = new Set<Path2D | BlockPath>();
+          if (overSea.size) for (const [owner, p] of bp.openBy) if (overSea.has(owner)) seaOpen.add(p);
           const lc = this.scratch(c);
-          if (!terrainLand && this.basemapPainter.pathsFor(view, sheet, opts.basemap!).coast === 'mixed') {
+          const mixed = !terrainLand && this.basemapPainter.pathsFor(view, sheet, opts.basemap!).coast === 'mixed';
+          if (mode === 'drawn') this.drawBorders(lc, sheet, sp, arr, snap, states, tg, style, width, 'shared', boxOf, bl);
+          else if (mixed) {
             this.drawBorders(lc, sheet, sp, arr, snap, states, tg, style, width, 'shared', boxOf, bl);
             const oc = this.scratch(c);
-            this.drawBorders(oc, sheet, sp, arr, snap, states, tg, style, width, 'open', null, bl);
+            this.drawBorders(oc, sheet, sp, arr, snap, states, tg, style, width, 'open', null, bl, seaOpen);
             const band = this.coastBand(c, view, sheet, opts.basemap!, frameKey, 2 * coastRim(view));
             oc.save();
             oc.setTransform(1, 0, 0, 1, 0, 0);
@@ -2675,13 +2725,22 @@ export class MapRenderer {
             lc.setTransform(1, 0, 0, 1, 0, 0);
             lc.drawImage(oc.canvas as CanvasImageSource, 0, 0);
             lc.restore();
-          } else this.drawBorders(lc, sheet, sp, arr, snap, states, tg, style, width, 'all', boxOf, bl);
+          } else this.drawBorders(lc, sheet, sp, arr, snap, states, tg, style, width, 'all', boxOf, bl, seaOpen);
           fronts(lc);
           this.trimToLand(lc, view, sheet, opts.basemap ?? null, frameKey, false, terrainLand ? terrain : null, seaLevel, cm);
           c.save();
           c.setTransform(1, 0, 0, 1, 0, 0);
           c.drawImage(lc.canvas as CanvasImageSource, 0, 0);
           c.restore();
+          // Borders out over the sea (D221): every edge against nobody where the layer's borders are drawn as drawn, and
+          // those of countries whose land carries on over the sea; whole.
+          const whole = mode === 'drawn' ? bp.open : [...seaOpen];
+          if (whole.length) this.strokeOpen(c, whole, bl, width, style);
+          // The border along the coast (D221): the coastline where the layer's land meets the sea.
+          if (mode === 'coast') {
+            if (mixed) this.coastLine(c, view, sheet, sp, arr, snap, bp, opts.basemap!, bl, width, style, overSea);
+            else if (terrainLand && terrain) this.terrainCoastLine(c, view, sheet, sp, arr, snap, terrain, opts.basemap ?? null, seaLevel, cm, bl, width, style, overSea);
+          }
         }
         c.restore();
       };
@@ -4448,6 +4507,94 @@ export class MapRenderer {
     return sc;
   }
 
+  /** How many scratch buffers can be held at once for a target of this size (as scratch() keeps them). */
+  private scratchRoom(ctx: CanvasRenderingContext2D): number {
+    const first = this.scratches[0];
+    const w = Math.max(ctx.canvas.width, first?.canvas.width ?? 0), h = Math.max(ctx.canvas.height, first?.canvas.height ?? 0);
+    return Math.max(1, Math.min(4, Math.floor(40_000_000 / (w * h))));
+  }
+
+  /**
+   * What a buffer holds within some parcels and over the sea (D221: countries whose land carries on over the sea), to be
+   * laid on it again once it is cut to the land. Null when the parcels are not on this sheet.
+   */
+  private overSeaPart(lc: CanvasRenderingContext2D, view: View, sheet: Sheet, sp: SheetParcels, arr: Arrangement, set: FaceSet, basemap: Basemap | null, terrain: TerrainShown | null, seaLevel: number, at: DOMMatrix): CanvasRenderingContext2D | null {
+    const shape = this.setPath(sp, sheet, arr, set);
+    if (!shape || this.scratchRoom(lc) < 3) return null;
+    const k = this.scratch(lc);
+    k.save(); k.setTransform(1, 0, 0, 1, 0, 0); k.drawImage(lc.canvas as CanvasImageSource, 0, 0); k.restore();
+    k.save(); k.globalCompositeOperation = 'destination-in'; k.fillStyle = '#000'; this.fill(k, shape); k.restore();
+    // (Less the land: only the part over the sea is laid on again.)
+    k.save();
+    k.globalCompositeOperation = 'destination-out';
+    if (terrain) this.layTerrain(k, view, sheet, terrain, 'landmask', at, this.seaOf(k, view, sheet, basemap, seaLevel, at, closeCoastOf(terrain, basemap, seaLevel)));
+    else if (basemap) this.basemapPainter.fillLand(k, view, sheet, basemap);
+    k.restore();
+    return k;
+  }
+
+  /** Edges against nobody stroked whole on a target (D221), in the layer's style for them. */
+  private strokeOpen(c: CanvasRenderingContext2D, paths: ReadonlyArray<Path2D | BlockPath>, look: LayerBorders | null, width: number, style: MapStyle): void {
+    const coast = look && !plainBorder(look.coast) ? look.coast : null;
+    c.save();
+    c.strokeStyle = style.border; c.lineWidth = width; c.lineJoin = 'round'; c.lineCap = 'round';
+    for (const p of paths) if (coast) this.strokeBorder(c, p, coast, width, style.border, this.frameUnit); else this.strokeOnSheet(c, p, width);
+    c.restore();
+  }
+
+  /**
+   * The border along the coast (D221): the coastline where a layer's land meets the sea, in the layer's style for edges
+   * against nobody, so each country's outline is whole. Kept to the layer's parcels and the land beside them along the
+   * coast (D83), less those of countries whose land carries on over the sea (their border runs where it was drawn).
+   */
+  private coastLine(c: CanvasRenderingContext2D, view: View, sheet: Sheet, sp: SheetParcels, arr: Arrangement, snap: LayerSnap, bp: BorderPaths, basemap: Basemap, look: LayerBorders | null, width: number, style: MapStyle, skip: ReadonlySet<string>): void {
+    if (this.scratchRoom(c) < 2) return;
+    const line = this.scratch(c), where = this.scratch(c);
+    where.fillStyle = '#000'; where.strokeStyle = '#000'; where.lineJoin = 'round'; where.lineCap = 'round';
+    let any = false;
+    for (const [owner, set] of snap.byOwner) {
+      if (skip.has(owner)) continue;
+      const sh = this.setPath(sp, sheet, arr, set);
+      if (sh) { this.fill(where, sh); any = true; }
+    }
+    if (!any) return;
+    for (const [owner, p] of bp.openBy) if (!skip.has(owner)) this.strokeOnSheet(where, p, 2 * coastRim(view));
+    const coast = this.basemapPainter.pathsFor(view, sheet, basemap).coastline;
+    const cs = look && !plainBorder(look.coast) ? look.coast : null;
+    line.strokeStyle = style.border; line.lineWidth = width; line.lineJoin = 'round'; line.lineCap = 'round';
+    if (cs) this.strokeBorder(line, coast, cs, width, style.border, this.frameUnit); else this.strokeOnSheet(line, coast, width);
+    line.save(); line.setTransform(1, 0, 0, 1, 0, 0); line.globalCompositeOperation = 'destination-in'; line.drawImage(where.canvas as CanvasImageSource, 0, 0); line.restore();
+    c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.drawImage(line.canvas as CanvasImageSource, 0, 0); c.restore();
+  }
+
+  /**
+   * The border along a coast the terrain decides (D221: a planet, another sea level, sculpted coasts), where there is no
+   * coastline to stroke: a band as wide as the border along the inside of the land's edge (worked out by the graphics
+   * card pixel by pixel, see terrain-gl.ts), within the layer's parcels, in the colour of the layer's style for edges
+   * against nobody.
+   */
+  private terrainCoastLine(c: CanvasRenderingContext2D, view: View, sheet: Sheet, sp: SheetParcels, arr: Arrangement, snap: LayerSnap, terrain: TerrainShown, basemap: Basemap | null, seaLevel: number, at: DOMMatrix, look: LayerBorders | null, width: number, style: MapStyle, skip: ReadonlySet<string>): void {
+    if (this.scratchRoom(c) < 2) return;
+    const where = this.scratch(c), land = this.scratch(c);
+    where.fillStyle = '#000';
+    let any = false;
+    for (const [owner, set] of snap.byOwner) {
+      if (skip.has(owner)) continue;
+      const sh = this.setPath(sp, sheet, arr, set);
+      if (sh) { this.fill(where, sh); any = true; }
+    }
+    if (!any) return;
+    // The band along the inside of the coast, as wide as the border on the device (the frame's scale times its width).
+    const band = Math.round(Math.max(1, width * Math.hypot(at.a, at.b)) * 4) / 4;
+    this.layTerrain(land, view, sheet, terrain, 'coastband', at, { ...this.seaOf(land, view, sheet, basemap, seaLevel, at, closeCoastOf(terrain, basemap, seaLevel)), band });
+    const cs = look && !plainBorder(look.coast) ? look.coast : null;
+    land.save(); land.setTransform(1, 0, 0, 1, 0, 0);
+    land.globalCompositeOperation = 'destination-in'; land.drawImage(where.canvas as CanvasImageSource, 0, 0);
+    land.globalCompositeOperation = 'source-in'; land.globalAlpha = cs?.opacity ?? 1; land.fillStyle = cs?.color ?? style.border; land.fillRect(0, 0, land.canvas.width, land.canvas.height);
+    land.restore();
+    c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.drawImage(land.canvas as CanvasImageSource, 0, 0); c.restore();
+  }
+
   /**
    * Borders are drawn where neighbouring parcels have different owners. During an animated change
    * they follow the animation: inside the advancing front the new owners decide, outside it the
@@ -4458,6 +4605,8 @@ export class MapRenderer {
     ctx: CanvasRenderingContext2D, sheet: Sheet, sp: SheetParcels, arr: Arrangement, snap: LayerSnap, states: Map<number, FaceState>,
     tg: { groups: Map<string, TransitionGroup>; of: Map<number, TransitionGroup> }, style: MapStyle, width: number,
     which: 'all' | 'shared' | 'open' = 'all', boxOf: ((g: TransitionGroup, pad: number) => Box2) | null = null, look: LayerBorders | null = null,
+    /** Edges against nobody left out (drawn apart, D221). */
+    skipOpen: ReadonlySet<Path2D | BlockPath> | null = null,
   ): void {
     const bp = this.borderPaths(sp, sheet, arr, snap, states);
     const stroke = (p: Path2D | BlockPath | null | undefined) => { if (p) this.strokeOnSheet(ctx, p, width); };
@@ -4471,7 +4620,7 @@ export class MapRenderer {
     // where it has them: one for the borders between countries, one for their edges against nobody.)
     const between = look && !plainBorder(look.between) ? look.between : null, coast = look && !plainBorder(look.coast) ? look.coast : null;
     if (which !== 'open') for (const p of bp.plain) if (between) this.strokeBorder(ctx, p, between, width, style.border, u); else stroke(p);
-    if (which !== 'shared') for (const p of bp.open) if (coast) this.strokeBorder(ctx, p, coast, width, style.border, u); else stroke(p);
+    if (which !== 'shared') for (const p of bp.open) { if (skipOpen?.has(p)) continue; if (coast) this.strokeBorder(ctx, p, coast, width, style.border, u); else stroke(p); }
     if (which === 'open') { ctx.restore(); return; }
     // Special borders between two named countries (D183), over the others.
     for (const pr of look?.pairs ?? []) {

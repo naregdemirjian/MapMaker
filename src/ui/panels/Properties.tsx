@@ -28,6 +28,7 @@ import { TypeDot, TypeSelect } from '../components/EventTypes.tsx';
 import { isFeatureKind } from '../../render-engine/feature-style.ts';
 import { StarPanel } from '../components/Stars.tsx';
 import { RiverPanel } from '../components/RiverPanel.tsx';
+import { coastBorderOf, overSeaOf, COAST_BORDERS, type CoastBorder } from '../../render-engine/border-look.ts';
 import { PropGroup } from '../shell/Group.tsx';
 import { InlineDialog } from '../shell/DialogFrame.tsx';
 import { ShowDialog } from '../components/ShowDialog.tsx';
@@ -137,12 +138,25 @@ function LayerPanel({ id }: { id: string }) {
         })}
       </PropGroup>}
       {layers.length > 0 && currentSpace && terrainSourceOf(currentSpace) && <PropGroup id="layer:coast" title="Coast">
-        {layers.filter(() => currentSpace && terrainSourceOf(currentSpace)).map((l) => (
-          <label key={`clip-${l.id}`} className="check layer-option" title="Territory painted over the sea or lakes is not shown there. Untick for sea claims or maritime zones.">
-            <input type="checkbox" data-testid="clip-to-land" checked={parseJSON<{ clipToLand?: boolean }>(l.style, {}).clipToLand !== false}
-              onChange={(e) => s.execute((wd) => cmd.setLayerClipToLand(wd, l.id, e.target.checked))} /> Territory ends at the coast
-          </label>
-        ))}
+        {layers.filter(() => currentSpace && terrainSourceOf(currentSpace)).map((l) => {
+          const st = parseJSON<{ clipToLand?: boolean; coastBorder?: string }>(l.style, {}), mode = coastBorderOf(st);
+          return (
+            <div key={`clip-${l.id}`} className="layer-option">
+              <label className="check" title="Territory painted over the sea or lakes is not shown there. Untick for sea claims or maritime zones (or let one country's land carry on over the sea, in its panel).">
+                <input type="checkbox" data-testid="clip-to-land" checked={st.clipToLand !== false}
+                  onChange={(e) => s.execute((wd) => cmd.setLayerClipToLand(wd, l.id, e.target.checked))} /> Territory ends at the coast
+              </label>
+              {/* How the borders meet the coast (D221): along the coastline, as drawn, or not at all. */}
+              {st.clipToLand !== false && (
+                <label className="inline" title={COAST_BORDERS.find((m) => m.id === mode)!.hint}>Borders at the coast
+                  <select value={mode} onChange={(e) => s.execute((wd) => cmd.setLayerCoastBorder(wd, l.id, e.target.value as CoastBorder))} data-testid="coast-border">
+                    {COAST_BORDERS.map((m) => <option key={m.id} value={m.id} title={m.hint}>{m.name}</option>)}
+                  </select>
+                </label>
+              )}
+            </div>
+          );
+        })}
       </PropGroup>}
     </div>
   );
@@ -216,6 +230,18 @@ export function QuickStart() {
   );
 }
 
+/** A country's land carrying on over the sea where drawn (D221), where its layer otherwise ends at the coast. */
+function OverSeaOption({ id }: { id: string }) {
+  const s = useStore();
+  const e = s.world!.get('entity', id);
+  if (!e) return null;
+  return (
+    <label className="check" title="Where its layer ends at the coast, this country's land and border still carry on over the sea where they were drawn: a sea claim, waters of its own">
+      <input type="checkbox" checked={overSeaOf(e.style)} onChange={(ev) => s.execute((wd) => cmd.setEntityOverSea(wd, id, ev.target.checked))} data-testid="country-over-sea" /> Its land carries on over the sea where drawn
+    </label>
+  );
+}
+
 function EntityPanel({ id }: { id: string }) {
   const s = useStore();
   const w = s.world!;
@@ -262,7 +288,7 @@ function EntityPanel({ id }: { id: string }) {
       {political && <CountryHistorySection id={id} />}
       </PropGroup>}
       {political && <PropGroup id="entity:fill" title="Fill"><CountryFillSection id={id} /></PropGroup>}
-      {political && <PropGroup id="entity:look" title="Look and borders"><CountryLookSection id={id} /><CountryBordersSection id={id} /></PropGroup>}
+      {political && <PropGroup id="entity:look" title="Look and borders"><CountryLookSection id={id} /><CountryBordersSection id={id} /><OverSeaOption id={id} /></PropGroup>}
       {political && <PropGroup id="entity:label" title="Label"><CountryLabelSection id={id} /></PropGroup>}
       {(e.type_id === 'character' || e.type_id === 'settlement') && <PropGroup id="entity:onmap" title="On the map"><CharacterSection id={id} /></PropGroup>}
       {e.type_id !== 'body' && <PropGroup id="entity:relations" title="Relationships"><RelationsSection id={id} /></PropGroup>}

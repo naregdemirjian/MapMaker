@@ -106,3 +106,23 @@ export const plainBorder = (s: BorderStyle | null): boolean => !s || JSON.string
 
 /** Whether any of a layer's borders moves on its own (its picture is then drawn again as time on screen passes). */
 export const bordersMove = (l: LayerBorders | null): boolean => !!l && [l.between, l.coast, ...l.pairs.map((p) => p.style)].some((s) => !!s && s.march !== 0 && s.dash !== 'solid');
+
+/**
+ * Where a layer's territory ends at the coast, how its borders meet the coast (D221): drawn along the coastline, so
+ * every country has a whole outline ('coast', as at first); along the border as drawn, out over the sea too, while the
+ * colours still end at the coast ('drawn'); or not at all, the coastline itself being the edge ('none').
+ */
+export type CoastBorder = 'coast' | 'drawn' | 'none';
+export const COAST_BORDERS: ReadonlyArray<{ id: CoastBorder; name: string; hint: string }> = [
+  { id: 'coast', name: 'Along the coast', hint: 'Each country\'s border wraps round its coastline, so its outline is whole' },
+  { id: 'drawn', name: 'As drawn, over the sea too', hint: 'The border runs where it was drawn, out over the sea, though the colours end at the coast; the looks of countries follow it too' },
+  { id: 'none', name: 'None at the coast', hint: 'No border where a country meets the sea: the coastline is its edge' },
+];
+export const coastBorderOf = (layerStyle: { coastBorder?: unknown } | null | undefined): CoastBorder =>
+  layerStyle?.coastBorder === 'drawn' || layerStyle?.coastBorder === 'none' ? layerStyle.coastBorder : 'coast';
+
+/** Whether a country's land carries on over the sea where it was drawn (D221), from its look as stored. */
+export function overSeaOf(entityStyle: string | null | undefined): boolean {
+  if (!entityStyle || !entityStyle.includes('"overSea"')) return false;
+  try { return (JSON.parse(entityStyle) as { overSea?: unknown }).overSea === true; } catch { return false; }
+}

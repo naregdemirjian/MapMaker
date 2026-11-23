@@ -8,7 +8,9 @@ import { BrushTipControl } from '../components/BrushTip.tsx';
 import { RiverSettings } from '../components/RiverPanel.tsx';
 import { BIOMES, type Biome } from '../../terrain/biomes.ts';
 import { fromStore, compare } from '../../core-time/index.ts';
-import { sculptOf, isSpaceMap } from '../../world-model/world-settings.ts';
+import { sculptOf, isSpaceMap, terrainSourceOf } from '../../world-model/world-settings.ts';
+import { overSeaOf } from '../../render-engine/border-look.ts';
+import { parseJSON } from '../../temporal-engine/engine.ts';
 import { RecordLengthControls } from '../components/RecordLength.tsx';
 import { FeatureToolOptions } from '../components/Features.tsx';
 import { FieldToolOptions, DisasterToolOptions } from '../components/Fields.tsx';
@@ -161,6 +163,7 @@ export function ToolOptions() {
               {owners.map((o) => { const locked = cmd.isLocked(w, o.id); return <option key={o.id} value={o.id} disabled={locked}>{o.name}{locked ? ' (locked)' : ''}</option>; })}
             </select>
           </label>
+          <WrapsCoast />
           {s.tool === 'pen' && <PenControls />}
           {(s.tool === 'pen' || s.tool === 'lasso') && <SmartBrushControls />}
           {s.tool === 'lasso' && (
@@ -276,5 +279,24 @@ function RiverDrawOptions() {
         <button className="small" onClick={() => s.set({ riverDraft: [] })} title="Give up this river (Esc)" data-testid="river-pen-cancel">Cancel</button>
       </>}
     </span>
+  );
+}
+
+/**
+ * Whether the land of the country being drawn for wraps round the coast, ending there with the rest of its layer, or
+ * carries on over the sea where it is drawn (D221; the country's own setting, in its panel too). Shown where the layer
+ * being drawn on ends at the coast.
+ */
+function WrapsCoast() {
+  const s = useStore();
+  const w = s.world!;
+  const layer = w.get('layer', s.layerId), owner = s.paintValue ? w.get('entity', s.paintValue) : null;
+  const clips = !!layer && layer.kind === 'partition' && parseJSON<{ clipToLand?: boolean }>(layer.style, {}).clipToLand !== false && !!terrainSourceOf(w.get('map_space', s.spaceId));
+  if (!owner || !clips) return null;
+  const over = overSeaOf(owner.style);
+  return (
+    <label className="check inline" title={`Ticked: ${owner.name}'s land ends at the coast, its border wrapping round it. Unticked: its land and border carry on over the sea where drawn (a sea claim, waters of its own); for all of ${owner.name}'s land`}>
+      <input type="checkbox" checked={!over} onChange={(e) => s.execute((wd) => cmd.setEntityOverSea(wd, owner.id, !e.target.checked))} data-testid="paint-wraps-coast" /> Wraps round the coast
+    </label>
   );
 }

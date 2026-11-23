@@ -61,6 +61,39 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D221. Borders at the coast: along the coastline by default, as drawn, or none; a country whose land carries on over the sea
+
+- **Why.** Where a layer ends at the coast, its colours were cut to the land and its borders against nobody with them,
+  so a country on the coast had no border along the sea: its outline stopped where the land did, the basemap's faint
+  coastline its only edge there. Its land could not carry on over the sea for one country alone (waters of its own, a
+  sea claim) while its neighbours end at the coast, nor could its border follow the line as drawn out over the sea.
+- **How a layer's borders meet the coast** (`coastBorder` in its style, `COAST_BORDERS`; *Borders at the coast* under
+  *Territory ends at the coast* in its Properties; `setLayerCoastBorder`, one undo): *Along the coast* (as at first,
+  and for layers made before): each country's border runs along its coastline too, in the layer's look for edges
+  against nobody (D183's *coast* style), so its outline is whole and the look applies along the coasts; *As drawn,
+  over the sea too*: the border runs where it was drawn, out over the sea, the whole border in that look, while the
+  colours still end at the coast (the countries' own strokes, D150, follow it too); *None at the coast*: the coastline
+  is the edge, as before this.
+- **The line along the coast** (`coastLine`): the Earth's coastline stroked like a border, kept to the layer's
+  countries and the land beside them along the coast that takes their look (D83's band), and drawn over the layer
+  once it is cut to the land, so the line is whole on both sides of the coast. Where the terrain decides the coast (a
+  planet, another sea level, sculpted coasts) there is no coastline to stroke: a band as wide as the border along the
+  inside of the land's edge, within the countries (`terrainCoastLine`), worked out pixel by pixel by the graphics card
+  from the heights (the terrain shader's `coastband`: the distance to the coast from the height and its slope, or from
+  the close coast's own soft edge). (Tried first: the land picture shrunk by the border's width and taken from itself.
+  Pictures drawn in strips and carried along as the view moves then differ from the picture drawn afresh, a line along
+  every strip's edge; a band worked out for each pixel alone is the same however the picture is cut.)
+- **A country whose land carries on over the sea** (`overSea` in its style; `setEntityOverSea`, one undo): *Wraps
+  round the coast* unticked beside *Give to* in the drawing tools, or *Its land carries on over the sea where drawn*
+  in its Look and borders; for all of its land, where its layer ends at the coast. Its colour is kept over the sea
+  where drawn (what the layer's picture holds within it over the sea, laid back after the cut), its edges against
+  nobody drawn whole out over the sea, and the line along the coast leaves it out.
+- **SVG frames** (D117) do the same as shapes: the coastline (of the scale shown, near the layer's countries and as far
+  as the frame reaches) stroked, under a mask of those countries and the band beside them; on a coast the terrain
+  decides, the countries filled in the border's colour under the band as a picture; borders out over the sea outside
+  the land's mask; a country over the sea drawn again under a mask of the sea alone. (Their borders are plain, as
+  before: the border looks of D183 are not in SVG frames.)
+
 ### D220. Rivers drawn as guidance: their points kept, their course and tributaries worked out, their water at any height
 
 - **Why.** The River brush only cut a valley into the ground: its water showed only where the ground fell below the sea

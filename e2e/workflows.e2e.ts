@@ -5770,6 +5770,122 @@ try {
     await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 0, lat: 20, zoom: 0, rotation: 0, projection: 'equirectangular' }));
   });
 
+  await h.step('Borders at the coast (D221): along the coastline by default, as drawn over the sea, or none; a country whose land carries on over the sea; undone', async () => {
+    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
+    await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: -8.6, lat: 39.5, zoom: 4.4, rotation: 0, projection: 'equirectangular' }));
+    const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
+    const before = await steps();
+    // A layer of its own (ending at the coast, as a new layer does), and a country drawn round Portugal, out over the Atlantic.
+    await page.getByRole('button', { name: '+ Layer' }).click();
+    await page.getByTestId('new-layer-name').fill('Coasts');
+    await page.getByTestId('new-layer-name').press('Enter');
+    await page.locator('.left .row', { hasText: 'Coasts' }).getByText('drawing here').waitFor();
+    await h.newCountry('Lusitania');
+    await h.chooseTool('lasso');
+    await page.getByTestId('paint-owner').selectOption({ label: 'Lusitania' });
+    const ring: LL[] = [[-11, 42.1], [-6.7, 42.1], [-6.7, 36.9], [-11, 36.9]];
+    const pts: Array<[number, number]> = [];
+    for (const ll of ring) { const q = await h.toPage(ll); pts.push(q); }
+    const dense: Array<[number, number]> = [];
+    for (let i = 0; i < 4; i++) { const a = pts[i], b = pts[(i + 1) % 4]; for (let k = 0; k < 6; k++) dense.push([a[0] + ((b[0] - a[0]) * k) / 6, a[1] + ((b[1] - a[1]) * k) / 6]); }
+    await h.drawLasso(dense);
+    await page.getByTestId('choice-correct').click();
+    await page.getByTestId('confirm-edit').click();
+    await page.getByTestId('confirm-edit').waitFor({ state: 'detached' });
+    await h.saved();
+    const ids = await page.evaluate(() => { const s = (window as any).__mapmaker.store; return { layer: s.layerId as string, country: s.world.all('entity').find((e: any) => e.name === 'Lusitania').id as string }; });
+    // The same in SVG frames: drawn by the browser, the file is the frame exported. Along the coast, the coastline as a line
+    // kept to the country; as drawn, its edges against nobody whole; its land carrying on over the sea, its colour there too.
+    const svgOf = async () => page.evaluate(async () => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const shot = B.defaultShot(s.spaceId, { lon: -8.6, lat: 39.5, zoom: 4.4, rotation: 0, projection: 'equirectangular' }, s.time, s.time, 24, 0.5);
+      shot.width = 640; shot.height = 480;
+      const { svg } = await B.svgFrame({ world: s.world, engine: s.engine, shot, shotName: 'Coasts', frame: 0 });
+      const c = document.createElement('canvas'); c.width = 640; c.height = 480;
+      const ctx = c.getContext('2d', { willReadFrequently: true })!;
+      B.renderFrame(ctx, new B.MapRenderer(), s.world, s.engine, shot, 0, B.PASS_DEFS.find((d: any) => d.name === 'all'), 640, 480, s.basemap, await B.terrainFor(s.world, s.spaceId, shot));
+      const a = ctx.getImageData(0, 0, 640, 480).data;
+      const img = new Image();
+      await new Promise((ok, bad) => { img.onload = ok; img.onerror = bad; img.src = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' })); });
+      ctx.clearRect(0, 0, 640, 480);
+      ctx.drawImage(img, 0, 0);
+      const b = ctx.getImageData(0, 0, 640, 480).data;
+      let off = 0;
+      for (let i = 0; i < a.length; i += 4) if (Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]) > 60) off++;
+      return { svg: svg as string, off: off / (a.length / 4) };
+    });
+    const alongSvg = await svgOf();
+    // (The layer's place among the frame's layers.)
+    const n = Number(/<g id="borders-(\d+)" inkscape:groupmode="layer" inkscape:label="Borders: Coasts"/.exec(alongSvg.svg)?.[1]);
+    assert.ok(alongSvg.svg.includes(`<g mask="url(#coast-where-${n})">\n<path id="coast-border-${n}"`), `the coast line in the SVG, kept to the country (layer ${n})`);
+    assert.ok(alongSvg.off < 0.02, `the SVG drawn is the frame (${(alongSvg.off * 100).toFixed(2)}% of pixels apart)`);
+    await page.evaluate(([layer, country]) => {
+      const m = (window as any).__mapmaker, s = m.store;
+      s.execute((w: any) => m.bench.commands.setLayerCoastBorder(w, layer, 'drawn'));
+      s.execute((w: any) => m.bench.commands.setEntityOverSea(w, country, true));
+    }, [ids.layer, ids.country] as const);
+    await h.saved();
+    const drawnSvg = await svgOf();
+    assert.ok(!new RegExp(`coast-border-${n}[-"]`).test(drawnSvg.svg) && drawnSvg.svg.includes(`<path id="border-bw${n}-${ids.country}"`), 'as drawn: its edges whole, no coast line');
+    assert.ok(new RegExp(`<g mask="url\\(#sea-only\\)">\\n<path id="territory-${ids.country}-sea"`).test(drawnSvg.svg), 'its colour over the sea');
+    assert.ok(drawnSvg.off < 0.02, `the SVG drawn is the frame (${(drawnSvg.off * 100).toFixed(2)}% of pixels apart)`);
+    for (let i = 0; i < 2; i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    // Its edges against nobody in magenta, to be seen.
+    await page.evaluate((layer) => { const m = (window as any).__mapmaker, s = m.store; s.execute((w: any) => m.bench.commands.setLayerBorders(w, layer, { between: null, pairs: [], coast: { color: '#ff00ff', opacity: 1, width: 3, dash: 'solid', dashScale: 1, double: 0, casing: 0, casingColor: '#ffffff', ticks: 0, tickLength: 6, sketch: 0, soft: 0, glow: 0, glowColor: '#ffe9a6', march: 0 } })); }, ids.layer);
+    await h.saved();
+    const rectOf = async (nw: LL, se: LL) => { const a = await h.toPage(nw), b = await h.toPage(se); return [a[0], a[1], b[0], b[1]] as const; };
+    const count = async (rect: readonly [number, number, number, number]) => {
+      await page.waitForTimeout(500);
+      return page.evaluate(([x0, y0, x1, y1]) => {
+        const c = document.querySelector('canvas.map-canvas') as HTMLCanvasElement, r = c.getBoundingClientRect(), k = c.width / r.width;
+        const d = c.getContext('2d')!.getImageData(Math.round((x0 - r.left) * k), Math.round((y0 - r.top) * k), Math.max(1, Math.round((x1 - x0) * k)), Math.max(1, Math.round((y1 - y0) * k))).data;
+        let n = 0;
+        for (let i = 0; i < d.length; i += 4) if (d[i] > 190 && d[i + 2] > 190 && d[i + 1] < 90) n++;
+        return n;
+      }, rect);
+    };
+    // Along Portugal's west coast, and out at sea west of it (within the outline drawn).
+    const coastBox = await rectOf([-10.2, 41.2], [-8.6, 38.6]), seaBox = await rectOf([-11.6, 41.2], [-10.4, 38.6]);
+    // Along the coast (as at first): the coastline drawn as its border, none out at sea.
+    const alongCoast = await count(coastBox);
+    assert.ok(alongCoast > 20, `its border along the coast (${alongCoast} pixels)`);
+    assert.equal(await count(seaBox), 0, 'none out at sea');
+    await h.screenshot('coast-borders');
+    // None at the coast.
+    await page.evaluate((layer) => (window as any).__mapmaker.store.set({ selection: { kind: 'layer', id: layer } }), ids.layer);
+    await page.getByTestId('coast-border').selectOption('none');
+    await h.saved();
+    assert.ok((await count(coastBox)) < 5, 'no border along the coast');
+    // As drawn: its border out over the sea too, though its colours end at the coast.
+    await page.getByTestId('coast-border').selectOption('drawn');
+    await h.saved();
+    assert.ok((await count(seaBox)) > 10, 'its border over the sea, where drawn');
+    await page.getByTestId('coast-border').selectOption('coast');
+    await h.saved();
+    // A country whose land carries on over the sea (switched in the drawing tools): its colour out at sea, its border where drawn.
+    const sea = async () => { const q = await h.toPage([-10.4, 39.5]), o = await h.toPage([-12.3, 39.5]); return page.evaluate(([a, b]) => {
+      const c = document.querySelector('canvas.map-canvas') as HTMLCanvasElement, r = c.getBoundingClientRect(), k = c.width / r.width, g = c.getContext('2d')!;
+      const px = (p: number[]) => Array.from(g.getImageData(Math.round((p[0] - r.left) * k), Math.round((p[1] - r.top) * k), 1, 1).data).slice(0, 3);
+      const x = px(a), y = px(b);
+      return Math.max(...x.map((v, i) => Math.abs(v - y[i])));
+    }, [q, o]); };
+    assert.ok((await sea()) < 12, 'the sea inside its outline is sea');
+    await page.getByTestId('paint-wraps-coast').uncheck();
+    await h.saved();
+    await page.waitForTimeout(400);
+    assert.ok((await sea()) > 25, 'its colour over the sea');
+    assert.ok((await count(seaBox)) > 10, 'its border where drawn');
+    await page.evaluate((id) => (window as any).__mapmaker.store.set({ selection: { kind: 'entity', id } }), ids.country);
+    assert.equal(await page.getByTestId('country-over-sea').isChecked(), true, 'the same setting in its panel');
+    await h.screenshot('over-sea');
+    // Undone, back as before.
+    for (let i = 0; i < 12 && (await steps()) > before; i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await steps(), before);
+    await h.chooseTool('select');
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
+  });
+
   await h.step('History Health lists the overlap, nothing else; no browser errors', async () => {
     await page.getByTestId('workspace-map').click();
     await page.getByTestId('health').click();

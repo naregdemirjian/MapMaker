@@ -14,6 +14,7 @@ import { geoPath, geoGraticule10, geoGraticule, geoCircle, geoCentroid, geoArea,
 import type { World } from '../../src/world-model/world.ts';
 import type { Engine, FaceState, Assignment, CompiledTransition } from '../../src/temporal-engine/engine.ts';
 import { parseJSON, slerpLonLat } from '../../src/temporal-engine/engine.ts';
+import { coastBorderOf } from '../../src/render-engine/border-look.ts';
 import { type Instant, compare, diffMs } from '../../src/core-time/index.ts';
 import { BASE_EVENT_ID } from '../../src/world-model/schema.ts';
 import type { Vec3 } from '../../src/geo-kernel/vec.ts';
@@ -267,7 +268,7 @@ export class MapRenderer {
     const layout = opts.layout ?? { labels: opts.passes.has('labels'), cities: opts.passes.has('cities') };
     const placesText = opts.passes.has('labels') || opts.passes.has('cities');
     const drawsLayers = opts.passes.has('fills') || opts.passes.has('borders') || (placesText && layout.labels);
-    type LayerStyle = { fillOpacity?: number; borderWidth?: number; clipToLand?: boolean };
+    type LayerStyle = { fillOpacity?: number; borderWidth?: number; clipToLand?: boolean; coastBorder?: unknown };
     const prepared: Array<{ ls: LayerStyle; states: Map<number, FaceState>; tg: ReturnType<MapRenderer['transitionGroups']>; clip: boolean }> = [];
     for (const layerId of drawsLayers ? opts.layerIds : []) {
       const layer = world.get('layer', layerId);
@@ -406,6 +407,27 @@ export class MapRenderer {
         ctx.restore();
       }
       ctx.restore();
+      // The border along the coast (D221, as at first): the coastline where the layer's land meets the sea, kept to its
+      // parcels and the land beside them along the coast (their outlines a few kilometres wide).
+      if (clip && coastBorderOf(ls) === 'coast') {
+        const owned: number[] = [];
+        for (const [face, st] of states) if (tg.of.has(face) ? st.transition!.from : st.value) owned.push(face);
+        if (owned.length) {
+          const where = this.scratch(ctx, 2), line = this.scratch(ctx, 3);
+          const rim = Math.min(48, Math.max(1, (5 / 6371) * view.projection.scale()));
+          const shape = this.groupPath(view, arr, owned);
+          where.fillStyle = '#000'; where.fill(shape, 'evenodd');
+          where.lineJoin = 'round'; where.lineCap = 'round'; where.lineWidth = 2 * rim; where.strokeStyle = '#000'; where.stroke(shape);
+          line.lineJoin = 'round'; line.lineCap = 'round'; line.lineWidth = (ls.borderWidth ?? style.borderWidth) * u; line.strokeStyle = style.border;
+          line.stroke(this.basemapPainter.pathsFor(view, opts.basemap!).coastline);
+          line.globalCompositeOperation = 'destination-in';
+          line.drawImage(where.canvas as CanvasImageSource, 0, 0);
+          ctx.save();
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.drawImage(line.canvas as CanvasImageSource, 0, 0);
+          ctx.restore();
+        }
+      }
     }
 
     // One label per country: a country on several layers (its land, and its military control, say) is

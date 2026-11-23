@@ -1,6 +1,6 @@
 // Domain commands: every user action is one of these. Each runs inside a transaction against the
 // in-memory world and returns the exact row diffs to save (and to undo). Commands never draw anything.
-import { layerBordersOf, type LayerBorders } from '../render-engine/border-look.ts';
+import { layerBordersOf, COAST_BORDERS, type LayerBorders, type CoastBorder } from '../render-engine/border-look.ts';
 import { countryLookOf, layerLookOf, lookPresetsOf, type CountryLook, type LayerLook, type LookPreset } from '../render-engine/country-look.ts';
 import { calendarProblems, type CalendarDef } from '../core-time/index.ts';
 import { World, Tx, newId } from '../world-model/world.ts';
@@ -486,6 +486,30 @@ export function setLayerClipToLand(world: World, id: string, clip: boolean): Com
 }
 
 /**
+ * Where a layer's territory ends at the coast, how its borders meet the coast (D221): along the coastline, as drawn
+ * (over the sea too), or none; one undo step.
+ */
+export function setLayerCoastBorder(world: World, id: string, mode: CoastBorder): CommandResult {
+  const layer = world.get('layer', id);
+  if (!layer) throw new Error('That layer no longer exists.');
+  if (!COAST_BORDERS.some((m) => m.id === mode)) throw new Error('That is not a way for borders to meet the coast.');
+  const style = { ...parseJSON<Record<string, unknown>>(layer.style, {}), coastBorder: mode };
+  return run(world, `Borders of "${layer.name}" at the coast: ${COAST_BORDERS.find((m) => m.id === mode)!.name.toLowerCase()}`, (tx) => tx.patch('layer', id, { style: JSON.stringify(style) }));
+}
+
+/**
+ * Whether a country's land carries on over the sea where it was drawn (D221), its colour and border kept there,
+ * instead of ending at the coast with the rest of its layer; one undo step.
+ */
+export function setEntityOverSea(world: World, id: string, on: boolean): CommandResult {
+  const e = world.get('entity', id);
+  if (!e) throw new Error('That country no longer exists.');
+  const next: EntityStyle = { ...entityStyle(e) };
+  if (on) next.overSea = true; else delete next.overSea;
+  return run(world, on ? `Let ${e.name}'s land carry on over the sea` : `End ${e.name}'s land at the coast`, (tx) => { tx.update('entity', { ...e, style: JSON.stringify(next) }); });
+}
+
+/**
  * How strongly a territory layer's colours cover what is under them (0 to 1) and how wide its borders are (in
  * pixels at 1920 wide); one undo step. (The renderer and exports always read them; now they can be changed.)
  */
@@ -665,6 +689,8 @@ export interface EntityStyle {
   look?: CountryLook;
   /** A city's importance as rated (D219: which show zoomed out, and how large), instead of from its people. */
   importance?: number;
+  /** Its land carries on over the sea where it was drawn (D221), where its layer otherwise ends at the coast. */
+  overSea?: boolean;
 }
 
 export function entityStyle(e: { style?: string } | null | undefined): EntityStyle {
