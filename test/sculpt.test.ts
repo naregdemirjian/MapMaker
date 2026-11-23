@@ -205,3 +205,35 @@ test('painted biomes (D169): kept and checked with the strokes, changing no heig
   assert.notEqual(painted.key, cover.key);
   assert.equal(paintedCover(cover, [], R), cover, 'nothing painted: the cover itself');
 });
+
+test('brush tips (D218): a hard tip a plateau, an oval tip wider across one way than the other, a ragged edge in and out; kept only when not round', async () => {
+  const { tipOf, isRoundTip, ROUND_TIP, TIP_PRESETS, cleanStamps: clean } = await import('../src/terrain/sculpt.ts');
+  const base = flat(0);
+  const line: Array<[number, number]> = [[-6.5, 10.5], [6.5, 10.5]];
+  const soft = applyStamps(base, [stamp('raise', line, { radiusKm: 400, strength: 1000 })], R).grid;
+  const hard = applyStamps(base, [stamp('raise', line, { radiusKm: 400, strength: 1000, tip: { ...ROUND_TIP, hardness: 0.75 } })], R).grid;
+  // Six tenths of the way out (400 km is about 3.6 degrees): the hard tip at full strength, the soft one well under.
+  assert.ok(at(hard, 0.5, 10.5 + 2.2) > 950 && at(soft, 0.5, 10.5 + 2.2) < 600, `plateau ${at(hard, 0.5, 12.7)}, dome ${at(soft, 0.5, 12.7)}`);
+  // An oval tip held east-west (not turning): a stroke going east is thin, one going north is wide.
+  const oval = { ...ROUND_TIP, roundness: 0.3, angle: 0 };
+  const east = applyStamps(base, [stamp('raise', [[-6.5, 0.5], [6.5, 0.5]], { radiusKm: 400, strength: 1000, tip: oval })], R).grid;
+  const north = applyStamps(base, [stamp('raise', [[0.5, -6.5], [0.5, 6.5]], { radiusKm: 400, strength: 1000, tip: oval })], R).grid;
+  assert.ok(at(east, 0.5, 0.5 + 2.2) < 50, `thin going east (${at(east, 0.5, 2.7)})`);
+  assert.ok(at(north, 0.5 + 2.2, 0.5) > 300, `wide going north (${at(north, 2.7, 0.5)})`);
+  // Turning with the stroke and held across it: as wide whichever way it goes.
+  const across = { ...ROUND_TIP, roundness: 0.3, angle: 90, follow: true };
+  const e2 = applyStamps(base, [stamp('raise', [[-6.5, 0.5], [6.5, 0.5]], { radiusKm: 400, strength: 1000, tip: across })], R).grid;
+  const n2 = applyStamps(base, [stamp('raise', [[0.5, -6.5], [0.5, 6.5]], { radiusKm: 400, strength: 1000, tip: across })], R).grid;
+  assert.ok(Math.abs(at(e2, 0.5, 0.5 + 2.2) - at(n2, 0.5 + 2.2, 0.5)) < 60, 'the same width both ways');
+  // A ragged edge: at the brush's edge some places raised, some not.
+  const ragged = applyStamps(base, [stamp('raise', line, { radiusKm: 400, strength: 1000, tip: { ...ROUND_TIP, ragged: 1 } })], R).grid;
+  let raised = 0, not = 0;
+  for (let k = -6; k <= 6; k++) { const v = at(ragged, 0.5 + k, 10.5 + 3.4); if (v > 20) raised++; else not++; }
+  assert.ok(raised > 0 && not > 0, `in and out along the edge (${raised} raised, ${not} not)`);
+  // Kept with the stroke only when not the plain round one; out of range made whole.
+  assert.ok(isRoundTip(undefined) && isRoundTip(ROUND_TIP) && !isRoundTip(TIP_PRESETS[1].tip));
+  assert.deepEqual(tipOf({ hardness: 2, roundness: 0, angle: 999, ragged: -1 }), { hardness: 0.95, roundness: 0.1, angle: 180, follow: false, ragged: 0, texture: 0 });
+  const kept = clean([{ id: 'a', tool: 'raise', path: [[0, 0]], radiusKm: 10, strength: 10, seed: 1, from: null, tip: ROUND_TIP }, { id: 'b', tool: 'raise', path: [[0, 0]], radiusKm: 10, strength: 10, seed: 1, from: null, tip: { hardness: 0.5 } }]);
+  assert.equal(kept[0].tip, undefined);
+  assert.equal(kept[1].tip?.hardness, 0.5);
+});

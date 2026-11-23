@@ -3,7 +3,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { useStore, DEFAULT_STROKE, type Tool } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
-import { SCULPT_TOOLS } from '../../terrain/sculpt.ts';
+import { SCULPT_TOOLS, tipped } from '../../terrain/sculpt.ts';
+import { BrushTipControl } from '../components/BrushTip.tsx';
 import { BIOMES, type Biome } from '../../terrain/biomes.ts';
 import { fromStore, compare } from '../../core-time/index.ts';
 import { sculptOf, isSpaceMap } from '../../world-model/world-settings.ts';
@@ -232,6 +233,7 @@ function SculptToolOptions() {
           <input type="number" min={1} max={10000} step={50} value={b.strength} onChange={(e) => Number(e.target.value) > 0 && set({ strength: Math.min(10000, Number(e.target.value)) })} data-testid="sculpt-strength" /> m
         </label>
       )}
+      {tipped(b.tool) && <BrushTipControl tip={b.tip} onChange={(tip) => set({ tip })} />}
       {b.tool === 'biome' && (
         <label className="inline" title="What grows where you paint, as the satellite look shows it">Biome
           <select value={b.biome} onChange={(e) => set({ biome: e.target.value as Biome })} data-testid="sculpt-biome">

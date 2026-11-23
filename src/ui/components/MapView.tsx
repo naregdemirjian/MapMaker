@@ -25,7 +25,7 @@ import { finishLook } from '../../presentation/looks.ts';
 import { parseJSON, slerpLonLat } from '../../temporal-engine/engine.ts';
 import { compare, fromStore, gregorian, formatYear } from '../../core-time/index.ts';
 import { basemapSourceOf, shown, minLakeKm2, terrainLook, seaLevelPoints, planetOf, sculptOf, terrainSourceOf, isPaleoEarth, simOf } from '../../world-model/world-settings.ts';
-import { stampsAt, OUTLINE_TOOLS } from '../../terrain/sculpt.ts';
+import { stampsAt, OUTLINE_TOOLS, isRoundTip, tipped } from '../../terrain/sculpt.ts';
 import { sculpted } from '../../terrain/sculpt-cache.ts';
 import { paintedCover } from '../../terrain/cover.ts';
 import { riversSoon } from '../../terrain/river-cache.ts';
@@ -109,6 +109,8 @@ function sculptStroke(points: Pt[]): void {
     tool: b.tool, path: points.map((q) => [q[0], q[1]] as [number, number]), radiusKm: b.radiusKm, strength: b.strength,
     seed: 1 + Math.floor(Math.random() * 999_999), from: b.dated && Number.isFinite(s.time.day) ? { day: s.time.day, ms: s.time.ms } : null,
     ...(b.tool === 'biome' ? { biome: b.biome } : {}),
+    // (The brush's tip, D218: for the brushes that paint with one, not outlines, rivers or biomes.)
+    ...(tipped(b.tool) && !isRoundTip(b.tip) ? { tip: b.tip } : {}),
   }));
 }
 

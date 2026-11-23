@@ -2838,6 +2838,69 @@ try {
     await page.evaluate((w) => (window as any).__mapmaker.store.set({ spaceId: w.spaceId, layerId: w.layerId, selection: null }), was);
   });
 
+  await h.step('Brush tips and mountain ranges (D218): a hard round tip raises a plateau, not a dome; the tip kept with the stroke; a range has a crest and valleys down its sides; undone', async () => {
+    await page.getByTestId('workspace-map').click();
+    await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 12, lat: 24, zoom: 3, rotation: 0, projection: 'equirectangular' }));
+    const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
+    const before = await steps();
+    const heightAt = (ll: [number, number], sculpted = true) => page.evaluate(([lon, lat, withStrokes]) => {
+      const m = (window as any).__mapmaker, s = m.store, space = s.world.get('map_space', s.spaceId), g = s.terrainOf(space);
+      return m.bench.heightAt(m.bench.sculpted(g.grid, g.key, withStrokes ? JSON.parse(space.settings).sculpt ?? [] : [], space.radius_m / 1000).grid, lon, lat) as number;
+    }, [ll[0], ll[1], sculpted] as const);
+    const stroke = async (lls: Array<[number, number]>) => {
+      const pts: Array<[number, number]> = [];
+      for (const ll of lls) pts.push(await h.toPage(ll));
+      await page.mouse.move(pts[0][0], pts[0][1]);
+      await page.mouse.down();
+      for (const q of pts.slice(1)) await page.mouse.move(q[0], q[1], { steps: 8 });
+      await page.mouse.up();
+    };
+    await page.getByTestId('tool-sculpt').click();
+    await page.getByTestId('sculpt-brush').selectOption('raise');
+    await page.getByTestId('sculpt-size').fill('150');
+    await page.getByTestId('sculpt-strength').fill('1000');
+    // The tip: a panel of tips to start from and every part of it; Hard round chosen.
+    await page.getByTestId('sculpt-tip').click();
+    await page.getByTestId('sculpt-tip-panel').waitFor();
+    await page.getByTestId('sculpt-tip-preset-hard').click();
+    assert.equal(await page.getByTestId('sculpt-tip-fade').inputValue(), '0.25');
+    await h.screenshot('brush-tip');
+    await page.getByTestId('sculpt-tip').click();
+    assert.equal(await page.getByTestId('sculpt-tip-panel').count(), 0, 'closed again');
+    await stroke([[9, 24], [12, 24], [15, 24]]);
+    await h.saved();
+    const kept = await page.evaluate(() => { const s = (window as any).__mapmaker.store; return JSON.parse(s.world.get('map_space', s.spaceId).settings).sculpt.at(-1); });
+    assert.equal(kept.tool, 'raise');
+    assert.equal(kept.tip?.hardness, 0.75, 'the tip kept with the stroke');
+    // At six tenths of the way to its edge, a hard tip has its full strength (a soft one about four tenths).
+    const rise = async (ll: [number, number]) => (await heightAt(ll)) - (await heightAt(ll, false));
+    const middle = await rise([12, 24]), off = await rise([12, 24 + 0.6 * (150 / 111.2)]);
+    assert.ok(middle > 900 && off > 0.85 * middle, `a plateau (${Math.round(middle)} m in the middle, ${Math.round(off)} m six tenths out)`);
+    // A mountain range (soft tip): its crest near the stroke, valleys and ridges down its sides.
+    await page.getByTestId('sculpt-brush').selectOption('mountains');
+    await page.getByTestId('sculpt-tip').click();
+    await page.getByTestId('sculpt-tip-preset-soft').click();
+    await page.getByTestId('sculpt-tip').click();
+    await page.getByTestId('sculpt-size').fill('250');
+    await page.getByTestId('sculpt-strength').fill('3000');
+    await stroke([[4, 30], [10, 31], [16, 30]]);
+    await h.saved();
+    const across = await Promise.all(Array.from({ length: 9 }, (_, k) => rise([10, 31 - 2 + k * 0.5])));
+    const top = Math.max(...across), at = across.indexOf(top);
+    assert.ok(top > 1500 && at >= 2 && at <= 6, `the crest near the stroke (${across.map(Math.round).join(', ')})`);
+    const flank = await Promise.all(Array.from({ length: 25 }, (_, k) => rise([7 + k * 0.25, 31 - 1.1])));
+    let turns = 0;
+    for (let k = 1; k < flank.length - 1; k++) if ((flank[k] - flank[k - 1]) * (flank[k + 1] - flank[k]) < 0) turns++;
+    assert.ok(turns >= 4 && Math.max(...flank) - Math.min(...flank) > 150, `ridges and valleys along its side (${flank.map(Math.round).join(', ')})`);
+    await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 10, lat: 30.5, zoom: 3.4, rotation: 0, projection: 'equirectangular' }));
+    await page.waitForTimeout(800);
+    await h.screenshot('mountain-range');
+    for (let i = 0; i < 2; i++) await page.getByTestId('undo').click();
+    await h.saved();
+    assert.equal(await steps(), before, 'each stroke one step');
+    await page.getByTestId('tool-select').click();
+  });
+
   await h.step('Sculpting: land painted into the North Sea in the base world; a dated stroke floods England from a date only; undone', async () => {
     await page.getByTestId('workspace-map').click();
     await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 2, lat: 54, zoom: 3, rotation: 0, projection: 'equirectangular' }));

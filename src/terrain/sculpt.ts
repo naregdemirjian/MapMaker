@@ -39,6 +39,53 @@ export const OUTLINE_TOOLS: readonly SculptTool[] = ['coast-land', 'coast-sea'];
 export const changesHeights = (s: Pick<TerrainStamp, 'tool'>) => s.tool !== 'biome';
 export const isSculptTool = (v: unknown): v is SculptTool => typeof v === 'string' && SCULPT_TOOLS.some((t) => t.id === v);
 
+/**
+ * A brush's tip (D218): how it fades toward its edge and what shape it is. Without one, a stroke is soft and round as
+ * before. Its long side is `radiusKm` from the middle, its short side `roundness` of that.
+ */
+export interface BrushTip {
+  /** How far toward its edge it stays at full strength (0: it fades all the way from its middle; 0.95: a hard edge). */
+  hardness: number;
+  /** Its short side against its long one (1: round). */
+  roundness: number;
+  /** How its long side is turned: degrees counter-clockwise from east, or from the stroke's own direction when `follow`. */
+  angle: number;
+  follow: boolean;
+  /** How ragged its edge is (0: a clean outline; 1: in and out by half its size). */
+  ragged: number;
+  /** How grainy it is inside (0: even). */
+  texture: number;
+}
+export const ROUND_TIP: BrushTip = { hardness: 0, roundness: 1, angle: 0, follow: false, ragged: 0, texture: 0 };
+/** Tips to start from. */
+export const TIP_PRESETS: Array<{ id: string; name: string; tip: BrushTip }> = [
+  { id: 'soft', name: 'Soft round', tip: ROUND_TIP },
+  { id: 'hard', name: 'Hard round', tip: { ...ROUND_TIP, hardness: 0.75 } },
+  { id: 'ragged', name: 'Ragged', tip: { ...ROUND_TIP, hardness: 0.25, ragged: 0.6 } },
+  { id: 'rocky', name: 'Rocky', tip: { ...ROUND_TIP, hardness: 0.15, ragged: 0.4, texture: 0.55 } },
+  { id: 'flat', name: 'Flat, turned', tip: { ...ROUND_TIP, hardness: 0.3, roundness: 0.3, angle: 45 } },
+  { id: 'across', name: 'Across the stroke', tip: { ...ROUND_TIP, hardness: 0.2, roundness: 0.35, angle: 90, follow: true, ragged: 0.25 } },
+];
+/** A tip as kept, made whole and within bounds. */
+export function tipOf(v: unknown): BrushTip {
+  const o = (v && typeof v === 'object' ? v : {}) as Partial<BrushTip>;
+  const num = (x: unknown, lo: number, hi: number, d: number) => (typeof x === 'number' && Number.isFinite(x) ? Math.max(lo, Math.min(hi, x)) : d);
+  return {
+    hardness: num(o.hardness, 0, 0.95, 0), roundness: num(o.roundness, 0.1, 1, 1), angle: num(o.angle, -180, 180, 0), follow: o.follow === true,
+    ragged: num(o.ragged, 0, 1, 0), texture: num(o.texture, 0, 1, 0),
+  };
+}
+/** Whether a brush paints with a tip (D218): all but outlines, rivers and painted biomes. */
+export const tipped = (tool: SculptTool) => !OUTLINE_TOOLS.includes(tool) && tool !== 'river' && tool !== 'biome';
+/** Whether a tip is the plain soft round one. */
+export const isRoundTip = (t: BrushTip | undefined) => !t || (t.hardness === 0 && t.roundness === 1 && t.ragged === 0 && t.texture === 0);
+/** How strong a tip is at a distance from its middle (in its own sizes: 1 at its edge), before any texture. */
+export function tipWeight(u: number, hardness: number): number {
+  if (u >= 1) return 0;
+  const t = u <= hardness ? 0 : (u - hardness) / (1 - hardness);
+  return (1 - t * t) * (1 - t * t);
+}
+
 /** A stroke of the sculpting brush (or a click: a path of one point). */
 export interface TerrainStamp {
   id: string;
@@ -53,6 +100,8 @@ export interface TerrainStamp {
   from: { day: number; ms: number } | null;
   /** For a painted biome: which. */
   biome?: Biome;
+  /** The brush's tip (D218): kept only when not the plain soft round one. */
+  tip?: BrushTip;
 }
 
 /** Stamps as stored, checked (anything broken left out). */
@@ -67,9 +116,11 @@ export function cleanStamps(raw: unknown): TerrainStamp[] {
     if (!path.length || !(Number(s.radiusKm) > 0) || !Number.isFinite(Number(s.strength))) continue;
     const from = s.from && Number.isFinite(s.from.day) ? { day: s.from.day, ms: Number.isFinite(s.from.ms) ? s.from.ms : 0 } : null;
     if (s.tool === 'biome' && !(typeof s.biome === 'string' && s.biome in BIOMES)) continue;
+    const tip = s.tip ? tipOf(s.tip) : undefined;
     out.push({
       id: s.id, tool: s.tool, path, radiusKm: Math.min(5000, Number(s.radiusKm)), strength: Math.max(0, Math.min(10000, Number(s.strength))), seed: Number.isFinite(s.seed) ? Number(s.seed) : 1, from,
       ...(s.tool === 'biome' ? { biome: s.biome } : {}),
+      ...(tip && !isRoundTip(tip) ? { tip } : {}),
     });
   }
   return out;
@@ -134,9 +185,79 @@ function distanceToPath(x: number, y: number, z: number, pts: Array<[number, num
   return best;
 }
 
+type V3 = [number, number, number];
+const dot = (a: V3, b: V3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+/** East and north along the ground at a place (any two at a pole). */
+function frameAt(a: V3): { east: V3; north: V3 } {
+  const h = Math.hypot(a[0], a[1]);
+  if (h < 1e-9) return { east: [0, 1, 0], north: [-1, 0, 0] };
+  const east: V3 = [-a[1] / h, a[0] / h, 0];
+  return { east, north: [-a[2] * east[1], a[2] * east[0], a[0] * east[1] - a[1] * east[0]] };
+}
+
+/**
+ * Where a place lies against a stroke (D218), for tips that are not round and for brushes that follow the stroke's
+ * course (the mountain range): how far it is in the tip's own sizes (`u`, 1 at the edge), how far along the stroke its
+ * nearest point is and how far to the side of it (radians; positive to the left going along). An elongated tip swept
+ * along the stroke reaches as far to the side as the tip's width across the stroke's direction there; past its ends
+ * and at its bends, the tip's own oval.
+ */
+interface StrokeGeo { pts: V3[]; normals: Array<V3 | null>; cum: number[]; seg: number[]; frames: Array<{ east: V3; north: V3 }>; dirs: number[] }
+function strokeGeo(pts: V3[], normals: Array<V3 | null>): StrokeGeo {
+  const seg: number[] = [], cum: number[] = [0], frames = pts.map(frameAt), dirs: number[] = [];
+  for (let i = 0; i < pts.length; i++) {
+    const b = pts[i + 1] ?? null, a = pts[i];
+    if (b) seg.push(Math.acos(Math.max(-1, Math.min(1, dot(a, b)))));
+    if (i > 0) cum.push(cum[i - 1] + seg[i - 1]);
+    // The stroke's direction at each point (on toward the next, or on from the one before at the end), from east.
+    const prev = pts[i - 1];
+    let t: V3 = frames[i].east;
+    if (b) { const c = dot(a, b); t = [b[0] - c * a[0], b[1] - c * a[1], b[2] - c * a[2]]; }
+    else if (prev) { const c = dot(a, prev); t = [c * a[0] - prev[0], c * a[1] - prev[1], c * a[2] - prev[2]]; }
+    dirs.push(Math.atan2(dot(t, frames[i].north), dot(t, frames[i].east)));
+  }
+  return { pts, normals, cum, seg, frames, dirs };
+}
+function strokeMeasure(p: V3, g: StrokeGeo, r: number, tip: BrushTip, out: { u: number; along: number; across: number }): void {
+  const A = r, B = r * tip.roundness, fixed = (tip.angle * Math.PI) / 180;
+  let best = Infinity, along = 0, across = 0;
+  for (let i = 0; i < g.pts.length; i++) {
+    const a = g.pts[i], f = g.frames[i], dir = g.dirs[i];
+    // Its oval round this point of the stroke.
+    const d = Math.acos(Math.max(-1, Math.min(1, dot(p, a))));
+    const beta = d > 1e-12 ? Math.atan2(dot(p, f.north), dot(p, f.east)) : 0;
+    const major = tip.follow ? dir + fixed : fixed;
+    const vm = d * Math.cos(beta - major), vn = d * Math.sin(beta - major);
+    const uv = Math.sqrt((vm / A) ** 2 + (vn / B) ** 2);
+    if (uv < best) { best = uv; along = g.cum[i]; across = d * Math.sin(beta - dir); }
+    const n = g.normals[i];
+    if (!n || i + 1 >= g.pts.length) continue;
+    // Beside the arc to the next point: as wide as the tip reaches across the stroke's direction.
+    const b = g.pts[i + 1];
+    const dn = dot(p, n);
+    const fx = p[0] - dn * n[0], fy = p[1] - dn * n[1], fz = p[2] - dn * n[2];
+    const ca = (a[1] * n[2] - a[2] * n[1]) * fx + (a[2] * n[0] - a[0] * n[2]) * fy + (a[0] * n[1] - a[1] * n[0]) * fz;
+    const cb = (n[1] * b[2] - n[2] * b[1]) * fx + (n[2] * b[0] - n[0] * b[2]) * fy + (n[0] * b[1] - n[1] * b[0]) * fz;
+    if (ca > 0 || cb > 0) continue;
+    const side = Math.asin(Math.max(-1, Math.min(1, dn)));
+    const alpha = tip.follow ? -fixed : dir - fixed;
+    const reachAcross = Math.sqrt((A * Math.sin(alpha)) ** 2 + (B * Math.cos(alpha)) ** 2);
+    const us = Math.abs(side) / reachAcross;
+    if (us < best) {
+      best = us;
+      const fl = Math.hypot(fx, fy, fz) || 1, foot: V3 = [fx / fl, fy / fl, fz / fl];
+      along = g.cum[i] + Math.acos(Math.max(-1, Math.min(1, dot(a, foot))));
+      across = side;
+    }
+  }
+  out.u = best; out.along = along; out.across = across;
+}
+
 function applyStamp(e: Float32Array, touched: Uint8Array, W: number, H: number, s: TerrainStamp, radiusKm: number): void {
   const r = s.radiusKm / radiusKm; // radians
-  const reach = s.tool === 'crater' ? r * 1.6 : r;
+  const tip = s.tip ? tipOf(s.tip) : ROUND_TIP;
+  // (A ragged edge reaches out up to half as far again.)
+  const reach = (s.tool === 'crater' ? r * 1.6 : r) * (1 + 0.5 * tip.ragged);
   const pts = s.tool === 'crater' ? [vec(s.path[0][0], s.path[0][1])] : s.path.map(([lon, lat]) => vec(lon, lat));
   const normals = pts.map((a, i) => {
     const b = pts[i + 1];
@@ -162,20 +283,35 @@ function applyStamp(e: Float32Array, touched: Uint8Array, W: number, H: number, 
   const i0 = fullRows ? 0 : Math.floor(((lonStart + 180) / 360) * W);
   const noise = simplex3(s.seed);
   const cellsAcross = Math.max(1, (r / (Math.PI / H)));
-  // The weight of each reached cell (0 outside the brush), worked out once.
+  // The weight of each reached cell (0 outside the brush), worked out once. A tip that is not round, and the
+  // mountain range, measure against the stroke's course (D218); the rest by distance alone, as before.
+  const framed = !isRoundTip(tip) || s.tool === 'mountains';
+  const geo = framed ? strokeGeo(pts, normals) : null, at = { u: 0, along: 0, across: 0 };
+  const edgeNoise = tip.ragged > 0 || tip.texture > 0 ? simplex3(s.seed + 7919) : null;
   const n = (j1 - j0 + 1) * cols, weight = new Float32Array(n), index = new Int32Array(n), dist = new Float32Array(n);
+  const along = framed ? new Float32Array(n) : null, across = framed ? new Float32Array(n) : null;
   let m = 0;
   for (let j = j0; j <= j1; j++) {
     const lat = 90 - ((j + 0.5) / H) * 180, cl = Math.cos(lat * RAD), z = Math.sin(lat * RAD);
     for (let c = 0; c < cols; c++) {
       const i = (((i0 + c) % W) + W) % W, lon = -180 + ((i + 0.5) / W) * 360;
       const x = cl * Math.cos(lon * RAD), y = cl * Math.sin(lon * RAD);
-      const d = distanceToPath(x, y, z, pts, normals);
-      if (d >= reach) continue;
-      const u = d / r;
-      weight[m] = u < 1 ? (1 - u * u) * (1 - u * u) : 0;
+      let u: number;
+      if (geo) { strokeMeasure([x, y, z], geo, r, tip, at); u = at.u; }
+      else { const d = distanceToPath(x, y, z, pts, normals); if (d >= reach) continue; u = d / r; }
+      // A ragged edge: the tip's size in and out by up to half, in lumps of its own size and smaller.
+      if (edgeNoise && tip.ragged > 0) {
+        const f = 1.8 / Math.max(r, 1e-4), g = 4.5 / Math.max(r, 1e-4);
+        u /= 1 + tip.ragged * 0.5 * (0.75 * edgeNoise(x * f, y * f, z * f) + 0.25 * edgeNoise(x * g + 31, y * g, z * g));
+      }
+      if (u >= reach / r) continue;
+      let w = tipWeight(u, tip.hardness);
+      // Grain: the inside in specks of strength and weakness.
+      if (edgeNoise && tip.texture > 0 && w > 0) { const f = 14 / Math.max(r, 1e-4); w *= 1 - tip.texture * (0.5 + 0.5 * edgeNoise(x * f + 77, y * f, z * f)); }
+      weight[m] = w;
       dist[m] = u;
       index[m] = j * W + i;
+      if (along && across) { along[m] = at.along; across[m] = at.across; }
       m++;
     }
   }
@@ -195,13 +331,22 @@ function applyStamp(e: Float32Array, touched: Uint8Array, W: number, H: number, 
       break;
     }
     case 'mountains': {
+      // A range along the stroke (D218): a massif rising to a main crest that wanders a little either side of the
+      // stroke, its peaks and saddles along it, then carved by the water running off it, as ranges are: valleys
+      // branching down from the crest, deeper and wider where more water has gathered, the ridges between them left
+      // standing. (The noise of the massif is laid in the range's own frame, along and across it.)
       for (let q = 0; q < m; q++) {
         const k = index[q], w = weight[q];
         if (!w) continue;
-        const ridged = 1 - Math.abs(noiseAt(k, 3) * 0.7 + noiseAt(k, 9) * 0.3);
-        e[k] += strength * Math.pow(w, 1.5) * (0.45 + 0.55 * ridged * ridged);
+        const a = along![q] / r, x = across![q] / r;
+        const crestAt = 0.16 * noise(a * 0.45 + 40, 0.5, 7.7);
+        const crest = Math.exp(-(((x - crestAt) / 0.26) ** 2));
+        const peaks = 0.5 + 0.5 * (0.5 + 0.5 * noise(a * 1.1 + 90, 0.3, 2.2));
+        const rough = 0.55 * noiseAt(k, 2.2) + 0.3 * noiseAt(k, 5) + 0.15 * noiseAt(k, 11);
+        e[k] += strength * (Math.pow(w, 0.9) * peaks * (0.4 + 0.6 * crest) + 0.3 * Math.pow(w, 0.7) * rough);
         mark(k);
       }
+      carve(e, W, H, index, weight, m, strength, cellsAcross);
       break;
     }
     case 'valley': {
@@ -285,6 +430,96 @@ function applyStamp(e: Float32Array, touched: Uint8Array, W: number, H: number, 
   }
 }
 
+
+/**
+ * Valleys carved by running water into the cells of a stroke (D218), for the mountain range: where water would run
+ * (each cell to its lowest neighbour, hollows filled first so it always finds a way out of the stroke's box), how
+ * much gathers in each cell, and a valley cut by it, deeper where more has gathered (up to 45% of the stroke's
+ * strength), widened by a little smoothing of the cuts, twice over so the second follows the first's valleys.
+ */
+function carve(e: Float32Array, W: number, H: number, index: Int32Array, weight: Float32Array, m: number, strength: number, cellsAcross: number): void {
+  if (m < 9) return;
+  // The stroke's box (columns as offsets from the first, across the 180th meridian if need be).
+  let jMin = H, jMax = 0;
+  const base = index[0] % W;
+  let cMin = 0, cMax = 0;
+  for (let q = 0; q < m; q++) {
+    const k = index[q], j = Math.floor(k / W), i = k % W, c = ((((i - base) % W) + W + W / 2) % W) - W / 2;
+    if (j < jMin) jMin = j; if (j > jMax) jMax = j;
+    if (c < cMin) cMin = c; if (c > cMax) cMax = c;
+  }
+  const bw = cMax - cMin + 3, bh = jMax - jMin + 3;
+  if (bw * bh > 4e6) return;
+  const at = (bx: number, by: number) => (jMin - 1 + by) * W + ((((base + cMin - 1 + bx) % W) + W) % W);
+  const inGrid = (by: number) => jMin - 1 + by >= 0 && jMin - 1 + by < H;
+  const wgt = new Float32Array(bw * bh);
+  for (let q = 0; q < m; q++) {
+    const k = index[q], j = Math.floor(k / W), i = k % W, c = ((((i - base) % W) + W + W / 2) % W) - W / 2;
+    wgt[(j - jMin + 1) * bw + (c - cMin + 1)] = weight[q];
+  }
+  const N = bw * bh, filled = new Float32Array(N), order = new Int32Array(N), recv = new Int32Array(N), water = new Float32Array(N), cut = new Float32Array(N);
+  const DX = [1, -1, 0, 0, 1, 1, -1, -1], DY = [0, 0, 1, -1, 1, -1, 1, -1], DL = [1, 1, 1, 1, Math.SQRT2, Math.SQRT2, Math.SQRT2, Math.SQRT2];
+  for (let pass = 0; pass < 3; pass++) {
+    // Hollows filled from the box's edge inward (a priority flood), each cell draining to the one it was reached from.
+    const heap: number[] = [], seen = new Uint8Array(N);
+    const push = (b: number) => {
+      heap.push(b);
+      let c = heap.length - 1;
+      while (c > 0) { const p = (c - 1) >> 1; if (filled[heap[p]] <= filled[heap[c]]) break; [heap[p], heap[c]] = [heap[c], heap[p]]; c = p; }
+    };
+    const pop = () => {
+      const top = heap[0], last = heap.pop()!;
+      if (heap.length) {
+        heap[0] = last;
+        let c = 0;
+        for (;;) { const l = 2 * c + 1, r2 = l + 1; let s2 = c; if (l < heap.length && filled[heap[l]] < filled[heap[s2]]) s2 = l; if (r2 < heap.length && filled[heap[r2]] < filled[heap[s2]]) s2 = r2; if (s2 === c) break; [heap[s2], heap[c]] = [heap[c], heap[s2]]; c = s2; }
+      }
+      return top;
+    };
+    for (let by = 0; by < bh; by++) for (let bx = 0; bx < bw; bx++) {
+      const b = by * bw + bx;
+      filled[b] = inGrid(by) ? e[at(bx, by)] : 1e9;
+      recv[b] = -1;
+      if (bx === 0 || by === 0 || bx === bw - 1 || by === bh - 1) { seen[b] = 1; push(b); }
+    }
+    let n = 0;
+    while (heap.length) {
+      const b = pop();
+      order[n++] = b;
+      const bx = b % bw, by = (b - bx) / bw;
+      for (let d = 0; d < 8; d++) {
+        const nx = bx + DX[d], ny = by + DY[d];
+        if (nx < 0 || ny < 0 || nx >= bw || ny >= bh) continue;
+        const o = ny * bw + nx;
+        if (seen[o]) continue;
+        seen[o] = 1;
+        filled[o] = Math.max(filled[o], filled[b] + 1e-3);
+        recv[o] = b;
+        push(o);
+      }
+    }
+    // Water gathered: each cell its own, passed down to where it drains, from the highest first.
+    water.fill(1);
+    for (let t = n - 1; t >= 0; t--) { const b = order[t]; if (recv[b] >= 0) water[recv[b]] += water[b]; }
+    // The cut: deeper where more water has gathered (as a share of what a valley as long as the stroke is wide
+    // would gather), only inside the stroke.
+    const most = Math.max(4, cellsAcross * cellsAcross * 0.25);
+    for (let b = 0; b < N; b++) cut[b] = wgt[b] > 0 ? 0.65 * strength * Math.min(1, Math.pow(water[b] / most, 0.5)) * Math.pow(wgt[b], 0.5) : 0;
+    // Widened: the cuts smoothed with their neighbours (a valley a few cells across, not a slot one cell wide).
+    for (let s2 = 0; s2 < 2; s2++) {
+      const next = new Float32Array(N);
+      for (let by = 1; by < bh - 1; by++) for (let bx = 1; bx < bw - 1; bx++) {
+        const b = by * bw + bx;
+        next[b] = Math.max(cut[b] * 0.7, 0.4 * cut[b] + 0.15 * (cut[b - 1] + cut[b + 1] + cut[b - bw] + cut[b + bw]));
+      }
+      cut.set(next);
+    }
+    for (let by = 1; by < bh - 1; by++) for (let bx = 1; bx < bw - 1; bx++) {
+      const b = by * bw + bx;
+      if (cut[b] > 0 && wgt[b] > 0 && inGrid(by)) e[at(bx, by)] -= cut[b] / 3;
+    }
+  }
+}
 
 /**
  * An outline that becomes land or sea (D169). The outline (closed from its last point to its first) is the coast,

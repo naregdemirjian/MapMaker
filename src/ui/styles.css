@@ -223,6 +223,17 @@ table.shortcuts kbd { font: inherit; background: var(--panel2); border: 1px soli
 /* (The HUD lets the pointer through to the map, except on its buttons.) */
 .map-hud button { pointer-events: auto; }
 .space-note { white-space: nowrap; }
+/* The terrain brush's tip (D218). */
+.tip-button { display: inline-flex; align-items: center; gap: 6px; }
+.tip-picture { border-radius: 3px; display: block; }
+.tip-panel { position: fixed; z-index: 60; width: 430px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 10px 28px rgba(0,0,0,0.5); padding: 10px; }
+.tip-presets { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; margin-bottom: 10px; }
+.tip-presets button { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 5px 2px; font-size: 10.5px; background: var(--panel2); line-height: 1.15; }
+.tip-presets button.on { border-color: var(--accent); }
+.tip-edit { display: flex; gap: 12px; align-items: flex-start; }
+.tip-sliders { flex: 1; min-width: 0; }
+.tip-sliders .range-row { margin: 4px 0; }
+.tip-sliders input[type=range] { width: 100%; }
 /* Finding a star on a map of space (D215). */
 .space-find { position: absolute; top: 10px; right: 10px; width: 260px; z-index: 5; }
 .space-find input { width: 100%; background: rgba(8,12,18,0.78); }

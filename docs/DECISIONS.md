@@ -61,6 +61,27 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D218. Terrain brushes with tips of any shape; mountain ranges carved by running water
+
+- **Why.** The only brush was a round one fading from its middle, too regular to look like ground; and the Mountain
+  range brush made a band of "veins" (a round bump times ridged noise running every way), not a range.
+- **A tip for every brush that paints** (`BrushTip`, kept with the stroke only when it is not the plain soft round
+  one, so old strokes and plain ones are unchanged): how far toward its edge it keeps its full strength (*Fades over*:
+  100% fades from the middle as before, 5% is a hard edge; `tipWeight`); its *roundness* (an oval) and how it is
+  *turned* (from east, or from the stroke's own direction: "Turns with the stroke"); a *ragged edge* (in and out by up
+  to half its size, in lumps of its own size); *texture* (grain inside). Presets: Soft round, Hard round, Ragged,
+  Rocky, Flat turned, Across the stroke. In the options bar, a button showing the tip opens a panel of the presets
+  and every part, with a picture of the tip (`BrushTip.tsx`). Outlines, rivers and painted biomes have no tip.
+- **How a shaped tip is swept along a stroke** (`strokeMeasure`): beside each stretch it reaches as far to the side as
+  the oval's width across the stroke's direction there (a flat tip held east-west paints thin going east and wide
+  going north), and round each point of the stroke its own oval; the plain round tip keeps the old, exact distance.
+- **The mountain range** now raises a massif rising to a main crest that wanders a little either side of the stroke,
+  with peaks and saddles along it (noise laid in the range's own frame, along and across it), then carves it as water
+  would (`carve`): where water runs off (each cell to its lowest neighbour, hollows filled first), how much gathers,
+  and a valley cut by it, deeper and wider where more has gathered; three times, so later valleys follow earlier
+  ones. The result has branching valleys down its sides and ridges between them. It costs about twice what it did
+  (some 250 ms for a range 1,400 km long on Earth's 10 km grid, once, when the stroke is made).
+
 ### D217. Star looks by kind: Basic, Charts, Photographic; the Sun seen as a star
 
 - **Every preset has a kind** (`SkyKind`, `SKY_KINDS`): *Basic* (drawn for the story: Natural, Telescope, Deep
