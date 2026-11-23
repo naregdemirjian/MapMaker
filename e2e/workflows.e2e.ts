@@ -787,6 +787,14 @@ try {
     const far = await named(0), near = await named(3);
     assert.ok(far && !far.named, 'whole world: a dot, no name');
     assert.ok(near && near.named, 'zoomed in: named');
+    // Rated a country's capital (D219): named even seen whole; not rated again, its dot alone there.
+    await page.getByTestId('city-importance-rank').selectOption('capital');
+    await h.saved();
+    assert.ok((await named(0))?.named, 'rated a capital: named seen whole');
+    await page.getByTestId('city-importance-rank').selectOption('auto');
+    await h.saved();
+    const unrated = await named(0);
+    assert.ok(unrated && !unrated.named, 'not rated: its dot alone seen whole');
     // Renamed from 1620 on (it is abandoned in 1650): the map shows each name in its time.
     await h.setDate('1620');
     await page.getByTestId('rename-from').click();
@@ -2885,9 +2893,10 @@ try {
     await page.getByTestId('sculpt-strength').fill('3000');
     await stroke([[4, 30], [10, 31], [16, 30]]);
     await h.saved();
-    const across = await Promise.all(Array.from({ length: 9 }, (_, k) => rise([10, 31 - 2 + k * 0.5])));
-    const top = Math.max(...across), at = across.indexOf(top);
-    assert.ok(top > 1500 && at >= 2 && at <= 6, `the crest near the stroke (${across.map(Math.round).join(', ')})`);
+    // (Across it in five places: a stroke has a seed of its own, and one place may be a pass between peaks.)
+    const sections = await Promise.all([7, 8.5, 10, 11.5, 13].map((lon) => Promise.all(Array.from({ length: 9 }, (_, k) => rise([lon, 31 - 2 + k * 0.5 + (lon - 10) * (lon < 10 ? 1 / 6 : -1 / 6)])))));
+    const tops = sections.map((a) => Math.max(...a)), near = sections.filter((a) => { const i = a.indexOf(Math.max(...a)); return i >= 2 && i <= 6; }).length;
+    assert.ok(Math.max(...tops) > 1500 && near >= 3, `the crest near the stroke (${sections.map((a) => a.map(Math.round).join(' ')).join(' | ')})`);
     const flank = await Promise.all(Array.from({ length: 25 }, (_, k) => rise([7 + k * 0.25, 31 - 1.1])));
     let turns = 0;
     for (let k = 1; k < flank.length - 1; k++) if ((flank[k] - flank[k - 1]) * (flank[k + 1] - flank[k]) < 0) turns++;
@@ -5594,6 +5603,62 @@ try {
     for (let i = 0; i < 2; i++) { await page.getByTestId('undo').click(); await h.saved(); }
     assert.equal(await st<number>(`s.world.all('sequence').length`), before);
     await page.getByTestId('workspace-map').click();
+  });
+
+  await h.step('Cities as maps online show them (D219): seen whole only the capitals and the largest, more as the map is closed in on; larger and bolder for bigger ones; their look changed, all shown again; undone', async () => {
+    const st = <T,>(f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`) as Promise<T>;
+    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
+    const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
+    const before = await steps();
+    // Every one of today's cities of Turkey (any share of its people).
+    await page.getByTestId('menu-map').click();
+    await page.getByTestId('command-add-cities').click();
+    await page.getByTestId('add-cities').waitFor();
+    await page.getByTestId('cities-scope-chosen').check();
+    await page.getByTestId('cities-country-search').fill('Turkey');
+    await page.getByTestId('cities-country-Turkey').check();
+    await page.getByTestId('add-cities-filter-share').fill('0');
+    await page.getByTestId('add-cities-filter-share').dispatchEvent('pointerup');
+    await page.waitForFunction(() => /^\s*(\d{2,})/.test(document.querySelector('[data-testid=cities-count]')?.textContent ?? ''));
+    await page.getByTestId('add-cities-go').click();
+    await page.getByTestId('add-cities').waitFor({ state: 'detached', timeout: 30000 });
+    await h.saved();
+    type City = { name: string; size?: number; weight?: number; named: boolean };
+    const shown = async (lon: number, lat: number, zoom: number) => {
+      await page.evaluate(([lon, lat, zoom]) => (window as any).__mapmaker.store.setCamera({ lon, lat, zoom, rotation: 0, projection: 'mercator' }), [lon, lat, zoom] as const);
+      await page.waitForTimeout(700);
+      return (await page.evaluate(() => (window as any).__mapmaker.store.renderer.lastCities.filter((c: any) => c.lon > 25 && c.lon < 45 && c.lat > 35 && c.lat < 43))) as City[];
+    };
+    const far = await shown(35, 39, 0.6), near = await shown(35, 39, 3.2);
+    const farNames = far.map((c) => c.name);
+    assert.ok(farNames.includes('Ankara') && farNames.includes('Istanbul'), `seen whole, the capital and the largest (${farNames.join(', ')})`);
+    assert.ok(near.length >= far.length + 10, `more as the map is closed in on (${far.length} then ${near.length})`);
+    const ankara = near.find((c) => c.name === 'Ankara')!, small = [...near].sort((a, b) => (a.size ?? 0) - (b.size ?? 0))[0];
+    assert.ok((ankara.size ?? 0) > (small.size ?? 0) && (ankara.weight ?? 0) > (small.weight ?? 0), `larger and bolder for the capital (${ankara.size}/${ankara.weight} against ${small.name} ${small.size}/${small.weight})`);
+    await h.screenshot('cities-close');
+    await shown(35, 39, 0.6);
+    await h.screenshot('cities-far');
+    // Their look: every city whatever the scale, names a third larger; back as maps online.
+    await page.getByTestId('menu-map').click();
+    await page.getByTestId('command-label-style').click();
+    await page.getByTestId('city-style').scrollIntoViewIfNeeded();
+    await h.screenshot('city-style');
+    await page.getByTestId('city-fade').uncheck();
+    await h.saved();
+    const all = await shown(35, 39, 0.6);
+    assert.ok(all.length >= near.length, `all of them seen whole (${all.length})`);
+    assert.equal(await st<boolean>(`JSON.parse(s.world.get('meta', 'city_style').value).fade`), false);
+    await page.getByTestId('city-dot-style').selectOption('square');
+    await h.saved();
+    await page.getByTestId('city-style-reset').click();
+    await h.saved();
+    assert.equal(await st<boolean>(`JSON.parse(s.world.get('meta', 'city_style').value).fade`), true, 'as maps online again');
+    await page.getByTestId('label-style-dialog').getByRole('button', { name: 'Done' }).click();
+    // (Undone: the look, then the cities.)
+    for (let i = 0; i < 12 && (await steps()) > before; i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await steps(), before);
+    await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 0, lat: 20, zoom: 0, rotation: 0, projection: 'equirectangular' }));
   });
 
   await h.step('History Health lists the overlap, nothing else; no browser errors', async () => {

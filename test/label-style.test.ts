@@ -58,3 +58,47 @@ test('label style commands: general style and per-country looks are stored, merg
   assert.equal(world.get('meta', 'label_style'), undefined, 'undo removes the general style row');
   assert.equal(world.get('entity', varn)!.style, '{}');
 });
+
+test('city style (D219): as maps online by default, made whole when broken; importance; fewer cities zoomed out', async () => {
+  const { resolveCityStyle, DEFAULT_CITY_STYLE, cityImportance, cityThreshold, cityClass } = await import('../src/render-engine/label-style.ts');
+  assert.deepEqual(resolveCityStyle(null), DEFAULT_CITY_STYLE);
+  assert.deepEqual(resolveCityStyle('{broken'), DEFAULT_CITY_STYLE);
+  const odd = resolveCityStyle(JSON.stringify({ dots: 'no', dotStyle: 'star', dotSize: 99, nameSize: 0, density: -2, fade: false }));
+  assert.equal(odd.dots, true);
+  assert.equal(odd.dotStyle, 'map');
+  assert.equal(odd.dotSize, 4);
+  assert.equal(odd.nameSize, 0.3);
+  assert.equal(odd.density, 0.2);
+  assert.equal(odd.fade, false);
+  // A capital of millions ranks above a larger city that is not one, a city of a million above a town; one's own cities have none.
+  const ankara = cityImportance({ population: 3_700_000, capital: 'national', economic: 2 })!, istanbul = cityImportance({ population: 11_000_000, capital: null, economic: 3 })!;
+  const trabzon = cityImportance({ population: 800_000, capital: null })!, kars = cityImportance({ population: 80_000, capital: null })!;
+  assert.ok(ankara > istanbul && istanbul > trabzon && trabzon > kars);
+  assert.equal(cityImportance(null), null);
+  assert.deepEqual([cityClass(ankara), cityClass(istanbul), cityClass(trabzon), cityClass(kars), cityClass(null), cityClass(6.5)], [0, 0, 2, 2, 1, 1]);
+  // Zoomed out only the most important: seen whole (about 4 pixels a degree) Ankara but not Trabzon; a region (60) Trabzon too; close in, Kars.
+  assert.ok(ankara >= cityThreshold(4) && trabzon < cityThreshold(4));
+  assert.ok(trabzon >= cityThreshold(60) && kars < cityThreshold(60));
+  assert.ok(kars >= cityThreshold(400));
+  // "How many": twice as many lowers the bar.
+  assert.ok(cityThreshold(30, 2) < cityThreshold(30, 1) && cityThreshold(30, 0.5) > cityThreshold(30, 1));
+  // Rated: a rating wins over its people, and a city of one's own has one only when rated.
+  assert.equal(cityImportance({ population: 80_000, capital: null }, 6.8), 6.8);
+  assert.equal(cityImportance(null, 7.6), 7.6);
+  assert.equal(cityImportance(null, 99), 9);
+});
+
+test('city importance (D219): rated, unrated again, one undo each', () => {
+  const world = new World();
+  const city = cmd.createEntity(world, { type_id: 'settlement', name: 'Port Aster' }).result;
+  const country = cmd.createEntity(world, { type_id: 'polity', name: 'Varn' }).result;
+  const rated = cmd.setCityImportance(world, city, 5.2);
+  assert.equal(cmd.entityStyle(world.get('entity', city)).importance, 5.2);
+  const unrated = cmd.setCityImportance(world, city, null);
+  assert.equal(cmd.entityStyle(world.get('entity', city)).importance, undefined);
+  assert.throws(() => cmd.setCityImportance(world, country, 6), /no longer exists/);
+  world.applyDiffs(invertDiffs(unrated.diffs));
+  assert.equal(cmd.entityStyle(world.get('entity', city)).importance, 5.2);
+  world.applyDiffs(invertDiffs(rated.diffs));
+  assert.equal(world.get('entity', city)!.style, '{}');
+});

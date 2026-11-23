@@ -26,7 +26,7 @@ import { cleanSeaLevel, type SeaLevelPoint } from '../terrain/sea-level.ts';
 import { planetParamsOf, PLANET_PRESETS, type PlanetParams } from '../terrain/planet.ts';
 import { cleanStamps, isSculptTool, SCULPT_TOOLS, type TerrainStamp } from '../terrain/sculpt.ts';
 import { BIOMES } from '../terrain/biomes.ts';
-import { resolvePointStyle, type LabelStyle, type CountryLabel, type PointStyle } from '../render-engine/label-style.ts';
+import { resolvePointStyle, type LabelStyle, type CountryLabel, type PointStyle, resolveCityStyle, type CityStyle } from '../render-engine/label-style.ts';
 import { DEFAULT_FEATURE_STYLE, isFeatureKind, type FeatureKind, type FeatureStyle } from '../render-engine/feature-style.ts';
 import { relationKind, isRelationKind, type RelationKind } from './relations.ts';
 import { DEFAULT_SOURCES, fieldLayerStyleOf, fieldSourceOf, isFieldType, FIELD_TYPES, type FieldSource, type FieldType } from './fields.ts';
@@ -630,6 +630,8 @@ export interface EntityStyle {
   side?: string; route?: RouteStyle;
   /** Its look beyond its colour (D181): elevation, opacity, a stack of effects. */
   look?: CountryLook;
+  /** A city's importance as rated (D219: which show zoomed out, and how large), instead of from its people. */
+  importance?: number;
 }
 
 export function entityStyle(e: { style?: string } | null | undefined): EntityStyle {
@@ -653,6 +655,19 @@ export function setPointStyle(world: World, patch: Partial<PointStyle>): Command
   });
 }
 
+/** How cities are drawn (D219), for the whole project. */
+export function cityStyle(world: World): CityStyle {
+  return resolveCityStyle(world.get('meta', 'city_style')?.value);
+}
+
+/** Changes how cities are drawn (D219): one undoable step. */
+export function setCityStyle(world: World, patch: Partial<CityStyle>): CommandResult {
+  const value = JSON.stringify(resolveCityStyle(JSON.stringify({ ...cityStyle(world), ...patch })));
+  return run(world, 'Change how cities are drawn', (tx) => {
+    if (world.get('meta', 'city_style')) tx.update('meta', { key: 'city_style', value }); else tx.insert('meta', { key: 'city_style', value });
+  });
+}
+
 export function setGeneralLabelStyle(world: World, patch: Partial<Record<keyof LabelStyle, unknown>>): CommandResult {
   const next: Record<string, unknown> = { ...generalLabelStyle(world) };
   for (const [k, v] of Object.entries(patch)) { if (v === null) delete next[k]; else next[k] = v; }
@@ -661,6 +676,15 @@ export function setGeneralLabelStyle(world: World, patch: Partial<Record<keyof L
     const value = JSON.stringify(next);
     if (row) tx.update('meta', { key: 'label_style', value }); else tx.insert('meta', { key: 'label_style', value });
   });
+}
+
+/** Rates a city's importance (D219; null: from its people, or not rated for a city of one's own): one undoable step. */
+export function setCityImportance(world: World, id: string, importance: number | null): CommandResult {
+  const e = world.get('entity', id);
+  if (!e || e.type_id !== 'settlement') throw new Error('That city no longer exists.');
+  const next: EntityStyle = { ...entityStyle(e) };
+  if (importance === null || !Number.isFinite(importance)) delete next.importance; else next.importance = Math.max(3, Math.min(9, importance));
+  return run(world, `Rate ${e.name}'s importance`, (tx) => { tx.update('entity', { ...e, style: JSON.stringify(next) }); });
 }
 
 /** Change parts of an entity's look. `label: null` returns its label to the general style. */

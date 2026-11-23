@@ -73,6 +73,88 @@ export function labelText(name: string, style: LabelStyle, override?: CountryLab
   return style.uppercase ? t.toLocaleUpperCase() : t;
 }
 
+/**
+ * How cities are drawn (D219), for the whole project: meta row 'city_style'. As maps online draw them by default:
+ * a small white dot (a ring round a dot for a country's capital) and the name beside it in white with a dark edge,
+ * larger and bolder for bigger and more important cities, the same size on screen at every scale; zoomed out, only
+ * the most important are shown, more and more appearing as the map is closed in on.
+ */
+export interface CityStyle {
+  /** A dot at each city, and how it is drawn: as maps online ('map'), filled, a ring, or a square. */
+  dots: boolean;
+  dotStyle: 'map' | 'filled' | 'ring' | 'square';
+  /** The dot's size and the name's size, as multiples of the design. */
+  dotSize: number;
+  nameSize: number;
+  /** The names' lettering, colour and edge (its width in pixels of a 1920-wide frame). */
+  font: string;
+  color: string;
+  haloColor: string;
+  haloWidth: number;
+  /** How much larger and bolder the bigger and more important cities are (0: all alike; 1: as maps online). */
+  byImportance: number;
+  /** Fewer cities zoomed out, the most important staying longest; and how many show at a scale (1: as maps online). */
+  fade: boolean;
+  density: number;
+  /** Dots and names growing as the map is closed in on (as before), instead of keeping their size on screen. */
+  growWithZoom: boolean;
+}
+
+export const DEFAULT_CITY_STYLE: CityStyle = {
+  dots: true, dotStyle: 'map', dotSize: 1, nameSize: 1, font: 'Segoe UI', color: '#ffffff', haloColor: '#1d2126', haloWidth: 3,
+  byImportance: 1, fade: true, density: 1, growWithZoom: false,
+};
+
+export function resolveCityStyle(stored: string | null | undefined): CityStyle {
+  let st: Partial<CityStyle> = {};
+  try { st = (JSON.parse(stored || '{}') as Partial<CityStyle> | null) ?? {}; } catch { /* a damaged setting falls back */ }
+  const d = DEFAULT_CITY_STYLE;
+  return {
+    dots: bool(st.dots, d.dots), dotStyle: (['map', 'filled', 'ring', 'square'] as const).includes(st.dotStyle as CityStyle['dotStyle']) ? st.dotStyle! : d.dotStyle,
+    dotSize: num(st.dotSize, 0.2, 4, d.dotSize), nameSize: num(st.nameSize, 0.3, 4, d.nameSize),
+    font: str(st.font, d.font), color: str(st.color, d.color), haloColor: str(st.haloColor, d.haloColor), haloWidth: num(st.haloWidth, 0, 10, d.haloWidth),
+    byImportance: num(st.byImportance, 0, 1.5, d.byImportance), fade: bool(st.fade, d.fade), density: num(st.density, 0.2, 5, d.density), growWithZoom: bool(st.growWithZoom, d.growWithZoom),
+  };
+}
+
+/**
+ * How important a city is (D219), for which show first and how large: the order of magnitude of its people, a
+ * country's capital a whole step more (a region's a little), an economic centre a little more. About 7.5 for a capital
+ * of millions, 6 for a city of a million, 5 for a town of a hundred thousand. Cities of one's own have none (always shown).
+ */
+export function cityImportance(meta: { population: number; capital: 'national' | 'regional' | null; economic?: number } | null, set?: number | null): number | null {
+  if (typeof set === 'number' && Number.isFinite(set)) return Math.max(3, Math.min(9, set));
+  if (!meta) return null;
+  return Math.log10(Math.max(1000, meta.population)) + (meta.capital === 'national' ? 1 : meta.capital === 'regional' ? 0.3 : 0) + 0.12 * Math.max(0, Math.min(3, meta.economic ?? 0));
+}
+
+/**
+ * The least importance a city needs to be shown at a scale (pixels of a 1920-wide frame per degree), as maps online
+ * thin them out: only capitals of millions and the largest cities seen whole, towns of a hundred thousand at the scale
+ * of a region; `density` 2 shows about as many again (the bar lower by 0.8).
+ */
+export function cityThreshold(pxPerDeg: number, density = 1): number {
+  const bar = 6 - 1.15 * Math.log2(Math.max(1e-6, pxPerDeg) / 33);
+  return Math.max(3.2, Math.min(7.3, bar)) - 0.8 * Math.log2(Math.max(0.05, density));
+}
+
+/**
+ * How important a city can be said to be (D219), for cities of one's own (or to rate one of today's otherwise): a
+ * country's capital, a large city, a city, a town, a village.
+ */
+export const CITY_RANKS: ReadonlyArray<{ id: string; name: string; importance: number }> = [
+  { id: 'capital', name: 'A country\'s capital', importance: 7.6 },
+  { id: 'large', name: 'A large city', importance: 6.8 },
+  { id: 'city', name: 'A city', importance: 6 },
+  { id: 'town', name: 'A town', importance: 5.2 },
+  { id: 'village', name: 'A village', importance: 4.4 },
+];
+/** A city of one's own that is not rated: its dot always shown, its name from the scale at which a city's is. */
+export const UNRATED_CITY = 6;
+
+/** A city's class by its importance: 0 the most important (capitals of millions, the largest cities), 1, 2 the rest. */
+export const cityClass = (importance: number | null) => (importance === null ? 1 : importance >= 7.2 ? 0 : importance >= 6.2 ? 1 : 2);
+
 /** Sizes of city and character markers and names (multipliers, 1 = as designed). Meta row 'point_style'. */
 export interface PointStyle { city: number; character: number }
 

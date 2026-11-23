@@ -61,6 +61,29 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D219. Cities drawn as maps online draw them, fewer when zoomed out, their look one's own
+
+- **Why.** Every city was drawn alike (a cream dot and a serif name growing with the zoom), and seen whole the map
+  was covered in names. Maps online draw a city by how large and important it is and show only the most important
+  ones zoomed out, more appearing as one closes in; the look of the dots and names could not be changed.
+- **How important a city is** (`cityImportance`): the order of magnitude of its people, a country's capital a whole
+  step more, a region's a little, an economic centre a little: about 7.5 for a capital of millions, 6 for a city of a
+  million, 5 for a town of a hundred thousand. A city can be rated instead in its panel (*Importance*: a country's
+  capital, a large city, a city, a town, a village; `setCityImportance`). A city of one's own not rated has none: its
+  dot shows at every scale and its name from the scale at which a city's does.
+- **Fewer cities zoomed out** (`cityThreshold`): the least importance shown at a scale, from pixels of a 1920-wide frame
+  per degree: seen whole only capitals of millions and the largest cities, towns of a hundred thousand at the scale of
+  a region, every town closer in. A city just past the bar fades in over a short span instead of popping in. *How
+  many* moves the bar (×2: about as many again).
+- **Drawn as maps online by default** (`CityStyle`, meta row `city_style`, one undo per change): a small white dot
+  edged in grey, a country's capital a ring round a dark dot; the name beside it in white with a dark edge, in three
+  classes by importance (17, 15.5, 14 pixels of a 1920 frame; bold, semi-bold, regular), the same size on screen at
+  every scale. The most important are placed first where names crowd.
+- **Its own look** (Label style → Cities): dots or none, and drawn as maps online, filled, a ring or a square; the dot's
+  and the name's sizes; font, colours and edge; how much bigger cities are drawn larger (0: all alike); fewer cities
+  zoomed out or all of them; dots and names growing with the zoom as before. "Back to the look of maps online" undoes
+  it all. The sizes of cities and characters overall stay as they were (D46).
+
 ### D218. Terrain brushes with tips of any shape; mountain ranges carved by running water
 
 - **Why.** The only brush was a round one fading from its middle, too regular to look like ground; and the Mountain

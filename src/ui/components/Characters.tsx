@@ -7,6 +7,8 @@ import { fromStore, compare } from '../../core-time/index.ts';
 import { fmt } from '../inputs.tsx';
 import { CharacterIconSection, UnitSection } from './CharacterIcons.tsx';
 import { isBaseEvent } from '../../world-model/schema.ts';
+import { placeMetaOf } from '../../domain/places.ts';
+import { cityImportance, CITY_RANKS } from '../../render-engine/label-style.ts';
 
 /** How a character placement is recorded: into the event being recorded, or as a change without an event. */
 export function placementMode(): cmd.EditMode {
@@ -38,6 +40,7 @@ export function CharacterSection({ id }: { id: string }) {
       <p className="muted">{city
         ? <>A city is a point, with no borders. Click the map with the Characters &amp; cities tool to found {ent.name} there on the date being viewed, or use “From the beginning” below; with Select, drag it to move it from that date.</>
         : <>A character is a point, with no borders. Click the map with the Characters &amp; cities tool to put {ent.name} there from the date being viewed; with Select, drag the marker to move it. Between two places {ent.name} travels, unless set to appear.</>}</p>
+      {city && <CityImportance id={id} />}
       <h4>Places</h4>
       {track.map((wp, i) => {
         const prev = track[i - 1];
@@ -62,5 +65,32 @@ export function CharacterSection({ id }: { id: string }) {
       {!city && <CharacterIconSection id={id} />}
       {!city && <UnitSection id={id} />}
     </div>
+  );
+}
+
+/** A rank's name for an importance (the nearest). */
+const rankName = (imp: number) => CITY_RANKS.reduce((a, r) => (Math.abs(r.importance - imp) < Math.abs(a.importance - imp) ? r : a)).name.toLowerCase();
+
+/**
+ * How important a city is (D219): from its people (today's cities), or rated (a capital, a large city, …): it decides
+ * from how far out it is shown and how large. A city of one's own not rated keeps its dot at every scale.
+ */
+function CityImportance({ id }: { id: string }) {
+  const s = useStore();
+  const ent = s.world!.get('entity', id);
+  if (!ent) return null;
+  const meta = placeMetaOf(ent.style);
+  const rated = cmd.entityStyle(ent).importance;
+  const fromPeople = cityImportance(meta);
+  const value = typeof rated === 'number' ? (CITY_RANKS.find((r) => Math.abs(r.importance - rated) < 0.05)?.id ?? 'rated') : 'auto';
+  const choose = (v: string) => { const r = CITY_RANKS.find((x) => x.id === v); s.execute((wd) => cmd.setCityImportance(wd, id, r ? r.importance : null)); };
+  return (
+    <label className="city-rank" title="How important the city is: the more important, the further out it is still shown, and the larger and bolder its name">Importance
+      <select value={value} onChange={(e) => choose(e.target.value)} data-testid="city-importance-rank">
+        <option value="auto">{fromPeople !== null ? `From its people (${rankName(fromPeople)})` : 'Not rated (its dot always shown)'}</option>
+        {CITY_RANKS.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+        {value === 'rated' && <option value="rated">As rated</option>}
+      </select>
+    </label>
   );
 }

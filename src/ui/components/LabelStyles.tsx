@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useStore } from '../store.ts';
 import { NumberField } from '../inputs.tsx';
 import * as cmd from '../../domain/commands.ts';
-import { resolveLabelStyle, labelFont, labelText, LABEL_FONTS, DEFAULT_LABEL_STYLE, type LabelStyle, type CountryLabel } from '../../render-engine/label-style.ts';
+import { resolveLabelStyle, labelFont, labelText, LABEL_FONTS, DEFAULT_LABEL_STYLE, DEFAULT_CITY_STYLE, type LabelStyle, type CountryLabel, type CityStyle } from '../../render-engine/label-style.ts';
 
 /** A slider that previews while dragging and saves once, when let go (one undo step). */
 export function Slider({ value, min, max, step, onCommit, format, testId, def }: { value: number; min: number; max: number; step: number; onCommit: (v: number) => void; format?: (v: number) => string; testId?: string; def?: number }) {
@@ -80,8 +80,11 @@ export function LabelStyleDialog({ onClose }: { onClose: () => void }) {
         <p className="muted">The look of every country label. A country can have its own look: select it and open “Label”.</p>
         <Preview style={style} text={labelText('Kingdom of Varn', style)} />
         <LabelStyleEditor value={style} onChange={(patch) => s.execute((wd) => cmd.setGeneralLabelStyle(wd, patch))} idPrefix="general-label" />
-        <h4>Cities and characters</h4>
-        <p className="muted">They grow as you zoom in and shrink as you zoom out; city names too small to read are left out. Their size overall:</p>
+        <h4>Cities</h4>
+        <p className="muted">As maps online draw them, unless changed here: a small dot (a ring round a dot for a country's capital) and the name beside it, larger and bolder for bigger and more important cities; zoomed out, only the most important show, more appearing as you close in. A city's importance comes from its people, or as rated in its panel; a city of your own not rated keeps its dot at every scale.</p>
+        <CityStyleEditor />
+        <h4>Sizes of cities and characters</h4>
+        <p className="muted">Characters grow as you zoom in and shrink as you zoom out; names too small to read are left out. Their size overall:</p>
         <div className="two">
           <label>Cities (%)<NumberField min={25} max={400} step={5} value={Math.round(cmd.pointStyle(w).city * 100)} def={100} onCommit={(n) => s.execute((wd) => cmd.setPointStyle(wd, { city: n / 100 }))} testId="city-size" /></label>
           <label>Characters (%)<NumberField min={25} max={400} step={5} value={Math.round(cmd.pointStyle(w).character * 100)} def={100} onCommit={(n) => s.execute((wd) => cmd.setPointStyle(wd, { character: n / 100 }))} testId="character-size" /></label>
@@ -124,6 +127,43 @@ export function CountryLabelSection({ id }: { id: string }) {
           </div>
         </details>
       </>}
+    </div>
+  );
+}
+
+/** How cities are drawn (D219): their dots, their names, how much their importance shows, fewer when zoomed out. */
+function CityStyleEditor() {
+  const s = useStore();
+  const cs = cmd.cityStyle(s.world!);
+  const set = (patch: Partial<CityStyle>) => s.execute((wd) => cmd.setCityStyle(wd, patch));
+  const pct = (v: number) => `${Math.round(v * 100)}%`;
+  const fonts = LABEL_FONTS.includes(cs.font) ? LABEL_FONTS : [cs.font, ...LABEL_FONTS];
+  return (
+    <div className="label-editor city-style" data-testid="city-style">
+      <label className="check"><input type="checkbox" checked={cs.dots} onChange={(e) => set({ dots: e.target.checked })} data-testid="city-dots" /> A dot at each city</label>
+      {cs.dots && <>
+        <label>Dot<select value={cs.dotStyle} onChange={(e) => set({ dotStyle: e.target.value as CityStyle['dotStyle'] })} data-testid="city-dot-style">
+          <option value="map">As maps online (a ring round a dot for a capital)</option>
+          <option value="filled">Filled, in the names' colour</option>
+          <option value="ring">A ring</option>
+          <option value="square">A square</option>
+        </select></label>
+        <label>Dot size<Slider value={cs.dotSize} min={0.2} max={4} step={0.05} def={1} format={pct} onCommit={(v) => set({ dotSize: v })} testId="city-dot-size" /></label>
+      </>}
+      <label>Name size<Slider value={cs.nameSize} min={0.3} max={4} step={0.05} def={1} format={pct} onCommit={(v) => set({ nameSize: v })} testId="city-name-size" /></label>
+      <label>Font<select value={cs.font} onChange={(e) => set({ font: e.target.value })} data-testid="city-font">
+        {fonts.map((f) => <option key={f} value={f} style={{ fontFamily: f }}>{f}</option>)}
+      </select></label>
+      <div className="two">
+        <label>Names<input type="color" value={cs.color} onChange={(e) => set({ color: e.target.value })} data-testid="city-color" /></label>
+        <label>Their edge<input type="color" value={cs.haloColor} onChange={(e) => set({ haloColor: e.target.value })} data-testid="city-halo-color" /></label>
+      </div>
+      <label>Edge width<Slider value={cs.haloWidth} min={0} max={10} step={0.5} def={3} format={(v) => (v ? `${v} px` : 'none')} onCommit={(v) => set({ haloWidth: v })} testId="city-halo-width" /></label>
+      <label title="How much larger and bolder bigger and more important cities are drawn (0: all alike)">Bigger cities larger<Slider value={cs.byImportance} min={0} max={1.5} step={0.05} def={1} format={pct} onCommit={(v) => set({ byImportance: v })} testId="city-importance" /></label>
+      <label className="check" title="Zoomed out, only the most important cities show (capitals and the largest first); more appear as you close in"><input type="checkbox" checked={cs.fade} onChange={(e) => set({ fade: e.target.checked })} data-testid="city-fade" /> Fewer cities when zoomed out</label>
+      {cs.fade && <label title="How many cities show at a scale (×2: about as many again)">How many<Slider value={cs.density} min={0.2} max={5} step={0.1} def={1} format={(v) => `×${v.toFixed(1)}`} onCommit={(v) => set({ density: v })} testId="city-density" /></label>}
+      <label className="check" title="Dots and names growing as you close in (as before), instead of keeping their size on screen"><input type="checkbox" checked={cs.growWithZoom} onChange={(e) => set({ growWithZoom: e.target.checked })} data-testid="city-grow" /> Grow as the map is closed in on</label>
+      <button className="link" onClick={() => set(DEFAULT_CITY_STYLE)} data-testid="city-style-reset">Back to the look of maps online</button>
     </div>
   );
 }
