@@ -39,6 +39,10 @@ a { color: var(--accent); cursor: pointer; }
 /* (Clipped, not scrollable: a crowded top bar wider than the window must never let the whole page slide sideways.) */
 .app { overflow: clip; display: grid; height: 100vh; grid-template-columns: var(--tools, 44px) var(--left, 250px) minmax(0, 1fr) var(--right, 310px); grid-template-rows: 24px 32px var(--options, 36px) minmax(0, 1fr) var(--bottom, 150px) 24px; grid-template-areas: "top top top top" "workspaces workspaces workspaces workspaces" "tools options options options" "tools left center right" "bottom bottom bottom bottom" "status status status status"; }
 .topbar { grid-area: top; display: flex; align-items: center; gap: 4px; padding: 0 8px; background: var(--panel); border-bottom: 1px solid var(--line); min-width: 0; }
+/* In the desktop app the top bar is the window's title bar (D214): it moves the window (double-click: maximise), and
+   leaves room at its ends for the window's own buttons (the env() values exist only there; in a browser, 8px). */
+.topbar { -webkit-app-region: drag; padding-left: max(8px, env(titlebar-area-x, 0px)); padding-right: calc(8px + 100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)); }
+.topbar button, .topbar select, .topbar input, .topbar a, .topbar [role=menubar], .topbar [role=menuitem] { -webkit-app-region: no-drag; }
 .topbar .brand { font-size: 13px; margin-right: 2px; }
 .topbar .project-name { font-size: 12px; }
 .map-chooser { display: inline-flex; align-items: center; gap: 4px; margin-left: 10px; }

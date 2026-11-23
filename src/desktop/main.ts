@@ -62,6 +62,11 @@ if (!app.requestSingleInstanceLock()) {
     console.log(`Map Maker ${version} is running at ${url} (projects: ${projectsDir})`);
     window = new BrowserWindow({
       width: 1600, height: 1000, minWidth: 1000, minHeight: 640, title: 'Map Maker', backgroundColor: '#0e141a', show: false,
+      // No title bar of the system's own (white on Windows) above Map Maker's top bar (D214): the top bar is the title
+      // bar, the window's minimise, maximise and close buttons drawn over its right end in its colours (on a Mac, the
+      // three buttons at its left), and the bar leaves room for them.
+      titleBarStyle: 'hidden',
+      titleBarOverlay: process.platform === 'darwin' ? true : { color: '#151d25', symbolColor: '#e3e9ef', height: 24 },
       webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false },
     });
     window.once('ready-to-show', () => { window?.maximize(); window?.show(); });

@@ -9,6 +9,8 @@ The approved architecture is the Claude Doc "Map Maker — Technical Architectur
 
 ## Status at a glance (20 November 2026, Stages 2, 3, 4, 6, 8 to 14 done; Stage 7 mostly done)
 
+- **No system title bar in the desktop app** (D214): Map Maker's top bar is the window's title bar, the window's
+  buttons drawn over its right end.
 - **Tidy** (D213): `Panels.tsx` broken up into the shared inputs, the bars, the tools, the lists and Properties; the
   windows' names typed; the colours used in several places named in one place in `styles.css`.
 - **Present and Export** (D212): the shot's settings in tabs (All, Shot, Camera and timing, Look, Graphics and text,

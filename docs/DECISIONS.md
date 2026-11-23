@@ -61,6 +61,17 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D214. The desktop app has no title bar of the system's own: Map Maker's top bar is the title bar
+
+- **Why.** On Windows the window's own title bar (white, with only "Map Maker" in it) sat above Map Maker's dark top
+  bar with its menus, a second bar for nothing. (The system's menu bar was already gone: `Menu.setApplicationMenu(null)`.)
+- **What.** The window is made with `titleBarStyle: 'hidden'` and a title bar overlay: the minimise, maximise and close
+  buttons are drawn by the system over the right end of the top bar, in its colours (`#151d25`, symbols `#e3e9ef`),
+  24 pixels high like the bar; on a Mac the three buttons sit at its left. The top bar moves the window when dragged
+  (`-webkit-app-region: drag`; double-click maximises), its menus and buttons stay clickable (`no-drag`), and it leaves
+  room at its ends for the window's buttons from the CSS values `env(titlebar-area-x)` and `env(titlebar-area-width)`,
+  which exist only in the desktop app (in a browser the bar is as it was).
+
 ### D213. Tidy: Panels.tsx broken up, windows' names typed, shared colours named (interface stage 8)
 
 - **`Panels.tsx` (1,200 lines, everything from the date field to Properties) is gone**, its parts moved unchanged by
