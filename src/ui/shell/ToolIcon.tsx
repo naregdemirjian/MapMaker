@@ -9,6 +9,7 @@ export const TOOL_ICONS: Record<Tool, string> = {
   vertex: '<path d="M5 18L11 6l8 9"/><circle cx="5" cy="18" r="1.8"/><circle cx="11" cy="6" r="1.8"/><circle cx="19" cy="15" r="1.8"/>',
   split: '<path d="M6 4h12v16H6z"/><path d="M3 15L21 8" stroke-dasharray="3 2.5"/>',
   regions: '<path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/>',
+  reach: '<path d="M7 3v18" stroke-dasharray="2.5 2.5"/><path d="M3 12h15M14 8l4 4-4 4"/>',
   erase: '<path d="M4 16l9-9 6 6-6 6H8zM9 11l5 5M11 20h9"/>',
   feature: '<path d="M4 17c4-10 8 3 15-9"/><path d="M15 7l4 1-1 4"/><circle cx="6" cy="7" r="1.8"/>',
   place: '<path d="M12 21s6-6 6-11a6 6 0 10-12 0c0 5 6 11 6 11z"/><circle cx="12" cy="10" r="2"/>',

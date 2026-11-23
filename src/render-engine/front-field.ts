@@ -52,6 +52,11 @@ export interface FrontShape {
    * `cellDeg`: how large the cell asked about is, in degrees of latitude (what is finer than it cannot count).
    */
   slowAt?: (lon: number, lat: number, cellDeg: number) => number;
+  /**
+   * The rings are already in one run of longitudes (each continuous, all within 300° of one another), as given: their
+   * longitudes are not made continuous again from the first ring (rings cut to a box far apart, D222).
+   */
+  continuous?: boolean;
 }
 
 /** Cells round the change: the land reached is carried this far beyond it, less one (room for soft edges). */
@@ -66,7 +71,7 @@ export type Rings = Array<Array<[number, number]>>;
  */
 export function buildFrontField(rings: Rings, source: FrontSource, shape: FrontShape): FrontField | null {
   // 1. Longitudes made continuous (a change across the 180th meridian gets longitudes beyond 180).
-  const rs = unwrap(rings);
+  const rs = shape.continuous ? rings.filter((r) => r.length >= 3) : unwrap(rings);
   if (!rs.length) return null;
   let west = Infinity, east = -Infinity, south = Infinity, north = -Infinity;
   for (const r of rs) for (const [x, y] of r) { if (x < west) west = x; if (x > east) east = x; if (y < south) south = y; if (y > north) north = y; }

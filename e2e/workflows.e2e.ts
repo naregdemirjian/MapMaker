@@ -5886,6 +5886,87 @@ try {
     await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
   });
 
+  await h.step('Advance and buffer zone (D222): a buffer zone either side of a border to nobody; an advance taking the neighbour\'s land within the distance of their border, by travel through the land, in an event spreading from the border; undone', async () => {
+    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
+    await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 26, lat: 48.5, zoom: 4.2, rotation: 0, projection: 'equirectangular' }));
+    const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
+    const before = await steps();
+    // A layer of its own, and two countries side by side on the plain north of the Black Sea, their border along 25° east
+    // (from ten years before the date viewed: a change in an event at the very moment a correction is made gives way to it).
+    await page.getByRole('button', { name: '+ Layer' }).click();
+    await page.getByTestId('new-layer-name').fill('Marches');
+    await page.getByTestId('new-layer-name').press('Enter');
+    await page.locator('.left .row', { hasText: 'Marches' }).getByText('drawing here').waitFor();
+    await page.evaluate(() => {
+      const m = (window as any).__mapmaker, s = m.store;
+      const box = (x0: number, y0: number, x1: number, y1: number) => [[[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]];
+      s.execute((w: any, e: any) => m.bench.commands.addCountries(w, e, { spaceId: s.spaceId, layerId: s.layerId, countries: [{ name: 'Westmark', polygons: [box(20, 47, 25, 50)], color: '#3d7dd8' }, { name: 'Ostland', polygons: [box(25, 47, 31, 50)], color: '#d8823d' }], mode: { kind: 'change', t: { day: s.time.day - 3650, ms: 0 } } }));
+    });
+    await h.saved();
+    // Who holds a place at the date viewed (or so many days later), on this layer.
+    const owner = (lon: number, lat: number, later = 0) => page.evaluate(([x, y, days]) => {
+      const m = (window as any).__mapmaker, s = m.store, arr = s.world.arrangement(s.spaceId);
+      const t = { day: s.time.day + days, ms: s.time.ms };
+      const id = m.bench.commands.ownerReader(arr, s.engine.partitionState(s.spaceId, s.layerId, t))(arr.locate(m.bench.lonLatToVec(x, y)));
+      return id ? s.world.get('entity', id).name as string : null;
+    }, [lon, lat, later] as const);
+    assert.deepEqual([await owner(24, 48.5), await owner(26, 48.5)], ['Westmark', 'Ostland']);
+    // The tool, its options: the land not minded (as the crow flies over it), so that the distances are the map's own.
+    await page.getByTestId('tool-select').click();
+    await page.locator('main.center').hover();
+    await page.keyboard.press('m');
+    assert.equal(await page.getByTestId('tool-name').textContent(), 'Advance & buffer zone', 'its key, M');
+    if (await page.getByTestId('reach-mind').count()) await page.getByTestId('reach-mind').fill('0');
+    const kmPerDeg = 6371.0088 * Math.PI / 180 * Math.cos((48.5 * Math.PI) / 180);
+    // A buffer zone 100 km either side of the border, to nobody: a click beside the border.
+    await page.getByTestId('reach-mode').selectOption('buffer');
+    await page.getByTestId('reach-owner').selectOption('');
+    await page.getByTestId('reach-km').fill('100');
+    const near = await h.toPage([25.04, 48.5]);
+    await page.mouse.click(near[0], near[1]);
+    await page.getByTestId('reach-what').waitFor();
+    assert.match((await page.getByTestId('reach-what').textContent()) ?? '', /A buffer zone 100 km either side of the border of (Westmark and Ostland|Ostland and Westmark), to nobody/);
+    await h.screenshot('buffer-zone');
+    await page.getByTestId('choice-correct').click();
+    await page.getByTestId('confirm-edit').click();
+    await page.getByTestId('confirm-edit').waitFor({ state: 'detached' });
+    await h.saved();
+    const d100 = 100 / kmPerDeg;
+    assert.deepEqual([await owner(25 - d100 / 2, 48.5), await owner(25 + d100 / 2, 48.5)], [null, null], 'nobody\'s land either side');
+    assert.deepEqual([await owner(25 - 1.6 * d100, 48.5), await owner(25 + 1.6 * d100, 48.5)], ['Westmark', 'Ostland'], 'beyond it, theirs');
+    await page.getByTestId('undo').click();
+    await h.saved();
+    assert.equal(await owner(25.3, 48.5), 'Ostland', 'the zone undone');
+    // An advance: Westmark advances 200 km into Ostland, in an event spreading from the border.
+    await page.getByTestId('reach-mode').selectOption('advance');
+    await page.getByTestId('reach-owner').selectOption({ label: 'Westmark' });
+    await page.getByTestId('reach-km').fill('200');
+    const inside = await h.toPage([28.5, 48.5]);
+    await page.mouse.click(inside[0], inside[1]);
+    await page.getByTestId('reach-what').waitFor();
+    assert.match((await page.getByTestId('reach-what').textContent()) ?? '', /Westmark advances 200 km into Ostland from the border they share/);
+    await h.screenshot('advance');
+    await page.getByTestId('choice-new').click();
+    await page.getByTestId('event-target').selectOption('new-event');
+    assert.equal(await page.getByTestId('new-event-name').inputValue(), 'Westmark advances into Ostland');
+    await page.getByTestId('confirm-edit').click();
+    await page.getByTestId('confirm-edit').waitFor({ state: 'detached' });
+    await h.saved();
+    // (Once the event is over: the change spreads from the border while it lasts.)
+    const ev = await page.evaluate(() => { const s = (window as any).__mapmaker.store, e = s.selection?.kind === 'event' ? s.world.get('event', s.selection.id) : null; return e ? { name: e.name as string, days: e.end_day === null ? 0 : (e.end_day as number) - s.time.day + 1 } : null; });
+    assert.equal(ev?.name, 'Westmark advances into Ostland', 'the event made, and chosen');
+    const d200 = 200 / kmPerDeg, after = Math.max(1, ev!.days);
+    assert.equal(await owner(25 + d200 / 2, 48.5, after), 'Westmark', 'half the distance in: taken');
+    assert.equal(await owner(25 + d200 * 1.3, 48.5, after), 'Ostland', 'beyond the distance: still Ostland\'s');
+    assert.equal(await owner(22, 48.5, after), 'Westmark');
+    // Undone, back as before.
+    for (let i = 0; i < 12 && (await steps()) > before; i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await steps(), before);
+    await h.chooseTool('select');
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
+  });
+
   await h.step('History Health lists the overlap, nothing else; no browser errors', async () => {
     await page.getByTestId('workspace-map').click();
     await page.getByTestId('health').click();

@@ -61,6 +61,38 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D222. Advance and buffer zone: the land within a distance of a border, by travel through the land
+
+- **Why.** An army's advance of so many kilometres into a neighbour, or a demilitarised zone so wide either side of a
+  border, had to be drawn by hand, guessing the distance on the map and the shape the land gives it (the optional
+  extra put off after Stage 13, from the strategic assistance planned with the smart brushes, D148).
+- **The tool** (*Advance & buffer zone*, key M, with the border tools; `ReachToolOptions`, `reachAt` in
+  `ui/components/Reach.tsx`): *Make* an advance into a neighbour or a buffer zone along a border; *Who advances* (or
+  *The zone goes to*: nobody, a no man's land, or an owner); *Distance* in kilometres (50 to start with, 1 to 2,000);
+  *Minding the land* (0 to 1, 0.6 to start with; shown where the map has heights). An advance: a click on the
+  neighbour's land. A buffer zone: a click on or within a dozen pixels of a border between two countries
+  (`borderNear`); the whole of that border is used.
+- **Within reach, by travel through the land** (`landWithin`, `domain/reach.ts`): a front field (D136) from the
+  border the two share (`sharedBorder`, at the date viewed) through the land of the one advanced into, or of both for
+  a zone (`landRings`: the rings of their parcels), slowed by rough ground, high ground and water as the fronts of
+  D142 are (`terrainSlowness`, on the heights as sculpted, with the sea of the date viewed); the land reached within
+  the distance traced as smooth outlines with their holes (`polygonsOf`). So an advance goes down a valley before
+  over the range beside it, round a bay rather than across it; an island of the neighbour's near the border is reached
+  across the water. The field is worked out only round the border: the land is first cut to a box round the border's
+  lines grown by a third more than the distance (nothing farther can be reached), so that the grid stays fine, about
+  ten cells across the distance, however large the countries (at most 400 cells across; about 70 ms for a border 40°
+  long). (A box grown by the distance alone let its own sides, which are no edges of the land, fall within reach by
+  half a cell at high latitudes; the land reached was then carried past them, as past the land's real edges, 40 km
+  too far.) A border too long to measure at once (its box over 300° of longitude) or no land within reach is said so.
+- **Given like a drawing** (`giveLand`, commands.ts): the outlines go into the map as an edit, but only the land the
+  owners named hold at the edit's moment changes hands (the neighbour's for an advance, both countries' for a zone:
+  `onlyFrom`, as adding today's countries does, D171), so the outlines' margins never take the sea or a third
+  country's land. The drawing prompt asks what it means as for any drawing: a correction from the date viewed, or a
+  new change in a new or an existing event (an advance's event named "X advances into Y", a conquest, spreading as an
+  advancing front from the border); one undo step. While it asks, the land is drawn on the map, cut to the land it
+  lies in, in the colour of who gets it, and the prompt stands at the right so that the map can be seen.
+  (`addCountries` gains a label of its own for this, and read the owners for `onlyFrom` at a new event's start.)
+
 ### D221. Borders at the coast: along the coastline by default, as drawn, or none; a country whose land carries on over the sea
 
 - **Why.** Where a layer ends at the coast, its colours were cut to the land and its borders against nobody with them,

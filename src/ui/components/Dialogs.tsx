@@ -21,9 +21,10 @@ import { spaceCamera } from '../../space/space-view.ts';
 import { REGION_MAPS } from '../../domain/region-maps.ts';
 import { makeRegionMap } from '../region-maps.ts';
 
-function Modal({ title, children, onClose, wide }: { title: string; children: React.ReactNode; onClose: () => void; wide?: boolean }) {
+/** A dialog over the app; `side`: at the right, the map left to be seen (what it asks about is drawn on the map, D222). */
+function Modal({ title, children, onClose, wide, side }: { title: string; children: React.ReactNode; onClose: () => void; wide?: boolean; side?: boolean }) {
   return (
-    <div className="modal-back" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div className={`modal-back${side ? ' side' : ''}`} onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className={`modal ${wide ? 'wide' : ''}`} role="dialog" aria-label={title}>
         <div className="modal-head"><h2>{title}</h2><button className="close" onClick={onClose} aria-label="Close">×</button></div>
         {children}
@@ -54,7 +55,7 @@ function PaintPrompt({ p }: { p: Extract<PendingEdit, { kind: 'paint' }> }) {
     const now = w.all('event').find((x) => listedHere(x) && compare(fromStore(x.start_day, x.start_ms), s.time) === 0);
     return now?.id ?? 'new-event';
   });
-  const [evName, setEvName] = useState(p.value ? `${who} gains territory` : 'Territory abandoned');
+  const [evName, setEvName] = useState(p.give ? p.give.eventName : p.value ? `${who} gains territory` : 'Territory abandoned');
   // A new event's type, and what follows from it until chosen by hand: its length and how its territory spreads (D75).
   const [evType, setEvType] = useState(p.value ? 'conquest' : 'general');
   const [end, setEnd] = useState<Instant | null>(() => defaultEnd(w, p.value ? 'conquest' : 'general', s.time));
@@ -87,6 +88,25 @@ function PaintPrompt({ p }: { p: Extract<PendingEdit, { kind: 'paint' }> }) {
       : style === 'advance' ? { style: 'advance', origin: p.origin, easing: 'smooth' }
       : style === 'dissolve' ? { style: 'dissolve', easing: 'smooth' } : { style: 'fade' };
     const base = { spaceId: p.spaceId, layerId: p.layerId, rings: p.rings, value: p.value, snap: p.snap };
+    // Land worked out by the Advance and buffer zone tool (D222): given only from the owners it is taken from.
+    const g = p.give;
+    if (g) {
+      const give = { spaceId: p.spaceId, layerId: p.layerId, polygons: g.polygons, value: p.value, onlyFrom: g.onlyFrom, label: g.label };
+      if (choice === 'correct') s.execute((wd, en) => cmd.giveLand(wd, en, { ...give, mode: { kind: 'change', t: s.time } }));
+      else if (target === 'new-event') {
+        if (end && compare(end, s.time) < 0) { s.toast('The event cannot end before it starts.', 'error'); return; }
+        const r = s.execute((wd, en) => cmd.giveLand(wd, en, { ...give, mode: { kind: 'change', t: s.time }, newEvent: { name: evName, start: s.time, end, type_id: evType }, transition: end ? transition : null }));
+        if (r?.eventId) s.set({ selection: { kind: 'event', id: r.eventId }, lastPaintEvent: r.eventId });
+      } else {
+        const ev = w.get('event', target)!;
+        const start = fromStore(ev.start_day, ev.start_ms);
+        const at = compare(s.time, start) > 0 ? s.time : null;
+        s.execute((wd, en) => cmd.giveLand(wd, en, { ...give, mode: { kind: 'new', eventId: target, at }, transition: ev.end_day !== null ? transition : null }));
+        s.set({ lastPaintEvent: target });
+      }
+      close();
+      return;
+    }
     if (choice === 'correct') {
       // From the date being viewed on, without an event (earlier dates stay as they are).
       s.execute((wd, en) => cmd.paintTerritory(wd, en, { ...base, mode: { kind: 'change', t: s.time } }));
@@ -120,8 +140,10 @@ function PaintPrompt({ p }: { p: Extract<PendingEdit, { kind: 'paint' }> }) {
     return () => window.removeEventListener('keydown', key);
   });
   return (
-    <Modal title={`What does this drawing mean?`} onClose={close}>
-      <p className="muted">You drew an area for <b>{who}</b> while looking at <b>{fmt(s.time, 'minute')}</b>.</p>
+    <Modal title={p.give ? 'What does this change mean?' : 'What does this drawing mean?'} onClose={close} side={!!p.give}>
+      {p.give
+        ? <p className="muted" data-testid="reach-what">{p.give.what} Looking at <b>{fmt(s.time, 'minute')}</b>.</p>
+        : <p className="muted">You drew an area for <b>{who}</b> while looking at <b>{fmt(s.time, 'minute')}</b>.</p>}
       <div className={`choice ${choice === 'new' ? 'on' : ''}`} onClick={() => setChoice('new')} data-testid="choice-new">
         <b>A new change from {fmt(s.time)}</b>
         <div className="muted" data-testid="new-change-lasts">History before this date stays as it is. {lasts}</div>

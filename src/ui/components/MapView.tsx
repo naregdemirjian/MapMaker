@@ -41,6 +41,7 @@ import { recordTransition } from '../record-length.ts';
 import { loadBasemapDetail, pixelsPerDegree, visibleBounds, DETAIL_PIXELS_PER_DEGREE, type Basemap } from '../../render-engine/basemap.ts';
 import { prepareSmart, smartLine, type SmartPrepared, type SmartWeights } from '../../render-engine/smart-brush.ts';
 import { smartInputFor } from '../smart-input.ts';
+import { reachAt } from './Reach.tsx';
 import { SmartAdjustPanel } from './SmartBrush.tsx';
 import { CompareBar } from './CompareBar.tsx';
 import type { AdjustState } from '../store.ts';
@@ -796,6 +797,24 @@ export function MapView() {
       for (const pin of toScreen(adj.pins)) { ctx.beginPath(); ctx.arc(pin[0], pin[1], 5, 0, Math.PI * 2); ctx.fillStyle = '#ffffff'; ctx.fill(); ctx.strokeStyle = '#0a1018'; ctx.lineWidth = 2; ctx.stroke(); }
       ctx.restore();
     }
+    // The land an advance or a buffer zone would give (D222), while the prompt asks what it means: its outline, and
+    // inside it the land it is cut to, in the colour of who gets it.
+    const give = s.pending?.kind === 'paint' ? s.pending.give : undefined;
+    if (give && s.pending?.kind === 'paint') {
+      const owner = s.pending.value ? w.get('entity', s.pending.value) : null;
+      const shape = new Path2D(), land = new Path2D();
+      const add = (path: Path2D, r: Array<[number, number]>) => { const q = toScreen(r); if (q.length < 3) return; path.moveTo(q[0][0], q[0][1]); for (const v of q.slice(1)) path.lineTo(v[0], v[1]); path.closePath(); };
+      for (const poly of give.polygons) for (const r of poly) add(shape, r);
+      for (const r of give.clip) add(land, r);
+      ctx.save();
+      ctx.clip(land, 'evenodd');
+      ctx.fillStyle = owner ? `${owner.color}88` : 'rgba(240,240,240,0.55)';
+      ctx.fill(shape, 'evenodd');
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = 'rgba(10,16,24,0.85)'; ctx.lineWidth = 4; ctx.stroke(shape);
+      ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 2; ctx.setLineDash([7, 5]); ctx.stroke(shape);
+      ctx.restore();
+    }
     // The Split tool's line: being drawn, or waiting for the click on the part that changes hands.
     const cutLine = drag.current.kind === 'cut' && drag.current.moved >= 4 ? toScreen(drag.current.points) : s.tool === 'split' && s.splitLine ? toScreen(s.splitLine) : null;
     if (cutLine && cutLine.length > 1) {
@@ -1034,6 +1053,12 @@ export function MapView() {
     // Regions: a click toggles the region under it; a drag draws a box around several.
     if (!presentation && e.button === 0 && s.tool === 'regions') {
       drag.current = { kind: 'pickbox', x: p[0], y: p[1], cx: p[0], cy: p[1], moved: 0 };
+      return;
+    }
+    // Advance and buffer zone (D222): a click on a neighbour's land, or beside a border, works out the land and offers it.
+    if (!presentation && e.button === 0 && s.tool === 'reach') {
+      const ll = screenToLonLat(view, p[0], p[1]);
+      if (ll && !s.pending) reachAt(view, ll);
       return;
     }
     // Split: a drag draws the line across a country; then a click chooses the part that changes hands.

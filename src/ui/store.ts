@@ -71,7 +71,7 @@ export type DialogName =
 /** One line of a right-click menu: an action, a heading, or a divider. */
 export type MenuItem = { label: string; run: () => void; danger?: boolean; testId?: string; shortcut?: string; disabled?: boolean; checked?: boolean } | { heading: string } | 'divider';
 
-export type Tool = 'select' | 'lasso' | 'polygon' | 'pen' | 'vertex' | 'place' | 'erase' | 'feature' | 'split' | 'regions' | 'sculpt' | 'field' | 'disaster' | 'systems' | 'lanes';
+export type Tool = 'select' | 'lasso' | 'polygon' | 'pen' | 'vertex' | 'place' | 'erase' | 'feature' | 'split' | 'regions' | 'reach' | 'sculpt' | 'field' | 'disaster' | 'systems' | 'lanes';
 export type Selection =
   | { kind: 'entity'; id: string }
   | { kind: 'event'; id: string }
@@ -88,13 +88,30 @@ export type Selection =
   | null;
 
 export type PendingEdit =
-  | { kind: 'paint'; spaceId: string; layerId: string; rings: Vec3[][]; value: string | null; sample: [number, number] | null; origin: [number, number]; snap: number; draftId?: string }
+  | { kind: 'paint'; spaceId: string; layerId: string; rings: Vec3[][]; value: string | null; sample: [number, number] | null; origin: [number, number]; snap: number; draftId?: string; give?: ReachGive }
   /** A border point dragged: moved for all time (refused with `blocked` when that would cross a border), or from the date viewed (D77). */
   | { kind: 'vertex'; spaceId: string; vertexId: number; to: Vec3; layerId?: string | null; blocked?: string | null }
   /** An area, line or point drawn with the features tool: a new feature, or a new shape for one (`reshape`). Parts in longitude, latitude. */
   | { kind: 'feature'; layerId: string; parts: Array<Array<[number, number]>>; reshape: string | null }
   /** A line drawn across a country with the Split tool and the part clicked (longitude, latitude; D76). */
   | { kind: 'split'; spaceId: string; layerId: string; line: Array<[number, number]>; pick: [number, number]; snap: number };
+
+/**
+ * Land worked out by the Advance and buffer zone tool (D222), offered like a drawing: outlined in longitude and latitude,
+ * given only from the owners listed (commands.ts, giveLand), with what it is in words and the land it lies in (for the
+ * picture of it on the map while it is offered).
+ */
+export interface ReachGive {
+  polygons: Array<Array<Array<[number, number]>>>;
+  onlyFrom: string[];
+  /** Its step in the history of edits, and what the prompt says it is. */
+  label: string;
+  what: string;
+  /** A new event's name to start with. */
+  eventName: string;
+  /** The land the outlines are cut to on the map (the owners' parcels' rings, read by the even-odd rule). */
+  clip: Array<Array<[number, number]>>;
+}
 
 export interface Toast { id: number; text: string; kind: 'info' | 'error' }
 
@@ -289,6 +306,8 @@ export class AppStore {
   splitLine: Array<[number, number]> | null = null;
   /** The countries chosen for "Merge into one" (D76). */
   mergeIds: string[] = [];
+  /** The Advance and buffer zone tool (D222): what it makes, how far (km), and how much the land slows it (0 to 1). */
+  reach: { mode: 'advance' | 'buffer'; km: number; mind: number } = { mode: 'advance', km: 50, mind: 0.6 };
   /** The region picker (D78): which regions are offered, and those chosen (indices into them). */
   regionLevel: 'regions' | 'countries' = 'regions';
   regionPicks: number[] = [];

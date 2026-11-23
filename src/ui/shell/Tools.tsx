@@ -17,6 +17,7 @@ import { FieldToolOptions, DisasterToolOptions } from '../components/Fields.tsx'
 import { SplitToolOptions } from '../components/SplitMerge.tsx';
 import { SmartBrushControls } from '../components/SmartBrush.tsx';
 import { RegionToolOptions } from '../components/Regions.tsx';
+import { ReachToolOptions } from '../components/Reach.tsx';
 import { RangeReset } from './Reset.tsx';
 import { TOOLS, toolsFor, stackOf, type ToolInfo } from '../tools.ts';
 import { ToolIcon } from './ToolIcon.tsx';
@@ -184,6 +185,7 @@ export function ToolOptions() {
     {s.tool === 'disaster' && <DisasterToolOptions />}
     {s.tool === 'split' && <SplitToolOptions />}
     {s.tool === 'regions' && <RegionToolOptions />}
+    {s.tool === 'reach' && <ReachToolOptions />}
     {s.tool === 'place' && (
       <div className="toolbar sub">
         <label className="inline">Place

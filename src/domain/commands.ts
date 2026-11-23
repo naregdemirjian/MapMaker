@@ -1332,12 +1332,12 @@ export interface CountryToAdd {
  * the sea or a neighbour's land along a border drawn a little differently. With `clear`, the land goes to
  * nobody; with `outside`, the change is to the land those owners hold outside the outlines instead.
  */
-export function addCountries(world: World, engine: Engine, o: { spaceId: string; layerId: string; countries: CountryToAdd[]; mode: EditMode; snap?: number; newEvent?: EventInput; into?: NewOwner; transition?: TransitionSpec | null; onlyFrom?: string[]; clear?: boolean; outside?: boolean }): CommandResult<{ entities: string[]; eventId: string | null }> {
+export function addCountries(world: World, engine: Engine, o: { spaceId: string; layerId: string; countries: CountryToAdd[]; mode: EditMode; snap?: number; newEvent?: EventInput; into?: NewOwner; transition?: TransitionSpec | null; onlyFrom?: string[]; clear?: boolean; outside?: boolean; label?: string }): CommandResult<{ entities: string[]; eventId: string | null }> {
   checkTarget(world, { spaceId: o.spaceId, layerId: o.layerId, mode: o.newEvent ? undefined : o.mode, value: typeof o.into === 'string' ? o.into : undefined });
   if (!o.countries.length) throw new Error('Choose at least one country.');
   if (o.outside && !o.onlyFrom) throw new Error('Say whose land outside the outlines changes.');
   const intoName = o.into === undefined ? '' : typeof o.into === 'string' ? world.get('entity', o.into)!.name : o.into.name.trim();
-  const label = o.clear ? `Clear ${o.outside ? 'land outside ' : ''}${o.countries.length === 1 ? o.countries[0].name : `${o.countries.length} regions`}` : o.into
+  const label = o.label ? o.label : o.clear ? `Clear ${o.outside ? 'land outside ' : ''}${o.countries.length === 1 ? o.countries[0].name : `${o.countries.length} regions`}` : o.into
     ? `Add ${o.countries.length === 1 ? o.countries[0].name : `${o.countries.length} countries`} to ${intoName}`
     : o.countries.length === 1 ? `Add ${o.countries[0].name}` : `Add ${o.countries.length} countries`;
   return run(world, label, (tx) => {
@@ -1430,6 +1430,20 @@ export function addCountries(world: World, engine: Engine, o: { spaceId: string;
     if (o.mode.kind !== 'new' && items.length) writeAssignments(tx, engine, o.spaceId, o.layerId, o.mode, items);
     return { entities, eventId };
   });
+}
+
+/**
+ * Give the land within outlines (longitude, latitude; each polygon its outline, then its holes) to an owner, or to
+ * nobody, taking only the land the owners in `onlyFrom` hold at the edit's moment (D222: what an advance takes from a
+ * neighbour, a buffer zone along a border): as a correction from a date or in an event (made in the same step with
+ * `newEvent`); one undo step under `label`.
+ */
+export function giveLand(world: World, engine: Engine, o: { spaceId: string; layerId: string; polygons: Array<Array<Array<[number, number]>>>; value: string | null; onlyFrom: string[]; mode: EditMode; newEvent?: EventInput; transition?: TransitionSpec | null; label: string }): CommandResult<{ eventId: string | null }> {
+  if (!o.polygons.length) throw new Error('There is no land to give.');
+  if (!o.onlyFrom.length) throw new Error('Say whose land is taken.');
+  if (o.value !== null && o.onlyFrom.includes(o.value) && o.onlyFrom.length === 1) throw new Error('A country cannot take land from itself.');
+  const r = addCountries(world, engine, { spaceId: o.spaceId, layerId: o.layerId, countries: [{ name: o.label, polygons: o.polygons }], mode: o.mode, newEvent: o.newEvent, into: o.value ?? undefined, clear: o.value === null, onlyFrom: o.onlyFrom, transition: o.transition, label: o.label });
+  return { label: r.label, diffs: r.diffs, result: { eventId: r.result.eventId } };
 }
 
 /**
@@ -2001,7 +2015,7 @@ function ownerIn(tx: Tx, to: NewOwner): string {
 }
 
 /** The owner of every parcel at a date, also for parcels split since the date was read (children inherit). */
-function ownerReader(arr: ReturnType<World['arrangement']>, states: Map<number, { value: string | null }>): (f: number) => string | null {
+export function ownerReader(arr: ReturnType<World['arrangement']>, states: Map<number, { value: string | null }>): (f: number) => string | null {
   return (f) => {
     const st = states.get(f);
     if (st) return st.value;
