@@ -27,6 +27,7 @@ import { PicturesSection } from '../components/Pictures.tsx';
 import { TypeDot, TypeSelect } from '../components/EventTypes.tsx';
 import { isFeatureKind } from '../../render-engine/feature-style.ts';
 import { StarPanel } from '../components/Stars.tsx';
+import { RiverPanel } from '../components/RiverPanel.tsx';
 import { PropGroup } from '../shell/Group.tsx';
 import { InlineDialog } from '../shell/DialogFrame.tsx';
 import { ShowDialog } from '../components/ShowDialog.tsx';
@@ -160,6 +161,7 @@ export function Inspector() {
       {sel?.kind === 'layer' && <LayerPanel id={sel.id} />}
       {sel?.kind === 'change' && <ChangePanel id={sel.id} />}
       {sel?.kind === 'star' && <StarPanel id={sel.id} />}
+      {sel?.kind === 'river' && <RiverPanel id={sel.id} spaceId={sel.spaceId} />}
     </aside>
   );
 }

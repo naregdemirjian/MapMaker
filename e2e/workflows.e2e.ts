@@ -2801,9 +2801,13 @@ try {
     let px = seaPx;
     for (let i = 0; i < 40 && Math.max(...px.map((v, k) => Math.abs(v - seaPx[k]))) <= 25; i++) { await page.waitForTimeout(100); px = await pixelAt(sea!); }
     assert.ok(Math.max(...px.map((v, k) => Math.abs(v - seaPx[k]))) > 25, `drawn as land (${px} against the sea's ${seaPx})`);
-    // A river from the middle of the new land east to the sea: its bed falls all the way.
+    // A river from the middle of the new land east to the sea: its bed falls all the way. (Run smoothly through the
+    // points drawn, not winding, D220: the bed is looked at along the stroke.)
     await page.getByTestId('sculpt-brush').selectOption('river');
     await page.getByTestId('sculpt-size').fill('60');
+    await page.getByTestId('sculpt-strength').fill('120');
+    await page.getByTestId('river-follow').uncheck();
+    for (const k of ['river-meander', 'river-tributaries']) { await page.getByTestId(k).fill('0'); await page.getByTestId(k).dispatchEvent('pointerup'); }
     await stroke([[lon0, lat0], [lon0 + 3, lat0 + 0.5], [lon0 + 6.5, lat0]]);
     const bed = await Promise.all([0, 1.5, 3, 4.5].map((d) => heightAt([lon0 + d, lat0 + (d <= 3 ? d / 6 : 0.5 - (d - 3) / 7)])));
     assert.ok(bed[0] < 600 && bed.every((v, i) => i === 0 || v <= bed[i - 1] + 20), `the river's bed falls towards the sea (${bed.map(Math.round).join(', ')} m)`);
@@ -2816,6 +2820,7 @@ try {
     let sand = await pixelAt(spot);
     for (let i = 0; i < 40 && !(sand[0] > sand[2] + 30); i++) { await page.waitForTimeout(100); sand = await pixelAt(spot); }
     assert.ok(sand[0] > sand[2] + 30, `desert painted (${sand})`);
+    await page.evaluate(() => { const s = (window as any).__mapmaker.store; s.set({ sculpt: { ...s.sculpt, river: { ...s.sculpt.river, follow: true, meander: 0.5, tributaries: 0.4 } } }); });
     await h.screenshot('planet-drawn');
     const strokes = await page.evaluate(() => { const s = (window as any).__mapmaker.store; return JSON.parse(s.world.get('map_space', s.spaceId).settings).sculpt.map((x: any) => `${x.tool}${x.biome ? `:${x.biome}` : ''}`); });
     assert.deepEqual(strokes, ['coast-land', 'river', 'biome:desert']);
@@ -5658,6 +5663,110 @@ try {
     // (Undone: the look, then the cities.)
     for (let i = 0; i < 12 && (await steps()) > before; i++) { await page.getByTestId('undo').click(); await h.saved(); }
     assert.equal(await steps(), before);
+    await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 0, lat: 20, zoom: 0, rotation: 0, projection: 'equirectangular' }));
+  });
+
+  await h.step('Rivers drawn as guidance (D220): with the pen and the brush, their water shown above the sea, tributaries from the heights; chosen, a point moved, settings changed, taken away; undone', async () => {
+    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
+    await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 37, lat: 37.8, zoom: 3.4, rotation: 0, projection: 'equirectangular' }));
+    await page.waitForTimeout(400);
+    const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
+    const before = await steps();
+    type Stamp = { id: string; tool: string; path: Array<[number, number]>; river?: { drawn: string; tributaries: number; follow: boolean }; rev?: number };
+    const rivers = async () => (await page.evaluate(() => { const s = (window as any).__mapmaker.store; return (JSON.parse(s.world.get('map_space', s.spaceId).settings).sculpt ?? []).filter((x: any) => x.tool === 'river'); })) as Stamp[];
+    type Shape = { id: string; course: Array<[number, number]>; widths: number[]; branches: Array<{ line: Array<[number, number]> }> };
+    const shapes = async () => (await page.evaluate(() => {
+      const m = (window as any).__mapmaker, s = m.store, space = s.world.get('map_space', s.spaceId), g = s.terrainOf(space);
+      return m.bench.sculpted(g.grid, g.key, JSON.parse(space.settings).sculpt ?? [], space.radius_m / 1000).rivers;
+    })) as Shape[];
+    await page.getByTestId('tool-sculpt').click();
+    await page.getByTestId('sculpt-brush').selectOption('river');
+    assert.equal(await page.getByTestId('sculpt-size').inputValue(), '30', 'a valley of a river\'s width');
+    // With the pen: its points clicked from its source in the highlands to its mouth in the Mediterranean; Enter makes it.
+    await page.getByTestId('river-draw-pen').click();
+    const penPts: Array<[number, number]> = [[39.0, 39.3], [37.5, 38.3], [36.4, 37.4], [35.4, 36.9], [35.2, 36.3]];
+    for (const ll of penPts) { const q = await h.toPage(ll); await page.mouse.click(q[0], q[1]); }
+    assert.equal((await page.getByTestId('river-draft-count').textContent())?.trim(), '5 points');
+    await page.keyboard.press('Enter');
+    await h.saved();
+    let all = await rivers();
+    assert.equal(all.length, 1);
+    assert.equal(all[0].path.length, 5, 'kept as its five points');
+    assert.equal(all[0].river?.drawn, 'pen');
+    await page.getByTestId('river-panel').waitFor();
+    await page.waitForFunction(() => { const s = (window as any).__mapmaker.store; return !!s.terrainOf(s.world.get('map_space', s.spaceId)); }, null, { timeout: 30000 });
+    // Worked out: from its source to the coast, with tributaries; its water drawn on the land, above the sea.
+    let made = (await shapes()).find((r) => r.id === all[0].id)!;
+    assert.ok(made.course.length > 20 && made.branches.length >= 1, `a course and tributaries (${made.course.length} points, ${made.branches.length} tributaries)`);
+    const mouth = made.course[made.course.length - 1];
+    assert.ok(mouth[1] > 36.2 && mouth[1] < 37.2, `its mouth at the coast (${mouth})`);
+    const mid = made.course[Math.floor(made.course.length / 2)];
+    const ground = await page.evaluate(([lon, lat]) => { const m = (window as any).__mapmaker, s = m.store, g = s.terrainOf(s.world.get('map_space', s.spaceId)); return m.bench.heightAt(g.grid, lon, lat); }, mid);
+    assert.ok(ground > 200, `its middle well above the sea (${Math.round(ground)} m)`);
+    await page.waitForTimeout(500);
+    const q = await h.toPage(mid);
+    const water = await page.evaluate(([x, y]) => {
+      const c = document.querySelector('canvas.map-canvas') as HTMLCanvasElement, r = c.getBoundingClientRect(), k = c.width / r.width;
+      const d = c.getContext('2d')!.getImageData(Math.round((x - r.left) * k) - 5, Math.round((y - r.top) * k) - 5, 11, 11).data;
+      let n = 0;
+      for (let i = 0; i < d.length; i += 4) if (d[i + 2] > d[i] + 25 && d[i + 2] > d[i + 1]) n++;
+      return n;
+    }, q);
+    assert.ok(water >= 3, `its water drawn there (${water} pixels)`);
+    await h.screenshot('river-pen');
+    // With the brush: a stroke kept as the points where it turns.
+    await page.getByTestId('river-draw-brush').click();
+    const strokeLL: Array<[number, number]> = [[42.5, 39.6], [41.6, 39.0], [40.8, 38.9], [40.0, 38.2]];
+    const pts: Array<[number, number]> = [];
+    for (const ll of strokeLL) pts.push(await h.toPage(ll));
+    await page.mouse.move(pts[0][0], pts[0][1]);
+    await page.mouse.down();
+    for (const p of pts.slice(1)) await page.mouse.move(p[0], p[1], { steps: 12 });
+    await page.mouse.up();
+    await h.saved();
+    all = await rivers();
+    assert.equal(all.length, 2);
+    const brushed = all[1];
+    assert.ok(brushed.path.length >= 2 && brushed.path.length <= 12, `kept as the points where it turns (${brushed.path.length})`);
+    assert.equal(brushed.river?.drawn, 'brush');
+    // Chosen (the one just drawn): a point dragged to a new place, and the river worked out again.
+    const p1 = await h.toPage(brushed.path[1]);
+    await page.mouse.move(p1[0], p1[1]);
+    await page.mouse.down();
+    await page.mouse.move(p1[0] + 30, p1[1] + 25, { steps: 6 });
+    await page.mouse.up();
+    await h.saved();
+    const moved = (await rivers())[1];
+    assert.notDeepEqual(moved.path[1], brushed.path[1], 'its point moved');
+    assert.equal(moved.rev, 1, 'changed once');
+    // Its settings in Properties: many tributaries, not along the valleys.
+    const fewer = (await shapes()).find((r) => r.id === moved.id)!.branches.length;
+    await page.getByTestId('river-sel-tributaries').fill('1');
+    await page.getByTestId('river-sel-tributaries').dispatchEvent('pointerup');
+    await h.saved();
+    const more = (await shapes()).find((r) => r.id === moved.id)!.branches.length;
+    assert.ok(more > fewer, `more tributaries (${fewer}, then ${more})`);
+    await page.getByTestId('river-sel-follow').uncheck();
+    await h.saved();
+    assert.equal((await rivers())[1].river?.follow, false);
+    // The first river chosen with Select, by its water; Delete takes it away; undone.
+    await h.chooseTool('select');
+    made = (await shapes()).find((r) => r.id === all[0].id)!;
+    const on = await h.toPage(made.course[Math.floor(made.course.length * 0.3)]);
+    await page.mouse.click(on[0], on[1]);
+    assert.deepEqual(await page.evaluate(() => (window as any).__mapmaker.store.selection), { kind: 'river', id: all[0].id, spaceId: await page.evaluate(() => (window as any).__mapmaker.store.spaceId) });
+    await page.keyboard.press('Delete');
+    await h.saved();
+    assert.equal((await rivers()).length, 1, 'taken away');
+    await page.getByTestId('undo').click();
+    await h.saved();
+    assert.equal((await rivers()).length, 2, 'back');
+    // Back as before.
+    for (let i = 0; i < 12 && (await steps()) > before; i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await steps(), before);
+    assert.equal((await rivers()).length, 0);
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
     await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 0, lat: 20, zoom: 0, rotation: 0, projection: 'equirectangular' }));
   });
 

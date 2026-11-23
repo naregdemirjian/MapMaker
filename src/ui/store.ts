@@ -23,6 +23,7 @@ import type { FieldSource } from '../domain/fields.ts';
 import type { DisasterId } from '../domain/disasters.ts';
 import type { SculptTool, BrushTip } from '../terrain/sculpt.ts';
 import { ROUND_TIP } from '../terrain/sculpt.ts';
+import { DEFAULT_RIVER, type RiverSpec } from '../terrain/river-course.ts';
 import type { Biome } from '../terrain/biomes.ts';
 import { terrainSourceOf, planetOf, isGeologicalMap, simOf, terrainLook } from '../world-model/world-settings.ts';
 import { simTerrain, simParams, simCover, simCoverFrame, quickPlanetCover } from './planet-engine.ts';
@@ -82,6 +83,8 @@ export type Selection =
   | { kind: 'change'; id: string }
   /** A star on a space map (D110), by its catalogue id. */
   | { kind: 'star'; id: number }
+  /** A river drawn on a map (D220): its points shown to be moved, its settings in Properties. */
+  | { kind: 'river'; id: string; spaceId: string }
   | null;
 
 export type PendingEdit =
@@ -276,7 +279,11 @@ export class AppStore {
   /** The adjusted line used, the line kept as drawn, or the drawing dropped (set by the map view). */
   adjustFinish: (choice: 'adjusted' | 'drawn' | 'cancel') => void = () => { this.set({ adjust: null }); };
   /** The sculpting brush (D98): which, how large (km), how strong (m), and whether a stroke changes the base world or holds from the date viewed. */
-  sculpt: { tool: SculptTool; radiusKm: number; strength: number; dated: boolean; biome: Biome; tip: BrushTip } = { tool: 'raise', radiusKm: 300, strength: 500, dated: false, biome: 'forest', tip: ROUND_TIP };
+  sculpt: { tool: SculptTool; radiusKm: number; strength: number; dated: boolean; biome: Biome; tip: BrushTip; river: RiverSpec } = { tool: 'raise', radiusKm: 300, strength: 500, dated: false, biome: 'forest', tip: ROUND_TIP, river: DEFAULT_RIVER };
+  /** A river being drawn with the pen (D220): its points so far, from its source. */
+  riverDraft: Array<[number, number]> = [];
+  /** Makes the river being drawn with the pen through its points (set by the map view). */
+  finishRiver: () => void = () => {};
   pending: PendingEdit | null = null;
   /** The Split tool's line, drawn and waiting for the part that changes hands to be clicked (D76). */
   splitLine: Array<[number, number]> | null = null;

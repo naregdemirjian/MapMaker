@@ -153,7 +153,7 @@ test('an outline drawn becomes land or sea (D169): the coast ragged at the brush
   assert.equal(at(across, 0.5, 0.5), -2000, 'not the other side of the world');
 });
 
-test('a river drawn from its source to its mouth (D169): its bed falls all the way, and the water runs down it', async () => {
+test('a river drawn from its source to its mouth (D169): its bed falls all the way, and the water runs down it', () => {
   // Rolling land at 400 to 600 m, sea east of 12°E.
   const ground = flat(0, (lon, lat) => (lon > 12 ? -1500 : 500 + Math.round(100 * Math.sin(lon * 1.7) * Math.cos(lat * 2.3))));
   const path: Array<[number, number]> = [[0.5, 10.5], [5.5, 12.5], [10.5, 10.5], [13.5, 10.5]];
@@ -177,14 +177,11 @@ test('a river drawn from its source to its mouth (D169): its bed falls all the w
   }
   assert.ok(at(g, lon, lat) < 0, `the water reaches the sea (stopped at ${lon}, ${lat})`);
   assert.ok(off <= 1, 'along the river drawn');
-  // Shown as a river whatever water reaches it, from its source to its mouth (not on into the sea).
-  const { riversNow } = await import('../src/terrain/river-cache.ts');
-  const river = stamp('river', path, { radiusKm: 300, strength: 120 });
-  const lines = riversNow(g, 'drawn-river-test', [river]).lines.coordinates;
-  const drawn = lines[lines.length - 1];
+  // Its water drawn (D220: whatever the height), from its source to its mouth (not on into the sea).
+  const drawn = applyStamps(ground, [stamp('river', path, { radiusKm: 300, strength: 120 })], R).rivers[0].course;
   assert.deepEqual(drawn[0], [0.5, 10.5], 'from its source');
   const end = drawn[drawn.length - 1];
-  assert.ok(end[0] > 11.4 && end[0] < 12.6, `to its mouth at the coast, an estuary its last few kilometres (${end})`);
+  assert.ok(end[0] > 11.4 && end[0] < 12.6, `to its mouth at the coast (${end})`);
 });
 
 test('painted biomes (D169): kept and checked with the strokes, changing no heights, laid over the land\'s colours', async () => {

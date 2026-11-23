@@ -5,6 +5,7 @@ import { geoArea, geoPath, geoEquirectangular } from 'd3-geo';
 import { screenToLonLat, lonLatToScreen, type View } from './camera.ts';
 import { makeRing, rankRing, addLine, type Ring, type Sheet } from './plane.ts';
 import type { BlockPath } from './blocks.ts';
+import type { RiverShape } from '../terrain/river-course.ts';
 
 export interface BasemapFile {
   format: string; dataset: string; version: string; scale: string; quantum: number;
@@ -261,6 +262,56 @@ export function drawRiverLines(ctx: CanvasRenderingContext2D, view: View, sheet:
   ctx.lineCap = 'round';
   ctx.strokeStyle = color;
   [1.6, 1.05, 0.65].forEach((w, c) => { ctx.lineWidth = w * px; paths![c].paint(ctx, (w * px) / 2 + 1, (p) => ctx.stroke(p)); });
+  ctx.restore();
+}
+
+/**
+ * Rivers drawn on a map (D220): each stretch as wide as the water it carries there (a multiple of the usual line: 1.9
+ * pixels of a 1920-wide frame at 1), the same on screen at any zoom, and whatever the height of the ground beneath.
+ * Their paths are kept with the sheet.
+ */
+const drawnRings = new WeakMap<readonly RiverShape[], { key: string; rings: Array<{ ring: Ring; w: number }> }>();
+export function drawDrawnRivers(ctx: CanvasRenderingContext2D, view: View, sheet: Sheet, rivers: readonly RiverShape[], color: string): void {
+  if (!rivers.length) return;
+  let made = drawnRings.get(rivers);
+  if (!made) {
+    const rings: Array<{ ring: Ring; w: number }> = [], step = 0.15, q = (w: number) => Math.max(1, Math.round(w / step));
+    // (Stretches of like width, each a line of its own sharing its ends with the next.)
+    const add = (pts: Array<[number, number]>, widths: number[]) => {
+      let start = 0;
+      for (let i = 1; i < pts.length; i++) {
+        if (i < pts.length - 1 && q(widths[i]) === q(widths[start])) continue;
+        const seg = pts.slice(start, i + 1);
+        rings.push({ ring: makeRing(Float64Array.from(seg, (p) => p[0]), Float64Array.from(seg, (p) => p[1]), false, false), w: q(widths[start]) * step });
+        start = i;
+      }
+    };
+    for (const r of rivers) { for (const b of r.branches) add(b.line, b.widths); add(r.course, r.widths); }
+    made = { key: `drawn-rivers:${++riverSets}`, rings };
+    drawnRings.set(rivers, made);
+  }
+  let paths = sheet.cache.get(made.key) as Array<[number, BlockPath]> | undefined;
+  if (!paths) {
+    const by = new Map<number, BlockPath>();
+    for (const { ring, w } of made.rings) {
+      if (!sheet.copies(ring.box).length) continue;
+      rankRing(ring);
+      let p = by.get(w);
+      if (!p) { p = sheet.blocks(); by.set(w, p); }
+      for (const l of sheet.lines(ring)) p.addLine(l);
+    }
+    // (The narrowest first, so the river lies over its tributaries where they join.)
+    paths = [...by].sort((a, b) => a[0] - b[0]);
+    sheet.cache.set(made.key, paths);
+  }
+  const [k, e, f] = sheet.placement(view);
+  const px = view.unit / k;
+  ctx.save();
+  ctx.transform(k, 0, 0, k, e, f);
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = color;
+  for (const [w, p] of paths) { const lw = 1.9 * w * px; ctx.lineWidth = lw; p.paint(ctx, lw / 2 + 1, (path) => ctx.stroke(path)); }
   ctx.restore();
 }
 const ringsOfScale = new WeakMap<BasemapScale, ScaleRings>();

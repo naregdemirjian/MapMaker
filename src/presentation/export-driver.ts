@@ -320,7 +320,7 @@ export function frameSetup(world: World, shot: ShotSettings, frame: number, def:
   const strokes = stampsAt(sculptOf(space), t);
   const fieldsHere = world.all('layer').some((l) => l.kind === 'field' && l.space_id === shot.spaceId);
   const carved = ground && (terrainShown || seaPoints.length || planetOf(space) || paleo || strokes.length || fieldsHere || frontsMindLand(world, shotTransitions(shot))) ? sculpted(ground.grid, ground.key, strokes, (space?.radius_m ?? 6371008.8) / 1000) : null;
-  const rivers = carved && (planetOf(space) || simKey) && on('rivers') ? riversNow(carved.grid, carved.key, strokes) : null;
+  const rivers = carved && (planetOf(space) || simKey) && on('rivers') ? riversNow(carved.grid, carved.key) : null;
   // The land's colours in the satellite look (D100): Earth's land cover, or the planet's biomes.
   const planet = planetOf(space);
   const bare = carved && terrainShown && PALETTES[look.palette].cover
@@ -328,7 +328,7 @@ export function frameSetup(world: World, shot: ShotSettings, frame: number, def:
     : null;
   // (With the biomes painted over it, D169.)
   const cover = bare ? paintedCover(bare, strokes, (space?.radius_m ?? 6371008.8) / 1000) : null;
-  const terrain = carved ? { grid: carved.grid, key: carved.key, look: terrainShown ? look : null, seaLevel: seaLevelAt(seaPoints, t) + glacial, override: carved.touched && basemap ? { data: carved.touched, key: carved.key } : null, rivers, cover, detail: detail?.heights ?? null, photo: detail?.photo ?? null } : null;
+  const terrain = carved ? { grid: carved.grid, key: carved.key, look: terrainShown ? look : null, seaLevel: seaLevelAt(seaPoints, t) + glacial, override: carved.touched && basemap ? { data: carved.touched, key: carved.key } : null, rivers, drawnRivers: carved.rivers, cover, detail: detail?.heights ?? null, photo: detail?.photo ?? null } : null;
   const passes = new Set<PassName>(def.passes.filter((p) => (p !== 'graticule' || (shot.graticule && on('graticule'))) && (p !== 'labels' || labels) && (p !== 'characters' || (shot.characters !== false && on('characters'))) && (p !== 'cities' || cities) && (p !== 'borders' || on('borders')) && (p !== 'features' || on('features')) && (p !== 'fields' || on('fields')) && (p !== 'terrain' || !!terrain?.look)));
   const transparent = def.name === 'all' ? shot.transparent : !def.background;
   const ls = lookStyles(shot);

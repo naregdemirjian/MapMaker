@@ -11,7 +11,7 @@ export function sculpted(grid: ElevationGrid, key: string, all: readonly Terrain
   // (Painted biomes change no heights: they are left out, so painting does not make the heights or rivers again, D169.)
   const stamps = all.filter(changesHeights);
   const k = stampsKey(key, stamps);
-  if (!stamps.length) return { grid, touched: null, key: k };
+  if (!stamps.length) return { grid, touched: null, rivers: [], key: k };
   let s = kept.get(k);
   if (s) { kept.delete(k); kept.set(k, s); return { ...s, key: k }; }
   s = applyStamps(grid, stamps, radiusKm);

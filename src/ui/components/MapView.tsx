@@ -27,6 +27,7 @@ import { compare, fromStore, gregorian, formatYear } from '../../core-time/index
 import { basemapSourceOf, shown, minLakeKm2, terrainLook, seaLevelPoints, planetOf, sculptOf, terrainSourceOf, isPaleoEarth, simOf } from '../../world-model/world-settings.ts';
 import { stampsAt, OUTLINE_TOOLS, isRoundTip, tipped } from '../../terrain/sculpt.ts';
 import { sculpted } from '../../terrain/sculpt-cache.ts';
+import { simplifyStroke, type RiverShape } from '../../terrain/river-course.ts';
 import { paintedCover } from '../../terrain/cover.ts';
 import { riversSoon } from '../../terrain/river-cache.ts';
 import { detailNeed, type DetailGrid } from '../../terrain/detail.ts';
@@ -72,7 +73,9 @@ type Drag =
   | { kind: 'pickbox'; x: number; y: number; cx: number; cy: number; moved: number }
   // Choosing several countries (D189): a box dragged with Shift (screen pixels); a stroke with Ctrl and Shift held.
   | { kind: 'selbox'; x: number; y: number; cx: number; cy: number; moved: number }
-  | { kind: 'selpaint'; last: Pt; ids: string[] };
+  | { kind: 'selpaint'; last: Pt; ids: string[] }
+  // A point of a river chosen (D220), dragged to a new place (map positions; the river is worked out again when let go).
+  | { kind: 'river-point'; id: string; index: number; path: Array<[number, number]>; x: number; y: number; moved: number };
 
 /** Where the shot preview last drew its texts and the events box (frame pixels), to pick them up. */
 let overlayRects: OverlayRect[] = [];
@@ -105,6 +108,12 @@ function sculptStroke(points: Pt[]): void {
   if (!points.length || !s.world) return;
   // (An outline needs three points to enclose anything; a river two, from its source to its mouth: D169.)
   if ((OUTLINE_TOOLS.includes(b.tool) && points.length < 3) || (b.tool === 'river' && points.length < 2)) { s.toast(b.tool === 'river' ? 'Draw the river from its source to its mouth.' : 'Draw round the shape to make it land or sea.', 'info'); return; }
+  if (b.tool === 'river') {
+    // (A river, D220: kept as the points where the stroke turns, to within a quarter of its valley's width.)
+    const R = (s.world.get('map_space', s.spaceId)?.radius_m ?? 6371008.8) / 1000;
+    addRiver(simplifyStroke(points.map((q) => [q[0], q[1]] as [number, number]), Math.max(2, b.radiusKm * 0.25), R), 'brush');
+    return;
+  }
   s.execute((wd) => cmd.addTerrainStamp(wd, s.spaceId, {
     tool: b.tool, path: points.map((q) => [q[0], q[1]] as [number, number]), radiusKm: b.radiusKm, strength: b.strength,
     seed: 1 + Math.floor(Math.random() * 999_999), from: b.dated && Number.isFinite(s.time.day) ? { day: s.time.day, ms: s.time.ms } : null,
@@ -112,6 +121,44 @@ function sculptStroke(points: Pt[]): void {
     // (The brush's tip, D218: for the brushes that paint with one, not outlines, rivers or biomes.)
     ...(tipped(b.tool) && !isRoundTip(b.tip) ? { tip: b.tip } : {}),
   }));
+}
+
+/** A river through these points (D220), from its source, with the settings in the options bar; then chosen. */
+function addRiver(path: Array<[number, number]>, drawn: 'pen' | 'brush'): void {
+  const s = store, b = s.sculpt;
+  if (path.length < 2 || !s.world) { s.toast('Draw the river from its source to its mouth.', 'info'); return; }
+  const id = s.execute((wd) => cmd.addTerrainStamp(wd, s.spaceId, {
+    tool: 'river', path, radiusKm: b.radiusKm, strength: b.strength, river: { ...b.river, drawn },
+    seed: 1 + Math.floor(Math.random() * 999_999), from: b.dated && Number.isFinite(s.time.day) ? { day: s.time.day, ms: s.time.ms } : null,
+  }));
+  if (id) s.set({ selection: { kind: 'river', id, spaceId: s.spaceId } });
+}
+
+/** A river's points and the line through them (D220), pale; `active` the point being moved; `to` where the pen's next point would go. */
+function drawRiverGuide(ctx: CanvasRenderingContext2D, v: View, pts: Array<[number, number]>, active: number, to: Pt | null): void {
+  const q = pts.map(([lon, lat]) => lonLatToScreen(v, lon, lat));
+  ctx.save();
+  ctx.lineWidth = 1.2; ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)'; ctx.setLineDash([5, 4]);
+  ctx.beginPath();
+  let on = false;
+  for (const p of q) { if (!p) { on = false; continue; } if (on) ctx.lineTo(p[0], p[1]); else { ctx.moveTo(p[0], p[1]); on = true; } }
+  if (to && on) ctx.lineTo(to[0], to[1]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  q.forEach((p, i) => {
+    if (!p) return;
+    ctx.beginPath(); ctx.arc(p[0], p[1], i === active ? 5 : 3.5, 0, Math.PI * 2);
+    ctx.fillStyle = i === active ? '#ffd166' : i === 0 ? 'rgba(255, 255, 255, 0.95)' : 'rgba(255, 255, 255, 0.7)'; ctx.fill();
+    ctx.lineWidth = 1.2; ctx.strokeStyle = 'rgba(16, 22, 29, 0.8)'; ctx.stroke();
+  });
+  ctx.restore();
+}
+
+/** The river chosen on this map (D220), if one is: its stamp. */
+function chosenRiver() {
+  const s = store, sel = s.selection;
+  if (sel?.kind !== 'river' || sel.spaceId !== s.spaceId || !s.world) return null;
+  return sculptOf(s.world.get('map_space', s.spaceId)).find((st) => st.id === sel.id && st.tool === 'river') ?? null;
 }
 
 function eraseBorders(stroke: Pt[], view: View): void {
@@ -254,6 +301,8 @@ export function MapView() {
   /** Points of the precise shape being placed, as map positions (longitude, latitude). */
   const [polygon, setPolygon] = useState<Pt[]>([]);
   const [cursor, setCursor] = useState<Pt | null>(null);
+  // The rivers drawn on the map in the last frame (D220), for choosing one with a click.
+  const riversDrawn = useRef<RiverShape[]>([]);
   const [hoverVertex, setHoverVertex] = useState<number | null>(null);
   const [, force] = useState(0);
   const [overOverlay, setOverOverlay] = useState(false);
@@ -351,12 +400,14 @@ export function MapView() {
     const ground = needsGrid ? s.terrainOf(space, time) : null;
     const carved = ground ? sculpted(ground.grid, ground.key, strokes, (space?.radius_m ?? 6371008.8) / 1000) : null;
     // A planet's rivers (D99), worked out a moment after its heights (drawn without them meanwhile).
-    const rivers = carved && (planetOf(space) || simulated) && on('rivers') ? riversSoon(carved.grid, carved.key, () => store.notify(), strokes) : null;
+    const rivers = carved && (planetOf(space) || simulated) && on('rivers') ? riversSoon(carved.grid, carved.key, () => store.notify()) : null;
+    riversDrawn.current = carved && on('rivers') ? carved.rivers : [];
     // The land's colours in the satellite look (D100): Earth's land cover, or a planet's biomes.
     // (With the biomes painted over it, D169.)
     const bare = carved && terrainShown && look && PALETTES[look.palette].cover ? s.coverOf(space, carved) : null;
     const cover = bare ? paintedCover(bare, strokes, (space?.radius_m ?? 6371008.8) / 1000) : null;
-    const terrain = ground && carved ? { grid: carved.grid, key: carved.key, look: terrainShown ? look : null, seaLevel, override: carved.touched && basemapSourceOf(space) === 'natural-earth' ? { data: carved.touched, key: carved.key } : null, rivers, cover, detail: null as DetailGrid | null, photo: null as PhotoRegion | null } : null;
+    // (Rivers drawn on the map, D220: their water at any height.)
+    const terrain = ground && carved ? { grid: carved.grid, key: carved.key, look: terrainShown ? look : null, seaLevel, override: carved.touched && basemapSourceOf(space) === 'natural-earth' ? { data: carved.touched, key: carved.key } : null, rivers, drawnRivers: carved.rivers, cover, detail: null as DetailGrid | null, photo: null as PhotoRegion | null } : null;
     if (terrain?.look) passes.add('terrain');
     if (on('borders')) passes.add('borders');
     if (on('features')) passes.add('features');
@@ -502,6 +553,12 @@ export function MapView() {
 
   function drawEditingOverlay(ctx: CanvasRenderingContext2D, v: View) {
     const w = s.world!, arr = w.arrangement(s.spaceId);
+    // A river chosen (D220): its points, small and pale (it is worked out from them: drag one to move it, Alt+click
+    // takes one away, a double-click on the line between two puts one in); and a river being drawn with the pen.
+    const dr = drag.current;
+    const riverPts = dr.kind === 'river-point' ? dr.path : chosenRiver()?.path ?? null;
+    if (riverPts) drawRiverGuide(ctx, v, riverPts, dr.kind === 'river-point' ? dr.index : -1, null);
+    if (s.tool === 'sculpt' && s.riverDraft.length) drawRiverGuide(ctx, v, s.riverDraft, -1, cursor);
     // The chosen area, line or point is outlined (where the last frame drew it).
     if (s.selection?.kind === 'feature') {
       const id = s.selection.id;
@@ -943,6 +1000,25 @@ export function MapView() {
       if (ll) store.execute((wd) => cmd.addTransitionOrigin(wd, id, [ll[0], ll[1]]));
       return;
     }
+    // A river chosen (D220): its point under the pointer is picked up and moved; Alt+click takes it away. (With Select or
+    // the River brush, and not while a river is being drawn with the pen.)
+    const editsRivers = s.tool === 'select' || (s.tool === 'sculpt' && s.sculpt.tool === 'river');
+    const river = !presentation && e.button === 0 && editsRivers && !store.riverDraft.length ? chosenRiver() : null;
+    if (river) {
+      const at = river.path.findIndex(([lon, lat]) => { const q = lonLatToScreen(view, lon, lat); return !!q && Math.hypot(q[0] - p[0], q[1] - p[1]) <= 8; });
+      if (at >= 0 && e.altKey) {
+        if (river.path.length > 2) store.execute((wd) => cmd.updateTerrainStamp(wd, s.spaceId, river.id, { path: river.path.filter((_, i) => i !== at) }));
+        else store.toast('A river needs two points at least: its source and its mouth.', 'info');
+        return;
+      }
+      if (at >= 0) { drag.current = { kind: 'river-point', id: river.id, index: at, path: river.path.map(([x, y]) => [x, y] as [number, number]), x: p[0], y: p[1], moved: 0 }; return; }
+    }
+    // The river pen (D220): each click a point of the river, from its source.
+    if (!presentation && e.button === 0 && s.tool === 'sculpt' && s.sculpt.tool === 'river' && s.sculpt.river.drawn === 'pen') {
+      const ll = screenToLonLat(view, p[0], p[1]);
+      if (ll) { store.set({ riverDraft: [...store.riverDraft, [ll[0], ll[1]]] }); setCursor(p); }
+      return;
+    }
     // Sculpting (D98): a stroke of the brush (a click for a crater or an island).
     if (!presentation && e.button === 0 && s.tool === 'sculpt') {
       const ll = screenToLonLat(view, p[0], p[1]);
@@ -1123,6 +1199,13 @@ export function MapView() {
       return;
     }
     if (d.kind === 'vertex') { d.moved = Math.max(d.moved, Math.hypot(p[0] - d.x, p[1] - d.y)); setCursor(p); return; }
+    if (d.kind === 'river-point') {
+      d.moved = Math.max(d.moved, Math.hypot(p[0] - d.x, p[1] - d.y));
+      const ll = screenToLonLat(view, p[0], p[1]);
+      if (ll) { d.path[d.index] = [ll[0], ll[1]]; force((n) => n + 1); }
+      return;
+    }
+    if (store.riverDraft.length && s.tool === 'sculpt' && !presentation) setCursor(p);
     if (d.kind === 'pen') {
       const pts = store.draft?.points ?? [];
       const last = pts[pts.length - 1];
@@ -1159,6 +1242,7 @@ export function MapView() {
     }
     if (d.kind === 'selpaint') { setCursor(null); return; }
     if (d.kind === 'sculpt') { sculptStroke(d.points); force((n) => n + 1); return; }
+    if (d.kind === 'river-point') { if (d.moved > 3) store.execute((wd) => cmd.updateTerrainStamp(wd, store.spaceId, d.id, { path: d.path })); force((n) => n + 1); return; }
     // A character dropped: it is there from the date being viewed (a click just selects it).
     if (d.kind === 'character') {
       setCursor(null);
@@ -1194,6 +1278,9 @@ export function MapView() {
       const [ux, uy] = rotatePoint(d.startX, d.startY, view.width / 2, view.height / 2, -view.rotation);
       const hitFeature = s.tool === 'select' ? store.renderer.featureAt(ux, uy) : null;
       if (hitFeature) { store.set({ selection: { kind: 'feature', id: hitFeature } }); return; }
+      // (A river drawn on the map, D220: its water under the pointer, a few pixels either side.)
+      const hitRiver = s.tool === 'select' ? riverAt(d.startX, d.startY) : null;
+      if (hitRiver) { store.set({ selection: { kind: 'river', id: hitRiver, spaceId: store.spaceId } }); return; }
       const ll = screenToLonLat(view, d.startX, d.startY);
       if (ll) store.set({ selection: { kind: 'point', lon: ll[0], lat: ll[1] } });
       return;
@@ -1315,6 +1402,39 @@ export function MapView() {
   }
   store.finishDraft = finishDraft;
 
+  /** The river drawn on the map under a point of the screen (D220), if any: within 6 pixels of its water. */
+  function riverAt(x: number, y: number): string | null {
+    let best = 6, found: string | null = null;
+    const near = (line: Array<[number, number]>, id: string) => {
+      let prev: Pt | null = null;
+      for (const [lon, lat] of line) {
+        const q = lonLatToScreen(view, lon, lat);
+        if (q && prev) {
+          const dx = q[0] - prev[0], dy = q[1] - prev[1], l2 = dx * dx + dy * dy;
+          const t = l2 > 0 ? Math.max(0, Math.min(1, ((x - prev[0]) * dx + (y - prev[1]) * dy) / l2)) : 0;
+          const dd = Math.hypot(x - prev[0] - t * dx, y - prev[1] - t * dy);
+          if (dd < best) { best = dd; found = id; }
+        }
+        prev = q;
+      }
+    };
+    for (const r of riversDrawn.current) { near(r.course, r.id); for (const b of r.branches) near(b.line, r.id); }
+    return found;
+  }
+
+  /** Makes the river being drawn with the pen (D220) through its points (a point clicked twice counted once). */
+  function finishRiver() {
+    const pts = store.riverDraft.filter((q, i, a) => {
+      if (!i) return true;
+      const qa = lonLatToScreen(view, a[i - 1][0], a[i - 1][1]), qb = lonLatToScreen(view, q[0], q[1]);
+      return !qa || !qb || Math.hypot(qa[0] - qb[0], qa[1] - qb[1]) > 3;
+    });
+    store.set({ riverDraft: [] });
+    setCursor(null);
+    addRiver(pts, 'pen');
+  }
+  store.finishRiver = finishRiver;
+
   function finishPolygon() {
     if (store.tool === 'feature') {
       const layer = store.world!.get('layer', store.featureLayerId);
@@ -1370,6 +1490,17 @@ export function MapView() {
       if (e.key === 'Escape') { setPolygon([]); setCursor(null); drag.current = { kind: 'none' }; if (store.splitLine && !store.pending) store.set({ splitLine: null }); if (store.tool === 'regions' && !store.dialog && store.regionPicks.length) store.set({ regionPicks: [] }); if (store.pickOrigin) store.set({ pickOrigin: null }); force((n) => n + 1); }
       if (e.key === 'Enter' && store.tool === 'regions' && !store.dialog && store.regionPicks.length) store.set({ dialog: 'give-regions' });
       if (e.key === 'Enter' && polygon.length) finishPolygon();
+      // The river pen (D220).
+      if (store.riverDraft.length && store.tool === 'sculpt') {
+        if (e.key === 'Enter' && store.riverDraft.length >= 2) { e.preventDefault(); finishRiver(); return; }
+        if (e.key === 'Escape') { store.set({ riverDraft: [] }); return; }
+        if (e.key === 'Backspace') { e.preventDefault(); store.set({ riverDraft: store.riverDraft.slice(0, -1) }); return; }
+      }
+      // The river chosen (D220): Delete takes it away (one step, which can be undone).
+      if ((e.key === 'Delete' || e.key === 'Backspace') && !presentation && store.selection?.kind === 'river' && (store.tool === 'select' || store.tool === 'sculpt')) {
+        const r = chosenRiver();
+        if (r) { e.preventDefault(); store.execute((wd) => cmd.removeTerrainStamp(wd, store.spaceId, r.id)); store.set({ selection: null }); return; }
+      }
       if (e.key === 'Enter' && store.tool === 'pen' && !store.pending) finishDraft();
       if ((e.key === 'Backspace' || (e.key.toLowerCase() === 'z' && (e.ctrlKey || e.metaKey))) && store.tool === 'pen' && store.draft?.pieces.length) {
         e.preventDefault(); e.stopImmediatePropagation(); store.penUndoPiece();
@@ -1386,6 +1517,23 @@ export function MapView() {
 
   function onDoubleClick(e: React.MouseEvent<HTMLCanvasElement>) {
     if (presentation) return;
+    if (s.tool === 'sculpt' && store.riverDraft.length >= 2) { finishRiver(); return; }
+    // A river chosen (D220): a double-click on the line between two of its points puts a point there (with Select).
+    const river = s.tool === 'select' ? chosenRiver() : null;
+    if (river) {
+      const p = local(e), ll = screenToLonLat(view, p[0], p[1]);
+      const scr = river.path.map(([lon, lat]) => lonLatToScreen(view, lon, lat));
+      let best = 8, at = -1;
+      for (let i = 0; i + 1 < scr.length; i++) {
+        const a = scr[i], b = scr[i + 1];
+        if (!a || !b) continue;
+        const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy;
+        const t = l2 > 0 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2)) : 0;
+        const dd = Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy);
+        if (dd < best && t > 0.02 && t < 0.98) { best = dd; at = i; }
+      }
+      if (at >= 0 && ll) { store.execute((wd) => cmd.updateTerrainStamp(wd, store.spaceId, river.id, { path: [...river.path.slice(0, at + 1), [ll[0], ll[1]], ...river.path.slice(at + 1)] })); return; }
+    }
     if (s.tool === 'polygon' || (s.tool === 'feature' && polygon.length)) { finishPolygon(); return; }
     if (s.tool === 'vertex' && s.world) {
       const p = local(e);

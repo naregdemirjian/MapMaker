@@ -5,6 +5,7 @@ import { useStore, DEFAULT_STROKE, type Tool } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
 import { SCULPT_TOOLS, tipped } from '../../terrain/sculpt.ts';
 import { BrushTipControl } from '../components/BrushTip.tsx';
+import { RiverSettings } from '../components/RiverPanel.tsx';
 import { BIOMES, type Biome } from '../../terrain/biomes.ts';
 import { fromStore, compare } from '../../core-time/index.ts';
 import { sculptOf, isSpaceMap } from '../../world-model/world-settings.ts';
@@ -217,22 +218,24 @@ function SculptToolOptions() {
   const strokes = sculptOf(space);
   const info = SCULPT_TOOLS.find((t) => t.id === b.tool)!;
   const set = (patch: Partial<typeof b>) => s.set({ sculpt: { ...b, ...patch } });
-  const uses = info.strength > 0;
+  const uses = info.strength > 0, river = b.tool === 'river';
   return (
     <div className="toolbar sub sculpt-options" data-testid="sculpt-options">
       <label className="inline">Brush
-        <select value={b.tool} onChange={(e) => { const t = SCULPT_TOOLS.find((x) => x.id === e.target.value)!; set({ tool: t.id, strength: t.strength || b.strength }); }} title={info.hint} data-testid="sculpt-brush">
+        <select value={b.tool} onChange={(e) => { const t = SCULPT_TOOLS.find((x) => x.id === e.target.value)!; set({ tool: t.id, strength: t.strength || b.strength, ...(t.id === 'river' ? { radiusKm: 30 } : b.tool === 'river' ? { radiusKm: 300 } : {}) }); s.set({ riverDraft: [] }); }} title={info.hint} data-testid="sculpt-brush">
           {SCULPT_TOOLS.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
         </select>
       </label>
-      <label className="inline" title={b.tool === 'coast-land' || b.tool === 'coast-sea' ? 'How ragged the coast is: the size of its bays and headlands' : 'The brush\'s radius on the ground'}>Size
+      {river && <RiverDrawOptions />}
+      <label className="inline" title={b.tool === 'coast-land' || b.tool === 'coast-sea' ? 'How ragged the coast is: the size of its bays and headlands' : river ? 'How wide the valley it cuts is, either side' : 'The brush\'s radius on the ground'}>{river ? 'Valley' : 'Size'}
         <input type="number" min={1} max={5000} step={10} value={b.radiusKm} onChange={(e) => Number(e.target.value) > 0 && set({ radiusKm: Math.min(5000, Number(e.target.value)) })} data-testid="sculpt-size" /> km
       </label>
       {uses && (
-        <label className="inline" title={b.tool === 'land' ? 'How high the new land stands' : b.tool === 'coast-land' ? 'How high the land rises inland' : b.tool === 'sea' || b.tool === 'coast-sea' ? 'How deep the new sea is' : b.tool === 'river' ? 'How far below the ground the river\'s bed runs' : 'How much the brush raises or lowers'}>{b.tool === 'land' || b.tool === 'coast-land' ? 'Height' : b.tool === 'sea' || b.tool === 'coast-sea' || b.tool === 'river' ? 'Depth' : 'Strength'}
-          <input type="number" min={1} max={10000} step={50} value={b.strength} onChange={(e) => Number(e.target.value) > 0 && set({ strength: Math.min(10000, Number(e.target.value)) })} data-testid="sculpt-strength" /> m
+        <label className="inline" title={b.tool === 'land' ? 'How high the new land stands' : b.tool === 'coast-land' ? 'How high the land rises inland' : b.tool === 'sea' || b.tool === 'coast-sea' ? 'How deep the new sea is' : river ? 'How deep it cuts its valley into the ground (0: the ground as it is; its water shows whatever the height)' : 'How much the brush raises or lowers'}>{b.tool === 'land' || b.tool === 'coast-land' ? 'Height' : b.tool === 'sea' || b.tool === 'coast-sea' ? 'Depth' : river ? 'Cuts' : 'Strength'}
+          <input type="number" min={river ? 0 : 1} max={10000} step={river ? 10 : 50} value={b.strength} onChange={(e) => { const v = Number(e.target.value); if (Number.isFinite(v) && (v > 0 || (river && v === 0))) set({ strength: Math.min(10000, v) }); }} data-testid="sculpt-strength" /> m
         </label>
       )}
+      {river && <RiverSettings value={b.river} onChange={(patch) => set({ river: { ...b.river, ...patch } })} idPrefix="river" />}
       {tipped(b.tool) && <BrushTipControl tip={b.tip} onChange={(tip) => set({ tip })} />}
       {b.tool === 'biome' && (
         <label className="inline" title="What grows where you paint, as the satellite look shows it">Biome
@@ -250,5 +253,28 @@ function SculptToolOptions() {
       <span className="muted">{info.hint}.</span>
       {strokes.length > 0 && <button className="link" onClick={() => s.execute((wd) => cmd.clearTerrainStamps(wd, s.spaceId))} data-testid="sculpt-clear" title="Take every stroke away (one step, which can be undone)">Remove all {strokes.length} stroke{strokes.length === 1 ? '' : 's'}</button>}
     </div>
+  );
+}
+
+/**
+ * How a river is drawn (D220): with the pen, its points clicked one by one from its source (Enter or a double-click
+ * finishes, Backspace takes the last back, Esc gives up), or with the brush, a stroke kept as the points where it turns.
+ */
+function RiverDrawOptions() {
+  const s = useStore();
+  const b = s.sculpt, pen = b.river.drawn === 'pen', n = s.riverDraft.length;
+  const draw = (drawn: 'pen' | 'brush') => s.set({ sculpt: { ...b, river: { ...b.river, drawn } }, riverDraft: [] });
+  return (
+    <span className="inline river-draw">
+      <span className="seg" role="group" aria-label="Draw the river with">
+        <button className={`small ${pen ? 'on' : ''}`} onClick={() => draw('pen')} title="Click its points one by one, from its source to its mouth" data-testid="river-draw-pen">Pen</button>
+        <button className={`small ${pen ? '' : 'on'}`} onClick={() => draw('brush')} title="Draw it in one stroke; it is kept as the points where it turns" data-testid="river-draw-brush">Brush</button>
+      </span>
+      {pen && n > 0 && <>
+        <span className="muted" data-testid="river-draft-count">{n} point{n === 1 ? '' : 's'}</span>
+        <button className="small" disabled={n < 2} onClick={() => s.finishRiver()} title="Make the river through these points (Enter)" data-testid="river-pen-finish">Finish</button>
+        <button className="small" onClick={() => s.set({ riverDraft: [] })} title="Give up this river (Esc)" data-testid="river-pen-cancel">Cancel</button>
+      </>}
+    </span>
   );
 }

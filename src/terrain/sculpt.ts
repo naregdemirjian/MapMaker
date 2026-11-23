@@ -8,8 +8,12 @@
 // land rising inland or the sea deepening away from it), a river drawn from its source to its mouth (a valley falling
 // all the way, so the water the map works out follows it), and biomes painted over the land's colours (kept with the
 // strokes, but changing no heights: see cover.ts).
+//
+// Rivers (D220) are kept as the points they were drawn through and their settings; their course, tributaries and water
+// are worked out from them with the heights (river-course.ts), so they can be moved and changed later.
 import type { ElevationGrid } from './grid.ts';
 import { simplex3 } from './planet.ts';
+import { applyRiverStamp, riverSpecOf, type RiverSpec, type RiverShape } from './river-course.ts';
 import { BIOMES, type Biome } from './biomes.ts';
 import type { Instant } from '../core-time/index.ts';
 
@@ -30,7 +34,7 @@ export const SCULPT_TOOLS: Array<{ id: SculptTool; name: string; hint: string; s
   { id: 'sea', name: 'Paint sea', hint: 'Flood what is under the stroke (shallow sea)', strength: 60 },
   { id: 'coast-land', name: 'Draw land (outline)', hint: 'Draw round a shape: inside becomes land, rising inland to the height set; the size sets how ragged its coast is', strength: 400 },
   { id: 'coast-sea', name: 'Draw sea (outline)', hint: 'Draw round a shape: inside becomes sea, deepening away from its coast to the depth set; the size sets how ragged its coast is', strength: 3000 },
-  { id: 'river', name: 'River', hint: 'Draw from a river\'s source to its mouth: a valley falling all the way, so the water follows it', strength: 120 },
+  { id: 'river', name: 'River', hint: 'Draw a river from its source to its mouth, point by point with the pen or in one stroke with the brush: its water shows at any height, with tributaries where the heights gather water; choose it later to move its points or change it', strength: 60 },
   { id: 'biome', name: 'Paint a biome', hint: 'Paint what grows there, as the satellite look shows it (generated and simulated planets)', strength: 0 },
 ];
 /** Tools whose stroke is an outline (closed by the map). */
@@ -102,6 +106,10 @@ export interface TerrainStamp {
   biome?: Biome;
   /** The brush's tip (D218): kept only when not the plain soft round one. */
   tip?: BrushTip;
+  /** A river's settings (D220; its path is then the points it was drawn through). None: a river from before (D169). */
+  river?: RiverSpec;
+  /** How many times it has been changed since it was made (D220: moved points, other settings). */
+  rev?: number;
 }
 
 /** Stamps as stored, checked (anything broken left out). */
@@ -117,10 +125,14 @@ export function cleanStamps(raw: unknown): TerrainStamp[] {
     const from = s.from && Number.isFinite(s.from.day) ? { day: s.from.day, ms: Number.isFinite(s.from.ms) ? s.from.ms : 0 } : null;
     if (s.tool === 'biome' && !(typeof s.biome === 'string' && s.biome in BIOMES)) continue;
     const tip = s.tip ? tipOf(s.tip) : undefined;
+    const river = s.tool === 'river' ? riverSpecOf(s.river) : null;
+    const rev = Number.isInteger(s.rev) && s.rev! > 0 ? s.rev! : 0;
     out.push({
       id: s.id, tool: s.tool, path, radiusKm: Math.min(5000, Number(s.radiusKm)), strength: Math.max(0, Math.min(10000, Number(s.strength))), seed: Number.isFinite(s.seed) ? Number(s.seed) : 1, from,
       ...(s.tool === 'biome' ? { biome: s.biome } : {}),
       ...(tip && !isRoundTip(tip) ? { tip } : {}),
+      ...(river ? { river } : {}),
+      ...(rev ? { rev } : {}),
     });
   }
   return out;
@@ -132,10 +144,10 @@ export function stampsAt(stamps: readonly TerrainStamp[], t: Instant): TerrainSt
 }
 
 /** A name for a set of stamps applied to some heights (what the result is kept by). */
-export const stampsKey = (baseKey: string, stamps: readonly TerrainStamp[]) => (stamps.length ? `${baseKey}+${stamps.map((s) => s.id).join(',')}` : baseKey);
+export const stampsKey = (baseKey: string, stamps: readonly TerrainStamp[]) => (stamps.length ? `${baseKey}+${stamps.map((s) => (s.rev ? `${s.id}.${s.rev}` : s.id)).join(',')}` : baseKey);
 
-/** The base heights with the stamps applied, in order, and the cells they touched (null when none). */
-export interface Sculpted { grid: ElevationGrid; touched: Uint8Array | null }
+/** The base heights with the stamps applied, in order, the cells they touched (null when none), and the rivers drawn (D220). */
+export interface Sculpted { grid: ElevationGrid; touched: Uint8Array | null; rivers: RiverShape[] }
 
 const RAD = Math.PI / 180;
 
@@ -146,19 +158,20 @@ const RAD = Math.PI / 180;
  */
 export function applyStamps(base: ElevationGrid, all: readonly TerrainStamp[], radiusKm: number): Sculpted {
   const stamps = all.filter(changesHeights);
-  if (!stamps.length) return { grid: base, touched: null };
+  if (!stamps.length) return { grid: base, touched: null, rivers: [] };
   const { width: W, height: H, step } = base;
   const e = new Float32Array(W * H);
   for (let k = 0; k < e.length; k++) e[k] = base.data[k] * step;
   const touched = new Uint8Array(W * H);
+  const rivers: RiverShape[] = [];
   for (const s of stamps) {
     if (OUTLINE_TOOLS.includes(s.tool)) applyOutline(e, touched, W, H, s, radiusKm);
-    else if (s.tool === 'river') applyRiver(e, touched, W, H, s, radiusKm);
+    else if (s.tool === 'river') { const r = applyRiverStamp(e, touched, W, H, s, radiusKm); if (r) rivers.push(r); }
     else applyStamp(e, touched, W, H, s, radiusKm);
   }
   const data = new Int16Array(W * H);
   for (let k = 0; k < data.length; k++) data[k] = Math.max(-32768, Math.min(32767, Math.round(e[k] / step)));
-  return { grid: { width: W, height: H, step, data }, touched };
+  return { grid: { width: W, height: H, step, data }, touched, rivers };
 }
 
 /** Unit vector of a place. */
@@ -610,69 +623,6 @@ function applyOutline(e: Float32Array, touched: Uint8Array, W: number, H: number
         const target = -(20 + (s.strength - 20) * rise * (1 + 0.1 * hills));
         if (target < e[k]) { e[k] = target; touched[k] = 1; }
       }
-    }
-  }
-}
-
-/**
- * A river drawn from its source to its mouth (D169): along the stroke the ground is cut to a bed falling steadily
- * from the depth set below the source's ground to just below the sea where the stroke first reaches it (or, ending
- * inland, to the depth set below the ground there), and the valley's sides slope down to it across the brush's width,
- * so the water the map works out runs the way it was drawn.
- */
-function applyRiver(e: Float32Array, touched: Uint8Array, W: number, H: number, s: TerrainStamp, radiusKm: number): void {
-  if (s.path.length < 2) return;
-  const at = (lon: number, lat: number) => {
-    const j = Math.max(0, Math.min(H - 1, Math.floor(((90 - lat) / 180) * H))), i = (((Math.floor(((lon + 180) / 360) * W)) % W) + W) % W;
-    return j * W + i;
-  };
-  const pts = s.path.map(([lon, lat]) => vec(lon, lat));
-  // How far along the stroke each point lies (radians), and the bed's height there: from the depth set below the
-  // source's ground down to the depth set below the mouth's (and below the sea at least), falling all the way.
-  const along = [0];
-  for (let i = 1; i < pts.length; i++) along.push(along[i - 1] + Math.acos(Math.max(-1, Math.min(1, pts[i][0] * pts[i - 1][0] + pts[i][1] * pts[i - 1][1] + pts[i][2] * pts[i - 1][2]))));
-  const total = Math.max(1e-9, along[along.length - 1]);
-  const [lonA, latA] = s.path[0], [lonB, latB] = s.path[s.path.length - 1];
-  if (e[at(lonA, latA)] < 0) return;
-  // Its mouth: where the stroke first reaches the sea (the bed falls to just below it there, and the stroke ends);
-  // or, drawn to an end inland, there (the bed as far below the ground there as at the source).
-  let mouth = 1;
-  for (let q = 0; q + 1 < s.path.length && mouth === 1; q++) {
-    const [a, b] = [s.path[q], s.path[q + 1]], dLon = ((((b[0] - a[0]) % 360) + 540) % 360) - 180;
-    const n = Math.max(1, Math.ceil((Math.hypot(dLon, b[1] - a[1]) / 180) * H * 2));
-    for (let k = 1; k <= n; k++) if (e[at(a[0] + (dLon * k) / n, a[1] + ((b[1] - a[1]) * k) / n)] < 0) { mouth = (along[q] + ((along[q + 1] - along[q]) * k) / n) / total; break; }
-  }
-  const top = e[at(lonA, latA)] - s.strength, bottom = mouth < 1 ? Math.min(-5, top - 1) : Math.min(e[at(lonB, latB)] - s.strength, top - 1);
-  const bedAt = (t: number) => top + ((bottom - top) * t) / mouth;
-  const r = s.radiusKm / radiusKm, reachDeg = r / RAD;
-  const lats = s.path.map((p) => p[1]);
-  const unwrapped: number[] = [];
-  for (const [lon] of s.path) { const prev = unwrapped[unwrapped.length - 1]; unwrapped.push(prev === undefined ? lon : prev + ((((lon - prev) % 360) + 540) % 360) - 180); }
-  const lat0 = Math.max(-90, Math.min(...lats) - reachDeg), lat1 = Math.min(90, Math.max(...lats) + reachDeg);
-  const j0 = Math.max(0, Math.floor(((90 - lat1) / 180) * H)), j1 = Math.min(H - 1, Math.ceil(((90 - lat0) / 180) * H));
-  const widest = Math.max(Math.abs(lat0), Math.abs(lat1));
-  const lonPad = Math.min(180, reachDeg / Math.max(0.05, Math.cos(Math.min(89, widest) * RAD)));
-  const cFrom = Math.floor(((Math.min(...unwrapped) - lonPad + 180) / 360) * W), cTo = Math.min(cFrom + W - 1, Math.ceil(((Math.max(...unwrapped) + lonPad + 180) / 360) * W));
-  for (let j = j0; j <= j1; j++) {
-    const lat = 90 - ((j + 0.5) / H) * 180, cl = Math.cos(lat * RAD), z = Math.sin(lat * RAD);
-    for (let cc = cFrom; cc <= cTo; cc++) {
-      const i = ((cc % W) + W) % W, lon = -180 + ((i + 0.5) / W) * 360;
-      const x = cl * Math.cos(lon * RAD), y = cl * Math.sin(lon * RAD);
-      // The nearest point of the stroke: its segment, and how far along.
-      let best = Infinity, t = 0;
-      for (let q = 0; q + 1 < pts.length; q++) {
-        const a = pts[q], b = pts[q + 1];
-        const ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], ap = [x - a[0], y - a[1], z - a[2]];
-        const len2 = ab[0] * ab[0] + ab[1] * ab[1] + ab[2] * ab[2];
-        const u = len2 > 0 ? Math.max(0, Math.min(1, (ap[0] * ab[0] + ap[1] * ab[1] + ap[2] * ab[2]) / len2)) : 0;
-        const dx = ap[0] - u * ab[0], dy = ap[1] - u * ab[1], dz = ap[2] - u * ab[2], d = Math.hypot(dx, dy, dz);
-        if (d < best) { best = d; t = (along[q] + u * (along[q + 1] - along[q])) / total; }
-      }
-      if (best >= r || t > mouth) continue;
-      const k = j * W + i, w = best / r, bed = bedAt(t);
-      // The valley: the bed in the middle, its sides rising to the ground at the brush's edge.
-      const side = bed + (e[k] - bed) * w * w;
-      if (side < e[k]) { e[k] = side; touched[k] = 1; }
     }
   }
 }

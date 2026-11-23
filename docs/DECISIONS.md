@@ -61,6 +61,39 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D220. Rivers drawn as guidance: their points kept, their course and tributaries worked out, their water at any height
+
+- **Why.** The River brush only cut a valley into the ground: its water showed only where the ground fell below the sea
+  (on Earth not at all), it ran exactly as the hand drew it, had no tributaries, and could not be changed once drawn.
+- **Kept as guidance** (`TerrainStamp.river`, `RiverSpec`): a river is the few points it was drawn through, clicked one
+  by one with the *pen* (Enter or a double-click finishes, Backspace takes the last point back, Esc gives up) or a
+  *brush* stroke kept as the points where it turns (`simplifyStroke`: to within a quarter of its valley's width), and
+  its settings: *width* (drawn at its mouth), *winding*, *tributaries*, *follows the valleys*; its valley's width and
+  depth are the brush's *Valley* and *Cuts* (0: the ground as it is; 30 km and 60 m to start with). A river's count of
+  changes (`rev`) is part of the heights' name, so a changed river is worked out again.
+- **Worked out with the heights** (`applyRiverStamp`, river-course.ts), in order with the other strokes: its course
+  smoothly through its points (a centripetal Catmull-Rom curve), or along the valleys and downhill between them (the
+  cheapest way over the heights in a box round each two points: low ground cheap, high ground dear, climbing dearer, the
+  sea dearest), smoothed; winding at every scale (bends from a third of its length down to a few of its points, each as
+  deep for its length as the next; most on flat ground, half as much in the mountains); from its first point on land to
+  where it reaches the sea; its valley cut, falling all the way, if asked.
+- **Tributaries where the water gathers**: in a box round the river every cell drains to the neighbour by which its
+  water reaches the river or the sea (hollows filled first); the water is gathered downstream, and channels run where a
+  share of the river's water has gathered (the more tributaries asked for, the smaller the share), traced from their
+  sources to where they join, the longest first, so a tributary's own branches end on it; they wind too. A river ending
+  inland takes no water from beyond its end. A river is as wide as the water it carries (the root of its share), its
+  tributaries narrower.
+- **Its water drawn whatever the height** (`drawDrawnRivers`): on any map, Earth's too, in the rivers' colour over the
+  land or the terrain's colours, each stretch as wide as its water and the same on screen at any zoom; hidden with the
+  other rivers (What is shown). A planet's own rivers (D99) no longer take drawn rivers into them; the smart brushes
+  follow both (`withDrawnRivers`).
+- **Changed later**: chosen with Select by its water (and when just drawn), its points show small and pale; with Select
+  (or the River brush) one dragged moves, Alt+click takes one away, a double-click on the line between two puts one in
+  (with Select), Delete removes the river. In
+  Properties: its settings, its valley, *Another shape* (another seed) and *Remove the river* (`updateTerrainStamp`,
+  `removeTerrainStamp`, one undo each). Rivers drawn before (D169) keep their strokes and valleys as they were, and now
+  show their water too.
+
 ### D219. Cities drawn as maps online draw them, fewer when zoomed out, their look one's own
 
 - **Why.** Every city was drawn alike (a cream dot and a serif name growing with the zoom), and seen whole the map

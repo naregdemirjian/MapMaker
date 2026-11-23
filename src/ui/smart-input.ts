@@ -12,7 +12,7 @@ import { basemapSourceOf, terrainSourceOf, planetOf, sculptOf, seaLevelPoints } 
 import type { MapSpaceRow } from '../world-model/schema.ts';
 import { stampsAt } from '../terrain/sculpt.ts';
 import { sculpted } from '../terrain/sculpt-cache.ts';
-import { riversSoon } from '../terrain/river-cache.ts';
+import { riversSoon, withDrawnRivers } from '../terrain/river-cache.ts';
 import { heightAt } from '../terrain/grid.ts';
 import { seaLevelAt } from '../terrain/sea-level.ts';
 import { E7 } from '../geo-kernel/vec.ts';
@@ -149,8 +149,8 @@ export function smartInputFor(view: View, stroke: Pt[], closed: boolean, side: 0
   const strokes = stampsAt(sculptOf(space), store.time);
   const carved = ground ? sculpted(ground.grid, ground.key, strokes, (space?.radius_m ?? 6371008.8) / 1000) : null;
   if ((wantHeights || (planet && w.rivers > 0)) && !carved) missing.push('heights');
-  // (With the rivers drawn on the map, D169, as the map has them.)
-  const planetRivers = offered.rivers && planet && w.rivers > 0 && carved ? riversSoon(carved.grid, carved.key, () => store.notify(), strokes) : null;
+  // (With the rivers drawn on the map, D220, as the map has them.)
+  const planetRivers = offered.rivers && planet && w.rivers > 0 && carved ? withDrawnRivers(riversSoon(carved.grid, carved.key, () => store.notify()), carved.rivers) : null;
   if (offered.rivers && planet && w.rivers > 0 && carved && !planetRivers) missing.push("planet's rivers");
   const earth = (offered.coasts || offered.today) && store.basemap ? chooseScale(store.basemap, view) : null;
   const features: SmartFeature[] = [

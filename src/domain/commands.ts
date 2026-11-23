@@ -233,6 +233,39 @@ export function addTerrainStamp(world: World, spaceId: string, stamp: Omit<Terra
   });
 }
 
+/**
+ * Changes a stroke kept on a map (D220: a river's points, its settings, its valley, another shape of it): one undoable
+ * step. Its count of changes goes up, so what was worked out from it is worked out again.
+ */
+export function updateTerrainStamp(world: World, spaceId: string, id: string, patch: Partial<Pick<TerrainStamp, 'path' | 'river' | 'radiusKm' | 'strength' | 'seed'>>): CommandResult {
+  const space = world.get('map_space', spaceId);
+  if (!space) throw new Error('That map no longer exists.');
+  const settings = worldSettings(space);
+  const all = cleanStamps(settings.sculpt);
+  const old = all.find((st) => st.id === id);
+  if (!old) throw new Error('That stroke is no longer on the map.');
+  const path = patch.path ? patch.path.filter((p) => Array.isArray(p) && Number.isFinite(p[0]) && Number.isFinite(p[1]) && Math.abs(p[1]) <= 90).map(([lon, lat]) => [Math.round(lon * 1e5) / 1e5, Math.round(lat * 1e5) / 1e5] as [number, number]) : old.path;
+  if (old.tool === 'river' && path.length < 2) throw new Error('A river needs two points at least: its source and its mouth.');
+  const [next] = cleanStamps([{ ...old, ...patch, path, rev: (old.rev ?? 0) + 1 }]);
+  if (!next) throw new Error('Those are not settings for this stroke.');
+  return run(world, old.tool === 'river' ? 'Change a river' : 'Change a stroke of the terrain', (tx) => {
+    tx.update('map_space', { ...space, settings: JSON.stringify({ ...settings, sculpt: all.map((st) => (st.id === id ? next : st)) }) });
+  });
+}
+
+/** Takes one stroke away from a map (D220: a river), in one undoable step. */
+export function removeTerrainStamp(world: World, spaceId: string, id: string): CommandResult {
+  const space = world.get('map_space', spaceId);
+  if (!space) throw new Error('That map no longer exists.');
+  const settings = worldSettings(space);
+  const all = cleanStamps(settings.sculpt);
+  const old = all.find((st) => st.id === id);
+  if (!old) throw new Error('That stroke is no longer on the map.');
+  return run(world, old.tool === 'river' ? 'Remove a river' : 'Remove a stroke of the terrain', (tx) => {
+    tx.update('map_space', { ...space, settings: JSON.stringify({ ...settings, sculpt: all.filter((st) => st.id !== id) }) });
+  });
+}
+
 /** Takes every sculpting stroke away (D98), in one undoable step. */
 export function clearTerrainStamps(world: World, spaceId: string): CommandResult {
   const space = world.get('map_space', spaceId);
