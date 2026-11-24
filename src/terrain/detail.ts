@@ -93,7 +93,7 @@ export function covers(g: DetailGrid, r: { west: number; south: number; east: nu
  * when it could not be had; `base` gives the heights kept (the bundled grid, sculpted: `touched`
  * marks its cells changed by sculpting). At most `maxCells` cells along each side.
  */
-export function buildDetail(need: DetailNeed, tile: (x: number, y: number) => Float32Array | null, base: { grid: ElevationGrid; key: string; touched?: Uint8Array | null }, maxCells = 2048): DetailGrid {
+export function buildDetail(need: DetailNeed, tile: (x: number, y: number) => Float32Array | null, base: { grid: ElevationGrid; key: string; touched?: Uint8Array | null; under?: ElevationGrid }, maxCells = 2048): DetailGrid {
   const { z } = need, n = 2 ** z;
   const [west, north] = tileLonLat(need.x0, need.y0, z), [east, south] = tileLonLat(need.x1 + 1, need.y1 + 1, z);
   const midLat = (north + south) / 2;
@@ -104,11 +104,17 @@ export function buildDetail(need: DetailNeed, tile: (x: number, y: number) => Fl
   const width = Math.max(1, Math.ceil((east - west) / dLon)), height = Math.max(1, Math.ceil((north - south) / dLat));
   const data = new Int16Array(width * height);
   const g = base.grid, touched = base.touched ?? null;
+  // Whether sculpting changed the heights at a place or beside it (the cells whose heights reach it between cells).
+  const under = base.under ?? null;
   const sculptedAt = (lon: number, lat: number) => {
     if (!touched) return false;
-    const i = (((Math.floor(((lon + 180) / 360) * g.width)) % g.width) + g.width) % g.width;
-    const j = Math.max(0, Math.min(g.height - 1, Math.floor(((90 - lat) / 180) * g.height)));
-    return touched[j * g.width + i] === 1;
+    const fi = ((lon + 180) / 360) * g.width - 0.5, fj = ((90 - lat) / 180) * g.height - 0.5;
+    const i0 = Math.floor(fi), j0 = Math.floor(fj);
+    for (let dj = 0; dj <= 1; dj++) for (let di = 0; di <= 1; di++) {
+      const i = (((i0 + di) % g.width) + g.width) % g.width, j = Math.max(0, Math.min(g.height - 1, j0 + dj));
+      if (touched[j * g.width + i] === 1) return true;
+    }
+    return false;
   };
   // A height from the tiles at global pixel coordinates (bilinear across tile edges), or NaN.
   const cache = new Map<number, Float32Array | null>();
@@ -127,7 +133,11 @@ export function buildDetail(need: DetailNeed, tile: (x: number, y: number) => Fl
     for (let i = 0; i < width; i++) {
       const lon = west + (i + 0.5) * dLon;
       let v = NaN;
-      if (!underIce(lon, lat) && !sculptedAt(lon, lat)) {
+      // Where the ground was sculpted (D98): the finer heights with what sculpting did laid over them (the difference
+      // it made to the map's own heights, smooth between their cells), so a valley cut or a hill raised keeps the
+      // ground's own detail and no cell's outline shows (D225). Without the heights from before: the map's own, as ever.
+      const carved = sculptedAt(lon, lat);
+      if (!underIce(lon, lat) && (!carved || under)) {
         const [tx, ty] = tileXY(lon, lat, z);
         const fx = tx * TILE - 0.5, fy = Math.max(0, Math.min(n * TILE - 1, ty * TILE - 0.5));
         const X = Math.floor(fx), Y = Math.floor(fy), ax = fx - X, ay = fy - Y;
@@ -140,6 +150,7 @@ export function buildDetail(need: DetailNeed, tile: (x: number, y: number) => Fl
         if (c === c) { sum += c * wc; weight += wc; some = c; }
         if (d === d) { sum += d * wd; weight += wd; some = d; }
         v = weight > 0 ? sum / weight : some;
+        if (carved && under && Number.isFinite(v)) { v += heightAt(g, lon, lat) - heightAt(under, lon, lat); whole = false; }
       }
       if (!Number.isFinite(v)) whole = false;
       data[j * width + i] = Math.max(-32768, Math.min(32767, Math.round(Number.isFinite(v) ? v : heightAt(g, lon, lat))));

@@ -7,7 +7,7 @@
 import { terrariumHeights, buildDetail, covers, TILE, type DetailNeed, type DetailGrid } from './detail.ts';
 import type { ElevationGrid } from './grid.ts';
 
-type Base = { grid: ElevationGrid; key: string; touched?: Uint8Array | null };
+type Base = { grid: ElevationGrid; key: string; touched?: Uint8Array | null; under?: ElevationGrid };
 
 const tiles = new Map<string, Float32Array>();
 const failed = new Map<string, number>();

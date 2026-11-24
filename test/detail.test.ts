@@ -77,6 +77,21 @@ test('a region\'s grid is laid from its tiles: heights where they are, the bundl
   touched[Math.floor((90 - 46.05) * 2) * W + Math.floor((10.05 + 180) * 2)] = 1;
   const sculpted = buildDetail(need, tiles(need.z, ridge), { ...base, touched });
   assert.equal(at(sculpted, 10.05, 46.05), 50, 'sculpted: the sculpted heights');
+  // With the heights from before sculpting (D225): the finer heights with what sculpting did laid over them, smooth
+  // between the map's cells: a valley cut 300 m into one cell lowers the ridge there and keeps its shape, with no
+  // step at the cell's edge.
+  const cut = flat(50), k = Math.floor((90 - 46.05) * 2) * W + Math.floor((10.05 + 180) * 2);
+  cut.data[k] = -250;
+  const over = buildDetail(need, tiles(need.z, ridge), { grid: cut, key: 'cut', touched, under: base.grid });
+  const plain = buildDetail(need, tiles(need.z, ridge), base);
+  const mid: [number, number] = [10.25, 46.25];
+  assert.ok(Math.abs(at(over, ...mid) - (at(plain, ...mid) - 300)) < 3, `the cell's middle 300 m lower (${at(over, ...mid)} against ${at(plain, ...mid)})`);
+  assert.ok(Math.abs(at(over, 10.002, 46.25) - at(over, 9.998, 46.25) - (at(plain, 10.002, 46.25) - at(plain, 9.998, 46.25))) < 8, 'no step at the edge of the cell');
+  assert.equal(at(over, 9.7, 45.8), at(plain, 9.7, 45.8), 'away from it, the tiles as they are');
+  let shaped = 0;
+  for (let x = 10.1; x < 10.45; x += 0.05) if (Math.abs((at(over, x, 46.25) - at(over, x - 0.05, 46.25)) - (at(plain, x, 46.25) - at(plain, x - 0.05, 46.25))) < 60) shaped++;
+  assert.ok(shaped >= 6, 'the ground keeps its own shape under the cut');
+  assert.equal(over.whole, false);
   // Under the ice of Greenland: the bundled grid's ice surface.
   const ice = detailNeed({ west: -41, south: 71.8, east: -39, north: 72.2 }, 300)!;
   const icy = buildDetail(ice, tiles(ice.z, () => -200), { grid: flat(3000), key: 'ice' });

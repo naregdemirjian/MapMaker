@@ -147,7 +147,11 @@ export function stampsAt(stamps: readonly TerrainStamp[], t: Instant): TerrainSt
 export const stampsKey = (baseKey: string, stamps: readonly TerrainStamp[]) => (stamps.length ? `${baseKey}+${stamps.map((s) => (s.rev ? `${s.id}.${s.rev}` : s.id)).join(',')}` : baseKey);
 
 /** The base heights with the stamps applied, in order, the cells they touched (null when none), and the rivers drawn (D220). */
-export interface Sculpted { grid: ElevationGrid; touched: Uint8Array | null; rivers: RiverShape[] }
+export interface Sculpted {
+  grid: ElevationGrid; touched: Uint8Array | null; rivers: RiverShape[];
+  /** The heights before the stamps (when any changed them): what sculpting did is the difference, laid over finer heights close in. */
+  under?: ElevationGrid;
+}
 
 const RAD = Math.PI / 180;
 
@@ -171,7 +175,7 @@ export function applyStamps(base: ElevationGrid, all: readonly TerrainStamp[], r
   }
   const data = new Int16Array(W * H);
   for (let k = 0; k < data.length; k++) data[k] = Math.max(-32768, Math.min(32767, Math.round(e[k] / step)));
-  return { grid: { width: W, height: H, step, data }, touched, rivers };
+  return { grid: { width: W, height: H, step, data }, touched, rivers, under: base };
 }
 
 /** Unit vector of a place. */

@@ -125,3 +125,20 @@ test('a brush stroke kept as the points where it turns (D220)', () => {
   const zigzag = Array.from({ length: 400 }, (_, i) => [i * 0.05, 5 + (i % 2) * 0.5] as [number, number]);
   assert.ok(simplifyStroke(zigzag, 1, R, 30).length <= 30);
 });
+
+test('a river always has its water, and its valley never makes sea (D225): cut near the coast the land stays land; a river across another\'s valley runs on; one drawn over water is drawn', () => {
+  // Low land (20 m) west of a coast at 20°E: a valley cut 60 m would go below the sea.
+  const low = (lon: number) => (lon > 20 ? -800 : 20 + (20 - lon) * 2);
+  const e = ground(low), touched = new Uint8Array(W * H);
+  const first = applyRiverStamp(e, touched, W, H, river([[10, 12], [15, 12.3], [21, 12]], { follow: false }, { strength: 60, radiusKm: 30 }), R)!;
+  assert.ok(first && first.course.length > 20);
+  let lowest = Infinity, cutCells = 0;
+  for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) { const lon = -180 + ((i + 0.5) / W) * 360; if (lon < 19.7 && touched[j * W + i]) { cutCells++; lowest = Math.min(lowest, e[j * W + i]); } }
+  assert.ok(cutCells > 20 && lowest >= 1, `its valley cut (${cutCells} cells), none of it below a metre above the sea (${lowest.toFixed(1)} m)`);
+  // A second river crossing the first one's valley: whole, to the coast beyond it.
+  const second = applyRiverStamp(e, touched, W, H, river([[12, 14], [14, 12.2], [16, 10.5], [21, 10]], { follow: false }, { strength: 60, radiusKm: 30, id: 'r2' }), R)!;
+  assert.ok(second && nearest(second.course, [16, 10.5]) < 80 && second.course[second.course.length - 1][0] > 19.5, 'runs on across the other\'s valley to the sea');
+  // Drawn over water from end to end: still a river, as drawn.
+  const wet = applyRiverStamp(ground(low), new Uint8Array(W * H), W, H, river([[22, 12], [24, 12.5], [26, 12]], { follow: false }), R);
+  assert.ok(wet && wet.course.length > 10 && wet.widths.every((w) => w > 0), 'a river over water');
+});

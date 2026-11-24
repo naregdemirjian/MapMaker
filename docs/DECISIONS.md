@@ -61,6 +61,23 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D225. Sculpting laid over the finer heights; a river always has its water and its valley never makes sea
+
+- **Why.** Close in on the Earth, where the finer heights are shown (D101), every cell of the map's own heights that a
+  sculpting stroke had touched was drawn from the map's coarse heights alone: square patches without the ground's
+  detail, their outlines showing, along every river valley and brush stroke. And a river's valley was cut to below the
+  sea at its mouth: along low ground that made arms of the sea in pieces, a river's water was hidden or ended in them,
+  and a river drawn across another's valley stopped there or was not made at all.
+- **What sculpting did, laid over the finer heights** (`buildDetail`, `Sculpted.under`): the heights from before the
+  strokes are kept beside the sculpted ones, and where sculpting changed the ground the finer heights take the
+  difference between the two (smooth between the map's cells) on top of their own: a valley is cut into the detailed
+  ground, a range raised on it, with no cell's outline. (Such a region still does not count as fine enough to draw the
+  coast from, D176: the terrain's own coast holds where sculpted, as before.)
+- **Land stays land under a river** (`cutValley`): a valley is never cut below a metre above the sea, so a river's
+  lower course is its water on land, not sea. Rivers drawn before lose the arms of the sea their valleys made.
+- **A river always shows** (`toTheSea`): a course with too little of it on land to be a line (drawn over water, or
+  starting in it) is kept as drawn instead of being dropped.
+
 ### D224. Tool options that need a second line no longer cover the lists' tabs
 
 - **Why.** The options of a tool lie in a bar one line high; options that need more (the river brush with its

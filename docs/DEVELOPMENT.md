@@ -9,6 +9,8 @@ The approved architecture is the Claude Doc "Map Maker — Technical Architectur
 
 ## Status at a glance (23 November 2026, Stages 2, 3, 4, 6, 8 to 14 done; Stage 7 mostly done)
 
+- **Sculpting and rivers close in** (D225): sculpted ground keeps the finer heights' detail (no square patches); a
+  river's valley never goes below the sea, and a river always has its water.
 - **Tool options never cover the lists** (D224): options that need a second line push what the side panels hold
   down below them; explanations keep to one line, whole on hovering.
 - **Zones of control** (D223): a click on a country divides its land among its cities, each taking the land nearest
@@ -649,7 +651,7 @@ worked out afresh, and any difference stops the test.
 | `test/custom-calendar.test.ts` | 7 | Calendars of one's own (D149): the Julian, French Republican and thirteen-month calendars against known dates; one made like the Gregorian agreeing with it over trillions of years; eras, years before them, a day of 30 hours, a six-day week; definitions refused with reasons; a map given a calendar and undone |
 | `test/tidy.test.ts` | 2 | Tidying unused borders (D151): history the same in the main timeline and a branch at a grid of places and dates, parcels referred to by a branch or an inactive version kept, undo, random histories followed against a fresh compile |
 | `test/branches.test.ts` | 5 | Branches (D150): what each timeline holds before and after its split, early history fixed once for both, edits put where their date belongs, recordings refused with the reason, the moment of the split, branches of branches, alternative versions, deleting and undoing, saving, and random edits followed change by change against a fresh compile |
-| `test/river-course.test.ts` | 6 | Rivers (D220): settings checked and kept with their strokes, a changed river worked out again; through its points or along the valleys (lower), to its mouth at the coast, its water whatever the height, wider downstream, winding; tributaries ending on the river or a greater tributary, more when asked, none from beyond an inland end; its valley cut; a river from before as drawn; a stroke kept as the points where it turns |
+| `test/river-course.test.ts` | 7 | Rivers (D220): settings checked and kept with their strokes, a changed river worked out again; through its points or along the valleys (lower), to its mouth at the coast, its water whatever the height, wider downstream, winding; tributaries ending on the river or a greater tributary, more when asked, none from beyond an inland end; its valley cut; a river from before as drawn; a stroke kept as the points where it turns; a valley cut near the coast stays land, a river across another's valley runs on, a river drawn over water is drawn (D225) |
 | `test/smart-brush.test.ts` | 7 | Smart brushes (D148) on synthetic terrains with known best paths: a river followed, a meander by weight, a crest and a valley, pins, a lake shore all round, far banks, towns and passes onto your side, fast enough for live sliders |
 | `test/follow-land.test.ts` | 4 | The exact course taken along line features: a river's stretch within the tolerance, its bends, out and back along it, a shore that is a loop all the way round, the nearer of two lines |
 | `test/geo-kernel.test.ts` | 13 | Predicates; parcels across the poles and the 180° line; nested islands; snapping; randomised point location against d3; rollback; vertex edits never break validity; a parcel's area summed on plain numbers against the earlier formula and d3 |

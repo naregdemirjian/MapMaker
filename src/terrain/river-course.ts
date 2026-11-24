@@ -320,9 +320,11 @@ function wind(g: Cells, line: Array<[number, number]>, amount: number, seed: num
 function toTheSea(g: Cells, line: Array<[number, number]>): Array<[number, number]> {
   let first = -1;
   for (let i = 0; i < line.length; i++) if (g.at(line[i][0], line[i][1]) >= 0) { first = i; break; }
-  if (first < 0) return [];
-  for (let i = first + 1; i < line.length; i++) if (g.at(line[i][0], line[i][1]) < 0) return line.slice(first, i + 1);
-  return line.slice(first);
+  // (Drawn all over water, or with too little of it on land to be a line: as drawn, so that a river always shows, D225.)
+  if (first < 0) return line;
+  let end = line.length;
+  for (let i = first + 1; i < line.length; i++) if (g.at(line[i][0], line[i][1]) < 0) { end = i + 1; break; }
+  return end - first >= 2 && end - first >= Math.min(line.length, 4) ? line.slice(first, end) : line;
 }
 
 /**
@@ -354,7 +356,9 @@ function cutValley(g: Cells, touched: Uint8Array, line: Array<[number, number]>,
     }
   }
   for (const [k, [d, bed]] of best) {
-    const w = d / r, side = bed + (g.e[k] - bed) * w * w;
+    // (Land stays land: a valley is never cut below a metre above the sea, D225. Cut to below the sea at its mouth,
+    // a river's valley became arms of the sea along its lower course, and rivers drawn across them ended there.)
+    const w = d / r, side = Math.max(bed + (g.e[k] - bed) * w * w, Math.min(g.e[k], 1));
     if (side < g.e[k]) { g.e[k] = side; touched[k] = 1; }
   }
 }
