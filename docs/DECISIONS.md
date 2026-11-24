@@ -61,6 +61,19 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D224. Tool options that need a second line no longer cover the lists' tabs
+
+- **Why.** The options of a tool lie in a bar one line high; options that need more (the river brush with its
+  explanation, the bar while an event is being recorded) wrapped onto a second line laid over what is below (D198, so
+  that the map keeps its size and place), and that covered the tabs of the lists at the left (Maps, Layers, Countries…)
+  and the top of Properties at the right.
+- **What the panels hold moves down below the options**: the bar measures how far its options reach below its line
+  (`--options-over`), and the panels either side begin that much lower; the second line still lies over the top of the
+  map only, which neither moves nor is drawn again. (Tried first: the bar itself growing by a line. The map then moved
+  down whenever recording began or a tool with more options was taken in hand, and was drawn again in full.)
+- **Fewer second lines**: a tool's words of explanation keep to what is left of one line and end in an ellipsis, the
+  whole of them shown on hovering; the tool's name stays beside its options, which wrap among themselves.
+
 ### D223. Zones of control: a country's land divided among its cities by travel through it
 
 - **Why.** A country breaking up into city-states, a realm parcelled out among its lords, the districts round each

@@ -97,7 +97,8 @@ try {
     await h.screenshot('occupation-layer-1750');
     // Hatched (D88): the occupier's stripes over the owner's colour, which shows between them (a strip below the name).
     const [colA, colB] = await page.evaluate(([a, b]) => { const w = (window as any).__mapmaker.store.world; const c = (n: string) => w.all('entity').find((e: any) => e.name === n).color; return [c(a), c(b)]; }, [A, B] as const);
-    const across = (want: 'mixed' | 'occupier') => page.waitForFunction(([x, y, ca, cb, w]) => {
+    // (Where the place is on the page at the moment of looking.)
+    const across = async (want: 'mixed' | 'occupier') => { const ap = await h.toPage(P.a); return page.waitForFunction(([x, y, ca, cb, w]) => {
       const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement;
       const r = c.getBoundingClientRect();
       const d = c.getContext('2d')!.getImageData(Math.round((x - r.left) * (c.width / r.width)) - 30, Math.round((y - r.top) * (c.height / r.height)), 60, 1).data;
@@ -107,7 +108,7 @@ try {
       let nearA = 0, nearB = 0;
       for (let i = 0; i < 60; i++) { const px = [d[i * 4], d[i * 4 + 1], d[i * 4 + 2]]; if (dist(px, pa) < dist(px, pb)) nearA++; else nearB++; }
       return w === 'mixed' ? nearA >= 10 && nearB >= 10 : nearA <= 3;
-    }, [ap[0], ap[1] + 24, colA, colB, want] as const, { timeout: 8000 });
+    }, [ap[0], ap[1] + 24, colA, colB, want] as const, { timeout: 8000 }); };
     // (The occupation lies at sea: the layer is let cover the sea for this, and set back after.)
     await page.evaluate(() => { const s = (window as any).__mapmaker.store; s.set({ selection: { kind: 'layer', id: s.layerId } }); }); // (the layer drawn on, shown in Properties)
     await page.getByTestId('clip-to-land').uncheck();
@@ -5258,6 +5259,21 @@ try {
     // Whichever tool, the map keeps its size and place.
     assert.deepEqual(await box('main.center'), map0);
     await h.screenshot('tool-strip');
+    // A tool with many options (the river brush, in a narrow window): its second line lies over the top of the map,
+    // and the lists' tabs move down below it, never covered; its words of explanation keep to one line, whole on hovering.
+    const size = page.viewportSize()!;
+    await page.setViewportSize({ width: 1100, height: size.height });
+    await page.keyboard.press('t');
+    await page.getByTestId('sculpt-brush').selectOption('river');
+    const bar = await box('[data-testid="options-bar"] .tool-options'), tabs = await box('[data-testid="list-tabs"]');
+    assert.ok(bar.height > 50, `the options take a second line (${bar.height})`);
+    assert.ok(tabs.y >= bar.y + bar.height - 1.5, `the lists start below the options (${tabs.y} against ${bar.y + bar.height})`);
+    assert.deepEqual(await box('main.center'), { ...map0, width: map0.width - 500 }, 'the map where it was');
+    const words = page.locator('[data-testid="options-bar"] .toolbar.sub > .muted').first();
+    assert.ok((await words.boundingBox())!.height < 24 && /Draw a river/.test((await words.getAttribute('title')) ?? ''), 'the explanation on one line, whole in its tooltip');
+    await h.screenshot('tool-options-two-lines');
+    await page.setViewportSize(size);
+    await page.keyboard.press('e');
     // A star map has its own tools, and a key of a tool it has not does nothing.
     await page.keyboard.press('v');
     assert.equal(await tool(), 'select');

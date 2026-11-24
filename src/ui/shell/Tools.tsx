@@ -130,8 +130,22 @@ export function ToolOptions() {
   const owners = outlinerLists(s).political;
   const rec = s.recordEventId ? w.get('event', s.recordEventId) : null;
   const tool = TOOLS.find((t) => t.id === s.tool);
+  // (Words of explanation cut short to one line: the whole of them on hovering.)
+  const bar = useRef<HTMLDivElement>(null);
+  useEffect(() => { for (const el of bar.current?.querySelectorAll<HTMLElement>('.toolbar.sub > .muted') ?? []) { const t = el.textContent ?? ''; if (el.title !== t) el.title = t; } });
+  // Options that need more than a line lie over what is below the bar: the panels either side move what they hold
+  // down by as much (styles.css), so that their tabs and headings are not covered.
+  useEffect(() => {
+    const inner = bar.current?.querySelector<HTMLElement>('.tool-options');
+    if (!inner) return;
+    const fit = () => document.documentElement.style.setProperty('--options-over', `${Math.max(0, inner.offsetHeight - 37)}px`);
+    const ro = new ResizeObserver(fit);
+    ro.observe(inner);
+    fit();
+    return () => { ro.disconnect(); document.documentElement.style.removeProperty('--options-over'); };
+  }, []);
   return (
-    <div className="options-bar" data-testid="options-bar">
+    <div className="options-bar" data-testid="options-bar" ref={bar}>
     <div className="tool-options-anchor"><div className="tool-options">
       <span className="tool-name" data-testid="tool-name">{tool?.name}</span>
       {s.tool === 'systems' && isSpaceMap(w.get('map_space', s.spaceId)) && (
