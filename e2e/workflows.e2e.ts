@@ -5967,6 +5967,65 @@ try {
     await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
   });
 
+  await h.step('Zones of control (D223): a country\'s land divided among its cities by travel through it, the zones drawn while the dialog asks; a city left out; every place to one of the cities; undone', async () => {
+    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
+    await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 25.5, lat: 48.5, zoom: 4.2, rotation: 0, projection: 'equirectangular' }));
+    const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
+    const before = await steps();
+    // A layer of its own; a country on the plain north of the Black Sea and three cities on its land (from ten years before).
+    await page.getByRole('button', { name: '+ Layer' }).click();
+    await page.getByTestId('new-layer-name').fill('Domains');
+    await page.getByTestId('new-layer-name').press('Enter');
+    await page.locator('.left .row', { hasText: 'Domains' }).getByText('drawing here').waitFor();
+    await page.evaluate(() => {
+      const m = (window as any).__mapmaker, s = m.store, C = m.bench.commands, t = { day: s.time.day - 3650, ms: 0 };
+      s.execute((w: any, e: any) => C.addCountries(w, e, { spaceId: s.spaceId, layerId: s.layerId, countries: [{ name: 'Midland', polygons: [[[[20, 47], [31, 47], [31, 50], [20, 50], [20, 47]]]], color: '#6aa84f' }], mode: { kind: 'change', t } }));
+      for (const [name, lon, lat] of [['Westburg', 22, 49], ['Ostburg', 29, 49], ['Mittel', 25.5, 48]] as const) {
+        const id = s.execute((w: any) => C.createEntity(w, { type_id: 'settlement', name }));
+        s.execute((w: any) => C.placeCharacter(w, { spaceId: s.spaceId, entity: id, lon, lat, mode: { kind: 'change', t } }));
+      }
+    });
+    await h.saved();
+    const owner = (lon: number, lat: number) => page.evaluate(([x, y]) => {
+      const m = (window as any).__mapmaker, s = m.store, arr = s.world.arrangement(s.spaceId);
+      const id = m.bench.commands.ownerReader(arr, s.engine.partitionState(s.spaceId, s.layerId, s.time))(arr.locate(m.bench.lonLatToVec(x, y)));
+      return id ? s.world.get('entity', id).name as string : null;
+    }, [lon, lat] as const);
+    // The tool's third use: a click on the country opens the dialog, its three cities chosen, the zones on the map.
+    await page.getByTestId('tool-select').click();
+    await page.locator('main.center').hover();
+    await page.keyboard.press('m');
+    await page.getByTestId('reach-mode').selectOption('zones');
+    if (await page.getByTestId('reach-mind').count()) await page.getByTestId('reach-mind').fill('0');
+    const at = await h.toPage([25.5, 49.6]);
+    await page.mouse.click(at[0], at[1]);
+    await page.getByTestId('zones').waitFor();
+    const cities = page.getByTestId('zone-city');
+    assert.deepEqual((await cities.evaluateAll((els) => els.map((e) => (e as HTMLInputElement).dataset.name))).sort(), ['Mittel', 'Ostburg', 'Westburg']);
+    assert.equal(await cities.evaluateAll((els) => els.filter((e) => (e as HTMLInputElement).checked).length), 3, 'all three chosen');
+    assert.ok(await page.evaluate(() => (window as any).__mapmaker.store.zonesDraft?.zones?.length === 3), 'three zones worked out');
+    await h.screenshot('zones-of-control');
+    // Mittel left out: two zones, and none kept by the country.
+    await page.locator('[data-testid="zone-city"][data-name="Mittel"]').uncheck();
+    assert.ok(await page.evaluate(() => (window as any).__mapmaker.store.zonesDraft?.zones?.length === 2), 'two zones now');
+    assert.equal(await page.getByTestId('zones-keep').inputValue(), '', 'nothing kept by the country: Mittel was its zone to keep');
+    await page.getByTestId('when-change').click();
+    await page.getByTestId('confirm-zones').click();
+    await page.getByTestId('zones').waitFor({ state: 'detached' });
+    await h.saved();
+    assert.deepEqual([await owner(21, 48.5), await owner(30, 48.5)], ['Westburg', 'Ostburg'], 'each end to the city in it');
+    // Every place of Midland's land to one of the two; none left to Midland, none to nobody.
+    const held = new Set<string | null>();
+    for (let x = 20.4; x < 31; x += 0.8) for (let y = 47.3; y < 50; y += 0.6) held.add(await owner(x, y));
+    assert.deepEqual([...held].sort(), ['Ostburg', 'Westburg']);
+    // Undone, back as before.
+    for (let i = 0; i < 14 && (await steps()) > before; i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await steps(), before);
+    await h.chooseTool('select');
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
+  });
+
   await h.step('History Health lists the overlap, nothing else; no browser errors', async () => {
     await page.getByTestId('workspace-map').click();
     await page.getByTestId('health').click();

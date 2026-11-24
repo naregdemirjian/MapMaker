@@ -1,7 +1,8 @@
 // The land within reach of a border (D222): as far as the distance by travel through the land, from the border
 // only; slower over rough ground; outlines and their holes; the border between two countries and the land
 // either side found on the map; an advance taking only the neighbour's land, a buffer zone to nobody, never
-// another country's land; one undo step; refused where it makes no sense.
+// another country's land; one undo step; refused where it makes no sense. Zones of control (D223): a country's
+// land divided among its cities by travel through it, each parcel to one zone, none left over.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { World } from '../src/world-model/world.ts';
@@ -10,7 +11,7 @@ import * as cmd from '../src/domain/commands.ts';
 import { gregorian, NEG_INF } from '../src/core-time/index.ts';
 import { invertDiffs } from '../src/world-model/schema.ts';
 import { lonLatToVec } from '../src/geo-kernel/vec.ts';
-import { landWithin, polygonsOf, sharedBorder, landRings, borderNear, clipRing, degreesFor, type LonLatPolygon } from '../src/domain/reach.ts';
+import { landWithin, polygonsOf, sharedBorder, landRings, borderNear, clipRing, degreesFor, zonesOf, zoneFinder, type LonLatPolygon } from '../src/domain/reach.ts';
 import { ring } from './helpers.ts';
 
 const R = 6371.0088;
@@ -145,4 +146,47 @@ test('a buffer zone either side of a border to nobody; land outlined that belong
   assert.throws(() => cmd.giveLand(world, engine, { spaceId: space, layerId: layer, polygons: [], value: A, onlyFrom: [B], mode: { kind: 'change', t: Y(1900) }, label: 'x' }), /no land to give/);
   assert.throws(() => cmd.giveLand(world, engine, { spaceId: space, layerId: layer, polygons: both, value: A, onlyFrom: [], mode: { kind: 'change', t: Y(1900) }, label: 'x' }), /whose land/);
   assert.throws(() => cmd.giveLand(world, engine, { spaceId: space, layerId: layer, polygons: both, value: A, onlyFrom: [A], mode: { kind: 'change', t: Y(1900) }, label: 'x' }), /from itself/);
+});
+
+test('zones of control: the land divided where two cities are equally near by travel; slower ground moves the line toward the city beyond it', () => {
+  const land = [box(0, 0, 20, 10)], cities: Array<[number, number]> = [[5, 5], [15, 5]];
+  const zones = zonesOf(land, cities)!;
+  assert.equal(zones.length, 2);
+  const at = zoneFinder(zones);
+  assert.deepEqual([at(3, 5), at(9.5, 5), at(10.5, 5), at(17, 5), at(1, 9), at(19, 1)], [0, 0, 1, 1, 0, 1], 'split along 10° east');
+  // Three times slower east of 8°: from the west city, 3° and then the slow ground; the line moves to 11° east.
+  const slowed = zoneFinder(zonesOf(land, cities, (lon) => (lon > 8 ? 3 : 1))!);
+  assert.deepEqual([slowed(10.5, 5), slowed(11.5, 5)], [0, 1], 'the line at about 11° east');
+  // Round the land, not across what is not it: in a U, the city at the end of one arm holds its whole arm.
+  const u = [[[0, 0], [1, 0], [1, 9], [2, 9], [2, 0], [3, 0], [3, 10], [0, 10]].map(([x, y]) => [x, -y]) as Array<[number, number]>];
+  const inU = zoneFinder(zonesOf(u, [[0.5, -0.5], [2.5, -0.5]])!);
+  assert.deepEqual([inU(0.5, -3), inU(2.5, -3), inU(0.6, -9.5), inU(2.4, -9.5)], [0, 1, 0, 1], 'each arm to the city at its end');
+  // Fewer than two places, or too many: none.
+  assert.equal(zonesOf(land, [[5, 5]]), null);
+});
+
+test('a country\'s land divided among zones: each parcel to the zone it lies in, none left over; a zone kept; new countries named; undone in one step; refusals', () => {
+  const { world, engine, space, layer, A, ownerAt } = setup();
+  const arr = world.arrangement(space);
+  const of = cmd.ownerReader(arr, engine.partitionState(space, layer, Y(1900)));
+  // Aldmark (20° by 20°) among three cities: its west kept, its north-east and south-east new countries.
+  const zones = zonesOf(landRings(arr, of, new Set([A])), [[-5, 0], [5, 5], [5, -5]])!;
+  const res = cmd.divideLand(world, engine, { spaceId: space, layerId: layer, from: A, zones: [{ owner: A, polygons: zones[0] }, { owner: { name: 'Nordhafen' }, polygons: zones[1] }, { owner: { name: 'Suderburg' }, polygons: zones[2] }], mode: { kind: 'change', t: Y(1900) }, label: 'Aldmark divided among its cities' });
+  assert.equal(res.label, 'Aldmark divided among its cities');
+  const name = (lon: number, lat: number, t = Y(1950)) => { const id = ownerAt(lon, lat, t); return id ? world.get('entity', id)!.name : null; };
+  assert.deepEqual([name(-8, 0), name(8, 8), name(8, -8), name(1, 0.2) !== null], ['Aldmark', 'Nordhafen', 'Suderburg', true]);
+  assert.equal(name(8, 8, Y(1800)), 'Aldmark', 'as it was before the date');
+  assert.deepEqual(res.result.entities.map((id) => world.get('entity', id)!.name).sort(), ['Nordhafen', 'Suderburg']);
+  // Every place of the land to one of the three; none left to nobody, nothing of Bergholt's taken.
+  const held = new Set<string | null>();
+  for (let x = -9.5; x < 10; x += 1) for (let y = -9.5; y < 10; y += 1) held.add(name(x, y));
+  assert.deepEqual([...held].sort(), ['Aldmark', 'Nordhafen', 'Suderburg']);
+  assert.equal(name(15, 0), 'Bergholt');
+  world.applyDiffs(invertDiffs(res.diffs));
+  assert.equal(name(8, 8), 'Aldmark', 'undone');
+  assert.equal(world.all('entity').some((e) => e.name === 'Nordhafen'), false, 'the new countries undone too');
+  // Refused: one zone; a locked country.
+  assert.throws(() => cmd.divideLand(world, engine, { spaceId: space, layerId: layer, from: A, zones: [{ owner: A, polygons: zones[0] }], mode: { kind: 'change', t: Y(1900) }, label: 'x' }), /two places at least/);
+  cmd.setLocked(world, [A], true);
+  assert.throws(() => cmd.divideLand(world, engine, { spaceId: space, layerId: layer, from: A, zones: [{ owner: A, polygons: zones[0] }, { owner: { name: 'X' }, polygons: zones[1] }], mode: { kind: 'change', t: Y(1900) }, label: 'x' }), /locked/);
 });

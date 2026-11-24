@@ -196,3 +196,75 @@ export function borderNear(arr: Arrangement, ownerOf: (face: number) => string |
   }
   return best;
 }
+
+/** The most cities a country's land can be divided among at once (a field each). */
+export const MOST_ZONES = 24;
+
+/**
+ * Zones of control (D223): the land of `region` divided among places in it, each part the land nearer its place than
+ * any other by travel through the land (minding the land with `slowAt`): a field of travel from each place on one grid,
+ * and each zone traced where its place is the nearest, as polygons (outline, then holes). The zones' edges run where
+ * two places are equally near by travel, round a range rather than across it; past the region's own edges they are
+ * carried on a little (to be cut by the land itself, as the land reached by a front is). Null when the region is too
+ * small or spans the whole planet, or the places are fewer than two.
+ */
+export function zonesOf(region: Rings, places: ReadonlyArray<[number, number]>, slowAt?: SlowAt, cells = 300): LonLatPolygon[][] | null {
+  if (places.length < 2 || places.length > MOST_ZONES) return null;
+  const fields = places.map((p) => buildFrontField(region, { kind: 'points', points: [p] }, { roughness: 0, seed: 1, cells, slowAt }));
+  const f0 = fields[0];
+  if (!f0 || fields.some((f) => !f || f.nx !== f0.nx || f.ny !== f0.ny || f.west !== f0.west || f.north !== f0.north)) return null;
+  // Each place's travel to every cell (degrees of travel, Infinity where it does not reach).
+  const N = f0.nx * f0.ny;
+  const T = fields.map((f) => { const t = new Float64Array(N); for (let c = 0; c < N; c++) t[c] = f!.at[c] === Infinity ? Infinity : f!.at[c] * f!.travel; return t; });
+  return T.map((own, i) => {
+    // At 0.5 where the place is as near as the nearest other; below it, nearer; above it, farther.
+    const at = new Float32Array(N);
+    for (let c = 0; c < N; c++) {
+      if (own[c] === Infinity) { at[c] = Infinity; continue; }
+      let other = Infinity;
+      for (let k = 0; k < T.length; k++) if (k !== i && T[k][c] < other) other = T[k][c];
+      at[c] = other === Infinity ? 0 : 0.5 + Math.max(-0.49, own[c] - other);
+    }
+    return polygonsOf(frontRings({ ...f0!, at, travel: 1 }, 0.5));
+  });
+}
+
+/**
+ * Which of some zones (each its polygons, outline then holes) a place lies in: the first holding it, else the one with
+ * an edge nearest it (a place in a sliver between zones); -1 with no zones. Made once for many places.
+ */
+export function zoneFinder(zones: ReadonlyArray<LonLatPolygon[]>): (lon: number, lat: number) => number {
+  const polys: Array<{ z: number; rings: Array<Array<[number, number]>>; box: [number, number, number, number]; mid: number }> = [];
+  zones.forEach((ps, z) => {
+    for (const rings of ps) {
+      let w = Infinity, s = Infinity, e = -Infinity, n = -Infinity;
+      for (const r of rings) for (const [x, y] of r) { if (x < w) w = x; if (x > e) e = x; if (y < s) s = y; if (y > n) n = y; }
+      if (w <= e) polys.push({ z, rings, box: [w, s, e, n], mid: (w + e) / 2 });
+    }
+  });
+  return (lon, lat) => {
+    for (const p of polys) {
+      // (The place's longitude taken round to the polygon's side of the planet.)
+      const x = lon + 360 * Math.round((p.mid - lon) / 360);
+      if (x < p.box[0] || x > p.box[2] || lat < p.box[1] || lat > p.box[3]) continue;
+      let inside = false;
+      for (const r of p.rings) for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
+        if ((r[i][1] > lat) !== (r[j][1] > lat) && x < ((r[j][0] - r[i][0]) * (lat - r[i][1])) / (r[j][1] - r[i][1]) + r[i][0]) inside = !inside;
+      }
+      if (inside) return p.z;
+    }
+    let best = -1, bd = Infinity;
+    const k = Math.max(0.02, Math.cos((lat * Math.PI) / 180));
+    for (const p of polys) {
+      const x = lon + 360 * Math.round((p.mid - lon) / 360);
+      for (const r of p.rings) for (let i = 1; i < r.length; i++) {
+        const ax = (r[i - 1][0] - x) * k, ay = r[i - 1][1] - lat, bx = (r[i][0] - x) * k, by = r[i][1] - lat;
+        const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+        const t = l2 > 0 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / l2)) : 0;
+        const d = Math.hypot(ax + t * dx, ay + t * dy);
+        if (d < bd) { bd = d; best = p.z; }
+      }
+    }
+    return best;
+  };
+}

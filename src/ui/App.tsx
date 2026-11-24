@@ -35,6 +35,7 @@ import { DataExportDialog } from './components/Search.tsx';
 import { EventTypesDialog } from './components/EventTypes.tsx';
 import { MergeDialog } from './components/SplitMerge.tsx';
 import { GiveRegionsDialog } from './components/Regions.tsx';
+import { ZonesDialog } from './components/Reach.tsx';
 import { ContextMenu, deleteEntitiesAsked, deleteEventsAsked } from './components/ContextMenu.tsx';
 
 export function App() {
@@ -118,6 +119,7 @@ export function App() {
       {s.dialog === 'border-shifts' && <BorderShiftsDialog key={s.shiftsFor ?? ''} />}
       {s.dialog === 'merge' && <MergeDialog />}
       {s.dialog === 'give-regions' && <GiveRegionsDialog />}
+      {s.dialog === 'zones' && <ZonesDialog />}
       {s.dialog === 'versions' && <VersionsDialog />}
       {s.dialog === 'health' && <HealthDialog />}
       {s.dialog === 'data-sources' && <DataSourcesDialog />}

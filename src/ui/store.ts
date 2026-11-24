@@ -52,6 +52,7 @@ export type DialogName =
   | 'event-types'
   | 'getting-started'
   | 'give-regions'
+  | 'zones'
   | 'health'
   | 'import-borders'
   | 'label-style'
@@ -110,6 +111,20 @@ export interface ReachGive {
   /** A new event's name to start with. */
   eventName: string;
   /** The land the outlines are cut to on the map (the owners' parcels' rings, read by the even-odd rule). */
+  clip: Array<Array<[number, number]>>;
+}
+
+/**
+ * A country's land to be divided among its cities (D223): the cities found on it at the date viewed (most important
+ * first), those chosen, the one whose zone stays with the country, the zones worked out for the chosen (in their
+ * order), and the land they are cut to on the map.
+ */
+export interface ZonesDraft {
+  country: string;
+  cities: Array<{ id: string; name: string; at: [number, number] }>;
+  chosen: string[];
+  keep: string | null;
+  zones: Array<Array<Array<Array<[number, number]>>>> | null;
   clip: Array<Array<[number, number]>>;
 }
 
@@ -307,7 +322,9 @@ export class AppStore {
   /** The countries chosen for "Merge into one" (D76). */
   mergeIds: string[] = [];
   /** The Advance and buffer zone tool (D222): what it makes, how far (km), and how much the land slows it (0 to 1). */
-  reach: { mode: 'advance' | 'buffer'; km: number; mind: number } = { mode: 'advance', km: 50, mind: 0.6 };
+  reach: { mode: 'advance' | 'buffer' | 'zones'; km: number; mind: number } = { mode: 'advance', km: 50, mind: 0.6 };
+  /** A country's land being divided among its cities (D223), while the dialog for it is open. */
+  zonesDraft: ZonesDraft | null = null;
   /** The region picker (D78): which regions are offered, and those chosen (indices into them). */
   regionLevel: 'regions' | 'countries' = 'regions';
   regionPicks: number[] = [];

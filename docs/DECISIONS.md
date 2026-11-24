@@ -61,6 +61,27 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D223. Zones of control: a country's land divided among its cities by travel through it
+
+- **Why.** A country breaking up into city-states, a realm parcelled out among its lords, the districts round each
+  garrison town: dividing land among places had to be drawn border by border, guessing where each place's reach ends
+  (the third of the optional extras put off after Stage 13, with D222).
+- **The tool's third use** (*Make: Zones of control round a country's cities* in *Advance & buffer zone*): a click on a
+  country finds the cities standing on its land at the date viewed (the most important first, D219), and a dialog at
+  the right (`ZonesDialog`) lists them, the first twelve chosen (at most 24); *the country keeps the zone round* one of
+  them (its most important city to start with; *None* divides it all); when, as the other edits of territory ask it.
+  The zones are drawn on the map meanwhile, each in a colour of its own (the kept one paler), worked out again as
+  cities are ticked and unticked.
+- **The zones** (`zonesOf`, `domain/reach.ts`): a field of travel from each city through the country's land on one grid
+  (D136, minding the land as the tool asks, D142); each zone is where its city is nearer than any other, traced where
+  the two nearest are as near as each other, so the line between two cities runs round a range rather than across it
+  and moves toward the city beyond rough ground. A city at the end of an arm of the land holds the whole arm.
+- **Divided parcel by parcel** (`divideLand`, commands.ts): the zones' outlines go into the map, then each parcel of
+  the country's land at the edit's moment goes to the zone that most of some points just inside it lie in (a point in
+  none, in a sliver where three zones' traced outlines do not quite meet, counts for the nearest), so all of the land
+  is divided and none is left over in specks. Each zone goes to a new country named after its city (or stays with the
+  country); one undo step, the new countries with it; refused for fewer than two zones or a locked country.
+
 ### D222. Advance and buffer zone: the land within a distance of a border, by travel through the land
 
 - **Why.** An army's advance of so many kilometres into a neighbour, or a demilitarised zone so wide either side of a

@@ -39,6 +39,7 @@ export { FEATURE_KINDS, DEFAULT_FEATURE_STYLE, isFeatureKind, featureStyle, type
 import { featureStyle as featureLook } from '../render-engine/feature-style.ts';
 import { cityFilterOf, placeMeta, placeMetaOf, sameCity, type CityFilter, type TodayPlace } from './places.ts';
 import { ringFromMapPoints } from '../render-engine/stroke.ts';
+import { zoneFinder } from './reach.ts';
 import { TRANSITION_LOOKS } from '../presentation/sequence.ts';
 import { flatRadiusKm } from '../render-engine/camera.ts';
 
@@ -1444,6 +1445,75 @@ export function giveLand(world: World, engine: Engine, o: { spaceId: string; lay
   if (o.value !== null && o.onlyFrom.includes(o.value) && o.onlyFrom.length === 1) throw new Error('A country cannot take land from itself.');
   const r = addCountries(world, engine, { spaceId: o.spaceId, layerId: o.layerId, countries: [{ name: o.label, polygons: o.polygons }], mode: o.mode, newEvent: o.newEvent, into: o.value ?? undefined, clear: o.value === null, onlyFrom: o.onlyFrom, transition: o.transition, label: o.label });
   return { label: r.label, diffs: r.diffs, result: { eventId: r.result.eventId } };
+}
+
+/**
+ * Divide the land an owner holds among zones (D223: zones of control round its cities): each parcel of `from`'s land
+ * at the edit's moment goes to the zone it lies in (judged by points just inside it against the zones' outlines; a
+ * point in none counts for the zone nearest it), each zone to its owner (an existing one, or a country made in the
+ * same step; a zone whose owner is `from` stays with it). The zones' outlines go into the map first, so that the
+ * parcels follow them. As a correction from a date or in an event (made in the same step with `newEvent`); one undo
+ * step under `label`.
+ */
+export function divideLand(world: World, engine: Engine, o: { spaceId: string; layerId: string; from: string; zones: Array<{ owner: NewOwner; polygons: Array<Array<Array<[number, number]>>> }>; mode: EditMode; newEvent?: EventInput; transition?: TransitionSpec | null; label: string }): CommandResult<{ entities: string[]; eventId: string | null }> {
+  checkTarget(world, { spaceId: o.spaceId, layerId: o.layerId, mode: o.newEvent ? undefined : o.mode });
+  const country = world.get('entity', o.from);
+  if (!country) throw new Error('That country no longer exists.');
+  if (o.zones.length < 2) throw new Error('Divide the land among two places at least.');
+  if (isLocked(world, o.from)) throw new Error(`${country.name} is locked: unlock it to divide its land.`);
+  return run(world, o.label, (tx) => {
+    const eventId = o.newEvent ? insertEventIn(tx, o.newEvent) : null;
+    const mode: EditMode = eventId ? { kind: 'new', eventId } : o.mode;
+    const owners = o.zones.map((z) => ownerIn(tx, z.owner));
+    // The zones' outlines into the map, all at once.
+    const rings: Vec3[][] = [];
+    for (const z of o.zones) for (const p of z.polygons) for (const r of p) { const v = ringFromMapPoints(r, 1); if (v) rings.push(v); }
+    if (rings.length) tx.kernel(o.spaceId, (arr) => arr.insertPaths(rings, { closed: true, snap: 1e-8 }));
+    const arr = world.arrangement(o.spaceId);
+    const ev = mode.kind === 'new' ? world.get('event', mode.eventId) : undefined;
+    const t = mode.kind === 'new' ? mode.at ?? (ev ? eventStart(ev) : o.newEvent?.start ?? NEG_INF) : mode.t;
+    const ownerOf = ownerReader(arr, engine.partitionState(o.spaceId, o.layerId, t));
+    const zoneOf = zoneFinder(o.zones.map((z) => z.polygons));
+    const leaves: number[][] = o.zones.map(() => []);
+    for (const f of arr.leafFaces()) {
+      if (ownerOf(f) !== o.from) continue;
+      // (Points just inside the parcel, each counted for its zone: the parcel goes to the zone most of them lie in.)
+      const votes = new Map<number, number>();
+      for (const [lon, lat] of insidePoints(arr, f)) { const z = zoneOf(lon, lat); if (z >= 0) votes.set(z, (votes.get(z) ?? 0) + 1); }
+      let best = -1, most = 0;
+      for (const [z, c] of votes) if (c > most) { most = c; best = z; }
+      if (best >= 0 && owners[best] !== o.from) leaves[best].push(f);
+    }
+    const items = owners.map((value, k) => ({ leaves: leaves[k], value })).filter((it) => it.leaves.length);
+    if (mode.kind === 'new') {
+      for (const it of withoutLocked(world, engine, o.spaceId, o.layerId, mode, items)) {
+        const set = [...it.leaves];
+        if (set.length) chainRecorded(tx, insertAssignEffect(tx, { eventId: mode.eventId, spaceId: o.spaceId, layerId: o.layerId, faces: canonicalFaces(arr, set), value: it.value, at: mode.at ?? null, transition: o.transition ?? null, intent: { op: 'paint', value: it.value } }));
+      }
+    } else if (items.length) writeAssignments(tx, engine, o.spaceId, o.layerId, mode, items);
+    return { entities: [...new Set(owners.filter((x) => x !== o.from))], eventId };
+  });
+}
+
+/** Points just inside a parcel: the middles of some of its sides (about `most`), moved a couple of metres into it. */
+function insidePoints(arr: ReturnType<World['arrangement']>, f: number, most = 9): Array<[number, number]> {
+  const NUDGE = 2e-5; // degrees: about two metres
+  const rings = arr.faceRingsLonLat(f);
+  const sides = rings.reduce((n, r) => n + r.length, 0);
+  const step = Math.max(1, Math.floor(sides / most));
+  const out: Array<[number, number]> = [];
+  let k = 0;
+  for (const r of rings) for (let i = 0; i < r.length; i++, k++) {
+    if (k % step) continue;
+    const [ax, ay] = r[i], [bx0, by] = r[(i + 1) % r.length];
+    const bx = bx0 + 360 * Math.round((ax - bx0) / 360);
+    const cos = Math.max(0.05, Math.cos((((ay + by) / 2) * Math.PI) / 180));
+    const dx = (bx - ax) * cos, dy = by - ay, len = Math.hypot(dx, dy);
+    if (!(len > 0)) continue;
+    // (A parcel lies on the left of its rings.)
+    out.push([(ax + bx) / 2 + ((-dy / len) * NUDGE) / cos, (ay + by) / 2 + (dx / len) * NUDGE]);
+  }
+  return out;
 }
 
 /**

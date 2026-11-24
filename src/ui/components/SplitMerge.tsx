@@ -86,9 +86,10 @@ export function useKeys(confirm: () => void, close: () => void) {
   });
 }
 
-export function Frame({ title, testId, onClose, children }: { title: string; testId: string; onClose: () => void; children: React.ReactNode }) {
+/** A dialog over the app; `side`: at the right, the map left to be seen (what it asks about is drawn on the map). */
+export function Frame({ title, testId, onClose, children, side }: { title: string; testId: string; onClose: () => void; children: React.ReactNode; side?: boolean }) {
   return (
-    <div className="modal-back" onPointerDown={(ev) => ev.target === ev.currentTarget && onClose()}>
+    <div className={`modal-back${side ? ' side' : ''}`} onPointerDown={(ev) => ev.target === ev.currentTarget && onClose()}>
       <div className="modal" role="dialog" aria-label={title} data-testid={testId}>
         <div className="modal-head"><h2>{title}</h2><button className="close" onClick={onClose} aria-label="Close">×</button></div>
         {children}

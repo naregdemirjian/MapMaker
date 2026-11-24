@@ -275,6 +275,7 @@ button.link.back { display: block; margin-bottom: 6px; }
 .modal-back.blocking { z-index: 65; background: rgba(4,8,12,0.75); }
 .modal-back { position: fixed; inset: 0; background: rgba(4,8,12,0.6); display: flex; align-items: center; justify-content: center; z-index: 50; }
 .modal-back.side { background: rgba(4,8,12,0.12); justify-content: flex-end; align-items: flex-start; padding: 104px 28px 0 0; }
+.zone-cities { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 12px; max-height: 190px; overflow-y: auto; margin: 6px 0 10px; }
 .modal { width: 470px; max-height: 88vh; overflow-y: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
 .modal.wide { width: 640px; }
 .modal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }

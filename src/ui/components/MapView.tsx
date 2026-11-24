@@ -815,6 +815,28 @@ export function MapView() {
       ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 2; ctx.setLineDash([7, 5]); ctx.stroke(shape);
       ctx.restore();
     }
+    // The zones a country's land would be divided into (D223), while the dialog asks: each in a colour of its own, cut
+    // to the country's land, with its edges.
+    const zd = s.dialog === 'zones' ? s.zonesDraft : null;
+    if (zd?.zones) {
+      const land = new Path2D();
+      const add = (path: Path2D, r: Array<[number, number]>) => { const q = toScreen(r); if (q.length < 3) return; path.moveTo(q[0][0], q[0][1]); for (const v of q.slice(1)) path.lineTo(v[0], v[1]); path.closePath(); };
+      for (const r of zd.clip) add(land, r);
+      ctx.save();
+      ctx.clip(land, 'evenodd');
+      ctx.lineJoin = 'round';
+      zd.zones.forEach((polys, k) => {
+        const shape = new Path2D();
+        for (const poly of polys) for (const r of poly) add(shape, r);
+        // (Colours a golden angle apart, so neighbours differ; the zone the country keeps paler.)
+        const kept = zd.chosen[k] === zd.keep;
+        ctx.fillStyle = `hsla(${Math.round((k * 137.508) % 360)}, 70%, 55%, ${kept ? 0.25 : 0.5})`;
+        ctx.fill(shape, 'evenodd');
+        ctx.strokeStyle = 'rgba(10,16,24,0.85)'; ctx.lineWidth = 3; ctx.stroke(shape);
+        ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 1.5; ctx.stroke(shape);
+      });
+      ctx.restore();
+    }
     // The Split tool's line: being drawn, or waiting for the click on the part that changes hands.
     const cutLine = drag.current.kind === 'cut' && drag.current.moved >= 4 ? toScreen(drag.current.points) : s.tool === 'split' && s.splitLine ? toScreen(s.splitLine) : null;
     if (cutLine && cutLine.length > 1) {
