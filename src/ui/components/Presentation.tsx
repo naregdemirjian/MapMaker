@@ -11,7 +11,7 @@ import { PASS_DEFS, runExport, exportPassesOf, estimateExportBytes, scaledBytes,
 import { svgFrame } from '../../presentation/svg-frame.ts';
 import { planVideo } from '../../presentation/video-encoder.ts';
 import { VIDEO_QUALITIES, formatBitrate, type VideoQuality } from '../../export/video-codecs.ts';
-import { eventsBoxOf, DEFAULT_EVENTS_BOX, type EventsBox } from '../../presentation/events-box.ts';
+import { eventsBoxOf, DEFAULT_EVENTS_BOX, EVENTS_BOX_SIZES, sizingOf, withSizing, type EventsBox, type EventsBoxSizing } from '../../presentation/events-box.ts';
 import { LOOKS, LOOK_IDS, GRADES, resolveLook, type LookId, type GradeId, type ShotLook } from '../../presentation/looks.ts';
 import { isSpaceMap, calendarOfSpace } from '../../world-model/world-settings.ts';
 import { spaceCamera } from '../../space/space-view.ts';
@@ -316,13 +316,31 @@ export function ShotEditor({ only }: { only?: 'export' } = {}) {
         <Group title="Current events box" open={box.show}>
           <label className="check"><input type="checkbox" checked={box.show} onChange={(e) => setBox({ show: e.target.checked })} data-testid="events-box-show" /> Show the events happening on screen</label>
           {box.show && <>
+            <h4>Size</h4>
+            <label title="Fixed: the box keeps the size you give it, listing as many events as fit, the most recent first. Room for the events: as tall as the most events listed need. Grows: as tall as the events of the moment need.">Size<select value={sizingOf(box)} onChange={(e) => setBox(withSizing(box, e.target.value as EventsBoxSizing))} data-testid="events-box-size">
+              <option value="fixed">Fixed size</option><option value="room">Room for the most events listed</option><option value="grow">Grows with the events</option>
+            </select></label>
+            {sizingOf(box) === 'fixed' && <label>Preset<select value={EVENTS_BOX_SIZES.find((z) => z.width === box.width && z.height === box.height)?.id ?? 'own'} onChange={(e) => { const z = EVENTS_BOX_SIZES.find((x) => x.id === e.target.value); if (z) setBox({ width: z.width, height: z.height }); }} data-testid="events-box-size-preset">
+              {EVENTS_BOX_SIZES.map((z) => <option key={z.id} value={z.id}>{z.name} ({z.width} × {z.height})</option>)}
+              <option value="own" disabled>Your own ({box.width} × {box.height})</option>
+            </select></label>}
+            <div className="two">
+              <label>Width<NumberField min={80} max={1920} step={10} value={box.width} def={DEFAULT_EVENTS_BOX.width} onCommit={(n) => setBox({ width: n })} testId="events-box-width" /></label>
+              {sizingOf(box) === 'fixed' && <label>Height<NumberField min={40} max={2000} step={10} value={box.height} def={DEFAULT_EVENTS_BOX.height} onCommit={(n) => setBox({ height: n })} testId="events-box-height" /></label>}
+            </div>
+            <p className="muted">In pixels of a frame 1920 wide (larger frames scale it).</p>
+            <h4>Position</h4>
             <label>Position<select value={box.corner} onChange={(e) => setBox({ corner: e.target.value as EventsBox['corner'] })} data-testid="events-box-corner">
               <option value="bottom-right">Bottom right</option><option value="bottom-left">Bottom left</option><option value="top-right">Top right</option><option value="top-left">Top left</option><option value="custom">Custom</option>
             </select></label>
-            {box.corner === 'custom' && <div className="two">
-              <label>Left (% of width)<NumberField min={0} max={100} step={1} value={Math.round(box.x * 100)} def={Math.round(DEFAULT_EVENTS_BOX.x * 100)} onCommit={(n) => setBox({ x: n / 100 })} /></label>
-              <label>Top (% of height)<NumberField min={0} max={100} step={1} value={Math.round(box.y * 100)} def={Math.round(DEFAULT_EVENTS_BOX.y * 100)} onCommit={(n) => setBox({ y: n / 100 })} /></label>
-            </div>}
+            {box.corner === 'custom'
+              ? <div className="two">
+                <label>Left (% of width)<NumberField min={0} max={100} step={1} value={Math.round(box.x * 100)} def={Math.round(DEFAULT_EVENTS_BOX.x * 100)} onCommit={(n) => setBox({ x: n / 100 })} testId="events-box-x" /></label>
+                <label>Top (% of height)<NumberField min={0} max={100} step={1} value={Math.round(box.y * 100)} def={Math.round(DEFAULT_EVENTS_BOX.y * 100)} onCommit={(n) => setBox({ y: n / 100 })} testId="events-box-y" /></label>
+              </div>
+              : <label>Distance from the edge<NumberField min={0} max={500} step={1} value={box.margin} def={DEFAULT_EVENTS_BOX.margin} onCommit={(n) => setBox({ margin: n })} testId="events-box-margin" /></label>}
+            <p className="muted">Or drag the box on the preview.</p>
+            <h4>What it lists</h4>
             <label>Heading<input value={box.title} placeholder="(none)" onChange={(e) => setBox({ title: e.target.value })} data-testid="events-box-title" /></label>
             <label className="check"><input type="checkbox" checked={box.showDate} onChange={(e) => setBox({ showDate: e.target.checked })} /> Show the date and time</label>
             {box.showDate && <label>Date detail<select value={box.datePrecision} onChange={(e) => setBox({ datePrecision: e.target.value as Precision })}>
@@ -332,7 +350,6 @@ export function ShotEditor({ only }: { only?: 'export' } = {}) {
               <label>Most events listed<NumberField min={0} max={20} step={1} value={box.maxEvents} def={DEFAULT_EVENTS_BOX.maxEvents} onCommit={(n) => setBox({ maxEvents: Math.round(n) })} /></label>
               <label>Events without an end stay (s)<NumberField min={0} max={60} step={0.5} value={box.linger} def={DEFAULT_EVENTS_BOX.linger} onCommit={(n) => setBox({ linger: n })} /></label>
             </div>
-            <label className="check" title="The box is as tall as the most events it lists need (each name on one line, shortened if long), so events come and go inside it and it never grows, shrinks or moves"><input type="checkbox" checked={!!box.keepSize} onChange={(e) => setBox({ keepSize: e.target.checked })} data-testid="events-box-keep-size" /> Keep its size and place (room for {box.maxEvents} {box.maxEvents === 1 ? 'event' : 'events'})</label>
             <label>Fade in and out (s)<NumberField min={0} max={10} step={0.1} value={box.fade} def={DEFAULT_EVENTS_BOX.fade} onCommit={(n) => setBox({ fade: n })} /></label>
             <label className="check"><input type="checkbox" checked={box.showDescription} onChange={(e) => setBox({ showDescription: e.target.checked })} /> Show each event's description</label>
             <label className="check"><input type="checkbox" checked={box.hideWhenEmpty} onChange={(e) => setBox({ hideWhenEmpty: e.target.checked })} data-testid="events-box-hide-empty" /> Hide the box while no event is listed</label>
@@ -348,7 +365,6 @@ export function ShotEditor({ only }: { only?: 'export' } = {}) {
               <label>Heading size<NumberField min={6} max={200} step={1} value={box.titleSize} def={DEFAULT_EVENTS_BOX.titleSize} onCommit={(n) => setBox({ titleSize: n })} /></label>
               <label>Date size<NumberField min={6} max={200} step={1} value={box.dateSize} def={DEFAULT_EVENTS_BOX.dateSize} onCommit={(n) => setBox({ dateSize: n })} /></label>
               <label>Event size<NumberField min={6} max={200} step={1} value={box.textSize} def={DEFAULT_EVENTS_BOX.textSize} onCommit={(n) => setBox({ textSize: n })} /></label>
-              <label>Width<NumberField min={80} max={1920} step={10} value={box.width} def={DEFAULT_EVENTS_BOX.width} onCommit={(n) => setBox({ width: n })} /></label>
             </div>
             <div className="two">
               <label>Heading colour<input type="color" value={box.titleColor} onChange={(e) => setBox({ titleColor: e.target.value })} /></label>
@@ -361,8 +377,6 @@ export function ShotEditor({ only }: { only?: 'export' } = {}) {
               <label>Border width<NumberField min={0} max={40} step={0.5} value={box.borderWidth} def={DEFAULT_EVENTS_BOX.borderWidth} onCommit={(n) => setBox({ borderWidth: n })} /></label>
               <label>Corner rounding<NumberField min={0} max={200} step={1} value={box.radius} def={DEFAULT_EVENTS_BOX.radius} onCommit={(n) => setBox({ radius: n })} /></label>
               <label>Inner spacing<NumberField min={0} max={200} step={1} value={box.padding} def={DEFAULT_EVENTS_BOX.padding} onCommit={(n) => setBox({ padding: n })} /></label>
-              <label>Distance from the edge<NumberField min={0} max={500} step={1} value={box.margin} def={DEFAULT_EVENTS_BOX.margin} onCommit={(n) => setBox({ margin: n })} /></label>
-              <label>Fixed height (0 = fit)<NumberField min={0} max={2000} step={10} value={box.height} def={DEFAULT_EVENTS_BOX.height} onCommit={(n) => setBox({ height: n })} /></label>
             </div>
             <h4>Style</h4>
             <GraphicStyleEditor value={box.style} idPrefix="events-box"

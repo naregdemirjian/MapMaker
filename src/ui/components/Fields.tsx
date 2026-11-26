@@ -4,6 +4,7 @@
 import { useStore } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
 import { DEFAULT_SOURCES, FIELD_TYPES, fieldLayerStyleOf, fieldSourceOf, lifespan, type FieldSource, type FieldType } from '../../domain/fields.ts';
+import { MOST_SCATTERED } from '../../domain/scatter.ts';
 import { DISASTERS, planDisaster, type DisasterId } from '../../domain/disasters.ts';
 import { terrainSourceOf } from '../../world-model/world-settings.ts';
 import { fieldsDrawable } from '../../render-engine/fields-gl.ts';
@@ -128,19 +129,44 @@ export function DisasterToolOptions() {
   return (
     <div className="toolbar sub disaster-options" data-testid="disaster-options">
       <label className="inline" title={t.hint}>Disaster
-        <select value={d.id} onChange={(e) => { const n = DISASTERS.find((x) => x.id === e.target.value)!; set({ id: n.id as DisasterId, size: n.size.value }); }} data-testid="disaster-kind">
+        <select value={d.id} onChange={(e) => { const n = DISASTERS.find((x) => x.id === e.target.value)!; set({ id: n.id as DisasterId, size: n.size.value, least: n.size.value, most: n.size.value }); }} data-testid="disaster-kind">
           {DISASTERS.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
         </select>
       </label>
-      <label className="inline" title={`From ${t.size.min} to ${t.size.max}`}>{t.size.label}
-        <input type="number" min={t.size.min} max={t.size.max} step={t.size.step} value={d.size} onChange={(e) => { const v = Number(e.target.value); if (Number.isFinite(v) && v > 0) set({ size: v }); }} data-testid="disaster-size" /> {t.size.unit}
+      <label className="inline" title="One disaster where you click, or many at once with a brush (D233): scattered along your stroke, each of its own size and moment">Place
+        <select value={d.many ? 'many' : 'one'} onChange={(e) => set({ many: e.target.value === 'many' })} data-testid="disaster-place">
+          <option value="one">One at a click</option><option value="many">Many with a brush</option>
+        </select>
       </label>
+      {!d.many && <label className="inline" title={`From ${t.size.min} to ${t.size.max}`}>{t.size.label}
+        <input type="number" min={t.size.min} max={t.size.max} step={t.size.step} value={d.size} onChange={(e) => { const v = Number(e.target.value); if (Number.isFinite(v) && v > 0) set({ size: v }); }} data-testid="disaster-size" /> {t.size.unit}
+      </label>}
+      {d.many && <>
+        <label className="inline" title={`How many in one stroke (at most ${MOST_SCATTERED.toLocaleString('en')}), scattered evenly along it`}>How many
+          <input type="number" min={1} max={MOST_SCATTERED} step={100} value={d.count} onChange={(e) => { const v = Math.round(Number(e.target.value)); if (v >= 1) set({ count: Math.min(MOST_SCATTERED, v) }); }} data-testid="disaster-count" style={{ width: '6.5em' }} />
+        </label>
+        <label className="inline" title="How far from your stroke they fall (a click: around the place)">within
+          <input type="number" min={0} max={5000} step={10} value={d.brushKm} onChange={(e) => { const v = Number(e.target.value); if (v >= 0) set({ brushKm: Math.min(5000, v) }); }} data-testid="disaster-brush-km" /> km
+        </label>
+        <label className="inline" title={`Each a ${t.size.label.toLowerCase()} of its own, from the least to the most (as many small ones as large on a scale of ratios). The same twice: all alike.`}>{t.size.label} from
+          <input type="number" min={t.size.min} max={t.size.max} step={t.size.step} value={d.least} onChange={(e) => { const v = Number(e.target.value); if (Number.isFinite(v) && v > 0) set({ least: v }); }} data-testid="disaster-least" />
+          to <input type="number" min={t.size.min} max={t.size.max} step={t.size.step} value={d.most} onChange={(e) => { const v = Number(e.target.value); if (Number.isFinite(v) && v > 0) set({ most: v }); }} data-testid="disaster-most" /> {t.size.unit}
+        </label>
+        <label className="inline" title="They happen one by one over this time from the date (or the moment recorded), each at a moment of its own; 0: all at once">over
+          <input type="number" min={0} max={100000} step={1} value={d.over} onChange={(e) => { const v = Number(e.target.value); if (v >= 0) set({ over: v }); }} data-testid="disaster-over" />
+          <select value={d.overUnit} onChange={(e) => set({ overUnit: e.target.value as typeof d.overUnit })} data-testid="disaster-over-unit">
+            <option value="hours">hours</option><option value="days">days</option><option value="months">months</option><option value="years">years</option>
+          </select>
+        </label>
+      </>}
       {t.wind && (
         <label className="inline" title="The direction the wind carries its plume: 0 north, 90 east, 180 south, 270 west">Wind towards
           <input type="number" min={0} max={359} step={15} value={d.windDeg} onChange={(e) => { const v = Number(e.target.value); if (Number.isFinite(v)) set({ windDeg: ((v % 360) + 360) % 360 }); }} data-testid="disaster-wind" /> °
         </label>
       )}
-      <span className="muted" data-testid="disaster-hint">{t.hint}. Click the map: {plan.name.toLowerCase()} {rec ? `in "${rec.name}"` : `as a new event from ${fmt(s.time)}`}{plan.crater && !terrain ? ' (no crater: this map has no terrain)' : ''}; one undo takes it all back.</span>
+      {d.many
+        ? <span className="muted" data-testid="disaster-hint">Drag across the map (or click): {d.count.toLocaleString('en')} {t.name.toLowerCase()}{d.count === 1 ? '' : 's'} scattered within {d.brushKm} km of the stroke, {d.over > 0 ? `one by one over ${d.over} ${d.overUnit}` : 'all at once'}, {rec ? `in "${rec.name}"` : `as a new event from ${fmt(s.time)}`}; spreading conditions as circles, no craters; one undo takes it all back.</span>
+        : <span className="muted" data-testid="disaster-hint">{t.hint}. Click the map: {plan.name.toLowerCase()} {rec ? `in "${rec.name}"` : `as a new event from ${fmt(s.time)}`}{plan.crater && !terrain ? ' (no crater: this map has no terrain)' : ''}; one undo takes it all back.</span>}
     </div>
   );
 }

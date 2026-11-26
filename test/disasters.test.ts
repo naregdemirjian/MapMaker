@@ -74,3 +74,70 @@ test('a disaster placed with one command: an event from its moment, its layers, 
   assert.ok(world.all('layer').some((l) => l.space_id === blank && l.kind === 'field'));
   assert.ok(world.all('layer').length > layersBefore);
 });
+
+test('many disasters at once (D233): a brush scatters them along its stroke, of sizes between a least and a most, over a span of time; kept as a recipe, laid out the same every time; undone in one step', async () => {
+  const { World } = await import('../src/world-model/world.ts');
+  const { Engine } = await import('../src/temporal-engine/engine.ts');
+  const cmd = await import('../src/domain/commands.ts');
+  const { invertDiffs } = await import('../src/world-model/schema.ts');
+  const { scatterItems, scatterOf, sizeFactors, SIZE_STEPS } = await import('../src/domain/scatter.ts');
+  const { distanceBearing } = await import('../src/domain/fields.ts');
+  const world = new World(), engine = new Engine(world);
+  const { spaceId } = cmd.seedProject(world, 'Scatter').result;
+  const t = gregorian.fromCivil({ year: 1983, month: 9, day: 26 });
+  const path: Array<[number, number]> = [[-100, 40], [-80, 40]];
+  const r = cmd.addDisasterScatter(world, { spaceId, disaster: 'nuclear', least: 100, most: 5000, windDeg: 90, path, widthKm: 150, count: 20000, spreadDays: 2, t, seed: 7 });
+  const ev = world.get('event', r.result)!;
+  assert.equal(ev.name, '20,000 × nuclear strike (100 kt to 5 Mt)');
+  const feats = world.all('feature');
+  assert.equal(feats.length, 3, 'one source for each condition, not twenty thousand');
+  assert.ok(feats.every((f) => f.style.length < 2000), 'kept small: the recipe, not every strike');
+  // Laid out the same every time, along the stroke and within the brush's reach of it.
+  const sc = scatterOf(JSON.parse(feats[0].style).source.scatter)!;
+  const items = scatterItems(sc), again = scatterItems(scatterOf(JSON.parse(feats[0].style).source.scatter)!);
+  assert.equal(items.length, 20000);
+  assert.deepEqual(items.slice(0, 50), again.slice(0, 50), 'the same layout from the same recipe');
+  const offStroke = (it: { lon: number; lat: number }) => Math.min(...Array.from({ length: 41 }, (_, k) => distanceBearing([-100 + k * 0.5, 40], [it.lon, it.lat])[0]));
+  assert.ok(items.slice(0, 400).every((it) => offStroke(it) <= 151), 'within 150 km of the stroke');
+  assert.ok(items.some((it) => it.lon < -97) && items.some((it) => it.lon > -83), 'all along it');
+  // Over the span: none before, about half after a day, all after two.
+  const layers = world.all('layer').filter((l) => l.kind === 'field');
+  const blast = layers.find((l) => fieldLayerStyleOf(l.style).type === 'damage')!;
+  const at = (days: number) => activeSources(world, engine, blast.id, { day: t.day + Math.floor(days), ms: Math.round((days % 1) * 86_400_000) }, compare);
+  assert.equal(at(-0.5).length, 0);
+  const half = at(1).length;
+  assert.ok(half > 8000 && half < 12000, `about half after a day (${half})`);
+  assert.equal(at(2.01).length, 20000, 'all after two days');
+  // Sizes between the least and the most: a 100 kt blast reaches about a third as far as a 5 Mt one, as single strikes do.
+  const one = (y: number) => planDisaster('nuclear', y).sources.find((s) => s.type === 'damage')!.source.radiusKm!;
+  const radii = at(3).map((a) => a.source.radiusKm);
+  assert.ok(Math.abs(Math.min(...radii) - one(100)) / one(100) < 0.02 && Math.abs(Math.max(...radii) - one(5000)) / one(5000) < 0.02, `from ${Math.min(...radii).toFixed(2)} to ${Math.max(...radii).toFixed(2)} km`);
+  assert.ok(sizeFactors(sc, 0).reach < 1 && sizeFactors(sc, SIZE_STEPS - 1).reach > 1);
+  // Refused: too many, nowhere; undone in one step.
+  assert.throws(() => cmd.addDisasterScatter(world, { spaceId, disaster: 'nuclear', least: 1, most: 1, path, widthKm: 1, count: 1e6, spreadDays: 0, t }), /100,000/);
+  assert.throws(() => cmd.addDisasterScatter(world, { spaceId, disaster: 'nuclear', least: 1, most: 1, path: [], widthKm: 1, count: 1, spreadDays: 0, t }), /not on the map/);
+  world.applyDiffs(invertDiffs(r.diffs));
+  assert.equal(world.all('feature').length, 0);
+  assert.equal(world.get('event', r.result), undefined);
+});
+
+test('drawn as some of them when there are too many (D233): each standing for several, the total the same on the whole', async () => {
+  const { World } = await import('../src/world-model/world.ts');
+  const { Engine } = await import('../src/temporal-engine/engine.ts');
+  const cmd = await import('../src/domain/commands.ts');
+  const { fieldValueAt } = await import('../src/domain/fields.ts');
+  const world = new World(), engine = new Engine(world);
+  const { spaceId } = cmd.seedProject(world, 'Scatter').result;
+  const t = gregorian.fromCivil({ year: 1983 });
+  cmd.addDisasterScatter(world, { spaceId, disaster: 'earthquake', least: 6, most: 6, path: [[10, 45]], widthKm: 400, count: 30000, spreadDays: 0, t, seed: 3 });
+  const layer = world.all('layer').find((l) => l.kind === 'field')!;
+  const when = { day: t.day + 1, ms: 0 };
+  const all = activeSources(world, engine, layer.id, when, compare), some = activeSources(world, engine, layer.id, when, compare, 3000);
+  assert.equal(all.length, 30000);
+  assert.equal(some.length, 3000);
+  assert.ok(some.every((a) => a.weight === 10), 'each standing for ten');
+  // The value over the area, on the whole, about the same (within a tenth).
+  let a = 0, b = 0;
+  for (let i = 0; i < 40; i++) for (let j = 0; j < 40; j++) { const lon = 6 + i * 0.2, lat = 42 + j * 0.15; a += fieldValueAt(all, lon, lat); b += fieldValueAt(some, lon, lat); }
+  assert.ok(Math.abs(a - b) / a < 0.1, `the same on the whole (${a.toFixed(0)} and ${b.toFixed(0)})`);
+});

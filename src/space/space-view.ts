@@ -102,3 +102,14 @@ export function panSpaceCamera(cam: Camera, view: SpaceView, dx: number, dy: num
   const rot = (cam.rotation * Math.PI) / 180, ux = dx * Math.cos(rot) + dy * Math.sin(rot), uy = -dx * Math.sin(rot) + dy * Math.cos(rot);
   return { ...cam, target: [t[0] - (view.right[0] * ux - view.up[0] * uy) * k, t[1] - (view.right[1] * ux - view.up[1] * uy) * k, t[2] - (view.right[2] * ux - view.up[2] * uy) * k] };
 }
+
+/**
+ * The camera moved forward or back (D231), as a middle-button drag moves it: the point it circles carried along the
+ * way it looks, so the camera travels through the stars (they come nearer and pass by), where the wheel's zoom only
+ * enlarges the picture. A drag of `dy` pixels up moves it forward by as many light-years as `dy` pixels span at the
+ * point it circles, twice over; down, back.
+ */
+export function dollySpaceCamera(cam: Camera, view: SpaceView, dy: number): Camera {
+  const t = view.target, d = (-dy / view.scale) * 2;
+  return { ...cam, target: [t[0] + view.forward[0] * d, t[1] + view.forward[1] * d, t[2] + view.forward[2] * d] };
+}

@@ -46,6 +46,7 @@ import { SmartAdjustPanel } from './SmartBrush.tsx';
 import { CompareBar } from './CompareBar.tsx';
 import type { AdjustState } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
+import { flatten, hitTest, splitPiece, moveAnchor, moveHandle, mirror, type Anchor } from '../bezier-path.ts';
 
 type Drag =
   | { kind: 'none' }
@@ -56,6 +57,9 @@ type Drag =
   | { kind: 'vertex'; vid: number; x: number; y: number; moved: number }
   // The border pen: points go straight into the current draft (map positions).
   | { kind: 'pen' }
+  // A path of curves (D232; the precise shape, or the border pen in curves): a new anchor's handles pulled out, an
+  // anchor moved, or a handle moved; `start` the anchors as they were when pressed, `ll0` where it was pressed.
+  | { kind: 'bz'; target: 'pen' | 'shape'; mode: 'new' | 'anchor' | 'handle'; index: number; which?: 'i' | 'o'; from: Pt; ll0: Pt; start: Anchor[]; moved: number; closeOnUp?: boolean }
   // A text or the current-events box dragged on the shot preview.
   | { kind: 'overlay'; id: string; x: number; y: number; from: { x: number; y: number } }
   // A character's marker dragged to a new place (from the date being viewed).
@@ -64,6 +68,8 @@ type Drag =
   | { kind: 'erase'; points: Pt[] }
   // A stroke of the sculpting brush (map positions; D98).
   | { kind: 'sculpt'; points: Pt[] }
+  // A stroke of the Disasters tool's brush (map positions; D233): many disasters scattered along it.
+  | { kind: 'scatter'; points: Pt[] }
   // A freehand area or line on a feature layer (map positions).
   | { kind: 'feature'; points: Pt[] }
   // The line between two dates being compared, dragged across the map.
@@ -299,8 +305,12 @@ export function MapView() {
   const [size, setSize] = useState({ w: 800, h: 600 });
   const drag = useRef<Drag>({ kind: 'none' });
   const wheelTimer = useRef(0);
-  /** Points of the precise shape being placed, as map positions (longitude, latitude). */
+  /** Points of a line or area clicked out on a feature layer, as map positions (longitude, latitude). */
   const [polygon, setPolygon] = useState<Pt[]>([]);
+  /** The precise shape being drawn (D232): its anchors and handles, as map positions. */
+  const shape = useRef<Anchor[]>([]);
+  /** What of a path of curves lies under the pointer (for the pointer's look). */
+  const [bzHover, setBzHover] = useState<'' | 'anchor' | 'handle' | 'piece' | 'close'>('');
   const [cursor, setCursor] = useState<Pt | null>(null);
   // The rivers drawn on the map in the last frame (D220), for choosing one with a click.
   const riversDrawn = useRef<RiverShape[]>([]);
@@ -725,8 +735,25 @@ export function MapView() {
       ctx.fillStyle = '#ffd166'; ctx.beginPath(); ctx.arc(pts[0][0], pts[0][1], 5, 0, Math.PI * 2); ctx.fill();
       const end = pts[pts.length - 1];
       ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(end[0], end[1], 4, 0, Math.PI * 2); ctx.fill();
-      if (cursor && drag.current.kind !== 'pen') { ctx.setLineDash([3, 4]); ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(end[0], end[1]); ctx.lineTo(cursor[0], cursor[1]); ctx.stroke(); }
+      if (cursor && drag.current.kind !== 'pen' && drag.current.kind !== 'bz') { ctx.setLineDash([3, 4]); ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(end[0], end[1]); ctx.lineTo(cursor[0], cursor[1]); ctx.stroke(); }
       ctx.restore();
+      // (Drawn in curves, D232: its anchors and their handles.)
+      if (draft.curve?.length && s.penCurves) drawAnchors(ctx, draft.curve, (ll) => lonLatToScreen(v, ll[0], ll[1]));
+    }
+    // The precise shape being drawn (D232): its path of curves, closed lightly, its anchors and handles.
+    if (s.tool === 'polygon' && shape.current.length && !presentation) {
+      const proj = (ll: Pt) => lonLatToScreen(v, ll[0], ll[1]);
+      const open = toScreen(flatten(shape.current, false)), closed = toScreen(flatten(shape.current, true));
+      const owner = s.paintValue ? w.get('entity', s.paintValue) : null;
+      ctx.save();
+      ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      if (closed.length > 2) { ctx.beginPath(); closed.forEach((q, i) => (i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]))); ctx.closePath(); ctx.fillStyle = (owner?.color ?? '#ffffff') + '40'; ctx.fill(); }
+      ctx.strokeStyle = owner?.color ?? '#ffffff'; ctx.lineWidth = 2;
+      ctx.beginPath(); open.forEach((q, i) => (i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]))); ctx.stroke();
+      const last = open[open.length - 1];
+      if (cursor && last && drag.current.kind !== 'bz') { ctx.setLineDash([3, 4]); ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(last[0], last[1]); ctx.lineTo(cursor[0], cursor[1]); ctx.stroke(); }
+      ctx.restore();
+      drawAnchors(ctx, shape.current, proj);
     }
     // Today's states and provinces as guides (D206; the working view only).
     if (s.guideStates && !presentation) { const gx = regionIndex('regions'); if (gx) drawStateGuides(ctx, v, gx); }
@@ -846,6 +873,19 @@ export function MapView() {
       ctx.beginPath(); cutLine.forEach((q, i) => (i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]))); ctx.stroke();
       ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 2.5; ctx.setLineDash([8, 5]);
       ctx.stroke();
+      ctx.restore();
+    }
+    // The Disasters tool's brush (D233): its reach round the pointer, and the band of its stroke.
+    if (s.tool === 'disaster' && s.disaster.many && !presentation) {
+      const px = s.disaster.brushKm / 6371.0088 / radiansPerPixel(v);
+      const band = drag.current.kind === 'scatter' ? toScreen(drag.current.points) : [];
+      ctx.save();
+      ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      if (band.length) {
+        ctx.strokeStyle = 'rgba(255,120,60,0.28)'; ctx.lineWidth = Math.max(2, 2 * px);
+        ctx.beginPath(); band.forEach((q, i) => (i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]))); if (band.length === 1) ctx.lineTo(band[0][0] + 0.01, band[0][1]); ctx.stroke();
+      }
+      if (cursor) { ctx.strokeStyle = 'rgba(255,170,120,0.9)'; ctx.lineWidth = 1.5; ctx.setLineDash([4, 3]); ctx.beginPath(); ctx.arc(cursor[0], cursor[1], Math.max(3, px), 0, Math.PI * 2); ctx.stroke(); }
       ctx.restore();
     }
     const featureLayer = s.tool === 'feature' ? w.get('layer', s.featureLayerId) : null;
@@ -1007,6 +1047,31 @@ export function MapView() {
     if (a && (a.tool !== s.tool || store.mode !== 'world')) store.adjustFinish('cancel');
   }, [s.tool, s.spaceId, s.mode]);
 
+  // Paths of curves (D232): the precise shape, and the border pen drawing curves.
+  const bzTarget = (): 'pen' | 'shape' | null => (presentation ? null : s.tool === 'polygon' ? 'shape' : s.tool === 'pen' && s.penCurves ? 'pen' : null);
+  const bzAnchors = (t: 'pen' | 'shape'): Anchor[] => (t === 'shape' ? shape.current : store.draft && store.draft.spaceId === store.spaceId ? store.draft.curve ?? [] : []);
+  const bzSet = (t: 'pen' | 'shape', a: Anchor[], edit: boolean) => { if (t === 'shape') { shape.current = a; shapeShown = a; force((n) => n + 1); } else store.penCurve(a, edit); };
+  const bzProject = (ll: Pt) => lonLatToScreen(view, ll[0], ll[1]);
+  /** What a press on a path of curves does: on a handle or an anchor, picks it up; on the first anchor, closes the path; on the line, adds an anchor there; elsewhere, adds an anchor, its handles pulled out by dragging. */
+  function bzDown(t: 'pen' | 'shape', p: Pt, alt: boolean): void {
+    const anchors = bzAnchors(t);
+    const ll = screenToLonLat(view, p[0], p[1]);
+    const hit = hitTest(anchors, false, bzProject, p);
+    const base = { kind: 'bz' as const, target: t, from: p, ll0: (ll ?? [0, 0]) as Pt, moved: 0 };
+    if (hit?.kind === 'handle') { drag.current = { ...base, mode: 'handle', index: hit.index, which: hit.which, start: anchors }; return; }
+    if (hit?.kind === 'anchor') {
+      // (Alt on an anchor: a corner again, or, dragged, new handles pulled out of it.)
+      if (alt) { const next = anchors.map((a, i) => (i === hit.index ? { p: a.p } : a)); bzSet(t, next, true); drag.current = { ...base, mode: 'new', index: hit.index, start: next }; return; }
+      drag.current = { ...base, mode: 'anchor', index: hit.index, start: anchors, closeOnUp: hit.index === 0 && anchors.length >= 3 };
+      return;
+    }
+    if (!ll) return;
+    if (hit?.kind === 'piece') { const next = splitPiece(anchors, hit.index, hit.t); bzSet(t, next, false); drag.current = { ...base, mode: 'anchor', index: hit.index + 1, start: next }; return; }
+    const next = [...anchors, { p: ll as [number, number] }];
+    bzSet(t, next, false);
+    drag.current = { ...base, mode: 'new', index: anchors.length, start: next };
+  }
+
   function onPointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
     if (!s.world) return;
     if (store.adjust && !presentation && e.button === 0) {
@@ -1116,6 +1181,8 @@ export function MapView() {
       const ll = screenToLonLat(view, p[0], p[1]);
       if (!ll) return;
       const d = s.disaster;
+      // Many with a brush (D233): scattered along the stroke when let go.
+      if (d.many) { drag.current = { kind: 'scatter', points: [ll] }; force((n) => n + 1); return; }
       const ev = store.execute((wd) => cmd.addDisaster(wd, { spaceId: s.spaceId, disaster: d.id, size: d.size, windDeg: d.windDeg, at: ll, t: s.time, eventId: s.recordEventId, seed: 1 + Math.floor(Math.random() * 9973) }));
       if (ev) store.set({ selection: { kind: 'event', id: ev } });
       return;
@@ -1157,6 +1224,8 @@ export function MapView() {
       drag.current = { kind: 'pan', x: e.clientX, y: e.clientY, moved: 0, startX: p[0], startY: p[1] };
       return;
     }
+    const bt = e.button === 0 ? bzTarget() : null;
+    if (bt) { bzDown(bt, p, e.altKey); setCursor(null); return; }
     if (!presentation && e.button === 0 && s.tool === 'pen') {
       const ll = screenToLonLat(view, p[0], p[1]);
       if (!ll) return;
@@ -1216,7 +1285,8 @@ export function MapView() {
       if (r !== hoverRegion.current) { hoverRegion.current = r; force((n) => n + 1); }
     }
     if (d.kind === 'cut') d.moved = Math.max(d.moved, Math.hypot(p[0] - d.x, p[1] - d.y));
-    if (d.kind === 'erase' || d.kind === 'feature' || d.kind === 'cut' || d.kind === 'sculpt') {
+    if (s.tool === 'disaster' && s.disaster.many && !presentation) setCursor(p);
+    if (d.kind === 'erase' || d.kind === 'feature' || d.kind === 'cut' || d.kind === 'sculpt' || d.kind === 'scatter') {
       const ll = screenToLonLat(view, p[0], p[1]);
       const last = d.points[d.points.length - 1];
       const ls = lonLatToScreen(view, last[0], last[1]);
@@ -1253,6 +1323,29 @@ export function MapView() {
       return;
     }
     if (store.riverDraft.length && s.tool === 'sculpt' && !presentation) setCursor(p);
+    if (d.kind === 'bz') {
+      d.moved = Math.max(d.moved, Math.hypot(p[0] - d.from[0], p[1] - d.from[1]));
+      if (d.moved < 3) return;
+      const ll = screenToLonLat(view, p[0], p[1]);
+      if (!ll) return;
+      const a = d.start.slice(), cur = a[d.index];
+      if (!cur) return;
+      const at: [number, number] = [ll[0], ll[1]];
+      if (d.mode === 'new') a[d.index] = { ...cur, o: at, i: mirror(cur.p, at) };
+      else if (d.mode === 'anchor') a[d.index] = moveAnchor(cur, ll[0] - d.ll0[0], ll[1] - d.ll0[1]);
+      else a[d.index] = moveHandle(cur, d.which!, at, e.altKey);
+      bzSet(d.target, a, true);
+      return;
+    }
+    if (d.kind === 'none') {
+      const bt = bzTarget();
+      if (bt) {
+        const anchors = bzAnchors(bt), hit = hitTest(anchors, false, bzProject, p);
+        const look = !hit ? '' : hit.kind === 'anchor' && hit.index === 0 && anchors.length >= 3 ? 'close' : hit.kind;
+        if (look !== bzHover) setBzHover(look);
+        if (bt === 'shape' && anchors.length) setCursor(hit ? null : p);
+      } else if (bzHover) setBzHover('');
+    }
     if (d.kind === 'pen') {
       const pts = store.draft?.points ?? [];
       const last = pts[pts.length - 1];
@@ -1280,6 +1373,20 @@ export function MapView() {
     // While a line is shown adjusted (D148): a click pins a point (or takes a pin away); a drag only moves the map.
     if (d.kind === 'pan' && d.pin) { if (d.moved < 4) togglePin(p); return; }
     if (d.kind === 'erase') { eraseBorders(d.points, view); force((n) => n + 1); return; }
+    // The Disasters tool's brush (D233): its stroke scattered with as many as asked, in a new event (or the one recorded).
+    if (d.kind === 'scatter') {
+      const ds = store.disaster, days = ds.over * ({ hours: 1 / 24, days: 1, months: 30.44, years: 365.25 } as const)[ds.overUnit];
+      const ev = store.execute((wd) => cmd.addDisasterScatter(wd, { spaceId: store.spaceId, disaster: ds.id, least: ds.least, most: ds.most, windDeg: ds.windDeg, path: d.points.map((q) => [q[0], q[1]] as [number, number]), widthKm: ds.brushKm, count: ds.count, spreadDays: days, t: store.time, eventId: store.recordEventId, seed: 1 + Math.floor(Math.random() * 9973) }));
+      if (ev) store.set({ selection: { kind: 'event', id: ev } });
+      force((n) => n + 1);
+      return;
+    }
+    // A path of curves (D232): a click on its first anchor closes it, and the shape or border is finished.
+    if (d.kind === 'bz') {
+      if (d.closeOnUp && d.moved < 3) { if (d.target === 'shape') finishPolygon(); else finishDraft(); }
+      force((n) => n + 1);
+      return;
+    }
     // Several countries chosen (D189): those the box touches (a click with Shift: the country there).
     if (d.kind === 'selbox') {
       const found = d.moved >= 4 ? ownersInRect(mapAt(), [d.x, d.y, p[0], p[1]]) : [ownerAtScreen(mapAt(), d.x, d.y)].filter((x): x is string => !!x);
@@ -1493,13 +1600,14 @@ export function MapView() {
       finishFeatureDrawing(layer.id, [pts.map((q) => screenToLonLat(view, q[0], q[1])).filter((q): q is [number, number] => !!q)]);
       return;
     }
-    // A double-click to finish also places its point twice; repeated points are dropped.
-    const pts = dedupe(polygon.map((q) => lonLatToScreen(view, q[0], q[1])).filter((q): q is Pt => !!q), 1);
-    if (pts.length < 3) { setPolygon([]); setCursor(null); return; }
+    // (The path of curves, D232, closed and laid out as points; points that fall together are dropped.)
+    const pts = dedupe(flatten(shape.current, true).map((q) => lonLatToScreen(view, q[0], q[1])).filter((q): q is Pt => !!q), 1);
+    shape.current = []; shapeShown = [];
+    setCursor(null);
+    setBzHover('');
+    if (pts.length < 3) { force((n) => n + 1); return; }
     const loops = splitLoops(pts).map(orientInteriorLeft).map((r) => densify(r, 6, true));
     finishShape(loops, pts[0]);
-    setPolygon([]);
-    setCursor(null);
   }
 
   function onWheel(e: WheelEvent) {
@@ -1534,9 +1642,11 @@ export function MapView() {
         return;
       }
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-      if (e.key === 'Escape') { setPolygon([]); setCursor(null); drag.current = { kind: 'none' }; if (store.splitLine && !store.pending) store.set({ splitLine: null }); if (store.tool === 'regions' && !store.dialog && store.regionPicks.length) store.set({ regionPicks: [] }); if (store.pickOrigin) store.set({ pickOrigin: null }); force((n) => n + 1); }
+      if (e.key === 'Escape') { setPolygon([]); shape.current = []; shapeShown = []; setCursor(null); drag.current = { kind: 'none' }; if (store.splitLine && !store.pending) store.set({ splitLine: null }); if (store.tool === 'regions' && !store.dialog && store.regionPicks.length) store.set({ regionPicks: [] }); if (store.pickOrigin) store.set({ pickOrigin: null }); force((n) => n + 1); }
       if (e.key === 'Enter' && store.tool === 'regions' && !store.dialog && store.regionPicks.length) store.set({ dialog: 'give-regions' });
-      if (e.key === 'Enter' && polygon.length) finishPolygon();
+      if (e.key === 'Enter' && (polygon.length || (store.tool === 'polygon' && shape.current.length))) finishPolygon();
+      // The precise shape (D232): Backspace takes back its last point.
+      if (e.key === 'Backspace' && store.tool === 'polygon' && shape.current.length && !presentation) { e.preventDefault(); shape.current = shape.current.slice(0, -1); shapeShown = shape.current; force((n) => n + 1); }
       // The river pen (D220).
       if (store.riverDraft.length && store.tool === 'sculpt') {
         if (e.key === 'Enter' && store.riverDraft.length >= 2) { e.preventDefault(); finishRiver(); return; }
@@ -1593,7 +1703,7 @@ export function MapView() {
     }
   }
 
-  const cursorStyle = drag.current.kind === 'swipe' || (overSplit && s.compare.on && !presentation) ? 'ew-resize' : presentation ? (drag.current.kind === 'overlay' || overOverlay ? 'move' : 'grab') : s.tool === 'select' ? 'grab' : s.tool === 'vertex' ? (hoverVertex !== null ? 'move' : 'default') : 'crosshair';
+  const cursorStyle = drag.current.kind === 'swipe' || (overSplit && s.compare.on && !presentation) ? 'ew-resize' : presentation ? (drag.current.kind === 'overlay' || overOverlay ? 'move' : 'grab') : s.tool === 'select' ? 'grab' : s.tool === 'vertex' ? (hoverVertex !== null ? 'move' : 'default') : bzHover === 'piece' ? 'copy' : bzHover === 'close' ? 'pointer' : bzHover ? 'move' : 'crosshair';
   return (
     <div className="map-wrap" ref={wrapRef}>
       <canvas
@@ -1681,3 +1791,38 @@ function pointIn(r: Pt[], p: Pt): boolean {
   return inside;
 }
 
+/** The precise shape being drawn (D232), for the automated tests. */
+let shapeShown: Anchor[] = [];
+export const shapeNow = (): Anchor[] => shapeShown;
+
+/**
+ * The anchors of a path of curves (D232) as Photoshop's pen shows them: a small square for each (the first larger and
+ * yellow: a click there closes the path), and the handles of those that have them, a line out to a small round knob.
+ */
+function drawAnchors(ctx: CanvasRenderingContext2D, anchors: Anchor[], project: (ll: Pt) => Pt | null): void {
+  ctx.save();
+  ctx.lineWidth = 1;
+  for (const a of anchors) {
+    const p = project(a.p);
+    if (!p) continue;
+    for (const h of [a.i, a.o]) {
+      if (!h) continue;
+      const q = project(h);
+      if (!q) continue;
+      ctx.strokeStyle = 'rgba(120,180,255,0.9)';
+      ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(q[0], q[1]); ctx.stroke();
+      ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(q[0], q[1], 3.5, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#2f7de1'; ctx.stroke();
+    }
+  }
+  anchors.forEach((a, i) => {
+    const p = project(a.p);
+    if (!p) return;
+    const r = i === 0 ? 5 : 4;
+    ctx.fillStyle = i === 0 ? '#ffd166' : '#ffffff';
+    ctx.strokeStyle = '#2f7de1'; ctx.lineWidth = 1.5;
+    ctx.fillRect(p[0] - r, p[1] - r, 2 * r, 2 * r);
+    ctx.strokeRect(p[0] - r, p[1] - r, 2 * r, 2 * r);
+  });
+  ctx.restore();
+}

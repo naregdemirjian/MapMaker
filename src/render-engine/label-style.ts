@@ -139,6 +139,26 @@ export function cityThreshold(pxPerDeg: number, density = 1): number {
 }
 
 /**
+ * How much of the cities is shown at a scale (D229), 0 to 1: seen so far out that a country is small, none at all (as
+ * maps online, which name only countries seen whole), fading in over a short span; a city set to be always shown is
+ * not left out. Pixels of a 1920-wide frame per degree: below 12 (a view more than some 160 degrees across), none.
+ */
+export const CITIES_FROM = 12;
+export function citiesShown(pxPerDeg: number): number {
+  return Math.max(0, Math.min(1, (pxPerDeg - CITIES_FROM) / 3));
+}
+
+/**
+ * The size of a city's name (D229), design pixels: by its class (0 the most important), smaller than a country's name
+ * as maps online draw them (13, 12 and 11 pixels closed in, 15% less seen far out). `byImportance` 0 draws all alike.
+ */
+export function cityNameSize(cls: number, pxPerDeg: number, byImportance = 1): number {
+  const sizes = [13, 12, 11];
+  const far = Math.max(0.85, Math.min(1, 0.85 + 0.075 * Math.log2(Math.max(1e-6, pxPerDeg) / 15)));
+  return (12 + (sizes[Math.max(0, Math.min(2, cls))] - 12) * byImportance) * far;
+}
+
+/**
  * How important a city can be said to be (D219), for cities of one's own (or to rate one of today's otherwise): a
  * country's capital, a large city, a city, a town, a village.
  */

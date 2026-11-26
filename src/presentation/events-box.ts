@@ -37,7 +37,10 @@ export interface EventsBox {
    * laid on it, and no panel of its own.
    */
   image: string | null; imageFit: 'wrap' | 'stretch' | 'cover' | 'contain'; imageOpacity: number;
-  /** Fixed height (design pixels); 0 grows with the content. Useful with a custom graphic. */
+  /**
+   * Fixed height (design pixels); 0 grows with the content (or, kept still, has room for `maxEvents`). A fixed box
+   * (D230, the default) lists as many of the events as fit in it, the most recent first.
+   */
   height: number;
   /** Hidden while no event is listed (D176): no box with only its title and the date between events. */
   hideWhenEmpty: boolean;
@@ -52,14 +55,30 @@ export interface EventsBox {
   keepSize?: boolean;
 }
 
+/** Sizes a fixed box can be given at once (D230), in pixels of a 1920-wide frame. */
+export const EVENTS_BOX_SIZES: ReadonlyArray<{ id: string; name: string; width: number; height: number }> = [
+  { id: 'small', name: 'Small', width: 400, height: 200 },
+  { id: 'medium', name: 'Medium', width: 520, height: 260 },
+  { id: 'large', name: 'Large', width: 680, height: 340 },
+];
+
 export const DEFAULT_EVENTS_BOX: EventsBox = {
   show: false, corner: 'bottom-right', x: 0.62, y: 0.7, width: 520, padding: 22, margin: 48,
   title: 'Now', showDate: true, datePrecision: 'day', maxEvents: 4, linger: 3, fade: 0.4, showDescription: false, groups: null,
   font: 'Segoe UI', titleSize: 18, dateSize: 30, textSize: 24,
   titleColor: '#ffd166', dateColor: '#f4efe6', textColor: '#e3e9ef', accentColor: '#ffd166',
   background: '#0a1018', backgroundOpacity: 0.72, borderColor: '#ffffff', borderWidth: 0, radius: 12,
-  image: null, imageFit: 'cover', imageOpacity: 1, height: 0, hideWhenEmpty: false,
+  image: null, imageFit: 'cover', imageOpacity: 1, height: EVENTS_BOX_SIZES[1].height, hideWhenEmpty: false, keepSize: true,
 };
+
+/** How a box's size is set (D230): fixed (width and height), room for the most events listed, or growing with them. */
+export type EventsBoxSizing = 'fixed' | 'room' | 'grow';
+export const sizingOf = (box: EventsBox): EventsBoxSizing => (box.height > 0 ? 'fixed' : box.keepSize ? 'room' : 'grow');
+/** The settings for a way of sizing the box (a fixed box keeps its height, or takes the medium one). */
+export function withSizing(box: EventsBox, sizing: EventsBoxSizing): Partial<EventsBox> {
+  if (sizing === 'fixed') return { height: box.height > 0 ? box.height : EVENTS_BOX_SIZES[1].height, keepSize: true };
+  return { height: 0, keepSize: sizing === 'room' };
+}
 
 export function eventsBoxOf(stored: Partial<EventsBox> | null | undefined): EventsBox {
   return { ...DEFAULT_EVENTS_BOX, ...(stored ?? {}) };
@@ -224,8 +243,11 @@ export function drawEventsBox(ctx: CanvasRenderingContext2D | OffscreenCanvasRen
   let prevKind = '';
   const gs = box.style ? graphicStyleOf(box.style) : null;
   const inset = gs ? accentInset(gs.panel, u) : 0;
+  // (A box of a fixed size, D230, lists as many events as fit in it, the most recent first; the rest are left out.)
+  const bottom = box.height > 0 && !wrapped ? y + h - pad : Infinity;
   for (const row of rows) {
     const lh = lineH(row) * (gs ? gs.text.lineHeight / 1.25 : 1);
+    if ((row.kind === 'event' || row.kind === 'desc') && cy + lh > bottom + 0.5) break;
     const mid = cy + lh / 2;
     ctx.globalAlpha = row.alpha;
     if (gs) {

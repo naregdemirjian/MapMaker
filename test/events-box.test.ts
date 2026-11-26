@@ -84,11 +84,38 @@ test('an events box kept still (D190): the same size and place with none, one or
   const ev = (name: string) => ({ id: name, name, description: '', alpha: 1, typeColor: null } as never);
   const long = 'A very long name of an event that would take three lines or more in the box';
   for (const corner of ['bottom-right', 'top-left'] as const) {
-    const still = eventsBoxOf({ show: true, keepSize: true, maxEvents: 3, corner });
+    const still = eventsBoxOf({ show: true, keepSize: true, height: 0, maxEvents: 3, corner });
     const boxes = [[], [ev('One')], [ev('One'), ev(long), ev('Three')]].map((es) => drawEventsBox(ctx, 1920, 1080, 1, still, t, es));
     assert.deepEqual(boxes[1], boxes[0], `${corner}: one event, the same box as none`);
     assert.deepEqual(boxes[2], boxes[0], `${corner}: three, one of them long, the same box`);
   }
-  const moving = eventsBoxOf({ show: true, maxEvents: 3 });
+  const moving = eventsBoxOf({ show: true, maxEvents: 3, height: 0, keepSize: false });
   assert.notDeepEqual(drawEventsBox(ctx, 1920, 1080, 1, moving, t, [ev('One')]), drawEventsBox(ctx, 1920, 1080, 1, moving, t, []), 'not asked: it grows as before');
+});
+
+test('an events box is of a fixed size by default (D230), listing as many events as fit, the most recent first', async () => {
+  const { drawEventsBox, DEFAULT_EVENTS_BOX, EVENTS_BOX_SIZES, sizingOf, withSizing } = await import('../src/presentation/events-box.ts');
+  const written: string[] = [];
+  const ctx = new Proxy({}, { get: (_t, k) => (k === 'measureText' ? (s: string) => ({ width: s.length * 10 }) : k === 'fillText' ? (s: string) => { written.push(s); } : typeof k === 'string' && ['save', 'restore', 'fill', 'fillRect', 'beginPath', 'roundRect', 'stroke', 'moveTo', 'lineTo', 'arc', 'closePath', 'rect', 'clip', 'drawImage', 'arcTo', 'quadraticCurveTo', 'translate', 'scale', 'setTransform'].includes(k) ? () => undefined : undefined), set: () => true }) as unknown as CanvasRenderingContext2D;
+  const t = gregorian.fromCivil({ year: 1453, month: 5, day: 29 });
+  const ev = (name: string) => ({ id: name, name, description: '', alpha: 1 } as never);
+  assert.equal(sizingOf(DEFAULT_EVENTS_BOX), 'fixed');
+  const box = eventsBoxOf({ show: true, maxEvents: 20 });
+  assert.deepEqual([box.width, box.height], [EVENTS_BOX_SIZES[1].width, EVENTS_BOX_SIZES[1].height], 'the medium size');
+  const many = Array.from({ length: 12 }, (_, i) => ev(`E${i}`));
+  const boxes = [[], [ev('E0')], many].map((es) => drawEventsBox(ctx, 1920, 1080, 1, box, t, es));
+  assert.deepEqual(boxes[1], boxes[0]);
+  assert.deepEqual(boxes[2], boxes[0], 'the same box with twelve events');
+  assert.equal(boxes[0]!.h, 260);
+  written.length = 0;
+  drawEventsBox(ctx, 1920, 1080, 1, box, t, many);
+  const listed = written.filter((x) => /^E\d+$/.test(x));
+  assert.ok(listed.length >= 3 && listed.length < 12, `as many as fit (${listed.length})`);
+  assert.deepEqual(listed, many.slice(0, listed.length).map((e: any) => e.name), 'the first (most recent) ones');
+  // Its own size, then growing again.
+  const own = eventsBoxOf({ show: true, width: 700, height: 150 });
+  assert.deepEqual([drawEventsBox(ctx, 1920, 1080, 1, own, t, many)!.w, drawEventsBox(ctx, 1920, 1080, 1, own, t, many)!.h], [700, 150]);
+  assert.deepEqual(withSizing(own, 'grow'), { height: 0, keepSize: false });
+  assert.deepEqual(withSizing(eventsBoxOf({ height: 0 }), 'fixed'), { height: 260, keepSize: true });
+  assert.equal(sizingOf(eventsBoxOf({ height: 0, keepSize: true })), 'room');
 });

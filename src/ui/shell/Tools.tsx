@@ -34,15 +34,18 @@ function PenControls() {
   const others = s.drafts.filter((x) => x.id !== d?.id);
   return (
     <div className="pen-controls" data-testid="pen-controls">
+      <select value={s.penCurves ? 'curves' : 'freehand'} onChange={(e) => s.set({ penCurves: e.target.value === 'curves' })} title="Curves, as Photoshop's pen: click for a corner, press and drag for a curve, click the line to add a point, drag points and handles to reshape it (Alt: one handle alone). Freehand: drag or click, as a brush." data-testid="pen-mode">
+        <option value="curves">Curves</option><option value="freehand">Freehand</option>
+      </select>
       {d ? <>
         <input className="draft-name" value={d.name} onChange={(e) => s.renameDraft(d.id, e.target.value)} title="Name of this draft" data-testid="draft-name" />
         <span className="muted">{d.points.length} points</span>
-        <button className="small" disabled={!d.pieces.length} onClick={() => s.penUndoPiece()} title="Ctrl+Z or Backspace (with the pen, undo only touches the draft)" data-testid="draft-undo">Take back last piece</button>
+        <button className="small" disabled={!d.pieces.length} onClick={() => s.penUndoPiece()} title="Ctrl+Z or Backspace (with the pen, undo only touches the draft)" data-testid="draft-undo">{d.curve?.length ? 'Take back last point' : 'Take back last piece'}</button>
         <button className="small" onClick={() => s.penRedoPiece()} title="Ctrl+Y" data-testid="draft-redo">Put back</button>
         <button className="small primary" disabled={d.points.length < 3} onClick={() => s.finishDraft()} data-testid="draft-finish">Finish <span className="key">Enter</span></button>
         <button className="small danger" onClick={() => { if (confirm(`Discard "${d.name}"?`)) s.discardDraft(d.id); }} data-testid="draft-discard">Discard</button>
         <button className="small" onClick={() => s.newDraft()} title="Keep this draft and start another">New draft</button>
-      </> : <span className="muted">Press on the map to start a border. Let go and carry on whenever you like.</span>}
+      </> : <span className="muted">{s.penCurves ? 'Click for a corner, press and drag for a curve; click the line to add a point. Carry on whenever you like.' : 'Press on the map to start a border. Let go and carry on whenever you like.'}</span>}
       {others.length > 0 && (
         <select value="" onChange={(e) => e.target.value && s.resumeDraft(e.target.value)} title="Carry on with another draft" data-testid="draft-resume">
           <option value="">Other drafts ({others.length})…</option>
@@ -180,7 +183,7 @@ export function ToolOptions() {
           </label>
           <WrapsCoast />
           {s.tool === 'pen' && <PenControls />}
-          {(s.tool === 'pen' || s.tool === 'lasso') && <SmartBrushControls />}
+          {((s.tool === 'pen' && !s.penCurves) || s.tool === 'lasso') && <SmartBrushControls />}
           {s.tool === 'lasso' && (
             <details className="brush-settings">
               <summary title="How freehand outlines are cleaned up">Brush settings ▾</summary>

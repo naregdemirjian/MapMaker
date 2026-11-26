@@ -223,3 +223,24 @@ test('lanes between stars (D112): opened from a date, growing from star to star 
   world.applyDiffs(invertDiffs(first.diffs));
   assert.equal(engine.lanesAt(sp, Y(2151)).length, 0, 'the first lane undone');
 });
+
+test('the middle button carries the camera forward and back through the stars (D231)', async () => {
+  const { dollySpaceCamera } = await import('../src/space/space-view.ts');
+  const cam = spaceCamera();
+  const v = makeSpaceView(cam, 1920, 1080, 50);
+  const ahead = dollySpaceCamera(cam, v, -100);
+  const t = ahead.target!;
+  const d = Math.hypot(t[0], t[1], t[2]);
+  assert.ok(d > 1, 'moved');
+  const along = (t[0] * v.forward[0] + t[1] * v.forward[1] + t[2] * v.forward[2]) / d;
+  assert.ok(along > 0.9999, 'along the way it looks');
+  assert.deepEqual([ahead.lon, ahead.lat, ahead.zoom, ahead.rotation], [cam.lon, cam.lat, cam.zoom, cam.rotation], 'neither turned nor zoomed');
+  // A star ahead of the camera comes nearer: drawn farther from the middle, and with more perspective.
+  const star: [number, number, number] = [4, 3, 1];
+  const before = v.project(star)!, after = makeSpaceView(ahead, 1920, 1080, 50).project(star)!;
+  assert.ok(after[2] > before[2], 'nearer');
+  assert.ok(Math.hypot(after[0] - 960, after[1] - 540) > Math.hypot(before[0] - 960, before[1] - 540));
+  // Back as far: where it was.
+  const back = dollySpaceCamera(ahead, makeSpaceView(ahead, 1920, 1080, 50), 100);
+  assert.ok(back.target!.every((x) => Math.abs(x) < 1e-9));
+});

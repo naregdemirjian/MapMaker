@@ -141,3 +141,23 @@ test('a heatmap worked out from a layer of points; many sources added in one ste
   assert.equal(activeSources(world, engine, heat, { day: t.day + 1, ms: 0 }, compare).length, 0);
   assert.throws(() => cmd.addFieldSources(world, { layerId: heat, sources: [{ name: 'x', at: [0, 100] }], mode: { kind: 'change', t } }), /not on the map/);
 });
+
+test('a plume\'s box fitted to it (D233): long and narrow, holding all of its value', async () => {
+  const { plumeBounds, sourceValue, distanceBearing, sourceReach, fieldSourceOf } = await import('../src/domain/fields.ts');
+  const s = fieldSourceOf({ shape: 'plume', radiusKm: 10, intensity: 100, windDeg: 60, windKmPerDay: 300, rise: 0, hold: 5, decay: 5 }, 'radiation');
+  const box = plumeBounds(s, 1, 20, 50)!;
+  const area = (box[2] - box[0]) * (box[3] - box[1]);
+  const reach = sourceReach(s, 1) / 111.2, circle = (2 * reach / Math.cos((50 * Math.PI) / 180)) * 2 * reach;
+  assert.ok(area < circle / 2, `smaller than the circle's box (${area.toFixed(1)} against ${circle.toFixed(1)} square degrees)`);
+  // Nothing of note outside it.
+  let worst = 0;
+  for (let i = 0; i <= 60; i++) for (let j = 0; j <= 60; j++) {
+    const lon = 20 + (i - 30) * 0.25, lat = 50 + (j - 30) * 0.12;
+    if (lon >= box[0] && lon <= box[2] && lat >= box[1] && lat <= box[3]) continue;
+    const [d, b] = distanceBearing([20, 50], [lon, lat]);
+    worst = Math.max(worst, sourceValue(s, d, b, 1));
+  }
+  assert.ok(worst < 0.02 * 100, `outside it, at most ${worst.toFixed(3)} of a peak of 100`);
+  assert.equal(plumeBounds(fieldSourceOf({ shape: 'circle' }, 'damage'), 1, 0, 0), null, 'a circle: its own box');
+  assert.equal(plumeBounds(s, 1, 20, 80), null, 'near a pole: the circle\'s');
+});

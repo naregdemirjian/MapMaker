@@ -380,6 +380,8 @@ try {
   await h.step('Border pen: draw in pieces, zoom between them, close and reopen, carry on, finish', async () => {
     await h.setDate('1985');
     await h.chooseTool('pen');
+    // (Freehand, as before curves, D232: pieces dragged and clicked.)
+    await page.getByTestId('pen-mode').selectOption('freehand');
     await page.getByTestId('paint-owner').selectOption({ label: 'Zoomland' });
     const { cx, cy } = await h.centre();
     // A square planned in map positions.
@@ -527,6 +529,7 @@ try {
     await page.evaluate(() => { const s = (window as any).__mapmaker.store; s.setCamera({ lon: 0.5, lat: 42.75, zoom: 5, rotation: 0, projection: 'equirectangular' }); s.terrainOf(s.world.get('map_space', s.spaceId)); });
     await page.waitForFunction(() => !!(window as any).__mapmaker.store.earthTerrain, null, { timeout: 60000 });
     await h.chooseTool('pen');
+    await page.getByTestId('pen-mode').selectOption('freehand');
     await page.getByTestId('smart-brush').locator('summary').click();
     await page.getByTestId('smart-brush').getByTestId('smart-rivers').fill('0');
     await page.getByTestId('smart-brush').getByTestId('smart-ridges').fill('100');
@@ -778,24 +781,35 @@ try {
     await page.getByTestId('place-from-beginning').click();
     assert.ok((await cities()).some((x) => x.name === 'Port Aster'), 'there from the beginning');
     await h.screenshot('city');
-    // Sizes follow the zoom: zoomed out to the whole world the name is left out (the dot stays);
-    // zoomed in, it is back.
+    // Seen whole, no cities at all, as maps online (D229); closed in, its dot, then its name.
     const named = async (zoom: number) => {
       await page.evaluate((z) => (window as any).__mapmaker.store.setCamera({ lon: -30, lat: 50, zoom: z, rotation: 0, projection: 'equirectangular' }), zoom);
       await page.waitForTimeout(150);
       return (await page.evaluate(() => (window as any).__mapmaker.store.renderer.lastCities.find((c: any) => c.name === 'Port Aster'))) as { named: boolean } | undefined;
     };
     const far = await named(0), near = await named(3);
-    assert.ok(far && !far.named, 'whole world: a dot, no name');
+    assert.equal(far, undefined, 'whole world: no city');
     assert.ok(near && near.named, 'zoomed in: named');
-    // Rated a country's capital (D219): named even seen whole; not rated again, its dot alone there.
+    // Where cities first appear, closing in, a city not rated is a dot alone; rated a country's capital (D219), named.
+    let first = 0;
+    for (let z = 0.25; z <= 3; z += 0.25) if (await named(z)) { first = z; break; }
+    assert.ok(first > 0, 'cities appear as the map is closed in on');
+    assert.equal((await named(first))!.named, false, 'not rated: its dot alone at first');
     await page.getByTestId('city-importance-rank').selectOption('capital');
     await h.saved();
-    assert.ok((await named(0))?.named, 'rated a capital: named seen whole');
+    assert.ok((await named(first))?.named, 'rated a capital: named there');
+    assert.equal(await named(0), undefined, 'even a capital is left out seen whole');
     await page.getByTestId('city-importance-rank').selectOption('auto');
     await h.saved();
-    const unrated = await named(0);
-    assert.ok(unrated && !unrated.named, 'not rated: its dot alone seen whole');
+    // Always shown (D229): named seen whole; one undo.
+    await page.getByTestId('city-always-shown').check();
+    await h.saved();
+    assert.ok((await named(0))?.named, 'always shown: named seen whole');
+    await page.getByTestId('undo').click();
+    await h.saved();
+    assert.equal(await named(0), undefined, 'undone');
+    assert.equal(await page.getByTestId('city-always-shown').isChecked(), false);
+    await named(3);
     // Renamed from 1620 on (it is abandoned in 1650): the map shows each name in its time.
     await h.setDate('1620');
     await page.getByTestId('rename-from').click();
@@ -2170,17 +2184,35 @@ try {
     await h.screenshot('overlays-dragged');
     await page.getByTestId('undo').click();
     await page.waitForFunction((x) => JSON.parse((window as any).__mapmaker.store.world.all('sequence')[0].settings).overlays.find((o: any) => o.kind === 'date').x === x, before.x);
-    // Kept still (D190): set to keep its size and place, the box stays where and as large as it is.
+    // Of a fixed size by default (D230): a size picked, or one's own; it stays where and as large as it is.
     await page.getByTestId('events-box-fit').selectOption('cover');
     await h.saved();
-    await page.getByTestId('events-box-keep-size').check();
+    assert.equal(await page.getByTestId('events-box-size').inputValue(), 'fixed');
+    assert.equal(await page.getByTestId('events-box-size-preset').inputValue(), 'medium');
+    await page.getByTestId('events-box-size-preset').selectOption('large');
     await h.saved();
-    assert.equal((await settings()).eventsBox.keepSize, true);
+    assert.deepEqual([(await settings()).eventsBox.width, (await settings()).eventsBox.height], [680, 340]);
     const still = async () => { await page.waitForTimeout(400); return (await rects()).find((r) => r.id === 'events-box')!; };
     const s0 = await still();
+    assert.ok(Math.abs(s0.w / s0.h - 2) < 0.05, `680 by 340 (${s0.w} by ${s0.h})`);
     await page.getByTestId('frame-slider').fill('20');
     const s1 = await still();
     assert.ok(Math.abs(s0.x - s1.x) < 1 && Math.abs(s0.y - s1.y) < 1 && Math.abs(s0.w - s1.w) < 1 && Math.abs(s0.h - s1.h) < 1, `the box stays put (${JSON.stringify(s0)} then ${JSON.stringify(s1)})`);
+    await page.getByTestId('events-box-height').fill('170');
+    await page.getByTestId('events-box-height').press('Enter');
+    await h.saved();
+    assert.equal(await page.getByTestId('events-box-size-preset').inputValue(), 'own');
+    const s2 = await still();
+    assert.ok(Math.abs(s2.w / s2.h - 4) < 0.1, `its own size, 680 by 170 (${s2.w} by ${s2.h})`);
+    // Kept still with room for the most events listed (D190), or growing with them.
+    await page.getByTestId('events-box-size').selectOption('room');
+    await h.saved();
+    assert.deepEqual([(await settings()).eventsBox.keepSize, (await settings()).eventsBox.height], [true, 0]);
+    await page.getByTestId('events-box-size').selectOption('grow');
+    await h.saved();
+    assert.equal((await settings()).eventsBox.keepSize, false);
+    await page.getByTestId('events-box-size').selectOption('fixed');
+    await h.saved();
     await page.getByTestId('frame-slider').fill('0');
     // Hide the box again for the following steps.
     await page.getByTestId('events-box-show').uncheck();
@@ -4096,7 +4128,7 @@ try {
     assert.ok(frame.id);
   });
 
-  await h.step('Space views (D215): the view in three dimensions stays level whatever the chart was turned to; the middle button moves the view; ⌂ back to the start, level; a star found by name and the view brought to it; undone', async () => {
+  await h.step('Space views (D215): the view in three dimensions stays level whatever the chart was turned to; the right button moves the view, the middle button carries it forward and back (D231); ⌂ back to the start, level; a star found by name and the view brought to it; undone', async () => {
     const st = <T,>(f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`) as Promise<T>;
     const hook = <T,>(name: string, ...args: unknown[]) => page.evaluate(([n, a]) => (window as any).__mapmaker[n as string](...(a as unknown[])), [name, args] as const) as Promise<T>;
     await page.getByTestId('workspace-map').click();
@@ -4111,16 +4143,35 @@ try {
     await page.waitForTimeout(150);
     const after = await hook<[number, number]>('starToPage', 71456);
     assert.ok(Math.hypot(after[0] - before[0], after[1] - before[1]) < 1, `level (${before} then ${after})`);
-    // The middle button moves the view; it does not turn it.
-    const cam0 = await st<{ lon: number; lat: number }>('s.camera');
+    // The right button moves the view sideways; it does not turn it.
+    const cam0 = await st<{ lon: number; lat: number; zoom: number }>('s.camera');
     const canvas = (await page.getByTestId('map-canvas').boundingBox())!;
-    await page.mouse.move(canvas.x + canvas.width / 2, canvas.y + canvas.height / 2);
-    await page.mouse.down({ button: 'middle' });
-    await page.mouse.move(canvas.x + canvas.width / 2 + 120, canvas.y + canvas.height / 2 + 40, { steps: 6 });
-    await page.mouse.up({ button: 'middle' });
-    const cam1 = await st<{ lon: number; lat: number; target?: number[] }>('s.camera');
+    const dragWith = async (button: 'middle' | 'right', dx: number, dy: number) => {
+      await page.mouse.move(canvas.x + canvas.width / 2, canvas.y + canvas.height / 2);
+      await page.mouse.down({ button });
+      await page.mouse.move(canvas.x + canvas.width / 2 + dx, canvas.y + canvas.height / 2 + dy, { steps: 6 });
+      await page.mouse.up({ button });
+      return st<{ lon: number; lat: number; zoom: number; target?: number[] }>('s.camera');
+    };
+    const cam1 = await dragWith('right', 120, 40);
     assert.deepEqual([cam1.lon, cam1.lat], [cam0.lon, cam0.lat], 'not turned');
     assert.ok(cam1.target && Math.hypot(cam1.target[0], cam1.target[1], cam1.target[2]) > 1, `moved (${cam1.target})`);
+    // The middle button (D231) carries the camera forward, dragged up, through the stars: along the way it looks,
+    // neither turned nor zoomed; Alpha Centauri, ahead, comes nearer; dragged down as far, back where it was.
+    const fwd = [-Math.cos((cam0.lat * Math.PI) / 180) * Math.cos((cam0.lon * Math.PI) / 180), -Math.cos((cam0.lat * Math.PI) / 180) * Math.sin((cam0.lon * Math.PI) / 180), -Math.sin((cam0.lat * Math.PI) / 180)];
+    const off = async () => { await page.waitForTimeout(150); const a = await hook<[number, number]>('starToPage', 71456), m = await hook<[number, number]>('spaceMiddle'); return Math.hypot(a[0] - m[0], a[1] - m[1]); };
+    await page.evaluate(() => { const s = (window as any).__mapmaker.store; s.setCamera({ ...s.camera, target: undefined }); });
+    const cam1b = await st<{ target?: number[] }>('s.camera');
+    const from = cam1b.target ?? [0, 0, 0];
+    const size0 = await off();
+    const cam2 = await dragWith('middle', 0, -60);
+    const moved = cam2.target!.map((v, i) => v - from[i]), len = Math.hypot(...moved);
+    assert.deepEqual([cam2.lon, cam2.lat, cam2.zoom], [cam0.lon, cam0.lat, cam0.zoom], 'not turned, not zoomed');
+    assert.ok(len > 1 && moved.reduce((a, v, i) => a + v * fwd[i], 0) / len > 0.999, `forward (${moved})`);
+    const size1 = await off();
+    assert.ok(size1 > size0 * 1.05, `nearer: farther from the middle of the picture as it comes nearer (${size0.toFixed(1)} then ${size1.toFixed(1)})`);
+    const cam3 = await dragWith('middle', 0, 60);
+    assert.ok(cam3.target!.every((v, i) => Math.abs(v - from[i]) < 1e-6), 'back');
     // ⌂: back to the start, level, the whole map in view.
     await page.evaluate(() => { const s = (window as any).__mapmaker.store; s.setCamera({ ...s.camera, lon: 33, lat: -12, zoom: 2.5 }); });
     await page.getByTestId('space-home').click();
@@ -5678,14 +5729,16 @@ try {
       await page.waitForTimeout(700);
       return (await page.evaluate(() => (window as any).__mapmaker.store.renderer.lastCities.filter((c: any) => c.lon > 25 && c.lon < 45 && c.lat > 35 && c.lat < 43))) as City[];
     };
-    const far = await shown(35, 39, 0.6), near = await shown(35, 39, 3.2);
+    // Seen whole, no cities at all (D229); a little closer, the capital and the largest; closer still, more.
+    assert.equal((await shown(35, 39, 0.6)).length, 0, 'seen whole, no cities');
+    const far = await shown(35, 39, 1.4), near = await shown(35, 39, 3.2);
     const farNames = far.map((c) => c.name);
-    assert.ok(farNames.includes('Ankara') && farNames.includes('Istanbul'), `seen whole, the capital and the largest (${farNames.join(', ')})`);
+    assert.ok(farNames.includes('Ankara') && farNames.includes('Istanbul'), `seen far out, the capital and the largest (${farNames.join(', ')})`);
     assert.ok(near.length >= far.length + 10, `more as the map is closed in on (${far.length} then ${near.length})`);
     const ankara = near.find((c) => c.name === 'Ankara')!, small = [...near].sort((a, b) => (a.size ?? 0) - (b.size ?? 0))[0];
     assert.ok((ankara.size ?? 0) > (small.size ?? 0) && (ankara.weight ?? 0) > (small.weight ?? 0), `larger and bolder for the capital (${ankara.size}/${ankara.weight} against ${small.name} ${small.size}/${small.weight})`);
     await h.screenshot('cities-close');
-    await shown(35, 39, 0.6);
+    await shown(35, 39, 1.4);
     await h.screenshot('cities-far');
     // Their look: every city whatever the scale, names a third larger; back as maps online.
     await page.getByTestId('menu-map').click();
@@ -6120,6 +6173,174 @@ try {
     assert.equal(await steps(), before);
     await h.chooseTool('select');
     await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
+  });
+
+  await h.step('Curves (D232): the precise shape and the border pen draw as Photoshop\'s pen: corners clicked, a curve dragged, a point added on the line keeping its shape, points and handles moved, Alt for a corner, closed by a click on the first point; the pen\'s curves kept in its draft; undone', async () => {
+    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
+    await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: -40, lat: 20, zoom: 2, rotation: 0, projection: 'equirectangular' }));
+    await h.setDate('1700');
+    const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
+    const before = await steps();
+    await h.newCountry('Curvia');
+    type A = { p: [number, number]; i?: [number, number] | null; o?: [number, number] | null };
+    const anchors = () => page.evaluate(() => (window as any).__mapmaker.shapeAnchors()) as Promise<A[]>;
+    await h.chooseTool('polygon');
+    const { cx, cy } = await h.centre();
+    const P = [[cx - 120, cy - 80], [cx + 80, cy - 80], [cx + 120, cy + 60]] as const;
+    for (const [x, y] of P) await page.mouse.click(x, y);
+    // Pressed and dragged: a smooth point, its handles either side.
+    await page.mouse.move(cx - 100, cy + 90); await page.mouse.down(); await page.mouse.move(cx - 40, cy + 90, { steps: 6 }); await page.mouse.up();
+    let a = await anchors();
+    assert.equal(a.length, 4);
+    assert.ok(!a[0].o && !a[1].i && !a[2].o, 'clicked: corners');
+    assert.ok(a[3].o && a[3].i, 'dragged: handles');
+    assert.ok(Math.abs(a[3].o![0] + a[3].i![0] - 2 * a[3].p[0]) < 1e-6 && Math.abs(a[3].o![1] + a[3].i![1] - 2 * a[3].p[1]) < 1e-6, 'in line, either side');
+    // A click on the line between the first two adds a point there; the line stays where it was.
+    await page.mouse.click(cx - 20, cy - 80);
+    a = await anchors();
+    assert.equal(a.length, 5);
+    const added = await h.toPage(a[1].p);
+    assert.ok(Math.abs(added[0] - (cx - 20)) < 2 && Math.abs(added[1] - (cy - 80)) < 2, `on the line (${added})`);
+    // Dragged, the point moves; a handle dragged turns the other with it; Alt-clicked, a corner again.
+    await page.mouse.move(added[0], added[1]); await page.mouse.down(); await page.mouse.move(added[0], added[1] - 40, { steps: 5 }); await page.mouse.up();
+    a = await anchors();
+    assert.equal(a.length, 5, 'moved, not added');
+    const movedTo = await h.toPage(a[1].p);
+    assert.ok(Math.abs(movedTo[1] - (cy - 120)) < 2, 'moved up');
+    const knob = await h.toPage(a[4].o!);
+    await page.mouse.move(knob[0], knob[1]); await page.mouse.down(); await page.mouse.move(knob[0], knob[1] + 40, { steps: 5 }); await page.mouse.up();
+    a = await anchors();
+    const turned = await h.toPage(a[4].i!), at4 = await h.toPage(a[4].p);
+    assert.ok(turned[1] < at4[1] - 10, 'the other handle turned with it');
+    await h.screenshot('curves-shape');
+    const corner = await h.toPage(a[4].p);
+    await page.keyboard.down('Alt'); await page.mouse.click(corner[0], corner[1]); await page.keyboard.up('Alt');
+    a = await anchors();
+    assert.ok(!a[4].i && !a[4].o, 'a corner again');
+    // A click on the first point closes it: the usual question, then the land.
+    const first = await h.toPage(a[0].p);
+    await page.mouse.click(first[0], first[1]);
+    await page.getByTestId('choice-correct').click();
+    await page.getByTestId('confirm-edit').click();
+    await h.saved();
+    assert.equal((await anchors()).length, 0, 'finished');
+    assert.equal(await h.ownerAt(await h.toLL([cx, cy]), '1700'), 'Curvia');
+    // The border pen in curves: the draft keeps its anchors and handles, and the line they make.
+    await h.chooseTool('pen');
+    // (Curves are the pen's way at first; an earlier step chose freehand.)
+    await page.getByTestId('pen-mode').selectOption('curves');
+    await page.getByTestId('paint-owner').selectOption({ label: 'Curvia' });
+    const Q = [[cx + 160, cy - 60], [cx + 300, cy - 60], [cx + 300, cy + 80]] as const;
+    for (const [x, y] of Q) await page.mouse.click(x, y);
+    await page.mouse.move(cx + 170, cy + 80); await page.mouse.down(); await page.mouse.move(cx + 130, cy + 80, { steps: 6 }); await page.mouse.up();
+    const draft = () => page.evaluate(() => { const d = (window as any).__mapmaker.store.draft; return { curve: d.curve as A[], points: d.points.length as number }; });
+    let dr = await draft();
+    assert.equal(dr.curve.length, 4);
+    assert.ok(dr.points > 10, `the curve laid out as points (${dr.points})`);
+    await page.keyboard.press('Backspace');
+    assert.equal((await draft()).curve.length, 3, 'Backspace: the last point taken back');
+    await page.keyboard.press('Control+y');
+    dr = await draft();
+    assert.equal(dr.curve.length, 4, 'put back');
+    await page.keyboard.press('Enter');
+    await page.getByTestId('choice-correct').waitFor();
+    await page.keyboard.press('Enter');
+    await page.getByTestId('choice-correct').waitFor({ state: 'detached' });
+    await h.saved();
+    assert.equal(await h.ownerAt(await h.toLL([cx + 240, cy + 10]), '1700'), 'Curvia', 'the border drawn in curves painted the land');
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.drafts.length), 0);
+    // Undone.
+    await h.chooseTool('select');
+    for (let i = 0; i < 8 && (await steps()) > before; i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await steps(), before);
+  });
+
+  await h.step('Many disasters with a brush (D233): seventy thousand nuclear strikes scattered along a stroke over Europe, of yields from 100 kt to 5 Mt, over six hours; none at first, all after; drawn in the working view and a 4K frame; kept small; undone in one step', async () => {
+    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
+    await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 15, lat: 50, zoom: 2.2, rotation: 0, projection: 'equirectangular' }));
+    await h.setDate('1990');
+    const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
+    const before = await steps();
+    await page.getByTestId('tool-disaster').click();
+    await page.getByTestId('disaster-kind').selectOption('nuclear');
+    await page.getByTestId('disaster-place').selectOption('many');
+    for (const [id, v] of [['disaster-count', '70000'], ['disaster-brush-km', '250'], ['disaster-least', '100'], ['disaster-most', '5000'], ['disaster-over', '6']] as const) await page.getByTestId(id).fill(v);
+    await page.getByTestId('disaster-over-unit').selectOption('hours');
+    assert.match((await page.getByTestId('disaster-hint').textContent()) ?? '', /70,000 nuclear strikes scattered within 250 km of the stroke, one by one over 6 hours/);
+    // A stroke from Paris to Moscow.
+    const a = await h.toPage([2.3, 48.9]), b = await h.toPage([37.6, 55.8]);
+    const t0 = Date.now();
+    await page.mouse.move(a[0], a[1]); await page.mouse.down();
+    for (let i = 1; i <= 20; i++) await page.mouse.move(a[0] + ((b[0] - a[0]) * i) / 20, a[1] + ((b[1] - a[1]) * i) / 20);
+    await page.mouse.up();
+    await h.saved();
+    const placed = Date.now() - t0;
+    const made = await page.evaluate(() => {
+      const s = (window as any).__mapmaker.store;
+      return { events: s.world.all('event').map((e: any) => e.name), features: s.world.all('feature').filter((f: any) => f.style.includes('"scatter"')).map((f: any) => f.style.length) };
+    });
+    assert.ok(made.events.includes('70,000 × nuclear strike (100 kt to 5 Mt)'), made.events.join(', '));
+    assert.equal(made.features.length, 3, 'one source for each condition');
+    assert.ok(made.features.every((n: number) => n < 4000), `kept small (${made.features.join(', ')} characters)`);
+    // None just before; after six hours, all seventy thousand; drawn in the working view.
+    const shown = async (iso: string) => {
+      await h.setDate(iso);
+      await page.waitForTimeout(300);
+      const t1 = Date.now();
+      const r = await page.evaluate(async () => {
+        const s = (window as any).__mapmaker.store;
+        s.notify();
+        await new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res)));
+        return s.renderer.lastFields.map((f: any) => ({ sources: f.sources, drawn: f.drawn }));
+      }) as Array<{ sources: number; drawn: number }>;
+      return { ms: Date.now() - t1, total: r.reduce((n, f) => n + f.sources, 0), drawn: r.reduce((n, f) => n + f.drawn, 0) };
+    };
+    const later = await shown('2 January 1990');
+    console.log(`  70,000 strikes: placed in ${placed} ms; the working view the day after in ${later.ms} ms (${later.total} sources in force, ${later.drawn} drawn)`);
+    // (Drawn as some of them, each standing for several: at most so many of each scatter in the working view.)
+    assert.ok(later.total > 3000 && later.total <= 3 * 6000, `drawn as some thousands standing for them all (${later.total})`);
+    assert.ok(later.drawn > 1000, 'drawn');
+    assert.ok(later.ms < 15000, `the working view in reasonable time (${later.ms} ms)`);
+    await h.screenshot('disasters-70000');
+    const r = await page.evaluate(() => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const start = { day: s.time.day, ms: 0 };
+      const shot = B.defaultShot(s.spaceId, { lon: 20, lat: 52, zoom: 2.2, rotation: 0, projection: 'equirectangular' }, start, { day: start.day + 1, ms: 0 }, 24, 1);
+      const def = B.PASS_DEFS.find((d: any) => d.name === 'fields');
+      const canvas = document.createElement('canvas');
+      canvas.width = 3840; canvas.height = 2160;
+      const ctx = canvas.getContext('2d')!;
+      const renderer = new B.MapRenderer();
+      renderer.quality = { ...B.EXPORT_QUALITY };
+      const t1 = performance.now();
+      B.renderFrame(ctx, renderer, s.world, s.engine, shot, 0, def, 3840, 2160, null, null);
+      const frameMs = performance.now() - t1;
+      const data = ctx.getImageData(0, 0, 3840, 2160).data;
+      let coloured = 0;
+      for (let i = 3; i < data.length; i += 4 * 16) if (data[i] > 20) coloured++;
+      return { frameMs, coloured: coloured / (data.length / 64) };
+    });
+    console.log(`  a 4K frame of them in ${Math.round(r.frameMs)} ms (${(r.coloured * 100).toFixed(0)}% coloured)`);
+    assert.ok(r.coloured > 0.02, 'coloured where they fell');
+    assert.ok(r.frameMs < 60000, `a 4K frame in reasonable time (${Math.round(r.frameMs)} ms)`);
+    // Half way through the six hours, about half of them.
+    const mid = await page.evaluate(() => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const layer = s.world.all('layer').find((l: any) => l.kind === 'field' && JSON.parse(l.style).field.type === 'damage');
+      const ev = s.world.all('event').find((e: any) => e.name.startsWith('70,000'));
+      const at = (h: number) => B.activeSources(s.world, s.engine, layer.id, { day: ev.start_day, ms: (ev.start_ms ?? 0) + h * 3600000 }, B.compare).length;
+      return [at(-1), at(3), at(7)];
+    });
+    assert.equal(mid[0], 0, 'none before');
+    assert.ok(mid[1] > 28000 && mid[1] < 42000, `about half after three hours (${mid[1]})`);
+    assert.equal(mid[2], 70000, 'all after six');
+    // One undo takes them all back.
+    await page.getByTestId('tool-select').click();
+    for (let i = 0; i < 4 && (await steps()) > before; i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await steps(), before);
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('feature').filter((f: any) => f.style.includes('"scatter"')).length), 0);
   });
 
   await h.step('History Health lists the overlap, nothing else; no browser errors', async () => {

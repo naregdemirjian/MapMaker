@@ -61,6 +61,93 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D233. Many disasters at once, with a brush: of sizes and moments of their own
+
+- **Why.** A project showing 70,000 nuclear detonations could only place them one click at a time, each the same
+  size and at the same moment as the date viewed.
+- **A brush** (the Disasters tool, *Place: Many with a brush*): how many (up to 100,000), how far from the stroke they
+  fall (km), their sizes from a least to a most (yield, magnitude, …: as many small as large on a scale of ratios; the
+  same twice: all alike) and the time they happen over (hours, days, months or years; 0: all at once). Dragged
+  across the map, they are scattered evenly along the stroke and over the brush's reach around it (a click: around
+  the place), each at a moment of its own within the span, in a new event (or the one being recorded); one undo
+  takes them all back. The brush's reach is shown round the pointer and along the stroke.
+- **Kept as a recipe, not one by one** (`domain/scatter.ts`): one source for each of the disaster's conditions (a
+  strike's blast, fire and fallout), holding the stroke, the brush, how many, a seed, the sizes and the span; laid out
+  the same whenever it is drawn (`scatterItems`). Seventy thousand strikes are three sources of under 4,000
+  characters, placed in half a second. Sizes are drawn in 24 steps between the least and the most, each step's reach
+  and strength those of a single disaster of that size (`planDisaster` at the least and the most). Conditions that
+  spread over the terrain (lava, wildfire, flood) are circles in a scatter, and impacts leave no craters: thousands of
+  those could not each be worked out.
+- **Drawn as some of them when there are many** (`activeSources(…, mostScattered)`): beyond 6,000 of a scatter in
+  the working view (12,000 in exports), every so many are drawn, each standing for as many (its `weight`); laid out at
+  random, those taken are spread as evenly as the rest, and the field's total is the same on the whole. The working
+  view with 70,000 strikes the day after: under 0.2 s; a 4K frame of their conditions: about 15 s on the test
+  machine's software graphics (far less on a graphics card).
+- **A plume's rectangle fitted to it** (`plumeBounds`): every plume (fallout, ash, smoke) was drawn over the box of
+  a circle as wide as the plume is long; now over a box round the plume itself, long and narrow, which holds all of
+  its value (the circle's box near the poles or for plumes thousands of km long). Seventy thousand strikes at 4K
+  went from 130 s to the 15 s above with the two together.
+
+### D232. The precise shape and the border pen draw curves, as the pen of Photoshop or After Effects
+
+- **Why.** The precise shape drew straight lines between clicked points, and the border pen drew freehand or in
+  straight lines; a curve could only be had by clicking many points, and a point once placed could not be moved, nor
+  one added between two.
+- **A path of curves** (`bezier-path.ts`): anchors, each with a handle before and after it (none: a corner); each
+  piece between two anchors is a cubic curve, straight where neither end has a handle. Kept in degrees of longitude
+  and latitude, so it stays put while the map is moved or zoomed, and laid out as points (24 to a curved piece) when
+  the shape is made.
+- **As Photoshop's pen**: a click adds a corner; pressed and dragged, the new anchor's handles are pulled out either
+  side, in line (a smooth point). A click on the line adds an anchor there, the curve split so its shape is unchanged,
+  and it can be dragged at once. An anchor dragged moves with its handles; a handle dragged turns the other with it,
+  keeping its length (Alt: that handle alone, a sharp turn). Alt and a click on an anchor makes it a corner again;
+  Alt and a drag pulls new handles out of it. A click on the first anchor (larger, yellow) closes the path: the
+  shape is finished, then the usual question. Double-click or Enter finish too; Backspace takes back the last
+  anchor; Esc gives up. The pointer shows what a press does (moved, a point added, closed). Anchors are drawn as small
+  squares, handles as a line out to a round knob.
+- **The precise shape** works only so. **The border pen** draws curves by default (*Curves* in its options), its
+  draft keeping the anchors and handles (`BorderDraft.curve`) with the line they make, so a draft is carried on
+  later in curves as it was left; Backspace and Ctrl+Z take back its last anchor, Ctrl+Y puts it back. *Freehand*
+  draws as before (drag or click, in pieces), with the smart brush (D148), which applies to freehand strokes only;
+  what was drawn freehand stays as it was when curves follow, and curves are kept as their line when freehand follows.
+
+### D231. In a space view seen in three dimensions, the middle button carries the camera forward and back
+
+- **Why.** In the solar system, star maps and galaxies seen in three dimensions, the wheel zooms (the picture is
+  enlarged, the camera stays where it is) and a drag with the middle button moved the view sideways (D215), as the
+  right button does. There was no way to travel through the stars.
+- **The middle button moves the camera** (`dollySpaceCamera`): dragged up, forward along the way the camera looks;
+  down, back; as many light-years as the drag spans at the point the camera circles, twice over. The point it circles
+  goes with it, so the stars ahead come nearer and those passed go behind; the camera is neither turned nor zoomed.
+  Sideways moves stay with the right button (and Shift with the left). On a chart (D131), seen flat, the middle
+  button moves the chart as before.
+
+### D230. The events box of a fixed size by default, its size and its place each in a section of their own
+
+- **Why.** The events box grew and shrank with the events of the moment (unless set to keep still, D190), its width,
+  height, inner spacing and distance from the edge lay among the colours under *Look*, and where it sits at the top.
+- **Fixed by default** (`EventsBox.height` 260, `keepSize`): a new shot's box is 520 by 260 pixels of a 1920 frame,
+  the same at every frame; it lists as many of the events as fit in it, the most recent first, each name on one line
+  (shortened with "…"), the rest left out. Shots already made keep what they had.
+- **Size** (its own section of the box's settings): *Fixed size* (presets Small 400 × 200, Medium 520 × 260, Large
+  680 × 340, or one's own width and height), *Room for the most events listed* (D190) or *Grows with the events*
+  (as before D190); width and inner spacing. **Position**: the corner or anywhere (left and top in % of the frame),
+  the distance from the edge; or dragged on the preview (D172). Then *What it lists* and *Look*, as before.
+
+### D229. Cities smaller than countries, none seen far out, unless always shown
+
+- **Why.** City names (17, 15.5 and 14 pixels of a 1920 frame, the same on screen at every scale, D219) were drawn
+  larger than many countries' names, and seen whole the largest cities and every city of one's own were still drawn.
+  Maps online name only countries seen far out, and their city names are smaller than their countries'.
+- **Smaller names** (`cityNameSize`): 13, 12 and 11 pixels by class, 15% less still seen far out; a country's name is
+  10 to 44. (Cities set to grow with the zoom keep the old sizes.)
+- **None seen far out** (`citiesShown`, `CITIES_FROM`): below 12 pixels of a 1920 frame per degree (a view of more
+  than some 160 degrees across, as the whole world), no city at all, of one's own or of today's, rated or not; they
+  fade in over the next three, then the importance bar of D219 thins them out as before. "Fewer cities zoomed out"
+  turned off in the city style shows them all at every scale, as before.
+- **Always shown** (a city's panel: *Always shown, however far out*; `setCityAlwaysShown`, kept in its style as
+  `alwaysShown`, one undo): its dot and name at every scale, placed first where names crowd.
+
 ### D228. Number boxes take effect as they step, and can be dragged
 
 - **Why.** A number box (border thickness and the rest) saved only on Enter or on leaving it, so a step of its arrows
@@ -264,7 +351,8 @@ Follows from D2. The test drives the real interface exactly as a person would.
   step more, a region's a little, an economic centre a little: about 7.5 for a capital of millions, 6 for a city of a
   million, 5 for a town of a hundred thousand. A city can be rated instead in its panel (*Importance*: a country's
   capital, a large city, a city, a town, a village; `setCityImportance`). A city of one's own not rated has none: its
-  dot shows at every scale and its name from the scale at which a city's does.
+  dot shows at every scale and its name from the scale at which a city's does. (Since D229 no city is shown seen far
+  out, unless set to be always shown.)
 - **Fewer cities zoomed out** (`cityThreshold`): the least importance shown at a scale, from pixels of a 1920-wide frame
   per degree: seen whole only capitals of millions and the largest cities, towns of a hundred thousand at the scale of
   a region, every town closer in. A city just past the bar fades in over a short span instead of popping in. *How

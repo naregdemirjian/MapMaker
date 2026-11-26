@@ -5,11 +5,12 @@ import { spaceSettingsOf as galaxySettingsOf } from '../world-model/world-settin
 import { App } from './App.tsx';
 import { installNumberScrub } from './number-scrub.ts';
 import { store } from './store.ts';
-import { gregorian } from '../core-time/index.ts';
+import { gregorian, compare } from '../core-time/index.ts';
+import { activeSources } from '../domain/fields.ts';
 import { lonLatToVec } from '../geo-kernel/vec.ts';
 import { makeView, screenToLonLat, lonLatToScreen } from '../render-engine/camera.ts';
 import { cameraAt, timeAt, defaultShot, newTextBox } from '../presentation/sequence.ts';
-import { currentShot, frameRect, shotOverlayRects, shownMapView, SIDE_GAP } from './components/MapView.tsx';
+import { currentShot, frameRect, shotOverlayRects, shownMapView, shapeNow, SIDE_GAP } from './components/MapView.tsx';
 import { shownSpace } from './components/SpaceView.tsx';
 import * as commands from '../domain/commands.ts';
 import { runExport, renderFrame, terrainFor, PASS_DEFS } from '../presentation/export-driver.ts';
@@ -50,7 +51,7 @@ function shown(width: number, height: number) {
    * and any difference stops the drawing with an error. Slow; never on in normal use.
    */
   verify(on = true) { Engine.verify = on; store.renderer.verify = on; },
-  bench: { commands, gregorian, lonLatToVec, runExport, renderFrame, terrainFor, svgFrame, newTextBox, PASS_DEFS, defaultShot, cameraAt, EXPORT_QUALITY, decodeCountries, COUNTRY_GROUP_COLORS, MapRenderer, makeView, Engine, labelStats, chooseScale, heightAt, sculpted, planet: planetBench },
+  bench: { commands, gregorian, lonLatToVec, runExport, renderFrame, terrainFor, svgFrame, newTextBox, PASS_DEFS, defaultShot, cameraAt, EXPORT_QUALITY, decodeCountries, COUNTRY_GROUP_COLORS, MapRenderer, makeView, Engine, labelStats, chooseScale, heightAt, sculpted, activeSources, compare, planet: planetBench },
   /** A view of the map for a camera and size (for off-screen comparisons in tests). */
   viewOf(camera: Parameters<typeof makeView>[0], width: number, height: number) { return makeView(camera, width, height); },
   /** Who owns the place at (lon, lat) on the date written in `date`, on the layer being drawn on. */
@@ -107,6 +108,8 @@ function shown(width: number, height: number) {
     const r = c.getBoundingClientRect();
     return [r.left + v.frame.x + st.x, r.top + v.frame.y + st.y];
   },
+  /** The precise shape being drawn (D232): its anchors and handles. */
+  shapeAnchors() { return shapeNow(); },
   /** How big a star of a space map was drawn (pixels across its radius), or null. */
   starRadius(id: number) { return shownSpace()?.stars.find((x) => x.id === id)?.r ?? null; },
   /** The star names written on the space map (D110). */

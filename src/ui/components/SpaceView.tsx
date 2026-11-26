@@ -1,11 +1,12 @@
 // The view of a space map (Stage 11, D110): the stars in three dimensions. Dragging turns the view
-// around what it looks at (Shift or the right button moves that point), the wheel zooms, a click
+// around what it looks at (Shift or the right button moves that point; the middle button, D231, carries the camera
+// forward and back), the wheel zooms, a click
 // chooses a star. In presentation mode it shows the shot's frame, its texts and its look, and
 // framing it sets the shot's still camera, as on other maps.
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLive, store } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
-import { makeSpaceView, orbitCamera, panSpaceCamera, turnChart, homeCamera, cameraToStar, type SpaceView as View3 } from '../../space/space-view.ts';
+import { makeSpaceView, orbitCamera, panSpaceCamera, dollySpaceCamera, turnChart, homeCamera, cameraToStar, type SpaceView as View3 } from '../../space/space-view.ts';
 import { SpaceRenderer, type DrawnStar } from '../../space/space-renderer.ts';
 import { spaceScene } from '../../space/scene.ts';
 import { galaxyImageNow, galaxyBakeState, onGalaxyPictures } from '../../space/galaxy-pictures.ts';
@@ -41,7 +42,7 @@ export function SpaceView() {
   const renderer = useRef(new SpaceRenderer());
   const [size, setSize] = useState({ w: 800, h: 600 });
   const [, force] = useState(0);
-  const drag = useRef<{ kind: 'none' } | { kind: 'orbit' | 'pan'; x: number; y: number; moved: number; start: Camera } | { kind: 'overlay'; id: string; x: number; y: number; from: { x: number; y: number } } | { kind: 'box'; x: number; y: number; cx: number; cy: number }>({ kind: 'none' });
+  const drag = useRef<{ kind: 'none' } | { kind: 'orbit' | 'pan' | 'dolly'; x: number; y: number; moved: number; start: Camera } | { kind: 'overlay'; id: string; x: number; y: number; from: { x: number; y: number } } | { kind: 'box'; x: number; y: number; cx: number; cy: number }>({ kind: 'none' });
   const wheelTimer = useRef(0);
   useEffect(() => {
     const el = wrapRef.current;
@@ -146,10 +147,11 @@ export function SpaceView() {
     // The Star systems tool: Ctrl and a drag draws a box around the stars to give.
     if (!presentation && e.button === 0 && store.tool === 'systems' && (e.ctrlKey || e.metaKey)) { drag.current = { kind: 'box', x: p[0], y: p[1], cx: p[0], cy: p[1] }; return; }
     // (On a chart, D131, a drag moves the chart and a right-drag turns it; in three dimensions, a drag turns the view
-    // round and a drag with the middle or right button, D215, moves it.)
+    // round, a drag with the right button (or Shift, D215) moves it sideways, and a drag with the middle button
+    // (D231) moves the camera forward, up, or back, down, through the stars.)
     const other = e.button === 2 || e.shiftKey;
     if (e.button === 1) e.preventDefault();
-    drag.current = { kind: chart ? (other ? 'orbit' : 'pan') : other || e.button === 1 ? 'pan' : 'orbit', x: p[0], y: p[1], moved: 0, start: camera };
+    drag.current = { kind: chart ? (other ? 'orbit' : 'pan') : e.button === 1 ? 'dolly' : other ? 'pan' : 'orbit', x: p[0], y: p[1], moved: 0, start: camera };
   }
   /** The primary star of a star's system (a companion sits where its primary is: a click means the system). */
   const primaryOf = (id: number) => (cat ? starPrimary(cat, id) : id);
@@ -170,12 +172,12 @@ export function SpaceView() {
     const d = drag.current, p = local(e);
     if (d.kind === 'overlay') { store.setLive({ presentOverlay: { id: d.id, dx: (p[0] - d.x) / frame.w, dy: (p[1] - d.y) / frame.h, from: d.from } }); return; }
     if (d.kind === 'box') { d.cx = p[0]; d.cy = p[1]; force((n) => n + 1); return; }
-    if (d.kind !== 'orbit' && d.kind !== 'pan') return;
+    if (d.kind !== 'orbit' && d.kind !== 'pan' && d.kind !== 'dolly') return;
     const dx = p[0] - d.x, dy = p[1] - d.y;
     d.moved = Math.max(d.moved, Math.hypot(dx, dy));
     if (d.moved < 3) return;
     const start = makeSpaceView(d.start, frame.w, frame.h, scene.radius, chart);
-    setCamera(d.kind === 'orbit' ? (chart ? turnChart(d.start, start, d.x, d.y, p[0], p[1]) : orbitCamera(d.start, dx, dy)) : panSpaceCamera(d.start, start, dx, dy));
+    setCamera(d.kind === 'dolly' ? dollySpaceCamera(d.start, start, dy) : d.kind === 'orbit' ? (chart ? turnChart(d.start, start, d.x, d.y, p[0], p[1]) : orbitCamera(d.start, dx, dy)) : panSpaceCamera(d.start, start, dx, dy));
   }
   function onPointerUp(e: React.PointerEvent<HTMLCanvasElement>) {
     const d = drag.current, p = local(e);
@@ -192,8 +194,9 @@ export function SpaceView() {
       giveStars(renderer.current.lastStars.filter((st) => st.x >= x0 && st.x <= x1 && st.y >= y0 && st.y <= y1).map((st) => st.id));
       return;
     }
-    if (d.kind !== 'orbit' && d.kind !== 'pan') return;
+    if (d.kind !== 'orbit' && d.kind !== 'pan' && d.kind !== 'dolly') return;
     if (d.moved >= 3) { if (presentation) commitShotCamera(); return; }
+    if (d.kind === 'dolly') return;
     if (presentation) return;
     // A click: the star under the pointer is chosen (a click on empty space chooses nothing); with the
     // Star systems tool, it is given.

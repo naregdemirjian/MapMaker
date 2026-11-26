@@ -4,6 +4,7 @@
 import { loadSmart, saveSmart, type SmartSettings } from './smart-settings.ts';
 import { useSyncExternalStore } from 'react';
 import { Api, ApiError, type JournalState, type ProjectInfo, type BorderDraft } from './api.ts';
+import { flatten, anchorIndices, type Anchor } from './bezier-path.ts';
 import { World } from '../world-model/world.ts';
 import { Engine } from '../temporal-engine/engine.ts';
 import { takeLockedSkipped, type CommandResult } from '../domain/commands.ts';
@@ -282,10 +283,16 @@ export class AppStore {
   fieldLayerId = '';
   fieldSource: Partial<FieldSource> = {};
   /** The Disasters tool (D104): which template, its size, and where the wind carries its plumes (degrees from north). */
-  disaster: { id: DisasterId; size: number; windDeg: number } = { id: 'nuclear', size: 1000, windDeg: 90 };
+  /**
+   * The Disasters tool: what and how large; one at a click, or many with a brush (D233): how many, how far from the
+   * stroke, their sizes from the least to the most, and the time they happen over.
+   */
+  disaster: { id: DisasterId; size: number; windDeg: number; many: boolean; count: number; brushKm: number; least: number; most: number; over: number; overUnit: 'hours' | 'days' | 'months' | 'years' } = { id: 'nuclear', size: 1000, windDeg: 90, many: false, count: 1000, brushKm: 300, least: 100, most: 1000, over: 6, overUnit: 'hours' };
   /** The kind the New layer dialog starts with (null: territory). */
   newLayerKind: 'partition' | 'area' | 'line' | 'point' | 'field' | null = null;
   featureDraw: 'freehand' | 'clicks' = 'freehand';
+  /** The border pen draws curves as Photoshop's pen does (D232), or freehand as before. */
+  penCurves = true;
   reshapeId: string | null = null;
   /**
    * "Changes over time": the selected country is shown lightly, and the land it gained and lost in
@@ -779,7 +786,18 @@ export class AppStore {
   penAdd(ll: [number, number], newPiece: boolean) {
     const id = this.draft && this.draft.spaceId === this.spaceId ? this.draftId! : this.newDraft();
     if (newPiece) this.penRedo = []; // a new piece ends what can be put back
-    this.changeDraft(id, (d) => ({ ...d, points: [...d.points, ll], pieces: newPiece ? [...d.pieces, d.points.length] : d.pieces }));
+    // (Drawn freehand after curves, D232: the curves are kept as the points they make.)
+    this.changeDraft(id, (d) => ({ ...withoutCurve(d), points: [...d.points, ll], pieces: newPiece ? [...d.pieces, d.points.length] : d.pieces }));
+  }
+
+  /**
+   * The current draft's curves set (D232; a new draft if none): the path after the points drawn freehand before them,
+   * laid out as points. `edit`: a change to anchors already there (nothing to put back is lost); otherwise an anchor added.
+   */
+  penCurve(anchors: Anchor[], edit = false) {
+    const id = this.draft && this.draft.spaceId === this.spaceId ? this.draftId! : this.newDraft();
+    if (!edit) this.penRedo = [];
+    this.changeDraft(id, (d) => curveDraft(d, anchors));
   }
 
   /** The points of the last piece drawn, replaced (by the piece made to follow the land, D148). */
@@ -794,6 +812,15 @@ export class AppStore {
   penUndoPiece() {
     const d = this.draft;
     if (!d || !d.pieces.length) return;
+    // (In curves, D232: the last anchor.)
+    if (d.curve?.length) {
+      const last = d.curve[d.curve.length - 1];
+      this.penRedoCurve = [...(this.penRedoCurve.length && this.penRedoDraft === d.id ? this.penRedoCurve : []), last];
+      this.penRedo = [];
+      this.penRedoDraft = d.id;
+      this.changeDraft(d.id, (x) => (x.curve!.length > 1 ? curveDraft(x, x.curve!.slice(0, -1)) : { ...withoutCurve(x), points: x.points.slice(0, x.curveStart ?? 0), pieces: x.pieces.filter((k) => k < (x.curveStart ?? 0)) }));
+      return;
+    }
     const from = d.pieces[d.pieces.length - 1];
     this.penRedo = [...(this.penRedo.length && this.penRedoDraft === d.id ? this.penRedo : []), d.points.slice(from)];
     this.penRedoDraft = d.id;
@@ -803,6 +830,12 @@ export class AppStore {
   /** Put back the piece last taken back. */
   penRedoPiece() {
     const d = this.draft;
+    if (d && this.penRedoDraft === d.id && this.penRedoCurve.length) {
+      const a = this.penRedoCurve[this.penRedoCurve.length - 1];
+      this.penRedoCurve = this.penRedoCurve.slice(0, -1);
+      this.changeDraft(d.id, (x) => curveDraft(x, [...(x.curve ?? []), a]));
+      return;
+    }
     if (!d || this.penRedoDraft !== d.id || !this.penRedo.length) return;
     const piece = this.penRedo[this.penRedo.length - 1];
     this.penRedo = this.penRedo.slice(0, -1);
@@ -811,6 +844,8 @@ export class AppStore {
 
   /** Pieces taken back from the current draft, to put back (last first). */
   private penRedo: Array<Array<[number, number]>> = [];
+  /** Anchors taken back from the current draft's curves (D232), to put back (last first). */
+  private penRedoCurve: Anchor[] = [];
   private penRedoDraft: string | null = null;
 
   discardDraft(id: string) { this.changeDraft(id, () => null); }
@@ -1027,4 +1062,18 @@ export function useStore(): AppStore {
 export function useLive(): AppStore {
   useSyncExternalStore(store.subscribeLive, () => store.liveVersion);
   return store;
+}
+
+/** A draft without its curves (D232): the points they made kept as drawn freehand. */
+function withoutCurve(d: BorderDraft): BorderDraft {
+  if (!d.curve) return d;
+  const { curve: _c, curveStart: _s, ...rest } = d;
+  return rest;
+}
+
+/** A draft with its curves set (D232): the points before them as they were, then the curves laid out as points. */
+function curveDraft(d: BorderDraft, anchors: Anchor[]): BorderDraft {
+  const start = d.curve ? d.curveStart ?? 0 : d.points.length;
+  const head = d.points.slice(0, start), pieces = d.pieces.filter((k) => k < start);
+  return { ...d, curve: anchors, curveStart: start, points: [...head, ...flatten(anchors, false)], pieces: [...pieces, ...anchorIndices(anchors).map((k) => start + k)] };
 }

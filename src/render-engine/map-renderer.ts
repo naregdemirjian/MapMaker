@@ -25,7 +25,7 @@ import type { Arrangement } from '../geo-kernel/arrangement.ts';
 import { BasemapPainter, chooseScale, landMaskOf, visibleBounds, boxIntersects, drawRiverLines, drawDrawnRivers, DEFAULT_BASEMAP_STYLE, LandMask, type Basemap, type BasemapStyle, type RiverSet } from './basemap.ts';
 import type { RiverShape } from '../terrain/river-course.ts';
 import { planeShape, placeLabel, lineChoices, textWidthEm, blockHeightEm, LINE_HEIGHT, type PlaneShape } from './label-place.ts';
-import { resolveLabelStyle, resolvePointStyle, labelSize, labelFont, labelText, type LabelStyle, type CountryLabel, resolveCityStyle, cityImportance, cityThreshold, cityClass, DEFAULT_CITY_STYLE, UNRATED_CITY, type CityStyle } from './label-style.ts';
+import { resolveLabelStyle, resolvePointStyle, labelSize, labelFont, labelText, type LabelStyle, type CountryLabel, resolveCityStyle, cityImportance, cityThreshold, citiesShown, cityNameSize, cityClass, DEFAULT_CITY_STYLE, UNRATED_CITY, type CityStyle } from './label-style.ts';
 import { imageNow, videoNow, drawImageFit, assetEpoch, type MediaChannel } from './assets.ts';
 import { clusterPieces, joinBoxes, fitScales, type GeoBox, type FillPieces } from './fill-clusters.ts';
 import { Sheet, makeRing, addLine, projectPoint, isCylindrical, SHARP_UP_TO, type Ring } from './plane.ts';
@@ -45,7 +45,7 @@ import { detailHeightAt, type DetailGrid } from '../terrain/detail.ts';
 import type { PhotoRegion } from '../terrain/photo.ts';
 import { FieldPictures, edgePhases, type FieldInstance, type FieldRaster } from './fields-gl.ts';
 import { spreadRaster, type SpreadRaster, type SpreadKind } from '../domain/spread.ts';
-import { activeSources, fieldLayerStyleOf, sourceReach, sizeAt, DEFAULT_SOURCES, type FieldSource } from '../domain/fields.ts';
+import { activeSources, fieldLayerStyleOf, sourceReach, plumeBounds, sizeAt, DEFAULT_SOURCES, type FieldSource } from '../domain/fields.ts';
 import { PALETTES, rampAt, DEFAULT_TERRAIN_LOOK, type TerrainLook } from '../terrain/look.ts';
 
 type LabelEntity = { name: string; style?: string; color?: string; type_id?: string };
@@ -147,6 +147,8 @@ export interface RenderQuality { tolerance: number; margin: number }
 const MOVING_UP_TO = 2 * SHARP_UP_TO;
 
 export const VIEW_QUALITY: RenderQuality = { tolerance: 0.35, margin: 0.6 };
+/** The most disasters of one scatter (D233) drawn, in the working view and in exports; beyond, every so many stand for the rest. */
+export const SCATTER_DRAWN_VIEW = 6000, SCATTER_DRAWN_EXPORT = 12000;
 /** Exports: a tenth of a pixel, whatever the working view is set to. */
 export const EXPORT_QUALITY: RenderQuality = { tolerance: 0.1, margin: 0.3 };
 
@@ -2877,7 +2879,9 @@ export class MapRenderer {
       const layer = world.get('layer', layerId);
       if (!layer || layer.kind !== 'field' || layer.space_id !== spaceId) continue;
       const style = fieldLayerStyleOf(layer.style);
-      const active = activeSources(world, engine, layerId, t, compare);
+      // (Disasters scattered by the thousand, D233: as many of each scatter as the drawing allows, each standing for
+      // several; exports draw more of them.)
+      const active = activeSources(world, engine, layerId, t, compare, this.quality.tolerance < VIEW_QUALITY.tolerance ? SCATTER_DRAWN_EXPORT : SCATTER_DRAWN_VIEW);
       // A heatmap worked out from a layer of points (D105): each point in force a soft spot, worth 1.
       const from = style.from ? world.get('layer', style.from) : undefined;
       if (from && from.kind === 'point' && from.space_id === spaceId) {
@@ -2902,12 +2906,13 @@ export class MapRenderer {
         const south = Math.max(-maxLat, a.lat - rhoDeg), north = Math.min(maxLat, a.lat + rhoDeg);
         if (south >= north) continue;
         const half = Math.abs(a.lat) + rhoDeg >= 89.9 ? 180 : (Math.asin(Math.min(1, Math.sin(rho) / Math.cos((a.lat * Math.PI) / 180))) * 180) / Math.PI;
-        const box: [number, number, number, number] = [a.lon - half, south, a.lon + half, north];
+        // (A plume: the box fitted to it, long and narrow, D233.)
+        const box: [number, number, number, number] = plumeBounds(a.source, a.age, a.lon, a.lat, radiusKm) ?? [a.lon - half, south, a.lon + half, north];
         const r = a.source.radiusKm * sizeAt(a.source, a.age);
         for (const { copy, rect: [x0, y0, x1, y1] } of rects(box)) {
           inst.push({
             rect: [x0, y0, x1, y1], lon: ((a.lon + 360 * copy) * Math.PI) / 180, lat: (a.lat * Math.PI) / 180,
-            radius: r, value: a.source.intensity * a.strength, noise: a.source.noise,
+            radius: r, value: a.source.intensity * a.strength * (a.weight ?? 1), noise: a.source.noise,
             plume: a.source.shape === 'plume' && a.source.windKmPerDay > 0 ? { dir: (a.source.windDeg * Math.PI) / 180, length: a.source.windKmPerDay * a.age } : null,
             phases: edgePhases(a.source.seed),
           });
@@ -5452,6 +5457,8 @@ export class MapRenderer {
     // the most important cities, more appearing as the map is closed in on. One's own cities are always shown.)
     const pxPerDeg = (view.projection.scale() * Math.PI) / 180 / u;
     const bar = cs.fade ? cityThreshold(pxPerDeg, cs.density) : -Infinity;
+    // (D229: seen far enough out, no cities at all, but those set to be always shown.)
+    const shown = cs.fade ? citiesShown(pxPerDeg) : 1;
     const k = cs.growWithZoom ? (pointScale(view, 0.3, 1.15) * 17) / 15.5 : 1;
     const kDot = cs.growWithZoom ? (pointScale(view, 0.5, 1) * 4.5) / 3.6 : 1;
     const f = cs.byImportance;
@@ -5463,17 +5470,18 @@ export class MapRenderer {
       // (Its importance: as rated, or from its people; a city of one's own not rated keeps its dot at every scale and
       // is named from the scale at which a city is.)
       const imp = cityImportance(meta, ratedImportance(e.style));
-      if (imp !== null && imp < bar) continue;
+      const always = alwaysShown(e.style);
+      if (!always && (shown <= 0 || (imp !== null && imp < bar))) continue;
       const p = view.projection([c.lon, c.lat]);
       if (!p || p[0] < -50 || p[1] < -50 || p[0] > view.width + 50 || p[1] > view.height + 50) continue;
       const cls = cityClass(imp);
-      const nameAt = (15.5 + ([17, 15.5, 14][cls] - 15.5) * f) * k * cs.nameSize * this.pointSizes.city;
+      const nameAt = (cs.growWithZoom ? (15.5 + ([17, 15.5, 14][cls] - 15.5) * f) * k : cityNameSize(cls, pxPerDeg, f)) * cs.nameSize * this.pointSizes.city;
       const dotAt = (3.6 + ([4.2, 3.6, 3][cls] - 3.6) * f) * kDot * cs.dotSize * Math.sqrt(this.pointSizes.city);
       // Too small to read, or a city of one's own not rated and zoomed too far out: no name (marked by a size of 0), only the dot.
-      const size = nameAt >= MIN_CITY_NAME && (imp !== null || UNRATED_CITY >= bar) ? nameAt * u : 0;
-      // (A city just past the bar fades in rather than popping in.)
-      const alpha = imp === null || !cs.fade ? 1 : Math.min(1, 0.3 + (0.7 * (imp - bar)) / 0.12);
-      out.push({ entity: c.entity, name: e.name, lon: c.lon, lat: c.lat, x: p[0], y: p[1], r: cs.dots ? dotAt * u : 0, size, tx: p[0], ty: p[1], align: 'left', drawn: false, weight: f >= 0.3 ? [700, 600, 500][cls] : 500, capital: meta?.capital === 'national', alpha, rank: imp ?? 99 });
+      const size = nameAt >= MIN_CITY_NAME && (always || imp !== null || UNRATED_CITY >= bar) ? nameAt * u : 0;
+      // (A city just past the bar fades in rather than popping in, and all of them as the map is closed in on.)
+      const alpha = always ? 1 : (imp === null || !cs.fade ? 1 : Math.min(1, 0.3 + (0.7 * (imp - bar)) / 0.12)) * shown;
+      out.push({ entity: c.entity, name: e.name, lon: c.lon, lat: c.lat, x: p[0], y: p[1], r: cs.dots ? dotAt * u : 0, size, tx: p[0], ty: p[1], align: 'left', drawn: false, weight: f >= 0.3 ? [700, 600, 500][cls] : 500, capital: meta?.capital === 'national', alpha, rank: always ? 100 + (imp ?? 0) : imp ?? 99 });
     }
     // The most important first (they are named first where names crowd), then a steady order (the same every frame).
     return out.sort((a, b) => b.rank - a.rank || a.name.localeCompare(b.name) || a.entity.localeCompare(b.entity));
@@ -5955,6 +5963,12 @@ function pointScale(view: View, lo: number, hi: number): number {
 
 /** City names smaller than this (design pixels) are left out; the dot stays. */
 const MIN_CITY_NAME = 8;
+
+/** A city set to be shown at every scale (D229). */
+function alwaysShown(style: string | undefined): boolean {
+  if (!style || !style.includes('"alwaysShown"')) return false;
+  try { return (JSON.parse(style) as { alwaysShown?: unknown }).alwaysShown === true; } catch { return false; }
+}
 
 /** A city's importance as rated in its look (D219), if it is. */
 function ratedImportance(style: string | undefined): number | null {

@@ -14,6 +14,12 @@ export interface BorderDraft {
   /** Index of the first point of each piece drawn (so the last piece can be taken back). */
   pieces: number[];
   updated: string;
+  /**
+   * Drawn in curves (D232): the anchors and handles of the path after the first `curveStart` points (those drawn
+   * freehand before); `points` holds the path laid out as points, so the draft is finished as any other.
+   */
+  curve?: Array<{ p: [number, number]; i?: [number, number] | null; o?: [number, number] | null }>;
+  curveStart?: number;
 }
 
 export class ApiError extends Error {

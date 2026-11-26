@@ -30,7 +30,8 @@ import { resolvePointStyle, type LabelStyle, type CountryLabel, type PointStyle,
 import { DEFAULT_FEATURE_STYLE, isFeatureKind, type FeatureKind, type FeatureStyle } from '../render-engine/feature-style.ts';
 import { relationKind, isRelationKind, type RelationKind } from './relations.ts';
 import { DEFAULT_SOURCES, fieldLayerStyleOf, fieldSourceOf, isFieldType, FIELD_TYPES, type FieldSource, type FieldType } from './fields.ts';
-import { planDisaster, isDisasterId, type DisasterId } from './disasters.ts';
+import { planDisaster, isDisasterId, DISASTERS, type DisasterId } from './disasters.ts';
+import { MOST_SCATTERED, SIZE_STEPS, sizeAtStep, type Scatter } from './scatter.ts';
 import { cleanIcon, type CharacterIcon, type RouteStyle } from '../render-engine/icons.ts';
 import type { TerritoryFill, FrontTeeth } from '../render-engine/map-renderer.ts';
 export type { CharacterIcon } from '../render-engine/icons.ts';
@@ -690,6 +691,8 @@ export interface EntityStyle {
   look?: CountryLook;
   /** A city's importance as rated (D219: which show zoomed out, and how large), instead of from its people. */
   importance?: number;
+  /** A city shown at every scale (D229), however far out the map is seen, where cities are otherwise left out. */
+  alwaysShown?: boolean;
   /** Its land carries on over the sea where it was drawn (D221), where its layer otherwise ends at the coast. */
   overSea?: boolean;
 }
@@ -745,6 +748,15 @@ export function setCityImportance(world: World, id: string, importance: number |
   const next: EntityStyle = { ...entityStyle(e) };
   if (importance === null || !Number.isFinite(importance)) delete next.importance; else next.importance = Math.max(3, Math.min(9, importance));
   return run(world, `Rate ${e.name}'s importance`, (tx) => { tx.update('entity', { ...e, style: JSON.stringify(next) }); });
+}
+
+/** A city shown at every scale, or as its importance decides (D229): one undoable step. */
+export function setCityAlwaysShown(world: World, id: string, on: boolean): CommandResult {
+  const e = world.get('entity', id);
+  if (!e || e.type_id !== 'settlement') throw new Error('That city no longer exists.');
+  const next: EntityStyle = { ...entityStyle(e) };
+  if (on) next.alwaysShown = true; else delete next.alwaysShown;
+  return run(world, on ? `Always show ${e.name}` : `Show ${e.name} by its importance`, (tx) => { tx.update('entity', { ...e, style: JSON.stringify(next) }); });
 }
 
 /** Change parts of an entity's look. `label: null` returns its label to the general style. */
@@ -2830,6 +2842,54 @@ export function addDisaster(world: World, o: { spaceId: string; disaster: Disast
     const eventId = ev ? ev.id : insertEventIn(tx, { name: plan.name, start: o.t, end: null });
     const at = ev && compare(o.t, fromStore(ev.start_day, ev.start_ms)) > 0 ? o.t : null;
     disasterIn(tx, space.id, plan, lon, lat, eventId, at, o.t, o.seed ?? 1);
+    return eventId;
+  });
+}
+
+/**
+ * Many disasters at once (D233), scattered by a brush along `path` (one place: a dab) within `widthKm` of it: `count`
+ * of them, of sizes spread between `least` and `most` (on a scale of ratios), happening over `spreadDays` from `t`
+ * (each at a moment of its own), as a new event (or in the one being recorded). Kept as one source for each of the
+ * disaster's conditions, holding the recipe; laid out the same whenever drawn. Conditions that spread over the
+ * terrain are circles here, and impacts leave no craters. One undoable step; returns the event.
+ */
+export function addDisasterScatter(world: World, o: { spaceId: string; disaster: DisasterId; least: number; most: number; windDeg?: number; path: Array<[number, number]>; widthKm: number; count: number; spreadDays: number; t: Instant; eventId?: string | null; seed?: number }): CommandResult<string> {
+  const space = world.get('map_space', o.spaceId);
+  if (!space || space.kind !== 'sphere') throw new Error('Disasters are placed on round maps.');
+  if (!isDisasterId(o.disaster)) throw new Error('Unknown kind of disaster.');
+  const path = o.path.filter((p) => Number.isFinite(p[0]) && Number.isFinite(p[1]) && Math.abs(p[1]) <= 90).map(([lon, lat]) => [Math.round(((((lon + 540) % 360) - 180)) * 1e5) / 1e5, Math.round(lat * 1e5) / 1e5] as [number, number]);
+  if (!path.length) throw new Error('That place is not on the map.');
+  const count = Math.round(o.count);
+  if (!(count >= 1 && count <= MOST_SCATTERED)) throw new Error(`From 1 to ${MOST_SCATTERED.toLocaleString('en')} at once.`);
+  if (!(o.widthKm >= 0) || !(o.spreadDays >= 0)) throw new Error('The brush and the span cannot be less than nothing.');
+  const ev = o.eventId ? world.get('event', o.eventId) : null;
+  if (o.eventId && !ev) throw new Error('That event no longer exists.');
+  const t0 = DISASTERS.find((d) => d.id === o.disaster)!;
+  const clamp = (v: number) => Math.max(t0.size.min, Math.min(t0.size.max, Number.isFinite(v) ? v : t0.size.value));
+  const least = clamp(Math.min(o.least, o.most)), most = clamp(Math.max(o.least, o.most));
+  const mid = sizeAtStep(least, most, (SIZE_STEPS - 1) / 2);
+  const wind = o.windDeg ?? 90;
+  const plan = planDisaster(o.disaster, mid, wind), lo = planDisaster(o.disaster, least, wind), hi = planDisaster(o.disaster, most, wind);
+  const sizes = least === most ? planDisaster(o.disaster, least, wind).name.replace(/^[^(]*\(|\)$/g, '') : `${lo.name.replace(/^[^(]*\(|\)$/g, '')} to ${hi.name.replace(/^[^(]*\(|\)$/g, '')}`;
+  const name = `${count.toLocaleString('en')} × ${t0.name.toLowerCase()} (${sizes})`;
+  const seed = Math.round(o.seed ?? 1);
+  return run(world, name, (tx) => {
+    const eventId = ev ? ev.id : insertEventIn(tx, { name: name[0].toUpperCase() + name.slice(1), start: o.t, end: null });
+    const at = ev && compare(o.t, fromStore(ev.start_day, ev.start_ms)) > 0 ? o.t : null;
+    plan.sources.forEach((p, i) => {
+      let layer = tx.world.all('layer').filter((l) => l.space_id === space.id && l.kind === 'field' && fieldLayerStyleOf(l.style).type === p.type).sort((a, b) => a.sort_order - b.sort_order)[0];
+      if (!layer) {
+        const ln = FIELD_TYPES[p.type].name;
+        layer = tx.insert('layer', { id: newId('layer'), space_id: space.id, kind: 'field', name: ln, sort_order: tx.world.all('layer').filter((l) => l.space_id === space.id).length, visible: 1, style: JSON.stringify({ field: { type: p.type, opacity: 1 } }), export_pass: ln.toLowerCase().replace(/\W+/g, '-') });
+      }
+      const base = fieldSourceOf({ ...DEFAULT_SOURCES[p.type], ...p.source, seed }, p.type);
+      const ratio = (a: number | undefined, b: number) => (a !== undefined && b > 0 ? Math.max(1e-4, a / b) : 1);
+      const l = lo.sources[i]?.source ?? p.source, h = hi.sources[i]?.source ?? p.source;
+      const scatter: Scatter = { path, widthKm: o.widthKm, count, seed: seed + i * 104729, reach: [ratio(l.radiusKm, base.radiusKm), ratio(h.radiusKm, base.radiusKm)], strength: [ratio(l.intensity, base.intensity), ratio(h.intensity, base.intensity)], spreadDays: o.spreadDays };
+      const id = newId('feat');
+      tx.insert('feature', { id, layer_id: layer.id, name: `${name}: ${p.name.toLowerCase()}`, entity_id: '', style: JSON.stringify({ source: { ...base, scatter } }), notes: '', created_seq: tx.world.nextSeq('feature') });
+      writeShape(tx, id, { kind: 'new', eventId, at }, { parts: [[path[0][0], path[0][1]]], anim: null });
+    });
     return eventId;
   });
 }

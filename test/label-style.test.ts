@@ -102,3 +102,17 @@ test('city importance (D219): rated, unrated again, one undo each', () => {
   world.applyDiffs(invertDiffs(rated.diffs));
   assert.equal(world.get('entity', city)!.style, '{}');
 });
+
+test('seen far out, no cities; their names smaller than countries\' (D229)', async () => {
+  const { citiesShown, cityNameSize, CITIES_FROM, DEFAULT_LABEL_STYLE } = await import('../src/render-engine/label-style.ts');
+  // The whole world in a 1920 frame is some 5.3 pixels a degree: none. Fading in past CITIES_FROM; all closer in.
+  assert.equal(citiesShown(5.3), 0);
+  assert.equal(citiesShown(CITIES_FROM), 0);
+  assert.ok(citiesShown(CITIES_FROM + 1.5) > 0 && citiesShown(CITIES_FROM + 1.5) < 1);
+  assert.equal(citiesShown(40), 1);
+  // Names: 13, 12, 11 closed in, smaller far out; never above a country's smallest label size and a little.
+  assert.deepEqual([0, 1, 2].map((c) => cityNameSize(c, 200)), [13, 12, 11]);
+  assert.ok(cityNameSize(0, 13) < 13 && cityNameSize(0, 13) >= 13 * 0.85 - 1e-9);
+  assert.equal(cityNameSize(0, 200, 0), cityNameSize(2, 200, 0), 'all alike');
+  assert.ok(cityNameSize(0, 200) <= DEFAULT_LABEL_STYLE.minSize * 1.3);
+});

@@ -10,6 +10,7 @@
 // The arithmetic here is the reference the field shader follows (render-engine/fields-gl.ts), and
 // what tests check.
 import type { Instant } from '../core-time/index.ts';
+import { scatterOf, scatterItems, sizeFactors, SIZE_STEPS, type Scatter } from './scatter.ts';
 
 /** The kinds of field, each with its own colours. */
 export type FieldType = 'radiation' | 'fire' | 'smoke' | 'flood' | 'damage' | 'drought' | 'heat' | 'custom';
@@ -61,6 +62,8 @@ export interface FieldSource {
   rise: number; hold: number; decay: number; grow: number;
   noise: number; seed: number;
   windDeg: number; windKmPerDay: number;
+  /** Many of it at once (D233): scattered by a brush, each of its own place, size and moment. */
+  scatter?: Scatter;
 }
 
 /** Each kind's usual source (what a click places before anything is changed). */
@@ -86,6 +89,7 @@ export function fieldSourceOf(raw: unknown, type: FieldType = 'custom'): FieldSo
     rise: num(r.rise, d.rise, 0, 1e6), hold: num(r.hold, d.hold, 0, 1e7), decay: num(r.decay, d.decay, 0, 1e7), grow: num(r.grow, d.grow, 0, 1e6),
     noise: num(r.noise, d.noise, 0, 1), seed: Math.round(num(r.seed, d.seed, 0, 1e9)),
     windDeg: ((num(r.windDeg, d.windDeg, -1e6, 1e6) % 360) + 360) % 360, windKmPerDay: num(r.windKmPerDay, d.windKmPerDay, 0, 1e5),
+    ...(scatterOf(r.scatter) ? { scatter: scatterOf(r.scatter)! } : {}),
   };
 }
 
@@ -167,6 +171,30 @@ export function sourceReach(s: FieldSource, age: number): number {
 }
 
 /**
+ * The box (west, south, east, north, degrees) a plume's value lies in at `age` (D233), fitted to the plume, long and
+ * narrow, where `sourceReach` gives a circle as wide as it is long: along the wind from a little behind its place to a
+ * little beyond its front, and across it to where its value has all but gone. Null for a circle, or where a flat
+ * reckoning will not do (a plume thousands of km long, or near a pole): then the circle's box.
+ */
+export function plumeBounds(s: FieldSource, age: number, lon: number, lat: number, radiusKm = R): [number, number, number, number] | null {
+  if (s.shape !== 'plume' || !(s.windKmPerDay > 0)) return null;
+  const r = s.radiusKm * sizeAt(s, age), L = s.windKmPerDay * Math.max(0, age);
+  const far = L + 1.5 * (r + 0.3 * L);
+  if (far + 1.6 * (r + 0.375 * L) > 2500 || Math.abs(lat) > 70) return null;
+  const w = (s.windDeg * Math.PI) / 180, k = 180 / Math.PI / radiusKm, cosLat = Math.cos((lat * Math.PI) / 180);
+  let west = Infinity, south = Infinity, east = -Infinity, north = -Infinity;
+  for (const a of [-1.5 * r, 0, L / 2, L, far]) {
+    const half = 1.6 * (r + 0.375 * Math.max(0, Math.min(L, a)));
+    for (const c of [-half, half]) {
+      const dx = a * Math.sin(w) + c * Math.cos(w), dy = a * Math.cos(w) - c * Math.sin(w);
+      const x = lon + (dx * k) / cosLat, y = lat + dy * k;
+      west = Math.min(west, x); east = Math.max(east, x); south = Math.min(south, y); north = Math.max(north, y);
+    }
+  }
+  return [west, south, east, north];
+}
+
+/**
  * When a source started, at moment `t`: the start of the run of its shapes in force at `t` (moving
  * it does not start it again); null when it does not exist at `t`.
  */
@@ -179,7 +207,7 @@ export function onsetOf(history: Array<{ t: Instant; parts: number[][] | null }>
 }
 
 /** A source in force at a moment, as drawn: where, how (its settings), how old (days) and how strong (share of its peak). */
-export interface ActiveSource { id: string; name: string; lon: number; lat: number; source: FieldSource; age: number; strength: number }
+export interface ActiveSource { id: string; name: string; lon: number; lat: number; source: FieldSource; age: number; strength: number; /** How many it stands for (D233: one of a scatter drawn for several); absent, one. */ weight?: number }
 
 interface FieldWorld {
   get(table: 'layer', id: string): { style: string } | undefined;
@@ -189,13 +217,27 @@ interface FieldEngine {
   featuresAt(layerId: string, t: Instant): Array<{ feature: string; parts: number[][]; since: Instant }>;
   featureHistory(featureId: string): Array<{ t: Instant; parts: number[][] | null }>;
 }
-const parsed = new WeakMap<object, { type: FieldType; source: FieldSource }>();
+const parsed = new WeakMap<object, { type: FieldType; source: FieldSource; sizes?: FieldSource[] }>();
+
+/**
+ * The settings of a scattered source's disasters (D233), one for each step of size: its reach and strength scaled,
+ * a circle where the source spreads over the terrain (thousands of those could not each be worked out), and an
+ * uneven edge of its own.
+ */
+function scatterSizes(src: FieldSource): FieldSource[] {
+  const sc = src.scatter!, out: FieldSource[] = [];
+  for (let k = 0; k < SIZE_STEPS; k++) {
+    const f = sizeFactors(sc, k);
+    out.push({ ...src, scatter: undefined, shape: src.shape === 'spread' ? 'circle' : src.shape, radiusKm: src.radiusKm * f.reach, intensity: src.intensity * f.strength, seed: src.seed + k * 7919 });
+  }
+  return out;
+}
 
 /**
  * The sources of a field layer in force at moment `t` (placed, and not yet faded), each with its age
  * and strength. `compare` orders moments (core-time's).
  */
-export function activeSources(world: FieldWorld, engine: FieldEngine, layerId: string, t: Instant, compare: (a: Instant, b: Instant) => number): ActiveSource[] {
+export function activeSources(world: FieldWorld, engine: FieldEngine, layerId: string, t: Instant, compare: (a: Instant, b: Instant) => number, mostScattered = Infinity): ActiveSource[] {
   const layer = world.get('layer', layerId);
   if (!layer) return [];
   const type = fieldLayerStyleOf(layer.style).type, out: ActiveSource[] = [];
@@ -211,6 +253,22 @@ export function activeSources(world: FieldWorld, engine: FieldEngine, layerId: s
       parsed.set(f, p);
     }
     const onset = onsetOf(engine.featureHistory(fa.feature), t, compare) ?? fa.since;
+    // Many at once (D233): each of the scattered disasters in force, at its own place, size and moment.
+    if (p.source.scatter) {
+      const sizes = p.sizes ?? (p.sizes = scatterSizes(p.source));
+      const items = scatterItems(p.source.scatter), base = daysBetween(onset, t);
+      // (More than `mostScattered` of them, as drawing allows: every so many of them, each standing for as many; they
+      // were laid out at random, so those taken are spread as evenly as the rest.)
+      const every = Math.max(1, Math.ceil(items.length / Math.max(1, mostScattered)));
+      for (let j = 0; j < items.length; j += every) {
+        const it = items[j], age = base - it.delay;
+        if (age < 0) continue;
+        const src = sizes[it.size], strength = strengthAt(src, age);
+        if (strength <= 0) continue;
+        out.push({ id: `${f.id}#${j}`, name: f.name, lon: it.lon, lat: it.lat, source: src, age, strength, ...(every > 1 ? { weight: every } : {}) });
+      }
+      continue;
+    }
     const age = daysBetween(onset, t), strength = strengthAt(p.source, age);
     if (strength <= 0) continue;
     out.push({ id: f.id, name: f.name, lon: fa.parts[0][0], lat: fa.parts[0][1], source: p.source, age, strength });
@@ -223,7 +281,7 @@ export function fieldValueAt(sources: ActiveSource[], lon: number, lat: number, 
   let v = 0;
   for (const s of sources) {
     const [d, b] = distanceBearing([s.lon, s.lat], [lon, lat], radiusKm);
-    if (d <= sourceReach(s.source, s.age)) v += sourceValue(s.source, d, b, s.age);
+    if (d <= sourceReach(s.source, s.age)) v += sourceValue(s.source, d, b, s.age) * (s.weight ?? 1);
   }
   return v;
 }

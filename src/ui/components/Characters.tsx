@@ -41,6 +41,7 @@ export function CharacterSection({ id }: { id: string }) {
         ? <>A city is a point, with no borders. Click the map with the Characters &amp; cities tool to found {ent.name} there on the date being viewed, or use “From the beginning” below; with Select, drag it to move it from that date.</>
         : <>A character is a point, with no borders. Click the map with the Characters &amp; cities tool to put {ent.name} there from the date being viewed; with Select, drag the marker to move it. Between two places {ent.name} travels, unless set to appear.</>}</p>
       {city && <CityImportance id={id} />}
+      {city && <CityAlwaysShown id={id} />}
       <h4>Places</h4>
       {track.map((wp, i) => {
         const prev = track[i - 1];
@@ -73,7 +74,7 @@ const rankName = (imp: number) => CITY_RANKS.reduce((a, r) => (Math.abs(r.import
 
 /**
  * How important a city is (D219): from its people (today's cities), or rated (a capital, a large city, …): it decides
- * from how far out it is shown and how large. A city of one's own not rated keeps its dot at every scale.
+ * from how far out it is shown and how large. A city of one's own not rated keeps its dot until the map is seen far out (D229).
  */
 function CityImportance({ id }: { id: string }) {
   const s = useStore();
@@ -87,10 +88,23 @@ function CityImportance({ id }: { id: string }) {
   return (
     <label className="city-rank" title="How important the city is: the more important, the further out it is still shown, and the larger and bolder its name">Importance
       <select value={value} onChange={(e) => choose(e.target.value)} data-testid="city-importance-rank">
-        <option value="auto">{fromPeople !== null ? `From its people (${rankName(fromPeople)})` : 'Not rated (its dot always shown)'}</option>
+        <option value="auto">{fromPeople !== null ? `From its people (${rankName(fromPeople)})` : 'Not rated (its dot shown until seen far out)'}</option>
         {CITY_RANKS.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
         {value === 'rated' && <option value="rated">As rated</option>}
       </select>
+    </label>
+  );
+}
+
+/** A city shown however far out the map is seen (D229), where cities are otherwise left out zoomed out. */
+function CityAlwaysShown({ id }: { id: string }) {
+  const s = useStore();
+  const ent = s.world!.get('entity', id);
+  if (!ent) return null;
+  const on = cmd.entityStyle(ent).alwaysShown === true;
+  return (
+    <label className="inline" title="Seen far out, cities are left out and only countries named, as maps online do. A city always shown keeps its dot and name at every scale.">
+      <input type="checkbox" checked={on} onChange={(e) => s.execute((wd) => cmd.setCityAlwaysShown(wd, id, e.target.checked))} data-testid="city-always-shown" /> Always shown, however far out
     </label>
   );
 }
