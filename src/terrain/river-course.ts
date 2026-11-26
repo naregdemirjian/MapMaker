@@ -490,7 +490,9 @@ export function applyRiverStamp(e: Float32Array, touched: Uint8Array, W: number,
   const reachesSea = g.at(course[course.length - 1][0], course[course.length - 1][1]) < 0;
   const top = g.at(course[0][0], course[0][1]) - s.strength;
   const bottom = reachesSea ? Math.min(-5, top - 1) : Math.min(g.at(course[course.length - 1][0], course[course.length - 1][1]) - s.strength, top - 1);
-  if (s.strength > 0) cutValley(g, touched, course, top, bottom, Math.max(s.radiusKm, g.cellKm * 0.75));
+  // (No valley is cut, D226: a river is its water alone, and the ground stays as it is. A cut valley showed as dark
+  // squares of the map's coarse cells from far away, and changed coasts and relief nobody had asked to change.)
+  void top; void bottom; void touched; void cutValley;
   // 3. Tributaries, from the heights now (the valley cut drawing water to it), and how much water it carries.
   const net = legacy ? null : tributaries(g, course, spec, L, !reachesSea);
   const widths = net ? net.flowAlong.map((f) => spec.width * Math.max(0.3, Math.sqrt(f))) : course.map((_, i) => spec.width * (0.35 + 0.65 * Math.pow(i / (course.length - 1), 0.6)));
@@ -511,12 +513,6 @@ export function applyRiverStamp(e: Float32Array, touched: Uint8Array, W: number,
       drawn.push(wound);
       const flow = (i: number) => b.flow[Math.min(b.flow.length - 1, Math.round((i / Math.max(1, wound.length - 1)) * (b.flow.length - 1)))];
       branches.push({ line: wound, widths: wound.map((_, i) => spec.width * Math.max(0.22, Math.min(0.9, Math.sqrt(flow(i))))) });
-      // (Their valleys cut too, less deep the smaller they are.)
-      if (s.strength > 0) {
-        const depth = s.strength * 0.6 * Math.sqrt(Math.min(1, b.flow[b.flow.length - 1] ?? 0.1));
-        const t = g.at(wound[0][0], wound[0][1]) - depth, end = wound[wound.length - 1];
-        cutValley(g, touched, wound, t, Math.min(t - 1, g.at(end[0], end[1])), Math.max(g.cellKm * 0.6, s.radiusKm * 0.5));
-      }
     }
   }
   // (Longitudes run on from the source's, across the 180th meridian if need be: lines are drawn whole.)

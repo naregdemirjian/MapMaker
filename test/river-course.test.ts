@@ -83,18 +83,18 @@ test('tributaries where the water of the heights gathers, each ending on the riv
   for (const b of many.branches) for (const [lon] of b.line) assert.ok(lon <= 20.3, 'on land');
 });
 
-test('a river ending inland gathers no water from beyond its end; its valley cut when asked; a river from before follows its stroke', () => {
+test('a river ending inland gathers no water from beyond its end; the ground never changed by a river; a river from before follows its stroke', () => {
   const e = ground(hills);
   const inland = applyRiverStamp(e, new Uint8Array(W * H), W, H, river([[4, 11], [9, 11.4], [13, 11]], { tributaries: 1 }), R)!;
   const end = inland.course[inland.course.length - 1];
   for (const b of inland.branches) assert.ok(kmBetween(b.line[b.line.length - 1], end) > 20, 'no tributary joins at its very end');
-  // Its valley cut: the ground lowered along it, down to below the sea at its mouth.
-  const cut = ground(hills), touched = new Uint8Array(W * H);
-  const r = applyRiverStamp(cut, touched, W, H, river([[8, 12], [21, 12]], { tributaries: 0, meander: 0, follow: false }, { strength: 150, radiusKm: 40 }), R)!;
-  const cell = (lon: number, lat: number) => Math.floor(((90 - lat) / 180) * H) * W + Math.floor(((lon + 180) / 360) * W);
-  const mid = r.course[Math.floor(r.course.length / 2)];
-  assert.ok(cut[cell(mid[0], mid[1])] < hills(mid[0], mid[1]) - 50, 'cut below the ground');
-  assert.ok(touched.some((v) => v === 1));
+  // No valley is cut, whatever depth its stroke carries (D226): the ground is as it was, to the cell, and nothing is
+  // marked as sculpted.
+  const cut = ground(hills), was = ground(hills), touched = new Uint8Array(W * H);
+  const r = applyRiverStamp(cut, touched, W, H, river([[8, 12], [21, 12]], { tributaries: 1, meander: 0.5, follow: false }, { strength: 150, radiusKm: 40 }), R)!;
+  assert.ok(r.course.length > 20);
+  assert.deepEqual(cut, was, 'the ground unchanged');
+  assert.ok(touched.every((v) => v === 0), 'nothing marked as sculpted');
   // A river drawn before D220 (no settings): its stroke followed as drawn, no tributaries.
   const old = applyRiverStamp(ground(hills), new Uint8Array(W * H), W, H, river([[8, 12], [12, 10], [16, 12]], null), R)!;
   assert.equal(old.branches.length, 0);
@@ -111,6 +111,15 @@ test('rivers with the heights (D220): one shape for each river stroke, worked ou
   assert.equal(r.rivers.length, 1);
   assert.equal(r.rivers[0].id, 'b');
   assert.equal(applyStamps(base, strokes.slice(0, 1), R).rivers.length, 0);
+  // The river changes nothing of the heights (D226): with it or without, the same heights and the same cells marked.
+  const without = applyStamps(base, strokes.slice(0, 1), R);
+  assert.deepEqual(r.grid.data, without.grid.data);
+  assert.deepEqual(r.touched, without.touched);
+  // A river alone: the map's own heights, nothing marked as sculpted, and its water.
+  const alone = applyStamps(base, strokes.slice(1), R);
+  assert.equal(alone.grid, base);
+  assert.equal(alone.touched, null);
+  assert.equal(alone.rivers.length, 1);
 });
 
 test('a brush stroke kept as the points where it turns (D220)', () => {
@@ -126,15 +135,14 @@ test('a brush stroke kept as the points where it turns (D220)', () => {
   assert.ok(simplifyStroke(zigzag, 1, R, 30).length <= 30);
 });
 
-test('a river always has its water, and its valley never makes sea (D225): cut near the coast the land stays land; a river across another\'s valley runs on; one drawn over water is drawn', () => {
+test('a river always has its water (D225, D226): low ground near the coast stays land; a river across another runs on; one drawn over water is drawn', () => {
   // Low land (20 m) west of a coast at 20°E: a valley cut 60 m would go below the sea.
   const low = (lon: number) => (lon > 20 ? -800 : 20 + (20 - lon) * 2);
   const e = ground(low), touched = new Uint8Array(W * H);
   const first = applyRiverStamp(e, touched, W, H, river([[10, 12], [15, 12.3], [21, 12]], { follow: false }, { strength: 60, radiusKm: 30 }), R)!;
   assert.ok(first && first.course.length > 20);
-  let lowest = Infinity, cutCells = 0;
-  for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) { const lon = -180 + ((i + 0.5) / W) * 360; if (lon < 19.7 && touched[j * W + i]) { cutCells++; lowest = Math.min(lowest, e[j * W + i]); } }
-  assert.ok(cutCells > 20 && lowest >= 1, `its valley cut (${cutCells} cells), none of it below a metre above the sea (${lowest.toFixed(1)} m)`);
+  assert.ok(touched.every((v) => v === 0), 'nothing marked as sculpted');
+  assert.deepEqual(e, ground(low), 'the ground as it was');
   // A second river crossing the first one's valley: whole, to the coast beyond it.
   const second = applyRiverStamp(e, touched, W, H, river([[12, 14], [14, 12.2], [16, 10.5], [21, 10]], { follow: false }, { strength: 60, radiusKm: 30, id: 'r2' }), R)!;
   assert.ok(second && nearest(second.course, [16, 10.5]) < 80 && second.course[second.course.length - 1][0] > 19.5, 'runs on across the other\'s valley to the sea');

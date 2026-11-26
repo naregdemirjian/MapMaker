@@ -173,8 +173,10 @@ export function applyStamps(base: ElevationGrid, all: readonly TerrainStamp[], r
     else if (s.tool === 'river') { const r = applyRiverStamp(e, touched, W, H, s, radiusKm); if (r) rivers.push(r); }
     else applyStamp(e, touched, W, H, s, radiusKm);
   }
+  // (Rivers alone change no heights, D226: the heights themselves, nothing marked as sculpted.)
+  if (!touched.some((v) => v === 1)) return { grid: base, touched: null, rivers };
   const data = new Int16Array(W * H);
-  for (let k = 0; k < data.length; k++) data[k] = Math.max(-32768, Math.min(32767, Math.round(e[k] / step)));
+  for (let k = 0; k < data.length; k++) data[k] = touched[k] ? Math.max(-32768, Math.min(32767, Math.round(e[k] / step))) : base.data[k];
   return { grid: { width: W, height: H, step, data }, touched, rivers, under: base };
 }
 

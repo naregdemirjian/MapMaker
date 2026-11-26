@@ -51,10 +51,6 @@ export function RiverPanel({ id, spaceId }: { id: string; spaceId: string }) {
       <div className="river-sel">
         <RiverSettings value={spec} onChange={(patch) => update({ river: { ...spec, ...patch } })} idPrefix="river-sel" />
       </div>
-      <div className="two">
-        <label title="How wide the valley it cuts is, either side">Valley (km)<NumberField min={1} max={5000} step={5} value={st.radiusKm} onCommit={(v) => update({ radiusKm: v })} testId="river-sel-valley" /></label>
-        <label title="How deep it cuts its valley into the ground (0: the ground as it is; its water shows whatever the height)">Cuts (m)<NumberField min={0} max={10000} step={10} value={st.strength} onCommit={(v) => update({ strength: v })} testId="river-sel-cut" /></label>
-      </div>
       <p className="muted" data-testid="river-sel-when">{st.from ? `From ${fmt(fromStore(st.from.day, st.from.ms))} on.` : 'In the base world (at every date).'}</p>
       <div className="buttons">
         <button onClick={() => update({ seed: 1 + Math.floor(Math.random() * 999_999) })} title="The same river winding and branching another way" data-testid="river-sel-reshape">Another shape</button>

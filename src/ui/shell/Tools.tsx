@@ -246,10 +246,10 @@ function SculptToolOptions() {
         </select>
       </label>
       {river && <RiverDrawOptions />}
-      <label className="inline" title={b.tool === 'coast-land' || b.tool === 'coast-sea' ? 'How ragged the coast is: the size of its bays and headlands' : river ? 'How wide the valley it cuts is, either side' : 'The brush\'s radius on the ground'}>{river ? 'Valley' : 'Size'}
+      {!river && <label className="inline" title={b.tool === 'coast-land' || b.tool === 'coast-sea' ? 'How ragged the coast is: the size of its bays and headlands' : river ? 'How wide the valley it cuts is, either side' : 'The brush\'s radius on the ground'}>{river ? 'Valley' : 'Size'}
         <input type="number" min={1} max={5000} step={10} value={b.radiusKm} onChange={(e) => Number(e.target.value) > 0 && set({ radiusKm: Math.min(5000, Number(e.target.value)) })} data-testid="sculpt-size" /> km
-      </label>
-      {uses && (
+      </label>}
+      {uses && !river && (
         <label className="inline" title={b.tool === 'land' ? 'How high the new land stands' : b.tool === 'coast-land' ? 'How high the land rises inland' : b.tool === 'sea' || b.tool === 'coast-sea' ? 'How deep the new sea is' : river ? 'How deep it cuts its valley into the ground (0: the ground as it is; its water shows whatever the height)' : 'How much the brush raises or lowers'}>{b.tool === 'land' || b.tool === 'coast-land' ? 'Height' : b.tool === 'sea' || b.tool === 'coast-sea' ? 'Depth' : river ? 'Cuts' : 'Strength'}
           <input type="number" min={river ? 0 : 1} max={10000} step={river ? 10 : 50} value={b.strength} onChange={(e) => { const v = Number(e.target.value); if (Number.isFinite(v) && (v > 0 || (river && v === 0))) set({ strength: Math.min(10000, v) }); }} data-testid="sculpt-strength" /> m
         </label>

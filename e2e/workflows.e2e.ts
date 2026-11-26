@@ -2802,16 +2802,15 @@ try {
     let px = seaPx;
     for (let i = 0; i < 40 && Math.max(...px.map((v, k) => Math.abs(v - seaPx[k]))) <= 25; i++) { await page.waitForTimeout(100); px = await pixelAt(sea!); }
     assert.ok(Math.max(...px.map((v, k) => Math.abs(v - seaPx[k]))) > 25, `drawn as land (${px} against the sea's ${seaPx})`);
-    // A river from the middle of the new land east to the sea: its bed falls all the way. (Run smoothly through the
-    // points drawn, not winding, D220: the bed is looked at along the stroke.)
+    // A river from the middle of the new land east to the sea: its water alone, the ground left as it is (D226).
     await page.getByTestId('sculpt-brush').selectOption('river');
-    await page.getByTestId('sculpt-size').fill('60');
-    await page.getByTestId('sculpt-strength').fill('120');
     await page.getByTestId('river-follow').uncheck();
     for (const k of ['river-meander', 'river-tributaries']) { await page.getByTestId(k).fill('0'); await page.getByTestId(k).dispatchEvent('pointerup'); }
+    const along = [0, 1.5, 3, 4.5].map((d) => [lon0 + d, lat0 + (d <= 3 ? d / 6 : 0.5 - (d - 3) / 7)] as [number, number]);
+    const bedBefore = await Promise.all(along.map((q) => heightAt(q)));
     await stroke([[lon0, lat0], [lon0 + 3, lat0 + 0.5], [lon0 + 6.5, lat0]]);
-    const bed = await Promise.all([0, 1.5, 3, 4.5].map((d) => heightAt([lon0 + d, lat0 + (d <= 3 ? d / 6 : 0.5 - (d - 3) / 7)])));
-    assert.ok(bed[0] < 600 && bed.every((v, i) => i === 0 || v <= bed[i - 1] + 20), `the river's bed falls towards the sea (${bed.map(Math.round).join(', ')} m)`);
+    assert.deepEqual(await Promise.all(along.map((q) => heightAt(q))), bedBefore, 'the ground along the river as it was');
+    assert.equal(await page.evaluate(() => { const s = (window as any).__mapmaker.store; return (JSON.parse(s.world.get('map_space', s.spaceId).settings).sculpt ?? []).filter((x: any) => x.tool === 'river').length; }), 1, 'the river made');
     // Desert painted over the land, as the satellite look shows it: sand.
     await page.getByTestId('sculpt-brush').selectOption('biome');
     await page.getByTestId('sculpt-biome').selectOption('desert');
@@ -5696,9 +5695,23 @@ try {
       const m = (window as any).__mapmaker, s = m.store, space = s.world.get('map_space', s.spaceId), g = s.terrainOf(space);
       return m.bench.sculpted(g.grid, g.key, JSON.parse(space.settings).sculpt ?? [], space.radius_m / 1000).rivers;
     })) as Shape[];
+    // The map as it is before any river, close in and from far away (D226: a river adds its water and changes nothing else).
+    const cam0 = await page.evaluate(() => ({ ...(window as any).__mapmaker.store.camera }));
+    const views = [cam0, { ...cam0, zoom: cam0.zoom - 1.5 }, { ...cam0, zoom: cam0.zoom - 3 }];
+    const picture = async (slot: string) => {
+      await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
+      for (let v = 0; v < views.length; v++) {
+        await page.evaluate((c) => (window as any).__mapmaker.store.setCamera(c), views[v]);
+        await page.waitForTimeout(900);
+        await page.evaluate(([name, k]) => { const c = document.querySelector('canvas.map-canvas') as HTMLCanvasElement; ((window as any).__riverShots ??= {})[`${name}${k}`] = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data; }, [slot, v] as const);
+      }
+      await page.evaluate((c) => (window as any).__mapmaker.store.setCamera(c), cam0);
+      await page.waitForTimeout(400);
+    };
+    await picture('before');
     await page.getByTestId('tool-sculpt').click();
     await page.getByTestId('sculpt-brush').selectOption('river');
-    assert.equal(await page.getByTestId('sculpt-size').inputValue(), '30', 'a valley of a river\'s width');
+    assert.equal(await page.getByTestId('sculpt-size').count() + await page.getByTestId('sculpt-strength').count(), 0, 'a river has no valley to size or cut');
     // With the pen: its points clicked from its source in the highlands to its mouth in the Mediterranean; Enter makes it.
     await page.getByTestId('river-draw-pen').click();
     const penPts: Array<[number, number]> = [[39.0, 39.3], [37.5, 38.3], [36.4, 37.4], [35.4, 36.9], [35.2, 36.3]];
@@ -5731,6 +5744,25 @@ try {
     }, q);
     assert.ok(water >= 3, `its water drawn there (${water} pixels)`);
     await h.screenshot('river-pen');
+    // Nothing of the map changed but its water (D226): at each zoom, every pixel that differs from the map before is
+    // bluer than it was (the river and its tributaries); no darker squares, no coast or relief changed.
+    await h.chooseTool('select');
+    await picture('after');
+    const diffs = await page.evaluate((n) => {
+      const shots = (window as any).__riverShots, out: Array<{ water: number; other: number }> = [];
+      for (let v = 0; v < n; v++) {
+        const a = shots[`before${v}`] as Uint8ClampedArray, b = shots[`after${v}`] as Uint8ClampedArray;
+        let water = 0, other = 0;
+        for (let i = 0; i < a.length; i += 4) {
+          if (Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]) <= 18) continue;
+          if (b[i + 2] - b[i] > a[i + 2] - a[i] + 4) water++; else other++;
+        }
+        out.push({ water, other });
+      }
+      return out;
+    }, views.length);
+    for (const [v, d] of diffs.entries()) assert.ok(d.water > 15 && d.other <= 12, `view ${v}: its water drawn (${d.water} pixels) and nothing else changed (${d.other})`);
+    await page.getByTestId('tool-sculpt').click();
     // With the brush: a stroke kept as the points where it turns.
     await page.getByTestId('river-draw-brush').click();
     const strokeLL: Array<[number, number]> = [[42.5, 39.6], [41.6, 39.0], [40.8, 38.9], [40.0, 38.2]];

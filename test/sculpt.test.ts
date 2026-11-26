@@ -153,30 +153,13 @@ test('an outline drawn becomes land or sea (D169): the coast ragged at the brush
   assert.equal(at(across, 0.5, 0.5), -2000, 'not the other side of the world');
 });
 
-test('a river drawn from its source to its mouth (D169): its bed falls all the way, and the water runs down it', () => {
+test('a river drawn from its source to its mouth (D169, D226): the ground left as it is, its water drawn from its source to its mouth', () => {
   // Rolling land at 400 to 600 m, sea east of 12°E.
   const ground = flat(0, (lon, lat) => (lon > 12 ? -1500 : 500 + Math.round(100 * Math.sin(lon * 1.7) * Math.cos(lat * 2.3))));
   const path: Array<[number, number]> = [[0.5, 10.5], [5.5, 12.5], [10.5, 10.5], [13.5, 10.5]];
-  const g = applyStamps(ground, [stamp('river', path, { radiusKm: 300, strength: 120 })], R).grid;
-  // Downhill all the way from the source: the valley's floor (the lowest of the cells about each place along the
-  // stroke, on this grid of 1° cells) falls step by step, about 70 m a step, give or take the cells' own places.
-  const floor = (lon: number, lat: number) => Math.min(...[-1, 0, 1].flatMap((a) => [-1, 0, 1].map((b) => at(g, lon + a, lat + b))));
-  const along: number[] = [];
-  for (let q = 0; q + 1 < path.length; q++) for (let k = 0; k < 10; k++) { const t = k / 10; along.push(floor(path[q][0] + (path[q + 1][0] - path[q][0]) * t, path[q][1] + (path[q + 1][1] - path[q][1]) * t)); }
-  for (let i = 1; i < along.length; i++) assert.ok(along[i] <= along[i - 1] + 30, `downhill at step ${i} (${along[i - 1]} → ${along[i]} m)`);
-  assert.ok(along[along.length - 1] < 0 && along.slice(0, 15).every((v) => v > 0), 'down to the sea, above it inland');
-  assert.ok(at(g, 0.5, 10.5) < at(ground, 0.5, 10.5), 'cut below the ground at the source');
-  // Water from the source finds the sea by the steepest way down, close by the river drawn.
-  let lon = 0.5, lat = 10.5, steps = 0, off = 0;
-  while (at(g, lon, lat) >= 0 && steps++ < 100) {
-    let best: [number, number] = [lon, lat], low = at(g, lon, lat);
-    for (const [dl, dp] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) { const v = at(g, lon + dl, lat + dp); if (v < low) { low = v; best = [lon + dl, lat + dp]; } }
-    if (best[0] === lon && best[1] === lat) break;
-    [lon, lat] = best;
-    off = Math.max(off, Math.min(...[10.5, 11.5, 12.5].map((l) => Math.abs(lat - l))));
-  }
-  assert.ok(at(g, lon, lat) < 0, `the water reaches the sea (stopped at ${lon}, ${lat})`);
-  assert.ok(off <= 1, 'along the river drawn');
+  const made = applyStamps(ground, [stamp('river', path, { radiusKm: 300, strength: 120 })], R);
+  assert.equal(made.grid, ground, 'the heights themselves');
+  assert.equal(made.touched, null, 'nothing marked as sculpted');
   // Its water drawn (D220: whatever the height), from its source to its mouth (not on into the sea).
   const drawn = applyStamps(ground, [stamp('river', path, { radiusKm: 300, strength: 120 })], R).rivers[0].course;
   assert.deepEqual(drawn[0], [0.5, 10.5], 'from its source');

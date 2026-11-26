@@ -61,6 +61,21 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D226. A river is its water alone: the ground is never changed by it
+
+- **Why.** A river cut a valley into the ground (30 km wide and 60 m deep to start with, D220). Seen from far away
+  the cut showed as dark squares, the map's coarse cells shaded along the river, fading as one closed in; it also
+  changed relief and, near the sea, coasts that nobody had asked to change. What is wanted of the tool is a new stream
+  of water and nothing else.
+- **No valley** (`applyRiverStamp`): a river's course, winding and tributaries are worked out from the heights as
+  before, but the heights are left as they are and no cell is marked as sculpted, whatever depth its stroke carries;
+  strokes of rivers alone give the map's own heights back (`applyStamps`). Rivers drawn before lose their valleys.
+  *Valley* and *Cuts* are gone from the brush's options and from a chosen river's Properties. (This replaces D225's
+  rule that a valley stays above the sea, and D220's valley.)
+- **Tested as asked** (`e2e/workflows`, the river step): the map pictured before and after a river is drawn, close in
+  and at two zooms farther out; every pixel that differs must be bluer than it was (its water), and no more than a
+  dozen others may differ at all.
+
 ### D225. Sculpting laid over the finer heights; a river always has its water and its valley never makes sea
 
 - **Why.** Close in on the Earth, where the finer heights are shown (D101), every cell of the map's own heights that a
