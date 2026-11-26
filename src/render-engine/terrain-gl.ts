@@ -325,7 +325,25 @@ void main() {
     // (How many pixels inland the coast is: by the slope, as the edge is smoothed above; close in on the finer heights,
     // only the smoothed edge itself.)
     float dpx = closeA >= 0.0 ? (closeA - 0.5) * 2.0 : rel / max(perPixel, 1e-3);
-    outColor = vec4(clamp(dpx + 0.5, 0.0, 1.0) - clamp(dpx - u_band + 0.5, 0.0, 1.0));
+    // Where a coastline says what is land (the Earth at today's sea level), the height there is held at half a metre
+    // whatever the ground does, and the slope tells nothing of how far the coast is: steep ground anywhere inland read
+    // as "near the coast" and was drawn as coast (D227). There the band is drawn only where sculpting has made the
+    // terrain decide the coast; the coastline itself is stroked for the rest (map-renderer.ts).
+    float byHeights = u_useMask == 1 && closeA < 0.0 && abs(u_seaLevel) < 0.01 ? over : 1.0;
+    // And only where the sea really lies within the band's reach: the height a band and a half downhill is below the
+    // sea. (Low ground far from any coast is within a few pixels' fall of the sea's level by its slope alone.)
+    if (closeA < 0.0 && byHeights > 0.0) {
+      vec2 fall = vec2(dEdu * sgx.x + dEdv * sgx.y, dEdu * sgy.x + dEdv * sgy.y);
+      float steep = length(fall);
+      if (steep < 1e-6) byHeights = 0.0;
+      else {
+        vec2 down = -fall / steep * (u_band * 1.5 + 1.0);
+        vec2 at2 = su + sgx * down.x + sgy * down.y;
+        float e2 = inD ? textureGrad(u_detail, at2, sgx, sgy).r : textureGrad(u_elev, at2, sgx, sgy).r;
+        if (e2 - u_seaLevel > 0.0) byHeights = 0.0;
+      }
+    }
+    outColor = vec4((clamp(dpx + 0.5, 0.0, 1.0) - clamp(dpx - u_band + 0.5, 0.0, 1.0)) * byHeights);
     return;
   }
   if (u_mode == 5) { outColor = vec4(over); return; }

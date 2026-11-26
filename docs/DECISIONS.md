@@ -61,6 +61,23 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D227. The border along the coast on a sculpted Earth: the coastline, not the low ground
+
+- **Why.** On a layer ending at the coast, a country's border runs along its coast (D221). Once any terrain stroke
+  existed on the Earth, the terrain was taken to decide every coast, and the border along it became a band worked out
+  from the heights: how many pixels' fall the ground is above the sea. Low ground far from any coast is within a few
+  pixels' fall of the sea's level (plains near sea level, land below it), so dark lines were drawn all over such
+  land inside a country, most of all round a low coast.
+- **The coastline still is the coast where nothing was sculpted** (`coastLine` with what is `less`): on the Earth at
+  today's sea level, the coastline is stroked as before any stroke, less the places where sculpting made the terrain
+  decide the coast; the band from the heights is drawn only there (the terrain shader's `coastband`, by its
+  `u_override`). SVG frames likewise (`svgMasks().coastline`).
+- **The band only where the sea is within reach**: wherever the band is drawn from the heights (sculpted ground,
+  planets, other sea levels), the height a band and a half downhill must be below the sea; low ground alone is no
+  coast. Worked out for each pixel alone, so pictures drawn in strips still agree.
+- **Tested**: in the coast-borders step the line along Portugal's coast is counted before and after a terrain stroke
+  far away: the same line (784 pixels both times; before the fix 283, the coastline gone and low ground drawn).
+
 ### D226. A river is its water alone: the ground is never changed by it
 
 - **Why.** A river cut a valley into the ground (30 km wide and 60 m deep to start with, D220). Seen from far away

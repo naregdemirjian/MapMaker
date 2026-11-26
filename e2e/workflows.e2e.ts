@@ -5900,6 +5900,26 @@ try {
     assert.ok(alongCoast > 20, `its border along the coast (${alongCoast} pixels)`);
     assert.equal(await count(seaBox), 0, 'none out at sea');
     await h.screenshot('coast-borders');
+    // With the terrain sculpted somewhere (D227: the terrain then has its say on coasts): still the coastline as its
+    // border, and no line anywhere inland, however steep the ground (steep slopes were drawn as coast).
+    const inland = await rectOf([-8.2, 40.4], [-7.5, 38.4]), all = await rectOf([-10.2, 42.0], [-7.0, 37.0]);
+    assert.ok((await count(inland)) < 5, 'no border inland');
+    const lineBefore = await count(all);
+    await page.evaluate(() => { const m = (window as any).__mapmaker, s = m.store; s.execute((w: any) => m.bench.commands.addTerrainStamp(w, s.spaceId, { tool: 'raise', path: [[20, 50]], radiusKm: 100, strength: 300, seed: 1, from: null })); });
+    await h.saved();
+    // (Once the Earth's heights are in and the map drawn with them.)
+    await page.waitForFunction(() => { const s = (window as any).__mapmaker.store; return !!s.terrainOf(s.world.get('map_space', s.spaceId)); }, null, { timeout: 60000 });
+    await page.waitForTimeout(2500);
+    const sculptedCoast = await count(coastBox), sculptedInland = await count(inland);
+    assert.ok(sculptedCoast > 20, `its border along the coast still (${sculptedCoast} pixels)`);
+    assert.ok(sculptedInland < 5, `no border inland with the terrain sculpted (${sculptedInland} pixels)`);
+    // (Low ground beside the coast, the Tagus plain here, was drawn as coast all over once the terrain was sculpted.)
+    const lineAfter = await count(all);
+    assert.ok(Math.abs(lineAfter - lineBefore) <= 0.06 * lineBefore + 6, `the same line as before the terrain was sculpted (${lineAfter} pixels against ${lineBefore})`);
+    assert.equal(await count(seaBox), 0, 'none out at sea');
+    await h.screenshot('coast-borders-sculpted');
+    await page.getByTestId('undo').click();
+    await h.saved();
     // None at the coast.
     await page.evaluate((layer) => (window as any).__mapmaker.store.set({ selection: { kind: 'layer', id: layer } }), ids.layer);
     await page.getByTestId('coast-border').selectOption('none');

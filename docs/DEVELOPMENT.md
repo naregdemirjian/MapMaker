@@ -9,6 +9,8 @@ The approved architecture is the Claude Doc "Map Maker — Technical Architectur
 
 ## Status at a glance (23 November 2026, Stages 2, 3, 4, 6, 8 to 14 done; Stage 7 mostly done)
 
+- **Coast borders on a sculpted Earth** (D227): the coastline stays the border along the coast after terrain strokes;
+  no lines over low ground inside a country.
 - **A river is its water alone** (D226): drawing one changes nothing of the ground, the relief or the coasts, at any
   zoom; the valley settings are gone.
 - **Sculpting and rivers close in** (D225): sculpted ground keeps the finer heights' detail (no square patches); a

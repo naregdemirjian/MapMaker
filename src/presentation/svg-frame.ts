@@ -390,7 +390,7 @@ export async function svgFrame(o: SvgFrameOptions): Promise<SvgFrame> {
         // the land beside them along the coast (D83); on a coast the terrain decides, a band along the inside of the land.
         let coastLine = '';
         const coastal = clip && mode === 'coast' && masked ? [...polys.keys()].filter((o) => !seaOwners.has(o)) : [];
-        if (coastal.length && masks!.coast === 'mixed' && basemap) {
+        if (coastal.length && masks!.coastline && basemap) {
           const where = new SvgPen(W, H, `cw${n}`), wc = where.asContext();
           turned(where);
           wc.fillStyle = '#ffffff'; wc.strokeStyle = '#ffffff'; wc.lineWidth = 2 * masks!.rim; wc.lineJoin = 'round'; wc.lineCap = 'round';
@@ -419,10 +419,11 @@ export async function svgFrame(o: SvgFrameOptions): Promise<SvgFrame> {
             defs.push(pen.defs());
             coastLine = `<g mask="url(#coast-where-${n})">\n${pen.body()}\n</g>`;
           }
-        } else if (coastal.length && masks!.coast === 'terrain') {
+        }
+        if (coastal.length && masks!.coast === 'terrain') {
           const band = pictures.svgCoastBand(view, shot.spaceId, options, Math.max(1, width));
           if (band && maskDef(`coast-line-${n}`, band)) {
-            const pen = new SvgPen(W, H, `bc${n}`), c = pen.asContext();
+            const pen = new SvgPen(W, H, `bt${n}`), c = pen.asContext();
             turned(pen);
             c.fillStyle = style.border;
             for (const o of coastal) {
@@ -432,7 +433,7 @@ export async function svgFrame(o: SvgFrameOptions): Promise<SvgFrame> {
               c.fill(new SvgPath(d) as unknown as Path2D, 'evenodd');
             }
             defs.push(pen.defs());
-            if (pen.body()) coastLine = `<g mask="url(#coast-line-${n})">\n${pen.body()}\n</g>`;
+            if (pen.body()) coastLine = [coastLine, `<g mask="url(#coast-line-${n})">\n${pen.body()}\n</g>`].filter(Boolean).join('\n');
           }
         }
         // Front lines along the wars of the moment (D89): a dark edge, the line, and teeth toward the enemy.

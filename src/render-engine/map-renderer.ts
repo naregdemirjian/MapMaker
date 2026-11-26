@@ -1892,7 +1892,7 @@ export class MapRenderer {
    * territory beside it (D83), and the frame without that band. `coast` says which case the view is
    * ('terrain': the terrain decides the coast). Null where nothing ends at a coast.
    */
-  svgMasks(view: View, spaceId: string, opts: RenderOptions): { fills: OffscreenCanvas; borders: OffscreenCanvas; band: OffscreenCanvas | null; outsideBand: OffscreenCanvas | null; rim: number; coast: 'land' | 'sea' | 'mixed' | 'terrain' } | null {
+  svgMasks(view: View, spaceId: string, opts: RenderOptions): { fills: OffscreenCanvas; borders: OffscreenCanvas; band: OffscreenCanvas | null; outsideBand: OffscreenCanvas | null; rim: number; coast: 'land' | 'sea' | 'mixed' | 'terrain'; coastline: boolean } | null {
     const terrain = opts.terrain && view.camera.projection !== 'flat' && terrainDrawable() ? opts.terrain : null;
     const seaLevel = terrain ? Math.round((terrain.seaLevel ?? 0) * 100) / 100 : 0;
     const terrainLand = !!terrain && (seaLevel !== 0 || !opts.basemap || !!terrain.override || closeCoastOf(terrain, opts.basemap, seaLevel));
@@ -1936,7 +1936,9 @@ export class MapRenderer {
       o.g.drawImage(band, 0, 0);
       outsideBand = o.c;
     }
-    return { fills: land(true), borders: land(false), band, outsideBand, rim, coast };
+    // (The Earth at today's sea level with sculpted ground, D227: its coastline is still the coast where not sculpted.)
+    const coastline = coast === 'mixed' || (terrainLand && !!terrain?.override && !!opts.basemap && seaLevel === 0 && this.basemapPainter.pathsFor(view, sheet, opts.basemap).coast === 'mixed');
+    return { fills: land(true), borders: land(false), band, outsideBand, rim, coast, coastline };
   }
 
   /**
@@ -2739,7 +2741,14 @@ export class MapRenderer {
           // The border along the coast (D221): the coastline where the layer's land meets the sea.
           if (mode === 'coast') {
             if (mixed) this.coastLine(c, view, sheet, sp, arr, snap, bp, opts.basemap!, bl, width, style, overSea);
-            else if (terrainLand && terrain) this.terrainCoastLine(c, view, sheet, sp, arr, snap, terrain, opts.basemap ?? null, seaLevel, cm, bl, width, style, overSea);
+            else if (terrainLand && terrain) {
+              // On the Earth at today's sea level with sculpted ground (D227): the coastline stroked as ever, less where
+              // sculpting made the terrain decide the coast; there, the band from the heights.
+              if (terrain.override && opts.basemap && seaLevel === 0 && !closeCoast && this.basemapPainter.pathsFor(view, sheet, opts.basemap).coast === 'mixed') {
+                this.coastLine(c, view, sheet, sp, arr, snap, bp, opts.basemap, bl, width, style, overSea, (k) => this.layTerrain(k, view, sheet, terrain, 'override', cm));
+              }
+              this.terrainCoastLine(c, view, sheet, sp, arr, snap, terrain, opts.basemap ?? null, seaLevel, cm, bl, width, style, overSea);
+            }
           }
         }
         c.restore();
@@ -4547,8 +4556,8 @@ export class MapRenderer {
    * against nobody, so each country's outline is whole. Kept to the layer's parcels and the land beside them along the
    * coast (D83), less those of countries whose land carries on over the sea (their border runs where it was drawn).
    */
-  private coastLine(c: CanvasRenderingContext2D, view: View, sheet: Sheet, sp: SheetParcels, arr: Arrangement, snap: LayerSnap, bp: BorderPaths, basemap: Basemap, look: LayerBorders | null, width: number, style: MapStyle, skip: ReadonlySet<string>): void {
-    if (this.scratchRoom(c) < 2) return;
+  private coastLine(c: CanvasRenderingContext2D, view: View, sheet: Sheet, sp: SheetParcels, arr: Arrangement, snap: LayerSnap, bp: BorderPaths, basemap: Basemap, look: LayerBorders | null, width: number, style: MapStyle, skip: ReadonlySet<string>, less: ((k: CanvasRenderingContext2D) => void) | null = null): void {
+    if (this.scratchRoom(c) < (less ? 3 : 2)) return;
     const line = this.scratch(c), where = this.scratch(c);
     where.fillStyle = '#000'; where.strokeStyle = '#000'; where.lineJoin = 'round'; where.lineCap = 'round';
     let any = false;
@@ -4564,6 +4573,12 @@ export class MapRenderer {
     line.strokeStyle = style.border; line.lineWidth = width; line.lineJoin = 'round'; line.lineCap = 'round';
     if (cs) this.strokeBorder(line, coast, cs, width, style.border, this.frameUnit); else this.strokeOnSheet(line, coast, width);
     line.save(); line.setTransform(1, 0, 0, 1, 0, 0); line.globalCompositeOperation = 'destination-in'; line.drawImage(where.canvas as CanvasImageSource, 0, 0); line.restore();
+    // (Less a picture of where the line is not wanted: where the terrain decides the coast, D227.)
+    if (less) {
+      const k = this.scratch(c);
+      less(k);
+      line.save(); line.setTransform(1, 0, 0, 1, 0, 0); line.globalCompositeOperation = 'destination-out'; line.drawImage(k.canvas as CanvasImageSource, 0, 0); line.restore();
+    }
     c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.drawImage(line.canvas as CanvasImageSource, 0, 0); c.restore();
   }
 
