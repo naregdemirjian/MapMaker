@@ -61,6 +61,19 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D228. Number boxes take effect as they step, and can be dragged
+
+- **Why.** A number box (border thickness and the rest) saved only on Enter or on leaving it, so a step of its arrows
+  showed nothing until the box was left; and there was no quick way to try a range of values.
+- **A step takes effect at once**: the up and down arrow keys and the box's own arrows save each step as it is made,
+  the cursor staying in the box (`NumberField`: a change without typing behind it, an `inputType`, is saved; typed
+  numbers still wait for Enter or leaving, so typing 150 is not saved as 1, then 15).
+- **Pressed and dragged up, the number rises; down, it falls** (`number-scrub.ts`, every number box of the app,
+  whichever panel made it): a step of the box for every 4 pixels, on the box's grid of steps as its own arrows go;
+  Shift ten times as far, Alt a tenth; each step saved as it is reached. A press without moving puts the cursor in
+  the box with its number chosen, to type over; a press on the box's own arrows, or in a box being typed in, is the
+  browser's as before. The pointer shows the drag (up-down arrows) over a box not being typed in.
+
 ### D227. The border along the coast on a sculpted Earth: the coastline, not the low ground
 
 - **Why.** On a layer ending at the coast, a country's border runs along its coast (D221). Once any terrain stroke

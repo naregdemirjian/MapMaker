@@ -17,8 +17,9 @@ const UNITS: Array<[LengthUnit, string]> = [['day', 'days'], ['month', 'months']
 function CountField({ value, onCommit, testId }: { value: number; onCommit: (n: number) => void; testId: string }) {
   const [text, setText] = useState(String(value));
   useEffect(() => setText(String(value)), [value]);
-  const commit = () => { const n = Math.round(Number(text)); if (n >= 1 && n !== value) onCommit(n); else setText(String(value)); };
-  return <input className="count" type="number" min={1} step={1} value={text} onChange={(e) => setText(e.target.value)} onBlur={commit} onKeyDown={(e) => { if (e.key === 'Enter') commit(); }} data-testid={testId} />;
+  const commit = (t = text) => { const n = Math.round(Number(t)); if (n >= 1 && n !== value) onCommit(n); else setText(String(value)); };
+  // (A step of the arrows or a drag, D228, takes effect at once; typing on Enter or on leaving.)
+  return <input className="count" type="number" min={1} step={1} value={text} onChange={(e) => { setText(e.target.value); if (!(e.nativeEvent as Event & { inputType?: string }).inputType) commit(e.target.value); }} onBlur={() => commit()} onKeyDown={(e) => { if (e.key === 'Enter') commit(); }} data-testid={testId} />;
 }
 
 /** In the recording bar: what each change recorded does. */

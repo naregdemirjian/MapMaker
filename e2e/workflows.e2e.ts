@@ -5387,6 +5387,34 @@ try {
     await width.fill(before);
     await width.press('Enter');
     await h.saved();
+    // A step of the arrow keys takes effect at once, while the box is still being typed in (D228).
+    await width.focus();
+    await width.press('ArrowUp');
+    await h.saved();
+    assert.ok(Number(await width.inputValue()) > Number(before), 'a step up');
+    assert.equal(await widthReset.isDisabled(), false, 'saved without leaving the box');
+    assert.ok(await width.evaluate((e) => e === document.activeElement), 'still in the box');
+    await widthReset.click();
+    await h.saved();
+    // Pressed and dragged up, the number rises a step for every 4 pixels; down, it falls; it takes effect as it moves.
+    const wb = (await width.boundingBox())!;
+    await page.mouse.move(wb.x + 12, wb.y + wb.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(wb.x + 12, wb.y + wb.height / 2 - 20, { steps: 5 });
+    assert.equal(await width.inputValue(), '2.5', 'five steps of 0.25 up from 1.4 (the first to 1.5, as the box\'s arrows)');
+    await page.waitForFunction(() => !(document.querySelector('[data-testid="layer-border-width-reset"]') as HTMLButtonElement).disabled);
+    await page.mouse.move(wb.x + 12, wb.y + wb.height / 2 + 8, { steps: 5 });
+    await page.mouse.up();
+    await h.saved();
+    assert.equal(await width.inputValue(), '1', 'two steps down from 1.4');
+    assert.equal(await page.evaluate(() => document.body.classList.contains('number-scrubbing')), false);
+    // Pressed without moving: the cursor is in the box to type, its number chosen.
+    await width.click();
+    assert.ok(await width.evaluate((e) => e === document.activeElement));
+    await page.keyboard.type(before);
+    assert.equal(await width.inputValue(), before, 'what was typed took the place of the number');
+    await width.press('Enter');
+    await h.saved();
     await h.screenshot('properties-layer');
     // The whole row chooses it (not only its name); a second click lets it go again.
     await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));

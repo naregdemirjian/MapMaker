@@ -32,7 +32,7 @@ function LengthField({ value, onChange, testId }: { value: types.EventLength | n
   };
   return (
     <span className="type-length">
-      <input type="number" min={1} placeholder="–" title="Empty: a new event of the type happens at once" value={n} onChange={(e) => setN(e.target.value)} onBlur={() => commit(n, unit)} onKeyDown={(e) => e.key === 'Enter' && commit(n, unit)} data-testid={`${testId}-n`} />
+      <input type="number" min={1} placeholder="–" title="Empty: a new event of the type happens at once" value={n} onChange={(e) => { setN(e.target.value); if (!(e.nativeEvent as Event & { inputType?: string }).inputType) commit(e.target.value, unit); }} onBlur={() => commit(n, unit)} onKeyDown={(e) => e.key === 'Enter' && commit(n, unit)} data-testid={`${testId}-n`} />
       <select value={unit} onChange={(e) => commit(n, e.target.value as types.LengthUnit)} data-testid={`${testId}-unit`}>
         <option value="day">days</option><option value="month">months</option><option value="year">years</option>
       </select>

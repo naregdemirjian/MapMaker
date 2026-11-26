@@ -103,18 +103,29 @@ export function yearSizer(startYear: number, endYear: number, cal: Calendar = gr
   return (a.length >= b.length ? a : b).replace(/\d/g, '0');
 }
 
-/** A number box that saves when you press Enter or leave it, not on every keystroke. */
+/**
+ * A number box. Typed numbers are saved when you press Enter or leave it, not on every keystroke; a step with the
+ * up and down arrow keys or the box's own arrows, and a drag of the mouse up or down in it (number-scrub.ts, D228),
+ * takes effect at once.
+ */
 export function NumberField({ value, onCommit, min, max, step, testId, title, def }: { value: number; onCommit: (n: number) => void; min?: number; max?: number; step?: number; testId?: string; title?: string; def?: number }) {
   const [text, setText] = useState(String(value));
   useEffect(() => setText(String(value)), [value]);
-  const commit = () => {
-    const n = Number(text);
-    if (!text.trim() || !Number.isFinite(n)) { setText(String(value)); return; }
+  const commit = (t = text) => {
+    const n = Number(t);
+    if (!t.trim() || !Number.isFinite(n)) { setText(String(value)); return; }
     const c = Math.min(max ?? Infinity, Math.max(min ?? -Infinity, n));
     if (c !== value) onCommit(c);
     setText(String(c));
   };
-  const input = <input type="number" value={text} min={min} max={max} step={step} title={title} onChange={(e) => setText(e.target.value)} onBlur={commit} onKeyDown={(e) => e.key === 'Enter' && commit()} data-testid={testId} />;
+  // (Typing comes as an InputEvent with what was typed; a step of the arrows or a drag comes without one.)
+  const change = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const t = e.target.value;
+    setText(t);
+    const ne = e.nativeEvent as Event & { inputType?: string };
+    if (!ne.inputType) commit(t);
+  };
+  const input = <input type="number" value={text} min={min} max={max} step={step} title={title} onChange={change} onBlur={() => commit()} onKeyDown={(e) => e.key === 'Enter' && commit()} data-testid={testId} />;
   // (With a default: a button beside it puts it back, D207.)
   if (def === undefined) return input;
   return <span className="with-reset">{input}<ResetButton def={def} at={value === def} onReset={() => { setText(String(def)); if (value !== def) onCommit(def); }} testId={testId ? `${testId}-reset` : undefined} /></span>;

@@ -3,6 +3,7 @@ import { setGalaxyGL } from '../space/galaxy-gl.ts';
 import { forgetBakedGalaxies, galaxyBakeState, galaxyImageNow } from '../space/galaxy-pictures.ts';
 import { spaceSettingsOf as galaxySettingsOf } from '../world-model/world-settings.ts';
 import { App } from './App.tsx';
+import { installNumberScrub } from './number-scrub.ts';
 import { store } from './store.ts';
 import { gregorian } from '../core-time/index.ts';
 import { lonLatToVec } from '../geo-kernel/vec.ts';
@@ -145,4 +146,5 @@ function shown(width: number, height: number) {
   },
 };
 
+installNumberScrub();
 createRoot(document.getElementById('root')!).render(<App />);
