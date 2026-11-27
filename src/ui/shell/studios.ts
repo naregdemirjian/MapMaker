@@ -44,6 +44,11 @@ export const PANELS: PanelInfo[] = [
   { id: 'looks', title: 'Looks', pages: ['history', 'timeline', 'looks', 'shots'], hint: 'How the thing chosen is drawn: its colour, fill, borders, label, marker (Design, Ctrl+D); in Shots, everywhere or this shot only', minW: 200 },
   { id: 'effects', title: 'Effects', pages: ['history', 'timeline', 'looks', 'shots'], hint: 'Every effect, in folders: drag one onto a country on the map, into the Looks panel or onto a row of the lists; double-click gives it to what is chosen', minW: 170 },
   { id: 'timeline', title: 'Timeline', pages: WORLD, hint: 'The date viewed, playing history, and the events on their tracks' },
+  // (The Timeline studio's own, D241.)
+  { id: 'groups', title: 'Groups', pages: ['timeline'], hint: 'The groups of events: each a track of the timeline, shown or not, its colour, name and place', minW: 200 },
+  { id: 'types', title: 'Types', pages: ['timeline'], hint: 'Event types: their colours, how territory drawn into their events spreads, how long a new one lasts', minW: 200 },
+  { id: 'branches', title: 'Branches', pages: ['timeline'], hint: 'Alternative timelines: the one viewed, a new one from the date viewed, each changed or deleted', minW: 200 },
+  { id: 'statistics', title: 'Statistics', pages: ['timeline'], hint: 'Numbers kept over time on the map viewed, shown counting in shots as {name}', minW: 200 },
   { id: 'shots', title: 'Shots', pages: SHOTS, hint: 'The shots of this project' },
   { id: 'shot', title: 'Shot', pages: ['shots'], hint: 'The settings of the shot chosen' },
   { id: 'export', title: 'Export', pages: ['export'], hint: 'What is exported, how and where' },
@@ -62,7 +67,8 @@ export function defaultDock(page: Page): DockLayout {
     case 'history':
       return { root: split('col', [split('row', [stack(['tools'], 44), lists('countries', ['layers', 'countries', 'places', 'areas', 'events', 'maps', 'effects'], 250), stack([VIEWER]), split('col', [stack(['properties']), stack(['looks'])], 310)]), stack(['timeline'], 190)]), floats: [] };
     case 'timeline':
-      return { root: split('col', [split('row', [lists('events', ['events', 'countries', 'layers', 'effects'], 270), stack([VIEWER]), split('col', [stack(['properties']), stack(['looks'])], 330)]), stack(['timeline'], 340)]), floats: [] };
+      // (The timeline takes the room; a small map follows the date above the studio's own panels, D241.)
+      return { root: split('row', [split('col', [stack([VIEWER], 200), lists('groups', ['groups', 'types', 'branches', 'statistics'], 0)], 290), stack(['timeline']), split('col', [stack(['properties']), stack(['looks'])], 320)]), floats: [] };
     case 'looks':
       // (The Effects panel under the lists, beside the map and the Looks panel effects are dragged onto, D238.)
       return { root: split('col', [split('row', [split('col', [lists('countries', ['countries', 'layers', 'places', 'areas'], 0), stack(['effects'], 300)], 250), stack([VIEWER]), split('col', [stack(['looks']), stack(['properties'], 230)], 380)]), stack(['timeline'], 130)]), floats: [] };

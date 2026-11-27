@@ -33,13 +33,14 @@ test('every panel has a name and the pages it opens in; the viewer opens everywh
   assert.ok(panelOn('shots', 'export') && !panelOn('shots', 'history'));
   assert.ok(panelOn('tools', 'map') && panelOn('tools', 'history') && !panelOn('tools', 'timeline'), 'the tools only where there is drawing');
   assert.ok(!panelOn('nonsense', 'history'));
+  assert.ok(['groups', 'types', 'branches', 'statistics'].every((p) => panelOn(p, 'timeline') && !panelOn(p, 'history')), 'the Timeline studio\'s own panels (D241)');
 });
 
 test('each page opens with its own layout, holding only panels it can hold, the viewer among them', () => {
   const want: Record<Page, string> = {
     map: '(([tools]@44 | [maps*,layers]@230 | [viewer*,gallery] | [properties]@350) / [timeline]@130)',
     history: '(([tools]@44 | [layers,countries*,places,areas,events,maps,effects]@250 | [viewer] | ([properties] / [looks])@310) / [timeline]@190)',
-    timeline: '(([events*,countries,layers,effects]@270 | [viewer] | ([properties] / [looks])@330) / [timeline]@340)',
+    timeline: '(([viewer]@200 / [groups*,types,branches,statistics])@290 | [timeline] | ([properties] / [looks])@320)',
     looks: '((([countries*,layers,places,areas] / [effects]@300)@250 | [viewer] | ([looks] / [properties]@230)@380) / [timeline]@130)',
     shots: '(([shots]@250 | [viewer] | ([shot] / [looks*,effects])@330) / [shot-timeline]@150)',
     export: '(([shots]@230 | [viewer] | [export]@380) / [shot-timeline]@110)',

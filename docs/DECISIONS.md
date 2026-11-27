@@ -61,6 +61,29 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D241. The Timeline studio's own panels: Groups, Types, Branches and Statistics under a small map (S6, first part)
+
+- **Why.** Agreed with the user (the drawing "Timeline: tracks" of the studios plan): the Timeline studio has its own
+  panels, groups, types, branches and statistics, beside a small map that follows the date, and the timeline takes the
+  room.
+- **Layout** (`studios.ts` `defaultDock('timeline')`): at the left, the map (200 pixels high: it follows the date and is
+  not drawn on, as the studio has no tools) over the tabs Groups, Types, Branches and Statistics (Groups in front; the
+  lists open from the Window menu); the timeline in the middle, all its height; Properties over the Looks panel at the right. Every one of them
+  docks, closes and opens again as the other panels (D234).
+- **Groups** (`panels/TimelinePanels.tsx` `GroupsPanel`): each group of events, a track of the timeline: shown or not
+  (the timeline's and the lists' filter, as the timeline's Groups menu), its colour, its name (double-click or ✎), its
+  place among the tracks (↑ ↓), deleted (its events stay; a message says Undo brings it back), and "Not in a group";
+  a new group by its name.
+- **Types, Branches, Statistics**: what the dialogs held, shared by both (`EventTypesBody`, compact in the panel;
+  `BranchesBody`; `StatisticsBody`, saved together with Save as in the dialog, and showing what is saved or undone
+  unless being edited). The ways to them (Event types… in the Events list and an event's Type, the ⑂ button, Statistics
+  in the map's Properties) bring the panel to the front in the Timeline studio, and open the dialog in the studios
+  without it (`store.panelOrDialog`).
+- **Tests.** Unit: the Timeline studio's layout; its own panels open there only. Interface: the layout (the map 200
+  pixels high, the timeline much taller, Groups in front); in History, Event types… opening its dialog; in Timeline, a
+  group made, renamed, hidden and shown, deleted; a type made in the Types panel and Event types… bringing it to the
+  front; a branch made and viewed, the main timeline viewed again; a statistic saved with the map; undone.
+
 ### D240. Keys in a shot: any number or colour of the Looks panel keyed at frames, each a track of the shot (S5, second part)
 
 - **Why.** Agreed with the user for S5: every option of the Looks panel can be keyframed, each keyframed option a track

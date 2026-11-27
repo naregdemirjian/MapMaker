@@ -13,6 +13,7 @@ import { DateBar } from './Bars.tsx';
 import { MapGallery } from '../components/MapGallery.tsx';
 import { LooksPanel } from '../panels/Looks.tsx';
 import { EffectsPanel } from '../panels/Effects.tsx';
+import { GroupsPanel, TypesPanel, BranchesPanel, StatisticsPanel } from '../panels/TimelinePanels.tsx';
 import { presents } from './studios.ts';
 import { VIEWER, type PanelId } from './dock.ts';
 import { panelInfo } from './studios.ts';
@@ -55,6 +56,10 @@ export function PanelContent({ id }: { id: PanelId }) {
     case 'shot': return <ShotEditor />;
     case 'export': return <ShotEditor only="export" />;
     case 'shot-timeline': return <ShotTimeline />;
+    case 'groups': return <GroupsPanel />;
+    case 'types': return <TypesPanel />;
+    case 'branches': return <BranchesPanel />;
+    case 'statistics': return <StatisticsPanel />;
   }
   return null;
 }

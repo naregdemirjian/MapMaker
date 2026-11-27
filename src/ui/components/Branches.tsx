@@ -1,5 +1,6 @@
 // Branches in the interface (Stage 13, D150): the timeline viewed, switched from the title bar; the Branches
-// dialog that makes a branch from the date viewed and renames, recolours, moves or deletes branches.
+// dialog, or the Timeline studio's Branches panel (D241), that makes a branch from the date viewed and renames,
+// recolours, moves or deletes branches.
 import { useState } from 'react';
 import { useStore } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
@@ -25,14 +26,28 @@ export function BranchSwitcher() {
           {tree.map((b) => <option key={b.id} value={b.id}>{indent(b.depth)}{branchName(w, b.id)}</option>)}
         </select>
       )}
-      <button className="icon-button" onClick={() => s.set({ dialog: 'branches' })} data-testid="open-branches" aria-label="Branches"
+      <button className="icon-button" onClick={() => s.panelOrDialog('branches', 'branches')} data-testid="open-branches" aria-label="Branches"
         title="Branches: an alternative history that splits off at the date viewed, shares everything before it and has its own events after it">⑂</button>
     </span>
   );
 }
 
-/** Making, changing and deleting branches. */
+/** Making, changing and deleting branches: in a dialog, or the Timeline studio's Branches panel (D241). */
 export function BranchesDialog() {
+  const s = useStore();
+  const close = () => s.set({ dialog: null });
+  return (
+    <div className="modal-back" onPointerDown={(ev) => ev.target === ev.currentTarget && close()}>
+      <div className="modal wide branches-dialog" role="dialog" aria-label="Branches" data-testid="branches-dialog">
+        <div className="modal-head"><h2>Branches</h2><button className="close" onClick={close} aria-label="Close">×</button></div>
+        <BranchesBody onDone={close} />
+      </div>
+    </div>
+  );
+}
+
+/** The branches: viewed, made from the date viewed, changed and deleted (`onDone`: the dialog closes after a choice). */
+export function BranchesBody({ onDone }: { onDone?: () => void }) {
   const s = useStore();
   const w = s.world!;
   const cal = calendarNow();
@@ -41,16 +56,14 @@ export function BranchesDialog() {
   const [from, setFrom] = useState<Instant>(s.time);
   const [parent, setParent] = useState<string>(s.branch);
   const [editing, setEditing] = useState<string | null>(null);
-  const close = () => s.set({ dialog: null });
+  const done = () => onDone?.();
   const make = () => {
     const id = s.execute((wd) => cmd.createBranch(wd, { name, from, parent }));
-    if (id) { s.setBranch(id); close(); s.toast(`Now viewing the branch "${name.trim()}": what you draw from ${cal.format(from, 'day')} on is its own.`); }
+    if (id) { s.setBranch(id); done(); setName(`Branch ${s.world!.all('branch').length + 1}`); s.toast(`Now viewing the branch "${name.trim()}": what you draw from ${cal.format(from, 'day')} on is its own.`); }
   };
   const own = (id: string) => w.all('event').filter((e) => e.branch_id === id && !isBaseEvent(e.id)).length;
   return (
-    <div className="modal-back" onPointerDown={(ev) => ev.target === ev.currentTarget && close()}>
-      <div className="modal wide branches-dialog" role="dialog" aria-label="Branches" data-testid="branches-dialog">
-        <div className="modal-head"><h2>Branches</h2><button className="close" onClick={close} aria-label="Close">×</button></div>
+    <>
         <p className="muted">A branch is an alternative history. It splits off at a date: everything before then it shares with the timeline it comes from, live (fixing early history fixes both), and after it, it has events of its own. Countries, cities and characters are shared by every branch.</p>
         <div className="branch-list">
           {tree.map((b) => {
@@ -64,7 +77,7 @@ export function BranchesDialog() {
                   <b>{branchName(w, b.id)}</b>
                   <span className="muted">{r ? ` · splits from ${branchName(w, r.parent_id)} on ${cal.format(branchStart(r), 'day')} · ${own(b.id)} event${own(b.id) === 1 ? '' : 's'} of its own` : ' · the history every branch starts from'}</span>
                   <span className="row-tools">
-                    {!sel && <button className="small" onClick={() => { s.setBranch(b.id); close(); }} data-testid={`branch-view-${branchName(w, b.id)}`}>View</button>}
+                    {!sel && <button className="small" onClick={() => { s.setBranch(b.id); done(); }} data-testid={`branch-view-${branchName(w, b.id)}`}>View</button>}
                     {sel && <span className="muted">viewing</span>}
                     {r && <button className="small" onClick={() => setEditing(editing === b.id ? null : b.id)} data-testid={`branch-edit-${r.name}`}>Edit…</button>}
                     {r && <button className="small danger" onClick={() => {
@@ -92,12 +105,11 @@ export function BranchesDialog() {
             <DateField value={from} onChange={(t) => t && setFrom(t)} testId="new-branch-date" />
           </label>
         </div>
-        <div className="modal-actions">
-          <button onClick={close}>Close</button>
+        <div className={onDone ? 'modal-actions' : 'buttons'}>
+          {onDone && <button onClick={done}>Close</button>}
           <button className="primary" onClick={make} data-testid="new-branch-make">Make the branch and view it</button>
         </div>
-      </div>
-    </div>
+    </>
   );
 }
 

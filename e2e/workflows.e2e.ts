@@ -5216,15 +5216,17 @@ try {
     await page.getByTestId('dock-tab-countries').click();
     await page.locator('.list-panel[data-list="countries"]').waitFor();
     await h.screenshot('studio-history');
-    // Timeline: a tall timeline, the events in front; no tools to draw with (the map only chooses).
+    // Timeline: the timeline in the middle, all its height; a small map over the studio's own panels, Groups in front
+    // (D241); no tools to draw with (the map only chooses).
     await page.getByTestId('studio-timeline').click();
     await page.getByTestId('reset-workspace').click();
     assert.equal(await store('s.pageNow()'), 'timeline');
-    assert.equal(Math.round((await box('[data-testid="dock-stack-timeline"]')).height), 340);
+    assert.equal(Math.round((await box('[data-testid="dock-stack-viewer"]')).height), 200);
+    assert.ok((await box('[data-testid="dock-stack-timeline"]')).height > 2 * (await box('[data-testid="dock-stack-viewer"]')).height, 'the timeline takes the room');
     assert.equal(await page.getByTestId('tool-strip').count(), 0);
     assert.equal(await page.getByTestId('options-bar').count(), 0);
     assert.equal(await store('s.tool'), 'select');
-    await page.locator('.list-panel[data-list="events"]').waitFor();
+    await page.getByTestId('groups-panel').waitFor();
     // Map Studio: the maps in front; the map's own settings in Properties.
     await page.getByTestId('studio-map').click();
     await page.getByTestId('reset-workspace').click();
@@ -5881,6 +5883,78 @@ try {
     await page.getByTestId('studio-history').click();
     await page.evaluate(() => (window as any).__mapmaker.allLists());
     await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null, looksScope: 'everywhere' }));
+  });
+
+  await h.step('The Timeline studio\'s own panels (D241): groups made, renamed, hidden and deleted; a type; a branch made and left; a statistic; elsewhere the dialogs; undone', async () => {
+    const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);
+    const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
+    await page.getByTestId('studio-history').click();
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
+    const before = await steps();
+    // In History, Event types… opens its dialog (no Types panel there).
+    await page.evaluate(() => (window as any).__mapmaker.allLists());
+    await page.getByTestId('open-event-types').click();
+    await page.getByTestId('event-types-dialog').waitFor();
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ dialog: null }));
+    // The Timeline studio: its own panels under a small map.
+    await page.getByTestId('studio-timeline').click();
+    await page.getByTestId('reset-workspace').click();
+    await page.getByTestId('groups-panel').waitFor();
+    // A group made, renamed, hidden from the timeline and shown again, then deleted (its events stay).
+    await page.getByTestId('gp-new-name').fill('Campaigns');
+    await page.getByTestId('gp-new-create').click();
+    await h.saved();
+    await page.getByTestId('gp-row-Campaigns').waitFor();
+    await page.getByTestId('gp-rename-Campaigns').click();
+    await page.getByTestId('gp-rename').fill('Wars');
+    await page.getByTestId('gp-rename').press('Enter');
+    await h.saved();
+    await page.getByTestId('gp-row-Wars').waitFor();
+    const gid = await store(`s.world.all('event_group').find((g) => g.name === 'Wars').id`) as string;
+    await page.getByTestId('gp-show-Wars').uncheck();
+    assert.ok(!((await store('s.eventFilter')) as string[]).includes(gid), 'hidden from the timeline and the lists');
+    await page.getByTestId('gp-show-Wars').check();
+    assert.equal(await store('s.eventFilter'), null);
+    await page.getByTestId('gp-delete-Wars').click();
+    await h.saved();
+    assert.equal(await page.getByTestId('gp-row-Wars').count(), 0);
+    await h.screenshot('timeline-studio-groups');
+    // A type, in the Types panel.
+    await page.getByTestId('dock-tab-types').click();
+    await page.getByTestId('types-panel').waitFor();
+    await page.getByTestId('types-panel').getByTestId('new-type-name').fill('Siege');
+    await page.getByTestId('types-panel').getByTestId('new-type-create').click();
+    await h.saved();
+    await page.getByTestId('type-row-Siege').waitFor();
+    // Event types… here brings the panel to the front, no dialog.
+    await page.getByTestId('dock-tab-groups').click();
+    await page.evaluate(() => (window as any).__mapmaker.store.panelOrDialog('types', 'event-types'));
+    await page.getByTestId('types-panel').waitFor();
+    assert.equal(await page.getByTestId('event-types-dialog').count(), 0);
+    // A branch made from the date viewed: viewed at once; the main timeline viewed again.
+    await page.getByTestId('dock-tab-branches').click();
+    await page.getByTestId('branches-panel').getByTestId('new-branch-name').fill('What if');
+    await page.getByTestId('branches-panel').getByTestId('new-branch-make').click();
+    await h.saved();
+    const bid = await store(`s.world.all('branch').find((b) => b.name === 'What if').id`) as string;
+    assert.equal(await store('s.branch'), bid);
+    await page.getByTestId('branches-panel').locator('[data-testid^="branch-view-"]').first().click();
+    assert.notEqual(await store('s.branch'), bid);
+    // A statistic of the map, saved.
+    await page.getByTestId('dock-tab-statistics').click();
+    await page.getByTestId('statistics-panel').getByTestId('statistic-add').click();
+    const n = await page.getByTestId('statistics-panel').locator('[data-testid^="statistic-name-"]').count();
+    await page.getByTestId(`statistic-name-${n - 1}`).fill('Army');
+    await page.getByTestId('statistics-panel').getByTestId('statistics-save').click();
+    await h.saved();
+    assert.ok(((await store(`JSON.parse(s.world.get('map_space', s.spaceId).settings || '{}').statistics ?? []`)) as Array<{ name: string }>).some((x) => x.name === 'Army'), 'kept with the map');
+    // Undone, step by step.
+    for (let i = 0; i < 20 && (await steps()) > before; i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await steps(), before);
+    assert.equal(await store(`s.world.all('branch').filter((b) => b.name === 'What if').length`), 0);
+    await page.getByTestId('dock-tab-groups').click();
+    await page.getByTestId('studio-history').click();
+    await page.evaluate(() => (window as any).__mapmaker.allLists());
   });
 
   await h.step('The menu bar: every command in a menu with its shortcut; the keyboard runs the same commands (D197)', async () => {

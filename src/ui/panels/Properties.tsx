@@ -72,7 +72,7 @@ function MapSetup() {
               <button className="link" onClick={() => s.set({ dialog: 'sea-level' })} data-testid="open-sea-level" title="The sea higher or lower than today's at dates you choose; the coasts follow it">Sea level over time…</button>
             )}
             <button className="link" onClick={() => s.set({ dialog: 'calendar' })} data-testid="open-calendar" title="The calendar this map's dates are written, typed and chosen in: the Gregorian, or one of its own">Calendar: {calendarNow().name}…</button>
-            <button className="link" onClick={() => s.set({ dialog: 'statistics' })} data-testid="open-statistics" title="Numbers kept over time (an economy, an army, the dead of a war), shown counting in shots' texts as {name}">Statistics ({statisticsOf(currentSpace).length})…</button>
+            <button className="link" onClick={() => s.panelOrDialog('statistics', 'statistics')} data-testid="open-statistics" title="Numbers kept over time (an economy, an army, the dead of a war), shown counting in shots' texts as {name}">Statistics ({statisticsOf(currentSpace).length})…</button>
             <button className="link" onClick={() => s.set({ dialog: 'data-sources' })} data-testid="data-sources">Data sources and credits</button>
           </div>
         )}
@@ -367,7 +367,7 @@ function EventPanel({ id }: { id: string }) {
       {!base && <>
         <PropGroup id="event:event" title="Event">
         <label>Name<input value={name} onChange={(ev) => setName(ev.target.value)} onBlur={() => name.trim() && name !== e.name && s.execute((wd) => cmd.updateEvent(wd, id, { name: name.trim() }))} /></label>
-        <label>Type<span className="row-inline"><TypeDot typeId={e.type_id} /><TypeSelect value={e.type_id} onChange={(t) => s.execute((wd) => cmd.updateEvent(wd, id, { type_id: t }))} testId="event-panel-type" /><button className="small" onClick={() => s.set({ dialog: 'event-types' })} title="Make, change and delete event types">Types…</button></span></label>
+        <label>Type<span className="row-inline"><TypeDot typeId={e.type_id} /><TypeSelect value={e.type_id} onChange={(t) => s.execute((wd) => cmd.updateEvent(wd, id, { type_id: t }))} testId="event-panel-type" /><button className="small" onClick={() => s.panelOrDialog('types', 'event-types')} title="Make, change and delete event types">Types…</button></span></label>
         <label>Starts<DateField value={start} onChange={(t) => t && s.execute((wd) => cmd.updateEvent(wd, id, { start: t }))} testId="event-panel-start" /></label>
         <label>Ends<DateField value={end} allowEmpty suggest={start} onChange={(t) => s.execute((wd) => cmd.updateEvent(wd, id, { end: t }))} testId="event-panel-end" /></label>
         <label title="When two events change the same place at the same instant, the higher precedence wins">Precedence<NumberField value={e.precedence} def={0} step={1} onCommit={(n) => s.execute((wd) => cmd.updateEvent(wd, id, { precedence: Math.round(n) }))} /></label>

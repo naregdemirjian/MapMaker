@@ -802,6 +802,14 @@ export class AppStore {
     if (!panelOn('looks', this.pageNow())) this.setPage('looks');
     this.openPanel('looks');
   }
+  /**
+   * The Timeline studio's own panels (D241): Groups, Types, Branches and Statistics brought to the front where the
+   * page has them; elsewhere, what they hold in a dialog.
+   */
+  panelOrDialog(id: PanelId, dialog: DialogName) {
+    if (panelOn(id, this.pageNow())) this.openPanel(id);
+    else this.set({ dialog });
+  }
   /** Map Studio's gallery of maps in front (New map). */
   openGallery() {
     this.setPage('map');

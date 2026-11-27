@@ -49,8 +49,9 @@ a { color: var(--accent); cursor: pointer; }
 .map-chooser select { height: 24px; padding: 1px 6px; max-width: 200px; }
 /* The timeline: its head, the tracks' heads, the tracks (D201). */
 .timeline { display: flex; flex-direction: column; }
-.tl-head { flex: none; height: 30px; display: flex; align-items: center; gap: 5px; padding: 0 8px; background: var(--panel); border-bottom: 1px solid var(--line); min-width: 0; }
-.tl-head button { height: 22px; padding: 0 8px; }
+/* (In a narrow column, as the Timeline studio's middle one, D241: its controls go on two lines.) */
+.tl-head { flex: none; min-height: 30px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 5px; padding: 4px 8px; background: var(--panel); border-bottom: 1px solid var(--line); min-width: 0; box-sizing: border-box; }
+.tl-head button { height: 22px; padding: 0 8px; white-space: nowrap; }
 .tl-head select { width: auto; padding: 1px 4px; font-size: 12px; height: 22px; }
 .tl-head .datebar .date-field { width: 220px; }
 .tl-head .datebar input { width: 100%; height: 22px; }
@@ -447,6 +448,7 @@ p.error { color: #ff9aa8; }
 .group-row input[type=color] { width: 22px; height: 20px; padding: 0; border: none; background: none; }
 .group-new { display: flex; gap: 6px; margin-top: 8px; }
 .group-new input { flex: 1; }
+.group-new button { white-space: nowrap; }
 .group-checks { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
 .key { font-size: 10px; opacity: 0.7; border: 1px solid currentColor; border-radius: 3px; padding: 0 3px; margin-left: 4px; }
 
@@ -567,6 +569,31 @@ label.indent { margin-left: 24px; }
 .type-row { display: grid; grid-template-columns: 52px minmax(100px, 1fr) minmax(150px, 1.4fr) 150px 44px 118px; gap: 6px; align-items: center; }
 .type-row.head { font-size: 11px; color: var(--muted, var(--muted2)); text-transform: uppercase; letter-spacing: 0.04em; }
 .type-row input[type=color] { width: 32px; height: 24px; padding: 0; border: none; background: none; }
+/* The Timeline studio's own panels (D241): narrow, so each type and branch takes two lines. */
+.type-table.compact { max-height: none; overflow: visible; }
+.type-table.compact .type-row { grid-template-columns: 38px minmax(0, 1fr) auto; grid-template-areas: "color name count" "spread spread length" "actions actions actions"; padding: 5px 0; border-bottom: 1px solid var(--line); }
+.type-table.compact .type-row > :nth-child(1) { grid-area: color; }
+.type-table.compact .type-row > :nth-child(2) { grid-area: name; min-width: 0; }
+.type-table.compact .type-row > :nth-child(3) { grid-area: spread; min-width: 0; }
+.type-table.compact .type-row > :nth-child(4) { grid-area: length; }
+.type-table.compact .type-row > :nth-child(5) { grid-area: count; font-size: 11.5px; }
+.type-table.compact .type-row > :nth-child(6) { grid-area: actions; justify-self: end; display: inline-flex; gap: 4px; }
+.groups-panel, .types-panel, .branches-panel, .statistics-panel { padding: 8px; overflow-y: auto; }
+.gp-head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; font-size: 11.5px; }
+.gp-head .row-tools { margin-left: auto; display: inline-flex; gap: 4px; }
+.gp-row { display: flex; align-items: center; gap: 6px; min-height: 26px; padding: 0 2px; border-radius: 4px; }
+.gp-row:hover { background: var(--hover-bg); }
+.gp-row.off .gp-name { color: var(--muted); text-decoration: line-through; }
+.gp-row input[type=color] { width: 22px; height: 18px; padding: 0; border: none; background: none; flex: none; }
+.gp-row .gp-name { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; cursor: default; }
+.gp-row .gp-rename { flex: 1; min-width: 0; padding: 2px 5px; }
+.gp-row .gp-count { flex: none; min-width: 18px; text-align: right; font-size: 11.5px; }
+.gp-row .row-tools { display: inline-flex; gap: 2px; opacity: 0.35; }
+.gp-row:hover .row-tools, .gp-row:focus-within .row-tools { opacity: 1; }
+.gp-row .row-tools button { padding: 1px 5px; font-size: 11px; }
+.branches-panel .branch-line { flex-wrap: wrap; }
+.branches-panel .branch-new { grid-template-columns: 1fr; }
+.statistics-panel .stat-editor .row label { min-width: 0; flex: 1 1 120px; }
 .type-color { display: flex; align-items: center; gap: 2px; }
 .type-length { display: flex; gap: 4px; }
 .type-length input { width: 56px; }

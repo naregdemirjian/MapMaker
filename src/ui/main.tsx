@@ -29,7 +29,9 @@ import { defaultDock, type Page } from './shell/studios.ts';
 /** The lists, in the order the one column of all of them had before they were panels of their own (D199, D234). */
 const LISTS = ['maps', 'layers', 'countries', 'places', 'areas', 'events'];
 const withAllLists = (n: dock.DockNode): dock.DockNode => n.kind === 'stack'
-  ? (n.panels.some((p) => LISTS.includes(p)) ? dock.split('col', LISTS.map((p) => dock.stack([p])), n.size) : n)
+  ? (n.panels.some((p) => LISTS.includes(p)) ? dock.split('col', LISTS.map((p) => dock.stack([p])), n.size)
+    // (In the Timeline studio, the lists under its own panels, D241.)
+    : n.panels.includes('groups') ? dock.split('col', [n, ...LISTS.map((p) => dock.stack([p]))], n.size) : n)
   : { ...n, children: n.children.map(withAllLists) };
 
 /** The working map's view as it is shown (it may hold a meridian while the map moves), or the camera's own for that size. */

@@ -19,9 +19,25 @@ function AmountField({ value, onCommit, testId }: { value: number; onCommit: (n:
 export function StatisticsDialog() {
   const s = useStore();
   const space = s.world!.get('map_space', s.spaceId)!;
-  const [draft, setDraft] = useState<Statistic[]>(() => statisticsOf(space));
-  const [error, setError] = useState('');
   const close = () => s.set({ dialog: null });
+  return (
+    <DialogFrame label="Statistics" title={<>Statistics of “{space.name}”</>} testId="statistics-dialog" wide onClose={close}>
+      <StatisticsBody onDone={close} />
+    </DialogFrame>
+  );
+}
+
+/** The statistics of the map viewed, edited and saved together: in the dialog (`onDone`), or the Statistics panel (D241). */
+export function StatisticsBody({ onDone }: { onDone?: () => void }) {
+  const s = useStore();
+  const space = s.world!.get('map_space', s.spaceId)!;
+  const stored = statisticsOf(space);
+  const [draft, setDraft] = useState<Statistic[]>(() => stored);
+  const [error, setError] = useState('');
+  // (In a panel: what is saved, or undone, shows again unless it is being edited.)
+  const [base, setBase] = useState(JSON.stringify(stored));
+  if (!onDone && JSON.stringify(stored) !== base && JSON.stringify(draft) === base) { setBase(JSON.stringify(stored)); setDraft(stored); }
+  const changed = JSON.stringify(draft) !== JSON.stringify(stored);
   const put = (i: number, patch: Partial<Statistic>) => setDraft(draft.map((x, j) => (j === i ? { ...x, ...patch } : x)));
   const save = () => {
     const names = draft.map((x) => x.name.trim().toLowerCase());
@@ -29,12 +45,14 @@ export function StatisticsDialog() {
     if (names.includes('date')) { setError('"date" already shows the date: give the statistic another name.'); return; }
     const twice = names.find((n, i) => names.indexOf(n) !== i);
     if (twice) { setError(`Two statistics are called "${twice}".`); return; }
+    setError('');
     s.execute((wd) => cmd.setMapStatistics(wd, space.id, draft));
-    close();
+    setBase(JSON.stringify(draft));
+    onDone?.();
   };
   const now = () => toJSONValue(s.time) as [number, number];
   return (
-    <DialogFrame label="Statistics" title={<>Statistics of “{space.name}”</>} testId="statistics-dialog" wide onClose={close}>
+    <>
         <p className="muted">Numbers kept over time: an economy, an army, the dead of a war. Give each its values at dates; between them it is worked out. In a shot's text box or title, write its name in braces, such as {'{GDP}'}, and it counts as history plays.</p>
         {draft.map((st, i) => (
           <div key={i} className="stat-editor" data-testid={`statistic-${i}`}>
@@ -59,7 +77,10 @@ export function StatisticsDialog() {
         ))}
         <button onClick={() => setDraft([...draft, { name: `Statistic ${draft.length + 1}`, format: 'number', ease: 'linear', keys: [{ at: now(), value: 0 }] }])} data-testid="statistic-add">+ Statistic</button>
         {error && <p className="error">{error}</p>}
-        <div className="modal-actions"><button onClick={close}>Cancel</button><button className="primary" onClick={save} data-testid="statistics-save">Save</button></div>
-    </DialogFrame>
+        <div className={onDone ? 'modal-actions' : 'buttons'}>
+          {onDone ? <button onClick={onDone}>Cancel</button> : <button onClick={() => setDraft(stored)} disabled={!changed}>Undo the changes</button>}
+          <button className="primary" onClick={save} disabled={!onDone && !changed} data-testid="statistics-save">Save</button>
+        </div>
+    </>
   );
 }

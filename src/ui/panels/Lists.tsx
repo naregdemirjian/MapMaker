@@ -300,7 +300,7 @@ export function ListPanel({ list }: { list: ListKind }) {
       {on('events') && <Section title="Events" onAdd={() => s.set({ dialog: 'new-event' })} addLabel="Event">
         <EventRows sig={eventSig} filter={filter} />
         {!events.length && <div className="muted pad">No events yet.</div>}
-        <button className="link pad-link" onClick={() => s.set({ dialog: 'event-types' })} data-testid="open-event-types">Event types…</button>
+        <button className="link pad-link" onClick={() => s.panelOrDialog('types', 'event-types')} data-testid="open-event-types">Event types…</button>
         {hiddenEvents > 0 && (
           <div className="muted pad" data-testid="events-hidden">{hiddenEvents} hidden by the group filter · <button className="link" onClick={() => s.set({ eventFilter: null })}>show all</button></div>
         )}
