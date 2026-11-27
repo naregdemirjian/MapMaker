@@ -163,6 +163,26 @@ function nameWidth(label: string): number {
   return labelWidth(measurer, label);
 }
 
+/** An event's dates in years, as dragged (D245). */
+interface Span { id: string; ys: number; ye: number | null }
+/** From the first start to the last end (or start) of some events, in years. */
+function spanOf(list: Array<{ ys: number; ye: number | null }>): { a: number; b: number } | null {
+  if (!list.length) return null;
+  return { a: Math.min(...list.map((x) => x.ys)), b: Math.max(...list.map((x) => x.ye ?? x.ys)) };
+}
+/** An event's dates in years, as stored (null: no such event). */
+function yearsOf(id: string): { ys: number; ye: number | null } | null {
+  const e = store.world?.get('event', id);
+  if (!e) return null;
+  return { ys: toApproxYear(fromStore(e.start_day, e.start_ms)), ye: e.end_day !== null ? toApproxYear(fromStore(e.end_day, e.end_ms ?? 0)) : null };
+}
+/** An event's dates as stored. */
+function datesOf(id: string): { start: Instant; end: Instant | null } | null {
+  const e = store.world?.get('event', id);
+  return e ? { start: fromStore(e.start_day, e.start_ms), end: e.end_day !== null ? fromStore(e.end_day, e.end_ms ?? 0) : null } : null;
+}
+const spans = (ids: string[]): Span[] => ids.map((id) => { const y = yearsOf(id); return y ? { id, ...y } : null; }).filter((x): x is Span => !!x);
+
 /** What the timeline shows, worked out once for each state of it. */
 interface Laid {
   tracks: TLTrack[];
@@ -186,14 +206,18 @@ export function Timeline({ head }: { head?: React.ReactNode }) {
   const [w, setW] = useState(800);
   const [h, setH] = useState(150);
   const [scroll, setScroll] = useState(0);
-  /** An event being dragged: where it would be, in years. */
-  const [preview, setPreview] = useState<null | { id: string; ys: number; ye: number | null }>(null);
+  /** Events being dragged (one, those chosen with it, those after them, D245): where they would be, in years. */
+  const [preview, setPreview] = useState<null | { key: string; at: Map<string, { ys: number; ye: number | null }> }>(null);
+  /** A box being drawn with Ctrl to choose the events it touches (D245), in pixels. */
+  const [box, setBox] = useState<null | { x0: number; y0: number; x1: number; y1: number }>(null);
   /** The track an event is dragged onto (another group's), and a track's head being dragged to another place. */
   const [dropTrack, setDropTrack] = useState<string | null>(null);
   const [headDrag, setHeadDrag] = useState<null | { id: string; y0: number; dy: number; moved: boolean }>(null);
   const justDragged = useRef(false);
   type Drag = { kind: 'scrub' } | { kind: 'pan'; x: number; y: number; start: number; end: number; scroll: number }
-    | { kind: 'bar'; id: string; mode: 'move' | 'start' | 'end'; x: number; y: number; ys: number; ye: number | null; moved: boolean; track: string; across: boolean };
+    | { kind: 'bar'; id: string; mode: 'move' | 'start' | 'end'; x: number; y: number; ys: number; ye: number | null; moved: boolean; track: string; across: boolean; group: Span[]; after: Span[] }
+    | { kind: 'box'; x0: number; y0: number; base: string[] }
+    | { kind: 'stretch'; side: 'start' | 'end'; x: number; a: number; b: number; to: number; items: Span[]; after: Span[]; moved: boolean };
   const drag = useRef<Drag | null>(null);
 
   useEffect(() => {
@@ -213,7 +237,7 @@ export function Timeline({ head }: { head?: React.ReactNode }) {
   const find = s.timelineFind.trim();
 
   const layKey = [world.serial, world.tableRevision('event'), world.tableRevision('event_group'), world.tableRevision('event_group_member'), world.tableRevision('branch'), s.branch, s.spaceId,
-    (s.eventFilter ?? ['*']).join(','), s.collapsed.filter((k) => k.startsWith('tl:')).join(','), start, end, w, preview ? `${preview.id}:${preview.ys}:${preview.ye}` : '', s.engine?.revision ?? 0].join('|');
+    (s.eventFilter ?? ['*']).join(','), s.collapsed.filter((k) => k.startsWith('tl:')).join(','), start, end, w, preview?.key ?? '', s.engine?.revision ?? 0].join('|');
   const lay = useMemo((): Laid => {
     const filter = eventFilterSet();
     const groups = sortedGroups(world), order = new Map(groups.map((g, i) => [g.id, i]));
@@ -226,7 +250,7 @@ export function Timeline({ head }: { head?: React.ReactNode }) {
       const track = gs[0] ?? cmd.UNGROUPED;
       const t = info.get(track);
       if (t) t.total++; else { const g = groups.find((x) => x.id === track); info.set(track, { name: g?.name ?? 'Events', color: g?.color ?? '#4f7ca8', total: 1 }); }
-      const moved = preview?.id === e.id ? preview : null;
+      const moved = preview?.at.get(e.id) ?? null;
       const ys = moved ? moved.ys : toApproxYear(fromStore(e.start_day, e.start_ms));
       const ye = moved ? moved.ye ?? ys : e.end_day !== null ? toApproxYear(fromStore(e.end_day, e.end_ms ?? 0)) : ys;
       if (!moved) { snaps.push(ys); if (ye !== ys) snaps.push(ye); }
@@ -247,7 +271,9 @@ export function Timeline({ head }: { head?: React.ReactNode }) {
   const scrolled = Math.min(scroll, maxScroll);
 
   // (Where the bars lie, for whoever asks from outside: the tests, and lists that scroll the timeline to an event.)
-  store.timelineLaid = { tracks: lay.tracks, top: RULER - scrolled };
+  const chosenIds = s.chosen('event'), chosenSet = new Set(chosenIds);
+  const span = chosenIds.length > 1 ? spanOf(chosenIds.map((id) => preview?.at.get(id) ?? yearsOf(id)).filter((x): x is { ys: number; ye: number | null } => !!x)) : null;
+  store.timelineLaid = { tracks: lay.tracks, top: RULER - scrolled, span: span ? [xOf(span.a), xOf(span.b)] : null };
 
   /** Everything but the playhead, kept as a picture until something it shows changes (dragging through time redraws the playhead only). */
   const still = useRef<{ key: string; canvas: OffscreenCanvas } | null>(null);
@@ -258,7 +284,7 @@ export function Timeline({ head }: { head?: React.ReactNode }) {
     const dpr = window.devicePixelRatio || 1;
     const W = Math.max(1, Math.round(w * dpr)), H = Math.max(1, Math.round(h * dpr));
     if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
-    const key = [layKey, world.tableRevision('event_type'), world.tableRevision('map_space'), h, scrolled, otherOpen, find, s.selection?.kind === 'event' || s.selection?.kind === 'change' ? s.selection.id : '', world.tableRevision('effect'), s.recordEventId ?? ''].join('|');
+    const key = [layKey, world.tableRevision('event_type'), world.tableRevision('map_space'), h, scrolled, otherOpen, find, s.selection?.kind === 'event' || s.selection?.kind === 'change' ? s.selection.id : '', chosenIds.join(','), world.tableRevision('effect'), s.recordEventId ?? ''].join('|');
     if (!still.current || still.current.key !== key) {
       const canvas = still.current && still.current.canvas.width === W && still.current.canvas.height === H ? still.current.canvas : new OffscreenCanvas(W, H);
       const ctx = canvas.getContext('2d') as unknown as CanvasRenderingContext2D;
@@ -321,7 +347,7 @@ export function Timeline({ head }: { head?: React.ReactNode }) {
           const e = world.get('event', b.ids[0]);
           if (!e) continue;
           const inactive = !!e.variant_group && !e.variant_active;
-          const selected = s.selection?.kind === 'event' && s.selection.id === e.id;
+          const selected = chosenSet.has(e.id);
           ctx.globalAlpha = (inactive ? 0.4 : 1) * (find && !nameMatches(e.name, find) ? 0.25 : 1);
           const colour = s.recordEventId === e.id ? '#d1495b' : selected ? '#ffd166' : typeColor(world, e.type_id) ?? '#4f7ca8';
           const planned = !drawn.has(e.id);
@@ -348,7 +374,7 @@ export function Timeline({ head }: { head?: React.ReactNode }) {
           for (const k of b.kids ?? []) {
             const ke = world.get('event', k.ids[0]);
             if (!ke || k.x1 < -2 || k.x0 > w + 2) continue;
-            const kSel = s.selection?.kind === 'event' && s.selection.id === ke.id;
+            const kSel = chosenSet.has(ke.id);
             ctx.globalAlpha = (ke.variant_group && !ke.variant_active ? 0.4 : 1) * (find && !nameMatches(ke.name, find) ? 0.25 : 1);
             ctx.fillStyle = 'rgba(8,12,18,0.55)';
             ctx.fillRect(k.x0, y + 3, k.x1 - k.x0, BAR - 5);
@@ -419,6 +445,25 @@ export function Timeline({ head }: { head?: React.ReactNode }) {
       ctx.strokeStyle = 'rgba(79,155,217,0.8)';
       ctx.strokeRect(0.5, Math.max(RULER, top) + 0.5, w - 1, Math.min(drop.height, h - otherH - top) - 1);
     }
+    // Several events chosen (D245): their span on the ruler, its ends held to stretch them.
+    if (span) {
+      const xa = xOf(span.a), xb = xOf(span.b);
+      ctx.fillStyle = 'rgba(255,209,102,0.22)';
+      ctx.fillRect(xa, RULER - 9, Math.max(1, xb - xa), 9);
+      ctx.fillStyle = '#ffd166';
+      for (const [xx, dir] of [[xa, 1], [xb, -1]] as const) {
+        ctx.fillRect(xx - 1, RULER - 14, 2, 14);
+        ctx.beginPath(); ctx.moveTo(xx, RULER - 14); ctx.lineTo(xx + 7 * dir, RULER - 14); ctx.lineTo(xx, RULER - 7); ctx.fill();
+      }
+    }
+    if (box) {
+      const bx = Math.min(box.x0, box.x1), by = Math.min(box.y0, box.y1), bw = Math.abs(box.x1 - box.x0), bh = Math.abs(box.y1 - box.y0);
+      ctx.fillStyle = 'rgba(79,155,217,0.15)';
+      ctx.fillRect(bx, by, bw, bh);
+      ctx.strokeStyle = 'rgba(79,155,217,0.9)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(bx + 0.5, by + 0.5, bw, bh);
+    }
     // The other date being compared (Stage 3): a dashed yellow line.
     if (s.compare.on && s.mode === 'world' && !s.compare.same) {
       const cx = xOf(toApproxYear(s.compare.time));
@@ -453,10 +498,29 @@ export function Timeline({ head }: { head?: React.ReactNode }) {
   const localX = (e: { clientX: number }) => e.clientX - ref.current!.getBoundingClientRect().left;
   const localY = (e: { clientY: number }) => e.clientY - ref.current!.getBoundingClientRect().top;
 
+  /** The events shown on the timeline that start at or after a date (in years), but those given (D245). */
+  function eventsAfter(pivot: number, but: string[]): Span[] {
+    const skip = new Set(but), filter = eventFilterSet(), out: Span[] = [];
+    for (const e of world.all('event')) {
+      if (skip.has(e.id) || !listedHere(e) || !cmd.eventShown(world, e.id, filter)) continue;
+      const ys = toApproxYear(fromStore(e.start_day, e.start_ms));
+      if (ys >= pivot - 1e-9) out.push({ id: e.id, ys, ye: e.end_day !== null ? toApproxYear(fromStore(e.end_day, e.end_ms ?? 0)) : null });
+    }
+    return out;
+  }
+
   function onDown(e: React.PointerEvent<HTMLCanvasElement>) {
     e.currentTarget.setPointerCapture(e.pointerId);
     const x = localX(e), y = localY(e);
     if (e.button === 1 || e.button === 2 || e.shiftKey) { drag.current = { kind: 'pan', x, y, start, end, scroll: scrolled }; return; }
+    // The ends of the span of several events chosen, on the ruler (D245): held to stretch them.
+    if (span && y < RULER && span.b - span.a > 1e-6) {
+      const side = Math.abs(x - xOf(span.b)) <= 7 ? 'end' : Math.abs(x - xOf(span.a)) <= 7 ? 'start' : null;
+      if (side) {
+        drag.current = { kind: 'stretch', side, x, a: span.a, b: span.b, to: side === 'end' ? span.b : span.a, items: spans(chosenIds), after: side === 'end' && store.timelineRipple ? eventsAfter(span.b, chosenIds) : [], moved: false };
+        return;
+      }
+    }
     const hit = y >= RULER && y < h - otherH ? barAt(lay.tracks, x, y - RULER + scrolled) : null;
     if (hit && hit.bar.ids.length > 1) {
       // A block of events run together: closer in, to see them apart.
@@ -466,14 +530,21 @@ export function Timeline({ head }: { head?: React.ReactNode }) {
     }
     if (hit) {
       const ev = store.world!.get('event', hit.bar.ids[0])!;
+      // Ctrl: added to the events chosen, or taken out of them (D245).
+      if (e.ctrlKey || e.metaKey) { store.pick('event', ev.id, { ctrlKey: true }, []); return; }
       const ys = toApproxYear(fromStore(ev.start_day, ev.start_ms)), ye = ev.end_day !== null ? toApproxYear(fromStore(ev.end_day, ev.end_ms ?? 0)) : null;
       // (Its ends are dragged to make it longer or shorter; the rest of it, to move it.)
       // (A bar too narrow to hold by its middle is only ever moved.)
       const ends = ye !== null && hit.bar.x1 - hit.bar.x0 >= 18;
       const mode = ends && Math.abs(x - hit.bar.x1) <= 5 && x <= hit.bar.x1 + 1 ? 'end' : ends && Math.abs(x - hit.bar.x0) <= 5 ? 'start' : 'move';
-      drag.current = { kind: 'bar', id: ev.id, mode, x, y, ys, ye, moved: false, track: hit.track.id, across: false };
+      // Moved, it takes the others chosen with it; with Move everything after, those after it too (D245).
+      const group = spans(mode === 'move' && chosenIds.length > 1 && chosenSet.has(ev.id) ? chosenIds : [ev.id]);
+      const after = store.timelineRipple && mode !== 'start' ? eventsAfter(mode === 'end' ? ye! : Math.min(...group.map((g) => g.ys)), group.map((g) => g.id)) : [];
+      drag.current = { kind: 'bar', id: ev.id, mode, x, y, ys, ye, moved: false, track: hit.track.id, across: false, group, after };
       return;
     }
+    // Ctrl on empty time: a box choosing the events it touches (D245).
+    if ((e.ctrlKey || e.metaKey) && y >= RULER && y < h - otherH) { drag.current = { kind: 'box', x0: x, y0: y, base: chosenIds }; setBox({ x0: x, y0: y, x1: x, y1: y }); return; }
     if (y >= h - otherH && pickChange(x)) return;
     drag.current = { kind: 'scrub' };
     store.setTime(timeAtX(x, e));
@@ -501,10 +572,22 @@ export function Timeline({ head }: { head?: React.ReactNode }) {
       const dy = ((x - d.x) / w) * (d.end - d.start);
       setScroll(Math.max(0, Math.min(maxScroll, d.scroll - (localY(e) - d.y))));
       store.set({ timeline: { start: d.start - dy, end: d.end - dy } });
+    } else if (d.kind === 'box') setBox({ x0: d.x0, y0: d.y0, x1: x, y1: localY(e) });
+    else if (d.kind === 'stretch') {
+      if (!d.moved && Math.abs(x - d.x) < 3) return;
+      d.moved = true;
+      // The end held goes where dragged (not past the other end); the events chosen in proportion, those after along.
+      const anchor = d.side === 'end' ? d.a : d.b, from = d.side === 'end' ? d.b : d.a, day = 1 / 365.2425;
+      const to = d.side === 'end' ? Math.max(anchor + day, snapped(yearAt(x), e)) : Math.min(anchor - day, snapped(yearAt(x), e));
+      d.to = to;
+      const k = (to - anchor) / (from - anchor), at = new Map<string, { ys: number; ye: number | null }>();
+      for (const i of d.items) at.set(i.id, { ys: anchor + (i.ys - anchor) * k, ye: i.ye === null ? null : anchor + (i.ye - anchor) * k });
+      for (const i of d.after) at.set(i.id, { ys: i.ys + (to - from), ye: i.ye === null ? null : i.ye + (to - from) });
+      setPreview({ key: `stretch:${d.side}:${to}`, at });
     } else {
       const yy = localY(e);
-      // (Dragged up or down onto another group's track, D209: it goes to that group.)
-      const over = d.mode === 'move' && yy >= RULER && yy < h - otherH ? lay.tracks.find((t) => yy - RULER + scrolled >= t.y && yy - RULER + scrolled < t.y + t.height) : undefined;
+      // (Dragged up or down onto another group's track, D209: it goes to that group; one event at a time.)
+      const over = d.mode === 'move' && d.group.length === 1 && yy >= RULER && yy < h - otherH ? lay.tracks.find((t) => yy - RULER + scrolled >= t.y && yy - RULER + scrolled < t.y + t.height) : undefined;
       const target = over && over.id !== d.track ? over.id : null;
       if (target !== dropTrack) setDropTrack(target);
       if (!d.moved && Math.abs(x - d.x) < 4 && Math.abs(yy - d.y) < 6) return;
@@ -515,13 +598,21 @@ export function Timeline({ head }: { head?: React.ReactNode }) {
       if (d.mode === 'end') ye = Math.max(d.ys, snapped(d.ye! + by, e));
       else if (d.mode === 'start') ys = Math.min(d.ye!, snapped(d.ys + by, e));
       else { ys = snapped(d.ys + by, e); if (ye !== null) ye += ys - d.ys; }
-      setPreview({ id: d.id, ys, ye });
+      // Those moved with it, and those after it (D245), by as much.
+      const at = new Map<string, { ys: number; ye: number | null }>([[d.id, { ys, ye }]]);
+      const dy = d.mode === 'end' ? ye! - d.ye! : ys - d.ys;
+      const along = (g: Span) => at.set(g.id, { ys: g.ys + dy, ye: g.ye === null ? null : g.ye + dy });
+      if (d.mode === 'move') d.group.filter((g) => g.id !== d.id).forEach(along);
+      if (d.mode !== 'start') d.after.forEach(along);
+      setPreview({ key: `${d.id}:${d.mode}:${ys}:${ye}`, at });
     }
   }
 
-  function onUp() {
+  function onUp(e: React.PointerEvent<HTMLCanvasElement>) {
     const d = drag.current;
     drag.current = null;
+    if (d?.kind === 'box') { setBox(null); chooseInBox(d.base, d.x0, d.y0, localX(e), localY(e)); return; }
+    if (d?.kind === 'stretch') { if (d.moved) stretch(d); setPreview(null); return; }
     if (d?.kind !== 'bar') return;
     const ev = store.world!.get('event', d.id);
     if (!ev) { setPreview(null); return; }
@@ -533,15 +624,61 @@ export function Timeline({ head }: { head?: React.ReactNode }) {
       if (!d.across || !preview) { setPreview(null); store.set({ selection: { kind: 'event', id: d.id } }); return; }
     }
     if (!d.moved || !preview || !d.across) {
-      // A click: the event chosen, at its start.
+      // A click: the event chosen (it alone), at its start.
       setPreview(null);
-      store.set({ selection: { kind: 'event', id: d.id }, time: fromStore(ev.start_day, ev.start_ms) });
+      store.set({ selection: { kind: 'event', id: d.id }, multi: null, time: fromStore(ev.start_day, ev.start_ms) });
       return;
     }
-    const patch = d.mode === 'end' ? { end: timeAtYear(preview.ye!) } : d.mode === 'start' ? { start: timeAtYear(preview.ys) } : { start: timeAtYear(preview.ys), ...(preview.ye !== null ? { end: timeAtYear(preview.ye) } : {}) };
-    store.execute((wd) => cmd.updateEvent(wd, d.id, patch));
-    store.set({ selection: { kind: 'event', id: d.id } });
+    const p = preview.at.get(d.id)!;
+    if (d.mode === 'start' || (d.mode === 'end' && !d.after.length)) {
+      store.execute((wd) => cmd.updateEvent(wd, d.id, d.mode === 'end' ? { end: timeAtYear(p.ye!) } : { start: timeAtYear(p.ys) }));
+    } else {
+      // Moved (with the others chosen), or made longer or shorter, and those after by as much: exactly, one undo step.
+      const own = datesOf(d.id)!;
+      const by = d.mode === 'move' ? cmd.shiftBy(own.start, timeAtYear(p.ys)) : cmd.shiftBy(own.end!, timeAtYear(p.ye!));
+      const shifted = (id: string): cmd.Retimed[] => { const r = datesOf(id); return r ? [{ id, start: by(r.start), end: r.end && by(r.end), carry: by }] : []; };
+      const list = d.mode === 'move' ? d.group.flatMap((g) => shifted(g.id)) : [{ id: d.id, start: own.start, end: by(own.end!) }];
+      list.push(...d.after.flatMap((a) => shifted(a.id)));
+      const what = d.mode === 'move' ? `Move ${d.group.length === 1 ? `"${ev.name}"` : `${d.group.length} events`}` : `Make "${ev.name}" ${compare(by(own.end!), own.end!) > 0 ? 'longer' : 'shorter'}`;
+      const n = d.after.length, them = d.group.length > 1 ? 'them' : 'it';
+      store.execute((wd) => cmd.retimeEvents(wd, list, n ? `${what}, and the ${n === 1 ? 'event' : `${n} events`} after ${them}` : what));
+    }
+    if (d.group.length === 1) store.set({ selection: { kind: 'event', id: d.id }, multi: null });
     setPreview(null);
+  }
+
+  /** The events a box touches (D245): its event for each bar (and the events within one, or run together in a block), with those chosen before. */
+  function chooseInBox(base: string[], x0: number, y0: number, x1: number, y1: number) {
+    const xa = Math.min(x0, x1), xb = Math.max(x0, x1), ya = Math.min(y0, y1), yb = Math.max(y0, y1);
+    if (xb - xa < 3 && yb - ya < 3) return;
+    const ids = new Set(base);
+    for (const tr of lay.tracks) {
+      if (tr.folded) continue;
+      for (const b of tr.bars) {
+        const top = RULER - scrolled + tr.y + 3 + b.lane * LANE;
+        if (b.hit1 < xa || b.x0 > xb || top + BAR < ya || top > yb) continue;
+        for (const id of b.ids) ids.add(id);
+        for (const k of b.kids ?? []) if (k.x1 >= xa && k.x0 <= xb) for (const id of k.ids) ids.add(id);
+      }
+    }
+    const list = [...ids];
+    if (list.length) store.set({ multi: { kind: 'event', ids: list }, selection: { kind: 'event', id: list[list.length - 1] } });
+  }
+
+  /** The events chosen stretched about one end of their span (D245), exactly; those after them along. One undo step. */
+  function stretch(d: Extract<Drag, { kind: 'stretch' }>) {
+    const rows = d.items.map((i) => ({ id: i.id, ...datesOf(i.id)! })).filter((r) => r.start);
+    if (rows.length < 2) return;
+    const first = rows.reduce((m, r) => (compare(r.start, m) < 0 ? r.start : m), rows[0].start);
+    const last = rows.reduce((m, r) => { const t = r.end ?? r.start; return compare(t, m) > 0 ? t : m; }, rows[0].end ?? rows[0].start);
+    const anchor = d.side === 'end' ? first : last, from = d.side === 'end' ? last : first, to = timeAtYear(d.to);
+    if (compare(to, from) === 0) return;
+    const map = cmd.stretchAbout(anchor, from, to);
+    const list: cmd.Retimed[] = rows.map((r) => ({ id: r.id, start: map(r.start), end: r.end && map(r.end), carry: map }));
+    const by = cmd.shiftBy(from, to);
+    for (const a of d.after) { const r = datesOf(a.id); if (r) list.push({ id: a.id, start: by(r.start), end: r.end && by(r.end), carry: by }); }
+    const longer = (compare(to, from) > 0) === (d.side === 'end');
+    store.execute((wd) => cmd.retimeEvents(wd, list, `${longer ? 'Stretch' : 'Shrink'} ${rows.length} events${d.after.length ? `, and move the ${d.after.length === 1 ? 'event' : `${d.after.length} events`} after them` : ''}`));
   }
 
   useEffect(() => {
@@ -605,6 +742,8 @@ export function Timeline({ head }: { head?: React.ReactNode }) {
           title="Events whose names hold what is typed stand out; the others are dimmed" aria-label="Find an event on the timeline" data-testid="timeline-find" />
         <button className={`small ${s.timelineSnap ? 'on' : ''}`} onClick={() => store.set({ timelineSnap: !s.timelineSnap })} aria-pressed={s.timelineSnap} data-testid="timeline-snap"
           title="Snapping: the playhead and the events dragged are drawn to the starts and ends of events and the dates of changes nearby (hold Alt to go without)">Snap</button>
+        <button className={`small ${s.timelineRipple ? 'on' : ''}`} onClick={() => store.set({ timelineRipple: !s.timelineRipple })} aria-pressed={s.timelineRipple} data-testid="timeline-ripple"
+          title="Moving an event (or those chosen), or its end, moves every event shown after it by as much; stretching those chosen moves those after them along">Move everything after: {s.timelineRipple ? 'on' : 'off'}</button>
         <GroupFilter />
         <button className="small" onClick={() => zoomBy(1.6)} title="Further out" aria-label="Zoom the timeline out" data-testid="timeline-zoom-out">−</button>
         <button className="small" onClick={() => zoomBy(1 / 1.6)} title="Closer in" aria-label="Zoom the timeline in" data-testid="timeline-zoom-in">+</button>
@@ -657,7 +796,10 @@ export function Timeline({ head }: { head?: React.ReactNode }) {
                 { label: `New event on ${calendarNow().format(t, 'day')}…`, testId: 'timeline-new-event', run: () => { store.setTime(t); store.set({ dialog: 'new-event' }); } },
                 { label: 'Go to this date', run: () => store.setTime(t) },
               ];
-              if (hit && hit.bar.ids.length === 1) openMenu(e, [...eventMenu(store.world!, hit.bar.ids), 'divider', ...here], store.world!.get('event', hit.bar.ids[0])?.name);
+              // (On one of several chosen: the menu for all of them, D245.)
+              const sel = hit && hit.bar.ids.length === 1 && chosenIds.length > 1 && chosenSet.has(hit.bar.ids[0]) ? chosenIds : null;
+              if (sel) openMenu(e, [...eventMenu(store.world!, sel), 'divider', ...here], `${sel.length} events`);
+              else if (hit && hit.bar.ids.length === 1) openMenu(e, [...eventMenu(store.world!, hit.bar.ids), 'divider', ...here], store.world!.get('event', hit.bar.ids[0])?.name);
               else if (hit) openMenu(e, [{ label: `Closer in on these ${hit.bar.ids.length} events`, run: () => { const a = yearAt(hit.bar.x0), b = yearAt(hit.bar.x1), pad = Math.max((b - a) * 0.15, (end - start) * 0.01); store.set({ timeline: { start: a - pad, end: b + pad } }); } }, 'divider', ...here]);
               else openMenu(e, here);
             }}

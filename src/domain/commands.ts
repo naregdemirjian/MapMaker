@@ -7,7 +7,7 @@ import { World, Tx, newId } from '../world-model/world.ts';
 import {
   Engine, canonicalFaces, leafDescendants, childrenMap, hashFaces, parseJSON, effectTime, eventStart, type Resolution, type TransitionSpec, type AnnexIntent, type PlaceIntent, type RenameIntent, type ShapeIntent, type RelateIntent, type SystemIntent, type LaneIntent, laneKey, type FeatureAnimStyle, isFeatureAnim,
 } from '../temporal-engine/engine.ts';
-import { type Instant, type Calendar, toStore, fromStore, NEG_INF, compare, isFiniteInstant, addMs, stepDate } from '../core-time/index.ts';
+import { type Instant, type Calendar, toStore, fromStore, NEG_INF, compare, isFiniteInstant, add, addMs, diff, stepDate, MS_PER_DAY } from '../core-time/index.ts';
 import { branchAt, branchCuts, seenAt, branchName, branchAndBelow, branchLine } from '../temporal-engine/branches.ts';
 import {
   BASE_EVENT_ID, MAIN_BRANCH, SCHEMA_VERSION, baseEventOf, isBaseEvent, type RowDiff, type EffectRow, type EventRow, type EntityRow, type LayerKind, type FeatureRow, type RelationRow,
@@ -995,20 +995,57 @@ export function shiftEvents(world: World, ids: string[], unit: 'day' | 'month' |
   if (!evs.length) throw new Error('Choose the events to move first.');
   if (!Number.isInteger(n) || n === 0) throw new Error('Move them by a whole number of days, months or years.');
   const step = (t: Instant) => stepDate(t, unit, n, cal);
-  const chosen = new Set(evs.map((e) => e.id));
-  const dated = world.all('effect').filter((ef) => chosen.has(ef.event_id) && ef.at_day !== null);
   const amount = `${Math.abs(n)} ${unit}${Math.abs(n) === 1 ? '' : 's'}`;
-  return run(world, `Move ${evs.length === 1 ? `"${evs[0].name}"` : `${evs.length} events`} ${amount} ${n > 0 ? 'later' : 'earlier'}`, (tx) => {
-    for (const e of evs) {
-      const [sd, sm] = toStore(step(fromStore(e.start_day, e.start_ms)));
-      const end = e.end_day !== null ? toStore(step(fromStore(e.end_day, e.end_ms ?? 0))) : null;
+  return retimeEvents(world, evs.map((e) => ({
+    id: e.id, start: step(fromStore(e.start_day, e.start_ms)), end: e.end_day !== null ? step(fromStore(e.end_day, e.end_ms ?? 0)) : null, carry: step,
+  })), `Move ${evs.length === 1 ? `"${evs[0].name}"` : `${evs.length} events`} ${amount} ${n > 0 ? 'later' : 'earlier'}`);
+}
+
+/** An event's new dates (D245), and where its changes recorded at dates of their own go (`carry`; without it they stay). */
+export interface Retimed { id: string; start: Instant; end: Instant | null; carry?: (t: Instant) => Instant }
+
+/**
+ * Events given new dates together (D242, D245): moved, made longer or shorter, stretched, those after them moved
+ * along; each event's changes recorded at dates of their own carried as its `carry` says. One undo step.
+ */
+export function retimeEvents(world: World, list: Retimed[], label: string): CommandResult {
+  const rows = list.map((r) => ({ r, e: world.get('event', r.id) })).filter((x): x is { r: Retimed; e: EventRow } => !!x.e && !isBaseEvent(x.e.id));
+  if (!rows.length) throw new Error('Choose the events to move first.');
+  for (const { r, e } of rows) if (r.end && compare(r.end, r.start) < 0) throw new Error(`"${e.name}" would end before it starts.`);
+  const carried = new Map(rows.filter((x) => x.r.carry).map((x) => [x.e.id, x.r.carry!]));
+  const dated = world.all('effect').filter((ef) => carried.has(ef.event_id) && ef.at_day !== null);
+  return run(world, label, (tx) => {
+    for (const { r, e } of rows) {
+      const [sd, sm] = toStore(r.start);
+      const end = r.end ? toStore(r.end) : null;
       tx.update('event', { ...e, start_day: sd, start_ms: sm, end_day: end ? end[0] : null, end_ms: end ? end[1] : null });
     }
     for (const ef of dated) {
-      const [d, ms] = toStore(step(fromStore(ef.at_day!, ef.at_ms ?? 0)));
+      const [d, ms] = toStore(carried.get(ef.event_id)!(fromStore(ef.at_day!, ef.at_ms ?? 0)));
       tx.update('effect', { ...ef, at_day: d, at_ms: ms });
     }
   });
+}
+
+/** Dates moved by the time from `a` to `b`, exactly (D245). */
+export function shiftBy(a: Instant, b: Instant): (t: Instant) => Instant {
+  const d = diff(a, b);
+  return (t) => add(t, d.days, d.ms);
+}
+
+/**
+ * Dates stretched about `anchor` so that `from` goes to `to` (D245): the times between in proportion, those beyond
+ * likewise. Dates in whole days stay in whole days.
+ */
+export function stretchAbout(anchor: Instant, from: Instant, to: Instant): (t: Instant) => Instant {
+  const days = (t: Instant) => (t.day - anchor.day) + (t.ms - anchor.ms) / MS_PER_DAY;
+  const k = days(from) === 0 ? 1 : days(to) / days(from);
+  return (t) => {
+    const d = days(t) * k;
+    if (t.ms === 0 && anchor.ms === 0) return add(anchor, Math.round(d));
+    const whole = Math.floor(d);
+    return add(anchor, whole, Math.round((d - whole) * MS_PER_DAY));
+  };
 }
 
 /**

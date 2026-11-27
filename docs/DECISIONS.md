@@ -61,6 +61,35 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D245. Several events at once on the timeline: chosen together, moved, stretched; Move everything after (S6, fifth part)
+
+- **Why.** "Moving and stretching many events at once" is the Timeline studio's own work in the plan ("Where
+  everything goes"), with "Move everything after" in the drawing of its head, and "Make a shot of these events" among
+  the hand-overs.
+- **Choosing several**: Ctrl+click on a bar adds its event to those chosen or takes it out; Ctrl+drag on empty time
+  draws a box that takes in every event whose bar it touches (the events within a longer one it reaches, those run
+  together in a block), with those chosen before. They are the lists' chosen events (`multi`): highlighted on the
+  timeline, in the lists and the table alike. A plain click chooses one alone again.
+- **Moved together**: one of several chosen dragged moves them all by as much, to the millisecond, each keeping its
+  length, its changes recorded at dates of their own going with it (`retimeEvents` with `shiftBy`, one undo step).
+  An event dragged alone now also carries its dated changes with it (before, they stayed behind).
+- **Stretched**: with several chosen, their span (first start to last end) shows as a band on the ruler; its ends,
+  held and dragged, stretch or shrink them about the other end in proportion, dates and lengths alike, their dated
+  changes with them (`stretchAbout`: whole days stay whole days; one undo step). Snapping as for bars; Alt without.
+- **Move everything after** (a switch in the timeline's head, off at first): an event (or those chosen) moved, or
+  an event's end moved, moves every event shown on the timeline that starts at or after it (its start; for an end,
+  that end) by as much, in the same undo step; stretching those chosen from their end moves those after them along.
+  "Shown": the events of the timeline viewed that the group filter shows, so nothing unseen moves.
+- **Make a shot of these events** (the events' right-click menu, here and in the lists): a shot from the first's start
+  to the last's end, named for them ("Raid A to Raid C"), Presentation in front with it chosen (`store.shotOfEvents`;
+  one event as before).
+- **Tests.** Unit: events retimed together with their dated changes carried or left, an end before a start refused;
+  dates moved exactly and stretched in proportion about a date, whole days staying whole. Interface: three events in
+  a group of their own; one clicked and another Ctrl+clicked; one dragged, both moved by as much in one undo step, the
+  third not; a Ctrl box taking in all three, their span on the ruler; its end dragged as far again, the three
+  stretched about the first start, twice as long and as far apart; Move everything after, the first dragged alone and
+  the others moved with it; right-click, a shot of the three; undone.
+
 ### D244. History's compact time bar: one line of time under the map (S6, fourth part)
 
 - **Why.** The agreed drawing of the History studio: one line of time under the map, "the date, the event recorded

@@ -51,7 +51,7 @@ export function StatusBar() {
     <div className="status-bar" data-testid="status-bar">
       <span className="status-hint" data-testid="status-hint">
         {presents(page) ? 'Drag and scroll the preview to frame the shot; drag the date, the title and the boxes on it to place them.'
-          : !drawsOn(page) ? <><b>{STUDIOS.find((st) => st.id === studioOf(page))!.name}</b> · {STUDIOS.find((st) => st.id === studioOf(page))!.hint}.{page === 'timeline' ? ' Drag an event to move it, its ends to retime it; double-click empty time for a new event; "Draw in History" on an event to draw its changes.' : ' Click on the map to choose; the tools to draw with are in Map Studio and History.'}</>
+          : !drawsOn(page) ? <><b>{STUDIOS.find((st) => st.id === studioOf(page))!.name}</b> · {STUDIOS.find((st) => st.id === studioOf(page))!.hint}.{page === 'timeline' ? ' Drag an event to move it, its ends to retime it; Ctrl+click or Ctrl+drag to choose several, then drag one to move them all or the ends of their span on the ruler to stretch them; double-click empty time for a new event; "Draw in History" to draw its changes.' : ' Click on the map to choose; the tools to draw with are in Map Studio and History.'}</>
           : tool ? <><b>{tool.name} ({tool.key})</b> · {tool.hint}</> : null}
       </span>
       <button className={`small ${problems ? 'warn' : ''}`} onClick={() => s.set({ dialog: 'health' })} data-testid="health" title="Places where the history contradicts itself, and how to mend them">

@@ -132,6 +132,8 @@ export function eventMenu(w: World, ids: string[]): MenuItem[] {
     for (const g of groups) items.push({ label: `Add to “${g.name}”`, run: () => store.execute((wd) => cmd.addEventsToGroup(wd, evs.map((e) => e.id), g.id)) });
   }
   items.push('divider');
+  // (A hand-over to Presentation, D245: "Make a shot of these events".)
+  items.push({ label: evs.length === 1 ? 'Make a shot of it ↗' : `Make a shot of these ${evs.length} events ↗`, testId: 'menu-shot-of-events', run: () => store.shotOfEvents(evs.map((e) => e.id)) });
   items.push({ label: evs.length === 1 ? `Delete “${evs[0].name}”` : `Delete ${evs.length} events`, danger: true, testId: 'menu-delete-events', run: () => deleteEventsAsked(evs.map((e) => e.id)) });
   return items;
 }

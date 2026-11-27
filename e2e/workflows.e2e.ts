@@ -6172,6 +6172,126 @@ try {
     await page.evaluate(() => (window as any).__mapmaker.allLists());
   });
 
+  await h.step('Several events at once on the timeline (D245): chosen by Ctrl+click and a Ctrl box; dragged together; stretched by their span on the ruler; Move everything after; a shot of them; undone', async () => {
+    const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);
+    const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
+    await page.getByTestId('studio-history').click();
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
+    const before = await steps();
+    await page.getByTestId('studio-timeline').click();
+    await page.getByTestId('reset-workspace').click();
+    await page.getByTestId('timeline').waitFor();
+    // Three raids a year long, three years apart, in a group of their own, after all the history there is (so that
+    // moving everything after the first moves only them); the timeline showing 2495 to 2515.
+    const ids = await page.evaluate(() => {
+      const m = (window as any).__mapmaker, s = m.store, g = m.bench.gregorian, Y = (y: number) => g.fromCivil({ year: y, month: 1, day: 1 });
+      return s.execute((wd: unknown) => m.bench.commands.importEvents(wd, [2500, 2503, 2507].map((y, i) => ({ name: `Raid ${'ABC'[i]}`, start: Y(y), end: Y(y + 1), groups: ['Raids'] }))));
+    }) as string[];
+    await h.saved();
+    const [A, B, C] = ids;
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ timeline: { start: 2495, end: 2515 }, timelineSnap: true, timelineRipple: false }));
+    const canvas = (await page.getByTestId('timeline').boundingBox())!;
+    type Bar = { ids: string[]; x0: number; x1: number; lane: number };
+    const laid = () => store('s.timelineLaid') as Promise<{ tracks: Array<{ id: string; y: number; bars: Bar[] }>; top: number; span: [number, number] | null }>;
+    /** Where an event's bar is, on the page: its middle, its ends. */
+    const barOf = async (id: string) => {
+      const l = await laid();
+      for (const t of l.tracks) for (const b of t.bars) if (b.ids.length === 1 && b.ids[0] === id) {
+        const y = canvas.y + l.top + t.y + 3 + b.lane * 20 + 7;
+        return { x: canvas.x + (b.x0 + b.x1) / 2, x0: canvas.x + b.x0, x1: canvas.x + b.x1, y };
+      }
+      throw new Error(`no bar for ${id}`);
+    };
+    const dates = (id: string) => store(`(() => { const e = s.world.get('event', ${JSON.stringify(id)}); return [e.start_day, e.end_day]; })()`) as Promise<[number, number]>;
+    const chosen = async () => ((await store(`s.chosen('event')`)) as string[]).slice().sort();
+    const daysPerPx = (20 * 365.2425) / canvas.width;
+    const drag = async (from: { x: number; y: number }, dx: number) => {
+      await page.keyboard.down('Alt');
+      await page.mouse.move(from.x, from.y);
+      await page.mouse.down();
+      await page.mouse.move(from.x + dx / 2, from.y, { steps: 4 });
+      await page.mouse.move(from.x + dx, from.y, { steps: 4 });
+      await page.mouse.up();
+      await page.keyboard.up('Alt');
+      await h.saved();
+    };
+    // A click chooses one; Ctrl+click adds another.
+    const a0 = await dates(A), b0 = await dates(B), c0 = await dates(C);
+    const pa = await barOf(A), pb = await barOf(B);
+    await page.mouse.click(pa.x, pa.y);
+    await page.keyboard.down('Control');
+    await page.mouse.click(pb.x, pb.y);
+    await page.keyboard.up('Control');
+    assert.deepEqual(await chosen(), [A, B].sort());
+    // One of them dragged: both moved by as much, to the day, in one undo step; the third stays.
+    await drag(pa, 60);
+    const a1 = await dates(A), b1 = await dates(B);
+    const moved = a1[0] - a0[0];
+    assert.ok(Math.abs(moved - 60 * daysPerPx) <= 3 * daysPerPx, `moved by sixty pixels of time: ${moved} days, ${60 * daysPerPx} expected`);
+    assert.deepEqual([a1[1] - a0[1], b1[0] - b0[0], b1[1] - b0[1]], [moved, moved, moved], 'the other chosen with it, each keeping its length');
+    assert.deepEqual(await dates(C), c0);
+    assert.match(await store('s.journal.undoLabel') as string, /^Move 2 events/);
+    await page.getByTestId('undo').click();
+    await h.saved();
+    assert.deepEqual([await dates(A), await dates(B)], [a0, b0], 'one undo step');
+    // A box drawn with Ctrl over empty time takes in all three; their span shows on the ruler.
+    const pc = await barOf(C);
+    await page.keyboard.down('Control');
+    await page.mouse.move(pa.x0 - 20, pa.y - 8);
+    await page.mouse.down();
+    await page.mouse.move(pc.x1 + 20, pa.y + 8, { steps: 6 });
+    await page.mouse.up();
+    await page.keyboard.up('Control');
+    assert.deepEqual(await chosen(), [A, B, C].sort());
+    await page.waitForFunction(() => !!(window as any).__mapmaker.store.timelineLaid?.span);
+    const span = (await laid()).span!;
+    assert.ok(span && Math.abs(canvas.x + span[0] - pa.x0) < 2 && Math.abs(canvas.x + span[1] - pc.x1) < 2, `the span from the first start to the last end: ${span}`);
+    await h.screenshot('timeline-several-chosen');
+    // Its end on the ruler dragged as far again: the three stretched about the first start, twice as long and as far apart.
+    const width = span[1] - span[0];
+    await drag({ x: canvas.x + span[1], y: canvas.y + 22 - 5 }, width);
+    const a2 = await dates(A), b2 = await dates(B), c2 = await dates(C);
+    const near = (got: number, want: number, what: string) => assert.ok(Math.abs(got - want) <= 4 * daysPerPx + 2, `${what}: ${got} days, ${want} expected`);
+    assert.equal(a2[0], a0[0], 'the first start stays');
+    near(c2[1] - a0[0], 2 * (c0[1] - a0[0]), 'the last end twice as far');
+    near(b2[0] - a0[0], 2 * (b0[0] - a0[0]), 'the second start twice as far');
+    near(a2[1] - a2[0], 2 * (a0[1] - a0[0]), 'each twice as long');
+    assert.match(await store('s.journal.undoLabel') as string, /^Stretch 3 events/);
+    await page.getByTestId('undo').click();
+    await h.saved();
+    assert.deepEqual([await dates(A), await dates(B), await dates(C)], [a0, b0, c0], 'one undo step');
+    // Move everything after: the first alone dragged, the two after it go with it.
+    await page.mouse.click(pa.x, pa.y);
+    assert.deepEqual(await chosen(), [A]);
+    await page.getByTestId('timeline-ripple').click();
+    assert.match((await page.getByTestId('timeline-ripple').textContent())!, /on/);
+    await drag(pa, 40);
+    const d = (await dates(A))[0] - a0[0];
+    assert.ok(d > 0);
+    assert.deepEqual([(await dates(B))[0] - b0[0], (await dates(C))[0] - c0[0], (await dates(C))[1] - c0[1]], [d, d, d], 'those after it by as much');
+    assert.match(await store('s.journal.undoLabel') as string, /^Move "Raid A", and the 2 events after it$/);
+    await page.getByTestId('undo').click();
+    await h.saved();
+    assert.deepEqual([await dates(A), await dates(B), await dates(C)], [a0, b0, c0], 'one undo step');
+    await page.getByTestId('timeline-ripple').click();
+    assert.equal(await store('s.timelineRipple'), false);
+    // Right-click on one of several chosen: their menu, with a shot of them all.
+    await page.evaluate((list) => (window as any).__mapmaker.store.set({ multi: { kind: 'event', ids: list }, selection: { kind: 'event', id: list[2] } }), ids);
+    await page.mouse.click(pb.x, pb.y, { button: 'right' });
+    await page.getByTestId('menu-shot-of-events').click();
+    await h.saved();
+    assert.equal(await store('s.pageNow()'), 'shots');
+    const shot = await store(`(() => { const r = s.world.get('sequence', s.shotId); const st = JSON.parse(r.settings); return { name: r.name, from: st.time[0].at[0] }; })()`) as { name: string; from: number };
+    assert.deepEqual(shot, { name: 'Raid A to Raid C', from: a0[0] });
+    // Undone, step by step.
+    await page.getByTestId('studio-timeline').click();
+    for (let i = 0; i < 10 && (await steps()) > before; i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await steps(), before);
+    assert.equal(await store(`s.world.all('event').filter((e) => e.name.startsWith('Raid ')).length`), 0);
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null, multi: null }));
+    await page.evaluate(() => (window as any).__mapmaker.allLists());
+  });
+
   await h.step('The menu bar: every command in a menu with its shortcut; the keyboard runs the same commands (D197)', async () => {
     const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);
     await page.getByTestId('studio-history').click();

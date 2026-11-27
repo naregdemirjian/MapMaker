@@ -32,7 +32,7 @@ import { terrainSourceOf, planetOf, isGeologicalMap, simOf, terrainLook } from '
 import { simTerrain, simParams, simCover, simCoverFrame, quickPlanetCover } from './planet-engine.ts';
 import { keyOf as contentKey } from '../planet/state/hash.ts';
 import type { PlanetDefinition } from '../planet/model/definition.ts';
-import { MAIN_BRANCH, isBaseEvent, invertDiffs, type MapSpaceRow } from '../world-model/schema.ts';
+import { MAIN_BRANCH, isBaseEvent, invertDiffs, type MapSpaceRow, type EventRow } from '../world-model/schema.ts';
 import { DEFAULT_PERIOD, type PeriodSpec } from '../domain/history-view.ts';
 import { setAssetBase } from '../render-engine/assets.ts';
 import { lonLatToVec, type Vec3 } from '../geo-kernel/vec.ts';
@@ -262,9 +262,11 @@ export class AppStore {
   listFilters: Record<string, string> = {};
   /** The timeline (D201): whether dragging snaps, and what is looked for among its events. */
   timelineSnap = true;
+  /** Move everything after (D245): moving an event, or its end, moves the events after it by as much. */
+  timelineRipple = false;
   timelineFind = '';
   /** The timeline's tracks as last laid out (pixels from the left edge of its picture; `top`: where the first begins). Not watched. */
-  timelineLaid: { tracks: TLTrack[]; top: number } | null = null;
+  timelineLaid: { tracks: TLTrack[]; top: number; span?: [number, number] | null } | null = null;
   spaceId = '';
   layerId = '';
   time: Instant = gregorian.fromCivil({ year: 2000 });
@@ -832,18 +834,28 @@ export class AppStore {
   }
 
   /** A shot of an event (D243): its time (a month after a moment), the map as viewed, named for it; Presentation in front. */
-  shotOfEvent(id: string) {
-    const w = this.world, e = w?.get('event', id);
-    if (!w || !e) return;
-    const start = fromStore(e.start_day, e.start_ms);
-    const end = e.end_day !== null && e.end_day > e.start_day ? fromStore(e.end_day, e.end_ms ?? 0) : add(start, 30);
+  shotOfEvent(id: string) { this.shotOfEvents([id]); }
+
+  /**
+   * A shot of events (D243, D245: "Make a shot of these events"): from the first's start to the last's end (a month
+   * after a moment), the map as viewed, named for them; Presentation in front with it chosen. One undo step.
+   */
+  shotOfEvents(ids: string[]) {
+    const w = this.world;
+    const evs = (w ? ids.map((id) => w.get('event', id)).filter((e): e is EventRow => !!e) : []).sort((a, b) => a.start_day - b.start_day || a.start_ms - b.start_ms);
+    if (!w || !evs.length) return;
+    const start = fromStore(evs[0].start_day, evs[0].start_ms);
+    const last = evs.reduce((m, e) => { const t = e.end_day !== null ? fromStore(e.end_day, e.end_ms ?? 0) : fromStore(e.start_day, e.start_ms); return compare(t, m) > 0 ? t : m; }, start);
+    const end = last.day > start.day ? last : add(start, 30);
+    const name = evs.length === 1 ? evs[0].name : `${evs[0].name} to ${evs[evs.length - 1].name}`;
     const settings = defaultShot(this.spaceId, this.camera, start, end);
     if (this.branch !== MAIN_BRANCH) settings.branch = this.branch;
-    const sid = this.execute((wd) => ({ ...createSequence(wd, e.name, settings), label: `A shot of "${e.name}"` }));
+    const sid = this.execute((wd) => ({ ...createSequence(wd, name, settings), label: evs.length === 1 ? `A shot of "${name}"` : `A shot of ${evs.length} events` }));
     if (!sid) return;
     this.setPage('shots');
     this.set({ shotId: sid, shotFrame: 0, presentCamera: null, playing: false });
   }
+
 
   /**
    * The Timeline studio's own panels (D241): Groups, Types, Branches and Statistics brought to the front where the

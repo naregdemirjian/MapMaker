@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { World } from '../src/world-model/world.ts';
 import * as cmd from '../src/domain/commands.ts';
-import { gregorian } from '../src/core-time/index.ts';
+import { gregorian, add, fromStore } from '../src/core-time/index.ts';
 import { defaultShot } from '../src/presentation/sequence.ts';
 import { eventFacts, changesText, involvesText, shotsOver, eventsCsv, parseEventsCsv } from '../src/domain/event-table.ts';
 import type { AnyRow } from '../src/world-model/schema.ts';
@@ -109,4 +109,47 @@ test('events added from a list: types by name, groups by name (made when missing
   assert.equal(cmd.groupsOfEvent(world, y).length, 2);
   assert.equal(eventFacts(world).get(x), undefined, 'planned: nothing drawn');
   assert.throws(() => cmd.importEvents(world, []), /no events/);
+});
+
+test('events retimed together (D245): new dates for each, their dated changes carried or left; one undo step; an end before a start refused', () => {
+  const { world, a, war, plan } = project();
+  effect(world, 'e1', war, 'assign', { op: 'set', value: a });
+  world.applyDiffs([{ table: 'effect', before: world.get('effect', 'e1')!, after: { ...world.get('effect', 'e1')!, at_day: Y(1340).day, at_ms: 0 } as AnyRow }]);
+  const ev = (id: string) => world.get('event', id)!;
+  // Moved: by the time from its start to where it went, its change carried along.
+  const by = cmd.shiftBy(Y(1337, 5, 12), Y(1347, 5, 12));
+  const r = cmd.retimeEvents(world, [
+    { id: war, start: by(Y(1337, 5, 12)), end: by(Y(1356)), carry: by },
+    { id: plan, start: Y(1370), end: Y(1371) },
+  ], 'Move two events');
+  assert.equal(r.label, 'Move two events');
+  assert.equal(ev(war).start_day, Y(1347, 5, 12).day);
+  assert.equal(ev(war).end_day, by(Y(1356)).day);
+  assert.equal(world.get('effect', 'e1')!.at_day, by(Y(1340)).day, 'carried');
+  assert.deepEqual([ev(plan).start_day, ev(plan).end_day], [Y(1370).day, Y(1371).day]);
+  // Its end alone, the change left where it is.
+  cmd.retimeEvents(world, [{ id: war, start: fromStore(ev(war).start_day, ev(war).start_ms), end: Y(1380) }], 'Longer');
+  assert.equal(world.get('effect', 'e1')!.at_day, by(Y(1340)).day, 'not carried');
+  assert.throws(() => cmd.retimeEvents(world, [{ id: plan, start: Y(1400), end: Y(1399) }], 'x'), /would end before it starts/);
+  assert.throws(() => cmd.retimeEvents(world, [{ id: 'gone', start: Y(1400), end: null }], 'x'), /Choose the events/);
+});
+
+test('dates moved exactly, and stretched about a date in proportion, whole days staying whole (D245)', () => {
+  const move = cmd.shiftBy(Y(1300), Y(1310, 3, 4));
+  assert.deepEqual(move(Y(1301)), add(Y(1301), Y(1310, 3, 4).day - Y(1300).day));
+  const half = { ...Y(1300), ms: 43_200_000 };
+  assert.deepEqual(cmd.shiftBy(Y(1300), half)(Y(1400)), { day: Y(1400).day, ms: 43_200_000 }, 'to the millisecond');
+  // Stretched about 1300 so that 1310 goes to 1330: three times as long from 1300.
+  const s = cmd.stretchAbout(Y(1300), Y(1310), Y(1330));
+  assert.deepEqual(s(Y(1300)), Y(1300), 'the anchor stays');
+  assert.equal(s(Y(1310)).day, Y(1330).day);
+  const mid = Y(1305).day - Y(1300).day, k = (Y(1330).day - Y(1300).day) / (Y(1310).day - Y(1300).day);
+  assert.deepEqual(s(Y(1305)), add(Y(1300), Math.round(mid * k)), 'in proportion (three times as far, to the day)');
+  assert.equal(s(Y(1305)).ms, 0, 'whole days');
+  // Shrunk about its end: 1300 goes to 1305, 1310 stays.
+  const t = cmd.stretchAbout(Y(1310), Y(1300), Y(1305));
+  assert.equal(t(Y(1300)).day, Y(1305).day);
+  assert.equal(t(Y(1310)).day, Y(1310).day);
+  // A date with a time of day keeps a time of day.
+  assert.ok(Number.isInteger(s({ ...Y(1302), ms: 1000 }).ms));
 });
