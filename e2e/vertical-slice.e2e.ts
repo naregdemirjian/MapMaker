@@ -241,8 +241,8 @@ try {
     // Everything worked out from what was there before is also worked out afresh, and must be the same (see main.tsx).
     await page.waitForFunction(() => !!(window as any).__mapmaker);
     await page.evaluate(() => (window as any).__mapmaker.verify());
-    // (The lists at the left all in one column, as these steps expect; their tabs are tested in the workflows.)
-    await page.evaluate(() => (window as any).__mapmaker.store.setListTab('all', true));
+    // (Every list open at once, each in a group of its own down the left, as these steps expect; the panels are tested in the workflows.)
+    await page.evaluate(() => (window as any).__mapmaker.allLists());
     await page.getByTestId('project-name').fill('Vertical Slice Test');
     await screenshot('project-picker');
     await page.getByTestId('project-create').click();
@@ -438,14 +438,14 @@ try {
     await page.getByTestId('menu-file').click(); await page.getByTestId('command-versions').click();
     await page.locator('.modal .row', { hasText: 'Two countries drawn' }).getByRole('button', { name: 'Restore' }).click();
     await waitOwner(P.conq, '1451', A);
-    assert.equal(await page.locator('.left .row', { hasText: EVENT }).count(), 0, 'the event recorded after that version is gone');
+    assert.equal(await page.locator('.list-panel .row', { hasText: EVENT }).count(), 0, 'the event recorded after that version is gone');
     assert.ok((await page.locator('.modal .row', { hasText: 'KB' }).getByRole('button', { name: 'Restore' }).count()) >= 1, 'automatic backups can be restored too');
     await screenshot('versions-and-backups');
     await page.locator('.modal-actions').getByRole('button', { name: 'Close' }).click();
     await saved();
     await page.getByTestId('undo').click();
     await waitOwner(P.conq, '1451', B);
-    await page.locator('.left .row', { hasText: EVENT }).waitFor();
+    await page.locator('.list-panel .row', { hasText: EVENT }).waitFor();
   });
 
   await step('Close Map Maker completely, start it again and reopen the project', async () => {
@@ -477,7 +477,7 @@ try {
   });
 
   await step('Animate the change over the length of the event', async () => {
-    await page.locator('.left .row', { hasText: EVENT }).click();
+    await page.locator('.list-panel .row', { hasText: EVENT }).click();
     await page.getByTestId('event-panel').waitFor();
     await page.getByTestId('event-panel-end').fill('1455');
     await page.getByTestId('event-panel-end').press('Enter');
@@ -498,8 +498,9 @@ try {
 
   let first: { dir: string; manifest: any } | null = null;
   await step('Make a shot of the event and export a preview image sequence', async () => {
-    await page.locator('.left .row', { hasText: EVENT }).click();
-    await page.getByTestId('workspace-present').click();
+    await page.locator('.list-panel .row', { hasText: EVENT }).click();
+    await page.getByTestId('studio-present').click();
+    await page.getByTestId('present-page-shots').click();
     await page.getByTestId('new-shot').click();
     await page.getByTestId('shot-editor').waitFor();
     await page.getByTestId('shot-seconds').fill('1');
@@ -549,8 +550,9 @@ try {
   await step('Export the same shot again after reloading: identical pixels', async () => {
     await page.reload();
     await page.getByText('Vertical Slice Test').click();
-    await page.getByTestId('workspace-present').click();
-    await page.locator('.left .row', { hasText: 'Shot 1' }).click();
+    await page.getByTestId('studio-present').click();
+    await page.getByTestId('present-page-shots').click();
+    await page.locator('.shots-panel .row', { hasText: 'Shot 1' }).click();
     await page.getByTestId('shot-editor').waitFor();
     const second = await runExport('export-preview');
     assert.notEqual(second.dir, first!.dir);
@@ -571,7 +573,8 @@ try {
 
   await step('Shot transitions: as recorded, none at all, or every change restyled (an advancing front from the border)', async () => {
     const drawn = () => page.evaluate(() => (window as any).__mapmaker.store.renderer.lastTransitions as Array<{ style: string; progress: number }>);
-    await page.getByTestId('workspace-present').click();
+    await page.getByTestId('studio-present').click();
+    await page.getByTestId('present-page-shots').click();
     await page.getByTestId('shot-editor').waitFor();
     await page.getByTestId('frame-slider').fill('12');
     await page.waitForTimeout(100);
@@ -620,16 +623,22 @@ try {
     await page.getByTestId('transition-mode').selectOption('recorded');
     await page.getByTestId('transition-restyle').uncheck();
     await page.evaluate(() => (window as any).__mapmaker.store.flush());
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
   });
 
   await step('Coastline clipping: territory over the sea disappears, territory on land stays', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     await page.getByTestId('map-canvas').waitFor();
     await setDate('2000');
     const b = decodeBasemap(JSON.parse(readFileSync(join(ROOT, 'data', 'natural-earth', 'ne-110m.json'), 'utf8')) as BasemapFile);
+    const b50 = decodeBasemap(JSON.parse(readFileSync(join(ROOT, 'data', 'natural-earth', 'ne-50m.json'), 'utf8')) as BasemapFile);
     const onLand = (ll: LL) => geoContains(b.land, ll);
-    const clearOfCoast = (ll: LL) => [[-1, 0], [1, 0], [0, -1], [0, 1]].every(([dx, dy]) => onLand([ll[0] + dx, ll[1] + dy]) === onLand(ll));
+    // (Clear of the finer coastline and lake shores too, which the map draws at this size: within half a degree of one
+    // of their points is too near. Small islands that the coarse coastline leaves out, such as Anguilla, keep a
+    // country's colour once it ends at the coast; large lakes, such as the reservoir of Tucuruí, lose it.)
+    const fineCoast = [...b50.land.coordinates.flat(2), ...b50.lakes.coordinates.flat(2)] as number[][];
+    const nearFineCoast = (ll: LL) => fineCoast.some((v) => Math.abs(v[0] - ll[0]) < 0.6 && Math.abs(v[1] - ll[1]) < 0.6);
+    const clearOfCoast = (ll: LL) => [[-1, 0], [1, 0], [0, -1], [0, 1]].every(([dx, dy]) => onLand([ll[0] + dx, ll[1] + dy]) === onLand(ll)) && !nearFineCoast(ll);
     // Sample a grid over the map; keep owned points well away from any coast.
     const { cx, cy } = await centre();
     const samples: Array<{ ll: LL; land: boolean }> = [];
@@ -673,7 +682,6 @@ try {
     await page.waitForTimeout(150);
     // Once clipped, every label stands on land. Labels are placed by the 1:50m coast in cells of an
     // eighth of a degree (the land mask), so that is the coast they are judged by, give or take a cell.
-    const b50 = decodeBasemap(JSON.parse(readFileSync(join(ROOT, 'data', 'natural-earth', 'ne-50m.json'), 'utf8')) as BasemapFile);
     const cell = 0.13;
     const onLand50 = (ll: LL) => [[0, 0], [-cell, 0], [cell, 0], [0, -cell], [0, cell], [-cell, -cell], [cell, -cell], [-cell, cell], [cell, cell]]
       .some(([dx, dy]) => geoContains(b50.land, [ll[0] + dx, ll[1] + dy]));
@@ -709,12 +717,12 @@ try {
     let ls = await labels();
     assert.ok(ls.length >= 1 && ls.every((l) => l.text === l.text.toUpperCase() && l.style.font === 'Georgia' && l.style.color === '#ffe08a'), `all labels follow the general style: ${JSON.stringify(ls)}`);
     // Country A: its own text and colour. Country B: no label.
-    await page.locator('.left .row', { hasText: A }).click();
+    await page.locator('.list-panel .row', { hasText: A }).click();
     await page.getByTestId('label-text').fill('Republic of A');
     await page.getByTestId('label-text').press('Tab');
     await page.locator('.own-look > summary').click();
     await page.getByTestId('country-label-color').fill('#ff4040');
-    await page.locator('.left .row', { hasText: B }).click();
+    await page.locator('.list-panel .row', { hasText: B }).click();
     await page.getByTestId('label-shown').uncheck();
     await page.waitForTimeout(150);
     ls = await labels();
@@ -727,8 +735,8 @@ try {
   });
 
   await step("A country filled with a flag (France) instead of its colour", async () => {
-    await page.getByTestId('workspace-map').click().catch(() => undefined);
-    await page.locator('.left .row', { hasText: A }).click();
+    await page.getByTestId('studio-history').click().catch(() => undefined);
+    await page.locator('.list-panel .row', { hasText: A }).click();
     await setDate('1451');
     await page.getByTestId('label-shown').uncheck(); // the label would cover the point measured
     await page.waitForTimeout(150);
@@ -753,7 +761,7 @@ try {
   });
 
   await step("Add today's countries: all of Europe with their flags, as an event", async () => {
-    await page.getByTestId('workspace-map').click().catch(() => undefined);
+    await page.getByTestId('studio-history').click().catch(() => undefined);
     await setDate('1460');
     await page.getByTestId('open-add-countries').click();
     await page.getByTestId('add-countries').waitFor();
@@ -886,7 +894,7 @@ try {
   });
 
   await step('History Health reports no problems', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     await page.getByTestId('health').click();
     await page.getByText('No problems found').waitFor();
     await screenshot('history-health');

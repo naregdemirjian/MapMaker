@@ -41,7 +41,7 @@ import { fmt, DateField, NumberField } from '../inputs.tsx';
 
 /**
  * The setting-up of the map being viewed: its geography, terrain and lakes, sea level, calendar, statistics,
- * the look of its stars, its planet. Under the list of maps, or (in the World workspace) at the right.
+ * the look of its stars, its planet. In Properties with nothing selected (D202).
  */
 function MapSetup() {
   const s = useStore();
@@ -166,7 +166,7 @@ export function Inspector() {
   const s = useStore();
   const sel = s.selection;
   return (
-    <aside className="right">
+    <div className="properties-panel">
       {!sel && <MapPanel />}
       {sel?.kind === 'entity' && <EntityPanel id={sel.id} />}
       {sel?.kind === 'event' && <EventPanel id={sel.id} />}
@@ -176,7 +176,7 @@ export function Inspector() {
       {sel?.kind === 'change' && <ChangePanel id={sel.id} />}
       {sel?.kind === 'star' && <StarPanel id={sel.id} />}
       {sel?.kind === 'river' && <RiverPanel id={sel.id} spaceId={sel.spaceId} />}
-    </aside>
+    </div>
   );
 }
 

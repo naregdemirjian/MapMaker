@@ -142,8 +142,9 @@ export class Harness {
     // Everything worked out from what was there before is also worked out afresh, and must be the same (see main.tsx).
     await this.page.waitForFunction(() => !!(window as any).__mapmaker);
     await this.page.evaluate(() => (window as any).__mapmaker.verify());
-    // (The lists at the left all in one column, as the steps written before their tabs expect; the tabs have a step of their own.)
-    await this.page.evaluate(() => (window as any).__mapmaker.store.setListTab('all', true));
+    // (Every list open at once, each in a group of its own down the left, as the steps written before the lists were
+    // panels of their own expect; the panels have steps of their own.)
+    await this.page.evaluate(() => (window as any).__mapmaker.allLists());
   }
 
   watch(p: Page): Page {
@@ -165,6 +166,13 @@ export class Harness {
       await this.page?.screenshot({ path: join(this.out, 'FAILED.png') }).catch(() => undefined);
       throw e;
     }
+  }
+
+  /** Opens a page (D234): its studio by the studios bar, and in Presentation the page by its tab. */
+  async goto(p: 'map' | 'history' | 'timeline' | 'looks' | 'shots' | 'export'): Promise<void> {
+    const studio = p === 'shots' || p === 'export' ? 'present' : p;
+    await this.page.getByTestId(`studio-${studio}`).click();
+    if (studio === 'present') await this.page.getByTestId(`present-page-${p}`).click();
   }
 
   /**

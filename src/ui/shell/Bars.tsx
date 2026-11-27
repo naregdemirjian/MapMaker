@@ -32,7 +32,7 @@ export function DateBar() {
   );
 }
 
-/** Which map is viewed, and which timeline of it (in the workspace bar, D203). */
+/** Which map is viewed, and which timeline of it (in the studios bar, D203, D234). */
 export function MapChooser() {
   const s = useStore();
   const w = s.world!;

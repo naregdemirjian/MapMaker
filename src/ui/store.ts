@@ -36,7 +36,8 @@ import { setAssetBase } from '../render-engine/assets.ts';
 import { lonLatToVec, type Vec3 } from '../geo-kernel/vec.ts';
 import type { StrokeSettings } from '../render-engine/stroke.ts';
 
-import { type Workspace, type Layouts, type PanelLayout, type Side, type ListTab, type ListTabs, DEFAULT_LAYOUTS, presents, loadLayouts, saveLayouts, loadWorkspace, saveWorkspace, loadListTabs, saveListTabs } from './shell/layout.ts';
+import { type Page, type Studio, type Docks, PAGES, presents, drawsOn, studioOf, defaultDock, panelOn, panelInfo, loadDocks, saveDocks, loadPage, savePage } from './shell/studios.ts';
+import { openPanel, removePanel, holderOf, type DockLayout, type PanelId } from './shell/dock.ts';
 import type { TLTrack } from './timeline-layout.ts';
 /** How freehand outlines are cleaned up, at first and when put back (D207). */
 export const DEFAULT_STROKE: StrokeSettings = { smoothness: 1, irregularity: 0, precision: 1.2, seed: 1 };
@@ -187,47 +188,72 @@ export class AppStore {
   }
   journal: JournalState = { head: 0, canUndo: false, canRedo: false, undoLabel: null, redoLabel: null };
   mode: Mode = 'world';
-  /** The workspace chosen (D196). Read it with `workspaceNow`: the mode can be changed from elsewhere (a search result opens the world). */
-  workspace: Workspace = loadWorkspace();
-  layouts: Layouts = loadLayouts();
-  /** The workspace being worked in: the one chosen, or the nearest that fits the mode. */
-  workspaceNow(): Workspace {
-    const w = this.workspace;
-    if (this.mode === 'present') return presents(w) ? w : 'present';
-    return presents(w) ? 'map' : w;
+  /**
+   * The page worked in (S1, D234): Map Studio, History, Timeline, Looks, or Presentation's Shots or Export. Read it
+   * with `pageNow`: the mode can be changed from elsewhere (a search result opens the world).
+   */
+  page: Page = loadPage();
+  /** The page Presentation opens on: the one last used of its two. */
+  presentPage: 'shots' | 'export' = 'shots';
+  /** Each page's arrangement of panels, and the one saved for it (kept on this computer). */
+  docks: Docks = loadDocks();
+  /** The page being worked in: the one chosen, or the nearest that fits the mode. */
+  pageNow(): Page {
+    const p = this.page;
+    if (this.mode === 'present') return presents(p) ? p : this.presentPage;
+    return presents(p) ? 'history' : p;
   }
-  setWorkspace(w: Workspace) {
-    saveWorkspace(w);
-    if (presents(w)) this.set({ workspace: w, listFilter: '', ...(this.mode === 'present' ? {} : { mode: 'present' as const, historyPlay: { ...this.historyPlay, on: false } }) });
-    else this.set({ workspace: w, listFilter: '', ...(this.mode === 'world' ? {} : { mode: 'world' as const, presentCamera: null, playing: false }) });
+  studioNow(): Studio { return studioOf(this.pageNow()); }
+  /** The tool in hand before a page without tools was opened (taken up again on coming back). */
+  private toolBefore: Tool = 'select';
+  setPage(p: Page) {
+    const from = this.pageNow();
+    if (!presents(p)) savePage(p);
+    // (In pages that do not draw on the map, the map only chooses and inspects: Select; the tool comes back after.)
+    const tool = !drawsOn(p) ? 'select' as const : drawsOn(from) ? this.tool : this.toolBefore;
+    if (drawsOn(from) && !drawsOn(p)) this.toolBefore = this.tool;
+    const shots = presents(p) ? { presentPage: p as 'shots' | 'export' } : {};
+    if (presents(p)) this.set({ page: p, ...shots, tool, ...(this.mode === 'present' ? {} : { mode: 'present' as const, historyPlay: { ...this.historyPlay, on: false } }) });
+    else this.set({ page: p, tool, ...(this.mode === 'world' ? {} : { mode: 'world' as const, presentCamera: null, playing: false }) });
   }
-  /** Changes the layout of the workspace being worked in (kept on this computer). */
-  setLayout(patch: Partial<PanelLayout> | null) {
-    const w = this.workspaceNow();
-    this.layouts = { ...this.layouts, [w]: patch ? { ...this.layouts[w], ...patch } : { ...DEFAULT_LAYOUTS[w] } };
-    saveLayouts(this.layouts);
+  /** A studio opened: its page (Presentation: the one of its two last used). */
+  setStudio(st: Studio) { this.setPage(st === 'present' ? this.presentPage : st); }
+  /** The arrangement of panels of the page worked in. */
+  dockNow(): DockLayout { return this.docks[this.pageNow()].live; }
+  /** Changes the arrangement of the page worked in (kept on this computer). */
+  setDock(layout: DockLayout, page: Page = this.pageNow()) {
+    this.docks = { ...this.docks, [page]: { ...this.docks[page], live: layout } };
+    saveDocks(this.docks);
     this.set({});
   }
-  /** The list shown at the left in each workspace on the world (D199), and what is typed in its filter. */
-  listTabs: ListTabs = loadListTabs();
-  listFilter = '';
-  listTabNow(): ListTab { const w = this.workspaceNow(); return w === 'map' || w === 'history' || w === 'world' ? this.listTabs[w] : 'all'; }
-  setListTab(tab: ListTab, everywhere = false) {
-    const w = this.workspaceNow();
-    if (everywhere) this.listTabs = { map: tab, history: tab, world: tab };
-    else if (w === 'map' || w === 'history' || w === 'world') this.listTabs = { ...this.listTabs, [w]: tab };
-    saveListTabs(this.listTabs);
-    this.set({ listFilter: '' });
+  /** Save workspace: the page's arrangement now becomes the one Reset returns to. */
+  saveWorkspace() {
+    const p = this.pageNow();
+    this.docks = { ...this.docks, [p]: { ...this.docks[p], saved: this.docks[p].live } };
+    saveDocks(this.docks);
+    this.toast(`The layout of ${PAGES.find((x) => x.id === p)!.name} is saved: Reset workspace returns to it.`);
+    this.set({});
   }
+  /** Reset workspace: back to the arrangement saved (or, with `original` or none saved, to the page's first). */
+  resetWorkspace(original = false) {
+    const p = this.pageNow(), d = this.docks[p];
+    this.docks = { ...this.docks, [p]: { live: !original && d.saved ? d.saved : defaultDock(p), saved: original ? null : d.saved } };
+    saveDocks(this.docks);
+    this.set({});
+  }
+  /** A panel opened (or brought to the front) in the page worked in. */
+  openPanel(id: PanelId) { if (panelOn(id, this.pageNow())) this.setDock(openPanel(this.dockNow(), id, this.docks[this.pageNow()].saved ?? defaultDock(this.pageNow()))); }
+  /** A panel closed (the viewer stays: it can be moved, not closed). */
+  closePanel(id: PanelId) { if (panelInfo(id)?.closable !== false) this.setDock(removePanel(this.dockNow(), id)); }
+  /** Whether a panel is open in the page worked in. */
+  panelOpen(id: PanelId): boolean { return !!holderOf(this.dockNow(), id); }
+  /** What is typed in each list's filter (by panel). */
+  listFilters: Record<string, string> = {};
   /** The timeline (D201): whether dragging snaps, and what is looked for among its events. */
   timelineSnap = true;
   timelineFind = '';
   /** The timeline's tracks as last laid out (pixels from the left edge of its picture; `top`: where the first begins). Not watched. */
   timelineLaid: { tracks: TLTrack[]; top: number } | null = null;
-  togglePanel(side: Side) {
-    const h = this.layouts[this.workspaceNow()].hidden;
-    this.setLayout({ hidden: h.includes(side) ? h.filter((x) => x !== side) : [...h, side] });
-  }
   spaceId = '';
   layerId = '';
   time: Instant = gregorian.fromCivil({ year: 2000 });

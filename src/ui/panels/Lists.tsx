@@ -1,5 +1,5 @@
-// The lists at the left, by tabs (D199): maps, layers, countries, people and places, areas, events; each with a filter
-// and its "+" button (tidy stage, D213: moved here from Panels.tsx).
+// The lists (D199), each a panel of its own (S1, D234): maps, layers, countries, people and places, areas, events; each
+// with its "+" button, and a filter where the list is long (tidy stage, D213: moved here from Panels.tsx).
 import { useState, memo } from 'react';
 import { useStore, store } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
@@ -14,7 +14,7 @@ import { openMenu, entityMenu, groupMenu, eventMenu } from '../components/Contex
 import { FeatureRows, featureLayers } from '../components/Features.tsx';
 import { typeColor } from '../../domain/event-types.ts';
 import { isFeatureKind } from '../../render-engine/feature-style.ts';
-import { LIST_TABS, nameMatches, type ListTab } from '../shell/layout.ts';
+import { nameMatches } from '../name-match.ts';
 import { fmt } from '../inputs.tsx';
 
 function Section({ title, onAdd, addLabel, children }: { title: string; onAdd?: () => void; addLabel?: string; children: React.ReactNode }) {
@@ -195,7 +195,10 @@ const EventRows = memo(function EventRows({ filter }: { sig: string; filter: str
   ))}</>;
 });
 
-export function Outliner() {
+export type ListKind = 'maps' | 'layers' | 'countries' | 'places' | 'areas' | 'events';
+
+/** One of the lists, as a panel (S1, D234). */
+export function ListPanel({ list }: { list: ListKind }) {
   const s = useStore();
   const w = s.world!;
   const [newEntity, setNewEntity] = useState<null | { name: string; type: string }>(null);
@@ -230,17 +233,15 @@ export function Outliner() {
       <button onClick={() => setNewEntity(null)}>Cancel</button>
     </div>
   );
-  const tab = s.listTabNow(), filter = s.listFilter;
-  const on = (...tabs: ListTab[]) => tab === 'all' || tabs.includes(tab);
-  const filtered = tab === 'countries' || tab === 'places' || tab === 'events' || tab === 'all';
+  const filter = s.listFilters[list] ?? '';
+  const on = (...kinds: ListKind[]) => kinds.includes(list);
+  const filtered = list === 'countries' || list === 'places' || list === 'events';
+  const setFilter = (v: string) => s.set({ listFilters: { ...s.listFilters, [list]: v } });
   return (
-    <aside className="left with-tabs">
-      <div className="list-tabs" role="tablist" aria-label="Lists" data-testid="list-tabs">
-        {LIST_TABS.map((t) => <button key={t.id} role="tab" aria-selected={t.id === tab} className={`list-tab ${t.id === tab ? 'on' : ''}`} title={t.hint} onClick={() => s.setListTab(t.id)} data-testid={`list-tab-${t.id}`}>{t.name}</button>)}
-      </div>
+    <div className="list-panel" data-list={list}>
       {filtered && (
         <div className="list-filter">
-          <input type="search" placeholder="Filter by name" value={filter} onChange={(e) => s.set({ listFilter: e.target.value })} onKeyDown={(e) => { if (e.key === 'Escape') s.set({ listFilter: '' }); }} data-testid="list-filter" aria-label="Filter the lists by name" />
+          <input type="search" placeholder="Filter by name" value={filter} onChange={(e) => setFilter(e.target.value)} onKeyDown={(e) => { if (e.key === 'Escape') setFilter(''); }} data-testid={`list-filter-${list}`} aria-label="Filter the list by name" />
         </div>
       )}
       <div className="lists">
@@ -302,6 +303,6 @@ export function Outliner() {
         )}
       </Section>}
       </div>
-    </aside>
+    </div>
   );
 }

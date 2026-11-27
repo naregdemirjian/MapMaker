@@ -2,7 +2,8 @@
 // does. The menu bar is drawn from it, the keyboard runs it, and the list of shortcuts is read from it, so a
 // command has one home and one description.
 import { store, type AppStore, type MenuItem, type DialogName } from './store.ts';
-import { WORKSPACES, type Side } from './shell/layout.ts';
+import { STUDIOS, PAGES, PANELS, presents, panelOn } from './shell/studios.ts';
+import { holderOf, VIEWER } from './shell/dock.ts';
 import { matches, type KeyLike } from './shell/shortcuts.ts';
 import { stepChange } from './components/Timeline.tsx';
 import { deleteEntitiesAsked, deleteEventsAsked } from './components/ContextMenu.tsx';
@@ -18,6 +19,8 @@ export interface Command {
   /** The key is listened for elsewhere (with conditions of its own): shown, not run from here. */
   keyedElsewhere?: boolean;
   enabled?: (s: AppStore) => boolean;
+  /** Whether it is in its menu at all now (a panel that cannot be opened in the page worked in is left out). */
+  visible?: (s: AppStore) => boolean;
   checked?: (s: AppStore) => boolean;
   run: (s: AppStore) => void;
 }
@@ -36,7 +39,15 @@ export function defaultCompareTime(s: AppStore) {
   try { return cal.fromCivil({ year: c.year - 100, month: c.month, day: Math.min(c.day, cal.daysIn(c.year - 100, c.month)) }); } catch { return cal.fromCivil({ year: c.year - 100 }); }
 }
 
-const panel = (side: Side, name: string): Command => ({ id: `panel-${side}`, name, checked: (s) => !s.layouts[s.workspaceNow()].hidden.includes(side), run: (s) => s.togglePanel(side) });
+/**
+ * A panel in the Window menu (S1, D234): ticked while open in the page worked in. Chosen, a closed panel opens (where it
+ * was last, else floating), one behind another tab comes to the front, and one in front closes.
+ */
+const panel = (id: string, name: string): Command => ({
+  id: `panel-${id}`, name, visible: (s) => panelOn(id, s.pageNow()), checked: (s) => s.panelOpen(id),
+  run: (s) => { const h = holderOf(s.dockNow(), id); if (h && h.active === id) s.closePanel(id); else s.openPanel(id); },
+});
+const PANEL_COMMANDS = PANELS.filter((p) => p.id !== VIEWER).map((p) => panel(p.id, p.title));
 
 export const COMMANDS: Command[] = [
   // File
@@ -56,9 +67,6 @@ export const COMMANDS: Command[] = [
   { id: 'guide-countries', name: 'Guides: today\'s country borders', enabled: (s) => world(s) && earth(s), checked: (s) => s.referenceBorders, run: (s) => s.set({ referenceBorders: !s.referenceBorders }) },
   { id: 'guide-states', name: 'Guides: today\'s states and provinces', enabled: (s) => world(s) && !!space(s) && space(s)!.kind === 'sphere' && !isSpaceMap(space(s)), checked: (s) => s.guideStates, run: (s) => s.set({ guideStates: !s.guideStates }) },
   { id: 'compare', name: 'Compare two dates', enabled: world, checked: (s) => s.compare.on, run: (s) => s.set({ compare: { ...s.compare, on: !s.compare.on, time: s.compare.on ? s.compare.time : defaultCompareTime(s) } }) },
-  panel('left', 'Lists at the left'),
-  panel('right', 'Panel at the right'),
-  panel('bottom', 'Timeline'),
   // Map
   { id: 'new-map', name: 'New map…', enabled: world, run: dialog('new-world') },
   { id: 'new-layer', name: 'New layer…', enabled: world, run: dialog('new-layer') },
@@ -77,8 +85,12 @@ export const COMMANDS: Command[] = [
   { id: 'next-change', name: 'Next change', shortcut: '.', enabled: world, run: () => stepChange(1) },
   { id: 'health', name: 'History Health…', run: dialog('health') },
   // Window
-  ...WORKSPACES.map((w, i): Command => ({ id: `workspace-${w.id}`, name: w.name, shortcut: `Alt+${i + 1}`, checked: (s) => s.workspaceNow() === w.id, run: (s) => s.setWorkspace(w.id) })),
-  { id: 'reset-workspace', name: 'Reset this workspace', run: (s) => s.setLayout(null) },
+  ...STUDIOS.map((st, i): Command => ({ id: `studio-${st.id}`, name: st.name, shortcut: `Alt+${i + 1}`, checked: (s) => s.studioNow() === st.id, run: (s) => s.setStudio(st.id) })),
+  ...PAGES.filter((p) => presents(p.id)).map((p): Command => ({ id: `page-${p.id}`, name: `Presentation: ${p.name}`, checked: (s) => s.pageNow() === p.id, run: (s) => s.setPage(p.id) })),
+  ...PANEL_COMMANDS,
+  { id: 'save-workspace', name: 'Save workspace', run: (s) => s.saveWorkspace() },
+  { id: 'reset-workspace', name: 'Reset workspace', run: (s) => s.resetWorkspace() },
+  { id: 'original-layout', name: 'Original layout', run: (s) => s.resetWorkspace(true) },
   // Help
   { id: 'getting-started', name: 'Getting started', run: dialog('getting-started') },
   { id: 'shortcuts', name: 'Keyboard shortcuts', run: dialog('shortcuts') },
@@ -91,22 +103,26 @@ export const command = (id: string): Command => { const c = BY_ID.get(id); if (!
 export const MENUS: Array<{ id: string; name: string; items: string[] }> = [
   { id: 'file', name: 'File', items: ['projects', 'versions', '-', 'import-borders', 'data-export'] },
   { id: 'edit', name: 'Edit', items: ['undo', 'redo', '-', 'delete', 'merge', '-', 'settings'] },
-  { id: 'view', name: 'View', items: ['show', 'compare', '-', 'guide-countries', 'guide-states', '-', 'panel-left', 'panel-right', 'panel-bottom'] },
+  { id: 'view', name: 'View', items: ['show', 'compare', '-', 'guide-countries', 'guide-states'] },
   { id: 'map', name: 'Map', items: ['new-map', 'new-layer', '-', 'add-countries', 'add-cities', '-', 'label-style', 'statistics'] },
   { id: 'history', name: 'History', items: ['new-event', 'event-types', 'branches', '-', 'play', 'previous-change', 'next-change', '-', 'health'] },
-  { id: 'window', name: 'Window', items: [...WORKSPACES.map((w) => `workspace-${w.id}`), '-', 'reset-workspace'] },
+  { id: 'window', name: 'Window', items: [...STUDIOS.map((st) => `studio-${st.id}`), '-', ...PAGES.filter((p) => presents(p.id)).map((p) => `page-${p.id}`), '-', ...PANEL_COMMANDS.map((c) => c.id), '-', 'save-workspace', 'reset-workspace', 'original-layout'] },
   { id: 'help', name: 'Help', items: ['getting-started', 'shortcuts'] },
 ];
 
 export const canRun = (c: Command, s: AppStore = store): boolean => !c.enabled || c.enabled(s);
 
-/** A menu's items as they stand now. */
+/** A menu's items as they stand now (those not in it now left out, and no line where nothing is either side of it). */
 export function menuItems(menu: string, s: AppStore = store): MenuItem[] {
-  return MENUS.find((m) => m.id === menu)!.items.map((id): MenuItem => {
-    if (id === '-') return 'divider';
+  const out: MenuItem[] = [];
+  for (const id of MENUS.find((m) => m.id === menu)!.items) {
+    if (id === '-') { if (out.length && out[out.length - 1] !== 'divider') out.push('divider'); continue; }
     const c = command(id);
-    return { label: c.name, run: () => c.run(store), testId: `command-${c.id}`, shortcut: c.shortcut, disabled: !canRun(c, s), checked: c.checked?.(s) };
-  });
+    if (c.visible && !c.visible(s)) continue;
+    out.push({ label: c.name, run: () => c.run(store), testId: `command-${c.id}`, shortcut: c.shortcut, disabled: !canRun(c, s), checked: c.checked?.(s) });
+  }
+  if (out[out.length - 1] === 'divider') out.pop();
+  return out;
 }
 
 /** The command a key press asks for, if it can be used now. */

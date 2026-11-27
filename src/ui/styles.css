@@ -37,8 +37,8 @@ a { color: var(--accent); cursor: pointer; }
 .date-input.bad { border-color: var(--danger); }
 
 /* (Clipped, not scrollable: a crowded top bar wider than the window must never let the whole page slide sideways.) */
-.app { overflow: clip; display: grid; height: 100vh; grid-template-columns: var(--tools, 44px) var(--left, 250px) minmax(0, 1fr) var(--right, 310px); grid-template-rows: 24px 32px var(--options, 36px) minmax(0, 1fr) var(--bottom, 150px) 24px; grid-template-areas: "top top top top" "workspaces workspaces workspaces workspaces" "tools options options options" "tools left center right" "bottom bottom bottom bottom" "status status status status"; }
-.topbar { grid-area: top; display: flex; align-items: center; gap: 4px; padding: 0 8px; background: var(--panel); border-bottom: 1px solid var(--line); min-width: 0; }
+.app { overflow: clip; display: flex; flex-direction: column; height: 100vh; }
+.topbar { flex: none; height: 24px; box-sizing: border-box; display: flex; align-items: center; gap: 4px; padding: 0 8px; background: var(--panel); border-bottom: 1px solid var(--line); min-width: 0; }
 /* In the desktop app the top bar is the window's title bar (D214): it moves the window (double-click: maximise), and
    leaves room at its ends for the window's own buttons (the env() values exist only there; in a browser, 8px). */
 .topbar { -webkit-app-region: drag; padding-left: max(8px, env(titlebar-area-x, 0px)); padding-right: calc(8px + 100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)); }
@@ -81,9 +81,9 @@ a { color: var(--accent); cursor: pointer; }
 /* (A section that names itself under a group of the same name need not say it twice.) */
 .prop-body > div > h4:first-child, .prop-body > h4:first-child { display: none; }
 .panel > h3 { margin-bottom: 10px; }
-/* The lists at the left, by tabs (D199). */
-.left.with-tabs { display: flex; flex-direction: column; overflow: hidden; }
-.left .lists { flex: 1; min-height: 0; overflow-y: auto; }
+/* A list in a panel of its own (D234): its filter stays at the top, the list scrolls under it. */
+.list-panel { display: flex; flex-direction: column; }
+.list-panel .lists { flex: 1; min-height: 0; overflow-y: auto; }
 .list-tabs { display: flex; flex-wrap: wrap; flex: none; border-bottom: 1px solid var(--line); background: var(--bg); }
 .list-tab { border: none; border-radius: 0; background: none; color: var(--muted); padding: 6px 8px; font-size: 12px; font-weight: 600; border-bottom: 2px solid transparent; }
 .list-tab:hover:not(:disabled) { background: var(--panel); color: var(--text); }
@@ -111,7 +111,7 @@ a { color: var(--accent); cursor: pointer; }
 .reset-default:hover:not(:disabled) { color: var(--accent2); background: var(--panel2); border: none; }
 .reset-default:disabled { opacity: 0.25; }
 /* The tool strip and the tool's options (D198). */
-.tool-strip { grid-area: tools; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px 0; background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; scrollbar-width: none; }
+.tool-strip { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px 0; background: var(--panel); overflow-y: auto; scrollbar-width: none; }
 .tool-slot { display: contents; }
 .tool-strip .tool { width: 32px; height: 30px; padding: 0; display: flex; align-items: center; justify-content: center; border-color: transparent; background: none; color: var(--text); flex: none; }
 .tool-strip .tool:hover:not(:disabled) { background: var(--panel2); border-color: var(--line); }
@@ -130,7 +130,7 @@ a { color: var(--accent); cursor: pointer; }
 .tool-flyout-name { flex: 1; }
 .tool-flyout-key { color: var(--muted); font-size: 12px; }
 .tool-sep { width: 22px; height: 1px; background: var(--line); margin: 3px 0; flex: none; }
-.options-bar { grid-area: options; background: var(--panel); border-bottom: 1px solid var(--line); min-width: 0; }
+.options-bar { flex: none; height: 36px; box-sizing: border-box; position: relative; z-index: 6; background: var(--panel); border-bottom: 1px solid var(--line); min-width: 0; }
 .options-bar .tool-options { display: flex; flex-wrap: wrap; align-items: center; background: var(--panel); border-bottom: 1px solid var(--line); min-height: 36px; }
 .options-bar .tool-name { font-weight: 600; padding: 0 4px 0 12px; white-space: nowrap; }
 .options-bar .toolbar.sub { border-bottom: none; background: none; padding: 3px 8px; }
@@ -146,22 +146,62 @@ a { color: var(--accent); cursor: pointer; }
 table.shortcuts { border-collapse: collapse; width: 100%; }
 table.shortcuts td { padding: 3px 12px 3px 0; vertical-align: top; }
 table.shortcuts kbd { font: inherit; background: var(--panel2); border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; white-space: nowrap; }
-/* The frame (D196): workspaces, the edges panels are resized by, the status bar. */
-.workspace-bar { grid-area: workspaces; display: flex; align-items: center; gap: 6px; padding: 0 10px; background: var(--bg); border-bottom: 1px solid var(--line); min-width: 0; }
-.workspace-bar button { padding: 3px 9px; }
-.workspaces { display: flex; align-self: stretch; gap: 2px; }
-.workspaces .workspace { border: none; border-radius: 0; background: none; color: var(--muted); padding: 0 14px; border-bottom: 2px solid transparent; font-weight: 600; }
-.workspaces .workspace:hover:not(:disabled) { background: var(--panel); color: var(--text); }
-.workspaces .workspace.on, .workspaces .workspace.on:hover:not(:disabled) { background: var(--panel); color: var(--text); border-bottom-color: var(--accent); filter: none; }
-.panel-toggles { display: inline-flex; gap: 3px; margin-left: 6px; }
-.panel-toggles .panel-toggle { padding: 2px 6px; background: var(--panel2); color: var(--muted); border-color: var(--line); font-weight: 400; }
-.panel-toggles .panel-toggle.on { color: var(--text); }
-.splitter { z-index: 6; touch-action: none; }
-.splitter:hover, .splitter:active { background: var(--accent); opacity: 0.55; }
-.splitter-left { grid-area: left; justify-self: end; width: 5px; margin-right: -3px; cursor: col-resize; }
-.splitter-right { grid-area: right; justify-self: start; width: 5px; margin-left: -3px; cursor: col-resize; }
-.splitter-bottom { grid-area: bottom; align-self: start; height: 5px; margin-top: -3px; cursor: row-resize; }
-.status-bar { grid-area: status; display: flex; align-items: center; gap: 10px; padding: 0 8px 0 10px; background: var(--panel); border-top: 1px solid var(--line); font-size: 12px; min-width: 0; }
+/* The frame (D196, D234): the studios, Presentation's pages, the page's layout; the status bar. */
+.studio-bar { flex: none; height: 32px; box-sizing: border-box; display: flex; align-items: center; gap: 6px; padding: 0 10px; background: var(--bg); border-bottom: 1px solid var(--line); min-width: 0; }
+.studio-bar button { padding: 3px 9px; }
+.studios, .studio-pages { display: flex; align-self: stretch; gap: 2px; }
+.studios .studio-tab { border: none; border-radius: 0; background: none; color: var(--muted); padding: 0 14px; border-bottom: 2px solid transparent; font-weight: 600; white-space: nowrap; }
+.studios .studio-tab:hover:not(:disabled) { background: var(--panel); color: var(--text); }
+.studios .studio-tab.on, .studios .studio-tab.on:hover:not(:disabled) { background: var(--panel); color: var(--text); border-bottom-color: var(--accent); filter: none; }
+.studio-pages { margin-left: 2px; padding-left: 8px; border-left: 1px solid var(--line); }
+.studio-pages .studio-page { border: none; border-radius: 0; background: none; color: var(--muted); padding: 0 10px; border-bottom: 2px solid transparent; font-size: 12px; }
+.studio-pages .studio-page:hover:not(:disabled) { background: var(--panel); color: var(--text); }
+.studio-pages .studio-page.on, .studio-pages .studio-page.on:hover:not(:disabled) { color: var(--text); border-bottom-color: var(--accent2); filter: none; }
+.workspace-buttons { display: inline-flex; gap: 3px; margin-left: 6px; }
+.workspace-buttons button.small { padding: 2px 7px; background: var(--panel2); border-color: var(--line); font-weight: 400; white-space: nowrap; }
+/* The docking panels (D234): groups of tabbed panels in rows and columns, edges between them dragged to resize,
+   floating windows over them. */
+.dock-area { flex: 1; min-height: 0; position: relative; background: var(--bg); }
+.dock-root { position: absolute; inset: 0; display: flex; }
+.dock-split { flex: 1; display: flex; min-width: 0; min-height: 0; }
+.dock-split.dock-row { flex-direction: row; }
+.dock-split.dock-col { flex-direction: column; }
+.dock-cell { display: flex; min-width: 0; min-height: 0; overflow: hidden; }
+.dock-cell > * { flex: 1; }
+.dock-edge { flex: none; z-index: 2; touch-action: none; background: var(--bg); }
+.dock-edge.across { width: 4px; cursor: col-resize; }
+.dock-edge.down { height: 4px; cursor: row-resize; }
+.dock-edge:hover, .dock-edge:active { background: var(--accent); opacity: 0.6; }
+.dock-stack { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--panel); }
+.dock-tabs { flex: none; display: flex; align-items: stretch; height: 24px; background: var(--bg); border-bottom: 1px solid var(--line); overflow: hidden; }
+.dock-tab-strip { flex: 1; min-width: 0; display: flex; align-items: stretch; position: relative; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.dock-tab-strip::-webkit-scrollbar { display: none; }
+.dock-tab { flex: none; display: flex; align-items: center; gap: 2px; padding: 0 9px; font-size: 12px; color: var(--muted); cursor: default; user-select: none; white-space: nowrap; border-right: 1px solid var(--line); }
+.dock-tab.on { padding-right: 3px; }
+.dock-tab:hover { color: var(--text); background: var(--panel2); }
+.dock-tab.on { color: var(--text); background: var(--panel); box-shadow: inset 0 2px 0 var(--accent); }
+.dock-tab-name { overflow: hidden; text-overflow: ellipsis; }
+.dock-tab-close { border: none; background: none; padding: 0 4px; line-height: 16px; color: var(--muted); border-radius: 3px; }
+.dock-tab-close:hover:not(:disabled) { color: var(--text); background: var(--panel3); border: none; }
+.dock-menu-button { margin-left: auto; flex: none; border: none; background: none; color: var(--muted); padding: 0 7px; border-radius: 0; }
+.dock-menu-button:hover:not(:disabled) { color: var(--text); background: var(--panel2); border: none; }
+.dock-tabs.lone .dock-tab { flex: 1; justify-content: center; padding: 0; border-right: none; letter-spacing: -2px; cursor: grab; box-shadow: none; }
+.dock-tabs.lone .dock-tab-strip { overflow: hidden; }
+.dock-body { flex: 1; min-height: 0; min-width: 0; position: relative; overflow: hidden; }
+.dock-panel-host { position: absolute; inset: 0; overflow: auto; display: flex; flex-direction: column; }
+.dock-panel-host > * { flex: 1 0 auto; }
+.dock-panel-host > .viewer-panel, .dock-panel-host > .timeline, .dock-panel-host > .list-panel, .dock-panel-host > .tool-strip { flex: 1 1 0; min-height: 0; }
+.viewer-panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+/* Options of the tool that need a second line lie over the top of what is below the bar: the groups along the top
+   edge move what they hold down by as much (the map keeps its size and place). */
+.dock-stack.top:not(.viewer-stack) { padding-top: var(--options-over, 0px); }
+.dock-float { position: absolute; z-index: 50; display: flex; flex-direction: column; min-width: 160px; min-height: 120px; max-width: calc(100% - 8px); background: var(--panel); border: 1px solid rgba(255,255,255,0.18); border-radius: 5px; box-shadow: 0 10px 30px rgba(0,0,0,0.55); overflow: hidden; }
+.dock-float > .dock-tabs { cursor: move; }
+.dock-float-corner { position: absolute; right: 0; bottom: 0; width: 14px; height: 14px; cursor: nwse-resize; touch-action: none; background: linear-gradient(135deg, transparent 50%, var(--muted) 50%, var(--muted) 60%, transparent 60%, transparent 72%, var(--muted) 72%, var(--muted) 82%, transparent 82%); opacity: 0.7; }
+.dock-drop-mark { position: fixed; z-index: 2000; pointer-events: none; background: rgba(79,155,217,0.22); border: 2px solid var(--accent); border-radius: 3px; box-sizing: border-box; }
+.dock-drag-ghost { position: fixed; z-index: 2001; pointer-events: none; padding: 3px 9px; background: var(--panel3); border: 1px solid rgba(255,255,255,0.18); border-radius: 4px; font-size: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); white-space: nowrap; }
+body.dock-dragging, body.dock-dragging * { cursor: grabbing !important; user-select: none; }
+.status-bar { flex: none; height: 24px; box-sizing: border-box; display: flex; align-items: center; gap: 10px; padding: 0 8px 0 10px; background: var(--panel); border-top: 1px solid var(--line); font-size: 12px; min-width: 0; }
 .status-hint { flex: 1; min-width: 0; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .status-hint b { color: var(--text); font-weight: 600; }
 .status-bar button.small { padding: 0 7px; line-height: 18px; }
@@ -178,10 +218,6 @@ table.shortcuts kbd { font: inherit; background: var(--panel2); border: 1px soli
 .datebar { display: inline-flex; align-items: center; gap: 4px; }
 .datebar input { width: 210px; text-align: center; font-weight: 600; }
 .spacer { flex: 1; }
-.left { grid-area: left; overflow-y: auto; background: var(--panel); border-right: 1px solid var(--line); }
-.right { grid-area: right; overflow-y: auto; background: var(--panel); border-left: 1px solid var(--line); }
-.center { grid-area: center; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-.bottom { grid-area: bottom; border-top: 1px solid var(--line); min-height: 0; }
 .section { border-bottom: 1px solid var(--line); }
 .section-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px 4px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
 .section-head button { white-space: nowrap; flex: none; }
@@ -202,7 +238,6 @@ table.shortcuts kbd { font: inherit; background: var(--panel2); border: 1px soli
    is left of one line, the whole of them on hovering. */
 .tool-options-anchor { position: relative; height: 0; z-index: 6; }
 .tool-options { position: absolute; left: 0; right: 0; top: 0; }
-aside.left, aside.right { padding-top: var(--options-over, 0px); }
 .options-bar .tool-options { flex-wrap: nowrap; align-items: flex-start; }
 .options-bar .tool-name { line-height: 36px; flex: none; }
 .options-bar .toolbar.sub { flex: 1 1 0; min-width: 0; }

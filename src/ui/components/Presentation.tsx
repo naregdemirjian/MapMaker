@@ -27,8 +27,8 @@ import { audioPlayer, audioPeaks, drawWaveform } from '../audio-track.ts';
 import type { ShotAudio } from '../../presentation/sequence.ts';
 
 /**
- * The shot editor's tabs in the Present workspace (D212): every group, or those of one kind. Remembered on this
- * computer. The Export workspace shows only the shot, its output quality and its export.
+ * The shot editor's tabs on Presentation's Shots page (D212): every group, or those of one kind. Remembered on this
+ * computer. The Export page shows only the shot, its output quality and its export.
  */
 export const SHOT_TABS: Array<{ id: string; name: string; groups: string[] | null }> = [
   { id: 'all', name: 'All', groups: null },
@@ -87,7 +87,7 @@ export function ShotsPanel() {
     if (id) s.set({ shotId: id, shotFrame: 0, presentCamera: null });
   };
   return (
-    <aside className="left">
+    <div className="shots-panel">
       <section className="section">
         <div className="section-head"><span>Shots</span><span><button className="small" onClick={wholeHistory} title="A shot of everything that happens: from the first change to the last, at an even pace, the year counting up, every change animated" data-testid="new-shot-history">+ Whole history</button> <button className="small" onClick={create} data-testid="new-shot">+ Shot</button></span></div>
         <div className="section-body">
@@ -97,7 +97,7 @@ export function ShotsPanel() {
           {!shots.length && <div className="muted pad">No shots yet. A shot turns a stretch of history into a camera move you can export. Select an event first to base the shot on its dates.</div>}
         </div>
       </section>
-    </aside>
+    </div>
   );
 }
 
@@ -117,7 +117,7 @@ export function ShotEditor({ only }: { only?: 'export' } = {}) {
   const [tab, setTab] = useState(loadShotTab);
   const cancel = useRef(false);
   useEffect(() => setName(row?.name ?? ''), [s.shotId]);
-  if (!shot || !row) return <aside className="right"><div className="panel"><h3>Presentation</h3><p className="muted">Create or pick a shot on the left. Its preview appears in the middle; drag and scroll there to frame the view.</p></div></aside>;
+  if (!shot || !row) return <div className="shot-settings"><div className="panel"><h3>Presentation</h3><p className="muted">Create or pick a shot on the left. Its preview appears in the middle; drag and scroll there to frame the view.</p></div></div>;
   const seconds = shot.frames / shot.fps;
   const passes = exportPassesOf(shot);
   const setPasses = (next: string[]) => update({ exportPasses: passDefsFor(w, shot).map((d) => d.name).filter((n) => next.includes(n)) });
@@ -200,7 +200,7 @@ export function ShotEditor({ only }: { only?: 'export' } = {}) {
     }
   };
   return (
-    <aside className="right" data-testid="shot-editor">
+    <div className="shot-settings" data-testid="shot-editor">
       <SizeEstimate shot={shot} passes={passes} estimateKey={estimateKey} onEstimate={setEstimate} />
       {only !== 'export' && (
         <div className="list-tabs shot-tabs" role="tablist" aria-label="Settings of the shot" data-testid="shot-tabs">
@@ -502,7 +502,7 @@ export function ShotEditor({ only }: { only?: 'export' } = {}) {
         </GroupsShown.Provider>
         <button className="danger" onClick={() => { if (confirm(`Delete the shot "${row.name}"?`)) { s.execute((wd) => cmd.deleteSequence(wd, row.id)); s.set({ shotId: null }); } }}>Delete shot</button>
       </div>
-    </aside>
+    </div>
   );
 }
 
@@ -628,7 +628,7 @@ function VideoCheck({ shot, onPlan }: { shot: ShotSettings; onPlan: (p: { key: s
   return null;
 }
 
-/** The groups of a shot's settings shown (null: all of them). The Export workspace shows those of the export alone. */
+/** The groups of a shot's settings shown (null: all of them). The Export page shows those of the export alone. */
 const GroupsShown = createContext<string[] | null>(null);
 const EXPORT_GROUPS = ['Shot', 'Output quality', 'Export'];
 

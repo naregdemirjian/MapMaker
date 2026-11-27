@@ -72,7 +72,7 @@ try {
     await page.getByRole('button', { name: '+ Layer' }).click();
     await page.getByTestId('new-layer-name').fill('Military control');
     await page.getByTestId('new-layer-name').press('Enter');
-    await page.locator('.left .row', { hasText: 'Military control' }).getByText('drawing here').waitFor();
+    await page.locator('.list-panel .row', { hasText: 'Military control' }).getByText('drawing here').waitFor();
     // Base: everyone controls their own land; then B occupies part of A in 1700.
     await h.chooseTool('lasso');
     await page.getByTestId('paint-owner').selectOption({ label: A });
@@ -127,13 +127,13 @@ try {
     await page.getByTestId('clip-to-land').check();
     await h.saved();
     // Hide the political layer: only military control is drawn.
-    await page.locator('.left .row', { hasText: 'Political' }).locator('input[type=checkbox]').uncheck();
+    await page.locator('.list-panel .row', { hasText: 'Political' }).locator('input[type=checkbox]').uncheck();
     await h.saved();
     const visible = await page.evaluate(() => (window as any).__mapmaker.store.world.all('layer').filter((l: any) => l.visible).map((l: any) => l.name));
     assert.deepEqual(visible, ['Military control']);
     await h.screenshot('political-hidden');
-    await page.locator('.left .row', { hasText: 'Political' }).locator('input[type=checkbox]').check();
-    await page.locator('.left .row', { hasText: 'Political' }).locator('span', { hasText: 'Political' }).click();
+    await page.locator('.list-panel .row', { hasText: 'Political' }).locator('input[type=checkbox]').check();
+    await page.locator('.list-panel .row', { hasText: 'Political' }).locator('span', { hasText: 'Political' }).click();
   });
 
   await h.step('Alternative versions of an event switch history back and forth', async () => {
@@ -182,7 +182,7 @@ try {
     await h.saved();
     await page.getByTestId('undo').click();
     await h.waitOwner(P.b, '1950', A);
-    await page.locator('.left .row', { hasText: 'Union' }).waitFor();
+    await page.locator('.list-panel .row', { hasText: 'Union' }).waitFor();
   });
 
   await h.step('A fade over the length of an event', async () => {
@@ -232,7 +232,7 @@ try {
   });
 
   await h.step('Event groups: make groups on the timeline, put events in several, filter what the timeline lists', async () => {
-    const listed = () => page.evaluate(() => Array.from(document.querySelectorAll('.left .row')).map((r) => r.textContent ?? '').filter((t) => /\d{4}/.test(t)));
+    const listed = () => page.evaluate(() => Array.from(document.querySelectorAll('.list-panel .row')).map((r) => r.textContent ?? '').filter((t) => /\d{4}/.test(t)));
     const has = (rows: string[], name: string) => rows.some((r) => r.includes(name));
     const groupsOn = page.getByTestId('group-filter-button');
     await groupsOn.click();
@@ -245,7 +245,7 @@ try {
     await page.locator('.group-popover .close').click();
     // Occupation of the west: West; Border treaty: West and Treaties (more than one group).
     for (const [event, groups] of [['Occupation of the west', ['West']], ['Border treaty', ['West', 'Treaties']]] as const) {
-      await page.locator('.left .row', { hasText: event }).first().click();
+      await page.locator('.list-panel .row', { hasText: event }).first().click();
       for (const g of groups) await page.getByTestId(`event-group-${g}`).check();
     }
     await h.saved();
@@ -292,7 +292,7 @@ try {
   });
 
   await h.step('Zooming in the middle of a brush stroke does not change the shape being drawn', async () => {
-    await page.locator('.left .row', { hasText: 'Political' }).locator('span').first().click();
+    await page.locator('.list-panel .row', { hasText: 'Political' }).locator('span').first().click();
     await h.newCountry('Zoomland');
     await h.chooseTool('lasso');
     const { cx, cy } = await h.centre();
@@ -614,7 +614,7 @@ try {
 
   let colours: Record<string, string> = {};
   await h.step('A character: a point that travels between places over time, moved by dragging, leaves the map; never territory', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     await page.getByTestId('tool-select').click();
     await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: -30, lat: 45, zoom: 1.6, rotation: 0, projection: 'equirectangular' }));
     await h.setDate('1500');
@@ -676,7 +676,7 @@ try {
   });
 
   await h.step('A character\'s icon: a ship facing the way it sails and flipped on the way back, an airliner turned, on a disc, larger; back to the marker', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     await page.getByTestId('tool-select').click();
     await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: -30, lat: 45, zoom: 1.6, rotation: 0, projection: 'equirectangular' }));
     const id = await page.evaluate(() => (window as any).__mapmaker.store.world.all('entity').find((e: any) => e.name === 'Ilse the Wanderer').id);
@@ -873,7 +873,7 @@ try {
 
 
   await h.step('Border shifts generated between a change\'s before and after (D195): a step every two months, real changes; more of the land each time from the gainer\'s border, some retaken; all of it at the end; another version, removed, undone', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     const before = await page.evaluate(() => (window as any).__mapmaker.store.world.all('entity').length);
     // Two countries side by side in the southern Indian Ocean, and a war in which the first takes all of the second (drawn as one change).
     const ids = await page.evaluate(() => {
@@ -1022,7 +1022,7 @@ try {
 
   await h.step("Changes over time: a country shown lightly, the land it gained in a year, a decade, a century", async () => {
     await page.getByTestId('tool-select').click();
-    await page.locator('.left .row', { hasText: A }).first().click();
+    await page.locator('.list-panel .row', { hasText: A }).first().click();
     await page.getByTestId('entity-panel').waitFor();
     await page.getByTestId('history-mode').check();
     await page.getByTestId('history-unit').selectOption('year');
@@ -1186,7 +1186,7 @@ try {
     await page.getByTestId('compare-toggle').click();
     // A shot of the branch: made while viewing it, its timeline chosen in the shot's settings.
     await page.getByTestId('branch-select').selectOption(br);
-    await page.getByTestId('workspace-present').click();
+    await h.goto('shots');
     await page.getByTestId('new-shot').click();
     await page.getByTestId('shot-branch').waitFor();
     assert.equal(await page.getByTestId('shot-branch').inputValue(), br);
@@ -1198,7 +1198,7 @@ try {
     assert.ok(west(await pv()), `then the main timeline (${await pv()})`);
     // (The shot goes again: later steps make shots of their own.)
     await page.evaluate(() => { const m = (window as any).__mapmaker, s = m.store; const id = s.shotId; s.set({ shotId: null }); s.execute((w: any) => m.bench.commands.deleteSequence(w, id)); });
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     // Deleted (with its event), the main timeline shown; undo brings it back.
     await page.getByTestId('open-branches').click();
     page.once('dialog', (d) => d.accept());
@@ -1250,7 +1250,7 @@ try {
     wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22); wav.writeUInt32LE(rate, 24); wav.writeUInt32LE(2 * rate, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34);
     wav.write('data', 36); wav.writeUInt32LE(2 * n, 40);
     for (let i = 0; i < n; i++) wav.writeInt16LE(Math.round(Math.sin((2 * Math.PI * 440 * i) / rate) * (i < rate ? 6000 : 26000)), 44 + 2 * i);
-    await page.getByTestId('workspace-present').click();
+    await h.goto('shots');
     await page.getByTestId('new-shot').click();
     await page.getByTestId('shot-editor').waitFor();
     await page.locator('summary', { hasText: 'Sound' }).click();
@@ -1268,7 +1268,7 @@ try {
     assert.deepEqual(readFileSync(join(ex.dir, 'audio-reference.wav')), wav);
     // (The shot goes again: later steps make shots of their own.)
     await page.evaluate(() => { const m = (window as any).__mapmaker, s = m.store; const id = s.shotId; s.set({ shotId: null }); s.execute((w: any) => m.bench.commands.deleteSequence(w, id)); });
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     await page.getByTestId('map-select').selectOption({ label: 'Earth' });
   });
 
@@ -1454,7 +1454,7 @@ try {
     });
     await page.getByTestId('frame-info').waitFor();
     assert.match(await page.getByTestId('frame-info').innerText(), /36 Frostmoon 20 TA/);
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     await page.getByTestId('undo').click();
     await h.saved();
     assert.equal(await page.evaluate((id) => !!(window as any).__mapmaker.store.world.get('sequence', id), shotId), false);
@@ -1469,7 +1469,7 @@ try {
   });
 
   await h.step('Recording into an event: each change spreads until the next one recorded; the last then given two years of its own in the event\'s panel', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: -30, lat: 45, zoom: 1.6, rotation: 0, projection: 'equirectangular' }));
     await h.setDate('1960');
     await page.getByRole('button', { name: '+ Event' }).click();
@@ -1781,7 +1781,7 @@ try {
     assert.equal(await page.getByTestId('feature-panel-name').inputValue(), 'Battle of the Ford');
     await h.screenshot('areas-lines-points');
     // The front moves in 1880: a new shape from that date, through the panel.
-    await page.locator('.left [data-testid=feature-row]', { hasText: 'Northern front' }).click();
+    await page.locator('.list-panel [data-testid=feature-row]', { hasText: 'Northern front' }).click();
     await h.setDate('1880');
     await page.getByTestId('feature-reshape').click();
     await page.getByTestId('reshaping').waitFor();
@@ -1864,7 +1864,7 @@ try {
 
   await h.step('Relationships: a war added from a country\'s panel, with an end date, read from both sides, ended again later', async () => {
     await h.setDate('1850');
-    await page.locator('.left .row', { hasText: A }).first().click();
+    await page.locator('.list-panel .row', { hasText: A }).first().click();
     await page.getByTestId('entity-panel').waitFor();
     await page.getByTestId('relation-new').click();
     await page.getByTestId('relation-kind').selectOption({ label: 'at war with' });
@@ -1890,7 +1890,7 @@ try {
     const holds = await page.evaluate(() => { const m = (window as any).__mapmaker, s = m.store, B = m.bench; const r = s.world.all('relation')[0]; return [1855, 1865, 1870.5, 1872].map((y) => s.engine.relationHolds(r.id, B.gregorian.fromCivil({ year: Math.floor(y), month: y % 1 ? 7 : 1 }))); });
     assert.deepEqual(holds, [true, false, true, false]);
     // Front lines (D89): on the political layer, the border between the two is a front line while they are at war.
-    await page.locator('.left .row', { hasText: 'Political' }).locator('span', { hasText: 'Political' }).click();
+    await page.locator('.list-panel .row', { hasText: 'Political' }).locator('span', { hasText: 'Political' }).click();
     await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null, tool: 'select' }));
     await page.evaluate(() => { const s = (window as any).__mapmaker.store; s.set({ selection: { kind: 'layer', id: s.layerId } }); }); // (the layer drawn on, shown in Properties)
     await page.getByTestId('layer-fronts').selectOption('second');
@@ -1991,13 +1991,13 @@ try {
 
   await h.step('A shot framed in the preview (still camera, reset) at 2.39:1 and 25 fps; inspect every exported pass', async () => {
     colours = await page.evaluate((names) => Object.fromEntries(names.map((n) => [n, (window as any).__mapmaker.store.world.all('entity').find((e: any) => e.name === n).color])), [A, B]);
-    await page.locator('.left .row', { hasText: 'Union' }).click();
+    await page.locator('.list-panel .row', { hasText: 'Union' }).click();
     // Out of sync with the clock (D92): the union, an instant of 1900, takes 0.4 s on screen in presentations.
     await page.getByTestId('event-screen').selectOption('own');
     await page.getByTestId('event-screen-seconds').fill('0.4');
     await page.getByTestId('event-screen-seconds').press('Enter');
     await page.waitForFunction(() => /"seconds":0.4/.test((window as any).__mapmaker.store.world.all('event').find((e: any) => e.name === 'Union').presentation));
-    await page.getByTestId('workspace-present').click();
+    await h.goto('shots');
     await page.getByTestId('new-shot').click();
     await page.getByTestId('shot-editor').waitFor();
     // History shown: 1880 to 1920, across the union of 1900.
@@ -2245,15 +2245,15 @@ try {
     });
     const video = join(ROOT, '.tmp', 'fill-test.webm');
     writeFileSync(video, Buffer.from(b64, 'base64'));
-    await page.getByTestId('workspace-map').click();
-    await page.locator('.left .row', { hasText: A }).click();
+    await page.getByTestId('studio-history').click();
+    await page.locator('.list-panel .row', { hasText: A }).click();
     await page.getByTestId('fill-upload-video').setInputFiles(video);
     await page.getByTestId('fill-play').waitFor();
     await page.getByTestId('fill-play').selectOption('once');
     await page.locator('.country-fill label', { hasText: 'Speed' }).locator('input').fill('2');
     await h.saved();
-    await page.getByTestId('workspace-present').click();
-    await page.locator('.left .row', { hasText: 'Shot 1' }).click();
+    await h.goto('shots');
+    await page.locator('.shots-panel .row', { hasText: 'Shot 1' }).click();
     await page.getByTestId('shot-editor').waitFor();
     const ex = await exportShot('export-preview');
     const at = async (f: number) => {
@@ -2263,12 +2263,12 @@ try {
     const first = await at(0), last = await at(ex.frames('fills').length - 1);
     assert.ok(first[1] > first[2] + 60 && first[1] > first[0] + 60, `first frame shows the video's green (${first})`);
     assert.ok(last[2] > last[1] + 60 && last[2] > last[0] + 60, `last frame shows the video's blue: it played (${last})`);
-    await page.getByTestId('workspace-map').click();
-    await page.locator('.left .row', { hasText: A }).click();
+    await page.getByTestId('studio-history').click();
+    await page.locator('.list-panel .row', { hasText: A }).click();
     await page.getByTestId('fill-color').click();
     await h.saved();
-    await page.getByTestId('workspace-present').click();
-    await page.locator('.left .row', { hasText: 'Shot 1' }).click();
+    await h.goto('shots');
+    await page.locator('.shots-panel .row', { hasText: 'Shot 1' }).click();
     await page.getByTestId('shot-editor').waitFor();
   });
 
@@ -2352,7 +2352,7 @@ try {
   });
 
   await h.step('A flat map: a 10 km city plan with straight borders and a scale in metres or kilometres', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     await page.getByRole('button', { name: '+ Map' }).click();
     await page.getByTestId('new-map-flat').check();
     await page.getByTestId('new-map-name').fill('Old Town');
@@ -2361,7 +2361,7 @@ try {
     await page.waitForFunction(() => (window as any).__mapmaker.store.world.get('map_space', (window as any).__mapmaker.store.spaceId)?.name === 'Old Town');
     assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.camera.projection), 'flat', 'seen in plan');
     assert.equal(await page.getByTestId('basemap-toggle').count(), 0, 'no Earth geography for a flat map');
-    assert.match((await page.locator('.left .row', { hasText: 'Old Town' }).textContent()) ?? '', /flat, 10 km wide/);
+    assert.match((await page.locator('.list-panel .row', { hasText: 'Old Town' }).textContent()) ?? '', /flat, 10 km wide/);
     // A square with the precise shape tool: drawn, owned, straight.
     await h.newCountry('Guild Quarter');
     await h.chooseTool('polygon');
@@ -2384,7 +2384,7 @@ try {
   });
 
   await h.step('Settings: how fast and how sharp the working view is drawn, kept on this computer', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     await page.getByTestId('tool-select').click();
     const state = () => page.evaluate(() => {
       const s = (window as any).__mapmaker.store, c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement;
@@ -2439,7 +2439,7 @@ try {
   });
 
   await h.step('What is shown: names, lakes and rivers hidden while working but kept in the presentation; small lakes left out by size', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     const look = () => page.evaluate(() => {
       const s = (window as any).__mapmaker.store, space = s.world.get('map_space', s.spaceId);
       return { labels: s.renderer.lastLabels.length as number, lakes: s.renderer.basemapPainter.lakeFilter as { show: boolean; minKm2: number }, settings: JSON.parse(space.settings).show ?? {} };
@@ -2469,9 +2469,9 @@ try {
     await h.screenshot('what-is-shown');
     await page.getByTestId('show-dialog').getByRole('button', { name: 'Close' }).last().click();
     // The presentation preview shows what exports show: lakes, of the size chosen.
-    await page.getByTestId('workspace-present').click();
+    await h.goto('shots');
     await page.waitForFunction((min) => { const f = (window as any).__mapmaker.store.renderer.basemapPainter.lakeFilter; return f.show && f.minKm2 === min; }, set.settings.minLakeKm2);
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.basemapPainter.lakeFilter.show === false);
     // Back as it was: one undo per change.
     for (let i = 0; i < 4; i++) await page.getByTestId('undo').click();
@@ -2482,7 +2482,7 @@ try {
   });
 
   await h.step('Locked countries: one locked from its menu keeps its land when drawn over and is given none; unlocked from its panel; all the others locked at once; undone', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     await page.evaluate((c) => (window as any).__mapmaker.store.setCamera({ lon: c[0], lat: c[1], zoom: 2, rotation: 0, projection: 'equirectangular' }), P.a);
     await h.setDate('1450');
     const held = (await h.ownerAt(P.a, '1450'))!;
@@ -2527,7 +2527,7 @@ try {
   });
 
   await h.step('Terrain: land coloured by height and the sea by depth, with relief; the satellite look, as photographed and by land cover; finer heights, photographs and made-up fine ground close in; relief over the countries; hidden while working but kept in the presentation; undone', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     // The whole world: the Himalaya, the plains of India, the Atlantic and the countries drawn over it.
     await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 20, lat: 20, zoom: 0.3, rotation: 0, projection: 'equirectangular' }));
     await h.setDate('1450');
@@ -2652,9 +2652,9 @@ try {
     // Hidden while working: gone from the working view, kept in the presentation (and exports).
     await show(() => page.getByTestId('show-working-terrain').uncheck());
     await page.waitForFunction(() => !(window as any).__mapmaker.store.renderer.lastTerrain.colours);
-    await page.getByTestId('workspace-present').click();
+    await h.goto('shots');
     await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastTerrain.colours);
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     assert.deepEqual(await terrain(), { colours: false, relief: false, overTerritories: false, seaLevel: 0, cover: false, detail: '', photo: '' });
     // Undone, step by step, to no terrain.
     for (let i = 0; i < 7; i++) await page.getByTestId('undo').click();
@@ -2664,7 +2664,7 @@ try {
   });
 
   await h.step('Sea level over time: 120 m lower, the North Sea is land, and territory ending at the coast covers it; undone', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 3, lat: 54, zoom: 3, rotation: 0, projection: 'equirectangular' }));
     await h.setDate('1450');
     const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
@@ -2677,7 +2677,7 @@ try {
     }, ll);
     const diff = (a: number[], b: number[]) => Math.max(...a.map((v, i) => Math.abs(v - b[i])));
     // A country on the military control layer, whose territory ends at the coast, over the North Sea and the land around it.
-    await page.locator('.left .row', { hasText: 'Military control' }).locator('span', { hasText: 'Military control' }).click();
+    await page.locator('.list-panel .row', { hasText: 'Military control' }).locator('span', { hasText: 'Military control' }).click();
     await page.evaluate(() => { const s = (window as any).__mapmaker.store; s.set({ selection: { kind: 'layer', id: s.layerId } }); }); // (the layer drawn on, shown in Properties)
     assert.ok(await page.getByTestId('clip-to-land').isChecked(), 'territory on this layer ends at the coast');
     const seaPlaces: LL[] = [[3, 55.5], [2, 56.6], [4.5, 56.6], [3.5, 54.4]], landPlaces: LL[] = [[-1, 52.7], [-2, 54.6], [8, 52.4], [6.6, 52.8]];
@@ -2725,7 +2725,7 @@ try {
   });
 
   await h.step('A generated planet: chosen with a picture of it, made from its seed, land and sea drawn, territory ending at its coast; undone', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
     const before = await steps();
     const was = await page.evaluate(() => { const s = (window as any).__mapmaker.store; return { spaceId: s.spaceId as string, layerId: s.layerId as string }; });
@@ -2780,7 +2780,7 @@ try {
   });
 
   await h.step('The quick generator\'s drawing tools (D169): on a generated planet, land drawn as an outline in its sea; a river from it to the sea; desert painted on it; its colours from the climate models; undone', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
     const before = await steps();
     const was = await page.evaluate(() => { const s = (window as any).__mapmaker.store; return { spaceId: s.spaceId as string, layerId: s.layerId as string }; });
@@ -2884,7 +2884,7 @@ try {
   });
 
   await h.step('Brush tips and mountain ranges (D218): a hard round tip raises a plateau, not a dome; the tip kept with the stroke; a range has a crest and valleys down its sides; undone', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 12, lat: 24, zoom: 3, rotation: 0, projection: 'equirectangular' }));
     const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
     const before = await steps();
@@ -2948,7 +2948,7 @@ try {
   });
 
   await h.step('Sculpting: land painted into the North Sea in the base world; a dated stroke floods England from a date only; undone', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 2, lat: 54, zoom: 3, rotation: 0, projection: 'equirectangular' }));
     await h.setDate('1450');
     const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
@@ -3002,7 +3002,7 @@ try {
   });
 
   await h.step('Conditions: a radiation layer; a source placed with a click from the date viewed, there while it lasts and not before or after; a plume carried east; hidden while working but presented; undone', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 70, lat: 56, zoom: 2, rotation: 0, projection: 'equirectangular' }));
     await h.setDate('1450');
     const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
@@ -3065,9 +3065,9 @@ try {
     await page.getByTestId('show-working-fields').uncheck();
     await page.getByTestId('show-dialog').getByRole('button', { name: 'Close' }).last().click();
     await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastFields.length === 0);
-    await page.getByTestId('workspace-present').click();
+    await h.goto('shots');
     await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastFields.length > 0);
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     // Undone, step by step: the switch, the plume, the circle and the layer.
     assert.equal(await fields().then((f) => f.length), 0);
     for (let i = 0; i < 4; i++) await page.getByTestId('undo').click();
@@ -3078,7 +3078,7 @@ try {
   });
 
   await h.step('Conditions spreading over the terrain: a fire in the West Siberian Plain advances day by day; undone', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     const site: LL = [75, 61];
     await page.evaluate((c) => (window as any).__mapmaker.store.setCamera({ lon: c[0], lat: c[1], zoom: 3.5, rotation: 0, projection: 'equirectangular' }), site);
     await h.setDate('1450');
@@ -3121,7 +3121,7 @@ try {
   });
 
   await h.step('Disasters: a meteor impact placed with one click as an event from the date viewed, its crater in the terrain and its blast, fires and dust; one undo takes it all back', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     const site: LL = [75, 61];
     await page.evaluate((c) => (window as any).__mapmaker.store.setCamera({ lon: c[0], lat: c[1], zoom: 3, rotation: 0, projection: 'equirectangular' }), site);
     await h.setDate('1450');
@@ -3169,7 +3169,7 @@ try {
   });
 
   await h.step('A heatmap worked out from the battles; three thousand strikes drawn in a 4K export frame and in the working view; undone', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
     // The layer of battles (points) and a date when it has some.
     const found = await page.evaluate(() => {
@@ -3264,7 +3264,7 @@ try {
   });
 
   await h.step('Routes: a line drawn as a campaign arrow, broad along its path, chevrons flowing along it as a shot plays and still while world-building; undone', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
     const before = await steps();
     const at: LL = [15, 46];
@@ -3343,7 +3343,7 @@ try {
   });
 
   await h.step('Text boxes and callouts: a text shown from half a second to one and a half; a callout pointing at a place clicked on the preview, its dot there; dragged; undone', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     // A short shot of one date (no title, no date).
     const shotId = await page.evaluate(() => {
       const m = (window as any).__mapmaker, s = m.store, B = m.bench;
@@ -3395,12 +3395,20 @@ try {
     const boxes = await drawnAt(24);
     const box = boxes.find((r) => r.id === calloutId)!;
     assert.ok(box, 'the callout\'s box is drawn');
-    // The pointer: pixels between the box and the place are the text's colour somewhere along the line.
+    // The pointer: pixels between the box and the place are the text's colour somewhere along the line. (Looked for a
+    // couple of pixels either side: the thin line leaves the box at its corner, rounded, not at the corner's point.)
     const from = [Math.min(box.x + box.w, Math.max(box.x, at[0])), Math.min(box.y + box.h, Math.max(box.y, at[1]))];
+    const litNear = (p: [number, number]) => page.evaluate(([x, y]) => {
+      const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement;
+      const r = c.getBoundingClientRect(), k = c.width / r.width;
+      const d = c.getContext('2d')!.getImageData(Math.round((x - r.left) * k) - 2, Math.round((y - r.top) * k) - 2, 5, 5).data;
+      for (let i = 0; i < d.length; i += 4) if (Math.max(Math.abs(d[i] - 244), Math.abs(d[i + 1] - 239), Math.abs(d[i + 2] - 230)) <= 60) return true;
+      return false;
+    }, p);
     let lit = 0;
     for (let i = 2; i <= 8; i++) {
-      const f = i / 10, px = await pixelAtPage([from[0] + (at[0] - from[0]) * f, from[1] + (at[1] - from[1]) * f]);
-      if (Math.max(...px.map((v, k) => Math.abs(v - [244, 239, 230][k]))) <= 60) lit++;
+      const f = i / 10;
+      if (await litNear([from[0] + (at[0] - from[0]) * f, from[1] + (at[1] - from[1]) * f])) lit++;
     }
     assert.ok(lit >= 4, `a line from the box to the place (${lit} of 7 points on it)`);
     await h.screenshot('text-box-callout');
@@ -3418,7 +3426,7 @@ try {
   });
 
   await h.step('Looks: a shot in the Atlas look (its sea in the preview and an exported frame), darker edges, then Parchment; the world-building view keeps its colours; undone', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     const sea: LL = [-40, 50];
     const shotId = await page.evaluate((c) => {
       const m = (window as any).__mapmaker, s = m.store, B = m.bench;
@@ -3510,7 +3518,7 @@ try {
   });
 
   await h.step('Transition looks (D137): Blitz chosen in the shot editor sets every part of it and its preview plays; a slider makes the look the shot\'s own; the glow takes the owner\'s colour; Overland minds the land (D142); an event\'s own look from its panel; undone', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     const shotId = await page.evaluate(() => {
       const m = (window as any).__mapmaker, s = m.store, B = m.bench;
       const settings = B.defaultShot(s.spaceId, { lon: 0, lat: 20, zoom: 1, rotation: 0, projection: 'equirectangular' }, s.time, s.time, 24, 1);
@@ -3599,7 +3607,7 @@ try {
   });
 
   await h.step('Playing a shot: Play runs through its frames at its pace and stops at its end; Pause and the frame slider', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     const shotId = await page.evaluate(() => {
       const m = (window as any).__mapmaker, s = m.store, B = m.bench;
       const settings = B.defaultShot(s.spaceId, { lon: 10, lat: 48, zoom: 1, rotation: 0, projection: 'equirectangular' }, s.time, s.time, 24, 1.5);
@@ -3635,7 +3643,7 @@ try {
   });
 
   await h.step('TIFF sequences: a shot exported as ZIP-compressed TIFF files with straight alpha, read back at the preview size; undone', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     const shotId = await page.evaluate(() => {
       const m = (window as any).__mapmaker, s = m.store, B = m.bench;
       const settings = B.defaultShot(s.spaceId, { lon: 10, lat: 48, zoom: 2, rotation: 0, projection: 'equirectangular' }, s.time, s.time, 24, 0.25);
@@ -3672,7 +3680,7 @@ try {
   });
 
   await h.step('Looks of countries (D181, D185): effects added in a country\'s panel, a light sweep that changes the frame as time on screen passes, a change through history, a look kept and given to a second country, an export with motion blur; undone', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
     const before = await steps();
     const lookOf = (name: string) => page.evaluate((n) => { const e = (window as any).__mapmaker.store.world.all('entity').find((x: any) => x.name === n); return JSON.parse(e.style || '{}').look ?? null; }, name);
@@ -3743,7 +3751,7 @@ try {
   });
 
   await h.step('SVG frames: the frame shown saved as an SVG file; territories, borders, names and texts as shapes and text in their layers; drawn by the browser it is the exported frame; undone', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     const shotId = await page.evaluate(() => {
       const m = (window as any).__mapmaker, s = m.store, B = m.bench;
       const settings = B.defaultShot(s.spaceId, { lon: 10, lat: 48, zoom: 2.2, rotation: 8, projection: 'equirectangular' }, s.time, s.time, 24, 0.5);
@@ -3797,7 +3805,7 @@ try {
   });
 
   await h.step('Videos: a shot exported as an MP4 (H.264) and a WebM (VP9) file; every frame there at the frame rate, the pictures of the PNG frames; a size beyond H.264 refused before it starts; undone', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     const shotId = await page.evaluate(() => {
       const m = (window as any).__mapmaker, s = m.store, B = m.bench;
       const settings = B.defaultShot(s.spaceId, { lon: 10, lat: 48, zoom: 2.2, rotation: 0, projection: 'equirectangular' }, B.gregorian.fromCivil({ year: 1450 }), B.gregorian.fromCivil({ year: 1950 }), 24, 1);
@@ -3878,7 +3886,7 @@ try {
   });
 
   await h.step('Each layer on its own: a shot exported as one pass per layer; each painted exactly where its layer holds land, clear elsewhere', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     const setup = await page.evaluate(([a, b, out]) => {
       const m = (window as any).__mapmaker, s = m.store, B = m.bench;
       // (In their order, bottom first, as the passes are written.)
@@ -3926,7 +3934,7 @@ try {
   });
 
   await h.step('A shot on the globe (D127): the projection chosen, the preview dragged to turn the planet, set turning on its own, exported as frames and as an SVG frame; undone', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     const shotId = await page.evaluate(([a]) => {
       const m = (window as any).__mapmaker, s = m.store, B = m.bench;
       const settings = B.defaultShot(s.spaceId, { lon: a[0], lat: a[1], zoom: 0.3, rotation: 0, projection: 'equirectangular' }, B.gregorian.fromCivil({ year: 1760 }), B.gregorian.fromCivil({ year: 1760 }), 24, 0.25);
@@ -3981,7 +3989,7 @@ try {
   });
 
   await h.step('A star map: the stars within 50 light-years in three dimensions; a star chosen and its panel; turned, zoomed and centred; star systems held by a country from a date; a lane between two stars; a shot of it exported; back to Earth', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     await page.getByRole('button', { name: '+ Map' }).click();
     await page.getByTestId('new-map-stars').check();
     await page.getByTestId('new-map-stars-note').waitFor();
@@ -4131,7 +4139,7 @@ try {
   await h.step('Space views (D215): the view in three dimensions stays level whatever the chart was turned to; the right button moves the view, the middle button carries it forward and back (D231); ⌂ back to the start, level; a star found by name and the view brought to it; undone', async () => {
     const st = <T,>(f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`) as Promise<T>;
     const hook = <T,>(name: string, ...args: unknown[]) => page.evaluate(([n, a]) => (window as any).__mapmaker[n as string](...(a as unknown[])), [name, args] as const) as Promise<T>;
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     await page.getByRole('button', { name: '+ Map' }).click();
     await page.getByTestId('new-map-stars').check();
     await page.getByTestId('new-map-name').fill('Level stars');
@@ -4198,7 +4206,7 @@ try {
   });
 
   await h.step('The solar system: the planets where they are on the date viewed, moving as the date changes; true or compressed distances; a planet\'s panel; side by side, a planet held and its holder over it; undone', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     await page.getByRole('button', { name: '+ Map' }).click();
     await page.getByTestId('new-map-solar').check();
     await page.getByTestId('new-map-solar-note').waitFor();
@@ -4376,7 +4384,7 @@ try {
   });
 
   await h.step('An invented star map: stars of one\'s own from a seed, made again from the next seed; found by search; undone', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     await page.getByRole('button', { name: '+ Map' }).click();
     await page.getByTestId('new-map-invented').check();
     await page.getByTestId('new-map-invented-note').waitFor();
@@ -4409,7 +4417,7 @@ try {
   });
 
   await h.step('The Milky Way: the whole galaxy, its arms and places; its picture as a draft, baked at full detail and kept, drawn without the graphics card (D193); the Orion Nebula found and its panel; star systems held in a box by a country; a frame of it; another galaxy of one\'s own; undone', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     await page.getByRole('button', { name: '+ Map' }).click();
     await page.getByTestId('new-map-milkyway').check();
     assert.match((await page.getByTestId('new-map-galaxy-note').textContent()) ?? '', /33 places/);
@@ -4522,7 +4530,7 @@ try {
   });
 
   await h.step('How the stars look (D130, D131, D132): presets from their pictures, any part changed, a look by chance; the map as a flat chart, moved and turned; realms as territories, a front where two at war meet; stars twinkling in a shot, an SVG frame of it; undone', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     await page.getByRole('button', { name: '+ Map' }).click();
     await page.getByTestId('new-map-stars').check();
     await page.getByTestId('new-map-name').fill('Looks');
@@ -4572,7 +4580,7 @@ try {
     for (let i = 0; i < peace.length; i += 4) if (peace[i + 1] > peace[i] + 40 && peace[i + 2] > peace[i] + 40 && peace[i + 1] > 100) mixed++;
     assert.ok(mixed > 8, `their border between them (${mixed} pixels)`);
     // At war (from the realm's panel): the border between them a front.
-    await page.locator('.left .row', { hasText: 'Solar Compact' }).first().click();
+    await page.locator('.list-panel .row', { hasText: 'Solar Compact' }).first().click();
     await page.getByTestId('entity-panel').waitFor();
     await page.getByTestId('relation-new').click();
     await page.getByTestId('relation-kind').selectOption({ label: 'at war with' });
@@ -4669,7 +4677,7 @@ try {
   });
 
   await h.step('The Earth through geological time (D134): made from the New map dialog; Pangaea 250 million years ago, its moment named; dates as how long ago; the seas of the last ice age lower, more land; a frame of it exported; undone', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     await page.getByRole('button', { name: '+ Map' }).click();
     await page.getByTestId('new-map-paleo').check();
     assert.match((await page.getByTestId('new-map-paleo-note').textContent()) ?? '', /540 million years ago to today/);
@@ -4739,7 +4747,7 @@ try {
   });
 
   await h.step('Playing history: the date moves on at the speed chosen, pauses where it is, Space plays and pauses, going round at the end; the date shown stays still as it changes', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     const year = () => page.evaluate(() => { const s = (window as any).__mapmaker.store; return s.time.day / 365.2425 + 1970; }) as Promise<number>;
     const was = await page.evaluate(() => (window as any).__mapmaker.store.time);
     await h.setDate('1 January 1800');
@@ -4789,14 +4797,14 @@ try {
     await page.getByTestId('history-play').click();
     // Leaving world-building stops it.
     await page.getByTestId('history-play').click();
-    await page.getByTestId('workspace-present').click();
+    await h.goto('shots');
     assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.historyPlay.on), false);
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     await page.evaluate((t) => (window as any).__mapmaker.store.setTime(t), was);
   });
 
   await h.step('Importing borders: two GeoJSON maps of their years; their dates from the names; the first the starting map, the second the changes at its date; countries going on by name; a shot of the whole history in one click; undone', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     const box = (w: number, so: number, e: number, n: number) => [[w, so], [e, so], [e, n], [w, n], [w, so]];
     const map = (features: Array<[string, number[][]]>) => JSON.stringify({ type: 'FeatureCollection', features: features.map(([name, ring]) => ({ type: 'Feature', properties: { NAME: name, POP: 1 }, geometry: { type: 'Polygon', coordinates: [ring] } })) });
     await page.getByTestId('open-import-borders').click();
@@ -4826,7 +4834,7 @@ try {
     await h.screenshot('import-borders');
     // A shot of the whole history in one click: from the first change to the last (a little either side), at an
     // even pace, the year counting up, every change animated; then taken away again.
-    await page.getByTestId('workspace-present').click();
+    await h.goto('shots');
     await page.getByTestId('new-shot-history').click();
     await page.getByTestId('shot-editor').waitFor();
     const whole = await page.evaluate(() => {
@@ -4843,14 +4851,14 @@ try {
     assert.equal(whole.frames, Math.max(2, Math.round(24 * Math.max(10, Math.min(120, years / 8)))), `a second for every eight years (${years.toFixed(0)} years in ${whole.frames} frames)`);
     await page.getByTestId('undo').click();
     await h.saved();
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     // Undone: one step for each map.
     for (let i = 0; i < 2; i++) { await page.getByTestId('undo').click(); await h.saved(); }
     assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('entity').some((e: any) => e.name === 'Kingdom of Wester')), false);
   });
 
   await h.step('Importing a dataset that dates each shape: its from and to properties found, the history at once (a country splitting, another only for a while), one undo step', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     const box = (w: number, so: number, e: number, n: number) => [[w, so], [e, so], [e, n], [w, n], [w, so]];
     const shapes: Array<[string, string, string, number[][]]> = [
       ['Old Wester', '1886-01-01', '1918-11-11', box(-150, -60, -130, -52)],
@@ -4931,7 +4939,7 @@ try {
   });
 
   await h.step('The Planet Studio (D156): a simulated planet from the New map dialog; a preset explained; a slider moved and what follows; its history simulated in workers, its relief and plates through time; used for a map whose land and sea follow the history on its timeline; undone', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     await page.getByRole('button', { name: '+ Map' }).click();
     await page.getByTestId('new-map-sim').check();
     assert.match((await page.getByTestId('new-map-sim-note').textContent()) ?? '', /Planet Studio opens/);
@@ -5133,68 +5141,180 @@ try {
     assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.name === 'Testa Prime')), false);
   });
 
-  await h.step('Workspaces: each arranges the panels for its work; panels resize and fold away, and stay so (D196)', async () => {
-    const box = async (sel: string) => (await page.locator(sel).boundingBox())!;
-    const ws = () => page.evaluate(() => (window as any).__mapmaker.store.workspaceNow());
+  await h.step('The studios: each page its own panels; panels dock, float, close and open again, resize; Save and Reset workspace (D196, D234)', async () => {
+    const box = async (sel: string) => (await page.locator(sel).first().boundingBox())!;
+    const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);
+    // The layout as it reads: rows (a|b) and columns (a/b) of groups [x,y]; floating windows after +.
+    const sig = () => page.evaluate(() => {
+      const r = (n: any): string => (n.kind === 'stack' ? `[${n.panels.join(',')}]` : `(${n.children.map(r).join(n.dir === 'row' ? ' | ' : ' / ')})`);
+      const l = (window as any).__mapmaker.store.dockNow();
+      return r(l.root) + l.floats.map((f: any) => ` + {${f.panels.join(',')}}`).join('');
+    });
+    const LISTS = '[layers,countries,places,areas,events,maps]';
+    const FIRST = `(([tools] | ${LISTS} | [viewer] | [properties]) / [timeline])`;
+    /** A tab carried by the pointer to a point (the drop mark shown on the way), let go there. */
+    const carry = async (panel: string, to: { x: number; y: number }, ctrl = false) => {
+      const t = await box(`[data-testid="dock-tab-${panel}"]`);
+      await page.mouse.move(t.x + t.width / 2, t.y + t.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(t.x + t.width / 2 + 12, t.y + t.height / 2 + 12, { steps: 3 });
+      if (ctrl) await page.keyboard.down('Control');
+      await page.mouse.move(to.x, to.y, { steps: 8 });
+      const marked = await page.getByTestId('dock-drop-mark').count();
+      await page.mouse.up();
+      if (ctrl) await page.keyboard.up('Control');
+      return marked;
+    };
+    // History, as it is at first: the tool strip, the lists as tabs of one group, the map, Properties; the timeline below.
+    await page.getByTestId('studio-history').click();
+    await page.getByTestId('menu-window').click();
+    await page.getByTestId('command-original-layout').click();
+    assert.equal(await store('s.pageNow()'), 'history');
+    assert.equal(await sig(), FIRST);
+    assert.equal(Math.round((await box('[data-testid="dock-stack-timeline"]')).height), 190);
+    assert.equal(Math.round((await box('[data-testid="dock-stack-properties"]')).width), 310);
+    // One list at a time, by its tab.
+    assert.equal(await page.locator('.list-panel').count(), 1, 'only the list in front is drawn');
+    await page.getByTestId('dock-tab-events').click();
+    await page.locator('.list-panel[data-list="events"]').waitFor();
+    assert.equal(await page.locator('.list-panel').count(), 1);
+    await page.getByTestId('dock-tab-countries').click();
+    await page.locator('.list-panel[data-list="countries"]').waitFor();
+    await h.screenshot('studio-history');
+    // Timeline: a tall timeline, the events in front; no tools to draw with (the map only chooses).
+    await page.getByTestId('studio-timeline').click();
     await page.getByTestId('reset-workspace').click();
-    await page.getByTestId('workspace-map').click();
-    assert.equal(Math.round((await box('.bottom')).height), 190);
-    // History: the same panels, a tall timeline.
-    await page.getByTestId('workspace-history').click();
-    assert.equal(await ws(), 'history');
+    assert.equal(await store('s.pageNow()'), 'timeline');
+    assert.equal(Math.round((await box('[data-testid="dock-stack-timeline"]')).height), 340);
+    assert.equal(await page.getByTestId('tool-strip').count(), 0);
+    assert.equal(await page.getByTestId('options-bar').count(), 0);
+    assert.equal(await store('s.tool'), 'select');
+    await page.locator('.list-panel[data-list="events"]').waitFor();
+    // Map Studio: the maps in front; the map's own settings in Properties.
+    await page.getByTestId('studio-map').click();
     await page.getByTestId('reset-workspace').click();
-    assert.equal(Math.round((await box('.bottom')).height), 340);
-    // World: the map's own settings at the right, no longer under the list of maps.
-    await page.getByTestId('workspace-world').click();
     await page.locator('[data-testid^="map-row-"].sel').click();
     await page.getByTestId('map-setup').waitFor();
-    assert.equal(await page.locator('.left [data-testid="open-calendar"]').count(), 0);
+    assert.equal(await page.locator('.list-panel [data-testid="open-calendar"]').count(), 0);
     if (await page.getByTestId('map-setup').getByTestId('open-calendar').count()) {
       await page.getByTestId('map-setup').getByTestId('open-calendar').click();
       await page.locator('.modal').waitFor();
       await page.evaluate(() => (window as any).__mapmaker.store.set({ dialog: null }));
     }
-    await h.screenshot('workspace-world');
-    // Export: the shot's output and export alone; Present: all of the shot.
-    await page.getByTestId('workspace-export').click();
-    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.mode), 'present');
-    assert.equal(await ws(), 'export');
-    await page.getByTestId('workspace-present').click();
-    assert.equal(await ws(), 'present');
-    // Back to the map; its edges resize its panels.
-    await page.getByTestId('workspace-map').click();
-    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.mode), 'world');
-    const edge = await box('[data-testid="splitter-left"]');
-    await page.mouse.move(edge.x + 2, edge.y + 200);
+    await h.screenshot('studio-map');
+    // Looks: the lists, the map and Properties, no tools; a tool taken in History comes back on returning there.
+    await page.getByTestId('studio-history').click();
+    await h.chooseTool('lasso');
+    await page.getByTestId('studio-looks').click();
+    assert.equal(await store('s.tool'), 'select');
+    assert.equal(await page.getByTestId('tool-strip').count(), 0);
+    await page.getByTestId('studio-history').click();
+    assert.equal(await store('s.tool'), 'lasso');
+    await page.getByTestId('tool-select').click();
+    // Presentation: two pages, Shots and Export, each its own layout.
+    await h.goto('export');
+    assert.equal(await store('s.mode'), 'present');
+    assert.equal(await store('s.pageNow()'), 'export');
+    await page.locator('[data-testid="dock-stack-export"]').waitFor();
+    await page.getByTestId('studio-history').click();
+    await page.getByTestId('studio-present').click();
+    assert.equal(await store('s.pageNow()'), 'export', 'Presentation opens on the page of it last used');
+    await h.goto('shots');
+    assert.equal(await store('s.pageNow()'), 'shots');
+    await page.getByTestId('studio-history').click();
+    assert.equal(await store('s.mode'), 'world');
+    // Docking. A tab dropped on another group's tabs joins them, in front.
+    const canvas0 = await box('[data-testid="map-canvas"]');
+    const lists = await box(`[data-testid="dock-stack-layers-countries-places-areas-events-maps"] .dock-tabs`);
+    assert.equal(await carry('properties', { x: lists.x + lists.width - 30, y: lists.y + lists.height / 2 }), 1, 'the drop is marked on the way');
+    assert.equal(await sig(), `(([tools] | [layers,countries,places,areas,events,maps,properties] | [viewer]) / [timeline])`);
+    await page.locator('.properties-panel').waitFor();
+    assert.equal(await page.getByTestId('dock-tab-properties').getAttribute('aria-selected'), 'true');
+    assert.ok((await box('[data-testid="map-canvas"]')).width > canvas0.width + 250, 'the map takes the room it left');
+    // Dropped at the bottom edge of the map: a group of its own under the map.
+    const map = await box('.viewer-panel');
+    await carry('properties', { x: map.x + map.width / 2, y: map.y + map.height - 15 });
+    assert.equal(await sig(), `(([tools] | ${LISTS} | ([viewer] / [properties])) / [timeline])`);
+    await h.screenshot('dock-under-map');
+    // Held with Ctrl, it floats where it is let go; a floating window is moved by its title row and resized by its corner.
+    await carry('properties', { x: map.x + 300, y: map.y + 120 }, true);
+    assert.equal(await sig(), `(([tools] | ${LISTS} | [viewer]) / [timeline]) + {properties}`);
+    const f0 = await box('[data-testid="dock-float-properties"]');
+    await page.mouse.move(f0.x + f0.width - 40, f0.y + 10);
     await page.mouse.down();
-    await page.mouse.move(edge.x + 62, edge.y + 200, { steps: 4 });
+    await page.mouse.move(f0.x + f0.width - 140, f0.y + 70, { steps: 5 });
     await page.mouse.up();
-    assert.equal(Math.round((await box('.left')).width), 310, 'the lists are 60 wider');
-    const canvasBefore = (await box('main.center')).width;
-    // Folded away, a panel gives its room to the map.
-    await page.getByTestId('toggle-right').click();
-    assert.equal(await page.locator('aside.right').count(), 0);
-    assert.equal(Math.round((await box('main.center')).width - canvasBefore), 310);
-    await page.getByTestId('toggle-bottom').click();
-    assert.equal(await page.locator('.bottom').count(), 0);
-    await h.screenshot('workspace-map-folded');
-    // Kept on this computer: the same after loading the page again.
-    const kept = await page.evaluate(() => JSON.parse(localStorage.getItem('mapmaker.layouts')!).map);
-    assert.deepEqual(kept, { left: 310, right: 310, bottom: 190, hidden: ['right', 'bottom'] });
-    await page.getByTestId('toggle-right').click();
-    await page.getByTestId('toggle-bottom').click();
-    await page.getByTestId('splitter-left').dblclick();
-    assert.equal(Math.round((await box('.left')).width), 250);
+    const f1 = await box('[data-testid="dock-float-properties"]');
+    assert.deepEqual([Math.round(f1.x - f0.x), Math.round(f1.y - f0.y)], [-100, 60]);
+    const corner = await box('[data-testid="dock-float-properties"] .dock-float-corner');
+    await page.mouse.move(corner.x + 6, corner.y + 6);
+    await page.mouse.down();
+    await page.mouse.move(corner.x + 66, corner.y + 46, { steps: 5 });
+    await page.mouse.up();
+    const f2 = await box('[data-testid="dock-float-properties"]');
+    assert.deepEqual([Math.round(f2.width - f1.width), Math.round(f2.height - f1.height)], [60, 40]);
+    await page.getByTestId('dock-tab-countries').click();
+    await page.getByTestId(`entity-row-${A}`).click();
+    await page.getByTestId('dock-float-properties').getByTestId('entity-panel').waitFor();
+    await h.screenshot('dock-floating');
+    // Closed by its ×, and opened again from the Window menu: back on its side of the map, as at first.
+    await page.getByTestId('dock-close-properties').click();
+    assert.equal(await page.locator('.properties-panel').count(), 0);
+    await page.getByTestId('menu-window').click();
+    assert.doesNotMatch((await page.getByTestId('command-panel-properties').textContent())!, /✓/);
+    assert.equal(await page.getByTestId('command-panel-shots').count(), 0, 'only the panels this page can hold');
+    await page.getByTestId('command-panel-properties').click();
+    await page.locator('.properties-panel').waitFor();
+    assert.equal(await sig(), FIRST);
+    // Chosen in the Window menu, a panel behind another tab comes to the front; in front, it closes.
+    await page.getByTestId('menu-window').click();
+    assert.match((await page.getByTestId('command-panel-places').textContent())!, /✓/);
+    await page.getByTestId('command-panel-places').click();
+    await page.locator('.list-panel[data-list="places"]').waitFor();
+    await page.getByTestId('menu-window').click();
+    await page.getByTestId('command-panel-places').click();
+    assert.equal(await sig(), `(([tools] | [layers,countries,areas,events,maps] | [viewer] | [properties]) / [timeline])`);
+    await page.getByTestId('menu-window').click();
+    await page.getByTestId('command-panel-places').click();
+    assert.equal(await sig(), FIRST, 'back with the lists it was with');
+    // The map cannot be closed: it has no ×.
+    assert.equal(await page.getByTestId('dock-close-viewer').count(), 0);
+    // The edge between two groups resizes them as it is dragged; the map gives or takes the room.
+    const edge = await box('.dock-stack.viewer-stack');
+    const props0 = await box('[data-testid="dock-stack-properties"]');
+    await page.mouse.move(props0.x - 2, props0.y + 200);
+    await page.mouse.down();
+    await page.mouse.move(props0.x - 62, props0.y + 200, { steps: 4 });
+    await page.mouse.up();
+    assert.equal(Math.round((await box('[data-testid="dock-stack-properties"]')).width), 370, 'Properties 60 wider');
+    assert.equal(Math.round((await box('.dock-stack.viewer-stack')).width), Math.round(edge.width) - 60);
+    // Save workspace keeps the page's layout; Reset workspace returns to it; Original layout to the first one.
+    await page.getByTestId('save-workspace').click();
+    await page.getByTestId('dock-close-timeline').click();
+    assert.equal(await page.locator('.timeline').count(), 0);
+    await page.getByTestId('reset-workspace').click();
+    await page.locator('.timeline').waitFor();
+    assert.equal(Math.round((await box('[data-testid="dock-stack-properties"]')).width), 370, 'as saved');
+    // Kept on this computer: the layout worked in and the one saved, page by page.
+    const kept = await page.evaluate(() => JSON.parse(localStorage.getItem('mapmaker.docks')!));
+    assert.ok(kept.history.saved && kept.history.live && kept.timeline.live, 'both kept');
+    assert.equal(kept.map.saved, null, 'Map Studio has none saved');
+    await page.getByTestId('menu-window').click();
+    await page.getByTestId('command-original-layout').click();
+    assert.equal(Math.round((await box('[data-testid="dock-stack-properties"]')).width), 310, 'the first layout');
+    assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('mapmaker.docks')!).history.saved), null);
     // The status bar says what the tool in hand does.
     await h.chooseTool('lasso');
     assert.match((await page.getByTestId('status-hint').textContent())!, /^Territory brush \(B\) · Draw around an area/);
     await page.getByTestId('tool-select').click();
-    await h.screenshot('workspace-map');
+    await h.screenshot('studio-history-first');
+    // (Every list open at once again for the steps after this one.)
+    await page.evaluate(() => (window as any).__mapmaker.allLists());
   });
 
   await h.step('The menu bar: every command in a menu with its shortcut; the keyboard runs the same commands (D197)', async () => {
     const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     // Each menu opens under its name; with one open, the next opens as the pointer passes over it.
     const seen: string[] = [];
     await page.getByTestId('menu-file').click();
@@ -5206,7 +5326,7 @@ try {
       seen.push(...ids);
     }
     assert.equal(new Set(seen).size, seen.length, 'no command is in two menus');
-    for (const id of ['command-versions', 'command-undo', 'command-show', 'command-new-map', 'command-new-event', 'command-workspace-history', 'command-shortcuts']) assert.ok(seen.includes(id), id);
+    for (const id of ['command-versions', 'command-undo', 'command-show', 'command-new-map', 'command-new-event', 'command-studio-timeline', 'command-panel-timeline', 'command-save-workspace', 'command-shortcuts']) assert.ok(seen.includes(id), id);
     await h.screenshot('menu-help');
     await page.keyboard.press('Escape');
     assert.equal(await store('s.menu'), null);
@@ -5216,14 +5336,14 @@ try {
     assert.equal(await page.getByTestId('command-merge').isDisabled(), true, 'nothing chosen to merge');
     await page.getByTestId('menu-edit').click();
     assert.equal(await store('s.menu'), null, 'a second click closes it');
-    // A checked command: the timeline folded away from the View menu and back.
-    await page.getByTestId('menu-view').click();
-    assert.match((await page.getByTestId('command-panel-bottom').textContent())!, /✓/);
-    await page.getByTestId('command-panel-bottom').click();
-    assert.equal(await page.locator('.bottom').count(), 0);
-    await page.getByTestId('menu-view').click();
-    await page.getByTestId('command-panel-bottom').click();
-    await page.locator('.bottom').waitFor();
+    // A ticked command: the timeline closed from the Window menu and opened again there.
+    await page.getByTestId('menu-window').click();
+    assert.match((await page.getByTestId('command-panel-timeline').textContent())!, /✓/);
+    await page.getByTestId('command-panel-timeline').click();
+    assert.equal(await page.locator('.timeline').count(), 0);
+    await page.getByTestId('menu-window').click();
+    await page.getByTestId('command-panel-timeline').click();
+    await page.locator('.timeline').waitFor();
     // Guides (D206): today's country borders, and today's states and provinces, over the working map.
     await page.getByTestId('menu-view').click();
     assert.equal(await page.getByTestId('command-guide-states').isDisabled(), false);
@@ -5236,12 +5356,12 @@ try {
     assert.match((await page.getByTestId('command-guide-states').textContent())!, /✓/);
     await page.getByTestId('command-guide-states').click();
     assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.guideStates), false);
-    // The keyboard: workspaces, the next and the previous change, a new event.
-    await page.locator('main.center').click({ position: { x: 5, y: 5 }, button: 'right' }).catch(() => undefined);
+    // The keyboard: studios, the next and the previous change, a new event.
+    await page.locator('.viewer-panel').click({ position: { x: 5, y: 5 }, button: 'right' }).catch(() => undefined);
+    await page.keyboard.press('Alt+3');
+    assert.equal(await store('s.pageNow()'), 'timeline');
     await page.keyboard.press('Alt+2');
-    assert.equal(await store('s.workspaceNow()'), 'history');
-    await page.keyboard.press('Alt+1');
-    assert.equal(await store('s.workspaceNow()'), 'map');
+    assert.equal(await store('s.pageNow()'), 'history');
     const changes = await store('s.engine.changeInstants().length') as number;
     if (changes >= 2) {
       const t0 = await store('JSON.stringify(s.time)');
@@ -5263,28 +5383,29 @@ try {
     await page.getByTestId('menu-help').click();
     await page.getByTestId('command-shortcuts').click();
     const list = (await page.getByTestId('shortcuts-dialog').textContent())!;
-    for (const k of ['Ctrl+Z', 'Alt+3', 'Space', 'Workspace: World', 'New event']) assert.ok(list.includes(k), k);
+    for (const k of ['Ctrl+Z', 'Alt+3', 'Space', 'Studio: Map Studio', 'New event']) assert.ok(list.includes(k), k);
     await h.screenshot('shortcuts');
     await page.getByTestId('shortcuts-dialog').getByRole('button', { name: 'Close' }).click();
   });
 
-  await h.step('The tool strip down the left edge, a key for each tool, and the options bar that keeps its height (D198)', async () => {
+  await h.step('The tool strip down the left edge, a key for each tool, and the options bar that keeps its height (D198, D234)', async () => {
     const tool = () => page.evaluate(() => (window as any).__mapmaker.store.tool);
     const box = async (sel: string) => (await page.locator(sel).boundingBox())!;
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     await page.getByTestId('map-select').selectOption({ label: 'Earth' });
     await page.getByTestId('tool-select').click();
-    // The strip is a narrow column at the far left; its tools are icons named for those who cannot see them.
+    // The strip is a narrow column at the far left (a panel too: its grip moves it); its tools are icons named for those who cannot see them.
     const strip = await box('[data-testid="tool-strip"]');
     assert.ok(strip.x === 0 && strip.width <= 48 && strip.height > 300, JSON.stringify(strip));
+    assert.equal(await page.getByTestId('dock-tab-tools').textContent(), '⋮⋮');
     await h.chooseTool('lasso');
     await page.getByTestId('tool-select').click();
     assert.equal(await page.getByTestId('tool-lasso').getAttribute('aria-label'), 'Territory brush');
     assert.match((await page.getByTestId('tool-lasso').getAttribute('title'))!, /^Territory brush \(B\)/);
     assert.equal(await page.getByTestId('tool-lasso').locator('svg').count(), 1);
     // A key takes a tool in hand; the bar above names it and holds its options.
-    const map0 = await box('main.center');
-    await page.locator('main.center').hover();
+    const map0 = await box('.viewer-panel');
+    await page.locator('.viewer-panel').hover();
     await page.keyboard.press('b');
     assert.equal(await tool(), 'lasso');
     assert.equal(await page.getByTestId('tool-name').textContent(), 'Territory brush');
@@ -5303,11 +5424,11 @@ try {
     assert.equal(await tool(), 'polygon');
     await page.getByTestId('tool-flyout-territory').waitFor({ state: 'detached' });
     assert.equal(await page.getByTestId('tool-stack-territory').getByTestId('tool-polygon').count(), 1, 'the precise shape shows now');
-    await page.locator('main.center').hover();
+    await page.locator('.viewer-panel').hover();
     await page.keyboard.press('e');
     assert.equal(await tool(), 'erase');
     // Whichever tool, the map keeps its size and place.
-    assert.deepEqual(await box('main.center'), map0);
+    assert.deepEqual(await box('.viewer-panel'), map0);
     await h.screenshot('tool-strip');
     // A tool with many options (the river brush, in a narrow window): its second line lies over the top of the map,
     // and the lists' tabs move down below it, never covered; its words of explanation keep to one line, whole on hovering.
@@ -5315,10 +5436,11 @@ try {
     await page.setViewportSize({ width: 1100, height: size.height });
     await page.keyboard.press('t');
     await page.getByTestId('sculpt-brush').selectOption('river');
-    const bar = await box('[data-testid="options-bar"] .tool-options'), tabs = await box('[data-testid="list-tabs"]');
+    const bar = await box('[data-testid="options-bar"] .tool-options'), tabs = await box('[data-testid="dock-tab-maps"]');
     assert.ok(bar.height > 50, `the options take a second line (${bar.height})`);
-    assert.ok(tabs.y >= bar.y + bar.height - 1.5, `the lists start below the options (${tabs.y} against ${bar.y + bar.height})`);
-    assert.deepEqual(await box('main.center'), { ...map0, width: map0.width - 500 }, 'the map where it was');
+    assert.ok(tabs.y >= bar.y + bar.height - 1.5, `the lists' tabs start below the options (${tabs.y} against ${bar.y + bar.height})`);
+    const map1 = await box('.viewer-panel');
+    assert.deepEqual([map1.y, map1.height], [map0.y, map0.height], 'the map where it was, as high');
     const words = page.locator('[data-testid="options-bar"] .toolbar.sub > .muted').first();
     assert.ok((await words.boundingBox())!.height < 24 && /Draw a river/.test((await words.getAttribute('title')) ?? ''), 'the explanation on one line, whole in its tooltip');
     await h.screenshot('tool-options-two-lines');
@@ -5340,58 +5462,70 @@ try {
     await page.getByTestId('shortcuts-dialog').getByRole('button', { name: 'Close' }).click();
   });
 
-  await h.step('The lists at the left by tabs, one at a time, each workspace with its own; a filter by name (D199)', async () => {
-    const heads = () => page.locator('.left .section-head > span:first-child').allTextContents();
-    await page.getByTestId('workspace-map').click();
+  await h.step('The lists, each a panel of its own: tabs of one group at first, one at a time; each with its own filter by name (D199, D234)', async () => {
+    const heads = () => page.locator('.list-panel .section-head > span:first-child').allTextContents();
+    const rows = (kind: string) => page.locator(`.list-panel [data-testid^="${kind}-row-"]`);
+    await page.getByTestId('studio-history').click();
     await page.getByTestId('map-select').selectOption({ label: 'Earth' });
-    // All: every list in one column (as the steps before this one had it).
+    // Every list open at once, each in a group of its own (as the steps before this one had them).
     assert.deepEqual(await heads(), ['Maps', 'Layers', 'Countries and factions', 'Characters', 'Cities and others', 'Areas, lines and points', 'Events']);
-    // One list at a time.
-    await page.getByTestId('list-tab-countries').click();
+    // As at first: the lists tabs of one group, one at a time.
+    await page.getByTestId('menu-window').click();
+    await page.getByTestId('command-original-layout').click();
+    await page.getByTestId('dock-tab-countries').click();
     assert.deepEqual(await heads(), ['Countries and factions']);
     await page.getByTestId(`entity-row-${A}`).waitFor();
     assert.equal(await page.getByTestId('layer-row').count(), 0);
-    await page.getByTestId('list-tab-places').click();
+    await page.getByTestId('dock-tab-places').click();
     assert.deepEqual(await heads(), ['Characters', 'Cities and others']);
-    await page.getByTestId('list-tab-layers').click();
+    await page.getByTestId('dock-tab-layers').click();
     assert.deepEqual(await heads(), ['Layers']);
     assert.ok(await page.getByTestId('layer-row').count() >= 1);
-    assert.equal(await page.getByTestId('list-filter').count(), 0, 'no filter where there is no list of names');
-    await h.screenshot('list-tab-layers');
+    assert.equal(await page.locator('[data-testid^="list-filter-"]').count(), 0, 'no filter where there is no list of names');
+    await h.screenshot('list-layers');
     // The filter: the names that hold every word typed, whatever the case; Esc clears it.
-    await page.getByTestId('list-tab-countries').click();
-    const all = await page.locator('.left [data-testid^="entity-row-"]').count();
-    await page.getByTestId('list-filter').fill('testa KING');
-    assert.deepEqual(await page.locator('.left [data-testid^="entity-row-"]').allTextContents().then((t) => t.map((x) => x.trim())), [A]);
+    await page.getByTestId('dock-tab-countries').click();
+    const all = await rows('entity').count();
+    await page.getByTestId('list-filter-countries').fill('testa KING');
+    assert.deepEqual(await rows('entity').allTextContents().then((t) => t.map((x) => x.trim())), [A]);
     await h.screenshot('list-filter');
-    await page.getByTestId('list-filter').press('Escape');
-    assert.equal(await page.locator('.left [data-testid^="entity-row-"]').count(), all);
-    await page.getByTestId('list-tab-events').click();
-    const events = await page.locator('.left [data-testid^="event-row-"]').count();
+    await page.getByTestId('list-filter-countries').press('Escape');
+    assert.equal(await rows('entity').count(), all);
+    // Each list its own filter, kept while the list is behind another tab.
+    await page.getByTestId('dock-tab-events').click();
+    const events = await rows('event').count();
     assert.ok(events >= 2, `events listed (${events})`);
-    const first = (await page.locator('.left [data-testid^="event-row-"]').first().getAttribute('data-testid'))!.replace('event-row-', '');
-    await page.getByTestId('list-filter').fill(first);
-    assert.ok(await page.locator('.left [data-testid^="event-row-"]').count() < events || events === 1);
+    const first = (await rows('event').first().getAttribute('data-testid'))!.replace('event-row-', '');
+    await page.getByTestId('list-filter-events').fill(first);
+    assert.ok(await rows('event').count() < events || events === 1);
     await page.getByTestId(`event-row-${first}`).waitFor();
-    // Each workspace keeps its own list: History opens on its own, the map's stays; kept after loading again.
-    await page.getByTestId('workspace-history').click();
-    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.listTabNow()), 'all');
-    await page.getByTestId('list-tab-events').click();
-    await page.getByTestId('workspace-map').click();
-    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.listTabNow()), 'events');
-    assert.equal(await page.getByTestId('list-filter').inputValue(), '', 'changing workspace or list empties the filter');
-    assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('mapmaker.listTabs')!)), { map: 'events', history: 'events', world: 'all' });
+    await page.getByTestId('dock-tab-countries').click();
+    assert.equal(await page.getByTestId('list-filter-countries').inputValue(), '', 'the countries\' own filter');
+    await page.getByTestId('dock-tab-events').click();
+    assert.equal(await page.getByTestId('list-filter-events').inputValue(), first);
+    await page.getByTestId('list-filter-events').fill('');
+    // Two lists side by side: the events' tab dropped at the foot of the group, a group of its own under the others.
+    const group = await page.locator('.list-panel').boundingBox();
+    const tab = (await page.getByTestId('dock-tab-events').boundingBox())!;
+    await page.mouse.move(tab.x + tab.width / 2, tab.y + tab.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(tab.x + 30, tab.y + 40, { steps: 3 });
+    await page.mouse.move(group!.x + group!.width / 2, group!.y + group!.height - 12, { steps: 8 });
+    await page.mouse.up();
+    await page.getByTestId('dock-tab-countries').click();
+    assert.deepEqual(await heads(), ['Countries and factions', 'Events']);
+    await h.screenshot('lists-side-by-side');
     // (All lists again for the steps after this one.)
-    await page.evaluate(() => (window as any).__mapmaker.store.setListTab('all', true));
+    await page.evaluate(() => (window as any).__mapmaker.allLists());
   });
 
   await h.step('Properties in groups that fold and stay folded; a layer in Properties (D200)', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     await page.getByTestId('map-select').selectOption({ label: 'Earth' });
     await page.getByTestId('tool-select').click();
     // A country: its properties in named groups.
     await page.getByTestId(`entity-row-${A}`).click();
-    const groups = () => page.locator('aside.right .prop-head').allTextContents().then((t) => t.map((x) => x.replace(/^[▾▸]/, '').trim()));
+    const groups = () => page.locator('.properties-panel .prop-head').allTextContents().then((t) => t.map((x) => x.replace(/^[▾▸]/, '').trim()));
     assert.deepEqual(await groups(), ['Country', 'Notes and pictures', 'Territory', 'Fill', 'Look and borders', 'Label', 'Relationships', 'Names over time']);
     await page.getByTestId('relations').waitFor();
     // Folded, a group stays folded for the next country too, and after loading the project again.
@@ -5406,7 +5540,7 @@ try {
     await page.getByTestId('group-head-entity:relations').click();
     await page.getByTestId('relations').waitFor();
     // An event's too.
-    const ev = (await page.locator('.left [data-testid^="event-row-"]').first().getAttribute('data-testid'))!;
+    const ev = (await page.locator('.list-panel [data-testid^="event-row-"]').first().getAttribute('data-testid'))!;
     await page.getByTestId(ev).click();
     assert.deepEqual((await groups()).slice(0, 2), ['Event', 'In presentations']);
     assert.ok((await groups()).includes('Changes'));
@@ -5414,7 +5548,7 @@ try {
     await page.locator('[data-testid="layer-row"]', { hasText: 'Political' }).locator('span').first().click();
     await page.getByTestId('layer-panel').waitFor();
     assert.deepEqual(await groups(), ['Layer', 'Fill and look', 'Borders and front lines', 'Coast']);
-    assert.equal(await page.locator('.left [data-testid="layer-fill"]').count(), 0, 'no longer in the list');
+    assert.equal(await page.locator('.list-panel [data-testid="layer-fill"]').count(), 0, 'no longer in the list');
     assert.equal(await page.getByTestId('layer-panel').getByTestId('layer-fill').inputValue(), 'solid');
     assert.equal(await page.getByTestId('layer-name').inputValue(), 'Political');
     // Its name and whether it is shown are changed there (one undo each).
@@ -5490,7 +5624,7 @@ try {
     await h.screenshot('properties-map-speed');
     await page.getByTestId('group-head-map:speed').click();
     assert.equal(await page.getByTestId('settings-dialog-inline').count(), 0);
-    assert.equal(await page.locator('.left [data-testid="open-calendar"]').count(), 0);
+    assert.equal(await page.locator('.list-panel [data-testid="open-calendar"]').count(), 0);
     assert.match((await page.getByTestId('map-panel').getByTestId('open-calendar').innerText()), /^Calendar: /);
     await h.screenshot('properties-map');
     await page.getByTestId('tool-select').click();
@@ -5498,9 +5632,8 @@ try {
 
   await h.step('The timeline: events in a track for each group, folded and opened; found, snapped, zoomed; an event dragged to another date (D201)', async () => {
     const st = <T,>(f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`) as Promise<T>;
-    await page.getByTestId('workspace-history').click();
+    await page.getByTestId('studio-timeline').click();
     await page.getByTestId('map-select').selectOption({ label: 'Earth' });
-    await page.getByTestId('tool-select').click();
     await page.getByTestId('timeline-fit').click();
     // The head: play, the date viewed and comparing, finding, snapping, the groups, zoom.
     for (const id of ['history-play', 'current-date', 'compare-toggle', 'timeline-find', 'timeline-snap', 'timeline-zoom-in', 'timeline-zoom-out', 'timeline-fit'])
@@ -5630,12 +5763,12 @@ try {
     // (The group made for this step is taken away again: one undo for each of what was done.)
     for (let i = 0; i < 12 && (await st<number>(`s.world.all('event_group').filter((g) => g.name === 'Track test').length`)) > 0; i++) { await page.getByTestId('undo').click(); await h.saved(); }
     assert.equal(await st<number>(`s.world.all('event_group').filter((g) => g.name === 'Track test').length`), 0);
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
   });
 
   await h.step('An event renames a country: from the event\'s start it is called so; one undo (D204)', async () => {
     const st = <T,>(f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`) as Promise<T>;
-    await page.getByTestId('workspace-history').click();
+    await page.getByTestId('studio-timeline').click();
     await page.getByTestId('map-select').selectOption({ label: 'Earth' });
     const ev = await st<{ id: string; name: string; day: number }>(`(() => { const e = s.world.all('event').filter((e) => s.engine.lists(e) && !e.id.startsWith('evt_base')).sort((a, b) => a.start_day - b.start_day)[0]; return { id: e.id, name: e.name, day: e.start_day }; })()`);
     await page.getByTestId(`event-row-${ev.name}`).click();
@@ -5653,12 +5786,12 @@ try {
     await page.getByTestId('undo').click();
     await h.saved();
     assert.notEqual(await at(ev.day + 1), 'Testan Empire');
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
   });
 
   await h.step('Present: the shot\'s settings in tabs; the shots as clips one after another under the preview (D212)', async () => {
     const st = <T,>(f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`) as Promise<T>;
-    await page.getByTestId('workspace-present').click();
+    await h.goto('shots');
     const before = await st<number>(`s.world.all('sequence').length`);
     await page.getByTestId('new-shot').click();
     await h.saved();
@@ -5678,11 +5811,11 @@ try {
     await h.screenshot('shot-tab-look');
     await page.getByTestId('shot-tab-all').click();
     assert.deepEqual(await titles(), every);
-    // The Export workspace: no tabs, only what exporting needs.
-    await page.getByTestId('workspace-export').click();
+    // The Export page: no tabs, only what exporting needs.
+    await h.goto('export');
     assert.equal(await page.getByTestId('shot-tabs').count(), 0);
     assert.deepEqual(await titles(), ['Shot', 'Output quality', 'Export']);
-    await page.getByTestId('workspace-present').click();
+    await h.goto('shots');
     // The shots as clips: the one chosen is the last made; a click on another chooses it; on the one chosen, a click goes to that frame.
     const clips = page.getByTestId('shot-clip');
     assert.equal(await clips.count(), before + 2);
@@ -5701,12 +5834,12 @@ try {
     // (The two shots taken away again.)
     for (let i = 0; i < 2; i++) { await page.getByTestId('undo').click(); await h.saved(); }
     assert.equal(await st<number>(`s.world.all('sequence').length`), before);
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
   });
 
   await h.step('Cities as maps online show them (D219): seen whole only the capitals and the largest, more as the map is closed in on; larger and bolder for bigger ones; their look changed, all shown again; undone', async () => {
     const st = <T,>(f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`) as Promise<T>;
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     await page.getByTestId('map-select').selectOption({ label: 'Earth' });
     const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
     const before = await steps();
@@ -5763,7 +5896,7 @@ try {
   });
 
   await h.step('Rivers drawn as guidance (D220): with the pen and the brush, their water shown above the sea, tributaries from the heights; chosen, a point moved, settings changed, taken away; undone', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     await page.getByTestId('map-select').selectOption({ label: 'Earth' });
     await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 37, lat: 37.8, zoom: 3.4, rotation: 0, projection: 'equirectangular' }));
     await page.waitForTimeout(400);
@@ -5900,7 +6033,7 @@ try {
   });
 
   await h.step('Borders at the coast (D221): along the coastline by default, as drawn over the sea, or none; a country whose land carries on over the sea; undone', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     await page.getByTestId('map-select').selectOption({ label: 'Earth' });
     await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: -8.6, lat: 39.5, zoom: 4.4, rotation: 0, projection: 'equirectangular' }));
     const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
@@ -5909,7 +6042,7 @@ try {
     await page.getByRole('button', { name: '+ Layer' }).click();
     await page.getByTestId('new-layer-name').fill('Coasts');
     await page.getByTestId('new-layer-name').press('Enter');
-    await page.locator('.left .row', { hasText: 'Coasts' }).getByText('drawing here').waitFor();
+    await page.locator('.list-panel .row', { hasText: 'Coasts' }).getByText('drawing here').waitFor();
     await h.newCountry('Lusitania');
     await h.chooseTool('lasso');
     await page.getByTestId('paint-owner').selectOption({ label: 'Lusitania' });
@@ -6036,7 +6169,7 @@ try {
   });
 
   await h.step('Advance and buffer zone (D222): a buffer zone either side of a border to nobody; an advance taking the neighbour\'s land within the distance of their border, by travel through the land, in an event spreading from the border; undone', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     await page.getByTestId('map-select').selectOption({ label: 'Earth' });
     await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 26, lat: 48.5, zoom: 4.2, rotation: 0, projection: 'equirectangular' }));
     const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
@@ -6046,7 +6179,7 @@ try {
     await page.getByRole('button', { name: '+ Layer' }).click();
     await page.getByTestId('new-layer-name').fill('Marches');
     await page.getByTestId('new-layer-name').press('Enter');
-    await page.locator('.left .row', { hasText: 'Marches' }).getByText('drawing here').waitFor();
+    await page.locator('.list-panel .row', { hasText: 'Marches' }).getByText('drawing here').waitFor();
     await page.evaluate(() => {
       const m = (window as any).__mapmaker, s = m.store;
       const box = (x0: number, y0: number, x1: number, y1: number) => [[[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]];
@@ -6063,7 +6196,7 @@ try {
     assert.deepEqual([await owner(24, 48.5), await owner(26, 48.5)], ['Westmark', 'Ostland']);
     // The tool, its options: the land not minded (as the crow flies over it), so that the distances are the map's own.
     await page.getByTestId('tool-select').click();
-    await page.locator('main.center').hover();
+    await page.locator('.viewer-panel').hover();
     await page.keyboard.press('m');
     assert.equal(await page.getByTestId('tool-name').textContent(), 'Advance & buffer zone', 'its key, M');
     if (await page.getByTestId('reach-mind').count()) await page.getByTestId('reach-mind').fill('0');
@@ -6117,7 +6250,7 @@ try {
   });
 
   await h.step('Zones of control (D223): a country\'s land divided among its cities by travel through it, the zones drawn while the dialog asks; a city left out; every place to one of the cities; undone', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     await page.getByTestId('map-select').selectOption({ label: 'Earth' });
     await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 25.5, lat: 48.5, zoom: 4.2, rotation: 0, projection: 'equirectangular' }));
     const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
@@ -6126,7 +6259,7 @@ try {
     await page.getByRole('button', { name: '+ Layer' }).click();
     await page.getByTestId('new-layer-name').fill('Domains');
     await page.getByTestId('new-layer-name').press('Enter');
-    await page.locator('.left .row', { hasText: 'Domains' }).getByText('drawing here').waitFor();
+    await page.locator('.list-panel .row', { hasText: 'Domains' }).getByText('drawing here').waitFor();
     await page.evaluate(() => {
       const m = (window as any).__mapmaker, s = m.store, C = m.bench.commands, t = { day: s.time.day - 3650, ms: 0 };
       s.execute((w: any, e: any) => C.addCountries(w, e, { spaceId: s.spaceId, layerId: s.layerId, countries: [{ name: 'Midland', polygons: [[[[20, 47], [31, 47], [31, 50], [20, 50], [20, 47]]]], color: '#6aa84f' }], mode: { kind: 'change', t } }));
@@ -6143,7 +6276,7 @@ try {
     }, [lon, lat] as const);
     // The tool's third use: a click on the country opens the dialog, its three cities chosen, the zones on the map.
     await page.getByTestId('tool-select').click();
-    await page.locator('main.center').hover();
+    await page.locator('.viewer-panel').hover();
     await page.keyboard.press('m');
     await page.getByTestId('reach-mode').selectOption('zones');
     if (await page.getByTestId('reach-mind').count()) await page.getByTestId('reach-mind').fill('0');
@@ -6176,7 +6309,7 @@ try {
   });
 
   await h.step('Curves (D232): the precise shape and the border pen draw as Photoshop\'s pen: corners clicked, a curve dragged, a point added on the line keeping its shape, points and handles moved, Alt for a corner, closed by a click on the first point; the pen\'s curves kept in its draft; undone', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     await page.getByTestId('map-select').selectOption({ label: 'Earth' });
     await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: -40, lat: 20, zoom: 2, rotation: 0, projection: 'equirectangular' }));
     await h.setDate('1700');
@@ -6257,7 +6390,7 @@ try {
   });
 
   await h.step('Many disasters with a brush (D233): seventy thousand nuclear strikes scattered along a stroke over Europe, of yields from 100 kt to 5 Mt, over six hours; none at first, all after; drawn in the working view and a 4K frame; kept small; undone in one step', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     await page.getByTestId('map-select').selectOption({ label: 'Earth' });
     await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 15, lat: 50, zoom: 2.2, rotation: 0, projection: 'equirectangular' }));
     await h.setDate('1990');
@@ -6344,7 +6477,7 @@ try {
   });
 
   await h.step('History Health lists the overlap, nothing else; no browser errors', async () => {
-    await page.getByTestId('workspace-map').click();
+    await page.getByTestId('studio-history').click();
     await page.getByTestId('health').click();
     await page.locator('.modal').waitFor();
     await h.screenshot('history-health');

@@ -11,7 +11,7 @@ import { GroupFilter, eventFilterSet, sortedGroups } from './EventGroups.tsx';
 import { layoutTracks, barAt, snap, LANE, BAR, type TLEvent, type TLTrack } from '../timeline-layout.ts';
 import { openMenu, eventMenu } from './ContextMenu.tsx';
 import type { MenuItem } from '../store.ts';
-import { nameMatches } from '../shell/layout.ts';
+import { nameMatches } from '../name-match.ts';
 import { changesAt, changeTime } from './ChangePanel.tsx';
 import { typeColor } from '../../domain/event-types.ts';
 

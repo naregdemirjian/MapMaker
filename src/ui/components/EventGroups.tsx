@@ -1,7 +1,8 @@
 // Event groups in the interface (DECISIONS D8): the timeline's group filter (where groups are also
 // created, renamed, recoloured and deleted) and the group checkboxes of an event.
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useStore, store } from '../store.ts';
+import { useOverPanels } from '../over-panels.ts';
 import * as cmd from '../../domain/commands.ts';
 import type { World } from '../../world-model/world.ts';
 
@@ -40,8 +41,7 @@ export function GroupFilter() {
       <button className={`small ${s.eventFilter ? 'on' : ''}`} onClick={() => setOpen(!open)} title="Choose which groups of events the timeline shows" data-testid="group-filter-button">
         Groups: {summary} ▾
       </button>
-      {open && (
-        <div className="group-popover" onPointerDown={(e) => e.stopPropagation()}>
+      {open && <GroupPopover>
           <div className="group-actions">
             <button className="small" onClick={() => s.set({ eventFilter: null })}>Show all</button>
             <button className="small" onClick={() => s.set({ eventFilter: [] })}>Show none</button>
@@ -74,10 +74,16 @@ export function GroupFilter() {
             <button className="small" onClick={create} data-testid="new-group-create">Add</button>
           </div>
           <p className="muted">The filter only changes which events are listed; the map always shows the full history.</p>
-        </div>
-      )}
+      </GroupPopover>}
     </div>
   );
+}
+
+/** The groups' popover, over the panels (not cut off by the timeline's). */
+function GroupPopover({ children }: { children: React.ReactNode }) {
+  const box = useRef<HTMLDivElement | null>(null);
+  useOverPanels(box);
+  return <div className="group-popover" ref={box} onPointerDown={(e) => e.stopPropagation()}>{children}</div>;
 }
 
 /** Group checkboxes: for an existing event (saved at once) or a new one (value and onChange). */

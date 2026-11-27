@@ -23,6 +23,14 @@ import { chooseScale } from '../render-engine/basemap.ts';
 import { heightAt } from '../terrain/grid.ts';
 import { sculpted } from '../terrain/sculpt-cache.ts';
 import { planetBench } from './planet-engine.ts';
+import * as dock from './shell/dock.ts';
+import { defaultDock, type Page } from './shell/studios.ts';
+
+/** The lists, in the order the one column of all of them had before they were panels of their own (D199, D234). */
+const LISTS = ['maps', 'layers', 'countries', 'places', 'areas', 'events'];
+const withAllLists = (n: dock.DockNode): dock.DockNode => n.kind === 'stack'
+  ? (n.panels.some((p) => LISTS.includes(p)) ? dock.split('col', LISTS.map((p) => dock.stack([p])), n.size) : n)
+  : { ...n, children: n.children.map(withAllLists) };
 
 /** The working map's view as it is shown (it may hold a meridian while the map moves), or the camera's own for that size. */
 function shown(width: number, height: number) {
@@ -51,6 +59,15 @@ function shown(width: number, height: number) {
    * and any difference stops the drawing with an error. Slow; never on in normal use.
    */
   verify(on = true) { Engine.verify = on; store.renderer.verify = on; },
+  /** The docking panels (D234): the functions on layouts, and each page's first layout. */
+  dock: { ...dock, defaultDock },
+  /**
+   * For the interface tests written before the lists were panels of their own (D234): in every page on the world, every
+   * list open at once, each in a group of its own down the left, where the one column of all the lists was.
+   */
+  allLists() {
+    for (const page of ['map', 'history', 'timeline', 'looks'] as Page[]) store.setDock({ root: withAllLists(defaultDock(page).root), floats: [] }, page);
+  },
   bench: { commands, gregorian, lonLatToVec, runExport, renderFrame, terrainFor, svgFrame, newTextBox, PASS_DEFS, defaultShot, cameraAt, EXPORT_QUALITY, decodeCountries, COUNTRY_GROUP_COLORS, MapRenderer, makeView, Engine, labelStats, chooseScale, heightAt, sculpted, activeSources, compare, planet: planetBench },
   /** A view of the map for a camera and size (for off-screen comparisons in tests). */
   viewOf(camera: Parameters<typeof makeView>[0], width: number, height: number) { return makeView(camera, width, height); },

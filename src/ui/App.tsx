@@ -1,15 +1,16 @@
 import { CalendarDialog } from './components/CalendarDialog.tsx';
 import { StatisticsDialog } from './components/StatisticsDialog.tsx';
 import { BranchesDialog } from './components/Branches.tsx';
-import { useEffect, useRef } from 'react';
-import { WorkspaceBar, Splitter, StatusBar, frameStyle } from './shell/Shell.tsx';
+import { useEffect } from 'react';
+import { StudioBar, StatusBar } from './shell/Shell.tsx';
+import { DockArea } from './shell/Dock.tsx';
+import { drawsOn } from './shell/studios.ts';
 import { arrowStep } from '../core-time/steps.ts';
 import { calendarNow } from './calendar-now.ts';
 import { useStore, store } from './store.ts';
-import { TopBar, DateBar, Toasts } from './shell/Bars.tsx';
-import { Outliner } from './panels/Lists.tsx';
-import { ToolStrip, ToolOptions } from './shell/Tools.tsx';
-import { Inspector, QuickStart } from './panels/Properties.tsx';
+import { TopBar, Toasts } from './shell/Bars.tsx';
+import { ToolOptions } from './shell/Tools.tsx';
+import { QuickStart } from './panels/Properties.tsx';
 import { ShortcutsDialog } from './shell/MenuBar.tsx';
 import { commandForKey } from './commands.ts';
 import { toolForKey } from './tools.ts';
@@ -18,13 +19,8 @@ import { SeaLevelDialog } from './components/SeaLevelDialog.tsx';
 import { SkyLookDialog } from './components/SkyLook.tsx';
 import { SolarRowDialog } from './components/SolarRow.tsx';
 import { BorderShiftsDialog } from './components/BorderShifts.tsx';
-import { MapView } from './components/MapView.tsx';
-import { SpaceView } from './components/SpaceView.tsx';
-import { isSpaceMap } from '../world-model/world-settings.ts';
-import { Timeline } from './components/Timeline.tsx';
 import { EditPrompt, NewWorldDialog, NewEventDialog, VersionsDialog, HealthDialog, DataSourcesDialog, ProjectPicker, OfflineNotice, AskDialog } from './components/Dialogs.tsx';
 import { PlanetStudio } from './components/PlanetStudio.tsx';
-import { ShotsPanel, ShotEditor, ShotTimeline } from './components/Presentation.tsx';
 import { LabelStyleDialog } from './components/LabelStyles.tsx';
 import { AddCountriesDialog } from './components/AddCountries.tsx';
 import { AddCitiesDialog } from './components/Cities.tsx';
@@ -49,8 +45,8 @@ export function App() {
       if (!store.pending && !(e.target as HTMLElement)?.isContentEditable) {
         const c = commandForKey(e);
         if (c) { e.preventDefault(); c.run(store); return; }
-        // A plain letter takes its tool in hand (while nothing is being drawn or asked).
-        if (store.mode === 'world' && store.world && !store.dialog && !e.ctrlKey && !e.metaKey && !e.altKey && e.key.length === 1) {
+        // A plain letter takes its tool in hand (while nothing is being drawn or asked, in a page that draws on the map).
+        if (drawsOn(store.pageNow()) && store.world && !store.dialog && !e.ctrlKey && !e.metaKey && !e.altKey && e.key.length === 1) {
           const t = toolForKey(e.key, store.world, store.spaceId);
           if (t) { e.preventDefault(); store.set({ tool: t.id }); return; }
         }
@@ -80,25 +76,15 @@ export function App() {
     return () => window.removeEventListener('keydown', key);
   }, []);
 
-  const frame = useRef<HTMLDivElement | null>(null);
-  const workspace = s.workspaceNow(), hidden = s.layouts[workspace].hidden;
   if (!s.world) return <><ProjectPicker /><Toasts />{s.busy && <div className="busy">{s.busy}</div>}</>;
+  const page = s.pageNow();
 
   return (
-    <div className={`app mode-${s.mode} workspace-${workspace}`} style={frameStyle(s)} ref={frame}>
+    <div className={`app mode-${s.mode} page-${page}`}>
       <TopBar />
-      <WorkspaceBar />
-      {s.mode === 'world' && <ToolOptions />}
-      {s.mode === 'world' && <ToolStrip />}
-      {!hidden.includes('left') && (s.mode === 'world' ? <Outliner /> : <ShotsPanel />)}
-      <main className="center">
-        {isSpaceMap(s.world.get('map_space', s.spaceId)) ? <SpaceView /> : <MapView />}
-      </main>
-      {!hidden.includes('right') && (s.mode === 'world' ? <Inspector /> : <ShotEditor only={workspace === 'export' ? 'export' : undefined} />)}
-      {!hidden.includes('bottom') && <footer className="bottom">{s.mode === 'world' ? <Timeline head={<DateBar />} /> : <ShotTimeline />}</footer>}
-      <Splitter side="left" frame={frame} />
-      <Splitter side="right" frame={frame} />
-      <Splitter side="bottom" frame={frame} />
+      <StudioBar />
+      {drawsOn(page) && <ToolOptions />}
+      <DockArea />
       <StatusBar />
       <EditPrompt />
       <AskDialog />

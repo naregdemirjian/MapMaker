@@ -25,7 +25,7 @@ export function MenuBar() {
 export function ShortcutsDialog() {
   const close = () => store.set({ dialog: null });
   const rows: Array<[string, string]> = [
-    ...COMMANDS.filter((c) => c.shortcut).map((c): [string, string] => [c.shortcut!, c.id.startsWith('workspace-') ? `Workspace: ${c.name}` : c.name.replace(/…$/, '')]),
+    ...COMMANDS.filter((c) => c.shortcut).map((c): [string, string] => [c.shortcut!, c.id.startsWith('studio-') ? `Studio: ${c.name}` : c.name.replace(/…$/, '')]),
     ['Ctrl+Shift+Z', 'Redo'],
     ...TOOLS.map((t): [string, string] => [t.key, `Tool: ${t.name}`]),
     ...OTHER_SHORTCUTS,

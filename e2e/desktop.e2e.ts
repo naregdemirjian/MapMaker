@@ -29,9 +29,9 @@ const launch = async (): Promise<{ app: ElectronApplication; page: Page }> => {
   });
   const page = await app.firstWindow();
   await page.waitForLoadState('domcontentloaded');
-  // (The lists at the left all in one column, as these steps expect.)
+  // (Every list open at once, each in a group of its own down the left, as these steps expect.)
   await page.waitForFunction(() => !!(window as any).__mapmaker);
-  await page.evaluate(() => (window as any).__mapmaker.store.setListTab('all', true));
+  await page.evaluate(() => (window as any).__mapmaker.allLists());
   return { app, page };
 };
 
@@ -72,7 +72,7 @@ try {
     await page.getByRole('button', { name: '+ Layer' }).click();
     await page.getByTestId('new-layer-name').fill('Religion');
     await page.getByTestId('new-layer-name').press('Enter');
-    await page.locator('.left .row', { hasText: 'Religion' }).waitFor();
+    await page.locator('.list-panel .row', { hasText: 'Religion' }).waitFor();
     await capture(page, join(OUT, '01-desktop-window.png'));
   });
 
@@ -144,7 +144,7 @@ try {
     await row.waitFor();
     await row.click();
     await page.getByTestId('map-canvas').waitFor();
-    await page.locator('.left .row', { hasText: 'Desktop Country' }).waitFor();
+    await page.locator('.list-panel .row', { hasText: 'Desktop Country' }).waitFor();
     await capture(page, join(OUT, '02-reopened.png'));
   });
 

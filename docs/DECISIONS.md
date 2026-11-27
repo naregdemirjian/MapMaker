@@ -61,6 +61,58 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D234. Five studios, and panels that dock as Premiere's (S1 of the studios plan)
+
+- **Why.** The interface was one arrangement of fixed columns with workspaces that only resized them (D196); the user
+  found it hard to work in and asked for separate pieces of software for the map, the history, the timeline, looks
+  and presentation, every panel movable as in Premiere, a Reset workspace button, and Save workspace keeping the
+  layout of each page. The plan agreed with the user is `docs/STUDIOS_PLAN.md` (eight stages, S1 to S8); this is S1.
+- **Five studios in a bar under the menus** (`shell/studios.ts`, `Shell.tsx` `StudioBar`; Window menu, Alt+1 to 5):
+  Map Studio, History, Timeline, Looks, Presentation, the last with two pages, Shots and Export (tabs beside it; it
+  opens on the one last used). Today's contents placed in them until each studio has its own (S2 to S8): the old
+  World workspace is Map Studio, Map is History, History is Timeline, Present and Export the two pages; Looks has the
+  lists, the map and Properties. Only Map Studio and History have the tool strip and the tools' options bar and keys;
+  elsewhere the map only chooses and inspects (the tool in hand is put down, and taken up again on coming back). The
+  page worked in is kept on this computer (a session never opens in Presentation).
+- **Each page a layout of its own** (`shell/dock.ts`, pure, 10 unit tests): groups of panels shown as tabs, in rows and
+  columns, plus floating windows. Sizes are pixels, or "what is left" (every row and column keeps one such, the one
+  holding the map if any), so the layout always fills the window. The panels: the map (the shot's preview in
+  Presentation; it can be moved, not closed), the tools, each list (Maps, Layers, Countries, Places, Areas, Events:
+  panels of their own now, each with its own filter, `panels/Lists.tsx` `ListPanel`), Properties, the timeline, and in
+  Presentation the shots, the shot's settings, the export's and the shot timeline. Each page holds only the panels
+  that belong to it (`PANELS`).
+- **Docking as in Premiere** (`shell/Dock.tsx`): a tab dragged onto another group's tabs (or its middle) joins them;
+  onto one of its edges (the outer quarter), a group of its own on that side, half as large (within limits); held with
+  Ctrl, or let go off every group, it floats where it is let go. Where it would go is shown while it is dragged. A
+  click brings a tab to the front; its × closes it (on the tab in front); the group's ≡ menu lists its panels and floats
+  or closes one or all. Tabs keep their width: more than fit, the row scrolls (the wheel scrolls it, the tab in front
+  kept in view). A floating window moves by its title row and resizes by its corner. The edge between two groups
+  resizes them as it is dragged (live, by the browser's layout alone; the size kept when let go), never below the least
+  a panel needs. The tool strip, alone in its group, has a grip in place of a tab.
+- **The Window menu** ticks the panels open in the page (only those it can hold are listed). Chosen: one closed opens
+  again in the group it was with at first if one of those is open, in its place among them; else in a group of its own
+  on the side of the map it was on at first, as large (beside the highest part of the layout holding the map in a row
+  or column running that way, else beside everything); else, not in the page's first layout at all, floating. One
+  behind another tab comes to the front; one in front closes.
+- **Save workspace** (studios bar and Window menu) keeps the page's layout as its own; **Reset workspace** returns to
+  it, or to the page's first layout when none is saved; **Original layout** returns to the first one and forgets the
+  one saved. Every page's layout worked in and the one saved are kept on this computer (`mapmaker.docks`), made valid
+  when read (unknown or doubled panels, panels of another page and nonsense sizes dropped; a layout without the map is
+  not one).
+- **Drawn once, moved where its tab is**: each panel's contents are drawn into an element of their own, which is
+  moved into the group showing it (React portals): moving a panel, or opening another studio, does not draw the map
+  again from nothing; only the panels in front are drawn. The tool options that need a second line push the groups
+  along the top down below them, never the map (D224 kept).
+- **Superseded**: the workspace bar, the folding buttons and the dragged edges of D196 (and `mapmaker.layouts`,
+  `mapmaker.workspace`), the lists' tabs and their single filter of D199 (`mapmaker.listTabs`); the View menu's
+  panel toggles of D197 are the Window menu's panels.
+- **Tests.** Unit: the layout tree (docking into tabs and onto sides, floating and docking back, closing, resizing
+  within limits, opening again in place, cleaning what was kept) and the studios (pages, which panels each holds,
+  each page's first layout, what is kept made valid). The interface tests open with every list in a group of its own
+  down the left (`__mapmaker.allLists()`), as the steps before the lists were panels expect; a step drags tabs into a
+  group, under the map and out floating (Ctrl), moves and resizes the window, closes and reopens panels from the
+  Window menu, resizes by an edge, saves, resets and returns to the original layout, and checks what is kept.
+
 ### D233. Many disasters at once, with a brush: of sizes and moments of their own
 
 - **Why.** A project showing 70,000 nuclear detonations could only place them one click at a time, each the same

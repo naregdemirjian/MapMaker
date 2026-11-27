@@ -4,6 +4,7 @@
 // calendar of the map being viewed (D149): its months, its week (or rows of seven when it has none).
 import { useEffect, useRef, useState } from 'react';
 import { type Instant, type Calendar, gregorian, stepDate } from '../../core-time/index.ts';
+import { useOverPanels } from '../over-panels.ts';
 export { stepDate } from '../../core-time/index.ts';
 
 export function CalendarPopover({ value, onPick, onClose, testId, cal = gregorian }: { value: Instant; onPick: (t: Instant) => void; onClose: () => void; testId?: string; cal?: Calendar }) {
@@ -12,6 +13,8 @@ export function CalendarPopover({ value, onPick, onClose, testId, cal = gregoria
   const [yearText, setYearText] = useState(cal.yearLabel(c.year));
   useEffect(() => setYearText(cal.yearLabel(cal.toCivil(focus).year)), [focus.day, focus.ms]);
   const box = useRef<HTMLDivElement | null>(null);
+  // (Over the panels, not cut off by the one it opened in.)
+  useOverPanels(box);
   // Closed by a click elsewhere or by Escape.
   useEffect(() => {
     const down = (e: PointerEvent) => { if (box.current && !box.current.contains(e.target as Node) && !(e.target as HTMLElement)?.closest?.('.date-calendar-button')) onClose(); };
