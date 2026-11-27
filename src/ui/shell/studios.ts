@@ -51,6 +51,7 @@ export const PANELS: PanelInfo[] = [
   { id: 'types', title: 'Types', pages: ['timeline'], hint: 'Event types: their colours, how territory drawn into their events spreads, how long a new one lasts', minW: 200 },
   { id: 'branches', title: 'Branches', pages: ['timeline'], hint: 'Alternative timelines: the one viewed, a new one from the date viewed, each changed or deleted', minW: 200 },
   { id: 'statistics', title: 'Statistics', pages: ['timeline'], hint: 'Numbers kept over time on the map viewed, shown counting in shots as {name}', minW: 200 },
+  { id: 'calendar', title: 'Calendar', pages: ['timeline'], hint: 'The calendar the map viewed is dated in: the Gregorian, or one of its own (its months, leap years, eras, week and day)', minW: 240 },
   { id: 'event-table', title: 'Table', pages: ['timeline'], hint: 'The events as a table: dates, names, types and groups changed in place; drawn or still to draw; a list read or written as a CSV file', minW: 320 },
   { id: 'shots', title: 'Shots', pages: SHOTS, hint: 'The shots of this project' },
   { id: 'shot', title: 'Shot', pages: ['shots'], hint: 'The settings of the shot chosen' },
@@ -72,7 +73,7 @@ export function defaultDock(page: Page): DockLayout {
       return { root: split('col', [historyTop(), stack(['timebar'], 84)]), floats: [] };
     case 'timeline':
       // (The timeline takes the room; a small map follows the date above the studio's own panels, D241.)
-      return { root: split('row', [split('col', [stack([VIEWER], 200), lists('groups', ['groups', 'types', 'branches', 'statistics'], 0)], 290), stack(['timeline', 'event-table']), split('col', [stack(['properties']), stack(['looks'])], 320)]), floats: [] };
+      return { root: split('row', [split('col', [stack([VIEWER], 200), lists('groups', ['groups', 'types', 'branches', 'statistics', 'calendar'], 0)], 290), stack(['timeline', 'event-table']), split('col', [stack(['properties']), stack(['looks'])], 320)]), floats: [] };
     case 'looks':
       // (The Effects panel under the lists, beside the map and the Looks panel effects are dragged onto, D238.)
       return { root: split('col', [split('row', [split('col', [lists('countries', ['countries', 'layers', 'places', 'areas'], 0), stack(['effects'], 300)], 250), stack([VIEWER]), split('col', [stack(['looks']), stack(['properties'], 230)], 380)]), stack(['timeline'], 130)]), floats: [] };

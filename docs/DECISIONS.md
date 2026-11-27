@@ -61,6 +61,23 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D246. The map's calendar, a panel of the Timeline studio (S6, sixth part)
+
+- **Why.** In the plan the Timeline studio owns "events, their dates and lengths, groups, types, branches, calendars,
+  statistics"; the calendar was a dialog reached from the map's setting-up in Map Studio only.
+- **Where**: "Calendar", a tab among the studio's own panels (Groups, Types, Branches, Statistics, Calendar); it
+  docks, floats and closes like every panel. It holds what the dialog holds (`CalendarBody`, shared): a template to
+  start from, the months, leap years, the day year 1 began, the hours of a day, the week, the eras, its problems and
+  the date viewed written in it. Its title names the calendar the map viewed uses.
+- **In the panel** a calendar is used without closing anything ("Use this calendar", greyed while nothing is changed;
+  "Use the Gregorian calendar"); "Discard changes" returns the draft to the calendar in use. The draft starts afresh
+  for another map, or when the calendar in use changes (used here or elsewhere, or undone).
+- **Elsewhere**: the map's setting-up in Map Studio opens the dialog as before (`panelOrDialog`: in the Timeline
+  studio, the panel to the front).
+- **Tests.** Unit: the studio's layout with the Calendar tab, the panel the Timeline studio's alone. Interface: the
+  tab, the Gregorian named; a template used from the panel, the date written in it and the panel still open, "Use
+  this calendar" greyed after; a change discarded; the Gregorian again; Map Studio's link opening the dialog; undone.
+
 ### D245. Several events at once on the timeline: chosen together, moved, stretched; Move everything after (S6, fifth part)
 
 - **Why.** "Moving and stretching many events at once" is the Timeline studio's own work in the plan ("Where

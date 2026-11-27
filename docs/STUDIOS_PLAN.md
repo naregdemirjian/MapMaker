@@ -48,6 +48,6 @@ experience only: no new map features while this is built.
 6. **Timeline studio (S6)**: its own panels (groups, types, branches, statistics) and a small map following the date
    (D241); the table of events (D242); planned events, Draw in History, a shot of an event (D243); History's compact
    time bar (D244); several events at once: chosen, moved, stretched, Move everything after, a shot of them (D245);
-   an outline of events and the map's calendar.
+   the map's calendar (D246); an outline of events.
 7. **Looks studio (S7)**: the stage, the parts, saving a stack as an effect.
 8. **Designing by hand (S8)**: pen and shapes, text; then the brush.

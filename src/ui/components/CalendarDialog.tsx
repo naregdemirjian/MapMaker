@@ -11,12 +11,16 @@ import { DateField, NumberField } from '../inputs.tsx';
 
 const copy = (d: CalendarDef): CalendarDef => JSON.parse(JSON.stringify(d)) as CalendarDef;
 
-export function CalendarDialog() {
+/**
+ * The map's calendar, worked on as a draft and then used (D149): in its dialog (`onDone` closes it), or in the
+ * Timeline studio's Calendar panel (D246), where it stays open.
+ */
+function CalendarBody({ onDone }: { onDone?: () => void }) {
   const s = useStore();
   const space = s.world!.get('map_space', s.spaceId)!;
   const own = calendarDefOf(space);
   const [draft, setDraft] = useState<CalendarDef | null>(own ? copy(own) : null);
-  const close = () => s.set({ dialog: null });
+  const changed = JSON.stringify(draft) !== JSON.stringify(own ?? null);
   const problems = draft ? calendarProblems(draft) : [];
   const cal = draft && !problems.length ? calendarOf(draft) : null;
   const set = (patch: Partial<CalendarDef>) => setDraft(draft ? { ...draft, ...patch } : null);
@@ -31,7 +35,7 @@ export function CalendarDialog() {
   const num = (v: number | undefined) => (v === undefined ? '' : String(v));
   const optInt = (text: string) => (text.trim() === '' ? undefined : Math.round(Number(text)));
   return (
-    <DialogFrame label="Calendar" title={<>Calendar of “{space.name}”</>} testId="calendar-dialog" wide className="calendar-dialog" onClose={close}>
+    <>
         <p className="muted">Dates on this map are written, typed and chosen in its calendar: on the timeline, in every date field, in shots and exports. Nothing stored changes, only how the moments are written.</p>
         <label>Start from
           <select value="" onChange={(e) => e.target.value && start(e.target.value)} data-testid="calendar-template">
@@ -53,7 +57,7 @@ export function CalendarDialog() {
                     <td><input value={m.short ?? ''} placeholder={m.name.slice(0, 3)} onChange={(e) => month(i, { short: e.target.value || undefined })} className="short" /></td>
                     <td><NumberField value={m.days} min={0} max={1000} step={1} onCommit={(n) => month(i, { days: Math.round(n) })} testId={`calendar-days-${i}`} /></td>
                     <td><NumberField value={m.leapDays ?? 0} min={0} max={100} step={1} onCommit={(n) => month(i, { leapDays: Math.round(n) || undefined })} testId={`calendar-leap-${i}`} /></td>
-                    <td><button className="link" disabled={draft.months.length < 2} onClick={() => set({ months: draft.months.filter((_, j) => j !== i) })}>Remove</button></td>
+                    <td><button className="link" disabled={draft.months.length < 2} onClick={() => set({ months: draft.months.filter((_, j) => j !== i) })} title={`Remove ${m.name}`} aria-label={`Remove ${m.name}`}>{onDone ? 'Remove' : '×'}</button></td>
                   </tr>
                 ))}
               </tbody>
@@ -112,10 +116,36 @@ export function CalendarDialog() {
           </div>
         )}
         <div className="modal-actions">
-          <button onClick={close}>Close</button>
-          {own && <button onClick={() => { s.execute((wd) => cmd.setMapCalendar(wd, space.id, null)); close(); }} data-testid="calendar-use-gregorian">Use the Gregorian calendar</button>}
-          {draft && <button className="primary" disabled={problems.length > 0} onClick={() => { s.execute((wd) => cmd.setMapCalendar(wd, space.id, draft)); close(); }} data-testid="calendar-use">Use this calendar</button>}
+          {onDone && <button onClick={onDone}>Close</button>}
+          {!onDone && changed && <button onClick={() => setDraft(own ? copy(own) : null)} data-testid="calendar-discard">Discard changes</button>}
+          {own && <button onClick={() => { s.execute((wd) => cmd.setMapCalendar(wd, space.id, null)); onDone?.(); }} data-testid="calendar-use-gregorian">Use the Gregorian calendar</button>}
+          {draft && <button className="primary" disabled={problems.length > 0 || (!onDone && !changed)} onClick={() => { s.execute((wd) => cmd.setMapCalendar(wd, space.id, draft)); onDone?.(); }} data-testid="calendar-use">Use this calendar</button>}
         </div>
+    </>
+  );
+}
+
+export function CalendarDialog() {
+  const s = useStore();
+  const space = s.world!.get('map_space', s.spaceId)!;
+  return (
+    <DialogFrame label="Calendar" title={<>Calendar of “{space.name}”</>} testId="calendar-dialog" wide className="calendar-dialog" onClose={() => s.set({ dialog: null })}>
+      <CalendarBody onDone={() => s.set({ dialog: null })} />
     </DialogFrame>
+  );
+}
+
+/** The Timeline studio's Calendar panel (D246): the map's calendar, changed in place and used without closing. */
+export function CalendarPanel() {
+  const s = useStore();
+  const space = s.world?.get('map_space', s.spaceId);
+  if (!space) return <div className="panel muted">No map.</div>;
+  const own = calendarDefOf(space);
+  // (Started afresh for another map, or when the calendar used changes: used here, elsewhere, or undone.)
+  return (
+    <div className="panel calendar-panel" data-testid="calendar-panel">
+      <div className="calendar-panel-title">Calendar of “{space.name}”: <b>{own?.name ?? 'Gregorian'}</b></div>
+      <CalendarBody key={`${space.id}|${JSON.stringify(own ?? null)}`} />
+    </div>
   );
 }

@@ -6292,6 +6292,56 @@ try {
     await page.evaluate(() => (window as any).__mapmaker.allLists());
   });
 
+  await h.step('The map\'s calendar in the Timeline studio (D246): a tab among its own panels; a calendar of its own used there and the dates written in it; changes discarded; the Gregorian again; in Map Studio its dialog; undone', async () => {
+    const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
+    const dateIs = async (v: string) => {
+      await page.waitForFunction((x) => (document.querySelector('[data-testid=current-date]') as HTMLInputElement).value === x, v, { timeout: 5000 }).catch(() => undefined);
+      assert.equal(await page.getByTestId('current-date').inputValue(), v);
+    };
+    await page.getByTestId('studio-history').click();
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
+    const before = await steps();
+    const keep = await page.evaluate(() => (window as any).__mapmaker.store.time);
+    await page.getByTestId('studio-timeline').click();
+    await page.getByTestId('reset-workspace').click();
+    await h.setDate('1 January 1100');
+    // A tab among the studio's own panels.
+    await page.getByTestId('dock-tab-calendar').click();
+    const panel = page.getByTestId('calendar-panel');
+    await panel.waitFor();
+    assert.match(await panel.innerText(), /Calendar of “Earth”: Gregorian/);
+    // A calendar of its own from a template, used there: the panel stays, the dates are written in it.
+    await panel.getByTestId('calendar-template').selectOption('world');
+    assert.match(await panel.getByTestId('calendar-preview').innerText(), /^The date viewed: 6 Turning 100 AF/);
+    await panel.getByTestId('calendar-use').click();
+    await h.saved();
+    await dateIs('6 Turning 100 AF');
+    assert.match(await panel.innerText(), /Calendar of “Earth”: Calendar of the Founding/);
+    assert.equal(await panel.getByTestId('calendar-use').isDisabled(), true, 'nothing changed since');
+    await h.screenshot('timeline-calendar-panel');
+    // A change, discarded.
+    await panel.getByTestId('calendar-name').fill('The long count');
+    await panel.getByTestId('calendar-discard').click();
+    assert.equal(await panel.getByTestId('calendar-name').inputValue(), 'Calendar of the Founding');
+    // The Gregorian again, from the panel.
+    await panel.getByTestId('calendar-use-gregorian').click();
+    await h.saved();
+    await dateIs('1 January 1100');
+    assert.match(await panel.innerText(), /Calendar of “Earth”: Gregorian/);
+    // In Map Studio, where the map is set up, its dialog as before.
+    await page.getByTestId('studio-map').click();
+    await page.locator('[data-testid^="map-row-"].sel').click();
+    await page.getByTestId('open-calendar').click();
+    await page.getByTestId('calendar-dialog').waitFor();
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ dialog: null }));
+    // Undone, step by step.
+    for (let i = 0; i < 10 && (await steps()) > before; i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await steps(), before);
+    await page.evaluate((t) => (window as any).__mapmaker.store.setTime(t), keep);
+    await page.getByTestId('studio-history').click();
+    await page.evaluate(() => (window as any).__mapmaker.allLists());
+  });
+
   await h.step('The menu bar: every command in a menu with its shortcut; the keyboard runs the same commands (D197)', async () => {
     const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);
     await page.getByTestId('studio-history').click();
