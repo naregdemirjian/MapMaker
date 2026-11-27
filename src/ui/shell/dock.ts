@@ -122,8 +122,8 @@ export function activate(l: DockLayout, holderId: string, panel: PanelId): DockL
 
 /**
  * A panel dropped on a group (or a floating window) `targetId`: into its tabs ('center'), or beside it on a side, in
- * a group of its own `newSize` pixels across (or down). Dropped on its own group's side while alone in it: nothing
- * changes. A floating window takes panels into its tabs only.
+ * a group of its own `newSize` pixels across (or down; 0: sharing what is left). Dropped on its own group's side while
+ * alone in it: nothing changes. A floating window takes panels into its tabs only.
  */
 export function dockPanel(l: DockLayout, panel: PanelId, targetId: string, zone: Zone, newSize = 280): DockLayout {
   const target = holderById(l, targetId);
@@ -138,7 +138,7 @@ export function dockPanel(l: DockLayout, panel: PanelId, targetId: string, zone:
   }
   const dir: Dir = zone === 'left' || zone === 'right' ? 'row' : 'col';
   const before = zone === 'left' || zone === 'top';
-  const fresh = stack([panel], Math.max(1, Math.round(newSize)));
+  const fresh = stack([panel], newSize > 0 ? Math.max(1, Math.round(newSize)) : 0);
   const place = (n: DockNode): DockNode => {
     if (n.kind === 'stack') return n.id === targetId ? split(dir, before ? [fresh, { ...n, size: 0 }] : [{ ...n, size: 0 }, fresh], n.size) : n;
     const i = n.children.findIndex((c) => c.kind === 'stack' && c.id === targetId);
@@ -183,42 +183,66 @@ export function resizeAt(l: DockLayout, splitId: string, index: number, by: numb
   return withRoot(l, normalize(root));
 }
 
-/** Where a panel lay in a layout relative to the viewer: the way the split parting them runs, which side, how large. */
-function sideOfViewer(l: DockLayout, panel: PanelId): { dir: Dir; before: boolean; size: number } | null {
-  let n: DockNode = l.root;
-  while (n.kind === 'split') {
-    const ip = n.children.findIndex((c) => contains(c, panel)), iv = n.children.findIndex((c) => contains(c, VIEWER));
-    if (ip < 0 || iv < 0) return null;
-    if (ip !== iv) return { dir: n.dir, before: ip < iv, size: n.children[ip].size };
-    n = n.children[ip];
+/** Every panel in a node. */
+const panelsIn = (n: DockNode): PanelId[] => [...stacks(n)].flatMap((st) => st.panels);
+
+/**
+ * What a panel lay beside in a layout: of the groups sharing its row or column there (or the parts holding them), the
+ * nearest that still has a panel open in `now`: that part's panels, one of them open, which way and side, how large the
+ * panel's own part was.
+ */
+function besideOpen(original: DockLayout, now: DockLayout, panel: PanelId): { within: Set<PanelId>; anchor: PanelId; dir: Dir; before: boolean; size: number } | null {
+  const path: DockSplit[] = [];
+  const find = (n: DockNode): boolean => {
+    if (n.kind === 'stack') return n.panels.includes(panel);
+    path.push(n);
+    if (n.children.some(find)) return true;
+    path.pop();
+    return false;
+  };
+  if (!find(original.root)) return null;
+  // From the split holding its group outwards; in each, the parts nearest to it first.
+  for (let k = path.length - 1; k >= 0; k--) {
+    const sp = path[k], i = sp.children.findIndex((c) => contains(c, panel));
+    const order = sp.children.map((_, j) => j).filter((j) => j !== i).sort((a, b) => Math.abs(a - i) - Math.abs(b - i));
+    for (const j of order) {
+      const within = new Set(panelsIn(sp.children[j]));
+      const anchor = [...within].find((p) => { const h = holderOf(now, p); return !!h && 'kind' in h; });
+      if (anchor) return { within, anchor, dir: sp.dir, before: i < j, size: sp.children[i].size };
+    }
   }
   return null;
 }
 
 /**
- * A panel in a group of its own beside the part of the layout holding the viewer, on one side: next to the highest
- * node holding the viewer in a split running that way (or, with none, beside everything).
+ * A panel in a group of its own beside a part of the layout (the largest holding `anchor` with only panels of `within`):
+ * next to it in the row or column it is in when that runs the way wanted, else the two of them in one of their own.
  */
-function besideViewer(l: DockLayout, panel: PanelId, dir: Dir, before: boolean, size: number): DockLayout {
-  const fresh = stack([panel], size > 0 ? size : 280);
+function placeBeside(l: DockLayout, panel: PanelId, within: Set<PanelId>, anchor: PanelId, dir: Dir, before: boolean, size: number): DockLayout {
+  const fresh = stack([panel], size > 0 ? Math.round(size) : 0);
+  const isPart = (n: DockNode) => contains(n, anchor) && panelsIn(n).every((p) => within.has(p));
   let done = false;
   const visit = (n: DockNode): DockNode => {
-    if (n.kind === 'stack' || done) return n;
-    const i = n.dir === dir ? n.children.findIndex((c) => contains(c, VIEWER)) : -1;
-    if (i < 0) return { ...n, children: n.children.map(visit) };
-    done = true;
-    const kids = [...n.children];
-    kids.splice(before ? i : i + 1, 0, fresh);
-    return { ...n, children: kids };
+    if (done) return n;
+    if (isPart(n)) { done = true; return split(dir, before ? [fresh, { ...n, size: 0 }] : [{ ...n, size: 0 }, fresh], n.size); }
+    if (n.kind === 'stack') return n;
+    const i = n.dir === dir ? n.children.findIndex(isPart) : -1;
+    if (i >= 0) {
+      done = true;
+      const kids = [...n.children];
+      kids.splice(before ? i : i + 1, 0, fresh);
+      return { ...n, children: kids };
+    }
+    return { ...n, children: n.children.map(visit) };
   };
-  const root = visit(l.root);
-  return withRoot(l, normalize(done ? root : split(dir, before ? [fresh, { ...l.root, size: 0 }] : [{ ...l.root, size: 0 }, fresh])));
+  return withRoot(l, normalize(visit(l.root)));
 }
 
 /**
  * A panel opened again: in front where it is, if it is open; else in the group it shares in `original` (the page's
- * first layout) with a panel open now, in its place among them; else in a group of its own on the side of the viewer
- * it was on there; else (not in that layout at all) floating.
+ * first layout) with a panel open now, in its place among them; else in a group of its own beside the part it lay
+ * beside there (the nearest with a panel open now; on the same side, as large); else (not in that layout at all)
+ * floating.
  */
 export function openPanel(l: DockLayout, panel: PanelId, original: DockLayout): DockLayout {
   const here = holderOf(l, panel);
@@ -234,8 +258,8 @@ export function openPanel(l: DockLayout, panel: PanelId, original: DockLayout): 
     const put = <T extends { id: string; panels: PanelId[]; active: PanelId }>(x: T): T => (x.id === h.id ? { ...x, panels, active: panel } : x);
     return { root: mapNode(l.root, (n) => (n.kind === 'stack' ? put(n) : n)), floats: l.floats.map(put) };
   }
-  const side = sideOfViewer(original, panel);
-  if (side && holderOf(l, VIEWER)) return besideViewer(l, panel, side.dir, side.before, side.size);
+  const near = besideOpen(original, l, panel);
+  if (near) return placeBeside(l, panel, near.within, near.anchor, near.dir, near.before, near.size);
   const n = l.floats.length;
   return { ...l, floats: [...l.floats, { id: newId('f'), panels: [panel], active: panel, x: 120 + 24 * n, y: 60 + 24 * n, w: 320, h: 420 }] };
 }

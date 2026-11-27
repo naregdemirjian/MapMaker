@@ -5186,7 +5186,7 @@ try {
       return r(l.root) + l.floats.map((f: any) => ` + {${f.panels.join(',')}}`).join('');
     });
     const LISTS = '[layers,countries,places,areas,events,maps]';
-    const FIRST = `(([tools] | ${LISTS} | [viewer] | [properties]) / [timeline])`;
+    const FIRST = `(([tools] | ${LISTS} | [viewer] | ([properties] / [looks])) / [timeline])`;
     /** A tab carried by the pointer to a point (the drop mark shown on the way), let go there. */
     const carry = async (panel: string, to: { x: number; y: number }, ctrl = false) => {
       const t = await box(`[data-testid="dock-tab-${panel}"]`);
@@ -5262,20 +5262,21 @@ try {
     const canvas0 = await box('[data-testid="map-canvas"]');
     const lists = await box(`[data-testid="dock-stack-layers-countries-places-areas-events-maps"] .dock-tabs`);
     assert.equal(await carry('properties', { x: lists.x + lists.width - 30, y: lists.y + lists.height / 2 }), 1, 'the drop is marked on the way');
-    assert.equal(await sig(), `(([tools] | [layers,countries,places,areas,events,maps,properties] | [viewer]) / [timeline])`);
+    assert.equal(await sig(), `(([tools] | [layers,countries,places,areas,events,maps,properties] | [viewer] | [looks]) / [timeline])`);
     await page.locator('.properties-panel').waitFor();
     assert.equal(await page.getByTestId('dock-tab-properties').getAttribute('aria-selected'), 'true');
-    // (The canvas takes its new size when the browser next reports it: waited for, not read at once.)
-    await page.waitForFunction((w) => document.querySelector('[data-testid="map-canvas"]')!.getBoundingClientRect().width > w, canvas0.width + 250, { timeout: 5000 }).catch(() => {});
-    assert.ok((await box('[data-testid="map-canvas"]')).width > canvas0.width + 250, 'the map takes the room it left');
+    // (Waited for, not read at once: the layout settles when the browser next lays it out.)
+    await page.waitForFunction(() => document.querySelector('[data-testid="dock-stack-looks"]')!.getBoundingClientRect().height > 500, null, { timeout: 5000 }).catch(() => {});
+    assert.ok((await box('[data-testid="dock-stack-looks"]')).height > 500, 'the Looks panel takes the whole column it shared');
+    void canvas0;
     // Dropped at the bottom edge of the map: a group of its own under the map.
     const map = await box('.viewer-panel');
     await carry('properties', { x: map.x + map.width / 2, y: map.y + map.height - 15 });
-    assert.equal(await sig(), `(([tools] | ${LISTS} | ([viewer] / [properties])) / [timeline])`);
+    assert.equal(await sig(), `(([tools] | ${LISTS} | ([viewer] / [properties]) | [looks]) / [timeline])`);
     await h.screenshot('dock-under-map');
     // Held with Ctrl, it floats where it is let go; a floating window is moved by its title row and resized by its corner.
     await carry('properties', { x: map.x + 300, y: map.y + 120 }, true);
-    assert.equal(await sig(), `(([tools] | ${LISTS} | [viewer]) / [timeline]) + {properties}`);
+    assert.equal(await sig(), `(([tools] | ${LISTS} | [viewer] | [looks]) / [timeline]) + {properties}`);
     const f0 = await box('[data-testid="dock-float-properties"]');
     await page.mouse.move(f0.x + f0.width - 40, f0.y + 10);
     await page.mouse.down();
@@ -5310,7 +5311,7 @@ try {
     await page.locator('.list-panel[data-list="places"]').waitFor();
     await page.getByTestId('menu-window').click();
     await page.getByTestId('command-panel-places').click();
-    assert.equal(await sig(), `(([tools] | [layers,countries,areas,events,maps] | [viewer] | [properties]) / [timeline])`);
+    assert.equal(await sig(), `(([tools] | [layers,countries,areas,events,maps] | [viewer] | ([properties] / [looks])) / [timeline])`);
     await page.getByTestId('menu-window').click();
     await page.getByTestId('command-panel-places').click();
     assert.equal(await sig(), FIRST, 'back with the lists it was with');
@@ -5398,6 +5399,76 @@ try {
     assert.equal(await store(`s.world.all('map_space').some((m) => m.name === 'Gallery world')`), false);
     await page.getByTestId('map-select').selectOption({ label: 'Earth' });
     assert.equal(await store('s.spaceId'), earth);
+  });
+
+  await h.step('The Looks panel (D236): a country\'s colour, fill, look, borders and label there, not in Properties; Design and Ctrl+D bring it to the front; a person\'s marker, a layer\'s and an event\'s looks', async () => {
+    const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);
+    const heads = (sel: string) => page.locator(`${sel} .prop-head`).allTextContents().then((t) => t.map((x) => x.replace(/^[▾▸]/, '').trim()));
+    await page.getByTestId('studio-history').click();
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
+    await page.getByTestId('tool-select').click();
+    // A country: what it is in Properties, how it is drawn in the Looks panel.
+    await page.getByTestId(`entity-row-${A}`).click();
+    await page.getByTestId('looks-entity').waitFor();
+    assert.deepEqual(await heads('.looks-panel'), ['Colour and fill', 'Look and borders', 'Label']);
+    assert.ok(!(await heads('.properties-panel')).some((t) => /fill|look|label/i.test(t)), 'no looks in Properties');
+    assert.equal(await page.getByTestId('entity-panel').getByTestId('country-fill').count(), 0);
+    await page.getByTestId('looks-entity').getByTestId('country-fill').waitFor();
+    await h.screenshot('looks-panel-country');
+    // Its colour changed there (one undo).
+    const colour = () => store(`s.world.all('entity').find((e) => e.name === ${JSON.stringify(A)}).color`);
+    const before = await colour();
+    await page.getByTestId('entity-color').fill('#2266aa');
+    await h.saved();
+    assert.equal(await colour(), '#2266aa');
+    await page.getByTestId('undo').click();
+    await h.saved();
+    assert.equal(await colour(), before);
+    // As at first, the Looks panel lies under Properties. Behind it as a tab, Design brings it to the front, and so does Ctrl+D.
+    await page.getByTestId('menu-window').click();
+    await page.getByTestId('command-original-layout').click();
+    await page.evaluate(() => { const m = (window as any).__mapmaker, s = m.store, l = s.dockNow(); s.setDock(m.dock.dockPanel(l, 'looks', m.dock.holderOf(l, 'properties').id, 'center')); });
+    await page.getByTestId('dock-tab-properties').click();
+    assert.equal(await page.locator('.looks-panel').count(), 0, 'behind Properties');
+    await page.getByTestId('entity-panel').getByTestId('open-looks').click();
+    await page.locator('.looks-panel').waitFor();
+    await page.getByTestId('dock-tab-properties').click();
+    await page.locator('.viewer-panel').hover();
+    await page.keyboard.press('Control+d');
+    await page.locator('.looks-panel').waitFor();
+    // (Every list open at once again, Looks under Properties, for the rest.)
+    await page.evaluate(() => (window as any).__mapmaker.allLists());
+    // A person: the marker.
+    const person = await store(`s.world.all('entity').find((e) => e.type_id === 'character')?.name ?? null`) as string | null;
+    if (person) {
+      await page.evaluate((n) => { const s = (window as any).__mapmaker.store; s.set({ selection: { kind: 'entity', id: s.world.all('entity').find((e: any) => e.name === n).id } }); }, person);
+      await page.keyboard.press('Control+d');
+      await page.getByTestId('looks-entity').waitFor();
+      assert.deepEqual(await heads('.looks-panel'), ['Colour', 'Marker']);
+    }
+    // A layer: its fill, look and borders.
+    await page.locator('[data-testid="layer-row"]', { hasText: 'Political' }).locator('span').first().click();
+    await page.getByTestId('layer-panel').getByTestId('open-looks').click();
+    await page.getByTestId('looks-layer').getByTestId('layer-fill').waitFor();
+    assert.deepEqual(await heads('.looks-panel'), ['Fill and look', 'Borders and front lines']);
+    // An event: its changes as they animate.
+    const ev = (await page.locator('.list-panel [data-testid^="event-row-"]').first().getAttribute('data-testid'))!;
+    await page.getByTestId(ev).click();
+    await page.getByTestId('event-panel').getByTestId('open-looks').click();
+    await page.getByTestId('looks-event').getByTestId('event-look').waitFor();
+    // Nothing chosen: what the panel is for.
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
+    assert.match((await page.getByTestId('looks-panel').textContent())!, /how it is drawn is set here/);
+    // In a studio without the Looks panel (Map Studio), Design opens the Looks studio.
+    await page.getByTestId(`entity-row-${A}`).click();
+    await page.getByTestId('studio-map').click();
+    await page.keyboard.press('Control+d');
+    assert.equal(await store('s.pageNow()'), 'looks');
+    await page.getByTestId('looks-entity').waitFor();
+    await h.screenshot('looks-studio');
+    await page.getByTestId('studio-history').click();
+    // (Every list open at once again for the steps after this one.)
+    await page.evaluate(() => (window as any).__mapmaker.allLists());
   });
 
   await h.step('The menu bar: every command in a menu with its shortcut; the keyboard runs the same commands (D197)', async () => {
@@ -5623,7 +5694,7 @@ try {
     // A country: its properties in named groups.
     await page.getByTestId(`entity-row-${A}`).click();
     const groups = () => page.locator('.properties-panel .prop-head').allTextContents().then((t) => t.map((x) => x.replace(/^[▾▸]/, '').trim()));
-    assert.deepEqual(await groups(), ['Country', 'Notes and pictures', 'Territory', 'Fill', 'Look and borders', 'Label', 'Relationships', 'Names over time']);
+    assert.deepEqual(await groups(), ['Country', 'Notes and pictures', 'Territory', 'Relationships', 'Names over time']);
     await page.getByTestId('relations').waitFor();
     // Folded, a group stays folded for the next country too, and after loading the project again.
     await page.getByTestId('group-head-entity:relations').click();
@@ -5644,9 +5715,9 @@ try {
     // A layer: clicking its name shows it in Properties, with what used to lie in the list under it.
     await page.locator('[data-testid="layer-row"]', { hasText: 'Political' }).locator('span').first().click();
     await page.getByTestId('layer-panel').waitFor();
-    assert.deepEqual(await groups(), ['Layer', 'Fill and look', 'Borders and front lines', 'Coast']);
+    assert.deepEqual(await groups(), ['Layer', 'Coast']);
     assert.equal(await page.locator('.list-panel [data-testid="layer-fill"]').count(), 0, 'no longer in the list');
-    assert.equal(await page.getByTestId('layer-panel').getByTestId('layer-fill').inputValue(), 'solid');
+    assert.equal(await page.getByTestId('looks-layer').getByTestId('layer-fill').inputValue(), 'solid', 'its looks in the Looks panel (D236)');
     assert.equal(await page.getByTestId('layer-name').inputValue(), 'Political');
     // Its name and whether it is shown are changed there (one undo each).
     await page.getByTestId('layer-visible').uncheck();

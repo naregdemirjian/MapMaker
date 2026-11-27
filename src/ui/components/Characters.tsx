@@ -5,7 +5,7 @@ import { useStore, store } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
 import { fromStore, compare } from '../../core-time/index.ts';
 import { fmt } from '../inputs.tsx';
-import { CharacterIconSection, UnitSection } from './CharacterIcons.tsx';
+import { UnitSection } from './CharacterIcons.tsx';
 import { isBaseEvent } from '../../world-model/schema.ts';
 import { placeMetaOf } from '../../domain/places.ts';
 import { cityImportance, CITY_RANKS } from '../../render-engine/label-style.ts';
@@ -41,7 +41,6 @@ export function CharacterSection({ id }: { id: string }) {
         ? <>A city is a point, with no borders. Click the map with the Characters &amp; cities tool to found {ent.name} there on the date being viewed, or use “From the beginning” below; with Select, drag it to move it from that date.</>
         : <>A character is a point, with no borders. Click the map with the Characters &amp; cities tool to put {ent.name} there from the date being viewed; with Select, drag the marker to move it. Between two places {ent.name} travels, unless set to appear.</>}</p>
       {city && <CityImportance id={id} />}
-      {city && <CityAlwaysShown id={id} />}
       <h4>Places</h4>
       {track.map((wp, i) => {
         const prev = track[i - 1];
@@ -63,7 +62,6 @@ export function CharacterSection({ id }: { id: string }) {
         );
       })}
       {!track.length && <div className="muted">Not placed on this map yet.</div>}
-      {!city && <CharacterIconSection id={id} />}
       {!city && <UnitSection id={id} />}
     </div>
   );
@@ -97,7 +95,7 @@ function CityImportance({ id }: { id: string }) {
 }
 
 /** A city shown however far out the map is seen (D229), where cities are otherwise left out zoomed out. */
-function CityAlwaysShown({ id }: { id: string }) {
+export function CityAlwaysShown({ id }: { id: string }) {
   const s = useStore();
   const ent = s.world!.get('entity', id);
   if (!ent) return null;

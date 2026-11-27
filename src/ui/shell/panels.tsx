@@ -11,6 +11,7 @@ import { Inspector } from '../panels/Properties.tsx';
 import { ToolStrip } from './Tools.tsx';
 import { DateBar } from './Bars.tsx';
 import { MapGallery } from '../components/MapGallery.tsx';
+import { LooksPanel } from '../panels/Looks.tsx';
 import { presents } from './studios.ts';
 import { VIEWER, type PanelId } from './dock.ts';
 import { panelInfo } from './studios.ts';
@@ -44,6 +45,7 @@ export function PanelContent({ id }: { id: PanelId }) {
   switch (id) {
     case 'tools': return <ToolStrip />;
     case 'gallery': return <MapGallery />;
+    case 'looks': return <LooksPanel />;
     case 'properties': return <Inspector />;
     case 'timeline': return <Timeline head={<DateBar />} />;
     case 'shots': return <ShotsPanel />;

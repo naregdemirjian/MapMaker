@@ -720,6 +720,11 @@ export class AppStore {
     await this.openProject(info.id);
     this.openGallery();
   }
+  /** Design (D236): the Looks panel in front, in the page worked in if it holds one, else in the Looks studio. */
+  design() {
+    if (!panelOn('looks', this.pageNow())) this.setPage('looks');
+    this.openPanel('looks');
+  }
   /** Map Studio's gallery of maps in front (New map). */
   openGallery() {
     this.setPage('map');

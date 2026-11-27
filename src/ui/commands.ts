@@ -61,6 +61,7 @@ export const COMMANDS: Command[] = [
   { id: 'delete', name: 'Delete what is chosen', shortcut: 'Delete', keyedElsewhere: true, enabled: (s) => world(s) && (s.chosen('entity').length > 0 || s.chosen('event').length > 0),
     run: (s) => { const ents = s.chosen('entity'), evs = s.chosen('event'); if (ents.length) deleteEntitiesAsked(ents); else if (evs.length) deleteEventsAsked(evs); } },
   { id: 'merge', name: 'Merge the countries chosen into one…', enabled: (s) => world(s) && politicalChosen(s).length >= 2, run: (s) => s.set({ dialog: 'merge', mergeIds: politicalChosen(s) }) },
+  { id: 'design', name: 'Design: the looks of what is chosen', shortcut: 'Ctrl+D', enabled: (s) => !!s.selection, run: (s) => s.design() },
   { id: 'settings', name: 'Settings: speed of the working view…', run: dialog('settings') },
   // View
   { id: 'show', name: 'What the map shows…', run: dialog('show') },
@@ -102,7 +103,7 @@ export const command = (id: string): Command => { const c = BY_ID.get(id); if (!
 /** The menus: ids of commands, '-' a line between them. */
 export const MENUS: Array<{ id: string; name: string; items: string[] }> = [
   { id: 'file', name: 'File', items: ['projects', 'versions', '-', 'import-borders', 'data-export'] },
-  { id: 'edit', name: 'Edit', items: ['undo', 'redo', '-', 'delete', 'merge', '-', 'settings'] },
+  { id: 'edit', name: 'Edit', items: ['undo', 'redo', '-', 'delete', 'merge', '-', 'design', '-', 'settings'] },
   { id: 'view', name: 'View', items: ['show', 'compare', '-', 'guide-countries', 'guide-states'] },
   { id: 'map', name: 'Map', items: ['new-map', 'new-layer', '-', 'add-countries', 'add-cities', '-', 'label-style', 'statistics'] },
   { id: 'history', name: 'History', items: ['new-event', 'event-types', 'branches', '-', 'play', 'previous-change', 'next-change', '-', 'health'] },

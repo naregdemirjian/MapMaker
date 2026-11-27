@@ -41,6 +41,7 @@ export const PANELS: PanelInfo[] = [
   { id: 'areas', title: 'Areas', pages: WORLD, hint: 'Areas, lines and points drawn on feature layers' },
   { id: 'events', title: 'Events', pages: WORLD, hint: 'The events of the timeline being viewed' },
   { id: 'properties', title: 'Properties', pages: WORLD, hint: 'What is selected (with nothing selected, the map)' },
+  { id: 'looks', title: 'Looks', pages: ['history', 'timeline', 'looks'], hint: 'How the thing chosen is drawn: its colour, fill, borders, label, marker (Design, Ctrl+D)', minW: 200 },
   { id: 'timeline', title: 'Timeline', pages: WORLD, hint: 'The date viewed, playing history, and the events on their tracks' },
   { id: 'shots', title: 'Shots', pages: SHOTS, hint: 'The shots of this project' },
   { id: 'shot', title: 'Shot', pages: ['shots'], hint: 'The settings of the shot chosen' },
@@ -58,11 +59,11 @@ export function defaultDock(page: Page): DockLayout {
     case 'map':
       return { root: split('col', [split('row', [stack(['tools'], 44), lists('maps', ['maps', 'layers'], 230), stack([VIEWER, 'gallery']), stack(['properties'], 350)]), stack(['timeline'], 130)]), floats: [] };
     case 'history':
-      return { root: split('col', [split('row', [stack(['tools'], 44), lists('countries', ['layers', 'countries', 'places', 'areas', 'events', 'maps'], 250), stack([VIEWER]), stack(['properties'], 310)]), stack(['timeline'], 190)]), floats: [] };
+      return { root: split('col', [split('row', [stack(['tools'], 44), lists('countries', ['layers', 'countries', 'places', 'areas', 'events', 'maps'], 250), stack([VIEWER]), split('col', [stack(['properties']), stack(['looks'])], 310)]), stack(['timeline'], 190)]), floats: [] };
     case 'timeline':
-      return { root: split('col', [split('row', [lists('events', ['events', 'countries', 'layers'], 270), stack([VIEWER]), stack(['properties'], 330)]), stack(['timeline'], 340)]), floats: [] };
+      return { root: split('col', [split('row', [lists('events', ['events', 'countries', 'layers'], 270), stack([VIEWER]), split('col', [stack(['properties']), stack(['looks'])], 330)]), stack(['timeline'], 340)]), floats: [] };
     case 'looks':
-      return { root: split('col', [split('row', [lists('countries', ['countries', 'layers', 'places', 'areas'], 250), stack([VIEWER]), stack(['properties'], 340)]), stack(['timeline'], 130)]), floats: [] };
+      return { root: split('col', [split('row', [lists('countries', ['countries', 'layers', 'places', 'areas'], 250), stack([VIEWER]), split('col', [stack(['looks']), stack(['properties'], 230)], 380)]), stack(['timeline'], 130)]), floats: [] };
     case 'shots':
       return { root: split('col', [split('row', [stack(['shots'], 250), stack([VIEWER]), stack(['shot'], 310)]), stack(['shot-timeline'], 150)]), floats: [] };
     case 'export':

@@ -30,6 +30,7 @@ import { StarPanel } from '../components/Stars.tsx';
 import { RiverPanel } from '../components/RiverPanel.tsx';
 import { coastBorderOf, overSeaOf, COAST_BORDERS, type CoastBorder } from '../../render-engine/border-look.ts';
 import { PropGroup } from '../shell/Group.tsx';
+import { DesignButton } from './Looks.tsx';
 import { InlineDialog } from '../shell/DialogFrame.tsx';
 import { ShowDialog } from '../components/ShowDialog.tsx';
 import { SeaLevelDialog } from '../components/SeaLevelDialog.tsx';
@@ -92,51 +93,12 @@ function LayerPanel({ id }: { id: string }) {
   const layers = feat || field ? [] : [layer];
   return (
     <div className="panel" data-testid="layer-panel">
-      <h3>{layer.name}</h3>
+      <h3>{layer.name}{(layer.kind === 'partition' || isFeatureKind(layer.kind)) && <DesignButton />}</h3>
       <PropGroup id="layer:layer" title="Layer">
         <div className="muted">{field ? 'Conditions (radiation, fire, floods, heatmaps)' : feat ? (layer.kind === 'area' ? 'Areas' : layer.kind === 'line' ? 'Lines' : 'Points') : layer.kind === 'partition' ? 'Territory: each place held by one country at a time' : 'Territory'}</div>
         <label>Name<input value={name} onChange={(ev) => setName(ev.target.value)} onBlur={() => name.trim() && name !== layer.name && s.execute((wd) => cmd.updateLayer(wd, id, { name: name.trim() }))} data-testid="layer-name" /></label>
         <label className="check"><input type="checkbox" checked={!!layer.visible} onChange={(ev) => s.execute((wd) => cmd.updateLayer(wd, id, { visible: ev.target.checked ? 1 : 0 }))} data-testid="layer-visible" /> Shown on the map</label>
       </PropGroup>
-      {layers.length > 0 && <PropGroup id="layer:fill" title="Fill and look">
-        {layers.map((l) => (
-          <label key={`fill-${l.id}`} className="inline layer-option" title="Stripes or dots let the layers under this one show through: for occupation, control or influence over the political map">Fill
-            <select value={parseJSON<{ fill?: string }>(l.style, {}).fill ?? 'solid'} onChange={(e) => s.execute((wd) => cmd.setLayerFill(wd, l.id, e.target.value as 'solid' | 'hatch' | 'cross' | 'dots'))} data-testid="layer-fill">
-              <option value="solid">Solid</option>
-              <option value="hatch">Stripes</option>
-              <option value="cross">Crossed stripes</option>
-              <option value="dots">Dots</option>
-            </select>
-          </label>
-        ))}
-        {layers.filter((l) => l.kind === 'partition').map((l) => {
-          const st = parseJSON<{ fillOpacity?: number; borderWidth?: number }>(l.style, {});
-          return (
-            <div key={`look-${l.id}`} className="two layer-option">
-              <label title="How strongly the countries' colours cover the map under them, in shots and exports too">Opacity (%)<NumberField min={0} max={100} step={5} value={Math.round((st.fillOpacity ?? 0.78) * 100)} def={l.export_pass === 'political' ? 78 : 60} onCommit={(n) => s.execute((wd) => cmd.setLayerLook(wd, l.id, { fillOpacity: n / 100 }))} testId="layer-opacity" /></label>
-              <label title="The width of the borders between countries on this layer (pixels at 1920 wide)">Border width<NumberField min={0} max={20} step={0.25} value={st.borderWidth ?? 1.3} def={l.export_pass === 'political' ? 1.4 : 1} onCommit={(n) => s.execute((wd) => cmd.setLayerLook(wd, l.id, { borderWidth: n }))} testId="layer-border-width" /></label>
-            </div>
-          );
-        })}
-        {layers.filter((l) => l.kind === 'partition').map((l) => <LayerLookSection key={`lk-${l.id}`} layerId={l.id} />)}
-      </PropGroup>}
-      {layers.length > 0 && <PropGroup id="layer:borders" title="Borders and front lines">
-        {layers.filter((l) => l.kind === 'partition').map((l) => <LayerBordersSection key={`lb-${l.id}`} layerId={l.id} />)}
-        {layers.map((l) => {
-          const st = parseJSON<{ fronts?: 'second' | 'first' | 'plain'; frontColor?: string }>(l.style, {});
-          return (
-            <label key={`fronts-${l.id}`} className="inline layer-option" title="Where two countries are at war (Relationships, in a country's panel), the border between them on this layer is drawn as a front line while the war lasts">Front lines
-              <select value={st.fronts ?? 'off'} onChange={(e) => s.execute((wd) => cmd.setLayerFronts(wd, l.id, e.target.value === 'off' ? null : e.target.value as 'second' | 'first' | 'plain'))} data-testid="layer-fronts">
-                <option value="off">None</option>
-                <option value="second" title="Where two countries are at war: teeth into the second of the war (as entered)">Teeth to the 2nd</option>
-                <option value="first" title="Where two countries are at war: teeth into the first of the war">Teeth to the 1st</option>
-                <option value="plain">No teeth</option>
-              </select>
-              {st.fronts && <input type="color" value={st.frontColor ?? '#d62828'} onChange={(e) => s.execute((wd) => cmd.setLayerFronts(wd, l.id, st.fronts!, e.target.value))} title="The colour of the front lines" data-testid="layer-front-color" />}
-            </label>
-          );
-        })}
-      </PropGroup>}
       {layers.length > 0 && currentSpace && terrainSourceOf(currentSpace) && <PropGroup id="layer:coast" title="Coast">
         {layers.filter(() => currentSpace && terrainSourceOf(currentSpace)).map((l) => {
           const st = parseJSON<{ clipToLand?: boolean; coastBorder?: string }>(l.style, {}), mode = coastBorderOf(st);
@@ -273,10 +235,9 @@ function EntityPanel({ id }: { id: string }) {
   const political = e.type_id === 'polity' || e.type_id === 'faction';
   return (
     <div className="panel" data-testid="entity-panel">
-      <h3><span className="swatch big" style={{ background: e.color }} /> {e.name}</h3>
+      <h3><span className="swatch big" style={{ background: e.color }} /> {e.name}<DesignButton /></h3>
       <PropGroup id="entity:identity" title={political ? 'Country' : e.type_id === 'character' ? 'Character' : e.type_id === 'settlement' ? 'City' : 'Identity'}>
       <label>Name<input value={name} onChange={(ev) => setName(ev.target.value)} onBlur={() => name.trim() && name !== e.name && s.execute((wd) => cmd.updateEntity(wd, id, { name: name.trim() }))} /></label>
-      <label>Colour<input type="color" value={e.color} onChange={(ev) => s.execute((wd) => cmd.updateEntity(wd, id, { color: ev.target.value }))} /></label>
       <label>Type<select value={e.type_id} onChange={(ev) => s.execute((wd) => cmd.updateEntity(wd, id, { type_id: ev.target.value }))}>{w.all('entity_type').map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
       {(e.type_id === 'polity' || e.type_id === 'faction') && (
         <label className="check" title="While locked, drawing over it leaves its land out, it is given no land, and it cannot be split, merged or annexed, nor its border points moved">
@@ -299,10 +260,8 @@ function EntityPanel({ id }: { id: string }) {
       ))}
       {!changes.length && e.type_id !== 'character' && e.type_id !== 'settlement' && <div className="muted">None yet.</div>}
       {political && <CountryHistorySection id={id} />}
+      {political && <OverSeaOption id={id} />}
       </PropGroup>}
-      {political && <PropGroup id="entity:fill" title="Fill"><CountryFillSection id={id} /></PropGroup>}
-      {political && <PropGroup id="entity:look" title="Look and borders"><CountryLookSection id={id} /><CountryBordersSection id={id} /><OverSeaOption id={id} /></PropGroup>}
-      {political && <PropGroup id="entity:label" title="Label"><CountryLabelSection id={id} /></PropGroup>}
       {(e.type_id === 'character' || e.type_id === 'settlement') && <PropGroup id="entity:onmap" title="On the map"><CharacterSection id={id} /></PropGroup>}
       {e.type_id !== 'body' && <PropGroup id="entity:relations" title="Relationships"><RelationsSection id={id} /></PropGroup>}
       {e.type_id !== 'body' && <PropGroup id="entity:names" title="Names over time"><NamesSection id={id} /></PropGroup>}
@@ -355,7 +314,7 @@ function EventPanel({ id }: { id: string }) {
   const owners = w.all('entity').filter((x) => x.type_id === 'polity' || x.type_id === 'faction');
   return (
     <div className="panel" data-testid="event-panel">
-      <h3>{base ? 'Starting map and changes without an event' : e.name}</h3>
+      <h3>{base ? 'Starting map and changes without an event' : e.name}{!base && <DesignButton />}</h3>
       {w.all('branch').length > 0 && (() => {
         // Which timeline it belongs to (D150): the one viewed, or the history it shares.
         const owner = e.branch_id || MAIN_BRANCH, row = w.get('branch', owner);
@@ -396,12 +355,6 @@ function EventPanel({ id }: { id: string }) {
             </label>
           );
         })()}
-        <label title="How its changes look when they animate, here and in every shot: as the shot's look, or a look of their own (a blitz in a film otherwise clean)">Look of its changes
-          <select value={eventTransitionLook(e.presentation) ?? ''} onChange={(ev) => s.execute((wd) => cmd.setEventLook(wd, id, ev.target.value || null))} data-testid="event-look">
-            <option value="">As the shot's look</option>
-            {TRANSITION_LOOKS.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-          </select>
-        </label>
         </PropGroup>
         <PropGroup id="event:description" title="Description and pictures">
         <label>Description<textarea rows={4} value={desc} onChange={(ev) => setDesc(ev.target.value)} onBlur={() => desc !== e.description && s.execute((wd) => cmd.updateEvent(wd, id, { description: desc }))} /></label>

@@ -40,7 +40,7 @@ experience only: no new map features while this is built.
    Looks studio with the lists and Properties until its own panels exist); the lists as panels of their own.
 2. **Map Studio (S2), done (D235)**: the map gallery (no default map); Map Studio's tools (terrain and water) and the map's
    setting-up there only; History keeps drawing, places, conditions and disasters.
-3. **Looks panel (S3)**: fundamentals by kind of thing; Design opens it; looks leave Properties.
+3. **Looks panel (S3), done (D236)**: fundamentals by kind of thing; Design opens it; looks leave Properties.
 4. **Effects panel (S4)**: every effect in folders, dragged onto things or into Looks; group looks as adjustment
    layers.
 5. **Looks in Presentation (S5)**: docked in Shots; everywhere or this shot only; keyframes on any option, as tracks.

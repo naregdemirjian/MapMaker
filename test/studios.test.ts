@@ -38,9 +38,9 @@ test('every panel has a name and the pages it opens in; the viewer opens everywh
 test('each page opens with its own layout, holding only panels it can hold, the viewer among them', () => {
   const want: Record<Page, string> = {
     map: '(([tools]@44 | [maps*,layers]@230 | [viewer*,gallery] | [properties]@350) / [timeline]@130)',
-    history: '(([tools]@44 | [layers,countries*,places,areas,events,maps]@250 | [viewer] | [properties]@310) / [timeline]@190)',
-    timeline: '(([events*,countries,layers]@270 | [viewer] | [properties]@330) / [timeline]@340)',
-    looks: '(([countries*,layers,places,areas]@250 | [viewer] | [properties]@340) / [timeline]@130)',
+    history: '(([tools]@44 | [layers,countries*,places,areas,events,maps]@250 | [viewer] | ([properties] / [looks])@310) / [timeline]@190)',
+    timeline: '(([events*,countries,layers]@270 | [viewer] | ([properties] / [looks])@330) / [timeline]@340)',
+    looks: '(([countries*,layers,places,areas]@250 | [viewer] | ([looks] / [properties]@230)@380) / [timeline]@130)',
     shots: '(([shots]@250 | [viewer] | [shot]@310) / [shot-timeline]@150)',
     export: '(([shots]@230 | [viewer] | [export]@380) / [shot-timeline]@110)',
   };

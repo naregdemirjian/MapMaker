@@ -61,6 +61,35 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D236. The Looks panel: how a thing is drawn, set in one place; Properties says what it is (S3)
+
+- **Why.** The plan agreed with the user: the looks of a thing are set in a panel of their own, the Looks panel, which
+  can be moved like any other; nowhere else. Properties had held both what a thing is and how it is drawn.
+- **The Looks panel** (`panels/Looks.tsx`): the fundamentals of the thing chosen, by kind. A country: its colour and
+  fill (colour, picture, flag, video), its look and borders (the look stack of D150-D155, special borders), its label.
+  A person: colour and marker. A city: colour and whether it is always shown. A layer of territory: fill and look,
+  borders and front lines. An area, a line or a point: its look (colour, fill and pattern, how a line is drawn, width,
+  dashes, flowing marks, teeth, arrowheads, symbol, size, name on the map). An event: the look of its changes as they
+  animate. Nothing chosen: what the panel is for. The same groups as before (their folded state kept, their names
+  unchanged where they were the same).
+- **Properties keeps what a thing is**: names, type, locked, notes and pictures, territory and its changes (a
+  country's land carrying on over the sea moves there), places, relationships, names over time, an event's dates,
+  changes and timing on screen, a layer's name and where its territory ends.
+- **Design** (a button in the heading of Properties for a country, a person, a city, a layer, an area, a line, a point
+  or an event; Edit › Design, Ctrl+D) brings the Looks panel to the front, in the page worked in if it has one, else in
+  the Looks studio. History and Timeline have it under Properties at first; the Looks studio has it above Properties,
+  larger.
+- **Panels reopen beside what they lay beside**: a closed panel opened again from the Window menu goes back into a
+  group of its own beside the nearest part of the page's first layout that still has a panel open (Properties under the
+  Looks panel again, the timeline under the map), on the same side and as large (D234's rule for its side of the map
+  replaced by this one).
+- **Tests.** Unit: each page's first layout with the Looks panel; reopening beside the part a panel lay beside.
+  Interface: a country's looks in the Looks panel and none in Properties, its colour changed there and undone; Design
+  and Ctrl+D bringing the panel to the front when it is behind Properties; a person's marker, a layer's fill, an event's
+  look; nothing chosen; Design from Map Studio opening the Looks studio. The steps before find the looks where they are
+  (Properties and the Looks panel both open in the tests' layout). In the docking step, Properties carried away from
+  its column leaves it to the Looks panel (waited for), in place of the map taking the room it left.
+
 ### D235. Map Studio: the gallery of maps, a project starts with none, the ground's tools and setting-up there only (S2)
 
 - **Why.** The plan agreed with the user (`docs/STUDIOS_PLAN.md`): Map Studio makes and sets up the ground; History

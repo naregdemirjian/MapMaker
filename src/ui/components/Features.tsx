@@ -4,6 +4,7 @@
 import { RangeReset } from '../shell/Reset.tsx';
 import { SmartBrushControls } from './SmartBrush.tsx';
 import { useEffect, useState } from 'react';
+import { DesignButton } from '../panels/Looks.tsx';
 import { useStore, store, type PendingEdit } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
 import { type Instant, compare, fromStore, NEG_INF } from '../../core-time/index.ts';
@@ -235,13 +236,14 @@ function AnimSelect({ kind, value, onChange, testId }: { kind: FeatureKind; valu
 }
 
 /** The panel of a chosen area, line or point: name, what it belongs to, look, shapes over time, notes. */
-export function FeaturePanel({ id }: { id: string }) {
+/**
+ * The look of an area, a line or a point (D236: in the Looks panel): its colour, fill and pattern, how a line is drawn,
+ * its width and dashes, marks flowing along it, teeth and arrowheads, a point's symbol and size, its name on the map.
+ */
+export function FeatureLookSection({ id }: { id: string }) {
   const s = useStore();
-  const w = s.world!, e = s.engine!;
+  const w = s.world!;
   const f = w.get('feature', id);
-  const [name, setName] = useState(f?.name ?? '');
-  const [notes, setNotes] = useState(f?.notes ?? '');
-  useEffect(() => { setName(f?.name ?? ''); setNotes(f?.notes ?? ''); }, [id, f?.name, f?.notes]);
   if (!f) return null;
   const layer = w.get('layer', f.layer_id);
   if (!layer || !isFeatureKind(layer.kind)) return null;
@@ -252,30 +254,9 @@ export function FeaturePanel({ id }: { id: string }) {
   const color = featureColor(kind, layer.style, f.style, ownerColor);
   const look = (patch: FeatureStyle) => s.execute((wd) => cmd.updateFeature(wd, id, { style: patch }));
   const arrowLook = kind === 'line' && st.look === 'arrow';
-  const steps = e.featureHistory(id);
-  const animOf = (effectId: string): FeatureAnimStyle | '' => { const tr = parseJSON<{ style?: FeatureAnimStyle } | null>(w.get('effect', effectId)?.transition ?? '', null); return tr?.style ?? ''; };
-  const now = e.featuresAt(f.layer_id, s.time).some((x) => x.feature === id);
   const owners = w.all('entity').filter((x) => x.type_id === 'polity' || x.type_id === 'faction').sort((a, b) => a.name.localeCompare(b.name));
-  const sameKind = w.all('layer').filter((l) => l.space_id === layer.space_id && l.kind === layer.kind);
   return (
-    <div className="panel" data-testid="feature-panel">
-      <h3><span className="swatch big" style={{ background: color }} /> {f.name}</h3>
-      <div className="muted">{KIND_NAME[kind].one[0].toUpperCase() + KIND_NAME[kind].one.slice(1)} on “{layer.name}” · {now ? `shown on ${fmt(s.time)}` : `not there on ${fmt(s.time)}`}</div>
-      <label>Name<input value={name} onChange={(ev) => setName(ev.target.value)} onBlur={() => name.trim() && name !== f.name && s.execute((wd) => cmd.updateFeature(wd, id, { name }))} data-testid="feature-panel-name" /></label>
-      <label>Belongs to
-        <select value={f.entity_id} onChange={(ev) => s.execute((wd) => cmd.updateFeature(wd, id, { entity_id: ev.target.value }))} data-testid="feature-panel-owner">
-          <option value="">Nobody in particular</option>
-          {owners.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-        </select>
-      </label>
-      {sameKind.length > 1 && (
-        <label>Layer
-          <select value={f.layer_id} onChange={(ev) => s.execute((wd) => cmd.updateFeature(wd, id, { layer_id: ev.target.value }))}>
-            {sameKind.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-          </select>
-        </label>
-      )}
-      <h4>Look</h4>
+    <>
       <div className="look-grid">
         <label className="inline">Colour <input type="color" value={own.color ?? color} onChange={(ev) => look({ color: ev.target.value })} data-testid="feature-color" /></label>
         {own.color && <button className="small" onClick={() => look({ color: undefined } as FeatureStyle)} title={ownerColor ? "Use the colour of the country it belongs to" : "Use the layer's colour"}>{ownerColor ? "Country's colour" : "Layer's colour"}</button>}
@@ -339,6 +320,46 @@ export function FeaturePanel({ id }: { id: string }) {
         </>}
         <label className="check"><input type="checkbox" checked={!!st.showName} onChange={(ev) => look({ showName: ev.target.checked })} data-testid="feature-show-name" /> Name on the map</label>
       </div>
+    </>
+  );
+}
+
+export function FeaturePanel({ id }: { id: string }) {
+  const s = useStore();
+  const w = s.world!, e = s.engine!;
+  const f = w.get('feature', id);
+  const [name, setName] = useState(f?.name ?? '');
+  const [notes, setNotes] = useState(f?.notes ?? '');
+  useEffect(() => { setName(f?.name ?? ''); setNotes(f?.notes ?? ''); }, [id, f?.name, f?.notes]);
+  if (!f) return null;
+  const layer = w.get('layer', f.layer_id);
+  if (!layer || !isFeatureKind(layer.kind)) return null;
+  const kind = layer.kind;
+  const ownerColor = f.entity_id ? w.get('entity', f.entity_id)?.color ?? null : null;
+  const color = featureColor(kind, layer.style, f.style, ownerColor);
+  const steps = e.featureHistory(id);
+  const animOf = (effectId: string): FeatureAnimStyle | '' => { const tr = parseJSON<{ style?: FeatureAnimStyle } | null>(w.get('effect', effectId)?.transition ?? '', null); return tr?.style ?? ''; };
+  const now = e.featuresAt(f.layer_id, s.time).some((x) => x.feature === id);
+  const owners = w.all('entity').filter((x) => x.type_id === 'polity' || x.type_id === 'faction').sort((a, b) => a.name.localeCompare(b.name));
+  const sameKind = w.all('layer').filter((l) => l.space_id === layer.space_id && l.kind === layer.kind);
+  return (
+    <div className="panel" data-testid="feature-panel">
+      <h3><span className="swatch big" style={{ background: color }} /> {f.name}<DesignButton /></h3>
+      <div className="muted">{KIND_NAME[kind].one[0].toUpperCase() + KIND_NAME[kind].one.slice(1)} on “{layer.name}” · {now ? `shown on ${fmt(s.time)}` : `not there on ${fmt(s.time)}`}</div>
+      <label>Name<input value={name} onChange={(ev) => setName(ev.target.value)} onBlur={() => name.trim() && name !== f.name && s.execute((wd) => cmd.updateFeature(wd, id, { name }))} data-testid="feature-panel-name" /></label>
+      <label>Belongs to
+        <select value={f.entity_id} onChange={(ev) => s.execute((wd) => cmd.updateFeature(wd, id, { entity_id: ev.target.value }))} data-testid="feature-panel-owner">
+          <option value="">Nobody in particular</option>
+          {owners.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+        </select>
+      </label>
+      {sameKind.length > 1 && (
+        <label>Layer
+          <select value={f.layer_id} onChange={(ev) => s.execute((wd) => cmd.updateFeature(wd, id, { layer_id: ev.target.value }))}>
+            {sameKind.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+          </select>
+        </label>
+      )}
       <h4>Shapes over time</h4>
       {steps.map((x) => {
         const ev = w.get('event', x.eventId);

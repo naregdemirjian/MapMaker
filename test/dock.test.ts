@@ -117,14 +117,19 @@ test('opened again: in front where it is; else beside a panel it was with at fir
   const alone = removePanel(removePanel(removePanel(original, 'layers'), 'countries'), 'events');
   assert.equal(sig(openPanel(alone, 'countries', original).root), '([tools]@44 | [countries]@250 | ([viewer] / [timeline]@190) | [properties]@310)');
   assert.equal(sig(openPanel(removePanel(original, 'properties'), 'properties', original).root), sig(original.root));
-  // (The column the timeline shared with the viewer closed up when it went: it comes back under everything.)
-  assert.equal(sig(openPanel(removePanel(original, 'timeline'), 'timeline', original).root), '(([tools]@44 | [layers*,countries,events]@250 | [viewer] | [properties]@310) / [timeline]@190)');
+  // (The column the timeline shared with the viewer closed up when it went: it comes back under the viewer, as at first.)
+  assert.equal(sig(openPanel(removePanel(original, 'timeline'), 'timeline', original).root), sig(original.root));
+  // Beside the part it lay beside: Properties back under Looks, the two of them in a column again where Looks stands.
+  const withLooks: DockLayout = { root: split('row', [stack(['viewer']), split('col', [stack(['properties']), stack(['looks'])], 310)]), floats: [] };
+  const closedProps = removePanel(withLooks, 'properties');
+  assert.equal(sig(closedProps.root), '([viewer] | [looks]@310)');
+  assert.equal(sig(openPanel(closedProps, 'properties', withLooks).root), '([viewer] | ([properties] / [looks])@310)');
   // A page whose layout has changed: next to the highest part holding the viewer in a split running that way.
   const moved = dockPanel(removePanel(original, 'timeline'), 'properties', holderOf(original, 'viewer')!.id, 'bottom', 200);
   assert.equal(sig(moved.root), '([tools]@44 | [layers*,countries,events]@250 | ([viewer] / [properties]@200))');
   assert.equal(sig(openPanel(moved, 'timeline', original).root), '([tools]@44 | [layers*,countries,events]@250 | ([viewer] / [timeline]@190 / [properties]@200))');
   const flat: DockLayout = { root: split('row', [stack(['viewer']), stack(['tools'], 44)]), floats: [] };
-  assert.equal(sig(openPanel(flat, 'timeline', original).root), '(([viewer] | [tools]@44) / [timeline]@190)', 'no column: one round everything');
+  assert.equal(sig(openPanel(flat, 'timeline', original).root), '(([viewer] / [timeline]@190) | [tools]@44)', 'under the viewer it lay under, in a column of their own');
   // Not in the first layout at all: it floats.
   const fl = openPanel(original, 'shots', original);
   assert.equal(fl.floats.length, 1);
