@@ -5,6 +5,7 @@ import { useStore } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
 import { parseJSON } from '../../temporal-engine/engine.ts';
 import { mapLightOf, statisticsOf } from '../../world-model/world-settings.ts';
+import { groupStyle } from '../../domain/group-looks.ts';
 import { NumberField, DateField } from '../inputs.tsx';
 import {
   BLEND_MODES, BLEND_NAMES, EFFECTS, EFFECT_DEFAULTS, EFFECT_KINDS, EFFECT_NAMES, PRESET_FILE_KIND, countryLookOf, layerLookOf, lookPresetsOf, takesMapLight,
@@ -251,5 +252,25 @@ export function LayerLookSection({ layerId }: { layerId: string }) {
       {look && <button className="small" onClick={() => s.execute((w) => cmd.setLayerEffects(w, layerId, null))}>No look</button>}
       <LookPresets current={look} idPrefix="layer" useLabel="Use a kept look" onUse={(kept) => s.execute((w) => cmd.setLayerEffects(w, layerId, { ...kept, blend: look?.blend ?? 'normal' }))} />
     </details>
+  );
+}
+
+/**
+ * A group's look (D237): elevation, fill strength and effects for every member, working with each member's own as an
+ * adjustment layer works with the clips under it: its effects drawn after theirs, a member's own elevation or fill
+ * strength winning.
+ */
+export function GroupLookSection({ groupId }: { groupId: string }) {
+  const s = useStore();
+  const g = s.world!.get('entity_group', groupId);
+  if (!g) return null;
+  const look = groupStyle(g).look ?? null;
+  return (
+    <div className="group-look" data-testid="group-look-section">
+      <LookEditor value={look ?? EMPTY} onChange={(next) => s.execute((w) => cmd.setGroupStyle(w, groupId, { look: next }))} idPrefix="group" />
+      {look?.effects.some((x) => 'light' in x && x.light === 'map') && <MapLightField idPrefix="group" />}
+      {look && <button className="small" onClick={() => s.execute((w) => cmd.setGroupStyle(w, groupId, { look: null }))} data-testid="group-look-reset">No look for the group</button>}
+      <LookPresets current={look} idPrefix="group" useLabel="Give the group a kept look" onUse={(kept) => s.execute((w) => cmd.setGroupStyle(w, groupId, { look: kept }))} />
+    </div>
   );
 }

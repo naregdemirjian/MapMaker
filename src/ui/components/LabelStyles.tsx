@@ -5,6 +5,7 @@ import { useStore } from '../store.ts';
 import { NumberField } from '../inputs.tsx';
 import * as cmd from '../../domain/commands.ts';
 import { resolveLabelStyle, labelFont, labelText, LABEL_FONTS, DEFAULT_LABEL_STYLE, DEFAULT_CITY_STYLE, type LabelStyle, type CountryLabel, type CityStyle } from '../../render-engine/label-style.ts';
+import { groupStyle, labelWithGroup } from '../../domain/group-looks.ts';
 
 /** A slider that previews while dragging and saves once, when let go (one undo step). */
 export function Slider({ value, min, max, step, onCommit, format, testId, def }: { value: number; min: number; max: number; step: number; onCommit: (v: number) => void; format?: (v: number) => string; testId?: string; def?: number }) {
@@ -98,31 +99,53 @@ export function LabelStyleDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
-/** A country's label: shown or hidden, its text, and its own look (or the general one). */
+/**
+ * A country's label: shown or hidden, its text, and its own look (or the general one). In a group with label settings
+ * (D237), the group's settings come between all labels' and its own: each of its own wins.
+ */
 export function CountryLabelSection({ id }: { id: string }) {
   const s = useStore();
   const w = s.world!;
   const e = w.get('entity', id);
   const own: CountryLabel = cmd.entityStyle(e).label ?? {};
-  const [text, setText] = useState(own.text ?? '');
-  useEffect(() => setText(own.text ?? ''), [id, own.text]);
+  const group = e?.group_id ? w.get('entity_group', e.group_id) : undefined;
+  const fromGroup = group ? groupStyle(group).label : undefined;
   if (!e) return null;
+  return <LabelEditor own={own} fromGroup={fromGroup} groupName={group?.name} name={e.name} save={(next) => s.execute((wd) => cmd.setEntityStyle(wd, id, { label: next }))} />;
+}
+
+/** A group's label settings (D237): for every member's label, each setting a member has of its own winning. */
+export function GroupLabelSection({ groupId }: { groupId: string }) {
+  const s = useStore();
+  const g = s.world!.get('entity_group', groupId);
+  if (!g) return null;
+  return <LabelEditor group own={groupStyle(g).label ?? {}} name={g.name} save={(next) => s.execute((wd) => cmd.setGroupStyle(wd, groupId, { label: next }))} />;
+}
+
+function LabelEditor({ own, fromGroup, groupName, name, save, group }: { own: CountryLabel; fromGroup?: CountryLabel; groupName?: string; name: string; save: (next: CountryLabel) => void; group?: boolean }) {
+  const s = useStore();
+  const w = s.world!;
+  const [text, setText] = useState(own.text ?? '');
+  useEffect(() => setText(own.text ?? ''), [name, own.text]);
   const general = cmd.generalLabelStyle(w);
-  const effective = resolveLabelStyle(general, own);
+  const merged = labelWithGroup(fromGroup, own) ?? {};
+  const effective = resolveLabelStyle(general, fromGroup, own);
   const lookKeys = Object.keys(own).filter((k) => k !== 'hidden' && k !== 'text');
-  const save = (next: CountryLabel) => s.execute((wd) => cmd.setEntityStyle(wd, id, { label: next }));
+  const groupKeys = Object.keys(fromGroup ?? {}).filter((k) => k !== 'hidden' && k !== 'text');
   return (
-    <div className="country-label" data-testid="country-label">
-      <h4>Label</h4>
-      <label className="check"><input type="checkbox" checked={!own.hidden} onChange={(ev) => save({ ...own, hidden: ev.target.checked ? undefined : true })} data-testid="label-shown" /> Show the label</label>
-      {!own.hidden && <>
-        <label>Label text<input value={text} placeholder={e.name} onChange={(ev) => setText(ev.target.value)} onBlur={() => text !== (own.text ?? '') && save({ ...own, text: text || undefined })} data-testid="label-text" /></label>
-        <Preview style={effective} text={labelText(e.name, effective, own)} />
+    <div className="country-label" data-testid={group ? 'group-label' : 'country-label'}>
+      <h4>{group ? 'Labels of its members' : 'Label'}</h4>
+      <label className="check"><input type="checkbox" checked={!merged.hidden} onChange={(ev) => save({ ...own, hidden: ev.target.checked ? (fromGroup?.hidden ? false : undefined) : true })} data-testid="label-shown" /> {group ? 'Show their labels' : 'Show the label'}</label>
+      {fromGroup?.hidden && !group && <p className="muted small-text">The group "{groupName}" hides its members' labels; this one {merged.hidden ? 'too' : 'is shown, by its own setting'}.</p>}
+      {!merged.hidden && <>
+        {!group && <label>Label text<input value={text} placeholder={name} onChange={(ev) => setText(ev.target.value)} onBlur={() => text !== (own.text ?? '') && save({ ...own, text: text || undefined })} data-testid="label-text" /></label>}
+        <Preview style={effective} text={group ? labelText(name, effective) : labelText(name, effective, own)} />
+        {groupKeys.length > 0 && <p className="muted small-text">{groupKeys.length} setting{groupKeys.length === 1 ? '' : 's'} from the group "{groupName}"; a setting of its own wins.</p>}
         <details className="own-look" open={lookKeys.length > 0}>
-          <summary>{lookKeys.length ? `Own look (${lookKeys.length} setting${lookKeys.length === 1 ? '' : 's'} differ from all labels)` : 'Own look (same as all labels)'}</summary>
-          <LabelStyleEditor value={effective} onChange={(patch) => save({ ...own, ...patch })} idPrefix="country-label" />
+          <summary>{group ? (lookKeys.length ? `Their look (${lookKeys.length} setting${lookKeys.length === 1 ? '' : 's'} differ from all labels)` : 'Their look (same as all labels)') : lookKeys.length ? `Own look (${lookKeys.length} setting${lookKeys.length === 1 ? '' : 's'} differ from all labels)` : 'Own look (same as all labels)'}</summary>
+          <LabelStyleEditor value={effective} onChange={(patch) => save({ ...own, ...patch })} idPrefix={group ? 'group-label' : 'country-label'} />
           <div className="buttons">
-            <button className="small" disabled={!lookKeys.length} onClick={() => save({ hidden: own.hidden, text: own.text })} data-testid="label-reset">Use the look of all labels</button>
+            <button className="small" disabled={!lookKeys.length} onClick={() => save({ hidden: own.hidden, text: own.text })} data-testid="label-reset">{group ? 'The look of all labels' : 'Use the look of all labels'}</button>
             <button className="small" onClick={() => s.set({ dialog: 'label-style' })}>Edit the look of all labels…</button>
           </div>
         </details>

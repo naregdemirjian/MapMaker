@@ -34,6 +34,7 @@ import { Kept as Weighed } from './kept.ts';
 import { parcelGeometry, type ParcelGeometry, type CycleGeom } from './parcel-geometry.ts';
 import { featureStyle, featureColor, isFeatureKind, type FeatureKind, type FeatureStyle } from './feature-style.ts';
 import { cityShown, placeMetaOf, DEFAULT_CITY_FILTER, type CityFilter } from '../domain/places.ts';
+import { lookedEntity, groupLookOf } from '../domain/group-looks.ts';
 import { cityFilterOfSpace, mapLightOf, statisticsOf } from '../world-model/world-settings.ts';
 import { campaignArrow, smoothLine, lineLength, arrowBodyLength, marksAlong, cutLineBetween, mixColor } from './routes.ts';
 import { shotProgress, eventScreenSeconds, eventTransitionLook, TRANSITION_LOOKS } from '../presentation/sequence.ts';
@@ -598,6 +599,8 @@ export class MapRenderer {
   lastTransitions: Array<{ style: string; progress: number }> = [];
   /** The wars shown as front lines in the last frame (D89): on which layer, drawn from whose side, teeth toward whom. */
   lastFronts: Array<{ layerId: string; from: string; toward: string }> = [];
+  /** The effects each country was drawn with in the last frame (those turned on, in order: its own or its layer's, then its group's, D237). */
+  lastLooks: Record<string, string[]> = {};
   /** What of the terrain the last frame drew (D95): its colours, relief over the plain land, relief over the territories; the sea level (D96). */
   lastTerrain = { colours: false, relief: false, overTerritories: false, seaLevel: 0, cover: false, detail: '', photo: '' };
   /** For benchmarks and tests: how many sheets have been made, and snapshots of layers worked out. */
@@ -2183,8 +2186,9 @@ export class MapRenderer {
       } };
     }
 
-    // Each name as it is at this moment (names can change over time).
-    const entities = new Map(world.all('entity').map((e) => { const n = engine.nameAt(e.id, t); return [e.id, n ? { ...e, name: n } : e]; }));
+    // Each name as it is at this moment (names can change over time); colours, fills and labels with their group's
+    // looks laid under their own (D237).
+    const entities = new Map(world.all('entity').map((e0) => { const e = lookedEntity(world, e0), n = engine.nameAt(e.id, t); return [e.id, n ? { ...e, name: n } : e]; }));
     this.mediaSeconds = opts.mediaSeconds ?? 0;
     this.mediaChannel = opts.mediaChannel ?? 'live';
     // Pictures and videos filling territory, by owner.
@@ -2215,6 +2219,12 @@ export class MapRenderer {
     const ownLookOf = (v: string): CountryLook | null => {
       if (!ownLooks.has(v)) ownLooks.set(v, countryLookOf(parseJSON<{ look?: unknown }>(entities.get(v)?.style ?? '{}', {})?.look));
       return ownLooks.get(v)!;
+    };
+    // The looks of the groups countries are in (D237), working with their own.
+    const groupLooks = new Map<string, CountryLook | null>();
+    const groupLookOfOwner = (v: string): CountryLook | null => {
+      if (!groupLooks.has(v)) groupLooks.set(v, groupLookOf(world, entities.get(v)));
+      return groupLooks.get(v)!;
     };
     // Countries whose land carries on over the sea where drawn (D221), and their parcels in a layer.
     const overSea = new Set<string>();
@@ -2262,6 +2272,7 @@ export class MapRenderer {
     };
     const prepared: Array<{ ls: LayerStyle; states: Map<number, FaceState>; snap: LayerSnap; tg: { groups: Map<string, TransitionGroup>; of: Map<number, TransitionGroup> }; clip: boolean; wars: Array<[string, string]> }> = [];
     this.lastFronts = [];
+    const drawnLooks: Record<string, string[]> = {};
     let landKey = '', layerSig = '', animated = false;
     for (const layerId of drawsLayers ? opts.layerIds : []) {
       const layer = world.get('layer', layerId);
@@ -2295,11 +2306,13 @@ export class MapRenderer {
       // (Looks that change as history goes or as time on screen passes, D185: drawn afresh at each moment.)
       const ll = layerLookOf(ls.look);
       for (const owner of snap.byOwner.keys()) {
-        const l = lookFor(ownLookOf(owner), ll);
+        const l = lookFor(ownLookOf(owner), ll, groupLookOfOwner(owner));
         if (movesOnScreen(l)) anyMedia = true;
         if (changesInHistory(l)) { anyMedia = true; looksInHistory = true; }
+        if (l && !looksPlain(l)) drawnLooks[owner] = l.effects.filter((e) => e.on).map((e) => e.kind);
       }
     }
+    this.lastLooks = drawnLooks;
 
     this.lastTransitions = prepared.flatMap((p) => [...p.tg.groups.values()].map((g) => ({ style: g.spec.style, progress: g.progress })));
     const land = (): Shape => ({ path: this.basemapPainter.pathsFor(view, sheet, opts.basemap!).land, onSheet: true });
@@ -2363,7 +2376,8 @@ export class MapRenderer {
         // (How every country looks, whoever holds land now: a changed colour means the whole picture.)
         let colours = 0;
         for (const e of entities.values()) {
-          const look = `${e.id}|${e.color}|${e.style}`;
+          // (With the looks of its group, D237: a group's effects change how its members are drawn.)
+          const look = `${e.id}|${e.color}|${e.style}|${e.group_id ? world.get('entity_group', e.group_id)?.style ?? '' : ''}`;
           let hsh = 0x811c9dc5;
           for (let i = 0; i < look.length; i++) hsh = Math.imul(hsh ^ look.charCodeAt(i), 16777619);
           colours = (colours + (hsh >>> 0)) % 4294967291;
@@ -2486,7 +2500,7 @@ export class MapRenderer {
           const items: Array<{ owner: string; set: FaceSet; shape: Shape; look: CountryLook | null }> = [];
           for (const [owner, set] of snap.byOwner) {
             const shape = this.setPath(sp, sheet, arr, set);
-            if (shape) items.push({ owner, set, shape, look: litBy(lookAt(lookFor(ownLookOf(owner), layerLook), t.day + t.ms / 864e5, this.mediaSeconds), mapLight) });
+            if (shape) items.push({ owner, set, shape, look: litBy(lookAt(lookFor(ownLookOf(owner), layerLook, groupLookOfOwner(owner)), t.day + t.ms / 864e5, this.mediaSeconds), mapLight) });
           }
           const styled = items.some((it) => !looksPlain(it.look));
           const paintOwner = (owner: string, set: FaceSet, shape: Shape) => {
@@ -4046,7 +4060,9 @@ export class MapRenderer {
     if (key !== this.timeMovesKey) {
       this.timeMovesKey = key;
       this.timeMovesValue = world.all('layer').some((l) => l.kind === 'field' && l.space_id === spaceId)
-        || world.all('entity').some((e) => typeof e.style === 'string' && e.style.includes('"video"'));
+        || world.all('entity').some((e) => typeof e.style === 'string' && e.style.includes('"video"'))
+        // (A group's video fill, D237, plays in its members.)
+        || world.all('entity_group').some((g) => typeof g.style === 'string' && g.style.includes('"video"'));
     }
     return this.timeMovesValue;
   }

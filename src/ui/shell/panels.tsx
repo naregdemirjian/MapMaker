@@ -12,6 +12,7 @@ import { ToolStrip } from './Tools.tsx';
 import { DateBar } from './Bars.tsx';
 import { MapGallery } from '../components/MapGallery.tsx';
 import { LooksPanel } from '../panels/Looks.tsx';
+import { EffectsPanel } from '../panels/Effects.tsx';
 import { presents } from './studios.ts';
 import { VIEWER, type PanelId } from './dock.ts';
 import { panelInfo } from './studios.ts';
@@ -20,7 +21,8 @@ function Viewer() {
   const s = useStore();
   const sp = s.world!.get('map_space', s.spaceId);
   if (!sp) return <div className="viewer-panel"><NoMap /></div>;
-  return <div className="viewer-panel">{isSpaceMap(sp) ? <SpaceView /> : <MapView />}</div>;
+  // (Effects let go over the map go to the country there, D238; space maps take none.)
+  return <div className="viewer-panel" data-drop={isSpaceMap(sp) ? undefined : 'map'}>{isSpaceMap(sp) ? <SpaceView /> : <MapView />}</div>;
 }
 
 /** A project with no map yet (D235): its first is chosen in Map Studio's gallery. */
@@ -46,6 +48,7 @@ export function PanelContent({ id }: { id: PanelId }) {
     case 'tools': return <ToolStrip />;
     case 'gallery': return <MapGallery />;
     case 'looks': return <LooksPanel />;
+    case 'effects': return <EffectsPanel />;
     case 'properties': return <Inspector />;
     case 'timeline': return <Timeline head={<DateBar />} />;
     case 'shots': return <ShotsPanel />;

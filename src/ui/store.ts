@@ -88,6 +88,8 @@ export type Selection =
   | { kind: 'star'; id: number }
   /** A river drawn on a map (D220): its points shown to be moved, its settings in Properties. */
   | { kind: 'river'; id: string; spaceId: string }
+  /** A group of countries (D237): what it holds in Properties, its looks (over its members') in the Looks panel. */
+  | { kind: 'group'; id: string }
   | null;
 
 export type PendingEdit =
@@ -271,6 +273,8 @@ export class AppStore {
   menu: { x: number; y: number; title?: string; items: MenuItem[]; bar?: string } | null = null;
   /** Folded groups and countries in the lists (remembered per project). */
   collapsed: string[] = [];
+  /** An effect being dragged from the Effects panel (D238): the country under it on the map, outlined there. */
+  effectHover: string | null = null;
   /** The ids chosen now: the several chosen, else the one selected (of that kind). */
   chosen(kind: 'entity' | 'event'): string[] {
     if (this.multi?.kind === kind && this.multi.ids.length) return this.multi.ids;

@@ -195,6 +195,26 @@ table.shortcuts kbd { font: inherit; background: var(--panel2); border: 1px soli
 /* The Looks panel (D236), and the Design button in Properties' headings that brings it to the front. */
 .design-button { margin-left: auto; float: right; font-size: 12px; font-weight: 500; }
 .looks-panel .panel > h3 { margin-bottom: 10px; }
+/* The Effects panel (D238): every effect in folders, dragged onto things. */
+.effects-panel { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.effects-find { padding: 6px 8px; border-bottom: 1px solid var(--line, #2a3442); }
+.effects-find input { width: 100%; box-sizing: border-box; }
+.effects-folders { flex: 1; overflow: auto; padding: 4px 0; }
+.effects-folder-head { display: flex; align-items: center; gap: 4px; padding: 4px 8px; cursor: pointer; user-select: none; font-size: 12px; }
+.effects-folder-head:hover { background: rgba(255, 255, 255, 0.04); }
+.effect-item { display: flex; align-items: center; gap: 7px; padding: 3px 8px 3px 24px; cursor: grab; user-select: none; font-size: 12.5px; touch-action: none; }
+.effect-item:hover, .effect-item:focus { background: rgba(94, 242, 255, 0.08); outline: none; }
+.effect-item:active { cursor: grabbing; }
+.effect-item .fx-sign { width: 18px; text-align: center; color: #8fb3d9; font-size: 11px; }
+.effect-item.fx-saved .fx-sign { color: #ffd166; }
+.effects-panel .small-text { padding: 2px 8px 4px 24px; margin: 0; }
+.effects-foot { margin: 0; padding: 6px 8px; border-top: 1px solid var(--line, #2a3442); font-size: 11.5px; line-height: 1.4; }
+.effect-ghost { position: fixed; z-index: 3000; pointer-events: none; padding: 4px 9px; border-radius: 5px; background: #12324a; border: 1px solid #5ef2ff; color: #e8f6ff; font-size: 12px; white-space: nowrap; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45); }
+.effect-ghost.none { border-color: #6b7785; background: #1d2530; color: #b8c2cc; }
+.drop-here { outline: 2px solid #5ef2ff !important; outline-offset: -2px; background: rgba(94, 242, 255, 0.08) !important; }
+/* A member of a group with looks (D237): those looks are laid over its own. */
+.group-note { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin: 0 0 10px; padding: 6px 8px; border-radius: 6px; background: rgba(255, 209, 102, 0.08); border: 1px solid rgba(255, 209, 102, 0.25); font-size: 12px; line-height: 1.4; }
+.group-note .link { margin-left: auto; }
 .viewer-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 24px; text-align: center; background: #0a1016; }
 .viewer-empty h3 { margin: 0; font-size: 18px; }
 .viewer-empty p { max-width: 460px; margin: 0; }
@@ -364,7 +384,8 @@ button.link.back { display: block; margin-bottom: 6px; }
 .progress .bar { flex: 1; min-width: 120px; height: 8px; background: var(--panel2); border-radius: 4px; overflow: hidden; }
 .progress .bar div { height: 100%; background: var(--accent); }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.toasts { position: fixed; right: 14px; bottom: 14px; display: flex; flex-direction: column; gap: 6px; z-index: 60; max-width: 420px; }
+/* (Messages only: the pointer goes through them to the panels under them, D238.) */
+.toasts { position: fixed; right: 14px; bottom: 14px; display: flex; flex-direction: column; gap: 6px; z-index: 60; max-width: 420px; pointer-events: none; }
 .toast { background: var(--sel); border: 1px solid #2e4a63; padding: 8px 12px; border-radius: 6px; box-shadow: 0 6px 20px rgba(0,0,0,0.4); }
 .toast.error { background: var(--danger-bg); border-color: var(--danger-line); }
 .busy { position: fixed; inset: 0; background: rgba(4,8,12,0.5); display: flex; align-items: center; justify-content: center; font-size: 16px; z-index: 70; }

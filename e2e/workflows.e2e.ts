@@ -965,10 +965,10 @@ try {
     await page.getByTestId('ask-input').fill('Main powers');
     await page.getByTestId('ask-input').press('Enter');
     await page.getByTestId('entity-group-Main powers').waitFor();
-    // Fold the group: its countries leave the list; unfold.
-    await page.getByTestId('entity-group-Main powers').click();
+    // Fold the group by its arrow: its countries leave the list; unfold. (Its row itself chooses the group, D237.)
+    await page.getByTestId('entity-group-fold-Main powers').click();
     assert.equal(await page.getByTestId(`entity-row-${A}`).count(), 0, 'folded away');
-    await page.getByTestId('entity-group-Main powers').click();
+    await page.getByTestId('entity-group-fold-Main powers').click();
     await page.getByTestId(`entity-row-${A}`).waitFor();
     // Hide the labels of the whole group from its menu, and show them again.
     const labelled = async () => page.evaluate(() => (window as any).__mapmaker.store.renderer.lastLabels.map((l: any) => l.text)) as Promise<string[]>;
@@ -5185,7 +5185,7 @@ try {
       const l = (window as any).__mapmaker.store.dockNow();
       return r(l.root) + l.floats.map((f: any) => ` + {${f.panels.join(',')}}`).join('');
     });
-    const LISTS = '[layers,countries,places,areas,events,maps]';
+    const LISTS = '[layers,countries,places,areas,events,maps,effects]';
     const FIRST = `(([tools] | ${LISTS} | [viewer] | ([properties] / [looks])) / [timeline])`;
     /** A tab carried by the pointer to a point (the drop mark shown on the way), let go there. */
     const carry = async (panel: string, to: { x: number; y: number }, ctrl = false) => {
@@ -5260,9 +5260,9 @@ try {
     assert.equal(await store('s.mode'), 'world');
     // Docking. A tab dropped on another group's tabs joins them, in front.
     const canvas0 = await box('[data-testid="map-canvas"]');
-    const lists = await box(`[data-testid="dock-stack-layers-countries-places-areas-events-maps"] .dock-tabs`);
+    const lists = await box(`[data-testid="dock-stack-layers-countries-places-areas-events-maps-effects"] .dock-tabs`);
     assert.equal(await carry('properties', { x: lists.x + lists.width - 30, y: lists.y + lists.height / 2 }), 1, 'the drop is marked on the way');
-    assert.equal(await sig(), `(([tools] | [layers,countries,places,areas,events,maps,properties] | [viewer] | [looks]) / [timeline])`);
+    assert.equal(await sig(), `(([tools] | [layers,countries,places,areas,events,maps,effects,properties] | [viewer] | [looks]) / [timeline])`);
     await page.locator('.properties-panel').waitFor();
     assert.equal(await page.getByTestId('dock-tab-properties').getAttribute('aria-selected'), 'true');
     // (Waited for, not read at once: the layout settles when the browser next lays it out.)
@@ -5311,7 +5311,7 @@ try {
     await page.locator('.list-panel[data-list="places"]').waitFor();
     await page.getByTestId('menu-window').click();
     await page.getByTestId('command-panel-places').click();
-    assert.equal(await sig(), `(([tools] | [layers,countries,areas,events,maps] | [viewer] | ([properties] / [looks])) / [timeline])`);
+    assert.equal(await sig(), `(([tools] | [layers,countries,areas,events,maps,effects] | [viewer] | ([properties] / [looks])) / [timeline])`);
     await page.getByTestId('menu-window').click();
     await page.getByTestId('command-panel-places').click();
     assert.equal(await sig(), FIRST, 'back with the lists it was with');
@@ -5469,6 +5469,222 @@ try {
     await page.getByTestId('studio-history').click();
     // (Every list open at once again for the steps after this one.)
     await page.evaluate(() => (window as any).__mapmaker.allLists());
+  });
+
+  await h.step('Groups\' looks (D237): a group chosen by its row; its colour, effects and label settings laid over its members\' as an adjustment layer, each member\'s own winning; one member changed alone; undone', async () => {
+    const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);
+    const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
+    await page.getByTestId('studio-history').click();
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
+    await page.getByTestId('tool-select').click();
+    await h.setDate('1650');
+    await page.evaluate(([a, b]) => (window as any).__mapmaker.store.setCamera({ lon: (a[0] + b[0]) / 2, lat: (a[1] + b[1]) / 2, zoom: 1.5, rotation: 0, projection: 'equirectangular' }), [P.a, P.b]);
+    const before = await steps();
+    const styleOf = (n: string) => page.evaluate((x) => JSON.parse((window as any).__mapmaker.store.world.all('entity').find((e: any) => e.name === x).style || '{}'), n);
+    for (const n of [A, B]) { const st = await styleOf(n); assert.ok(!st.fill && !st.look, `${n}: no fill or look of its own to begin with`); }
+    // Chosen by its row in the Countries list: what it holds in Properties, its looks in the Looks panel.
+    await page.getByTestId('entity-group-Main powers').click();
+    assert.equal(await store('s.selection.kind'), 'group');
+    await page.getByTestId(`group-member-${A}`).waitFor();
+    await page.getByTestId(`group-member-${B}`).waitFor();
+    await page.getByTestId('looks-group').waitFor();
+    // Its members drawn in its colour: of five small patches about a place of each, the clearest (its label, cities and
+    // areas drawn over it aside) mostly of that colour.
+    const share = (ll: LL, kind: 'magenta' | 'green') => page.evaluate(([lon, lat, kd]) => {
+      const p = (window as any).__mapmaker.lonLatToPage(lon, lat);
+      const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement;
+      const r = c.getBoundingClientRect(), k = c.width / r.width, R = Math.round(10 * k), D = 36;
+      let best = 0;
+      for (const [ox, oy] of [[0, 0], [0, D], [0, -D], [D, 0], [-D, 0]]) {
+        const d = c.getContext('2d')!.getImageData(Math.round((p[0] + ox - r.left) * k) - R, Math.round((p[1] + oy - r.top) * k) - R, 2 * R + 1, 2 * R + 1).data;
+        let n = 0, m = 0;
+        for (let i = 0; i < d.length; i += 4) {
+          n++;
+          if (kd === 'magenta' ? d[i] > 150 && d[i + 1] < 100 && d[i + 2] > 120 : d[i + 1] > 120 && d[i] < 90 && d[i + 2] < 120) m++;
+        }
+        best = Math.max(best, Math.round((100 * m) / n));
+      }
+      return best;
+    }, [ll[0], ll[1], kind] as const);
+    const settle = async (ll: LL, kind: 'magenta' | 'green') => { let v = await share(ll, kind); for (let i = 0; i < 30 && v < 80; i++) { await page.waitForTimeout(100); v = await share(ll, kind); } return v; };
+    await page.getByTestId('group-color').fill('#ff00cc');
+    await h.saved();
+    await page.getByTestId('group-color-members').check();
+    await h.saved();
+    let v = await settle(P.a, 'magenta');
+    assert.ok(v >= 80, `${A} in the group's colour (${v}% of the clearest patch about it)`);
+    v = await settle(P.b, 'magenta');
+    assert.ok(v >= 80, `${B} too (${v}%)`);
+    // One member changed alone: a colour chosen in its Looks wins; the other keeps the group's.
+    await page.getByTestId(`group-member-${B}`).click();
+    await page.getByTestId('looks-group-note').waitFor();
+    await page.getByTestId('entity-color').fill('#00cc44');
+    await h.saved();
+    v = await settle(P.b, 'green');
+    assert.ok(v >= 80, `${B} in its own colour (${v}%)`);
+    v = await share(P.a, 'magenta');
+    assert.ok(v >= 80, `${A} still in the group's (${v}%)`);
+    // And given back the group's (its own kept for when it leaves the group).
+    await page.getByTestId('entity-group-color').click();
+    await h.saved();
+    v = await settle(P.b, 'magenta');
+    assert.ok(v >= 80, `${B} in the group's colour again (${v}%)`);
+    assert.equal(await store(`s.world.all('entity').find((e) => e.name === ${JSON.stringify(B)}).color`), '#00cc44');
+    // The group's effects at the same time as a member's own: a stroke for the group, a drop shadow for one of them alone.
+    await page.getByTestId('looks-open-group').click();
+    await page.getByTestId('looks-group').waitFor();
+    await page.getByTestId('group-add-effect').selectOption('stroke');
+    await h.saved();
+    await page.getByTestId(`group-member-${A}`).click();
+    await page.getByTestId('looks-entity').locator('details.country-look > summary').click();
+    await page.getByTestId('country-add-effect').selectOption('shadow');
+    await h.saved();
+    const looks = () => page.evaluate(([a, b]) => { const s = (window as any).__mapmaker.store, id = (n: string) => s.world.all('entity').find((e: any) => e.name === n).id; return JSON.stringify([s.renderer.lastLooks[id(a)] ?? [], s.renderer.lastLooks[id(b)] ?? []]); }, [A, B]);
+    for (let i = 0; i < 30 && (await looks()) !== JSON.stringify([['shadow', 'stroke'], ['stroke']]); i++) await page.waitForTimeout(100);
+    assert.equal(await looks(), JSON.stringify([['shadow', 'stroke'], ['stroke']]), 'its own shadow and the group\'s stroke; the other, the group\'s stroke');
+    // Label settings for every member: capitals; a member's own setting wins.
+    const labels = () => page.evaluate(([a, b]) => { const s = (window as any).__mapmaker.store, id = (n: string) => s.world.all('entity').find((e: any) => e.name === n).id; return JSON.stringify([a, b].map((n) => s.renderer.lastLabels.find((l: any) => l.entityId === id(n))?.text ?? null)); }, [A, B]);
+    await page.getByTestId('looks-open-group').click();
+    await page.getByTestId('group-label').locator('details.own-look > summary').click();
+    await page.getByTestId('group-label-uppercase').check();
+    await h.saved();
+    const caps = JSON.stringify([A.toUpperCase(), B.toUpperCase()]);
+    for (let i = 0; i < 30 && (await labels()) !== caps; i++) await page.waitForTimeout(100);
+    assert.equal(await labels(), caps, 'both labelled in capitals');
+    await page.getByTestId(`group-member-${A}`).click();
+    await page.getByTestId('country-label').locator('details.own-look > summary').click();
+    await page.getByTestId('country-label-uppercase').uncheck();
+    await h.saved();
+    const mixed = JSON.stringify([A, B.toUpperCase()]);
+    for (let i = 0; i < 30 && (await labels()) !== mixed; i++) await page.waitForTimeout(100);
+    assert.equal(await labels(), mixed, 'its own setting wins; the other keeps the group\'s');
+    await h.screenshot('group-looks');
+    // Undone, step by step: as before.
+    for (let i = 0; i < 20 && (await steps()) > before; i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await steps(), before);
+    assert.equal(await store(`s.world.all('entity_group').find((g) => g.name === 'Main powers').style`), '{}');
+    for (let i = 0; i < 30 && (await looks()) !== '[[],[]]'; i++) await page.waitForTimeout(100);
+    assert.equal(await looks(), '[[],[]]');
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
+  });
+
+  await h.step('The Effects panel (D238): every effect in folders, found by name; dragged onto a country on the map, into the Looks panel of a group, onto a layer\'s and an event\'s rows; double-clicked for what is chosen; refused where it does not belong; undone', async () => {
+    const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);
+    const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
+    const box = async (sel: string) => (await page.locator(sel).first().boundingBox())!;
+    await page.getByTestId('studio-history').click();
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
+    await page.getByTestId('tool-select').click();
+    await h.setDate('1650');
+    await page.evaluate(([a, b]) => (window as any).__mapmaker.store.setCamera({ lon: (a[0] + b[0]) / 2, lat: (a[1] + b[1]) / 2, zoom: 1.5, rotation: 0, projection: 'equirectangular' }), [P.a, P.b]);
+    const before = await steps();
+    // Opened from the Window menu (it is a tab of the lists at first); here laid under the Looks panel, as anyone may.
+    await page.getByTestId('menu-window').click();
+    await page.getByTestId('command-panel-effects').click();
+    await page.getByTestId('effects-panel').waitFor();
+    await page.evaluate(() => { const m = (window as any).__mapmaker, s = m.store, l = s.dockNow(); s.setDock(m.dock.dockPanel(l, 'effects', m.dock.holderOf(l, 'looks').id, 'bottom', 300)); });
+    await page.getByTestId('effects-panel').waitFor();
+    for (const f of ['countries', 'borders', 'labels', 'graphics', 'transitions', 'saved']) await page.getByTestId(`effects-folder-${f}`).waitFor();
+    assert.match((await page.getByTestId('effects-folder-saved').textContent())!, /Looks you keep/);
+    // Found by name: only the folders with such effects.
+    await page.getByTestId('effects-filter').fill('glow');
+    assert.deepEqual(await page.locator('.effects-folder').evaluateAll((els) => els.map((e) => e.getAttribute('data-testid'))), ['effects-folder-countries', 'effects-folder-borders']);
+    await page.getByTestId('effects-filter').press('Escape');
+    assert.equal(await page.locator('.effects-folder').count(), 6);
+    await h.screenshot('effects-panel');
+    // Dragged: the effect's name follows the pointer, saying what it would be given to; let go there, given (one step).
+    const drag = async (id: string, find: string, to: { x: number; y: number }) => {
+      await page.getByTestId('effects-filter').fill(find);
+      const it = await box(`[data-testid="effect-${id}"]`);
+      await page.mouse.move(it.x + it.width / 2, it.y + it.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(it.x + it.width / 2 + 12, it.y + it.height / 2 + 8, { steps: 3 });
+      await page.mouse.move(to.x, to.y, { steps: 12 });
+      const ghost = (await page.getByTestId('effect-ghost').textContent()) ?? '';
+      const hover = await store('s.effectHover');
+      await page.mouse.up();
+      await page.getByTestId('effects-filter').fill('');
+      return { ghost, hover };
+    };
+    const idOf = (n: string) => store(`s.world.all('entity').find((e) => e.name === ${JSON.stringify(n)}).id`) as Promise<string>;
+    const lookKinds = (n: string) => page.evaluate((x) => (JSON.parse((window as any).__mapmaker.store.world.all('entity').find((e: any) => e.name === x).style || '{}').look?.effects ?? []).map((e: any) => e.kind), n);
+    // Onto a country on the map: that country alone, lit while it is over it.
+    const [ax, ay] = await h.toPage(P.a);
+    const d1 = await drag('countries:shadow', 'drop shadow', { x: ax, y: ay });
+    assert.equal(d1.ghost, `Drop shadow → ${A}`);
+    assert.equal(d1.hover, await idOf(A), 'the country under it lit');
+    await h.saved();
+    assert.deepEqual(await lookKinds(A), ['shadow']);
+    assert.deepEqual(await lookKinds(B), [], 'only the country it was let go on');
+    assert.equal(await store('s.effectHover'), null);
+    // Into the Looks panel: what is chosen there, here a group (all of its members, with their own).
+    await page.getByTestId('entity-group-Main powers').click();
+    await page.getByTestId('looks-group').waitFor();
+    const lp = await box('[data-testid="looks-panel"]');
+    const d2 = await drag('countries:stroke', 'stroke', { x: lp.x + lp.width / 2, y: lp.y + 40 });
+    assert.equal(d2.ghost, 'Stroke → the group “Main powers”');
+    await h.saved();
+    assert.deepEqual(await store(`JSON.parse(s.world.all('entity_group').find((g) => g.name === 'Main powers').style).look.effects.map((e) => e.kind)`), ['stroke']);
+    const looks = () => page.evaluate(([a, b]) => { const s = (window as any).__mapmaker.store, id = (n: string) => s.world.all('entity').find((e: any) => e.name === n).id; return JSON.stringify([s.renderer.lastLooks[id(a)] ?? [], s.renderer.lastLooks[id(b)] ?? []]); }, [A, B]);
+    for (let i = 0; i < 30 && (await looks()) !== JSON.stringify([['shadow', 'stroke'], ['stroke']]); i++) await page.waitForTimeout(100);
+    assert.equal(await looks(), JSON.stringify([['shadow', 'stroke'], ['stroke']]), 'drawn: the shadow given to one, the group\'s stroke on both');
+    // Onto a layer's row: its borders between countries dashed.
+    const layerRow = page.locator('[data-testid="layer-row"]', { hasText: 'Political' }).first();
+    const layerId = ((await layerRow.getAttribute('data-drop')) ?? '').replace('layer:', '');
+    await layerRow.scrollIntoViewIfNeeded();
+    const lr = (await layerRow.boundingBox())!;
+    const d3 = await drag('borders:dashed', 'dashed', { x: lr.x + lr.width / 2, y: lr.y + lr.height / 2 });
+    assert.equal(d3.ghost, 'Dashed → the layer “Political”');
+    await h.saved();
+    assert.equal(await store(`JSON.parse(s.world.get('layer', ${JSON.stringify(layerId)}).style).borders.between.dash`), 'dashed');
+    // Onto an event's row: its changes animate in that look.
+    const evRow = page.locator('.list-panel [data-testid^="event-row-"]').first();
+    const evName = ((await evRow.getAttribute('data-testid')) ?? '').replace('event-row-', '');
+    await evRow.scrollIntoViewIfNeeded();
+    const er = (await evRow.boundingBox())!;
+    const d4 = await drag('transitions:blitz', 'blitz', { x: er.x + er.width / 2, y: er.y + er.height / 2 });
+    assert.equal(d4.ghost, `Blitz → the event “${evName}”`);
+    await h.saved();
+    assert.equal(await store(`JSON.parse(s.world.all('event').find((e) => e.name === ${JSON.stringify(evName)}).presentation || '{}').look`), 'blitz');
+    // Double-clicked: given to what is chosen (here a country's label, in italics).
+    await page.getByTestId(`entity-row-${A}`).click();
+    await page.getByTestId('effects-filter').fill('italic');
+    await page.getByTestId('effect-labels:italic').dblclick();
+    await h.saved();
+    assert.equal(await store(`JSON.parse(s.world.all('entity').find((e) => e.name === ${JSON.stringify(A)}).style).label.italic`), true);
+    // Where it does not belong, nothing is given, and it says what it is for.
+    const head = await steps();
+    await page.getByTestId('effects-filter').fill('news');
+    await page.locator('[data-testid^="effect-graphics:"]').first().dblclick();
+    await page.locator('.toast', { hasText: 'is for a shot' }).waitFor();
+    assert.equal(await steps(), head, 'nothing given');
+    // Let go where no country is: given to nothing, and it says so.
+    const spot = await page.evaluate(() => {
+      const m = (window as any).__mapmaker, s = m.store, c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement, r = c.getBoundingClientRect();
+      for (let fy = 0.15; fy < 0.85; fy += 0.05) for (let fx = 0.15; fx < 0.9; fx += 0.05) {
+        const x = r.left + fx * r.width, y = r.top + fy * r.height, ll = m.pageToLonLat(x, y);
+        if (ll && !s.engine.valueAtPoint(s.spaceId, s.layerId, m.bench.lonLatToVec(ll[0], ll[1]), s.time)) return [x, y] as [number, number];
+      }
+      return null;
+    });
+    assert.ok(spot, 'a place held by no one in view');
+    const d6 = await drag('countries:bevel', 'bevel', { x: spot![0], y: spot![1] });
+    assert.deepEqual([d6.ghost, d6.hover], ['Bevel', null]);
+    await page.locator('.toast', { hasText: 'over a country' }).waitFor();
+    assert.equal(await steps(), head, 'nothing given');
+    await h.screenshot('effects-given');
+    // Undone, step by step.
+    for (let i = 0; i < 20 && (await steps()) > before; i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await steps(), before);
+    assert.deepEqual(await lookKinds(A), []);
+    // The Looks studio has it under the lists from the first.
+    await page.getByTestId('studio-looks').click();
+    await page.getByTestId('reset-workspace').click();
+    await page.getByTestId('effects-panel').waitFor();
+    await page.getByTestId('studio-history').click();
+    // (Every list open at once again for the steps after this one.)
+    await page.evaluate(() => (window as any).__mapmaker.allLists());
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
   });
 
   await h.step('The menu bar: every command in a menu with its shortcut; the keyboard runs the same commands (D197)', async () => {

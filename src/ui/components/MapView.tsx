@@ -244,6 +244,24 @@ function commitShotCamera(): void {
 let shownView: { view: View; preview: boolean } | null = null;
 export function shownMapView(): { view: View; preview: boolean } | null { return shownView; }
 
+/**
+ * The country (or faction) drawn under a point of the page on the working map, if any (D238: an effect dragged from
+ * the Effects panel is given to it). Null over the sea, outside the map, or in Presentation.
+ */
+export function countryAtPage(pageX: number, pageY: number): string | null {
+  const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement | null;
+  if (!c || store.mode !== 'world' || !store.engine || !store.world || !store.layerId) return null;
+  const r = c.getBoundingClientRect();
+  let width = r.width;
+  // (Two timelines or dates side by side, D150: the map is the left half.)
+  if (store.compare.on && store.compare.side) width = Math.max(25, Math.floor((width - SIDE_GAP) / 2));
+  if (pageX < r.left || pageX > r.left + width || pageY < r.top || pageY > r.bottom) return null;
+  const v = shownView && !shownView.preview && shownView.view.width === width && shownView.view.height === r.height ? shownView.view : makeView(store.camera, width, r.height);
+  const id = ownerAtScreen({ engine: store.engine, world: store.world, spaceId: store.spaceId, layerId: store.layerId, t: store.time, view: v }, pageX - r.left, pageY - r.top);
+  const type = id ? store.world.get('entity', id)?.type_id : undefined;
+  return type === 'polity' || type === 'faction' ? id : null;
+}
+
 /** How long after the last movement of the view the picture is drawn afresh, sharp (milliseconds). */
 const SETTLE_MS = 110;
 /** Pixels between the two sides of a side-by-side comparison (D150). */
@@ -605,13 +623,24 @@ export function MapView() {
       }
       ctx.restore();
     } else
-    // Selected owner: outline its territory at the current date (every one of several chosen, D189).
-    if (s.selection?.kind === 'entity' && s.layerId) {
+    // Selected owner: outline its territory at the current date (every one of several chosen, D189; every member of a
+    // group chosen, D237).
+    if ((s.selection?.kind === 'entity' || s.selection?.kind === 'group') && s.layerId) {
       const states = s.engine!.partitionState(s.spaceId, s.layerId, s.time);
-      const ids = new Set(s.multi?.kind === 'entity' && s.multi.ids.includes(s.selection.id) ? s.multi.ids : [s.selection.id]);
+      const sel = s.selection;
+      const ids = new Set(sel.kind === 'group' ? w.all('entity').filter((e) => e.group_id === sel.id).map((e) => e.id)
+        : s.multi?.kind === 'entity' && s.multi.ids.includes(sel.id) ? s.multi.ids : [sel.id]);
       const faces: number[] = [];
       for (const [f, st] of states) if (st.value && ids.has(st.value)) faces.push(f);
       s.renderer.withFaces(ctx, v, arr, faces, (p, px) => { ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 2.5 * px; ctx.setLineDash([6 * px, 4 * px]); ctx.stroke(p); });
+    }
+    // An effect dragged from the Effects panel (D238): the country it would be given to, lit and outlined.
+    if (s.effectHover && s.layerId) {
+      const faces: number[] = [];
+      for (const [f, st] of s.engine!.partitionState(s.spaceId, s.layerId, s.time)) if (st.value === s.effectHover) faces.push(f);
+      ctx.save();
+      s.renderer.withFaces(ctx, v, arr, faces, (p, px) => { ctx.fillStyle = 'rgba(94, 242, 255, 0.16)'; ctx.fill(p, 'evenodd'); ctx.strokeStyle = '#5ef2ff'; ctx.lineWidth = 3 * px; ctx.setLineDash([]); ctx.stroke(p); });
+      ctx.restore();
     }
     // Selected character: its route through its places (dashed), each place a small ring.
     if (s.selection?.kind === 'entity' && w.get('entity', s.selection.id)?.type_id === 'character') {

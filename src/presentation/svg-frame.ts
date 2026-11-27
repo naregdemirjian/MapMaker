@@ -20,6 +20,7 @@ import { territoryPolygons, facesPolygons } from '../domain/data-export.ts';
 import { parcelGeometry } from '../render-engine/parcel-geometry.ts';
 import type { Arrangement } from '../geo-kernel/arrangement.ts';
 import { entityStyle } from '../domain/commands.ts';
+import { groupStyle, lookedEntity } from '../domain/group-looks.ts';
 import { preloadImages, prepareVideos, imageNow, videoNow, drawImageFit } from '../render-engine/assets.ts';
 import { eventsBoxOf } from './events-box.ts';
 import { timeAt, type ShotSettings } from './sequence.ts';
@@ -161,7 +162,8 @@ export async function svgFrame(o: SvgFrameOptions): Promise<SvgFrame> {
   const space = world.get('map_space', shot.spaceId);
   const t = timeAt(shot, frame);
   // Everything loaded before drawing, as for exports: pictures, videos at the frame's moment, stars.
-  const fills = world.all('entity').map((e) => entityStyle(e).fill).filter((f): f is NonNullable<typeof f> => !!f?.asset);
+  // (Groups' fills too, D237: a group's picture fills its members without one of their own.)
+  const fills = [...world.all('entity').map((e) => entityStyle(e).fill), ...world.all('entity_group').map((g) => groupStyle(g).fill)].filter((f): f is NonNullable<typeof f> => !!f?.asset);
   const videos = fills.filter((f) => f.kind === 'video').map((f) => ({ file: f.asset!, play: f }));
   await preloadImages([eventsBoxOf(shot.eventsBox).image, ...fills.filter((f) => f.kind === 'image').map((f) => f.asset), ...world.all('entity').map((e) => entityStyle(e).icon?.asset)]);
   if (videos.length) await prepareVideos(videos, frame / shot.fps);
@@ -271,7 +273,9 @@ export async function svgFrame(o: SvgFrameOptions): Promise<SvgFrame> {
       const polys = territoryPolygons(world, engine, shot.spaceId, layerId, t);
       const arr = world.arrangements.get(shot.spaceId);
       const nameOf = (id: string) => engine.nameAt(id, t) ?? world.get('entity', id)?.name ?? id;
-      const colourOf = (id: string) => world.get('entity', id)?.color ?? '#888888';
+      // (Colours and fills with their groups' looks, D237.)
+      const looked = (id: string) => { const e = world.get('entity', id); return e ? lookedEntity(world, e) : undefined; };
+      const colourOf = (id: string) => looked(id)?.color ?? '#888888';
       const lines = new Map<string, { shared: Position[][]; open: Position[][] }>();
       if (arr) for (const [owner, faces] of byOwner) lines.set(owner, borderLines(arr, states, owner, faces));
       const multi = (ls: Position[][]): string => (ls.length ? path({ type: 'MultiLineString', coordinates: ls }) ?? '' : '');
@@ -313,7 +317,7 @@ export async function svgFrame(o: SvgFrameOptions): Promise<SvgFrame> {
             const geo = forD3(p), d = path(geo);
             if (!d) continue;
             const shape = new SvgPath(d) as unknown as Path2D;
-            const media = entityStyle(world.get('entity', owner) ?? { style: '{}' }).fill;
+            const media = entityStyle(looked(owner) ?? { style: '{}' }).fill;
             const src = media?.asset && !media.off ? (media.kind === 'video' ? videoNow(media.asset, frame / shot.fps, media, 'export') : media.kind === 'image' ? imageNow(media.asset) : null) : null;
             if (src && media && arr) {
               // A picture or video filling the territory (D81), placed piece by piece as frames place it (D82).

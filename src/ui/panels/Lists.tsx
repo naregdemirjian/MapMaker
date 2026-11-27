@@ -10,6 +10,7 @@ import type { World } from '../../world-model/world.ts';
 import { lonLatToVec } from '../../geo-kernel/vec.ts';
 import { eventVisible } from '../components/EventGroups.tsx';
 import { FillSwatch } from '../components/CountryFill.tsx';
+import { lookedEntity } from '../../domain/group-looks.ts';
 import { openMenu, entityMenu, groupMenu, eventMenu } from '../components/ContextMenu.tsx';
 import { FeatureRows, featureLayers } from '../components/Features.tsx';
 import { typeColor } from '../../domain/event-types.ts';
@@ -149,9 +150,11 @@ const EntityRows = memo(function EntityRows({ section, filter }: { sig: string; 
     if (it.kind === 'group') {
       const folded = s.collapsed.includes(`grp:${it.g.id}`);
       return (
-        <div key={`g-${it.g.id}`} className="row group-head" onClick={() => s.toggleCollapsed(`grp:${it.g.id}`)} data-testid={`entity-group-${it.g.name}`}
+        <div key={`g-${it.g.id}`} className={`row group-head ${s.selection?.kind === 'group' && s.selection.id === it.g.id ? 'sel' : ''}`} data-testid={`entity-group-${it.g.name}`} data-drop={`group:${it.g.id}`}
+          title="The group: what it holds in Properties, its looks (laid over its members', each member's own winning) in the Looks panel"
+          onClick={() => s.set({ selection: { kind: 'group', id: it.g.id }, multi: null })}
           onContextMenu={(ev) => openMenu(ev, groupMenu(w, it.g.id, it.members), it.g.name)}>
-          <span className="twisty">{folded ? '▸' : '▾'}</span><span className="swatch" style={{ background: it.g.color }} /><b>{it.g.name}</b><span className="muted"> · {it.members.length}</span>
+          <span className="twisty" title={folded ? 'Show its members' : 'Fold it away'} onClick={(ev) => { ev.stopPropagation(); s.toggleCollapsed(`grp:${it.g.id}`); }} data-testid={`entity-group-fold-${it.g.name}`}>{folded ? '▸' : '▾'}</span><span className="swatch" style={{ background: it.g.color }} /><b>{it.g.name}</b><span className="muted"> · {it.members.length}</span>
           {it.members.length > 0 && it.members.every((m) => cmd.isLocked(w, m)) && <LockMark testId={`locked-group-${it.g.name}`} />}
         </div>
       );
@@ -159,7 +162,7 @@ const EntityRows = memo(function EntityRows({ section, filter }: { sig: string; 
     const e = it.e;
     const open = s.collapsed.includes(`open:${e.id}`);
     return (
-      <div key={e.id} className={`row ${chosen.has(e.id) ? 'sel' : ''}`} style={{ paddingLeft: 8 + it.depth * 14 }} data-testid={`entity-row-${e.name}`}
+      <div key={e.id} className={`row ${chosen.has(e.id) ? 'sel' : ''}`} style={{ paddingLeft: 8 + it.depth * 14 }} data-testid={`entity-row-${e.name}`} data-drop={`entity:${e.id}`}
         onClick={(ev) => s.pick('entity', e.id, ev, order)}
         onContextMenu={(ev) => {
           const cur = s.chosen('entity');
@@ -168,7 +171,7 @@ const EntityRows = memo(function EntityRows({ section, filter }: { sig: string; 
           openMenu(ev, entityMenu(s.world!, ids), ids.length === 1 ? e.name : `${ids.length} chosen`);
         }}>
         {it.cities > 0 && <span className="twisty" title={open ? 'Hide its cities' : 'Show its cities'} onClick={(ev) => { ev.stopPropagation(); s.toggleCollapsed(`open:${e.id}`); }} data-testid={`cities-of-${e.name}`}>{open ? '▾' : '▸'}</span>}
-        <FillSwatch entity={e} />{e.name}{it.cities > 0 && <span className="muted"> · {it.cities} {it.cities === 1 ? 'city' : 'cities'}</span>}
+        <FillSwatch entity={lookedEntity(w, e)} />{e.name}{it.cities > 0 && <span className="muted"> · {it.cities} {it.cities === 1 ? 'city' : 'cities'}</span>}
         {cmd.isLocked(w, e.id) && <LockMark testId={`locked-${e.name}`} />}
       </div>
     );
@@ -182,7 +185,7 @@ const EventRows = memo(function EventRows({ filter }: { sig: string; filter: str
   const order = shown.map((e) => e.id);
   const chosenEv = new Set(s.chosen('event'));
   return <>{shown.map((e) => (
-    <div key={e.id} className={`row ${chosenEv.has(e.id) ? 'sel' : ''} ${e.variant_group && !e.variant_active ? 'dim' : ''}`} data-testid={`event-row-${e.name}`}
+    <div key={e.id} className={`row ${chosenEv.has(e.id) ? 'sel' : ''} ${e.variant_group && !e.variant_active ? 'dim' : ''}`} data-testid={`event-row-${e.name}`} data-drop={`event:${e.id}`}
       onClick={(ev) => { s.pick('event', e.id, ev, order); if (!ev.ctrlKey && !ev.metaKey && !ev.shiftKey) s.setTime(fromStore(e.start_day, e.start_ms)); }}
       onContextMenu={(ev) => {
         const cur = s.chosen('event');
@@ -208,7 +211,7 @@ export function ListPanel({ list }: { list: ListKind }) {
   const lists = outlinerLists(s);
   const { political, characters, others, looseOthers } = lists;
   // Long lists are drawn again only when what they show changes (see EntityRows and EventRows).
-  const entitySig = `${lists.sig}|${s.chosen('entity').join(',')}`;
+  const entitySig = `${lists.sig}|${s.chosen('entity').join(',')}|${s.selection?.kind === 'group' ? s.selection.id : ''}`;
   const eventSig = [w.serial, w.tableRevision('event'), w.tableRevision('event_type'), w.tableRevision('event_group'), w.tableRevision('event_group_member'), w.tableRevision('branch'), s.branch, (s.eventFilter ?? ['*']).join(','), s.chosen('event').join(',')].join('|');
   const events = sortedEvents(w);
   const hiddenEvents = s.eventFilter ? events.reduce((n, e) => n + (eventVisible(w, e.id) ? 0 : 1), 0) : 0;
@@ -259,7 +262,7 @@ export function ListPanel({ list }: { list: ListKind }) {
           const here = field ? s.tool === 'field' && s.fieldLayerId === l.id : feat ? s.tool === 'feature' && s.featureLayerId === l.id : l.id === s.layerId;
           const chosen = s.selection?.kind === 'layer' && s.selection.id === l.id;
           return (
-            <div key={l.id} className={`row ${chosen ? 'sel' : ''} ${here ? 'drawing' : ''}`} data-testid="layer-row" title={chosen ? 'Click again to stop showing it in Properties' : 'Draw on this layer, and show it in Properties'}
+            <div key={l.id} className={`row ${chosen ? 'sel' : ''} ${here ? 'drawing' : ''}`} data-testid="layer-row" data-drop={`layer:${l.id}`} title={chosen ? 'Click again to stop showing it in Properties' : 'Draw on this layer, and show it in Properties'}
               onClick={() => { if (chosen) { s.set({ selection: null }); return; } (field ? s.set({ selection: { kind: 'layer', id: l.id }, fieldLayerId: l.id, fieldSource: s.fieldLayerId === l.id ? s.fieldSource : {}, tool: 'field' }) : feat ? s.set({ selection: { kind: 'layer', id: l.id }, featureLayerId: l.id, tool: 'feature', reshapeId: null }) : s.set({ selection: { kind: 'layer', id: l.id }, layerId: l.id, tool: s.tool === 'feature' || s.tool === 'field' ? 'lasso' : s.tool })); }}>
               <input type="checkbox" checked={!!l.visible} title="Show or hide" onClick={(e) => e.stopPropagation()} onChange={(e) => s.execute((wd) => cmd.updateLayer(wd, l.id, { visible: e.target.checked ? 1 : 0 }))} />
               <span className="layer-name">{l.name}</span>

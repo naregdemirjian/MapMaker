@@ -61,6 +61,75 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D238. The Effects panel: every effect in folders, dragged onto things or into the Looks panel (S4, second part)
+
+- **Why.** Agreed with the user: an Effects panel holding every effect the software has, in folders, as in Premiere;
+  an effect dragged onto a thing on the map or into its Looks; more effects added over time.
+- **The catalogue** (`render-engine/effects-catalogue.ts`, pure): six folders. **Countries**: every effect of the look
+  stack (drop shadow, stroke, inner shadow, outer and inner glows, bevel, gradient, pattern, light sweep, 3D slab,
+  texture). **Borders**: dashed, long dashes, dotted, dash and dot, double line, casing, ticks, hand-drawn, soft edge,
+  glow, marching ants, and a plain line again. **Labels**: capitals, italic, bold, light, spaced letters, a thick
+  outline or none, larger, smaller, old map, hidden. **Graphics**: the whole looks of a shot's events box (D184's
+  templates). **Transitions**: how changes animate (D137's looks). **Saved by you**: the looks kept under names
+  (D185), each given whole. Each effect says what it can be given to (`givesTo`, `receiversText`) and what giving it
+  does (`withEffect`: added at the end of a look's stack at its defaults, in the map's light where it takes one;
+  `borderWith`; `labelWith`); effects are found by a word of their names (`filterItems`).
+- **Giving one** (`ui/effects.ts` `give`, one undo step, saying what it did or why not): to a country (its own look;
+  several countries chosen, each its own, `setCountriesOwnLooks`; labels, `setLabelsWith`), a group (its looks, D237:
+  so to every member, laid over theirs), a layer (its look for countries without their own; its borders between
+  countries), an event (the look of its changes), or a shot in Presentation (its events box, its changes).
+  A border effect given to a country or a group goes to the borders of the layer drawn on, where borders belong. An
+  effect given where it does not belong gives nothing and says what it is for.
+- **How** (`panels/Effects.tsx`, `ui/effect-drag.ts`): an effect is dragged from its row; its name follows the pointer,
+  saying what it would go to; over the map the country under it is lit (`MapView` `countryAtPage`, the store's
+  `effectHover`), over a row of the lists (a country, a group, a layer, an event) or the Looks panel (what is chosen) the
+  row or panel is marked; let go, it is given; Escape gives it to nothing. A double-click, or Enter, gives it to what is
+  chosen. Its settings are then in the Looks panel like any other's. The folders fold; Saved by you says where looks
+  are kept from when it has none.
+- **Where it is**: a tab of the lists' group in History and Timeline, under the lists in the Looks studio; it can be
+  opened in Shots too (where it gives graphics and transitions to the shot open; its place there is S5's).
+- **Messages** (the toasts in the corner) let the pointer through to the panels under them, and only the four newest
+  are shown: many steps undone at once had piled a column of them over the panels at the right.
+- **Tests.** Unit: every effect in its folder, the kept looks in Saved by you; what each folder's effects are given to;
+  an effect added to a look at its defaults and in the map's light, laid on a border and a label; found by name; the
+  layouts with the panel. Interface: the folders, found by name; Drop shadow dragged onto a country on the map (its
+  name and the country's following the pointer, the country lit, given to it alone); Stroke dragged into the Looks panel
+  of a group (both members drawn with it, one with its own shadow too); Dashed onto a layer's row; Blitz onto an event's
+  row; Italic double-clicked for a chosen country; a graphic refused for a country; let go over no country, nothing
+  given; undone; the Looks studio with the panel from the first. The studios step's layouts with the Effects tab.
+
+### D237. Groups have looks of their own, laid over their members' as an adjustment layer (S4, first part)
+
+- **Why.** Agreed with the user: a group works on the things in it as an adjustment layer in Premiere works on the clips
+  under it. Its looks change every member, and each member can still be changed alone; the group's effects and the
+  member's own work at the same time, and where the two set the same part, the member's own wins, part by part.
+- **What a group's looks hold** (`domain/group-looks.ts` `GroupStyle`, stored in `entity_group.style`, file format 8:
+  older files gain it, empty, when opened): its members drawn in the group's colour (the colour of its row in the
+  lists) or not; a fill (a flag, a picture or a video); a look (elevation, fill strength and a stack of effects, the
+  look stack of D181-D186); label settings (any of a label's, not its text).
+- **How they meet a member's own** (`withGroupLooks`, `lookFor(own, layer, group)`): the group's effects are drawn after
+  the member's own (or after its layer's, when it has no look of its own); its elevation and fill strength count where
+  the member's are as they come (0 and 100%), and over its layer's; a fill of the member's own wins; each label
+  setting of its own wins (shown where the group hides labels: its own "shown" wins too); the group's colour is used
+  but for a member whose colour was chosen for it alone (in its Looks: `EntityStyle.ownColor`, set by
+  `setEntityColor`; "The group's colour" gives it back, its own kept for when it leaves). The renderer, the exports
+  and SVG frames draw members so (the rows they read made by `lookedEntity`, kept per row); a group's picture is
+  loaded before exports like a country's; its video keeps the map moving.
+- **In the interface**: a group's row in the Countries, Places lists chooses it (its arrow folds it): Properties shows
+  what it holds (its name, those in it, each chosen from there, locked or not, deleted keeping them), the Looks panel
+  its looks (Colour and fill, Look, Labels: the editors of a country's, `GroupFillSection`, `GroupLookSection`,
+  `GroupLabelSection`), and the map outlines its members. A member's Looks say that its group's looks are laid over it,
+  with the way to them; its colour reads "the group's" until one is chosen for it.
+- **Commands**: `setGroupStyle` (only the parts given, null taking one away), `setEntityGroupColor`, `setEntityColor`;
+  one undo step each.
+- **Tests.** Unit: a group's look with a member's own (effects of both in order, the member's own elevation and fill
+  strength winning, the layer's last); colour, fill and label part by part; the same row while nothing changes; the
+  commands checked and undone; a version 7 file's groups gaining looks, its old undo history still undoing.
+  Interface: a group chosen by its row, its members listed; its colour on both members (in the pixels); one member
+  given a colour of its own and then the group's again; the group's stroke and one member's own shadow drawn
+  together (the renderer's record of the effects drawn); capitals for every member's label, one member's own setting
+  winning; undone. The step that folds a group does so by its arrow.
+
 ### D236. The Looks panel: how a thing is drawn, set in one place; Properties says what it is (S3)
 
 - **Why.** The plan agreed with the user: the looks of a thing are set in a panel of their own, the Looks panel, which
@@ -120,8 +189,11 @@ Follows from D2. The test drives the real interface exactly as a person would.
   and the way back to the gallery (vertical slice); New map from the menu, the families of cards, a card's own settings,
   a blank world made and viewed, its setting-up in Map Studio and a link from History, undone (workflows); the steps
   that sculpt or set up the map go to Map Studio for it and back to History after (the rivers step draws there and takes
-  its pictures before and after both in History, the map the same size). The docking step of D234 waits for the map's canvas to take
-  the room left to it, as the browser reports it a moment later (the Windows run of D234 read it too early).
+  its pictures before and after both in History, the map the same size). The docking step of D234 waits for the map's
+  canvas to take the room left to it, as the browser reports it a moment later (the Windows run of D234 read it too
+  early). The desktop suite lays each page out as at first, the lists as tabs of one group: on Windows the app's
+  window is no taller than the screen, too short for every list in a group of its own (the Windows run of D235 found
+  "+ New" covered by the list below it); checked in a window of 1024 by 700 too.
 
 ### D234. Five studios, and panels that dock as Premiere's (S1 of the studios plan)
 

@@ -12,7 +12,8 @@ import type { World } from '../../world-model/world.ts';
 import { lonLatToVec } from '../../geo-kernel/vec.ts';
 import { GroupChecks } from '../components/EventGroups.tsx';
 import { CountryLabelSection } from '../components/LabelStyles.tsx';
-import { CountryFillSection } from '../components/CountryFill.tsx';
+import { CountryFillSection, FillSwatch } from '../components/CountryFill.tsx';
+import { groupMembers, lookedEntity } from '../../domain/group-looks.ts';
 import { CountryLookSection, LayerLookSection } from '../components/LookEditor.tsx';
 import { CountryBordersSection, LayerBordersSection } from '../components/BorderEditor.tsx';
 import { CharacterSection } from '../components/Characters.tsx';
@@ -124,6 +125,44 @@ function LayerPanel({ id }: { id: string }) {
   );
 }
 
+/**
+ * A group of countries, characters or cities in Properties (D237): its name, what is in it (each one chosen from here),
+ * locked or not. Its looks, laid over its members' as an adjustment layer, are in the Looks panel (Design).
+ */
+function GroupPanel({ id }: { id: string }) {
+  const s = useStore();
+  const w = s.world!;
+  const g = w.get('entity_group', id);
+  const [name, setName] = useState(g?.name ?? '');
+  useEffect(() => setName(g?.name ?? ''), [id, g?.name]);
+  if (!g) return null;
+  const members = groupMembers(w, id);
+  const political = members.filter((e) => e.type_id === 'polity' || e.type_id === 'faction').map((e) => e.id);
+  return (
+    <div className="panel" data-testid="group-panel">
+      <h3><span className="swatch big" style={{ background: g.color }} /> {g.name}<DesignButton /></h3>
+      <PropGroup id="group:identity" title="Group">
+        <label>Name<input value={name} onChange={(ev) => setName(ev.target.value)} onBlur={() => name.trim() && name.trim() !== g.name && s.execute((wd) => cmd.renameEntityGroup(wd, id, name.trim()))} data-testid="group-name" /></label>
+        {political.length > 0 && (
+          <label className="check" title="While locked, drawing over its countries leaves their land out, and they cannot be split, merged or annexed">
+            <input type="checkbox" checked={political.every((m) => cmd.isLocked(w, m))} onChange={(ev) => s.execute((wd) => cmd.setLocked(wd, political, ev.target.checked))} data-testid="group-locked" /> Locked: the land and borders of its countries stay as they are
+          </label>
+        )}
+      </PropGroup>
+      <PropGroup id="group:members" title={`In it (${members.length})`}>
+        {members.map((e) => (
+          <div key={e.id} className="row" onClick={() => s.set({ selection: { kind: 'entity', id: e.id }, multi: null })} data-testid={`group-member-${e.name}`}>
+            <FillSwatch entity={lookedEntity(w, e)} />{e.name}
+          </div>
+        ))}
+        {!members.length && <p className="muted">Nothing yet: choose countries, right-click, Move to "{g.name}".</p>}
+        {members.length > 1 && <button className="small" onClick={() => s.set({ multi: { kind: 'entity', ids: members.map((e) => e.id) }, selection: { kind: 'entity', id: members[0].id } })} data-testid="group-select-all">Choose all {members.length}</button>}
+      </PropGroup>
+      <button onClick={() => { s.execute((wd) => cmd.deleteEntityGroup(wd, id)); s.set({ selection: null }); }} title="What is in it stays, in no group" data-testid="group-delete">Delete the group (keep what is in it)</button>
+    </div>
+  );
+}
+
 export function Inspector() {
   const s = useStore();
   const sel = s.selection;
@@ -138,6 +177,7 @@ export function Inspector() {
       {sel?.kind === 'change' && <ChangePanel id={sel.id} />}
       {sel?.kind === 'star' && <StarPanel id={sel.id} />}
       {sel?.kind === 'river' && <RiverPanel id={sel.id} spaceId={sel.spaceId} />}
+      {sel?.kind === 'group' && <GroupPanel id={sel.id} />}
     </div>
   );
 }

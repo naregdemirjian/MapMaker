@@ -267,9 +267,21 @@ export function layerLookOf(o: unknown): LayerLook | null {
   return { ...base, blend: (BLEND_MODES as readonly string[]).includes(b as string) ? (b as BlendMode) : 'normal' };
 }
 
-/** The look a country is drawn with: its own if it has one, else its layer's (with no layer look, nothing to do: null). */
-export function lookFor(own: CountryLook | null, layer: LayerLook | null): CountryLook | null {
-  return own ?? (layer ? { elevation: layer.elevation, opacity: layer.opacity, effects: layer.effects } : null);
+/**
+ * The look a country is drawn with: its own if it has one, else its layer's (with no layer look, nothing to do: null).
+ * With the look of a group it is in (D237), that works with it as an adjustment layer over a clip: the group's effects
+ * are drawn after the country's, and its elevation and fill strength count where the country's own are as they come
+ * (0 and 100%: a member's own fundamentals win, part by part); the layer's last.
+ */
+export function lookFor(own: CountryLook | null, layer: LayerLook | null, group: CountryLook | null = null): CountryLook | null {
+  const base = own ?? (layer ? { elevation: layer.elevation, opacity: layer.opacity, effects: layer.effects } : null);
+  if (!group) return base;
+  const first = (vals: Array<number | undefined>, def: number) => vals.find((v) => v !== undefined && v !== def) ?? def;
+  return {
+    elevation: first([own?.elevation, group.elevation, own ? undefined : layer?.elevation], 0),
+    opacity: first([own?.opacity, group.opacity, own ? undefined : layer?.opacity], 1),
+    effects: [...(base?.effects ?? []), ...group.effects],
+  };
 }
 
 /** Whether a look changes anything (so countries without one are drawn exactly as before). */

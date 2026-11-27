@@ -7,6 +7,7 @@ import { IconPicture } from './CharacterIcons.tsx';
 import { iconById } from '../../render-engine/icons.ts';
 import * as cmd from '../../domain/commands.ts';
 import { assetUrl } from '../../render-engine/assets.ts';
+import { groupStyle, lookedEntity } from '../../domain/group-looks.ts';
 
 interface Flag { code: string; name: string }
 let flagList: Promise<Flag[]> | null = null;
@@ -55,15 +56,31 @@ function FlagPicker({ onPick, onClose, current }: { onPick: (code: string) => vo
   );
 }
 
+/** A country's fill (D81, D82), in its Looks. */
 export function CountryFillSection({ id }: { id: string }) {
   const s = useStore();
   const e = s.world!.get('entity', id);
-  const [picking, setPicking] = useState(false);
-  const [busy, setBusy] = useState(false);
   if (!e) return null;
   const fill = cmd.entityStyle(e).fill;
+  return <FillEditor fill={fill} swatch={lookedEntity(s.world!, e)} save={(next) => s.execute((wd) => cmd.setEntityStyle(wd, id, { fill: next }))} setShown={(on) => s.execute((wd) => cmd.setFillsShown(wd, [id], on))} />;
+}
+
+/** A group's fill (D237): a picture or video filling each of its members without a fill of its own. */
+export function GroupFillSection({ groupId }: { groupId: string }) {
+  const s = useStore();
+  const g = s.world!.get('entity_group', groupId);
+  if (!g) return null;
+  const fill = groupStyle(g).fill;
+  return <FillEditor group fill={fill} swatch={{ color: g.color, style: JSON.stringify({ fill }) }} save={(next) => s.execute((wd) => cmd.setGroupStyle(wd, groupId, { fill: next }))}
+    setShown={(on) => { if (fill) s.execute((wd) => cmd.setGroupStyle(wd, groupId, { fill: on ? { ...fill, off: undefined } : { ...fill, off: true } })); }} />;
+}
+
+/** The editor of a fill: the colour, a flag, a picture or a video, and how it covers the land (a country's, or a group's for its members). */
+function FillEditor({ fill, swatch, save, setShown, group }: { fill: cmd.CountryFill | undefined; swatch: { color: string; style?: string }; save: (next: cmd.CountryFill | null) => void; setShown: (on: boolean) => void; group?: boolean }) {
+  const s = useStore();
+  const [picking, setPicking] = useState(false);
+  const [busy, setBusy] = useState(false);
   const kind = fill?.kind ?? 'color';
-  const save = (next: cmd.CountryFill | null) => s.execute((wd) => cmd.setEntityStyle(wd, id, { fill: next }));
   const upload = async (file: File | undefined, k: 'image' | 'video') => {
     if (!file) return;
     setBusy(true);
@@ -77,12 +94,12 @@ export function CountryFillSection({ id }: { id: string }) {
     <div className="country-fill" data-testid="country-fill">
       <h4>Fill</h4>
       <div className="fill-now">
-        <FillSwatch entity={e} /> Filled with {kind === 'color' ? 'its colour' : kind === 'image' ? (fill?.asset?.startsWith('data/flags/') ? 'a flag' : 'a picture') : 'a video'}
-        {kind !== 'color' && <button className="small" onClick={() => save(null)} data-testid="fill-color">Use the colour</button>}
+        <FillSwatch entity={swatch} /> {group ? 'Its members filled with' : 'Filled with'} {kind === 'color' ? (group ? 'their colours (or fills of their own)' : 'its colour') : kind === 'image' ? (fill?.asset?.startsWith('data/flags/') ? 'a flag' : 'a picture') : 'a video'}
+        {kind !== 'color' && <button className="small" onClick={() => save(null)} data-testid="fill-color">{group ? 'Their colours' : 'Use the colour'}</button>}
       </div>
       {kind !== 'color' && fill?.asset && (
         <label className="check" title="Switch the picture off for now: the colour shows, and the picture is kept">
-          <input type="checkbox" checked={!fill.off} onChange={(ev) => s.execute((wd) => cmd.setFillsShown(wd, [id], ev.target.checked))} data-testid="fill-shown" /> Show the {kind === 'video' ? 'video' : 'picture'} (off: its colour, the {kind === 'video' ? 'video' : 'picture'} is kept)
+          <input type="checkbox" checked={!fill.off} onChange={(ev) => setShown(ev.target.checked)} data-testid="fill-shown" /> Show the {kind === 'video' ? 'video' : 'picture'} (off: {group ? 'their colours' : 'its colour'}, the {kind === 'video' ? 'video' : 'picture'} is kept)
         </label>
       )}
       <div className="buttons">
@@ -117,7 +134,7 @@ export function CountryFillSection({ id }: { id: string }) {
           </div>
           <p className="muted">The video plays in Presentation and in exports, from the start of each shot. While drawing, its first frame is shown.</p>
         </>}
-        <p className="muted">Where a picture cannot be shown yet, the country's colour is used.</p>
+        <p className="muted">{group ? 'A member with a fill of its own keeps it. Where' : 'Where'} a picture cannot be shown yet, the country's colour is used.</p>
       </>}
       {picking && <FlagPicker current={fill?.asset} onClose={() => setPicking(false)} onPick={(code) => { save({ ...(fill?.kind === 'image' ? fill : {}), kind: 'image', asset: `data/flags/${code}.svg`, fit: fill?.kind === 'image' ? fill.fit ?? 'fill' : 'fill' }); setPicking(false); }} />}
     </div>

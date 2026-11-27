@@ -29,6 +29,7 @@ import { BIOMES } from '../terrain/biomes.ts';
 import { resolvePointStyle, type LabelStyle, type CountryLabel, type PointStyle, resolveCityStyle, type CityStyle } from '../render-engine/label-style.ts';
 import { DEFAULT_FEATURE_STYLE, isFeatureKind, type FeatureKind, type FeatureStyle } from '../render-engine/feature-style.ts';
 import { relationKind, isRelationKind, type RelationKind } from './relations.ts';
+import { groupStyle } from './group-looks.ts';
 import { DEFAULT_SOURCES, fieldLayerStyleOf, fieldSourceOf, isFieldType, FIELD_TYPES, type FieldSource, type FieldType } from './fields.ts';
 import { planDisaster, isDisasterId, DISASTERS, type DisasterId } from './disasters.ts';
 import { MOST_SCATTERED, SIZE_STEPS, sizeAtStep, type Scatter } from './scatter.ts';
@@ -556,6 +557,31 @@ export function setCountriesLook(world: World, ids: string[], look: CountryLook 
   });
 }
 
+/**
+ * Countries each given a look of their own (an effect added to each one's, D238), in one undo step; `what` names it
+ * ("a drop shadow").
+ */
+export function setCountriesOwnLooks(world: World, looks: Array<[string, CountryLook]>, what: string): CommandResult {
+  const rows = looks.map(([id, look]) => [world.get('entity', id), countryLookOf(look)] as const).filter((r): r is readonly [NonNullable<typeof r[0]>, CountryLook] => !!r[0] && !!r[1]);
+  if (!rows.length) throw new Error('Choose a country first.');
+  return run(world, rows.length === 1 ? `Give ${rows[0][0].name} ${what}` : `Give ${rows.length} countries ${what}`, (tx) => {
+    for (const [e, look] of rows) tx.patch('entity', e.id, { style: JSON.stringify({ ...entityStyle(e), look }) });
+  });
+}
+
+/** Label settings laid on several countries' labels at once (an effect of the Effects panel, D238): one undo step. */
+export function setLabelsWith(world: World, ids: string[], patch: CountryLabel, what: string): CommandResult {
+  const rows = ids.map((id) => world.get('entity', id)).filter((e): e is NonNullable<typeof e> => !!e);
+  if (!rows.length) throw new Error('Choose a country first.');
+  return run(world, rows.length === 1 ? `${what} for the label of ${rows[0].name}` : `${what} for ${rows.length} labels`, (tx) => {
+    for (const e of rows) {
+      const st = entityStyle(e);
+      const label = Object.fromEntries(Object.entries({ ...(st.label ?? {}), ...patch }).filter(([, v]) => v !== undefined && v !== null && v !== '')) as CountryLabel;
+      tx.patch('entity', e.id, { style: JSON.stringify({ ...st, label }) });
+    }
+  });
+}
+
 /** The project's looks kept under names (D185). */
 export function lookPresets(world: World): LookPreset[] {
   return lookPresetsOf(parseJSON<unknown>(world.get('meta', 'look_presets')?.value ?? '[]', []));
@@ -698,6 +724,8 @@ export interface EntityStyle {
   alwaysShown?: boolean;
   /** Its land carries on over the sea where it was drawn (D221), where its layer otherwise ends at the coast. */
   overSea?: boolean;
+  /** Its colour chosen for it alone (D237): kept where its group draws its members in the group's colour. */
+  ownColor?: boolean;
 }
 
 export function entityStyle(e: { style?: string } | null | undefined): EntityStyle {
@@ -1087,7 +1115,7 @@ export function createEntityGroup(world: World, name: string, members: string[] 
   return run(world, `Create group "${name.trim()}"`, (tx) => {
     const id = newId('egrp');
     const n = world.all('entity_group').length;
-    tx.insert('entity_group', { id, name: name.trim(), color: GROUP_COLORS[n % GROUP_COLORS.length], sort_order: n, created_seq: world.nextSeq('entity_group') });
+    tx.insert('entity_group', { id, name: name.trim(), color: GROUP_COLORS[n % GROUP_COLORS.length], sort_order: n, created_seq: world.nextSeq('entity_group'), style: '{}' });
     for (const m of members) if (world.get('entity', m)) tx.patch('entity', m, { group_id: id });
     return id;
   });
@@ -1107,6 +1135,53 @@ export function deleteEntityGroup(world: World, id: string): CommandResult {
     for (const e of world.all('entity')) if (e.group_id === id) tx.patch('entity', e.id, { group_id: '' });
     tx.remove('entity_group', id);
   });
+}
+
+/** A group's colour (its row in the lists; its members' where it draws them in it, D237): one undo step. */
+export function setEntityGroupColor(world: World, id: string, color: string): CommandResult {
+  const g = world.get('entity_group', id);
+  if (!g) throw new Error('That group no longer exists.');
+  if (!/^#[0-9a-f]{6}$/i.test(color)) throw new Error('Choose a colour.');
+  return run(world, `Colour of "${g.name}"`, (tx) => tx.patch('entity_group', id, { color: color.toLowerCase() }));
+}
+
+/**
+ * A group's looks (D237), laid over its members' as an adjustment layer: its members drawn in its colour or not, a
+ * fill, a look (elevation, fill strength, effects) and label settings for all of them. Only the parts given change;
+ * null takes a part away. One undo step.
+ */
+export function setGroupStyle(world: World, id: string, patch: { colorMembers?: boolean | null; fill?: CountryFill | null; look?: CountryLook | null; label?: CountryLabel | null }): CommandResult {
+  const g = world.get('entity_group', id);
+  if (!g) throw new Error('That group no longer exists.');
+  const next: Record<string, unknown> = { ...groupStyle(g) };
+  if (patch.colorMembers !== undefined) { if (patch.colorMembers) next.colorMembers = true; else delete next.colorMembers; }
+  if (patch.fill !== undefined) {
+    if (patch.fill === null || patch.fill.kind === 'color') delete next.fill;
+    else { if (!patch.fill.asset) throw new Error('Choose a picture or video first.'); next.fill = patch.fill; }
+  }
+  if (patch.look !== undefined) {
+    const clean = patch.look ? countryLookOf(patch.look) : null;
+    if (patch.look && !clean) throw new Error('That is not a look.');
+    if (clean) next.look = clean; else delete next.look;
+  }
+  if (patch.label !== undefined) {
+    const clean = patch.label ? Object.fromEntries(Object.entries(patch.label).filter(([k, v]) => k !== 'text' && v !== undefined && v !== null && v !== '')) : {};
+    if (Object.keys(clean).length) next.label = clean; else delete next.label;
+  }
+  return run(world, `Change the looks of "${g.name}"`, (tx) => tx.patch('entity_group', id, { style: JSON.stringify(next) }));
+}
+
+/**
+ * A country's (or character's, city's) colour, chosen for it alone (D237): kept where its group draws its members in
+ * the group's colour; `own` false gives it back the group's (its colour is kept for when it leaves). One undo step.
+ */
+export function setEntityColor(world: World, id: string, color: string | null, own = true): CommandResult {
+  const e = world.get('entity', id);
+  if (!e) throw new Error('That no longer exists.');
+  if (color !== null && !/^#[0-9a-f]{6}$/i.test(color)) throw new Error('Choose a colour.');
+  const next: EntityStyle = { ...entityStyle(e) };
+  if (own) next.ownColor = true; else delete next.ownColor;
+  return run(world, own ? `Colour of ${e.name}` : `${e.name} in its group's colour`, (tx) => tx.patch('entity', id, { ...(color !== null ? { color: color.toLowerCase() } : {}), style: JSON.stringify(next) }));
 }
 
 /** Put countries (or cities, characters) into a group, or take them out ('' = no group). */
@@ -2510,7 +2585,7 @@ export function addCities(world: World, o: { spaceId: string; places: TodayPlace
     if (!group) {
       group = newId('egrp');
       const n = tx.world.all('entity_group').length;
-      tx.insert('entity_group', { id: group, name: 'Today\'s cities', color: GROUP_COLORS[n % GROUP_COLORS.length], sort_order: n, created_seq: tx.world.nextSeq('entity_group') });
+      tx.insert('entity_group', { id: group, name: 'Today\'s cities', color: GROUP_COLORS[n % GROUP_COLORS.length], sort_order: n, created_seq: tx.world.nextSeq('entity_group'), style: '{}' });
     }
     const ids: string[] = [];
     for (const { p, id: have } of todo) {

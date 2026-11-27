@@ -16,6 +16,7 @@ import type { Instant } from '../core-time/index.ts';
 import { encodeTiff, deflateInBrowser } from '../export/tiff.ts';
 import { eventsBoxOf, currentEvents, drawEventsBox } from './events-box.ts';
 import { eventShown, entityStyle } from '../domain/commands.ts';
+import { groupStyle } from '../domain/group-looks.ts';
 import { isFeatureKind } from '../render-engine/feature-style.ts';
 import { preloadImages, prepareVideos } from '../render-engine/assets.ts';
 import { basemapSourceOf, loadBasemap, loadBasemapDetail, loadDatasetRecords, DEFAULT_BASEMAP_STYLE, type Basemap, type BasemapStyle } from '../render-engine/basemap.ts';
@@ -432,7 +433,8 @@ export async function runExport(o: {
   const basemap = await basemapFor(o.world, o.shot.spaceId);
   const terrain = await terrainFor(o.world, o.shot.spaceId, o.shot);
   // Pictures and videos: every picture loaded, and every video sought to its frame before drawing.
-  const fills = o.world.all('entity').map((e) => entityStyle(e).fill).filter((f): f is NonNullable<typeof f> => !!f?.asset);
+  // (Groups' fills too, D237: a group's picture fills its members without one of their own.)
+  const fills = [...o.world.all('entity').map((e) => entityStyle(e).fill), ...o.world.all('entity_group').map((g) => groupStyle(g).fill)].filter((f): f is NonNullable<typeof f> => !!f?.asset);
   const videoFills = fills.filter((f) => f.kind === 'video').map((f) => ({ file: f.asset!, play: f }));
   // (and characters' own pictures used as their icons)
   const iconPictures = o.world.all('entity').map((e) => entityStyle(e).icon?.asset);

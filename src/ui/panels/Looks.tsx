@@ -1,7 +1,8 @@
 // The Looks panel (S3 of the studios plan, D236): how the thing chosen is drawn, its fundamentals by kind: a country's
-// colour, fill, look, borders and label; a person's marker; a city's showing; a layer's fill, look, borders and front
-// lines; an area's, a line's or a point's look; an event's changes as they animate. The one place looks are set:
-// Properties says what a thing is. "Design" (a button in Properties, and Ctrl+D) brings it to the front.
+// colour, fill, look, borders and label; a person's marker; a city's showing; a group's looks, laid over its members'
+// as an adjustment layer (D237); a layer's fill, look, borders and front lines; an area's, a line's or a point's look;
+// an event's changes as they animate. The one place looks are set: Properties says what a thing is. "Design" (a button
+// in Properties, and Ctrl+D) brings it to the front.
 import { useStore, store } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
 import { parseJSON } from '../../temporal-engine/engine.ts';
@@ -9,9 +10,10 @@ import { isFeatureKind } from '../../render-engine/feature-style.ts';
 import { eventTransitionLook, TRANSITION_LOOKS } from '../../presentation/sequence.ts';
 import { PropGroup } from '../shell/Group.tsx';
 import { NumberField } from '../inputs.tsx';
-import { CountryLabelSection } from '../components/LabelStyles.tsx';
-import { CountryFillSection } from '../components/CountryFill.tsx';
-import { CountryLookSection, LayerLookSection } from '../components/LookEditor.tsx';
+import { CountryLabelSection, GroupLabelSection } from '../components/LabelStyles.tsx';
+import { CountryFillSection, GroupFillSection } from '../components/CountryFill.tsx';
+import { CountryLookSection, LayerLookSection, GroupLookSection } from '../components/LookEditor.tsx';
+import { groupStyle, groupLooksPlain, groupMembers, lookedEntity } from '../../domain/group-looks.ts';
 import { CountryBordersSection, LayerBordersSection } from '../components/BorderEditor.tsx';
 import { CharacterIconSection } from '../components/CharacterIcons.tsx';
 import { CityAlwaysShown } from '../components/Characters.tsx';
@@ -26,7 +28,49 @@ function Hint() {
   return (
     <div className="panel">
       <h3>Looks</h3>
-      <p className="muted">Choose a country, a person or a city, a layer, an area, a line or a point, or an event: how it is drawn is set here (what it is, in Properties).</p>
+      <p className="muted">Choose a country, a person or a city, a group of them, a layer, an area, a line or a point, or an event: how it is drawn is set here (what it is, in Properties).</p>
+    </div>
+  );
+}
+
+/**
+ * A thing's colour, chosen for it alone (D237). In a group drawing its members in the group's colour: the group's,
+ * until one is chosen for it here; then its own, with the way back to the group's.
+ */
+function EntityColour({ id }: { id: string }) {
+  const s = useStore();
+  const w = s.world!;
+  const e = w.get('entity', id);
+  if (!e) return null;
+  const g = e.group_id ? w.get('entity_group', e.group_id) : undefined;
+  const set = (color: string) => s.execute((wd) => cmd.setEntityColor(wd, id, color));
+  if (g && groupStyle(g).colorMembers) {
+    const own = cmd.entityStyle(e).ownColor === true;
+    return own ? (
+      <label>Colour (its own)
+        <span className="inline"><input type="color" value={e.color} onChange={(ev) => set(ev.target.value)} data-testid="entity-color" />
+          <button className="small" onClick={() => s.execute((wd) => cmd.setEntityColor(wd, id, null, false))} title={`Drawn in the colour of the group "${g.name}" again (its own is kept for when it leaves)`} data-testid="entity-group-color">The group's colour</button></span>
+      </label>
+    ) : (
+      <label title={`The group "${g.name}" draws its members in its colour; choosing one here gives it a colour of its own`}>Colour (the group's)
+        <input type="color" value={g.color} onChange={(ev) => set(ev.target.value)} data-testid="entity-color" />
+      </label>
+    );
+  }
+  return <label>Colour<input type="color" value={e.color} onChange={(ev) => set(ev.target.value)} data-testid="entity-color" /></label>;
+}
+
+/** A member of a group with looks (D237): those looks are laid over its own; the way to them. */
+function GroupNote({ id }: { id: string }) {
+  const s = useStore();
+  const w = s.world!;
+  const e = w.get('entity', id);
+  const g = e?.group_id ? w.get('entity_group', e.group_id) : undefined;
+  if (!g || groupLooksPlain(groupStyle(g))) return null;
+  return (
+    <div className="group-note" data-testid="looks-group-note">
+      <span className="swatch" style={{ background: g.color }} /> In the group <b>{g.name}</b>: its looks are laid over these, its effects added to them; a setting of its own wins.
+      <button className="small link" onClick={() => s.set({ selection: { kind: 'group', id: g.id }, multi: null })} data-testid="looks-open-group">The group's looks…</button>
     </div>
   );
 }
@@ -38,15 +82,45 @@ function EntityLooks({ id }: { id: string }) {
   const political = e.type_id === 'polity' || e.type_id === 'faction';
   return (
     <div className="panel" data-testid="looks-entity">
-      <h3><span className="swatch big" style={{ background: e.color }} /> {e.name}</h3>
+      <h3><span className="swatch big" style={{ background: lookedEntity(s.world!, e).color }} /> {e.name}</h3>
+      <GroupNote id={id} />
       <PropGroup id="entity:fill" title={political ? 'Colour and fill' : 'Colour'}>
-        <label>Colour<input type="color" value={e.color} onChange={(ev) => s.execute((wd) => cmd.updateEntity(wd, id, { color: ev.target.value }))} data-testid="entity-color" /></label>
+        <EntityColour id={id} />
         {political && <CountryFillSection id={id} />}
       </PropGroup>
       {political && <PropGroup id="entity:look" title="Look and borders"><CountryLookSection id={id} /><CountryBordersSection id={id} /></PropGroup>}
       {political && <PropGroup id="entity:label" title="Label"><CountryLabelSection id={id} /></PropGroup>}
       {e.type_id === 'character' && <PropGroup id="entity:marker" title="Marker"><CharacterIconSection id={id} /></PropGroup>}
       {e.type_id === 'settlement' && <PropGroup id="entity:showing" title="Showing"><CityAlwaysShown id={id} /></PropGroup>}
+    </div>
+  );
+}
+
+/**
+ * A group's looks (D237): laid over its members' as an adjustment layer over the clips under it. Its colour (and its
+ * members drawn in it or not), a fill, a look with effects, label settings; each member's own settings winning.
+ */
+function GroupLooks({ id }: { id: string }) {
+  const s = useStore();
+  const w = s.world!;
+  const g = w.get('entity_group', id);
+  if (!g) return <Hint />;
+  const gs = groupStyle(g);
+  const members = groupMembers(w, id);
+  const political = !members.length || members.some((e) => e.type_id === 'polity' || e.type_id === 'faction');
+  return (
+    <div className="panel" data-testid="looks-group">
+      <h3><span className="swatch big" style={{ background: g.color }} /> {g.name}</h3>
+      <p className="muted">Laid over the looks of the {members.length === 1 ? 'one' : members.length} in it, as an adjustment layer: its effects are added to each one's own, and where one has a setting of its own, that wins. Choose one of them to change it alone.</p>
+      <PropGroup id="group:fill" title={political ? 'Colour and fill' : 'Colour'}>
+        <label>Colour<input type="color" value={g.color} onChange={(ev) => s.execute((wd) => cmd.setEntityGroupColor(wd, id, ev.target.value))} data-testid="group-color" /></label>
+        <label className="check" title="Those given a colour of their own (in their Looks) keep it">
+          <input type="checkbox" checked={!!gs.colorMembers} onChange={(ev) => s.execute((wd) => cmd.setGroupStyle(wd, id, { colorMembers: ev.target.checked }))} data-testid="group-color-members" /> Its members drawn in this colour
+        </label>
+        {political && <GroupFillSection groupId={id} />}
+      </PropGroup>
+      {political && <PropGroup id="group:look" title="Look"><GroupLookSection groupId={id} /></PropGroup>}
+      {political && <PropGroup id="group:label" title="Labels"><GroupLabelSection groupId={id} /></PropGroup>}
     </div>
   );
 }
@@ -142,13 +216,14 @@ export function LooksPanel() {
   const s = useStore();
   const sel = s.selection;
   return (
-    <div className="looks-panel" data-testid="looks-panel">
+    <div className="looks-panel" data-testid="looks-panel" data-drop="looks">
       {!sel && <Hint />}
       {sel?.kind === 'entity' && <EntityLooks id={sel.id} />}
       {sel?.kind === 'layer' && <LayerLooks id={sel.id} />}
       {sel?.kind === 'feature' && <FeatureLooks id={sel.id} />}
       {sel?.kind === 'event' && <EventLooks id={sel.id} />}
-      {sel && sel.kind !== 'entity' && sel.kind !== 'layer' && sel.kind !== 'feature' && sel.kind !== 'event' && <Hint />}
+      {sel?.kind === 'group' && <GroupLooks id={sel.id} />}
+      {sel && sel.kind !== 'entity' && sel.kind !== 'layer' && sel.kind !== 'feature' && sel.kind !== 'event' && sel.kind !== 'group' && <Hint />}
     </div>
   );
 }

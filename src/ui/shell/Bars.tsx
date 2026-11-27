@@ -73,5 +73,6 @@ export function TopBar() {
 
 export function Toasts() {
   const s = useStore();
-  return <div className="toasts">{s.toasts.map((t) => <div key={t.id} className={`toast ${t.kind}`} data-testid={`toast-${t.kind}`}>{t.text}</div>)}</div>;
+  // (The four newest: many steps undone at once leave a short pile, not a column over the panels.)
+  return <div className="toasts">{s.toasts.slice(-4).map((t) => <div key={t.id} className={`toast ${t.kind}`} data-testid={`toast-${t.kind}`}>{t.text}</div>)}</div>;
 }

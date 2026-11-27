@@ -22,8 +22,12 @@ export interface EntityRow {
   /** The user's group (folder) it is listed in; '' for none. Added in file format 4. */
   group_id: string;
 }
-/** A group (folder) of countries, factions, cities or characters, made by the user. Added in file format 4. */
-export interface EntityGroupRow { id: string; name: string; color: string; sort_order: number; created_seq: number }
+/**
+ * A group (folder) of countries, factions, cities or characters, made by the user. Added in file format 4.
+ * `style`: its looks (JSON, see domain/group-looks.ts GroupStyle), laid over its members' as an adjustment layer is
+ * over the clips under it (D237). Added in file format 8.
+ */
+export interface EntityGroupRow { id: string; name: string; color: string; sort_order: number; created_seq: number; style: Json }
 export interface LayerRow { id: string; space_id: string; kind: LayerKind; name: string; sort_order: number; visible: number; style: Json; export_pass: string }
 export interface EventTypeRow { id: string; name: string; builtin: number; fields: Json }
 export interface EventRow {
@@ -90,7 +94,7 @@ export const TABLES: { [K in TableName]: TableDef } = {
   sequence: { key: 'id', columns: { id: 'text', name: 'text', created_seq: 'int', settings: 'text' } },
   event_group: { key: 'id', columns: { id: 'text', name: 'text', color: 'text', sort_order: 'int', created_seq: 'int' } },
   event_group_member: { key: 'id', columns: { id: 'text', group_id: 'text', event_id: 'text' } },
-  entity_group: { key: 'id', columns: { id: 'text', name: 'text', color: 'text', sort_order: 'int', created_seq: 'int' } },
+  entity_group: { key: 'id', columns: { id: 'text', name: 'text', color: 'text', sort_order: 'int', created_seq: 'int', style: 'text' }, defaults: { style: '{}' } },
   feature: { key: 'id', columns: { id: 'text', layer_id: 'text', name: 'text', entity_id: 'text', style: 'text', notes: 'text', created_seq: 'int' } },
   relation: { key: 'id', columns: { id: 'text', kind: 'text', a: 'text', b: 'text', notes: 'text', created_seq: 'int' } },
   branch: { key: 'id', columns: { id: 'text', name: 'text', parent_id: 'text', from_day: 'int', from_ms: 'int', color: 'text', notes: 'text', created_seq: 'int' } },
@@ -118,9 +122,10 @@ export function invertDiffs(diffs: RowDiff[]): RowDiff[] {
  * 5: areas, lines and points on feature layers (table feature; changes of kind 'shape').
  * 6: relationships between entities (table relation; changes of kind 'relate').
  * 7: branches, alternative timelines (table branch; events' branch_id naming one).
+ * 8: looks of groups of countries (entity_group.style, D237).
  * Older files are upgraded when opened (see ProjectDb.migrate), after an automatic backup.
  */
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 /** A row with values for any columns it predates (old backups, old undo history). */
 export function withDefaults<T extends AnyRow>(table: TableName, row: T): T {
