@@ -61,6 +61,27 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D255. Effects on a drawing (S8, fifth part)
+
+- **Why.** The drawing of the Looks studio: in a drawing's Looks, "Effects on this drawing: Outer glow · Size 12; Drop
+  shadow; Drag an effect here".
+- **A drawing's effects**: drop shadows and outer glows (`DRAWING_EFFECTS`), kept with it and checked as a country's are
+  (`effectOf`: settings held to their ranges; other kinds left out). Each is cast from what the drawing draws (its line,
+  fill and texts, or its pattern), in order, under it: the drawing is drawn alone on a spare canvas, and each shadow
+  falls from that picture (the picture itself put off the canvas, so only its shadow lands: a canvas's shadow, its
+  colour at the effect's strength, its blur, moved away from the light by its distance); then the drawing over them;
+  all at the drawing's opacity and blend, and cut by the country's borders as the drawing is. A glow is a shadow that
+  does not move. (The map's one light and a glow's spread are not used here.)
+- **In the drawing's Looks**: "Effects on this drawing", each with its switch, its settings (colour, strength, light
+  from, distance and blur for a shadow; colour, strength and size for a glow) and × to take it away; "+ Drop shadow" and
+  "+ Outer glow"; and the place to drag one to. **From the Effects panel**: with a drawing chosen in the Looks studio,
+  what is chosen is the drawing (the panel says so), so a double-click gives it there, and so does a drag into the Looks
+  panel; an effect that is not a shadow or a glow is refused with a word. Each one undo step.
+- **Tests.** Unit: a drawing's drop shadows and outer glows kept, others left out, settings held to their range.
+  Interface: a white square drawn; a drop shadow from its Looks, set 40 pixels away straight down and sharp: the
+  country's land below it darker; an outer glow double-clicked in the Effects panel, which names the drawing; the
+  shadow taken away; a border's effect refused; undone.
+
 ### D254. A drawing as a pattern that follows the country (S8, fourth part)
 
 - **Why.** The plan and the drawing of the Looks studio: "A drawing is either fixed to the land (borders cut it) or a

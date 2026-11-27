@@ -6965,6 +6965,83 @@ try {
     await page.evaluate(() => (window as any).__mapmaker.allLists());
   });
 
+  await h.step('Effects on a drawing (D255): a drop shadow added in its Looks, cast from it on the country\'s land; an outer glow by a double-click in the Effects panel; one taken away; a border effect refused; undone', async () => {
+    const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);
+    const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
+    await page.getByTestId('studio-history').click();
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
+    await h.setDate('1650');
+    await page.getByTestId('studio-looks').click();
+    await page.getByTestId('reset-workspace').click();
+    await page.evaluate(([a, b]) => (window as any).__mapmaker.store.setCamera({ lon: (a[0] + b[0]) / 2, lat: (a[1] + b[1]) / 2, zoom: 1.5, rotation: 0, projection: 'equirectangular' }), [P.a, P.b]);
+    const idA = await store(`s.world.all('entity').find((e) => e.name === ${JSON.stringify(A)}).id`) as string;
+    await page.evaluate((id) => (window as any).__mapmaker.store.set({ selection: { kind: 'entity', id }, multi: null }), idA);
+    const before = await steps();
+    const pa = await h.toPage(P.a), pb = await h.toPage(P.b);
+    const qa: [number, number] = [pa[0] + 0.3 * (pb[0] - pa[0]), pa[1] + 80];
+    // How dark a small patch about a point of the page is (the sum of its colour, on average).
+    const light = (q: [number, number]) => page.evaluate((p) => {
+      const cv = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement;
+      const r = cv.getBoundingClientRect(), k = cv.width / r.width;
+      const d = cv.getContext('2d')!.getImageData(Math.round((p[0] - r.left - 2) * k), Math.round((p[1] - r.top - 2) * k), Math.round(4 * k), Math.round(4 * k)).data;
+      let n = 0, sum = 0;
+      for (let i = 0; i < d.length; i += 4) { sum += d[i] + d[i + 1] + d[i + 2]; n++; }
+      return sum / n;
+    }, q);
+    const effects = () => store(`(JSON.parse(s.world.get('entity', ${JSON.stringify(idA)}).style || '{}').drawings ?? [])[0]?.effects.map((e) => e.kind) ?? []`) as Promise<string[]>;
+    const until = async (ok: () => Promise<boolean>) => { for (let i = 0; i < 40 && !(await ok()); i++) await page.waitForTimeout(100); };
+    // A white square, filled, no line; below it, beside it, the country's own colour.
+    await page.getByTestId('tool-shape').click();
+    await page.getByTestId('shape-rectangle').click();
+    if (await page.getByTestId('draw-stroke-on').isChecked()) await page.getByTestId('draw-stroke-on').uncheck();
+    await page.getByTestId('draw-fill-on').check();
+    await page.getByTestId('draw-fill-color').fill('#ffffff');
+    const below: [number, number] = [qa[0] + 4, qa[1] + 22];
+    const l0 = await light(below);
+    await page.mouse.move(qa[0] - 12, qa[1] - 12);
+    await page.mouse.down();
+    await page.mouse.move(qa[0] + 12, qa[1] + 12, { steps: 3 });
+    await page.mouse.up();
+    await h.saved();
+    // A drop shadow, from its Looks: far below and sharp, black.
+    await page.getByTestId('drawing-add-shadow').click();
+    await h.saved();
+    await page.getByTestId('drawing-effect-0-distance').fill('40');
+    await page.getByTestId('drawing-effect-0-distance').press('Enter');
+    await h.saved();
+    await page.getByTestId('drawing-effect-0-blur').fill('0');
+    await page.getByTestId('drawing-effect-0-blur').press('Enter');
+    await h.saved();
+    await page.getByTestId('drawing-effect-0-angle').fill('90');
+    await page.getByTestId('drawing-effect-0-angle').press('Enter');
+    await h.saved();
+    assert.deepEqual(await effects(), ['shadow']);
+    await until(async () => (await light(below)) < l0 - 40);
+    assert.ok((await light(below)) < l0 - 40, `its shadow below it, on the country's land (${l0} then ${await light(below)})`);
+    await h.screenshot('looks-drawing-shadow');
+    // An outer glow by a double-click in the Effects panel (to the drawing chosen); the shadow taken away.
+    assert.match(await page.getByTestId('effects-panel').innerText(), /the drawing “Drawing 1”/);
+    await page.getByTestId('effect-countries:outer-glow').dblclick();
+    await h.saved();
+    assert.deepEqual(await effects(), ['shadow', 'outer-glow']);
+    await page.getByTestId('drawing-effect-0-remove').click();
+    await h.saved();
+    assert.deepEqual(await effects(), ['outer-glow']);
+    // A border's effect is not for a drawing.
+    if (!(await page.getByTestId('effect-borders:plain').isVisible().catch(() => false))) await page.getByTestId('effects-folder-head-borders').click();
+    await page.getByTestId('effect-borders:plain').dblclick();
+    await h.saved();
+    assert.deepEqual(await effects(), ['outer-glow'], 'refused');
+    // Undone, step by step.
+    for (let i = 0; i < 12 && (await steps()) > before; i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await steps(), before);
+    assert.deepEqual(await effects(), []);
+    await page.getByTestId('tool-select').click();
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null, drawNew: { stroke: { color: '#2b1d12', width: 2 }, fill: null } }));
+    await page.getByTestId('studio-history').click();
+    await page.evaluate(() => (window as any).__mapmaker.allLists());
+  });
+
   await h.step('The menu bar: every command in a menu with its shortcut; the keyboard runs the same commands (D197)', async () => {
     const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);
     await page.getByTestId('studio-history').click();

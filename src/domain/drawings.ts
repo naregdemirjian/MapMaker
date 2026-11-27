@@ -5,7 +5,7 @@
 // country's borders cut it (where the country does not hold the land, it is not seen). Pure data here: what a drawing
 // is, how it is kept and checked, shapes made from a box drawn on the screen, what lies under the pointer; the
 // renderer draws them (render-engine/drawings.ts), the commands change them (commands.ts).
-import { BLEND_MODES, type BlendMode } from '../render-engine/country-look.ts';
+import { BLEND_MODES, effectOf, type BlendMode, type Effect } from '../render-engine/country-look.ts';
 
 export type LL = [number, number];
 export type Pt = [number, number];
@@ -44,11 +44,15 @@ export interface Drawing {
    */
   mode: 'land' | 'pattern';
   tile: [number, number] | null;
+  /** Effects on the drawing (D255): drop shadows and outer glows, cast from what it draws, in order. */
+  effects: Effect[];
   shapes: DrawShape[];
 }
+/** The effects a drawing takes (D255). */
+export const DRAWING_EFFECTS = ['shadow', 'outer-glow'] as const;
 
 /** A new drawing's looks: a dark line two pixels wide, not filled, as drawn, fixed to the land. */
-export const NEW_DRAWING: Omit<Drawing, 'id' | 'name' | 'shapes'> = { on: true, stroke: { color: '#2b1d12', width: 2 }, fill: null, opacity: 1, blend: 'normal', mode: 'land', tile: null };
+export const NEW_DRAWING: Omit<Drawing, 'id' | 'name' | 'shapes'> = { on: true, stroke: { color: '#2b1d12', width: 2 }, fill: null, opacity: 1, blend: 'normal', mode: 'land', tile: null, effects: [] };
 /** The widest and highest tile a pattern has (pixels of a frame 1920 wide). */
 export const MOST_TILE = 2000;
 /** At most, for a country: drawings, shapes in a drawing, anchors in a shape. */
@@ -113,6 +117,7 @@ export function drawingOf(v: unknown): Drawing | null {
     blend: (BLEND_MODES as readonly string[]).includes(d.blend as string) ? (d.blend as BlendMode) : 'normal',
     mode,
     tile: mode === 'pattern' ? tile : null,
+    effects: Array.isArray(d.effects) ? d.effects.slice(0, 8).map(effectOf).filter((e): e is Effect => !!e && (DRAWING_EFFECTS as readonly string[]).includes(e.kind)) : [],
     shapes: Array.isArray(d.shapes) ? d.shapes.slice(0, MOST_SHAPES).map((x) => shapeOf(x, mode === 'pattern' ? 'tile' : 'land')).filter((x): x is DrawShape => !!x) : [],
   };
 }

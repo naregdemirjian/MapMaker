@@ -11,6 +11,9 @@ import { givesTo, receiversText, withEffect, borderWith, labelWith, type EffectI
 import { GRAPHIC_TEMPLATES } from '../presentation/graphic-style.ts';
 import { shotTransitions, withTransitionLook, type ShotSettings } from '../presentation/sequence.ts';
 import { eventsBoxOf } from '../presentation/events-box.ts';
+import { drawingNow } from './panels/DrawingLooks.tsx';
+import { EFFECT_DEFAULTS } from '../render-engine/country-look.ts';
+import { DRAWING_EFFECTS } from '../domain/drawings.ts';
 
 /** Something an effect is given to. */
 export type Target =
@@ -18,11 +21,15 @@ export type Target =
   | { kind: 'group'; id: string }
   | { kind: 'layer'; id: string }
   | { kind: 'event'; id: string }
-  | { kind: 'shot'; id: string };
+  | { kind: 'shot'; id: string }
+  // (A drawing of a country's design, chosen in the Looks studio, D255.)
+  | { kind: 'drawing'; owner: string; id: string };
 
 /** What is chosen, as things an effect can be given to: every country chosen, a group, a layer, an event; in Presentation, the shot open. */
 export function chosenTargets(): Target[] {
   const s = store, sel = s.selection;
+  const dn = s.pageNow() === 'looks' ? drawingNow() : null;
+  if (dn) return [{ kind: 'drawing', owner: dn.owner, id: dn.drawing.id }];
   if (sel?.kind === 'entity') {
     const ids = s.multi?.kind === 'entity' && s.multi.ids.includes(sel.id) ? s.multi.ids : [sel.id];
     return ids.map((id) => ({ kind: 'entity', id }));
@@ -44,11 +51,12 @@ export function targetsText(targets: Target[]): string {
     case 'layer': return `the layer “${w.get('layer', t.id)?.name ?? ''}”`;
     case 'event': return `the event “${w.get('event', t.id)?.name ?? ''}”`;
     case 'shot': return `the shot “${w.get('sequence', t.id)?.name ?? ''}”`;
+    case 'drawing': return `the drawing “${cmd.drawingsOfEntity(w.get('entity', t.owner)).find((x) => x.id === t.id)?.name ?? ''}”`;
   }
 }
 
 const isCountry = (id: string) => { const t = store.world?.get('entity', id)?.type_id; return t === 'polity' || t === 'faction'; };
-const receiverOf = (t: Target): Receiver | null => (t.kind === 'entity' ? (isCountry(t.id) ? 'country' : null) : t.kind);
+const receiverOf = (t: Target): Receiver | null => (t.kind === 'entity' ? (isCountry(t.id) ? 'country' : null) : t.kind === 'drawing' ? null : t.kind);
 const EMPTY: CountryLook = { elevation: 0, opacity: 1, effects: [] };
 const lc = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
 
@@ -62,6 +70,14 @@ export function give(item: EffectItem, targets: Target[]): { ok: boolean; messag
   if (!w) return { ok: false, message: 'Open a project first.' };
   if (!targets.length) return { ok: false, message: `Choose something to give “${item.name}” to (${receiversText(item)}), or drag it there.` };
   const first = targets[0];
+  // (A drawing takes the effects that cast from what it draws, D255.)
+  if (first.kind === 'drawing') {
+    const d = cmd.drawingsOfEntity(w.get('entity', first.owner)).find((x) => x.id === first.id);
+    if (!d) return { ok: false, message: 'That drawing is no longer there.' };
+    if (item.folder !== 'countries' || !(DRAWING_EFFECTS as readonly string[]).includes(item.kind)) return { ok: false, message: 'A drawing takes a drop shadow or an outer glow.' };
+    s.executeLooks((wd) => cmd.updateDrawing(wd, first.owner, first.id, { effects: [...d.effects, { ...EFFECT_DEFAULTS[item.kind as (typeof DRAWING_EFFECTS)[number]] }] }));
+    return { ok: true, message: `${item.name} given to the drawing “${d.name}”.` };
+  }
   const recv = receiverOf(first);
   if (!recv) return { ok: false, message: `Effects are for countries; a person's or a city's looks are in its Looks panel.` };
   // (Borders belong to a layer: given to a country or a group, the layer drawn on.)

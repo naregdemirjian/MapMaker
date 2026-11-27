@@ -66,7 +66,7 @@ test('what lies under the pointer: inside a filled shape, on the line of one not
   assert.equal(hitsShape(box, project, [50, 50], false, 1), false, 'inside, not filled');
   assert.equal(hitsShape(box, project, [50, 3], false, 1), true, 'on its line');
   assert.equal(hitsShape(box, project, [150, 50], true, 1), false, 'outside');
-  const d = (id: string, fill: string | null, on = true): Drawing => ({ id, name: id, on, stroke: { color: '#000000', width: 2 }, fill, opacity: 1, blend: 'normal', mode: 'land', tile: null, shapes: [box] });
+  const d = (id: string, fill: string | null, on = true): Drawing => ({ id, name: id, on, stroke: { color: '#000000', width: 2 }, fill, opacity: 1, blend: 'normal', mode: 'land', tile: null, effects: [], shapes: [box] });
   assert.equal(drawingAt([d('lower', '#ff0000'), d('upper', '#00ff00')], project, [50, 50], 1)?.id, 'upper');
   assert.equal(drawingAt([d('lower', '#ff0000'), d('upper', '#00ff00', false)], project, [50, 50], 1)?.id, 'lower', 'a hidden one passed over');
   assert.equal(drawingAt([d('lower', null)], project, [50, 50], 1), null);
@@ -143,14 +143,14 @@ test('texts (D253): kept and checked, a box to point at, turned with the text; a
   assert.equal(hitsShape(flat, project, [100 + b.hw - 2, -200], false, 0, 0), true, 'at its end');
   assert.equal(hitsShape(flat, project, [100, -200 + 30], false, 0, 0), false, 'below it');
   assert.equal(hitsShape({ ...flat, angle: 90 }, project, [100, -200 + b.hw - 2], false, 0, 0), true, 'turned upright: along it');
-  const d: Drawing = { id: 'x', name: 'Words', on: true, stroke: { color: '#000000', width: 1 }, fill: null, opacity: 1, blend: 'normal', mode: 'land', tile: null, shapes: [flat] };
+  const d: Drawing = { id: 'x', name: 'Words', on: true, stroke: { color: '#000000', width: 1 }, fill: null, opacity: 1, blend: 'normal', mode: 'land', tile: null, effects: [], shapes: [flat] };
   assert.equal(drawingShows(d), true);
   assert.equal(drawingAt([d], project, [100, -200], 1)?.id, 'x');
 });
 
 test('a pattern that follows the country (D254): made from the drawing as seen, laid back on the land as it was; kept and checked', () => {
   const sq = boxShape('rectangle', [100, 100], [140, 120], unproject)!;
-  const d: Drawing = { id: 'p', name: 'Crowns', on: true, stroke: { color: '#000000', width: 2 }, fill: '#ffcc00', opacity: 1, blend: 'normal', mode: 'land', tile: null, shapes: [sq, { kind: 'text', at: unproject([120, 140]), text: 'A', size: 10, font: 'Georgia', weight: 600, italic: false, angle: 0 }] };
+  const d: Drawing = { id: 'p', name: 'Crowns', on: true, stroke: { color: '#000000', width: 2 }, fill: '#ffcc00', opacity: 1, blend: 'normal', mode: 'land', tile: null, effects: [], shapes: [sq, { kind: 'text', at: unproject([120, 140]), text: 'A', size: 10, font: 'Georgia', weight: 600, italic: false, angle: 0 }] };
   // At a unit of 2 (a frame twice as wide as 1920): sizes in the tile are halved.
   const p = toPattern(d, project, 2, 10)!;
   assert.equal(p.mode, 'pattern');
@@ -169,4 +169,11 @@ test('a pattern that follows the country (D254): made from the drawing as seen, 
   assert.equal(drawingOf({ ...p, tile: null })!.mode, 'land');
   assert.equal(toPattern({ ...d, shapes: [] }, project, 1), null, 'nothing to make one of');
   assert.equal(drawingAt([p], project, [50, 50], 1), null, 'a pattern is not chosen by a click');
+});
+
+test('effects on a drawing (D255): drop shadows and outer glows kept, others left out', () => {
+  const d = drawingOf({ id: 'e', shapes: [], effects: [{ kind: 'shadow', distance: 9999, color: 'nope' }, { kind: 'outer-glow' }, { kind: 'bevel' }, { kind: 'nonsense' }] })!;
+  assert.deepEqual(d.effects.map((e) => e.kind), ['shadow', 'outer-glow']);
+  const sh = d.effects[0] as { distance: number; color: string };
+  assert.ok(sh.distance <= 200 && /^#[0-9a-f]{6}$/.test(sh.color), 'held to its range, a colour by default');
 });

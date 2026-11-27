@@ -5,7 +5,7 @@
 // A pattern that follows the country (D254): one tile of its shapes, repeated over all of the country's land, the
 // tile's middle on the middle of the country, so that it goes where the country goes.
 import { screenPath, traceSegs, drawingShows, textFont, type Drawing, type LL, type Pt, type TextShape } from '../domain/drawings.ts';
-import { compositeOf } from './country-look.ts';
+import { compositeOf, castOf, shadowOffset, rgbaOf } from './country-look.ts';
 
 type Ctx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 
@@ -97,8 +97,9 @@ function fillPattern(on: Ctx, d: Drawing, unit: number, around: Around): boolean
 export function paintDrawings(c: CanvasRenderingContext2D, tmp: CanvasRenderingContext2D, list: Drawing[], project: (ll: LL) => Pt | null, unit: number, around?: Around): void {
   for (const d of list) {
     if (!drawingShows(d) || (d.mode === 'pattern' && !around)) continue;
-    // (Laid on as it is, unless an opacity or a blend applies to its line and fill together.)
-    const alone = d.opacity >= 1 && d.blend === 'normal';
+    // (Laid on as it is, unless an opacity or a blend applies to its line and fill together, or it casts shadows.)
+    const casts = d.effects.map(castOf).filter((x) => !!x);
+    const alone = d.opacity >= 1 && d.blend === 'normal' && !casts.length;
     const on = alone ? c : tmp;
     if (!alone) {
       tmp.save();
@@ -112,6 +113,21 @@ export function paintDrawings(c: CanvasRenderingContext2D, tmp: CanvasRenderingC
     c.setTransform(1, 0, 0, 1, 0, 0);
     c.globalAlpha *= d.opacity;
     c.globalCompositeOperation = compositeOf(d.blend);
+    // Its drop shadows and outer glows (D255), cast from what it draws: each a shadow of the picture alone, the picture
+    // itself put far off the canvas so that only its shadow falls on it. Then the drawing over them.
+    if (casts.length) {
+      const m = tmp.getTransform(), k = Math.hypot(m.a, m.b) || 1, far = tmp.canvas.width + 64;
+      for (const sh of casts) {
+        const [dx, dy] = shadowOffset(sh, unit * k);
+        c.save();
+        c.shadowColor = rgbaOf(sh.color, sh.opacity);
+        c.shadowBlur = sh.blur * unit * k;
+        c.shadowOffsetX = dx + far;
+        c.shadowOffsetY = dy;
+        c.drawImage(tmp.canvas as CanvasImageSource, -far, 0);
+        c.restore();
+      }
+    }
     c.drawImage(tmp.canvas as CanvasImageSource, 0, 0);
     c.restore();
   }

@@ -4,14 +4,14 @@
 // the shape to draw, and the line and fill of the drawing being drawn into (of a new one, before there is one).
 import { useStore, store } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
-import { BLEND_MODES, BLEND_NAMES, type BlendMode } from '../../render-engine/country-look.ts';
+import { BLEND_MODES, BLEND_NAMES, EFFECTS, EFFECT_DEFAULTS, type BlendMode, type Effect } from '../../render-engine/country-look.ts';
 import { PropGroup } from '../shell/Group.tsx';
 import { NumberField } from '../inputs.tsx';
 import { LABEL_FONTS } from '../../render-engine/label-style.ts';
 import { makeView, lonLatToScreen, screenToLonLat } from '../../render-engine/camera.ts';
 import { territoryPolygons } from '../../domain/data-export.ts';
 import { boxOf, middleOf } from '../stage.ts';
-import { toPattern, toLand, type Drawing, type DrawStroke, type TextShape, type Pt } from '../../domain/drawings.ts';
+import { toPattern, toLand, DRAWING_EFFECTS, type Drawing, type DrawStroke, type TextShape, type Pt } from '../../domain/drawings.ts';
 
 /** The drawing designed: of the country chosen, the one chosen in its parts (null: none, or no longer there). */
 export function drawingNow(s = store): { owner: string; drawing: Drawing } | null {
@@ -91,6 +91,39 @@ function TextFields({ t, set, prefix }: { t: Pick<TextShape, 'size' | 'font' | '
   );
 }
 
+/** The effects on a drawing (D255), as drawn: each with its settings, added by its button or dragged from the Effects panel. */
+function DrawingEffects({ owner, d }: { owner: string; d: Drawing }) {
+  const s = useStore();
+  const put = (effects: Effect[]) => s.executeLooks((wd) => cmd.updateDrawing(wd, owner, d.id, { effects }));
+  const setAt = (k: number, patch: Record<string, unknown>) => put(d.effects.map((e, j) => (j === k ? ({ ...e, ...patch } as Effect) : e)));
+  return (
+    <PropGroup id="drawing:effects" title="Effects on this drawing">
+      {d.effects.map((e, k) => (
+        <div key={k} className="drawing-effect" data-testid={`drawing-effect-${k}`}>
+          <div className="drawing-effect-head">
+            <label className="check"><input type="checkbox" checked={e.on} onChange={(ev) => setAt(k, { on: ev.target.checked })} data-testid={`drawing-effect-${k}-on`} /> {EFFECTS[e.kind].name}</label>
+            <button className="small danger" onClick={() => put(d.effects.filter((_, j) => j !== k))} title="Take this effect away" data-testid={`drawing-effect-${k}-remove`}>×</button>
+          </div>
+          <div className="two">
+            {EFFECTS[e.kind].fields.filter((f) => f.key !== 'light' && f.key !== 'spread').map((f) => {
+              const v = (e as unknown as Record<string, unknown>)[f.key];
+              const id = `drawing-effect-${k}-${f.key}`;
+              if (f.type === 'colour') return <label key={f.key}>{f.label}<input type="color" value={v as string} onChange={(ev) => setAt(k, { [f.key]: ev.target.value })} data-testid={id} /></label>;
+              if (f.type === 'percent') return <label key={f.key}>{f.label}<NumberField value={Math.round((v as number) * 100)} min={0} max={100} step={5} onCommit={(n) => setAt(k, { [f.key]: n / 100 })} testId={id} /></label>;
+              if (f.type === 'number') return <label key={f.key}>{f.label}<NumberField value={v as number} min={f.min} max={f.max} step={f.step} onCommit={(n) => setAt(k, { [f.key]: n })} testId={id} /></label>;
+              return null;
+            })}
+          </div>
+        </div>
+      ))}
+      <div className="buttons">
+        {DRAWING_EFFECTS.map((kind) => <button key={kind} className="small" onClick={() => put([...d.effects, { ...EFFECT_DEFAULTS[kind] }])} data-testid={`drawing-add-${kind}`}>+ {EFFECTS[kind].name}</button>)}
+      </div>
+      <p className="drop-here muted small-text" data-testid="drawing-drop">Drag a drop shadow or an outer glow here from the Effects panel (or double-click it there).</p>
+    </PropGroup>
+  );
+}
+
 /** A drawing chosen in the Looks studio's parts: its looks, in the Looks panel. */
 export function DrawingLooks({ owner, drawing: d }: { owner: string; drawing: Drawing }) {
   const s = useStore();
@@ -117,6 +150,7 @@ export function DrawingLooks({ owner, drawing: d }: { owner: string; drawing: Dr
         <label>This drawing is<ModeChoice owner={owner} d={d} testId="drawing-mode" /></label>
         <p className="muted small-text">{d.shapes.length === 1 ? 'One shape' : `${d.shapes.length} shapes`}{d.mode === 'pattern' ? `, a pattern repeated over all of the land of ${e.name} wherever it lies. Lay it on the land again to draw into it.` : `, fixed to the land: the borders of ${e.name} cut it.`}</p>
       </PropGroup>
+      <DrawingEffects owner={owner} d={d} />
       {d.shapes.some((sh) => sh.kind === 'text') && (
         <PropGroup id="drawing:texts" title="Texts">
           {d.shapes.map((sh, k) => sh.kind !== 'text' ? null : (
