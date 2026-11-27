@@ -61,6 +61,30 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D247. The outline of events (S6, seventh part)
+
+- **Why.** The drawing of the Timeline studio has three views of the events, "Tracks", "Table" and "Outline", and the
+  plan has the studio "make, retime, group, nest" events. The outline shows how they nest.
+- **Where**: "Outline", a tab beside the timeline and the table in the Timeline studio (it docks like every panel).
+- **The tree** (`domain/event-outline.ts`, pure): chapter by chapter as in the table (the groups of events in their
+  order, an event under the first of its groups, those in none last); in a chapter, each event under the shortest
+  longer event that holds it (a battle in a campaign in a war: as deep as the events go, where the timeline draws one
+  level, D211); events of the same span stand side by side; every level in order of start.
+- **Rows**: a twisty for an event holding others (folded, "3 within"), drawn (✓) or planned (a dashed box), the name,
+  its dates; indented by depth. A click chooses the event and goes to its start; Ctrl and Shift choose several (the
+  lists' chosen events); a double-click renames it in place (one undo step); right-click as in the lists (a shot of
+  them among the rest). The arrow keys: up and down along the rows, right opens an event or goes into it, left folds
+  it or goes up to what holds it. Open all, Fold all; the folds kept with the project's other folds. A filter by
+  name keeps the events it finds and those holding them, opened.
+- **Not done**: nesting by dragging a row onto another (an event's place in the tree follows from its dates; the
+  timeline moves and stretches them, D245).
+- **Tests.** Unit: the tree (three levels, siblings in order of start, events of the same span side by side, a moment
+  at a war's end held by it, events crossing each other not), how many an event holds, what holds it; the rows shown,
+  folded and filtered. Interface: a war, a campaign, a battle, a siege and a treaty planned in a group of their own;
+  the Outline tab with the war holding the campaign holding the battle; folded ("3 within"); a row chosen and the date
+  at its start; the arrow keys up, right (opens, goes in), left (folds, goes up); Ctrl+click; renamed in place;
+  filtered to the battle with what holds it; Fold all, Open all; undone.
+
 ### D246. The map's calendar, a panel of the Timeline studio (S6, sixth part)
 
 - **Why.** In the plan the Timeline studio owns "events, their dates and lengths, groups, types, branches, calendars,

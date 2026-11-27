@@ -631,6 +631,22 @@ label.indent { margin-left: 24px; }
 .et-shift { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 5px 8px; background: var(--panel2); border-bottom: 1px solid var(--line); }
 .et-shift input[type=number] { width: 70px; }
 .et-scroll { flex: 1; min-height: 0; overflow: auto; }
+/* The outline of events (D247): rows indented by how deep they are held, a twisty for those holding others. */
+.event-outline-panel { display: flex; flex-direction: column; height: 100%; min-height: 0; outline: none; }
+.ol-scroll { flex: 1; min-height: 0; overflow: auto; padding-bottom: 8px; }
+.ol-chapter { padding: 6px 8px; background: var(--panel); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 1; }
+.ol-row { display: flex; align-items: center; gap: 6px; min-height: 24px; padding-right: 8px; cursor: default; white-space: nowrap; }
+.ol-row:hover { background: var(--hover-bg); }
+.ol-row.sel, .ol-row.sel:hover { background: var(--sel); }
+.ol-row.dim { opacity: 0.55; }
+.ol-twisty { flex: none; width: 16px; padding: 0; border: none; background: transparent; color: var(--muted); font-size: 11px; text-align: center; }
+.ol-twisty:hover:not(:disabled) { background: transparent; color: var(--text); }
+.ol-row .et-yes { color: var(--ok); font-weight: 700; width: 12px; text-align: center; }
+.ol-row .et-planned { display: inline-block; flex: none; width: 11px; height: 11px; border: 1.5px dashed var(--muted); border-radius: 2px; }
+.ol-name { overflow: hidden; text-overflow: ellipsis; }
+.ol-row input { padding: 1px 5px; min-width: 160px; }
+.ol-date { font-size: 12px; }
+.ol-held { font-size: 12px; margin-left: auto; }
 table.et { width: 100%; border-collapse: collapse; font-size: 12px; }
 table.et th { position: sticky; top: 0; z-index: 1; background: var(--panel); text-align: left; font-weight: 600; font-size: 10.5px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); padding: 5px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
 table.et td { padding: 3px 8px; border-bottom: 1px solid var(--line2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; vertical-align: middle; }

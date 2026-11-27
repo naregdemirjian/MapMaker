@@ -5224,7 +5224,7 @@ try {
     await page.getByTestId('reset-workspace').click();
     assert.equal(await store('s.pageNow()'), 'timeline');
     assert.equal(Math.round((await box('[data-testid="dock-stack-viewer"]')).height), 200);
-    assert.ok((await box('[data-testid="dock-stack-timeline-event-table"]')).height > 2 * (await box('[data-testid="dock-stack-viewer"]')).height, 'the timeline (with the table, D242) takes the room');
+    assert.ok((await box('[data-testid="dock-stack-timeline-event-table-event-outline"]')).height > 2 * (await box('[data-testid="dock-stack-viewer"]')).height, 'the timeline (with the table, D242) takes the room');
     assert.equal(await page.getByTestId('tool-strip').count(), 0);
     assert.equal(await page.getByTestId('options-bar').count(), 0);
     assert.equal(await store('s.tool'), 'select');
@@ -6338,6 +6338,84 @@ try {
     for (let i = 0; i < 10 && (await steps()) > before; i++) { await page.getByTestId('undo').click(); await h.saved(); }
     assert.equal(await steps(), before);
     await page.evaluate((t) => (window as any).__mapmaker.store.setTime(t), keep);
+    await page.getByTestId('studio-history').click();
+    await page.evaluate(() => (window as any).__mapmaker.allLists());
+  });
+
+  await h.step('The outline of events (D247): a tab beside the timeline and the table; each event under the longer one holding it; folded and opened; the arrow keys; renamed in place; filtered; undone', async () => {
+    const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);
+    const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
+    await page.getByTestId('studio-history').click();
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
+    const before = await steps();
+    // A war holding a campaign holding a battle, and a treaty after them, in a group of their own.
+    await page.evaluate(() => {
+      const m = (window as any).__mapmaker, s = m.store, g = m.bench.gregorian, Y = (y: number, mo = 1, d = 1) => g.fromCivil({ year: y, month: mo, day: d });
+      return s.execute((wd: unknown) => m.bench.commands.importEvents(wd, [
+        { name: 'War of the Fords', start: Y(1337), end: Y(1356), groups: ['Fords chapter'] },
+        { name: 'Siege of Sel', start: Y(1350), end: Y(1351), groups: ['Fords chapter'] },
+        { name: 'The northern campaign', start: Y(1340), end: Y(1345), groups: ['Fords chapter'] },
+        { name: 'Battle of the Fords', start: Y(1342, 8, 3), end: Y(1342, 8, 5), groups: ['Fords chapter'] },
+        { name: 'Treaty of the Fords', start: Y(1357), end: null, groups: ['Fords chapter'] },
+      ]));
+    });
+    await h.saved();
+    await page.getByTestId('studio-timeline').click();
+    await page.getByTestId('reset-workspace').click();
+    await page.getByTestId('dock-tab-event-outline').click();
+    const ol = page.getByTestId('outline');
+    await ol.waitFor();
+    const rows = () => ol.locator('.ol-row').evaluateAll((els) => els.map((e) => `${e.getAttribute('data-depth')}:${e.querySelector('.ol-name')?.textContent ?? ''}`));
+    // (Its own events only, by name: other chapters may hold events of like names.)
+    const mine = new Set(['War of the Fords', 'The northern campaign', 'Battle of the Fords', 'Siege of Sel', 'Siege of Sel castle', 'Treaty of the Fords']);
+    const wars = async () => (await rows()).filter((r) => mine.has(r.slice(r.indexOf(':') + 1)));
+    assert.deepEqual(await wars(), ['0:War of the Fords', '1:The northern campaign', '2:Battle of the Fords', '1:Siege of Sel', '0:Treaty of the Fords']);
+    await page.getByTestId('ol-chapter-Fords chapter').waitFor();
+    await h.screenshot('timeline-outline');
+    // Folded: what it holds is hidden, and counted.
+    await page.getByTestId('ol-twisty-War of the Fords').click();
+    assert.deepEqual(await wars(), ['0:War of the Fords', '0:Treaty of the Fords']);
+    assert.equal(await page.getByTestId('ol-held-War of the Fords').innerText(), '3 within');
+    // A row chosen: the event selected, the date at its start; the arrow keys go along and open.
+    await page.getByTestId('ol-row-Treaty of the Fords').click();
+    const id = (name: string) => store(`s.world.all('event').find((e) => e.name === ${JSON.stringify(name)}).id`);
+    assert.deepEqual(await store('s.selection'), { kind: 'event', id: await id('Treaty of the Fords') });
+    assert.equal(await store('s.time.day'), await store(`s.world.get('event', s.selection.id).start_day`));
+    await page.keyboard.press('ArrowUp');
+    assert.deepEqual(await store('s.selection'), { kind: 'event', id: await id('War of the Fords') });
+    await page.keyboard.press('ArrowRight');
+    assert.deepEqual(await wars(), ['0:War of the Fords', '1:The northern campaign', '2:Battle of the Fords', '1:Siege of Sel', '0:Treaty of the Fords'], 'opened');
+    await page.keyboard.press('ArrowRight');
+    assert.deepEqual(await store('s.selection'), { kind: 'event', id: await id('The northern campaign') }, 'into it');
+    await page.keyboard.press('ArrowLeft');
+    assert.deepEqual(await wars(), ['0:War of the Fords', '1:The northern campaign', '1:Siege of Sel', '0:Treaty of the Fords'], 'the campaign folded');
+    await page.keyboard.press('ArrowLeft');
+    assert.deepEqual(await store('s.selection'), { kind: 'event', id: await id('War of the Fords') }, 'up to what holds it');
+    // Ctrl+click chooses another as well.
+    await page.keyboard.down('Control');
+    await page.getByTestId('ol-row-Treaty of the Fords').click();
+    await page.keyboard.up('Control');
+    assert.equal(((await store(`s.chosen('event')`)) as string[]).length, 2);
+    // Renamed in place, one undo step.
+    await page.getByTestId('ol-row-Siege of Sel').dblclick();
+    await page.getByTestId('ol-rename').fill('Siege of Sel castle');
+    await page.getByTestId('ol-rename').press('Enter');
+    await h.saved();
+    await page.getByTestId('ol-row-Siege of Sel castle').waitFor();
+    // Filtered: the battle, with what holds it, opened.
+    await page.getByTestId('ol-filter').fill('Battle');
+    assert.deepEqual(await wars(), ['0:War of the Fords', '1:The northern campaign', '2:Battle of the Fords']);
+    await page.getByTestId('ol-filter').press('Escape');
+    // Fold all, open all.
+    await page.getByTestId('ol-fold-all').click();
+    assert.deepEqual(await wars(), ['0:War of the Fords', '0:Treaty of the Fords']);
+    await page.getByTestId('ol-open-all').click();
+    assert.equal((await wars()).length, 5);
+    // Undone, step by step.
+    for (let i = 0; i < 10 && (await steps()) > before; i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await steps(), before);
+    assert.equal(await store(`s.world.all('event').filter((e) => /Fords|Siege of Sel/.test(e.name)).length`), 0);
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null, multi: null }));
     await page.getByTestId('studio-history').click();
     await page.evaluate(() => (window as any).__mapmaker.allLists());
   });
