@@ -264,6 +264,8 @@ export class AppStore {
   timelineSnap = true;
   /** Move everything after (D245): moving an event, or its end, moves the events after it by as much. */
   timelineRipple = false;
+  /** The Looks studio's stage (D249): the thing designed drawn alone, the other countries muted. */
+  stageAlone = false;
   timelineFind = '';
   /** The timeline's tracks as last laid out (pixels from the left edge of its picture; `top`: where the first begins). Not watched. */
   timelineLaid: { tracks: TLTrack[]; top: number; span?: [number, number] | null } | null = null;

@@ -49,5 +49,5 @@ experience only: no new map features while this is built.
    (D241); the table of events (D242); planned events, Draw in History, a shot of an event (D243); History's compact
    time bar (D244); several events at once: chosen, moved, stretched, Move everything after, a shot of them (D245);
    the map's calendar (D246); the outline of events (D247). Done.
-7. **Looks studio (S7)**: the parts, as drawn (D248); the stage; saving a stack as an effect.
+7. **Looks studio (S7)**: the parts, as drawn (D248); the stage (D249); saving a stack as an effect.
 8. **Designing by hand (S8)**: pen and shapes, text; then the brush.

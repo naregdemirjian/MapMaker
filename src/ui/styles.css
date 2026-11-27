@@ -631,6 +631,13 @@ label.indent { margin-left: 24px; }
 .et-shift { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 5px 8px; background: var(--panel2); border-bottom: 1px solid var(--line); }
 .et-shift input[type=number] { width: 70px; }
 .et-scroll { flex: 1; min-height: 0; overflow: auto; }
+/* The Looks studio's stage (D249): the thing designed over the map, alone or on it, far, middle or near. */
+.stage-bar { flex: none; display: flex; align-items: center; gap: 10px; padding: 4px 10px; background: var(--panel); border-bottom: 1px solid var(--line); min-width: 0; }
+.stage-bar .stage-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.stage-bar .seg { display: inline-flex; gap: 0; }
+.stage-bar .seg button { border-radius: 0; margin-left: -1px; }
+.stage-bar .seg button:first-child { border-radius: 5px 0 0 5px; margin-left: 0; }
+.stage-bar .seg button:last-child { border-radius: 0 5px 5px 0; }
 /* The Looks studio's Parts panel (D248): the thing designed, its parts top to bottom, something else to design. */
 .look-parts { padding: 8px; overflow-y: auto; }
 .parts-head { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }

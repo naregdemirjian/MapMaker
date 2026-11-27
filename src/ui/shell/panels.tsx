@@ -18,6 +18,7 @@ import { EventTablePanel } from '../panels/EventTable.tsx';
 import { CalendarPanel } from '../components/CalendarDialog.tsx';
 import { EventOutlinePanel } from '../panels/EventOutline.tsx';
 import { LookPartsPanel } from '../panels/LookParts.tsx';
+import { StageBar } from '../components/StageBar.tsx';
 import { TimeBar } from '../components/TimeBar.tsx';
 import { presents } from './studios.ts';
 import { VIEWER, type PanelId } from './dock.ts';
@@ -28,7 +29,8 @@ function Viewer() {
   const sp = s.world!.get('map_space', s.spaceId);
   if (!sp) return <div className="viewer-panel"><NoMap /></div>;
   // (Effects let go over the map go to the country there, D238; space maps take none.)
-  return <div className="viewer-panel" data-drop={isSpaceMap(sp) ? undefined : 'map'}>{isSpaceMap(sp) ? <SpaceView /> : <MapView />}</div>;
+  // (In the Looks studio, the map is the stage, D249: over it, the thing designed, alone or on the map, far, middle, near.)
+  return <div className="viewer-panel" data-drop={isSpaceMap(sp) ? undefined : 'map'}>{s.pageNow() === 'looks' && !isSpaceMap(sp) && <StageBar />}{isSpaceMap(sp) ? <SpaceView /> : <MapView />}</div>;
 }
 
 /** A project with no map yet (D235): its first is chosen in Map Studio's gallery. */

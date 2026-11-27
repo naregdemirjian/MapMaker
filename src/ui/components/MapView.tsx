@@ -44,6 +44,7 @@ import { prepareSmart, smartLine, type SmartPrepared, type SmartWeights } from '
 import { smartInputFor } from '../smart-input.ts';
 import { reachAt } from './Reach.tsx';
 import { SmartAdjustPanel } from './SmartBrush.tsx';
+import { aloneWorld, keptBy } from '../stage.ts';
 import { CompareBar } from './CompareBar.tsx';
 import type { AdjustState } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
@@ -518,7 +519,9 @@ export function MapView() {
     // (In a shot, the names on the map keep clear of its texts, as in its exports, D178.)
     const overlaid = shot ? (s.presentOverlay ? moveOverlay(shot, s.presentOverlay.id, s.presentOverlay.dx, s.presentOverlay.dy, s.presentOverlay.from) : shot) : null;
     // (With the shot's own looks, and its keyed settings at the frame shown: D239, D240.)
-    const looked = shot ? shotLooksAt(s.world, shot, s.shotFrame) : s.world;
+    // (In the Looks studio, the thing designed alone on the stage, D249: the other countries muted.)
+    const kept = !shot && s.stageAlone && s.pageNow() === 'looks' ? keptBy(s.world, s.selection) : null;
+    const looked = shot ? shotLooksAt(s.world, shot, s.shotFrame) : kept ? aloneWorld(s.world, kept) : s.world;
     const keepOut = overlaid && (namesOn || citiesOn) ? overlayKeepOut(looked, overlaid, s.shotFrame, time, frame.w, frame.h, view, s.engineFor(overlaid.branch)) : undefined;
     try {
       s.renderer.render(ctx, view, looked, shot ? s.engineFor(shot.branch) : s.engine, s.spaceId, time, { passes, transparent: !!shot?.transparent, layerIds: layers, basemap, referenceBorders: !shot && s.referenceBorders, transitions: shot ? transitionOptions(shot, s.shotFrame) : undefined, mediaSeconds: shot ? s.shotFrame / shot.fps : 0, trails: !!shot?.trails, trailsSince: shot ? trailsStart(shot) : null, layout: { labels: namesOn && !namesHidden, cities: citiesOn }, moving: moving && vs.whileMoving === 'carry', holdNames: moving && vs.names === 'hold', fillAround, hurried, show, terrain, style: shotLook?.style, basemapStyle: shotLook?.basemap, keepOut });

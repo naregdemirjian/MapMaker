@@ -6463,6 +6463,65 @@ try {
     await page.evaluate(() => (window as any).__mapmaker.allLists());
   });
 
+  await h.step('The Looks studio\'s stage (D249): the thing designed alone, the other countries muted; framed far, middle and near; on the map again', async () => {
+    const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);
+    await page.getByTestId('studio-history').click();
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
+    await h.setDate('1650');
+    await page.getByTestId('studio-looks').click();
+    await page.getByTestId('reset-workspace').click();
+    await page.getByTestId('stage-bar').waitFor();
+    // Nothing chosen: nothing to show alone or to frame.
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null, stageAlone: false }));
+    assert.equal(await page.getByTestId('stage-alone').isDisabled(), true);
+    const idA = await store(`s.world.all('entity').find((e) => e.name === ${JSON.stringify(A)}).id`) as string;
+    await page.evaluate((id) => (window as any).__mapmaker.store.set({ selection: { kind: 'entity', id }, multi: null }), idA);
+    assert.match(await page.getByTestId('stage-bar').innerText(), new RegExp(A));
+    // Framed: middle, all of it filling the view; far, smaller; near, closer still.
+    await page.getByTestId('stage-middle').click();
+    const zMiddle = await store('s.camera.zoom') as number;
+    await page.getByTestId('stage-far').click();
+    const zFar = await store('s.camera.zoom') as number;
+    await page.getByTestId('stage-near').click();
+    const zNear = await store('s.camera.zoom') as number;
+    assert.ok(zFar < zMiddle && zMiddle < zNear, `far ${zFar}, middle ${zMiddle}, near ${zNear}`);
+    await page.getByTestId('stage-middle').click();
+    // Alone: the neighbour muted, the country itself as it is. (Both in view, as in D237; of a patch about each place,
+    // its main colour, so that a name or a border drawn over a part of it does not count.)
+    await page.evaluate(([a, b]) => (window as any).__mapmaker.store.setCamera({ lon: (a[0] + b[0]) / 2, lat: (a[1] + b[1]) / 2, zoom: 1.5, rotation: 0, projection: 'equirectangular' }), [P.a, P.b]);
+    const mainColour = (ll: LL) => page.evaluate(([lon, lat]) => {
+      const p = (window as any).__mapmaker.lonLatToPage(lon, lat);
+      const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement;
+      const r = c.getBoundingClientRect(), k = c.width / r.width, R = Math.round(10 * k);
+      const d = c.getContext('2d')!.getImageData(Math.round((p[0] - r.left) * k) - R, Math.round((p[1] - r.top) * k) - R, 2 * R + 1, 2 * R + 1).data;
+      const n = new Map<string, number>();
+      for (let i = 0; i < d.length; i += 4) { const key = `${d[i] >> 3},${d[i + 1] >> 3},${d[i + 2] >> 3}`; n.set(key, (n.get(key) ?? 0) + 1); }
+      const [key] = [...n].sort((x, y) => y[1] - x[1])[0];
+      return key.split(',').map((v) => Number(v) * 8 + 4);
+    }, ll);
+    const diff = (x: number[], y: number[]) => Math.max(...x.map((v, i) => Math.abs(v - y[i])));
+    // (Drawn on the next frame: waited for until it holds, or a few seconds.)
+    const until = async (ok: () => Promise<boolean>) => { for (let i = 0; i < 40 && !(await ok()); i++) await page.waitForTimeout(100); };
+    await page.waitForTimeout(400);
+    const a0 = await mainColour(P.a), b0 = await mainColour(P.b);
+    assert.ok(diff(a0, b0) > 20, `the two countries apart to begin with (${a0} against ${b0})`);
+    await page.getByTestId('stage-alone').click();
+    assert.equal(await page.getByTestId('stage-alone').getAttribute('aria-pressed'), 'true');
+    await until(async () => diff(await mainColour(P.b), b0) > 20);
+    const a1 = await mainColour(P.a), b1 = await mainColour(P.b);
+    assert.ok(diff(a0, a1) <= 8, `the country designed as it was (${a0} against ${a1})`);
+    assert.ok(diff(b0, b1) > 20, `its neighbour muted (${b0} against ${b1})`);
+    assert.equal(await store(`s.world.all('entity').find((e) => e.name === ${JSON.stringify(B)}).color === '#3a4652'`), false, 'nothing stored changed');
+    await h.screenshot('looks-stage-alone');
+    // On the map again: as before.
+    await page.getByTestId('stage-on-map').click();
+    await until(async () => diff(await mainColour(P.b), b0) <= 8);
+    assert.ok(diff(await mainColour(P.b), b0) <= 8, 'the neighbour as it was');
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
+    await page.getByTestId('studio-history').click();
+    await page.evaluate(() => (window as any).__mapmaker.allLists());
+  });
+
   await h.step('The menu bar: every command in a menu with its shortcut; the keyboard runs the same commands (D197)', async () => {
     const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);
     await page.getByTestId('studio-history').click();

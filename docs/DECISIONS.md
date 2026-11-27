@@ -61,6 +61,25 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D249. The Looks studio's stage: the thing alone or on the map, far, middle and near (S7, second part)
+
+- **Why.** The drawing of the Looks studio: over the stage, "Kingdom of Aldmere · Alone · On the map · Far · Middle ·
+  Near", to see what is designed by itself and at the scales it will be seen at.
+- **The stage bar** (over the map in the Looks studio, `components/StageBar.tsx`): the thing designed by name;
+  **Alone** / **On the map**; **Far**, **Middle**, **Near**. A country or a group (with its members) can be shown alone
+  and framed; other things (a layer, a city, an event) are designed on the map as it is.
+- **Alone**: every other country drawn in one muted grey, without its look, fill or name, and every group none of them
+  is in plain; the thing designed, and everything else on the map (land, sea, cities, routes), as they are. It is a view
+  of the world laid over it as a shot's own looks are (`aloneWorld` in `stage.ts`, through `shotWorld`, D239): nothing
+  stored changes, and the map draws it as it draws any world.
+- **Far, Middle, Near**: the map moved to the middle of its outline at the date viewed (`boxOf`, `middleOf`: across 180°
+  too) and zoomed so that it takes a third of the view, three quarters of it, or more than all of it (a close look at
+  its fill and borders); the zoom found from the outline projected at zoom 0 (each step of zoom doubles the scale).
+- **Tests.** Unit: alone, the other countries muted without looks or names, the kept one and a city as they are, the
+  world itself untouched; what a thing keeps on the stage; the box of an outline, across 180° too, and its middle.
+  Interface: nothing chosen, nothing to show alone; a country chosen and named; far, middle and near, each closer;
+  alone, its neighbour muted in the pixels and itself as it was; on the map again, the neighbour as before.
+
 ### D248. The Looks studio as drawn: the thing designed and its parts (S7, first part)
 
 - **Why.** The agreed drawing of the Looks studio ("Looks: designing by hand"): at the left the thing designed and
