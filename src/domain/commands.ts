@@ -29,6 +29,7 @@ import { BIOMES } from '../terrain/biomes.ts';
 import { resolvePointStyle, type LabelStyle, type CountryLabel, type PointStyle, resolveCityStyle, type CityStyle } from '../render-engine/label-style.ts';
 import { DEFAULT_FEATURE_STYLE, isFeatureKind, type FeatureKind, type FeatureStyle } from '../render-engine/feature-style.ts';
 import { relationKind, isRelationKind, type RelationKind } from './relations.ts';
+import { drawingOf, drawingsOf, shapeOf, nextDrawingName, NEW_DRAWING, MOST_DRAWINGS, MOST_SHAPES, type Drawing, type DrawShape } from './drawings.ts';
 import { groupStyle } from './group-looks.ts';
 import { DEFAULT_SOURCES, fieldLayerStyleOf, fieldSourceOf, isFieldType, FIELD_TYPES, type FieldSource, type FieldType } from './fields.ts';
 import { planDisaster, isDisasterId, DISASTERS, type DisasterId } from './disasters.ts';
@@ -542,6 +543,86 @@ export function setCountryLook(world: World, id: string, look: CountryLook | nul
   return run(world, clean ? `Change the look of ${e.name}` : `${e.name} looks like its layer again`, (tx) => tx.patch('entity', id, { style: JSON.stringify(next) }));
 }
 
+/** A country's drawings by hand (D251), as kept in its style, checked. */
+export function drawingsOfEntity(e: { style?: string } | null | undefined): Drawing[] {
+  return drawingsOf(entityStyle(e).drawings);
+}
+
+/** A country drawn on by hand (D251): one that exists, and a country or a faction. */
+function drawnOn(world: World, id: string) {
+  const e = world.get('entity', id);
+  if (!e) throw new Error('That country no longer exists.');
+  if (e.type_id !== 'polity' && e.type_id !== 'faction') throw new Error('Only a country is drawn on by hand.');
+  return e;
+}
+
+function putDrawings(world: World, id: string, label: string, list: Drawing[]): CommandResult {
+  const e = drawnOn(world, id);
+  const next: EntityStyle = { ...entityStyle(e) };
+  if (list.length) next.drawings = list; else delete next.drawings;
+  return run(world, label, (tx) => tx.patch('entity', id, { style: JSON.stringify(next) }));
+}
+
+function freshDrawing(list: Drawing[], init: Partial<Omit<Drawing, 'id' | 'shapes'>>): Drawing {
+  if (list.length >= MOST_DRAWINGS) throw new Error(`A country has ${MOST_DRAWINGS} drawings at most.`);
+  return drawingOf({ ...NEW_DRAWING, ...init, id: newId('drw'), name: init.name ?? nextDrawingName(list), shapes: [] })!;
+}
+
+/** A new drawing, empty, over a country's others (D251); its id. */
+export function addDrawing(world: World, id: string, init: Partial<Omit<Drawing, 'id' | 'shapes'>> = {}): CommandResult<string> {
+  const e = drawnOn(world, id);
+  const list = drawingsOfEntity(e), d = freshDrawing(list, init);
+  return { ...putDrawings(world, id, `A new drawing on ${e.name}`, [...list, d]), result: d.id };
+}
+
+/**
+ * A shape drawn into one of a country's drawings, or into a new one over the others (`drawingId` null, made with
+ * `init`'s looks); the drawing's id. One undo step.
+ */
+export function addDrawingShape(world: World, id: string, drawingId: string | null, shape: DrawShape, init: Partial<Omit<Drawing, 'id' | 'shapes'>> = {}): CommandResult<string> {
+  const e = drawnOn(world, id);
+  const clean = shapeOf(shape);
+  if (!clean) throw new Error('That shape has too few points to draw.');
+  let list = drawingsOfEntity(e);
+  let d = drawingId ? list.find((x) => x.id === drawingId) ?? null : null;
+  if (drawingId && !d) throw new Error('That drawing no longer exists.');
+  if (!d) { d = freshDrawing(list, init); list = [...list, d]; }
+  if (d.shapes.length >= MOST_SHAPES) throw new Error(`A drawing holds ${MOST_SHAPES} shapes at most: start another.`);
+  const into = d.id;
+  list = list.map((x) => (x.id === into ? { ...x, shapes: [...x.shapes, clean] } : x));
+  return { ...putDrawings(world, id, `Draw on ${e.name} (${d.name})`, list), result: into };
+}
+
+/** A drawing's name or looks changed (its shapes kept). */
+export function updateDrawing(world: World, id: string, drawingId: string, patch: Partial<Omit<Drawing, 'id' | 'shapes'>>): CommandResult {
+  const e = drawnOn(world, id);
+  const list = drawingsOfEntity(e), d = list.find((x) => x.id === drawingId);
+  if (!d) throw new Error('That drawing no longer exists.');
+  const next = drawingOf({ ...d, ...patch, id: d.id, shapes: d.shapes })!;
+  const label = patch.name !== undefined && next.name !== d.name ? `Rename the drawing "${d.name}" to "${next.name}"` : `Change the drawing "${d.name}" of ${e.name}`;
+  return putDrawings(world, id, label, list.map((x) => (x.id === drawingId ? next : x)));
+}
+
+/** A drawing taken away from a country's design. */
+export function removeDrawing(world: World, id: string, drawingId: string): CommandResult {
+  const e = drawnOn(world, id);
+  const list = drawingsOfEntity(e), d = list.find((x) => x.id === drawingId);
+  if (!d) throw new Error('That drawing no longer exists.');
+  return putDrawings(world, id, `Remove the drawing "${d.name}" of ${e.name}`, list.filter((x) => x.id !== drawingId));
+}
+
+/** A drawing moved `by` places among a country's drawings (later ones are drawn over earlier ones). */
+export function moveDrawing(world: World, id: string, drawingId: string, by: number): CommandResult {
+  const e = drawnOn(world, id);
+  const list = drawingsOfEntity(e), k = list.findIndex((x) => x.id === drawingId);
+  if (k < 0) throw new Error('That drawing no longer exists.');
+  const to = Math.max(0, Math.min(list.length - 1, k + by));
+  const next = list.slice();
+  const [d] = next.splice(k, 1);
+  next.splice(to, 0, d);
+  return putDrawings(world, id, `Move the drawing "${d.name}" ${to > k ? 'over' : 'under'} the others`, next);
+}
+
 /** The same look given to several countries at once (a preset, D185); null: each looks like its layer again. One undo step. */
 export function setCountriesLook(world: World, ids: string[], look: CountryLook | null, what = 'a look'): CommandResult {
   const clean = look ? countryLookOf(look) : null;
@@ -735,6 +816,8 @@ export interface EntityStyle {
   overSea?: boolean;
   /** Its colour chosen for it alone (D237): kept where its group draws its members in the group's colour. */
   ownColor?: boolean;
+  /** Drawings by hand (D251): parts of its design drawn in the Looks studio, fixed to the land. */
+  drawings?: Drawing[];
 }
 
 export function entityStyle(e: { style?: string } | null | undefined): EntityStyle {

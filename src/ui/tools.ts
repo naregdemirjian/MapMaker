@@ -1,12 +1,12 @@
 // The tools (D198): their names, what they do, the key that takes each in hand, and the group it stands in
 // on the tool strip. Which of them a map has depends on the map, and on the studio worked in (D235): the ground's
 // (terrain and water) in Map Studio, the history's (land held, borders, places, areas, conditions and disasters) in
-// History; Select in both.
+// History; Select in both. The Looks studio has its own (S8, D251): Select and the tools to design by hand.
 import type { Tool } from './store.ts';
 import type { World } from '../world-model/world.ts';
 import { terrainSourceOf, isSpaceMap } from '../world-model/world-settings.ts';
 
-export interface ToolInfo { id: Tool; key: string; group: 'select' | 'draw' | 'borders' | 'things' | 'land' | 'space'; name: string; hint: string; stack?: string }
+export interface ToolInfo { id: Tool; key: string; group: 'select' | 'draw' | 'borders' | 'things' | 'land' | 'space' | 'design'; name: string; hint: string; stack?: string }
 
 /** Tools stacked in one place on the strip (D205): the one last used shows, the others slide out from it. */
 export const STACKS: Record<string, Tool[]> = { territory: ['lasso', 'pen', 'polygon'] };
@@ -28,6 +28,7 @@ export const TOOLS: ToolInfo[] = [
   { id: 'disaster', key: 'D', group: 'land', name: 'Disasters', hint: 'Nuclear strikes, earthquakes, eruptions, floods, wildfires, meteor impacts and droughts: choose one and its size, then click the map. It is placed as an event from the date viewed, its conditions rising and fading by themselves (an impact leaves its crater in the terrain); one undo takes it all back.' },
   { id: 'field', key: 'F', group: 'land', name: 'Conditions', hint: 'Radiation, fire, smoke and ash, floods, destruction and heatmaps: click the map to place a source on a field layer from the date viewed (or in the event being recorded). It rises, lasts and fades by itself.' },
   { id: 'lanes', key: 'N', group: 'space', name: 'Lanes', hint: 'On a star map: click a star, then another: a lane between them (a route, a jump lane, a supply line) from the date viewed, belonging to the country or faction chosen. Recorded into an event with a length, it grows from the first star to the second over the event: an expedition or a fleet on its way.' },
+  { id: 'shape', key: 'U', group: 'design', name: 'Shapes', hint: 'Drag on the map for a rectangle or an ellipse (Shift: a square or a circle), drawn on the design of the country chosen: into its drawing chosen in Parts, or a new one. Fixed to the land; its borders cut it.' },
   { id: 'systems', key: 'S', group: 'space', name: 'Star systems', hint: 'On a star map: click a star to give it to the country or faction chosen, from the date viewed (or in the event being recorded); hold Ctrl and drag a box to give every star in it. Their realm glows around the stars they hold.' },
 ];
 
@@ -36,9 +37,12 @@ export const SPACE_TOOLS: string[] = ['select', 'systems', 'lanes'];
 
 /** The tools of the ground (D235): Map Studio's. Select is in every studio that draws; the rest are History's. */
 export const GROUND_TOOLS: string[] = ['sculpt'];
+/** The tools to design by hand (S8, D251): the Looks studio's, with Select. */
+export const DESIGN_TOOLS: string[] = ['shape'];
 /** The pages with tools to draw with, and which tools each has. */
-export type ToolPage = 'map' | 'history';
-export const toolOnPage = (id: string, page: ToolPage): boolean => id === 'select' || (page === 'map') === GROUND_TOOLS.includes(id);
+export type ToolPage = 'map' | 'history' | 'looks';
+export const toolOnPage = (id: string, page: ToolPage): boolean =>
+  id === 'select' || (DESIGN_TOOLS.includes(id) ? page === 'looks' : page !== 'looks' && (page === 'map') === GROUND_TOOLS.includes(id));
 
 /** The tools a map has in a page (Map Studio's or History's), in the order of the strip. */
 export function toolsFor(w: World, spaceId: string, page: ToolPage = 'history'): ToolInfo[] {

@@ -1,0 +1,110 @@
+// Drawings by hand (S8, D251): drawings kept and checked, rectangles and ellipses from a box on the screen, the path as
+// drawn, what lies under the pointer; the commands that add, change and take them away.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { World } from '../src/world-model/world.ts';
+import * as cmd from '../src/domain/commands.ts';
+import { drawingsOf, boxShape, screenPath, hitsShape, drawingAt, nextDrawingName, drawingShows, type Drawing, type LL, type Pt } from '../src/domain/drawings.ts';
+
+// (A plain projection for the tests: a degree is ten pixels, north up.)
+const project = (ll: LL): Pt => [ll[0] * 10, 0 - ll[1] * 10];
+const unproject = (p: Pt): LL => [p[0] / 10, 0 - p[1] / 10];
+
+test('drawings kept and checked: what is not one dropped, numbers held to their ranges, one of each id', () => {
+  const list = drawingsOf([
+    { id: 'a', name: '  Hatching  ', stroke: { color: '#112233', width: 9999 }, fill: 'red', opacity: 2, blend: 'multiply', shapes: [{ kind: 'path', closed: true, anchors: [{ p: [1, 2] }, { p: [3, 4], i: [2, 4], o: 'x' }, { p: [999, 0] }] }, { kind: 'path', anchors: [{ p: [0, 0] }] }] },
+    { id: 'a', name: 'Again' },
+    { name: 'No id' },
+    'nonsense',
+    { id: 'b', blend: 'sideways', on: false },
+  ]);
+  assert.deepEqual(list.map((d) => d.id), ['a', 'b']);
+  const [a, b] = list;
+  assert.equal(a.name, 'Hatching');
+  assert.deepEqual(a.stroke, { color: '#112233', width: 200 });
+  assert.equal(a.fill, null, 'not a colour');
+  assert.equal(a.opacity, 1);
+  assert.equal(a.blend, 'multiply');
+  assert.equal(a.shapes.length, 1, 'a shape of one point dropped');
+  assert.deepEqual(a.shapes[0].anchors, [{ p: [1, 2] }, { p: [3, 4], i: [2, 4] }], 'a point off the world dropped, a handle that is not one too');
+  assert.equal(b.blend, 'normal');
+  assert.equal(b.on, false);
+  assert.equal(b.name, 'Drawing');
+  assert.deepEqual(drawingsOf(undefined), []);
+});
+
+test('a rectangle and an ellipse from a box on the screen; a square and a circle; too small or off the map, none', () => {
+  const r = boxShape('rectangle', [100, 50], [20, 10], unproject)!;
+  assert.equal(r.closed, true);
+  assert.deepEqual(r.anchors.map((a) => project(a.p)), [[20, 10], [100, 10], [100, 50], [20, 50]]);
+  assert.ok(r.anchors.every((a) => !a.i && !a.o), 'corners');
+  const e = boxShape('ellipse', [0, 0], [80, 40], unproject)!;
+  assert.deepEqual(e.anchors.map((a) => project(a.p)), [[40, 0], [80, 20], [40, 40], [0, 20]]);
+  // Each handle along the curve, the usual 0.552 of the half-width or half-height away.
+  const top = e.anchors[0];
+  assert.ok(Math.abs(project(top.o!)[0] - (40 + 40 * 0.5523)) < 0.01 && Math.abs(project(top.o!)[1]) < 1e-9);
+  const sq = boxShape('rectangle', [0, 0], [30, 10], unproject, true)!;
+  assert.deepEqual(project(sq.anchors[2].p), [30, 30], 'as high as it is wide');
+  assert.equal(boxShape('ellipse', [0, 0], [1, 40], unproject), null);
+  assert.equal(boxShape('rectangle', [0, 0], [40, 40], () => null), null);
+});
+
+test('a path as drawn on the screen: lines between corners, curves through handles, closed back to the first', () => {
+  const s = { kind: 'path' as const, closed: true, anchors: [{ p: [0, 0] as LL }, { p: [10, 0] as LL, o: [10, -5] as LL }, { p: [10, -10] as LL }] };
+  const segs = screenPath(s, project)!;
+  assert.equal(segs.length, 4, 'a move, two pieces and the closing one');
+  assert.deepEqual(segs[1], { to: [100, 0] });
+  assert.deepEqual(segs[2], { to: [100, 100], c0: [100, 50], c1: [100, 100] });
+  assert.deepEqual(segs[3], { to: [0, 0] });
+  assert.equal(screenPath({ ...s, closed: false }, project)!.length, 3);
+  assert.equal(screenPath(s, (ll) => (ll[0] > 5 ? null : project(ll))), null, 'part of it off the map');
+});
+
+test('what lies under the pointer: inside a filled shape, on the line of one not filled, the uppermost drawing', () => {
+  const box = boxShape('rectangle', [0, 0], [100, 100], unproject)!;
+  assert.equal(hitsShape(box, project, [50, 50], true, 1), true, 'inside, filled');
+  assert.equal(hitsShape(box, project, [50, 50], false, 1), false, 'inside, not filled');
+  assert.equal(hitsShape(box, project, [50, 3], false, 1), true, 'on its line');
+  assert.equal(hitsShape(box, project, [150, 50], true, 1), false, 'outside');
+  const d = (id: string, fill: string | null, on = true): Drawing => ({ id, name: id, on, stroke: { color: '#000000', width: 2 }, fill, opacity: 1, blend: 'normal', shapes: [box] });
+  assert.equal(drawingAt([d('lower', '#ff0000'), d('upper', '#00ff00')], project, [50, 50], 1)?.id, 'upper');
+  assert.equal(drawingAt([d('lower', '#ff0000'), d('upper', '#00ff00', false)], project, [50, 50], 1)?.id, 'lower', 'a hidden one passed over');
+  assert.equal(drawingAt([d('lower', null)], project, [50, 50], 1), null);
+  assert.equal(drawingShows(d('x', null)), true);
+  assert.equal(drawingShows({ ...d('x', null), stroke: null }), false, 'nothing to draw it with');
+  assert.equal(nextDrawingName([d('Drawing 1', null), d('drawing 2', null)].map((x) => ({ ...x, name: x.id }))), 'Drawing 3');
+});
+
+function project0() {
+  const world = new World();
+  cmd.seedProject(world, 'Drawings');
+  const a = cmd.createEntity(world, { type_id: 'polity', name: 'Aldmere' }).result;
+  const c = cmd.createEntity(world, { type_id: 'settlement', name: 'Port' }).result;
+  return { world, a, c };
+}
+
+test('a shape drawn into a new drawing, then into it again; its looks and name changed; moved; taken away', () => {
+  const { world, a, c } = project0();
+  const shape = boxShape('ellipse', [0, 0], [80, 40], unproject)!;
+  const id = cmd.addDrawingShape(world, a, null, shape, { stroke: { color: '#aa0000', width: 3 } }).result;
+  let list = cmd.drawingsOfEntity(world.get('entity', a));
+  assert.equal(list.length, 1);
+  assert.equal(list[0].name, 'Drawing 1');
+  assert.deepEqual(list[0].stroke, { color: '#aa0000', width: 3 });
+  assert.equal(cmd.addDrawingShape(world, a, id, boxShape('rectangle', [0, 0], [10, 10], unproject)!).result, id);
+  assert.equal(cmd.drawingsOfEntity(world.get('entity', a))[0].shapes.length, 2);
+  cmd.updateDrawing(world, a, id, { name: 'Mountain hatching', fill: '#ffcc00', opacity: 0.8, blend: 'multiply' });
+  const second = cmd.addDrawing(world, a).result;
+  list = cmd.drawingsOfEntity(world.get('entity', a));
+  assert.deepEqual(list.map((d) => d.name), ['Mountain hatching', 'Drawing 1']);
+  assert.equal(list[0].fill, '#ffcc00');
+  assert.equal(list[0].blend, 'multiply');
+  cmd.moveDrawing(world, a, second, -1);
+  assert.deepEqual(cmd.drawingsOfEntity(world.get('entity', a)).map((d) => d.id), [second, id], 'drawn first now: under the other');
+  cmd.removeDrawing(world, a, second);
+  cmd.removeDrawing(world, a, id);
+  assert.equal(cmd.entityStyle(world.get('entity', a)).drawings, undefined, 'none left: none kept');
+  assert.throws(() => cmd.addDrawingShape(world, c, null, shape), /Only a country/);
+  assert.throws(() => cmd.addDrawingShape(world, a, 'gone', shape), /no longer exists/);
+  assert.throws(() => cmd.updateDrawing(world, a, 'gone', { name: 'X' }), /no longer exists/);
+});

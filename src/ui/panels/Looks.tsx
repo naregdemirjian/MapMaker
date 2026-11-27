@@ -21,6 +21,7 @@ import { CountryBordersSection, LayerBordersSection } from '../components/Border
 import { CharacterIconSection } from '../components/CharacterIcons.tsx';
 import { CityAlwaysShown } from '../components/Characters.tsx';
 import { FeatureLookSection } from '../components/Features.tsx';
+import { DrawingLooks, drawingNow } from './DrawingLooks.tsx';
 
 /** In a panel's heading: its looks, in the Looks panel (brought to the front; Ctrl+D). */
 export function DesignButton() {
@@ -271,7 +272,7 @@ export function LooksPanel() {
     <div className="looks-panel" data-testid="looks-panel" data-drop="looks">
       <ScopeSwitch />
       {!sel && <Hint />}
-      {sel?.kind === 'entity' && <EntityLooks id={sel.id} />}
+      {sel?.kind === 'entity' && (drawingNow(s) ? <DrawingLooks owner={sel.id} drawing={drawingNow(s)!.drawing} /> : <EntityLooks id={sel.id} />)}
       {sel?.kind === 'layer' && <LayerLooks id={sel.id} />}
       {sel?.kind === 'feature' && <FeatureLooks id={sel.id} />}
       {sel?.kind === 'event' && <EventLooks id={sel.id} />}

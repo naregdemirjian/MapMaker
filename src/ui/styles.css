@@ -631,6 +631,16 @@ label.indent { margin-left: 24px; }
 .et-shift { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 5px 8px; background: var(--panel2); border-bottom: 1px solid var(--line); }
 .et-shift input[type=number] { width: 70px; }
 .et-scroll { flex: 1; min-height: 0; overflow: auto; }
+/* Drawings by hand (D251): a drawing chosen among the parts, its line and fill as fields. */
+.part-row.on { background: var(--sel); border-color: #ffd166; box-shadow: inset 3px 0 0 #ffd166; color: var(--text); font-weight: normal; }
+.parts-add { margin-top: 8px; margin-right: 6px; }
+.draw-field { display: inline-flex; gap: 6px; align-items: center; flex-wrap: nowrap; }
+.draw-field label.check { margin: 0; white-space: nowrap; }
+.draw-field input[type="color"] { width: 30px; height: 24px; padding: 1px; margin: 0; }
+.draw-field .with-reset { display: inline-flex; align-items: center; }
+.draw-field input[type="number"] { width: 56px; margin: 0; flex: none; }
+.looks-panel .draw-field { display: flex; margin: 8px 0; }
+.drawing-of { margin-top: -4px; }
 /* The Looks studio's stage (D249): the thing designed over the map, alone or on it, far, middle or near. */
 .stage-bar { flex: none; display: flex; align-items: center; gap: 10px; padding: 4px 10px; background: var(--panel); border-bottom: 1px solid var(--line); min-width: 0; }
 .stage-bar .stage-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }

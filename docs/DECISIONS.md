@@ -61,6 +61,49 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D251. Drawings by hand, parts of a country's design: the Looks studio's tools, and Shapes (S8, first part)
+
+- **Why.** The plan and the drawing of the Looks studio: "Pen, shapes, brush and text are tools among the others", each
+  drawing a part of the country's design ("Drawing: mountain hatching · on the land"), with its own looks (stroke,
+  fill, opacity, blend; effects later), "fixed to the land (borders cut it)".
+- **A drawing** (`domain/drawings.ts`, kept in the country's style as `drawings`): a name, shown or not, a stroke
+  (colour, width in pixels of a frame 1920 wide) or none, a fill or none, an opacity, a blend mode, and its shapes. A
+  shape is a path of curves as the pen draws them (D232: anchors with handles, in degrees of longitude and latitude),
+  so it stays where it was drawn on the land whatever the zoom; a rectangle or an ellipse is such a path, made at once
+  (an ellipse as four smooth anchors). Checked as kept (a shape of one point, a point off the world, a colour that is
+  not one dropped; numbers held to their ranges); at most 40 drawings, 400 shapes in each.
+- **Drawn by the map's renderer** (`render-engine/drawings.ts`) over the country's fill and its effects inside it, cut
+  by its edge: where the country does not hold the land at the date viewed, the drawing is not seen (so it follows the
+  borders through history without being changed). Each drawing's line and fill are drawn as one picture, then laid on
+  at its opacity and in its blend mode (its line over its fill not mixed with it); later drawings over earlier ones. As
+  part of the country's fill, it is laid on with the layer's opacity and cut at the coast where the layer is. In
+  exports as on the map; SVG frames, which draw countries' colours and pictures but not their effects, leave drawings
+  out too for now.
+- **The Looks studio's own tools** (as History and Map Studio have theirs, D235): the tool strip at its left with
+  **Select** and **Shapes** (U); the pen, text and the brush follow. A tool taken in Looks is taken up again on coming
+  back; History's are not there.
+- **Shapes**: dragged out on the map, a rectangle or an ellipse in the box (Shift: a square or a circle; the options
+  bar chooses which), into the drawing chosen of the country designed, or a new one ("Drawing 1"…) made with the line
+  and fill set in the options bar and then chosen; one undo step. Nothing chosen to design: a word saying to choose a
+  country. With a drawing chosen, the options bar's line and fill are its own.
+- **Parts and Looks**: a country's drawings are among its parts, between its border and its fill, the last drawn
+  uppermost ("Drawing: Hatching · on the land"); "+ Drawing" makes an empty one, chosen, with Shapes in hand. A drawing
+  chosen shows its own looks in the Looks panel, as drawn: its name, "Drawing · part of" its country (back to the
+  country's looks), its fundamentals (name, stroke and its width and colour, fill, opacity, blend, shown), Bring
+  forward and Send backward among its drawings, Remove drawing (Delete too: in the Looks studio, Delete takes away the
+  drawing chosen, not the country designed). It is outlined on the map while chosen.
+- **Select in the Looks studio**: a click on a drawing of the country designed chooses it; elsewhere, the country
+  holding the place clicked is designed (it was chosen as a place only, and the Looks panel had nothing to show).
+- **Alone** on the stage (D249), other countries' drawings are left out with their looks.
+- **Tests.** Unit: drawings kept and checked; a rectangle and an ellipse from a box on the screen, a square, none too
+  small or off the map; a path as drawn (lines, curves, closed); what lies under the pointer, inside a filled shape or
+  on a line, the uppermost drawing; a shape into a new drawing and again into it, its looks and name, moved, taken
+  away, none left none kept, only a country drawn on. Interface: the Looks studio's own tools; a country designed by a
+  click; a rectangle filled green dragged across its border with its neighbour, one undo step: green on it, the
+  neighbour as it was; among its parts between border and fill; renamed, at 40% less green; an ellipse into it; chosen
+  on the map by a click, the country's looks again by its name; + Drawing, taken away by Delete with the country still
+  there; undone, as it was.
+
 ### D250. A design saved as an effect (S7, third and last part)
 
 - **Why.** The plan and the drawing of the Looks studio: "a stack tuned here is saved into the Effects panel as a new

@@ -4,12 +4,13 @@ import { BranchesDialog } from './components/Branches.tsx';
 import { useEffect } from 'react';
 import { StudioBar, StatusBar } from './shell/Shell.tsx';
 import { DockArea } from './shell/Dock.tsx';
-import { drawsOn } from './shell/studios.ts';
+import { hasTools } from './shell/studios.ts';
 import { arrowStep } from '../core-time/steps.ts';
 import { calendarNow } from './calendar-now.ts';
 import { useStore, store } from './store.ts';
 import { TopBar, Toasts } from './shell/Bars.tsx';
 import { ToolOptions } from './shell/Tools.tsx';
+import { drawingNow } from './panels/DrawingLooks.tsx';
 import { QuickStart } from './panels/Properties.tsx';
 import { ShortcutsDialog } from './shell/MenuBar.tsx';
 import { commandForKey } from './commands.ts';
@@ -48,7 +49,7 @@ export function App() {
         if (c) { e.preventDefault(); c.run(store); return; }
         // A plain letter takes its tool in hand (while nothing is being drawn or asked, in a page that draws on the map).
         const page = store.pageNow();
-        if ((page === 'map' || page === 'history') && store.world && !store.dialog && !e.ctrlKey && !e.metaKey && !e.altKey && e.key.length === 1) {
+        if ((page === 'map' || page === 'history' || page === 'looks') && store.world && !store.dialog && !e.ctrlKey && !e.metaKey && !e.altKey && e.key.length === 1) {
           const t = toolForKey(e.key, store.world, store.spaceId, page);
           if (t) { e.preventDefault(); store.set({ tool: t.id }); return; }
         }
@@ -70,6 +71,9 @@ export function App() {
       }
       // Delete: everything chosen in the lists (the Border points tool uses Delete for points).
       if (e.key === 'Delete' && store.tool !== 'vertex' && store.mode !== 'present' && !store.pending) {
+        // (In the Looks studio, a drawing chosen of the country designed is what goes, D251.)
+        const dn = store.pageNow() === 'looks' ? drawingNow() : null;
+        if (dn) { e.preventDefault(); store.removeDrawing(dn.owner, dn.drawing.id); return; }
         const ents = store.chosen('entity'), evs = store.chosen('event');
         if (ents.length) { e.preventDefault(); deleteEntitiesAsked(ents); } else if (evs.length) { e.preventDefault(); deleteEventsAsked(evs); }
       }
@@ -85,7 +89,7 @@ export function App() {
     <div className={`app mode-${s.mode} page-${page}`}>
       <TopBar />
       <StudioBar />
-      {drawsOn(page) && <ToolOptions />}
+      {hasTools(page) && <ToolOptions />}
       <DockArea />
       <StatusBar />
       <HistoryPlayer />

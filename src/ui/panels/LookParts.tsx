@@ -10,7 +10,7 @@ import { groupStyle, groupMembers } from '../../domain/group-looks.ts';
 import type { World } from '../../world-model/world.ts';
 
 /** A part of a thing's design: its Looks panel group (and the place in it), and what it holds now. */
-export interface Part { id: string; name: string; group: string; inner?: string; holds: string }
+export interface Part { id: string; name: string; group: string; inner?: string; holds: string; drawing?: string }
 
 const on = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
@@ -29,6 +29,8 @@ export function partsOf(w: World, sel: ReturnType<typeof useStore>['selection'])
           { id: 'effects', name: 'Effects', group: 'entity:look', inner: '.country-look', holds: fx.length ? fx.map((x) => EFFECT_NAMES[x.kind]).join(', ') : look ? 'none' : 'as its layer' },
           { id: 'label', name: 'Label', group: 'entity:label', holds: st.label ? 'its own' : 'as every country' },
           { id: 'border', name: 'Border', group: 'entity:look', inner: '.country-borders', holds: 'between it and each neighbour' },
+          // (Its drawings by hand, D251: the last drawn uppermost.)
+          ...cmd.drawingsOfEntity(e).slice().reverse().map((d) => ({ id: `drawing:${d.id}`, name: `Drawing: ${d.name}`, group: 'drawing:fundamentals', holds: d.on ? 'on the land' : 'hidden', drawing: d.id })),
           { id: 'fill', name: 'Fill', group: 'entity:fill', holds: st.fill && st.fill.kind !== 'color' ? (st.fill.kind === 'image' ? 'a picture' : 'a video') : `its colour, ${e.color}` },
         ],
       };
@@ -73,6 +75,9 @@ export function partsOf(w: World, sel: ReturnType<typeof useStore>['selection'])
  * moment; a place within the group (a fold of it) opened too.
  */
 export function focusPart(p: Part) {
+  // (A drawing: its own looks in the Looks panel, D251.)
+  if (p.drawing) { store.set({ drawingId: p.drawing }); store.design(); return; }
+  if (store.drawingId) store.set({ drawingId: null });
   store.design();
   const key = `prop:${p.group}`;
   if (store.collapsed.includes(key)) store.toggleCollapsed(key);
@@ -140,12 +145,16 @@ export function LookPartsPanel() {
           <ul className="parts-list">
             {what.parts.map((p) => (
               <li key={p.id}>
-                <button className="part-row" onClick={() => focusPart(p)} title={`${p.name}: its settings in the Looks panel`} data-testid={`part-${p.id}`}>
+                <button className={`part-row ${p.drawing && p.drawing === s.drawingId ? 'on' : ''}`} onClick={() => focusPart(p)} title={`${p.name}: its settings in the Looks panel`} data-testid={`part-${p.id}`}>
                   <span className="part-name">{p.name}</span><span className="part-holds muted">{p.holds}</span>
                 </button>
               </li>
             ))}
           </ul>
+          {s.selection?.kind === 'entity' && (what.kind === 'Country' || what.kind === 'Faction') && (
+            <button className="small parts-add" onClick={() => { const sel = s.selection; if (sel?.kind !== 'entity') return; const id = s.executeLooks((wd) => cmd.addDrawing(wd, sel.id, { stroke: s.drawNew.stroke, fill: s.drawNew.fill })); if (id !== undefined) { s.set({ drawingId: id, tool: 'shape' }); s.design(); } }}
+              title="A new drawing, part of its design, drawn on the map with the tools at the left (Shapes)" data-testid="parts-add-drawing">+ Drawing</button>
+          )}
           {(s.selection?.kind === 'entity' || s.selection?.kind === 'group') && what.kind !== 'City' && what.kind !== 'Person' && (
             <button className="small parts-save" disabled={!stack?.effects.length} onClick={() => stack && void saveAsEffect(stack, `${what.name}'s look`)}
               title={stack?.effects.length ? 'Its stack of effects (with its elevation and opacity) saved as an effect of its own, to give to anything' : 'It has no effects of its own to save yet'} data-testid="parts-save-effect">Save as an effect…</button>

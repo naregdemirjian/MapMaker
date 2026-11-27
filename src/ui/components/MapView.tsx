@@ -45,6 +45,8 @@ import { smartInputFor } from '../smart-input.ts';
 import { reachAt } from './Reach.tsx';
 import { SmartAdjustPanel } from './SmartBrush.tsx';
 import { aloneWorld, keptBy } from '../stage.ts';
+import { boxShape, screenPath, traceSegs, drawingAt, type LL as DrawLL, type Pt as DrawPt } from '../../domain/drawings.ts';
+import { drawingNow } from '../panels/DrawingLooks.tsx';
 import { CompareBar } from './CompareBar.tsx';
 import type { AdjustState } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
@@ -68,6 +70,8 @@ type Drag =
   | { kind: 'character'; entity: string; from: Pt; moved: number }
   // The border eraser's stroke (map positions).
   | { kind: 'erase'; points: Pt[] }
+  // The Shapes tool's box (S8, D251), dragged out on the screen.
+  | { kind: 'draw-box'; from: Pt; to: Pt; square: boolean }
   // A stroke of the sculpting brush (map positions; D98).
   | { kind: 'sculpt'; points: Pt[] }
   // A stroke of the Disasters tool's brush (map positions; D233): many disasters scattered along it.
@@ -925,6 +929,28 @@ export function MapView() {
       });
       ctx.restore();
     }
+    // The Shapes tool's box being dragged out (D251), and the drawing designed outlined (in the Looks studio).
+    if (drag.current.kind === 'draw-box' && !presentation) {
+      const db = drag.current, box = boxShape(store.shapeKind, db.from, db.to, (q) => [q[0], q[1]], db.square);
+      const segs = box ? screenPath(box, (ll) => [ll[0], ll[1]]) : null;
+      if (segs) {
+        ctx.save();
+        ctx.beginPath(); traceSegs(ctx, segs, true);
+        ctx.strokeStyle = 'rgba(10,16,24,0.8)'; ctx.lineWidth = 3; ctx.stroke();
+        ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 1.5; ctx.setLineDash([6, 4]); ctx.stroke();
+        ctx.restore();
+      }
+    }
+    const designed = !presentation && s.pageNow() === 'looks' ? drawingNow() : null;
+    if (designed) {
+      ctx.save();
+      ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]);
+      for (const sh of designed.drawing.shapes) {
+        const segs = screenPath(sh, (ll) => lonLatToScreen(v, ll[0], ll[1]) as DrawPt | null);
+        if (segs) { ctx.beginPath(); traceSegs(ctx, segs, sh.closed); ctx.stroke(); }
+      }
+      ctx.restore();
+    }
     // The Split tool's line: being drawn, or waiting for the click on the part that changes hands.
     const cutLine = drag.current.kind === 'cut' && drag.current.moved >= 4 ? toScreen(drag.current.points) : s.tool === 'split' && s.splitLine ? toScreen(s.splitLine) : null;
     if (cutLine && cutLine.length > 1) {
@@ -1192,6 +1218,8 @@ export function MapView() {
       if (ll) { drag.current = { kind: 'sculpt', points: [ll] }; force((n) => n + 1); }
       return;
     }
+    // The Shapes tool (S8, D251): a box dragged out, a rectangle or an ellipse in it, into the design of the country chosen.
+    if (!presentation && e.button === 0 && s.tool === 'shape') { drag.current = { kind: 'draw-box', from: p, to: p, square: e.shiftKey }; return; }
     // Border eraser: a stroke across borders.
     if (!presentation && e.button === 0 && s.tool === 'erase') {
       const ll = screenToLonLat(view, p[0], p[1]);
@@ -1346,6 +1374,7 @@ export function MapView() {
       if (r !== hoverRegion.current) { hoverRegion.current = r; force((n) => n + 1); }
     }
     if (d.kind === 'cut') d.moved = Math.max(d.moved, Math.hypot(p[0] - d.x, p[1] - d.y));
+    if (d.kind === 'draw-box') { d.to = p; d.square = e.shiftKey; force((n) => n + 1); return; }
     if (s.tool === 'disaster' && s.disaster.many && !presentation) setCursor(p);
     if (d.kind === 'erase' || d.kind === 'feature' || d.kind === 'cut' || d.kind === 'sculpt' || d.kind === 'scatter') {
       const ll = screenToLonLat(view, p[0], p[1]);
@@ -1441,6 +1470,12 @@ export function MapView() {
       }
       return;
     }
+    if (d.kind === 'draw-box') {
+      force((n) => n + 1);
+      const made = boxShape(store.shapeKind, d.from, p, (q) => screenToLonLat(view, q[0], q[1]) as DrawLL | null, e.shiftKey);
+      if (made) store.drawShape(made);
+      return;
+    }
     // While a line is shown adjusted (D148): a click pins a point (or takes a pin away); a drag only moves the map.
     if (d.kind === 'pan' && d.pin) { if (d.moved < 4) togglePin(p); return; }
     if (d.kind === 'erase') { eraseBorders(d.points, view); force((n) => n + 1); return; }
@@ -1506,6 +1541,18 @@ export function MapView() {
       // (A river drawn on the map, D220: its water under the pointer, a few pixels either side.)
       const hitRiver = s.tool === 'select' ? riverAt(d.startX, d.startY) : null;
       if (hitRiver) { store.set({ selection: { kind: 'river', id: hitRiver, spaceId: store.spaceId } }); return; }
+      // In the Looks studio (D251): a drawing of the country designed, under the pointer, chosen; else the country
+      // holding the place designed (the sea: nothing).
+      if (store.pageNow() === 'looks' && s.tool === 'select') {
+        const sel = store.selection, w = store.lookWorld ?? store.world!;
+        const own = sel?.kind === 'entity' ? cmd.drawingsOfEntity(w.get('entity', sel.id)) : [];
+        const hit = own.length ? drawingAt(own, (ll) => lonLatToScreen(view, ll[0], ll[1]) as DrawPt | null, [d.startX, d.startY], view.unit) : null;
+        if (hit) { store.set({ drawingId: hit.id }); return; }
+        const at = screenToLonLat(view, d.startX, d.startY);
+        const owner = at && store.engine && store.layerId ? store.engine.valueAtPoint(store.spaceId, store.layerId, lonLatToVec(at[0], at[1]), store.time) : null;
+        store.set({ selection: owner ? { kind: 'entity', id: owner } : null });
+        return;
+      }
       const ll = screenToLonLat(view, d.startX, d.startY);
       if (ll) store.set({ selection: { kind: 'point', lon: ll[0], lat: ll[1] } });
       return;

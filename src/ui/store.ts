@@ -8,7 +8,8 @@ import { flatten, anchorIndices, type Anchor } from './bezier-path.ts';
 import { World } from '../world-model/world.ts';
 import { Engine, parseJSON } from '../temporal-engine/engine.ts';
 import { defaultShot, type ShotSettings } from '../presentation/sequence.ts';
-import { takeLockedSkipped, updateSequence, createSequence, type CommandResult } from '../domain/commands.ts';
+import { takeLockedSkipped, updateSequence, createSequence, addDrawingShape, drawingsOfEntity, removeDrawing, type CommandResult } from '../domain/commands.ts';
+import { NEW_DRAWING, type DrawShape, type DrawStroke, type ShapeKind } from '../domain/drawings.ts';
 import { shotLooksAt, restyleOf, restyleDiffs, looksAfter, tracksOf, type Restyle, type LookTrack } from '../presentation/shot-looks.ts';
 import { type Instant, gregorian, toJSONValue, fromJSONValue, fromStore, add, compare, PRESENT_YEAR } from '../core-time/index.ts';
 import { type Camera, defaultCamera, flatCamera, PROJECTIONS } from '../render-engine/camera.ts';
@@ -76,7 +77,7 @@ export type DialogName =
 /** One line of a right-click menu: an action, a heading, or a divider. */
 export type MenuItem = { label: string; run: () => void; danger?: boolean; testId?: string; shortcut?: string; disabled?: boolean; checked?: boolean } | { heading: string } | 'divider';
 
-export type Tool = 'select' | 'lasso' | 'polygon' | 'pen' | 'vertex' | 'place' | 'erase' | 'feature' | 'split' | 'regions' | 'reach' | 'sculpt' | 'field' | 'disaster' | 'systems' | 'lanes';
+export type Tool = 'select' | 'lasso' | 'polygon' | 'pen' | 'vertex' | 'place' | 'erase' | 'feature' | 'split' | 'regions' | 'reach' | 'sculpt' | 'field' | 'disaster' | 'systems' | 'lanes' | 'shape';
 export type Selection =
   | { kind: 'entity'; id: string }
   | { kind: 'event'; id: string }
@@ -209,14 +210,14 @@ export class AppStore {
   }
   studioNow(): Studio { return studioOf(this.pageNow()); }
   /** The tool last in hand in each page with tools (Map Studio's are the ground's, History's the history's, D235). */
-  private toolOf: Record<'map' | 'history', Tool> = { map: 'select', history: 'select' };
+  private toolOf: Record<'map' | 'history' | 'looks', Tool> = { map: 'select', history: 'select', looks: 'select' };
   setPage(p: Page) {
     const from = this.pageNow();
     if (!presents(p)) savePage(p);
     // (In pages that do not draw on the map, the map only chooses and inspects: Select. Each page that draws takes
     // up again the tool last in hand there.)
-    if (from === 'map' || from === 'history') this.toolOf[from] = this.tool;
-    const tool: Tool = (p === 'map' || p === 'history') && toolOnPage(this.toolOf[p], p) ? this.toolOf[p] : 'select';
+    if (from === 'map' || from === 'history' || from === 'looks') this.toolOf[from] = this.tool;
+    const tool: Tool = (p === 'map' || p === 'history' || p === 'looks') && toolOnPage(this.toolOf[p], p) ? this.toolOf[p] : 'select';
     const shots = presents(p) ? { presentPage: p as 'shots' | 'export' } : {};
     if (presents(p)) this.set({ page: p, ...shots, tool, ...(this.mode === 'present' ? {} : { mode: 'present' as const, historyPlay: { ...this.historyPlay, on: false } }) });
     else this.set({ page: p, tool, ...(this.mode === 'world' ? {} : { mode: 'world' as const, presentCamera: null, playing: false }) });
@@ -266,6 +267,12 @@ export class AppStore {
   timelineRipple = false;
   /** The Looks studio's stage (D249): the thing designed drawn alone, the other countries muted. */
   stageAlone = false;
+  /** The drawing designed (S8, D251): of the country chosen, the one chosen among its parts (null: the country itself). */
+  drawingId: string | null = null;
+  /** What the Shapes tool draws. */
+  shapeKind: ShapeKind = 'rectangle';
+  /** The line and fill a new drawing is made with (until one is chosen, whose own the tools then use). */
+  drawNew: { stroke: DrawStroke | null; fill: string | null } = { stroke: NEW_DRAWING.stroke, fill: NEW_DRAWING.fill };
   timelineFind = '';
   /** The timeline's tracks as last laid out (pixels from the left edge of its picture; `top`: where the first begins). Not watched. */
   timelineLaid: { tracks: TLTrack[]; top: number; span?: [number, number] | null } | null = null;
@@ -602,6 +609,8 @@ export class AppStore {
   set(patch: Partial<AppStore>) {
     // Selecting one thing (on the map, from a panel) ends a choice of several, unless it is part of it.
     if ('selection' in patch && !('multi' in patch)) patch = { ...patch, multi: null };
+    // (Something else chosen: a drawing of the country chosen before is no longer what is designed, D251.)
+    if ('selection' in patch && !('drawingId' in patch)) patch = { ...patch, drawingId: null };
     // The territory brush gives land to the country selected: a country or faction chosen in a list or
     // a panel, or the one holding the place clicked on the map (never "nobody" from a click on the sea).
     if (patch.selection && !('paintValue' in patch)) {
@@ -811,6 +820,22 @@ export class AppStore {
   design() {
     if (!panelOn('looks', this.pageNow())) this.setPage('looks');
     this.openPanel('looks');
+  }
+  /**
+   * A shape drawn with the Looks studio's tools (S8, D251): into the drawing chosen of the country designed, or into a
+   * new one over its others (then chosen), made with the line and fill set for a new drawing. One undo step.
+   */
+  drawShape(shape: DrawShape) {
+    const sel = this.selection, w = this.lookWorld ?? this.world;
+    const e = sel?.kind === 'entity' && w ? w.get('entity', sel.id) : null;
+    if (!e || (e.type_id !== 'polity' && e.type_id !== 'faction')) { this.toast('Choose a country to draw on its design: click it with Select, or choose it in the lists.'); return; }
+    const into = this.drawingId && drawingsOfEntity(e).some((d) => d.id === this.drawingId) ? this.drawingId : null;
+    const id = this.executeLooks((wd) => addDrawingShape(wd, e.id, into, shape, { stroke: this.drawNew.stroke, fill: this.drawNew.fill }));
+    if (id !== undefined && id !== this.drawingId) this.set({ drawingId: id });
+  }
+  /** A drawing taken away from a country's design (D251); the country designed again. */
+  removeDrawing(owner: string, id: string) {
+    if (this.executeLooks((wd) => removeDrawing(wd, owner, id)) !== undefined) this.set({ drawingId: null });
   }
   /**
    * An event drawn into (D243): History in front, recording into it (from its start unless the date viewed is within

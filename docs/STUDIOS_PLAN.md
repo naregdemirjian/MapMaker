@@ -50,4 +50,5 @@ experience only: no new map features while this is built.
    time bar (D244); several events at once: chosen, moved, stretched, Move everything after, a shot of them (D245);
    the map's calendar (D246); the outline of events (D247). Done.
 7. **Looks studio (S7)**: the parts, as drawn (D248); the stage (D249); saving a stack as an effect (D250). Done.
-8. **Designing by hand (S8)**: pen and shapes, text; then the brush.
+8. **Designing by hand (S8)**: drawings as parts of a country's design, the Looks studio's tools and Shapes (D251);
+   the pen; text; patterns that follow the country; effects on drawings; then the brush.

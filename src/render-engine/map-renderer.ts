@@ -35,6 +35,8 @@ import { parcelGeometry, type ParcelGeometry, type CycleGeom } from './parcel-ge
 import { featureStyle, featureColor, isFeatureKind, type FeatureKind, type FeatureStyle } from './feature-style.ts';
 import { cityShown, placeMetaOf, DEFAULT_CITY_FILTER, type CityFilter } from '../domain/places.ts';
 import { lookedEntity, groupLookOf } from '../domain/group-looks.ts';
+import { drawingsOf, drawingShows, type Drawing, type LL as DrawLL, type Pt as DrawPt } from '../domain/drawings.ts';
+import { paintDrawings } from './drawings.ts';
 import { cityFilterOfSpace, mapLightOf, statisticsOf } from '../world-model/world-settings.ts';
 import { campaignArrow, smoothLine, lineLength, arrowBodyLength, marksAlong, cutLineBetween, mixColor } from './routes.ts';
 import { shotProgress, eventScreenSeconds, eventTransitionLook, TRANSITION_LOOKS } from '../presentation/sequence.ts';
@@ -2226,6 +2228,16 @@ export class MapRenderer {
       if (!groupLooks.has(v)) groupLooks.set(v, groupLookOf(world, entities.get(v)));
       return groupLooks.get(v)!;
     };
+    // Countries' drawings by hand (D251): those that show anything.
+    const ownDrawings = new Map<string, Drawing[] | null>();
+    const drawingsOfOwner = (v: string): Drawing[] | null => {
+      if (!ownDrawings.has(v)) {
+        const list = drawingsOf(parseJSON<{ drawings?: unknown }>(entities.get(v)?.style ?? '{}', {})?.drawings).filter(drawingShows);
+        ownDrawings.set(v, list.length ? list : null);
+      }
+      return ownDrawings.get(v)!;
+    };
+    const projectLL = (ll: DrawLL) => view.projection(ll) as DrawPt | null;
     // Countries whose land carries on over the sea where drawn (D221), and their parcels in a layer.
     const overSea = new Set<string>();
     for (const e of entities.values()) if (overSeaOf(e.style)) overSea.add(e.id);
@@ -2497,12 +2509,12 @@ export class MapRenderer {
           }
           // Every owner's parcels as one shape (those not on this sheet are skipped altogether).
           const layerLook = layerLookOf(ls.look);
-          const items: Array<{ owner: string; set: FaceSet; shape: Shape; look: CountryLook | null }> = [];
+          const items: Array<{ owner: string; set: FaceSet; shape: Shape; look: CountryLook | null; drawings: Drawing[] | null }> = [];
           for (const [owner, set] of snap.byOwner) {
             const shape = this.setPath(sp, sheet, arr, set);
-            if (shape) items.push({ owner, set, shape, look: litBy(lookAt(lookFor(ownLookOf(owner), layerLook, groupLookOfOwner(owner)), t.day + t.ms / 864e5, this.mediaSeconds), mapLight) });
+            if (shape) items.push({ owner, set, shape, look: litBy(lookAt(lookFor(ownLookOf(owner), layerLook, groupLookOfOwner(owner)), t.day + t.ms / 864e5, this.mediaSeconds), mapLight), drawings: drawingsOfOwner(owner) });
           }
-          const styled = items.some((it) => !looksPlain(it.look));
+          const styled = items.some((it) => !looksPlain(it.look) || it.drawings);
           const paintOwner = (owner: string, set: FaceSet, shape: Shape) => {
             const media = fillOf(owner);
             if (media) {
@@ -2582,6 +2594,13 @@ export class MapRenderer {
                     return (main = this.deviceBox(on ? [on[0], on[1], on[2] - on[0], on[3] - on[1]] : box, cm, 0, lc.canvas.width, lc.canvas.height, Infinity));
                   };
                   for (const e of inside) this.insideEffect(lc, tmp, it.shape, e, (pad) => this.deviceBox(box, cm, pad, lc.canvas.width, lc.canvas.height), u, mainOf);
+                }
+                // Its drawings by hand (D251), over its fill and effects, cut by its edge (where it holds the land).
+                if (it.drawings) {
+                  lc.save();
+                  this.clip(lc, it.shape);
+                  paintDrawings(lc, tmp, it.drawings, projectLL, u);
+                  lc.restore();
                 }
               }
               i = j;

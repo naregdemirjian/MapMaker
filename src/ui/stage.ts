@@ -22,7 +22,7 @@ export function aloneWorld(world: World, keep: ReadonlySet<string>): World {
   for (const e of world.all('entity')) {
     if (keep.has(e.id) || !political(e.type_id)) continue;
     const st = cmd.entityStyle(e);
-    const { look: _look, fill: _fill, ...rest } = st;
+    const { look: _look, fill: _fill, drawings: _drawings, ...rest } = st;
     entity[e.id] = { color: MUTED, style: JSON.stringify({ ...rest, label: { ...(st.label ?? {}), hidden: true } }) };
   }
   for (const g of world.all('entity_group')) {

@@ -23,6 +23,8 @@ export const studioOf = (p: Page): Studio => PAGES.find((x) => x.id === p)!.stud
 export const presents = (p: Page): boolean => p === 'shots' || p === 'export';
 /** Whether a page has tools to draw on the map with (the others choose and inspect only). */
 export const drawsOn = (p: Page): boolean => p === 'map' || p === 'history';
+/** The pages with tools in hand (D251): those that draw on the map, and the Looks studio, which designs by hand. */
+export const hasTools = (p: Page): boolean => drawsOn(p) || p === 'looks';
 export const isPage = (v: unknown): v is Page => PAGES.some((p) => p.id === v);
 
 const WORLD: Page[] = ['map', 'history', 'timeline', 'looks'];
@@ -32,7 +34,7 @@ const SHOTS: Page[] = ['shots', 'export'];
 export interface PanelInfo { id: PanelId; title: string; pages: Page[]; hint: string; minW?: number; minH?: number; closable?: boolean }
 export const PANELS: PanelInfo[] = [
   { id: VIEWER, title: 'Map', pages: [...WORLD, ...SHOTS], hint: 'The map being viewed (in Presentation, the shot’s preview)', minW: 200, minH: 120, closable: false },
-  { id: 'tools', title: 'Tools', pages: ['map', 'history'], hint: 'The tools to draw on the map with', minW: 40 },
+  { id: 'tools', title: 'Tools', pages: ['map', 'history', 'looks'], hint: 'The tools to draw on the map with', minW: 40 },
   { id: 'gallery', title: 'New map', pages: ['map'], hint: 'Every kind of map: choose one, set it up, create it', minW: 260 },
   { id: 'maps', title: 'Maps', pages: WORLD, hint: 'The maps of this project' },
   { id: 'layers', title: 'Layers', pages: WORLD, hint: 'The layers of the map being viewed: which are shown, which is drawn on' },
@@ -79,7 +81,7 @@ export function defaultDock(page: Page): DockLayout {
       return { root: split('row', [split('col', [stack([VIEWER], 200), lists('groups', ['groups', 'types', 'branches', 'statistics', 'calendar'], 0)], 290), stack(['timeline', 'event-table', 'event-outline']), split('col', [stack(['properties']), stack(['looks'])], 320)]), floats: [] };
     case 'looks':
       // (As drawn, D248: the thing's parts at the left, before the lists; the stage; its Looks over the Effects panel.)
-      return { root: split('row', [lists('parts', ['parts', 'countries', 'layers', 'places', 'areas'], 250), stack([VIEWER]), split('col', [stack(['looks']), stack(['effects'], 300)], 380)]), floats: [] };
+      return { root: split('row', [stack(['tools'], 44), lists('parts', ['parts', 'countries', 'layers', 'places', 'areas'], 250), stack([VIEWER]), split('col', [stack(['looks']), stack(['effects'], 300)], 380)]), floats: [] };
     case 'shots':
       // (The Looks and Effects panels beside the shot, under its settings, D239.)
       return { root: split('col', [split('row', [stack(['shots'], 250), stack([VIEWER]), split('col', [stack(['shot']), stack(['looks', 'effects'])], 330)]), stack(['shot-timeline'], 150)]), floats: [] };

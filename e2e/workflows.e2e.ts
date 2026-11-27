@@ -5241,12 +5241,13 @@ try {
       await page.evaluate(() => (window as any).__mapmaker.store.set({ dialog: null }));
     }
     await h.screenshot('studio-map');
-    // Looks: the lists, the map and Properties, no tools; a tool taken in History comes back on returning there.
+    // Looks: tools of its own to design by hand (D251), not History's; a tool taken in History comes back on returning there.
     await page.getByTestId('studio-history').click();
     await h.chooseTool('lasso');
     await page.getByTestId('studio-looks').click();
     assert.equal(await store('s.tool'), 'select');
-    assert.equal(await page.getByTestId('tool-strip').count(), 0);
+    await page.getByTestId('tool-shape').waitFor();
+    assert.equal(await page.getByTestId('tool-lasso').count(), 0);
     await page.getByTestId('studio-history').click();
     assert.equal(await store('s.tool'), 'lasso');
     await page.getByTestId('tool-select').click();
@@ -6571,6 +6572,135 @@ try {
     assert.equal(await steps(), before);
     assert.deepEqual(await looks(), looks0, 'both countries\' looks as they were');
     assert.equal(await store(`JSON.parse(s.world.get('meta', 'look_presets')?.value ?? '[]').some((p) => p.name === 'Testa shadow' || p.name === 'Raised shadow')`), false, 'nothing kept');
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
+    await page.getByTestId('studio-history').click();
+    await page.evaluate(() => (window as any).__mapmaker.allLists());
+  });
+
+  await h.step('Drawings by hand (D251): the Looks studio\'s tools; a rectangle across a border drawn on one country\'s design and cut by it; its looks; an ellipse into it; chosen on the map; + Drawing; undone', async () => {
+    const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);
+    const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
+    await page.getByTestId('studio-history').click();
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
+    await h.setDate('1650');
+    await page.getByTestId('studio-looks').click();
+    await page.getByTestId('reset-workspace').click();
+    const before = await steps();
+    // The Looks studio's own tools: Select and Shapes, not History's.
+    await page.getByTestId('tool-shape').waitFor();
+    assert.equal(await page.getByTestId('tool-lasso').count(), 0);
+    await page.evaluate(([a, b]) => (window as any).__mapmaker.store.setCamera({ lon: (a[0] + b[0]) / 2, lat: (a[1] + b[1]) / 2, zoom: 1.5, rotation: 0, projection: 'equirectangular' }), [P.a, P.b]);
+    await page.getByTestId('tool-select').click();
+    // A click on the map with Select: the country there designed. (On its land a third of the way to its neighbour, beside
+    // its name and away from its cities: a click on a city chooses the city.)
+    const pa = await h.toPage(P.a), pb = await h.toPage(P.b);
+    const onA: [number, number] = [pa[0] + 0.3 * (pb[0] - pa[0]), pa[1] + 12];
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
+    await page.mouse.click(onA[0], onA[1]);
+    const idA = await store(`s.world.all('entity').find((e) => e.name === ${JSON.stringify(A)}).id`) as string;
+    assert.deepEqual(await store('s.selection'), { kind: 'entity', id: idA });
+    await page.getByTestId('looks-entity').waitFor();
+    // The main colour of a patch about a point of the page (a border drawn over part of it aside): a third of the way
+    // from one place to the other, on the first country's land beside its name, and three quarters of the way, on its
+    // neighbour's.
+    const qa: [number, number] = [pa[0] + 0.3 * (pb[0] - pa[0]), pa[1] + 12], qb: [number, number] = [pa[0] + 0.75 * (pb[0] - pa[0]), pa[1] + 12];
+    const mainColour = (q: [number, number]) => page.evaluate((p) => {
+      const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement;
+      const r = c.getBoundingClientRect(), k = c.width / r.width, R = Math.round(8 * k);
+      const d = c.getContext('2d')!.getImageData(Math.round((p[0] - r.left) * k) - R, Math.round((p[1] - r.top) * k) - R, 2 * R + 1, 2 * R + 1).data;
+      const n = new Map<string, number>();
+      for (let i = 0; i < d.length; i += 4) { const key = `${d[i] >> 3},${d[i + 1] >> 3},${d[i + 2] >> 3}`; n.set(key, (n.get(key) ?? 0) + 1); }
+      const [key] = [...n].sort((x, y) => y[1] - x[1])[0];
+      return key.split(',').map((v) => Number(v) * 8 + 4);
+    }, q);
+    const diff = (x: number[], y: number[]) => Math.max(...x.map((v, i) => Math.abs(v - y[i])));
+    const until = async (ok: () => Promise<boolean>) => { for (let i = 0; i < 40 && !(await ok()); i++) await page.waitForTimeout(100); };
+    await page.waitForTimeout(300);
+    const a0 = await mainColour(qa), b0 = await mainColour(qb);
+    // Shapes: a rectangle filled green, dragged from beyond one place to beyond the other, over the border between them.
+    await page.getByTestId('tool-shape').click();
+    await page.getByTestId('draw-options').waitFor();
+    assert.match(await page.getByTestId('draw-into').innerText(), /Into a new drawing of/);
+    await page.getByTestId('draw-fill-on').check();
+    await page.getByTestId('draw-fill-color').fill('#00ff00');
+    await page.mouse.move(pa[0] - 30, pa[1] - 30);
+    await page.mouse.down();
+    await page.mouse.move((pa[0] + pb[0]) / 2, (pa[1] + pb[1]) / 2, { steps: 4 });
+    await page.mouse.move(pb[0] + 30, pb[1] + 30, { steps: 4 });
+    await page.mouse.up();
+    await h.saved();
+    const drawings = () => store(`JSON.parse(s.world.get('entity', ${JSON.stringify(idA)}).style || '{}').drawings ?? []`) as Promise<Array<{ id: string; name: string; fill: string | null; opacity: number; shapes: Array<{ anchors: Array<{ o?: unknown }> }> }>>;
+    let list = await drawings();
+    assert.equal(list.length, 1);
+    assert.equal(list[0].fill, '#00ff00');
+    assert.equal(list[0].shapes[0].anchors.length, 4, 'a rectangle: four corners');
+    assert.equal(await store('s.drawingId'), list[0].id, 'the new drawing chosen');
+    // (One undo step: undone once, no drawing; done again.)
+    await page.getByTestId('undo').click();
+    await h.saved();
+    assert.equal((await drawings()).length, 0);
+    await page.getByTestId('redo').click();
+    await h.saved();
+    assert.equal((await drawings()).length, 1);
+    // Drawn on the country's land, and cut by its border: its neighbour as it was.
+    await until(async () => diff(await mainColour(qa), a0) > 20);
+    const a1 = await mainColour(qa), b1 = await mainColour(qb);
+    assert.ok(a1[1] > a1[0] + 30 && a1[1] > a1[2] + 30, `green on ${A} (${a1})`);
+    assert.ok(diff(b1, b0) <= 8, `${B} as it was (${b0} against ${b1})`);
+    await h.screenshot('looks-drawing-rectangle');
+    // A part of the country's design, between its border and its fill; its own looks in the Looks panel.
+    assert.deepEqual(await page.getByTestId('parts-panel').locator('.parts-list').first().locator('.part-name').allInnerTexts(), ['Effects', 'Label', 'Border', 'Drawing: Drawing 1', 'Fill']);
+    await page.getByTestId('looks-drawing').waitFor();
+    assert.match(await page.getByTestId('looks-drawing').innerText(), new RegExp(`Drawing · part of\\s+${A}`));
+    await page.getByTestId('drawing-name').fill('Hatching');
+    await page.getByTestId('drawing-name').press('Enter');
+    await h.saved();
+    await page.getByTestId('drawing-opacity').fill('40');
+    await h.saved();
+    list = await drawings();
+    assert.equal(list[0].name, 'Hatching');
+    assert.equal(list[0].opacity, 0.4);
+    await until(async () => (await mainColour(qa))[1] < a1[1] - 20);
+    assert.ok((await mainColour(qa))[1] < a1[1] - 20, 'less green at 40%');
+    assert.match(await page.getByTestId('part-drawing:' + list[0].id).innerText(), /Drawing: Hatching/);
+    // An ellipse into the same drawing: curves, four anchors with handles.
+    await page.getByTestId('shape-ellipse').click();
+    await page.mouse.move(pa[0] - 20, pa[1] - 12);
+    await page.mouse.down();
+    await page.mouse.move(pa[0] + 20, pa[1] + 12, { steps: 4 });
+    await page.mouse.up();
+    await h.saved();
+    list = await drawings();
+    assert.equal(list.length, 1);
+    assert.equal(list[0].shapes.length, 2);
+    assert.ok(list[0].shapes[1].anchors.every((a) => !!a.o), 'an ellipse: smooth anchors');
+    // Chosen on the map with Select: on the drawing, the drawing; beside it on the country's land, the country.
+    await page.getByTestId('tool-select').click();
+    await page.getByTestId('drawing-owner').click();
+    await page.getByTestId('looks-entity').waitFor();
+    assert.equal(await store('s.drawingId'), null);
+    await page.mouse.click(onA[0], onA[1]);
+    assert.equal(await store('s.drawingId'), list[0].id);
+    await page.getByTestId('looks-drawing').waitFor();
+    // + Drawing: another, empty, chosen, the Shapes tool in hand; taken away again.
+    await page.getByTestId('parts-add-drawing').click();
+    await h.saved();
+    assert.equal((await drawings()).length, 2);
+    assert.equal(await store('s.tool'), 'shape');
+    assert.match(await page.getByTestId('looks-drawing').innerText(), /Drawing 1/);
+    // Delete takes away the drawing chosen, not the country designed.
+    await page.keyboard.press('Delete');
+    await h.saved();
+    assert.equal((await drawings()).length, 1);
+    assert.ok(await store(`!!s.world.get('entity', ${JSON.stringify(idA)})`), 'the country still there');
+    assert.equal(await store('s.drawingId'), null);
+    // Undone, step by step: no drawings, the country as it was.
+    for (let i = 0; i < 12 && (await steps()) > before; i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await steps(), before);
+    assert.deepEqual(await drawings(), []);
+    await until(async () => diff(await mainColour(qa), a0) <= 8);
+    assert.ok(diff(await mainColour(qa), a0) <= 8, `${A} as it was`);
+    await page.getByTestId('tool-select').click();
     await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
     await page.getByTestId('studio-history').click();
     await page.evaluate(() => (window as any).__mapmaker.allLists());

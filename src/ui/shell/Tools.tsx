@@ -23,6 +23,7 @@ import { TOOLS, toolsFor, stackOf, type ToolInfo } from '../tools.ts';
 import { ToolIcon } from './ToolIcon.tsx';
 import { fmt } from '../inputs.tsx';
 import { outlinerLists } from '../panels/Lists.tsx';
+import { DrawToolOptions } from '../panels/DrawingLooks.tsx';
 
 /** The biomes a brush can paint (D169), by their names. */
 const BIOME_NAMES: Record<Biome, string> = { ice: 'Ice', tundra: 'Tundra', boreal: 'Northern forest', forest: 'Forest', grass: 'Grassland', steppe: 'Steppe', desert: 'Desert', savanna: 'Savanna', rainforest: 'Rainforest', rock: 'Bare rock' };
@@ -60,7 +61,7 @@ function PenControls() {
 export function ToolStrip() {
   const s = useStore();
   const page = s.pageNow();
-  const tools = toolsFor(s.world!, s.spaceId, page === 'map' ? 'map' : 'history');
+  const tools = toolsFor(s.world!, s.spaceId, page === 'map' ? 'map' : page === 'looks' ? 'looks' : 'history');
   // Stacked tools take one place, at the first of them (D205).
   const slots: Array<{ tools: ToolInfo[]; stack: string | null }> = [];
   for (const t of tools) {
@@ -198,6 +199,7 @@ export function ToolOptions() {
         </div>
       )}
     {s.tool === 'feature' && <FeatureToolOptions />}
+    {s.tool === 'shape' && <DrawToolOptions />}
     {s.tool === 'sculpt' && <SculptToolOptions />}
     {s.tool === 'field' && <FieldToolOptions />}
     {s.tool === 'disaster' && <DisasterToolOptions />}

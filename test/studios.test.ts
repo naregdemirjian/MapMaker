@@ -31,7 +31,7 @@ test('every panel has a name and the pages it opens in; the viewer opens everywh
   assert.equal(viewer.closable, false);
   assert.ok(panelOn('countries', 'history') && panelOn('countries', 'looks') && !panelOn('countries', 'shots'));
   assert.ok(panelOn('shots', 'export') && !panelOn('shots', 'history'));
-  assert.ok(panelOn('tools', 'map') && panelOn('tools', 'history') && !panelOn('tools', 'timeline'), 'the tools only where there is drawing');
+  assert.ok(panelOn('tools', 'map') && panelOn('tools', 'history') && panelOn('tools', 'looks') && !panelOn('tools', 'timeline'), 'the tools only where there is drawing, and designing by hand (D251)');
   assert.ok(!panelOn('nonsense', 'history'));
   assert.ok(['groups', 'types', 'branches', 'statistics', 'calendar'].every((p) => panelOn(p, 'timeline') && !panelOn(p, 'history')), 'the Timeline studio\'s own panels (D241, D246)');
 });
@@ -41,7 +41,7 @@ test('each page opens with its own layout, holding only panels it can hold, the 
     map: '(([tools]@44 | [maps*,layers]@230 | [viewer*,gallery] | [properties]@350) / [timeline]@130)',
     history: '(([tools]@44 | [layers,countries*,places,areas,events,maps,effects]@250 | [viewer] | ([properties] / [looks])@310) / [timebar]@84)',
     timeline: '(([viewer]@200 / [groups*,types,branches,statistics,calendar])@290 | [timeline*,event-table,event-outline] | ([properties] / [looks])@320)',
-    looks: '([parts*,countries,layers,places,areas]@250 | [viewer] | ([looks] / [effects]@300)@380)',
+    looks: '([tools]@44 | [parts*,countries,layers,places,areas]@250 | [viewer] | ([looks] / [effects]@300)@380)',
     shots: '(([shots]@250 | [viewer] | ([shot] / [looks*,effects])@330) / [shot-timeline]@150)',
     export: '(([shots]@230 | [viewer] | [export]@380) / [shot-timeline]@110)',
   };
