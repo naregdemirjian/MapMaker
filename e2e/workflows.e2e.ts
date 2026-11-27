@@ -6926,7 +6926,14 @@ try {
     await page.keyboard.press('t');
     assert.equal(await tool(), 'sculpt');
     await page.getByTestId('sculpt-brush').selectOption('river');
-    const bar = await box('[data-testid="options-bar"] .tool-options'), tabs = await box('[data-testid="dock-tab-maps"]');
+    // (The panels move down once the bar's new height has been measured, a moment after its options change: measured
+    // when that has happened, or after a few seconds.)
+    let bar = await box('[data-testid="options-bar"] .tool-options'), tabs = await box('[data-testid="dock-tab-maps"]');
+    for (let i = 0; i < 30 && !(bar.height > 50 && tabs.y >= bar.y + bar.height - 1.5); i++) {
+      await page.waitForTimeout(100);
+      bar = await box('[data-testid="options-bar"] .tool-options');
+      tabs = await box('[data-testid="dock-tab-maps"]');
+    }
     assert.ok(bar.height > 50, `the options take a second line (${bar.height})`);
     assert.ok(tabs.y >= bar.y + bar.height - 1.5, `the lists' tabs start below the options (${tabs.y} against ${bar.y + bar.height})`);
     const map1 = await box('.viewer-panel');
