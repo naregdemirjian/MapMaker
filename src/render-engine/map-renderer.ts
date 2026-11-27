@@ -2599,7 +2599,9 @@ export class MapRenderer {
                 if (it.drawings) {
                   lc.save();
                   this.clip(lc, it.shape);
-                  paintDrawings(lc, tmp, it.drawings, projectLL, u);
+                  // (Its patterns, D254: laid on its box, their tile's middle on its middle.)
+                  const sb = this.screenBox(view, arr, it.set.faces);
+                  paintDrawings(lc, tmp, it.drawings, projectLL, u, { at: [sb[0] + sb[2] / 2, sb[1] + sb[3] / 2], box: [sb[0], sb[1], sb[2], sb[3]] });
                   lc.restore();
                 }
               }

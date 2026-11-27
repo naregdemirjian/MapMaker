@@ -622,6 +622,16 @@ export function updateDrawing(world: World, id: string, drawingId: string, patch
   return putDrawings(world, id, label, list.map((x) => (x.id === drawingId ? next : x)));
 }
 
+/** A drawing put in place of itself, whole (D254: made a pattern that follows the country, or laid on the land). */
+export function setDrawing(world: World, id: string, drawingId: string, next: Drawing, label: string): CommandResult {
+  const e = drawnOn(world, id);
+  const list = drawingsOfEntity(e);
+  if (!list.some((x) => x.id === drawingId)) throw new Error('That drawing no longer exists.');
+  const clean = drawingOf({ ...next, id: drawingId });
+  if (!clean) throw new Error('That is not a drawing.');
+  return putDrawings(world, id, label, list.map((x) => (x.id === drawingId ? clean : x)));
+}
+
 /** A drawing taken away from a country's design. */
 export function removeDrawing(world: World, id: string, drawingId: string): CommandResult {
   const e = drawnOn(world, id);

@@ -6886,6 +6886,85 @@ try {
     await page.evaluate(() => (window as any).__mapmaker.allLists());
   });
 
+  await h.step('A pattern that follows the country (D254): a small yellow square made a pattern, repeated over the country\'s land and not its neighbour\'s; not drawn into; laid on the land again; undone', async () => {
+    const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);
+    const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
+    await page.getByTestId('studio-history').click();
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
+    await h.setDate('1650');
+    await page.getByTestId('studio-looks').click();
+    await page.getByTestId('reset-workspace').click();
+    await page.evaluate(([a, b]) => (window as any).__mapmaker.store.setCamera({ lon: (a[0] + b[0]) / 2, lat: (a[1] + b[1]) / 2, zoom: 1.5, rotation: 0, projection: 'equirectangular' }), [P.a, P.b]);
+    const idA = await store(`s.world.all('entity').find((e) => e.name === ${JSON.stringify(A)}).id`) as string;
+    await page.evaluate((id) => (window as any).__mapmaker.store.set({ selection: { kind: 'entity', id }, multi: null }), idA);
+    const before = await steps();
+    const pa = await h.toPage(P.a), pb = await h.toPage(P.b);
+    // A patch of the first country's land beside its name, and one of its neighbour's.
+    const qa: [number, number] = [pa[0] + 0.3 * (pb[0] - pa[0]), pa[1] + 80], qb: [number, number] = [pa[0] + 0.75 * (pb[0] - pa[0]), pa[1] + 80];
+    const yellow = (q: [number, number]) => page.evaluate((p) => {
+      const cv = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement;
+      const r = cv.getBoundingClientRect(), k = cv.width / r.width;
+      const d = cv.getContext('2d')!.getImageData(Math.round((p[0] - r.left - 60) * k), Math.round((p[1] - r.top - 40) * k), Math.round(120 * k), Math.round(80 * k)).data;
+      let n = 0;
+      for (let i = 0; i < d.length; i += 4) if (d[i] > 180 && d[i + 1] > 135 && d[i + 2] < 90) n++;
+      return n;
+    }, q);
+    const drawings = () => store(`JSON.parse(s.world.get('entity', ${JSON.stringify(idA)}).style || '{}').drawings ?? []`) as Promise<Array<{ mode: string; tile: [number, number] | null; shapes: unknown[] }>>;
+    const until = async (ok: () => Promise<boolean>) => { for (let i = 0; i < 40 && !(await ok()); i++) await page.waitForTimeout(100); };
+    // A small yellow square, filled, no line.
+    await page.getByTestId('tool-shape').click();
+    await page.getByTestId('shape-rectangle').click();
+    if (await page.getByTestId('draw-stroke-on').isChecked()) await page.getByTestId('draw-stroke-on').uncheck();
+    await page.getByTestId('draw-fill-on').check();
+    await page.getByTestId('draw-fill-color').fill('#ffcc00');
+    await page.mouse.move(qa[0] - 6, qa[1] - 6);
+    await page.mouse.down();
+    await page.mouse.move(qa[0] + 6, qa[1] + 6, { steps: 3 });
+    await page.mouse.up();
+    await h.saved();
+    await until(async () => (await yellow(qa)) > 0);
+    const one = await yellow(qa);
+    assert.ok(one > 0, 'the square drawn');
+    // A pattern that follows the country: over all of its land, none of its neighbour's.
+    await page.getByTestId('drawing-mode').selectOption('pattern');
+    await h.saved();
+    let list = await drawings();
+    assert.equal(list[0].mode, 'pattern');
+    assert.ok(list[0].tile && list[0].tile[0] > 12 && list[0].tile[0] < 80, `a tile about the square (${list[0].tile})`);
+    await until(async () => (await yellow(qa)) > 4 * one);
+    const many = await yellow(qa);
+    assert.ok(many > 4 * one, `repeated over the land (${one} yellow pixels, then ${many})`);
+    assert.equal(await yellow(qb), 0, 'none on its neighbour');
+    assert.match(await page.getByTestId('parts-panel').innerText(), /Drawing 1\s+follows it/);
+    await h.screenshot('looks-pattern');
+    // Not drawn into while a pattern.
+    const away = [qa[0] + 30, qa[1] - 30];
+    await page.mouse.move(away[0], away[1]);
+    await page.mouse.down();
+    await page.mouse.move(away[0] + 15, away[1] + 15, { steps: 3 });
+    await page.mouse.up();
+    await h.saved();
+    list = await drawings();
+    assert.equal(list.length, 1);
+    assert.equal(list[0].shapes.length, 1, 'nothing drawn into the pattern');
+    // Laid on the land again: one square, at the middle of the country.
+    await page.getByTestId('drawing-mode').selectOption('land');
+    await h.saved();
+    list = await drawings();
+    assert.equal(list[0].mode, 'land');
+    assert.equal(list[0].tile, null);
+    await until(async () => (await yellow(qa)) < many / 4);
+    assert.ok((await yellow(qa)) < many / 4, 'no longer repeated');
+    // Undone, step by step.
+    for (let i = 0; i < 12 && (await steps()) > before; i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await steps(), before);
+    assert.deepEqual(await drawings(), []);
+    await page.getByTestId('tool-select').click();
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null, drawNew: { stroke: { color: '#2b1d12', width: 2 }, fill: null } }));
+    await page.getByTestId('studio-history').click();
+    await page.evaluate(() => (window as any).__mapmaker.allLists());
+  });
+
   await h.step('The menu bar: every command in a menu with its shortcut; the keyboard runs the same commands (D197)', async () => {
     const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);
     await page.getByTestId('studio-history').click();

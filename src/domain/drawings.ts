@@ -37,11 +37,20 @@ export interface Drawing {
   /** 0 to 1. */
   opacity: number;
   blend: BlendMode;
+  /**
+   * Fixed to the land (its shapes in degrees; the country's borders cut it), or a pattern that follows the country
+   * (D254): its shapes in pixels of a frame 1920 wide within a tile `tile` wide and high, repeated over the country's
+   * land wherever it lies, the tile's middle on the middle of the country.
+   */
+  mode: 'land' | 'pattern';
+  tile: [number, number] | null;
   shapes: DrawShape[];
 }
 
-/** A new drawing's looks: a dark line two pixels wide, not filled, as drawn. */
-export const NEW_DRAWING: Omit<Drawing, 'id' | 'name' | 'shapes'> = { on: true, stroke: { color: '#2b1d12', width: 2 }, fill: null, opacity: 1, blend: 'normal' };
+/** A new drawing's looks: a dark line two pixels wide, not filled, as drawn, fixed to the land. */
+export const NEW_DRAWING: Omit<Drawing, 'id' | 'name' | 'shapes'> = { on: true, stroke: { color: '#2b1d12', width: 2 }, fill: null, opacity: 1, blend: 'normal', mode: 'land', tile: null };
+/** The widest and highest tile a pattern has (pixels of a frame 1920 wide). */
+export const MOST_TILE = 2000;
 /** At most, for a country: drawings, shapes in a drawing, anchors in a shape. */
 export const MOST_DRAWINGS = 40, MOST_SHAPES = 400, MOST_ANCHORS = 4000;
 /** The widest line a drawing can have (pixels of a frame 1920 wide). */
@@ -49,33 +58,37 @@ export const MOST_WIDTH = 200;
 
 const isColor = (v: unknown): v is string => typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v);
 const num = (v: unknown, lo: number, hi: number, d: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : d);
-const llOf = (v: unknown): LL | null =>
-  Array.isArray(v) && v.length === 2 && typeof v[0] === 'number' && typeof v[1] === 'number' && Number.isFinite(v[0]) && Number.isFinite(v[1]) && Math.abs(v[0]) <= 540 && Math.abs(v[1]) <= 90
+/** Where a shape's points may lie: in degrees on the land, or in a pattern's tile (pixels, with room either side). */
+type Bound = 'land' | 'tile';
+const ptIn = (v: unknown, b: Bound): LL | null =>
+  Array.isArray(v) && v.length === 2 && typeof v[0] === 'number' && typeof v[1] === 'number' && Number.isFinite(v[0]) && Number.isFinite(v[1])
+    && (b === 'land' ? Math.abs(v[0]) <= 540 && Math.abs(v[1]) <= 90 : Math.abs(v[0]) <= 2 * MOST_TILE && Math.abs(v[1]) <= 2 * MOST_TILE)
     ? [v[0], v[1]] : null;
+const llOf = (v: unknown) => ptIn(v, 'land');
 
-function anchorOf(v: unknown): DrawAnchor | null {
+function anchorOf(v: unknown, b: Bound = 'land'): DrawAnchor | null {
   const a = v as { p?: unknown; i?: unknown; o?: unknown } | null;
-  const p = a ? llOf(a.p) : null;
+  const p = a ? ptIn(a.p, b) : null;
   if (!p) return null;
   const out: DrawAnchor = { p };
-  const i = llOf(a!.i), o = llOf(a!.o);
+  const i = ptIn(a!.i, b), o = ptIn(a!.o, b);
   if (i) out.i = i;
   if (o) out.o = o;
   return out;
 }
 
 /** A shape as kept, checked (null: not a shape this version knows, or one with too few points to draw). */
-export function shapeOf(v: unknown): DrawShape | null {
+export function shapeOf(v: unknown, b: Bound = 'land'): DrawShape | null {
   const s = v as { kind?: unknown; anchors?: unknown; closed?: unknown } | null;
   if (s?.kind === 'text') {
     const t = v as Partial<Record<keyof TextShape, unknown>>;
-    const at = llOf(t.at), text = typeof t.text === 'string' ? t.text.trim().slice(0, MOST_TEXT) : '';
+    const at = ptIn(t.at, b), text = typeof t.text === 'string' ? t.text.trim().slice(0, MOST_TEXT) : '';
     if (!at || !text) return null;
     const font = typeof t.font === 'string' && t.font.trim() ? t.font.trim().slice(0, 60) : NEW_TEXT.font;
     return { kind: 'text', at, text, size: num(t.size, 4, 400, NEW_TEXT.size), font, weight: Math.round(num(t.weight, 100, 900, NEW_TEXT.weight) / 100) * 100, italic: t.italic === true, angle: num(t.angle, -360, 360, 0) };
   }
   if (!s || s.kind !== 'path' || !Array.isArray(s.anchors)) return null;
-  const anchors = s.anchors.slice(0, MOST_ANCHORS).map(anchorOf).filter((a): a is DrawAnchor => !!a);
+  const anchors = s.anchors.slice(0, MOST_ANCHORS).map((a) => anchorOf(a, b)).filter((a): a is DrawAnchor => !!a);
   if (anchors.length < 2) return null;
   return { kind: 'path', anchors, closed: s.closed === true && anchors.length >= 2 };
 }
@@ -85,6 +98,11 @@ export function drawingOf(v: unknown): Drawing | null {
   const d = v as Partial<Record<keyof Drawing, unknown>> | null;
   if (!d || typeof d.id !== 'string' || !d.id) return null;
   const st = d.stroke as { color?: unknown; width?: unknown } | null | undefined;
+  // (A pattern needs its tile; without one it is taken for a drawing on the land.)
+  const tl = d.tile as unknown[] | null | undefined;
+  const tile: [number, number] | null = Array.isArray(tl) && tl.length === 2 && typeof tl[0] === 'number' && typeof tl[1] === 'number' && tl[0] >= 1 && tl[1] >= 1
+    ? [Math.min(MOST_TILE, tl[0]), Math.min(MOST_TILE, tl[1])] : null;
+  const mode = d.mode === 'pattern' && tile ? 'pattern' : 'land';
   return {
     id: d.id,
     name: typeof d.name === 'string' && d.name.trim() ? d.name.trim().slice(0, 80) : 'Drawing',
@@ -93,7 +111,9 @@ export function drawingOf(v: unknown): Drawing | null {
     fill: isColor(d.fill) ? d.fill : null,
     opacity: num(d.opacity, 0, 1, 1),
     blend: (BLEND_MODES as readonly string[]).includes(d.blend as string) ? (d.blend as BlendMode) : 'normal',
-    shapes: Array.isArray(d.shapes) ? d.shapes.slice(0, MOST_SHAPES).map(shapeOf).filter((x): x is DrawShape => !!x) : [],
+    mode,
+    tile: mode === 'pattern' ? tile : null,
+    shapes: Array.isArray(d.shapes) ? d.shapes.slice(0, MOST_SHAPES).map((x) => shapeOf(x, mode === 'pattern' ? 'tile' : 'land')).filter((x): x is DrawShape => !!x) : [],
   };
 }
 
@@ -266,9 +286,63 @@ export function hitsShape(s: DrawShape, project: (ll: LL) => Pt | null, at: Pt, 
 export function drawingAt(list: Drawing[], project: (ll: LL) => Pt | null, at: Pt, unit: number): Drawing | null {
   for (let k = list.length - 1; k >= 0; k--) {
     const d = list[k];
-    if (!d.on) continue;
+    // (A pattern lies everywhere on the country: chosen in its parts, not by a click.)
+    if (!d.on || d.mode === 'pattern') continue;
     const half = d.stroke ? (d.stroke.width * unit) / 2 : 0;
     if (d.shapes.some((s) => hitsShape(s, project, at, !!d.fill, half, 5, unit))) return d;
   }
   return null;
+}
+
+/** Every point of a shape (anchors and handles, a text's place), mapped by `f` (null if any maps to nothing). */
+function mapShape(s: DrawShape, f: (p: LL) => LL | null): DrawShape | null {
+  if (s.kind === 'text') { const at = f(s.at); return at ? { ...s, at } : null; }
+  const anchors: DrawAnchor[] = [];
+  for (const a of s.anchors) {
+    const p = f(a.p), i = a.i ? f(a.i) : null, o = a.o ? f(a.o) : null;
+    if (!p || (a.i && !i) || (a.o && !o)) return null;
+    anchors.push({ p, ...(i ? { i } : {}), ...(o ? { o } : {}) });
+  }
+  return { ...s, anchors };
+}
+
+/**
+ * A drawing on the land made a pattern that follows the country (D254): its shapes as they look on the screen now, in
+ * pixels of a frame 1920 wide, within a tile as large as they are with `gap` pixels of room round them (and the line's
+ * width). Null if any of it is off the map.
+ */
+export function toPattern(d: Drawing, project: (ll: LL) => Pt | null, unit: number, gap = 12): Drawing | null {
+  if (d.mode === 'pattern' || !d.shapes.length) return null;
+  const px = (ll: LL): LL | null => { const q = project(ll); return q ? [q[0] / unit, q[1] / unit] : null; };
+  const shapes: DrawShape[] = [];
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  const take = (p: LL, rx = 0, ry = 0) => { x0 = Math.min(x0, p[0] - rx); y0 = Math.min(y0, p[1] - ry); x1 = Math.max(x1, p[0] + rx); y1 = Math.max(y1, p[1] + ry); };
+  for (const s of d.shapes) {
+    const m = mapShape(s, px);
+    if (!m) return null;
+    if (m.kind === 'text') { const b = textBox(m, (q) => q, 1)!; take(m.at, Math.hypot(b.hw, b.hh), Math.hypot(b.hw, b.hh)); }
+    else for (const a of m.anchors) for (const q of [a.p, a.i, a.o]) if (q) take(q);
+    shapes.push(m);
+  }
+  const pad = gap / 2 + (d.stroke ? d.stroke.width : 0);
+  const w = x1 - x0 + 2 * pad, h = y1 - y0 + 2 * pad;
+  if (!(w >= 1 && h >= 1) || w > MOST_TILE || h > MOST_TILE) return null;
+  const dx = pad - x0, dy = pad - y0;
+  return { ...d, mode: 'pattern', tile: [w, h], shapes: shapes.map((s) => mapShape(s, (p) => [p[0] + dx, p[1] + dy])!) };
+}
+
+/**
+ * A pattern laid back on the land (D254): one tile of it with its middle at `middle` (a point of the screen), its
+ * shapes turned into degrees as they are seen there. Null if any of it is off the map.
+ */
+export function toLand(d: Drawing, unproject: (p: Pt) => LL | null, unit: number, middle: Pt): Drawing | null {
+  if (d.mode !== 'pattern' || !d.tile) return null;
+  const [w, h] = d.tile;
+  const shapes: DrawShape[] = [];
+  for (const s of d.shapes) {
+    const m = mapShape(s, (p) => unproject([middle[0] + (p[0] - w / 2) * unit, middle[1] + (p[1] - h / 2) * unit]));
+    if (!m) return null;
+    shapes.push(m);
+  }
+  return { ...d, mode: 'land', tile: null, shapes };
 }

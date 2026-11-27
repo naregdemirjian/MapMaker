@@ -943,8 +943,9 @@ export function MapView() {
         ctx.restore();
       }
     }
+    // (A pattern, D254, is not where it was drawn: neither outlined nor its points shown.)
     const designed = !presentation && s.pageNow() === 'looks' ? drawingNow() : null;
-    if (designed) {
+    if (designed && designed.drawing.mode === 'land') {
       const de = drag.current.kind === 'draw-edit' && drag.current.drawingId === designed.drawing.id ? drag.current : null;
       const shapes = designed.drawing.shapes.map((sh, k) => (de && de.shape === k ? (sh.kind === 'text' ? { ...sh, at: de.now[0].p } : { ...sh, anchors: de.now }) : sh));
       const proj = (ll: Pt) => lonLatToScreen(v, ll[0], ll[1]) as DrawPt | null;
@@ -1330,7 +1331,7 @@ export function MapView() {
     // The drawing chosen in the Looks studio (D252): with Select, one of its points or handles picked up and moved.
     if (!presentation && e.button === 0 && s.tool === 'select' && s.pageNow() === 'looks') {
       const dn = drawingNow();
-      for (let k = (dn?.drawing.shapes.length ?? 0) - 1; dn && k >= 0; k--) {
+      for (let k = (dn?.drawing.mode === 'land' ? dn.drawing.shapes.length : 0) - 1; dn && k >= 0; k--) {
         const sh = dn.drawing.shapes[k];
         // (A text is picked up anywhere on it, by its place, D253.)
         const anchors = sh.kind === 'text' ? [{ p: sh.at }] : sh.anchors;

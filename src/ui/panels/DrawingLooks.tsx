@@ -8,7 +8,10 @@ import { BLEND_MODES, BLEND_NAMES, type BlendMode } from '../../render-engine/co
 import { PropGroup } from '../shell/Group.tsx';
 import { NumberField } from '../inputs.tsx';
 import { LABEL_FONTS } from '../../render-engine/label-style.ts';
-import type { Drawing, DrawStroke, TextShape } from '../../domain/drawings.ts';
+import { makeView, lonLatToScreen, screenToLonLat } from '../../render-engine/camera.ts';
+import { territoryPolygons } from '../../domain/data-export.ts';
+import { boxOf, middleOf } from '../stage.ts';
+import { toPattern, toLand, type Drawing, type DrawStroke, type TextShape, type Pt } from '../../domain/drawings.ts';
 
 /** The drawing designed: of the country chosen, the one chosen in its parts (null: none, or no longer there). */
 export function drawingNow(s = store): { owner: string; drawing: Drawing } | null {
@@ -16,6 +19,39 @@ export function drawingNow(s = store): { owner: string; drawing: Drawing } | nul
   if (!w || sel?.kind !== 'entity' || !s.drawingId) return null;
   const d = cmd.drawingsOfEntity(w.get('entity', sel.id)).find((x) => x.id === s.drawingId);
   return d ? { owner: sel.id, drawing: d } : null;
+}
+
+/**
+ * A drawing made a pattern that follows the country, or laid on the land again (D254), from the map as seen: a pattern's
+ * tile holds the drawing as it looks now; laid on the land, one tile goes to the middle of the country as seen.
+ */
+export function setDrawingMode(owner: string, d: Drawing, mode: 'land' | 'pattern') {
+  const s = store, w = s.world, e = w?.get('entity', owner);
+  if (!w || !e || d.mode === mode) return;
+  const canvas = document.querySelector<HTMLCanvasElement>('[data-testid="map-canvas"]');
+  const v = makeView(s.camera, canvas?.clientWidth || 1200, canvas?.clientHeight || 800);
+  if (mode === 'pattern') {
+    const p = toPattern(d, (ll) => lonLatToScreen(v, ll[0], ll[1]) as Pt | null, v.unit);
+    if (!p) { s.toast('Draw something in it first, all of it on the map as seen: the pattern repeats it as it looks.'); return; }
+    s.executeLooks((wd) => cmd.setDrawing(wd, owner, d.id, p, `Make the drawing "${d.name}" a pattern that follows ${e.name}`));
+    return;
+  }
+  const polys = s.engine ? [...territoryPolygons(w, s.engine, s.spaceId, s.layerId, s.time)].filter(([o]) => o === owner).flatMap(([, ps]) => ps) : [];
+  const box = boxOf(polys), mid = box ? middleOf(box) : null;
+  const at = (mid ? lonLatToScreen(v, mid[0], mid[1]) : null) ?? [v.width / 2, v.height / 2];
+  const l = toLand(d, (q) => screenToLonLat(v, q[0], q[1]) as [number, number] | null, v.unit, at as Pt);
+  if (!l) { s.toast(`Move the map so that the middle of ${e.name} is in view, then lay it on the land.`); return; }
+  s.executeLooks((wd) => cmd.setDrawing(wd, owner, d.id, l, `Lay the drawing "${d.name}" of ${e.name} on the land`));
+}
+
+/** Whether a drawing is fixed to the land or a pattern that follows the country (D254), as a choice. */
+function ModeChoice({ owner, d, testId }: { owner: string; d: Drawing; testId: string }) {
+  return (
+    <select value={d.mode} onChange={(ev) => setDrawingMode(owner, d, ev.target.value as 'land' | 'pattern')} title="Fixed to the land: where it was drawn, cut by the borders. A pattern: repeated over all of the country's land, wherever it lies, going where the country goes." data-testid={testId}>
+      <option value="land">Fixed to the land</option>
+      <option value="pattern">A pattern that follows it</option>
+    </select>
+  );
 }
 
 /** A drawing's line and fill, as fields: a box to have one, its colour (and the line's width). */
@@ -78,7 +114,8 @@ export function DrawingLooks({ owner, drawing: d }: { owner: string; drawing: Dr
           </select>
         </label>
         <label className="check"><input type="checkbox" checked={d.on} onChange={(ev) => set({ on: ev.target.checked })} data-testid="drawing-on" /> Shown</label>
-        <p className="muted small-text">{d.shapes.length === 1 ? 'One shape' : `${d.shapes.length} shapes`}, fixed to the land: the borders of {e.name} cut it.</p>
+        <label>This drawing is<ModeChoice owner={owner} d={d} testId="drawing-mode" /></label>
+        <p className="muted small-text">{d.shapes.length === 1 ? 'One shape' : `${d.shapes.length} shapes`}{d.mode === 'pattern' ? `, a pattern repeated over all of the land of ${e.name} wherever it lies. Lay it on the land again to draw into it.` : `, fixed to the land: the borders of ${e.name} cut it.`}</p>
       </PropGroup>
       {d.shapes.some((sh) => sh.kind === 'text') && (
         <PropGroup id="drawing:texts" title="Texts">
@@ -117,6 +154,7 @@ export function DrawToolOptions() {
           ))}
         </span>
       )}
+      {now && <label className="inline draw-field">This drawing is<ModeChoice owner={now.owner} d={now.drawing} testId="draw-mode" /></label>}
       {now ? (
         <LineAndFill stroke={now.drawing.stroke} fill={now.drawing.fill} prefix="draw"
           onStroke={(stroke) => s.executeLooks((wd) => cmd.updateDrawing(wd, now.owner, now.drawing.id, { stroke }))}
@@ -125,7 +163,7 @@ export function DrawToolOptions() {
         <LineAndFill stroke={s.drawNew.stroke} fill={s.drawNew.fill} prefix="draw" onStroke={(stroke) => s.set({ drawNew: { ...s.drawNew, stroke } })} onFill={(fill) => s.set({ drawNew: { ...s.drawNew, fill } })} />
       )}
       <span className="muted" data-testid="draw-into">
-        {!designable ? 'Choose a country to draw on its design.' : now ? `Into "${now.drawing.name}" of ${country!.name}, fixed to the land.` : `Into a new drawing of ${country!.name}, fixed to the land.`}
+        {!designable ? 'Choose a country to draw on its design.' : now?.drawing.mode === 'pattern' ? `"${now.drawing.name}" is a pattern that follows ${country!.name}: lay it on the land to draw into it.` : now ? `Into "${now.drawing.name}" of ${country!.name}, fixed to the land.` : `Into a new drawing of ${country!.name}, fixed to the land.`}
       </span>
     </div>
   );

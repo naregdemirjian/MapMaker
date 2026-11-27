@@ -30,7 +30,7 @@ export function partsOf(w: World, sel: ReturnType<typeof useStore>['selection'])
           { id: 'label', name: 'Label', group: 'entity:label', holds: st.label ? 'its own' : 'as every country' },
           { id: 'border', name: 'Border', group: 'entity:look', inner: '.country-borders', holds: 'between it and each neighbour' },
           // (Its drawings by hand, D251: the last drawn uppermost.)
-          ...cmd.drawingsOfEntity(e).slice().reverse().map((d) => ({ id: `drawing:${d.id}`, name: `Drawing: ${d.name}`, group: 'drawing:fundamentals', holds: d.on ? 'on the land' : 'hidden', drawing: d.id })),
+          ...cmd.drawingsOfEntity(e).slice().reverse().map((d) => ({ id: `drawing:${d.id}`, name: `Drawing: ${d.name}`, group: 'drawing:fundamentals', holds: !d.on ? 'hidden' : d.mode === 'pattern' ? 'follows it' : 'on the land', drawing: d.id })),
           { id: 'fill', name: 'Fill', group: 'entity:fill', holds: st.fill && st.fill.kind !== 'color' ? (st.fill.kind === 'image' ? 'a picture' : 'a video') : `its colour, ${e.color}` },
         ],
       };

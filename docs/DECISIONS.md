@@ -61,6 +61,30 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D254. A drawing as a pattern that follows the country (S8, fourth part)
+
+- **Why.** The plan and the drawing of the Looks studio: "A drawing is either fixed to the land (borders cut it) or a
+  pattern that follows the country" ("Drawing: crown pattern · follows it").
+- **This drawing is: Fixed to the land, or A pattern that follows it** (the drawing's Looks, and the options bar of the
+  tools to draw with, as drawn). Made a pattern, a drawing keeps its shapes as they look on the screen at that moment,
+  in pixels of a frame 1920 wide, within a **tile** as large as they are with a little room round them (and the line's
+  width); the map's renderer repeats the tile over all of the country's land, wherever the country lies at the date
+  viewed, its middle on the middle of the country's box, so it goes where the country goes (as it gains or loses land,
+  and as the map is moved), at the same size on the screen whatever the zoom, as the patterns among the effects. Cut by
+  the borders and the coast as the rest of the country's fill; at the drawing's opacity and blend. One undo step
+  (`setDrawing`).
+- **Laid on the land again**: one tile of it goes to the middle of the country as seen (of the map, if the country is
+  not in view), its shapes in degrees again; then drawn into, reshaped and moved as any drawing. A pattern itself is not
+  drawn into (the tools say so and leave it), nor chosen by a click on the map, nor are its points shown: it is chosen
+  in the Parts panel ("Drawing: … · follows it").
+- **Kept** with its mode and its tile; a pattern without a tile is taken for a drawing on the land; a tile's points
+  may lie beyond the degrees of the world (they are pixels).
+- **Tests.** Unit: a drawing made a pattern from the drawing as seen (its corners at the room and the line's width from
+  the tile's edge, the tile about it), laid back on the land as it was; kept and checked; nothing to make one of; a
+  pattern not chosen by a click. Interface: a small yellow square drawn; made a pattern: many times as much yellow over
+  the country's land, none on its neighbour's, "follows it" among its parts; not drawn into; laid on the land again, no
+  longer repeated; undone.
+
 ### D253. Text on a country's design (S8, third part)
 
 - **Why.** The plan and the drawing of the Looks studio: "Pen, shapes, brush and text are tools among the others".

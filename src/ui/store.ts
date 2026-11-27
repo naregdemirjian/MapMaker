@@ -831,7 +831,10 @@ export class AppStore {
     const sel = this.selection, w = this.lookWorld ?? this.world;
     const e = sel?.kind === 'entity' && w ? w.get('entity', sel.id) : null;
     if (!e || (e.type_id !== 'polity' && e.type_id !== 'faction')) { this.toast('Choose a country to draw on its design: click it with Select, or choose it in the lists.'); return; }
-    const into = this.drawingId && drawingsOfEntity(e).some((d) => d.id === this.drawingId) ? this.drawingId : null;
+    const chosen = this.drawingId ? drawingsOfEntity(e).find((d) => d.id === this.drawingId) ?? null : null;
+    // (A pattern, D254, holds a tile, not the land: laid on the land again to be drawn into.)
+    if (chosen?.mode === 'pattern') { this.toast(`"${chosen.name}" is a pattern that follows ${e.name}: lay it on the land (in its Looks) to draw into it.`); return; }
+    const into = chosen ? chosen.id : null;
     const id = this.executeLooks((wd) => addDrawingShape(wd, e.id, into, shape, { stroke: this.drawNew.stroke, fill: this.drawNew.fill }));
     if (id !== undefined && id !== this.drawingId) this.set({ drawingId: id });
   }
