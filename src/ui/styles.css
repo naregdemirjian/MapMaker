@@ -57,6 +57,23 @@ a { color: var(--accent); cursor: pointer; }
 .tl-head .datebar input { width: 100%; height: 22px; }
 .tl-head .tl-find { width: 150px; height: 22px; padding: 1px 6px; }
 .tl-head .group-filter { position: relative; top: auto; right: auto; }
+/* History's compact time bar (D244): a row of controls over a strip of the changes near the date. */
+.timebar { display: flex; flex-direction: column; background: var(--panel); min-width: 0; }
+.dock-panel-host > .timebar { flex: 1 1 0; min-height: 0; }
+.tb-row { flex: none; display: flex; align-items: center; gap: 5px; height: 32px; padding: 0 8px; min-width: 0; overflow: hidden; border-bottom: 1px solid var(--line); }
+.tb-row button { height: 22px; padding: 0 8px; white-space: nowrap; flex: none; }
+.tb-row select { width: auto; padding: 1px 4px; font-size: 12px; height: 22px; }
+.tb-row .datebar { flex: none; }
+.tb-row .datebar .date-field { width: 200px; }
+.tb-row .datebar input { width: 100%; height: 22px; }
+.tb-row .vsep { flex: none; width: 1px; height: 18px; background: var(--line); margin: 0 3px; }
+.tb-record { display: inline-flex; align-items: center; gap: 5px; margin: 0; height: 22px; padding: 0 2px 0 7px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel2); color: var(--muted); font-size: 12px; min-width: 0; flex: 0 1 auto; }
+.tb-record > select { display: inline-block; width: auto; min-width: 0; max-width: 240px; margin: 0; border: none; background: transparent; height: 20px; color: var(--text); }
+.tb-record.on { border-color: var(--danger); color: var(--danger-text); background: var(--danger-bg); }
+.tb-rec-dot { font-size: 10px; color: var(--muted); }
+.tb-record.on .tb-rec-dot { color: #ff5d6c; }
+.tb-rec-label { white-space: nowrap; }
+.tb-strip { display: block; width: 100%; flex: none; cursor: col-resize; touch-action: none; }
 .tl-body { flex: 1; min-height: 0; display: flex; }
 .tl-heads { flex: none; display: flex; flex-direction: column; background: var(--panel); border-right: 1px solid var(--line); font-size: 12px; }
 .tl-heads-ruler { flex: none; display: flex; align-items: center; padding: 0 8px; color: var(--muted); font-size: 11px; border-bottom: 1px solid var(--line); box-sizing: border-box; }

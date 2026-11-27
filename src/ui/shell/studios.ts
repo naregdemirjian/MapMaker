@@ -44,6 +44,8 @@ export const PANELS: PanelInfo[] = [
   { id: 'looks', title: 'Looks', pages: ['history', 'timeline', 'looks', 'shots'], hint: 'How the thing chosen is drawn: its colour, fill, borders, label, marker (Design, Ctrl+D); in Shots, everywhere or this shot only', minW: 200 },
   { id: 'effects', title: 'Effects', pages: ['history', 'timeline', 'looks', 'shots'], hint: 'Every effect, in folders: drag one onto a country on the map, into the Looks panel or onto a row of the lists; double-click gives it to what is chosen', minW: 170 },
   { id: 'timeline', title: 'Timeline', pages: WORLD, hint: 'The date viewed, playing history, and the events on their tracks' },
+  // (History's compact time bar, D244: the full timeline is the Timeline studio's, and opened here from the Window menu.)
+  { id: 'timebar', title: 'Time', pages: ['history'], hint: 'One line of time: the event drawn into, the date viewed and the changes near it, playing history; Open Timeline for the events themselves', minH: 84 },
   // (The Timeline studio's own, D241.)
   { id: 'groups', title: 'Groups', pages: ['timeline'], hint: 'The groups of events: each a track of the timeline, shown or not, its colour, name and place', minW: 200 },
   { id: 'types', title: 'Types', pages: ['timeline'], hint: 'Event types: their colours, how territory drawn into their events spreads, how long a new one lasts', minW: 200 },
@@ -66,7 +68,8 @@ export function defaultDock(page: Page): DockLayout {
     case 'map':
       return { root: split('col', [split('row', [stack(['tools'], 44), lists('maps', ['maps', 'layers'], 230), stack([VIEWER, 'gallery']), stack(['properties'], 350)]), stack(['timeline'], 130)]), floats: [] };
     case 'history':
-      return { root: split('col', [split('row', [stack(['tools'], 44), lists('countries', ['layers', 'countries', 'places', 'areas', 'events', 'maps', 'effects'], 250), stack([VIEWER]), split('col', [stack(['properties']), stack(['looks'])], 310)]), stack(['timeline'], 190)]), floats: [] };
+      // (One line of time under the map, D244: organising events is the Timeline studio's work.)
+      return { root: split('col', [historyTop(), stack(['timebar'], 84)]), floats: [] };
     case 'timeline':
       // (The timeline takes the room; a small map follows the date above the studio's own panels, D241.)
       return { root: split('row', [split('col', [stack([VIEWER], 200), lists('groups', ['groups', 'types', 'branches', 'statistics'], 0)], 290), stack(['timeline', 'event-table']), split('col', [stack(['properties']), stack(['looks'])], 320)]), floats: [] };
@@ -79,6 +82,20 @@ export function defaultDock(page: Page): DockLayout {
     case 'export':
       return { root: split('col', [split('row', [stack(['shots'], 230), stack([VIEWER]), stack(['export'], 380)]), stack(['shot-timeline'], 110)]), floats: [] };
   }
+}
+
+/** History's panels over its time bar: the tools, the lists, the map, Properties over the Looks panel. */
+function historyTop() {
+  return split('row', [stack(['tools'], 44), stack(['layers', 'countries', 'places', 'areas', 'events', 'maps', 'effects'], 250, 'countries'), stack([VIEWER]), split('col', [stack(['properties']), stack(['looks'])], 310)]);
+}
+
+/**
+ * Where a panel goes when it is opened in a page whose first arrangement does not hold it (else it would float): in
+ * History, the timeline under the map, over the time bar (D244). The page's first arrangement otherwise.
+ */
+export function homeDock(page: Page): DockLayout {
+  if (page === 'history') return { root: split('col', [historyTop(), stack(['timeline'], 190), stack(['timebar'], 84)]), floats: [] };
+  return defaultDock(page);
 }
 
 /** A page's arrangement now, and the one saved for it (null: none saved; Reset returns to the first). */

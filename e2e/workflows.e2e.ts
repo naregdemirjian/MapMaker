@@ -5186,7 +5186,7 @@ try {
       return r(l.root) + l.floats.map((f: any) => ` + {${f.panels.join(',')}}`).join('');
     });
     const LISTS = '[layers,countries,places,areas,events,maps,effects]';
-    const FIRST = `(([tools] | ${LISTS} | [viewer] | ([properties] / [looks])) / [timeline])`;
+    const FIRST = `(([tools] | ${LISTS} | [viewer] | ([properties] / [looks])) / [timebar])`;
     /** A tab carried by the pointer to a point (the drop mark shown on the way), let go there. */
     const carry = async (panel: string, to: { x: number; y: number }, ctrl = false) => {
       const t = await box(`[data-testid="dock-tab-${panel}"]`);
@@ -5200,13 +5200,15 @@ try {
       if (ctrl) await page.keyboard.up('Control');
       return marked;
     };
-    // History, as it is at first: the tool strip, the lists as tabs of one group, the map, Properties; the timeline below.
+    // History, as it is at first: the tool strip, the lists as tabs of one group, the map, Properties; under them one line
+    // of time, the time bar (D244).
     await page.getByTestId('studio-history').click();
     await page.getByTestId('menu-window').click();
     await page.getByTestId('command-original-layout').click();
     assert.equal(await store('s.pageNow()'), 'history');
     assert.equal(await sig(), FIRST);
-    assert.equal(Math.round((await box('[data-testid="dock-stack-timeline"]')).height), 190);
+    assert.equal(Math.round((await box('[data-testid="dock-stack-timebar"]')).height), 84);
+    assert.equal(await page.locator('.timeline').count(), 0, 'no timeline: organising events is the Timeline studio\'s work');
     assert.equal(Math.round((await box('[data-testid="dock-stack-properties"]')).width), 310);
     // One list at a time, by its tab.
     assert.equal(await page.locator('.list-panel').count(), 1, 'only the list in front is drawn');
@@ -5264,7 +5266,7 @@ try {
     const canvas0 = await box('[data-testid="map-canvas"]');
     const lists = await box(`[data-testid="dock-stack-layers-countries-places-areas-events-maps-effects"] .dock-tabs`);
     assert.equal(await carry('properties', { x: lists.x + lists.width - 30, y: lists.y + lists.height / 2 }), 1, 'the drop is marked on the way');
-    assert.equal(await sig(), `(([tools] | [layers,countries,places,areas,events,maps,effects,properties] | [viewer] | [looks]) / [timeline])`);
+    assert.equal(await sig(), `(([tools] | [layers,countries,places,areas,events,maps,effects,properties] | [viewer] | [looks]) / [timebar])`);
     await page.locator('.properties-panel').waitFor();
     assert.equal(await page.getByTestId('dock-tab-properties').getAttribute('aria-selected'), 'true');
     // (Waited for, not read at once: the layout settles when the browser next lays it out.)
@@ -5274,11 +5276,11 @@ try {
     // Dropped at the bottom edge of the map: a group of its own under the map.
     const map = await box('.viewer-panel');
     await carry('properties', { x: map.x + map.width / 2, y: map.y + map.height - 15 });
-    assert.equal(await sig(), `(([tools] | ${LISTS} | ([viewer] / [properties]) | [looks]) / [timeline])`);
+    assert.equal(await sig(), `(([tools] | ${LISTS} | ([viewer] / [properties]) | [looks]) / [timebar])`);
     await h.screenshot('dock-under-map');
     // Held with Ctrl, it floats where it is let go; a floating window is moved by its title row and resized by its corner.
     await carry('properties', { x: map.x + 300, y: map.y + 120 }, true);
-    assert.equal(await sig(), `(([tools] | ${LISTS} | [viewer] | [looks]) / [timeline]) + {properties}`);
+    assert.equal(await sig(), `(([tools] | ${LISTS} | [viewer] | [looks]) / [timebar]) + {properties}`);
     const f0 = await box('[data-testid="dock-float-properties"]');
     await page.mouse.move(f0.x + f0.width - 40, f0.y + 10);
     await page.mouse.down();
@@ -5313,7 +5315,7 @@ try {
     await page.locator('.list-panel[data-list="places"]').waitFor();
     await page.getByTestId('menu-window').click();
     await page.getByTestId('command-panel-places').click();
-    assert.equal(await sig(), `(([tools] | [layers,countries,areas,events,maps,effects] | [viewer] | ([properties] / [looks])) / [timeline])`);
+    assert.equal(await sig(), `(([tools] | [layers,countries,areas,events,maps,effects] | [viewer] | ([properties] / [looks])) / [timebar])`);
     await page.getByTestId('menu-window').click();
     await page.getByTestId('command-panel-places').click();
     assert.equal(await sig(), FIRST, 'back with the lists it was with');
@@ -5330,10 +5332,10 @@ try {
     assert.equal(Math.round((await box('.dock-stack.viewer-stack')).width), Math.round(edge.width) - 60);
     // Save workspace keeps the page's layout; Reset workspace returns to it; Original layout to the first one.
     await page.getByTestId('save-workspace').click();
-    await page.getByTestId('dock-close-timeline').click();
-    assert.equal(await page.locator('.timeline').count(), 0);
+    await page.getByTestId('dock-close-timebar').click();
+    assert.equal(await page.locator('.timebar').count(), 0);
     await page.getByTestId('reset-workspace').click();
-    await page.locator('.timeline').waitFor();
+    await page.locator('.timebar').waitFor();
     assert.equal(Math.round((await box('[data-testid="dock-stack-properties"]')).width), 370, 'as saved');
     // Kept on this computer: the layout worked in and the one saved, page by page.
     const kept = await page.evaluate(() => JSON.parse(localStorage.getItem('mapmaker.docks')!));
@@ -6059,6 +6061,114 @@ try {
     assert.equal(await steps(), before);
     assert.equal(await store(`s.world.all('event').filter((e) => e.name === 'Siege of Sel').length`), 0);
     await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
+    await page.evaluate(() => (window as any).__mapmaker.allLists());
+  });
+
+  await h.step('History\'s time bar (D244): one line of time under the map; the event drawn into chosen there; the date moved along its strip, zoomed and fitted; history played without the timeline; Open Timeline; the timeline opened from the Window menu over it; undone', async () => {
+    const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);
+    const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
+    await page.getByTestId('studio-history').click();
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
+    const before = await steps();
+    // As at first: under the map and the panels beside it, the time bar, the width of the window; no timeline.
+    await page.getByTestId('menu-window').click();
+    await page.getByTestId('command-original-layout').click();
+    await page.getByTestId('timebar').waitFor();
+    assert.equal(await page.locator('.timeline').count(), 0);
+    const bar = (await page.getByTestId('dock-stack-timebar').boundingBox())!, map = (await page.locator('.viewer-panel').boundingBox())!;
+    assert.ok(bar.y >= map.y + map.height - 1 && bar.width > map.width + 300, 'under the map, as wide as the window');
+    await h.screenshot('history-time-bar');
+    // A new event from the bar: recorded into at once (History draws), the bar saying so.
+    await page.getByTestId('timebar-new-event').click();
+    await page.getByTestId('event-name').fill('Treaty of Sel');
+    await page.getByTestId('event-create').click();
+    await h.saved();
+    const id = await store(`s.world.all('event').find((e) => e.name === 'Treaty of Sel').id`) as string;
+    assert.equal(await store('s.recordEventId'), id);
+    assert.equal(await page.getByTestId('timebar-record').inputValue(), id);
+    await page.locator('.tb-record.on').waitFor();
+    // The strip: the changes near the date (yellow ticks), the event recorded into; seen whole by a double-click.
+    const strip = page.getByTestId('timebar-strip');
+    assert.equal(await strip.getAttribute('data-event'), id);
+    await strip.dblclick();
+    const fitted = await store('JSON.stringify(s.timeline)') as string;
+    assert.equal(await store('(s.fitTimeline(), JSON.stringify(s.timeline))'), fitted, 'the whole history');
+    /** The colour of the strip's pixel (it is drawn at one pixel to a pixel here). */
+    const pixel = (x: number, y: number) => page.evaluate(([px, py]) => {
+      const el = document.querySelector('[data-testid="timebar-strip"]') as HTMLCanvasElement;
+      return [...el.getContext('2d')!.getImageData(Math.round(px), Math.round(py), 1, 1).data.slice(0, 3)];
+    }, [x, y]);
+    const yellow = await page.evaluate(() => {
+      const el = document.querySelector('[data-testid="timebar-strip"]') as HTMLCanvasElement;
+      const d = el.getContext('2d')!.getImageData(0, 12, el.width, 1).data;
+      let n = 0;
+      for (let i = 0; i < d.length; i += 4) if (d[i] > 240 && Math.abs(d[i + 1] - 209) < 12 && Math.abs(d[i + 2] - 102) < 12) n++;
+      return n;
+    });
+    if (await store('s.engine.changeInstants().length')) assert.ok(yellow > 0, 'the changes as ticks');
+    // Recording into none, from the bar; then into the event again: from its start, the date being outside it.
+    await page.getByTestId('timebar-record').selectOption('');
+    assert.equal(await store('s.recordEventId'), null);
+    assert.equal(await page.getByTestId('recording').count(), 0);
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
+    await page.waitForFunction(() => document.querySelector('[data-testid="timebar-strip"]')!.getAttribute('data-event') === '');
+    const start = await store(`s.world.get('event', ${JSON.stringify(id)}).start_day`) as number;
+    await page.evaluate((d) => { const s = (window as any).__mapmaker.store; s.setTime({ day: d - 4000, ms: 0 }); }, start);
+    await page.getByTestId('timebar-record').selectOption(id);
+    assert.equal(await store('s.recordEventId'), id);
+    assert.equal(await store('s.time.day'), start, 'to its start');
+    assert.notEqual(await store('s.tool'), 'select', 'a drawing tool in hand');
+    await page.getByTestId('recording').waitFor();
+    // The wheel zooms about the pointer; a click moves the date there (Alt: not drawn to a change nearby).
+    const sb = (await strip.boundingBox())!;
+    const span = async () => (await store('s.timeline.end - s.timeline.start')) as number;
+    const s0 = await span();
+    await page.mouse.move(sb.x + sb.width / 2, sb.y + sb.height / 2);
+    await page.mouse.wheel(0, -100);
+    await page.waitForFunction((v) => { const t = (window as any).__mapmaker.store.timeline; return t.end - t.start < v; }, s0);
+    const s1 = await span();
+    assert.ok(Math.abs(s1 / s0 - 0.8) < 1e-6, `zoomed in: ${s1 / s0}`);
+    await page.keyboard.down('Alt');
+    await page.mouse.click(sb.x + sb.width * 0.25, sb.y + sb.height / 2);
+    const d1 = await store('s.time.day') as number;
+    await page.mouse.click(sb.x + sb.width * 0.75, sb.y + sb.height / 2);
+    const d2 = await store('s.time.day') as number;
+    await page.keyboard.up('Alt');
+    const want = 0.5 * s1 * 365.2425;
+    assert.ok(Math.abs(d2 - d1 - want) <= Math.max(2, want * 0.01), `half the strip apart: ${d2 - d1} days, not ${want}`);
+    // The date drawn as a red line where it was clicked (the pointer gone, so as not to show the date under it).
+    await page.mouse.move(sb.x + sb.width / 2, sb.y - 200);
+    await page.waitForTimeout(100);
+    const cols = await Promise.all([-2, -1, 0, 1].map((k) => pixel(sb.width * 0.75 + k, 2)));
+    assert.ok(cols.some(([r, g, b]) => r > 240 && Math.abs(g - 93) < 16 && Math.abs(b - 108) < 16), `the date's line: ${JSON.stringify(cols)}`);
+    // History plays from the bar, the timeline closed (the app plays it, not the timeline).
+    const speed = await store('s.historyPlay.yearsPerSecond') as number;
+    await page.getByTestId('history-speed').selectOption('1');
+    const t0 = await store('s.time.day') as number;
+    await page.getByTestId('history-play').click();
+    await page.waitForFunction((d) => (window as any).__mapmaker.store.time.day > d + 30, t0, { timeout: 10_000 });
+    await page.getByTestId('history-play').click();
+    assert.equal(await store('s.historyPlay.on'), false);
+    // Open Timeline: the Timeline studio.
+    await page.getByTestId('open-timeline').click();
+    assert.equal(await store('s.pageNow()'), 'timeline');
+    await page.getByTestId('studio-history').click();
+    // The full timeline opened from the Window menu: under the map, over the time bar.
+    await page.getByTestId('menu-window').click();
+    assert.doesNotMatch((await page.getByTestId('command-panel-timeline').textContent())!, /✓/);
+    await page.getByTestId('command-panel-timeline').click();
+    await page.locator('.timeline').waitFor();
+    const tl = (await page.getByTestId('dock-stack-timeline').boundingBox())!, bar2 = (await page.getByTestId('dock-stack-timebar').boundingBox())!;
+    assert.ok(tl.y + tl.height <= bar2.y + 1 && Math.round(tl.height) === 190, 'over the time bar');
+    assert.equal(await page.locator('.dock-float').count(), 0, 'not floating');
+    await h.screenshot('history-time-bar-and-timeline');
+    await page.getByTestId('dock-close-timeline').click();
+    // Undone, step by step.
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ recordEventId: null, tool: 'select', selection: null }));
+    for (let i = 0; i < 10 && (await steps()) > before; i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await steps(), before);
+    assert.equal(await store(`s.world.all('event').filter((e) => e.name === 'Treaty of Sel').length`), 0);
+    await page.evaluate((v) => { const s = (window as any).__mapmaker.store; s.set({ historyPlay: { ...s.historyPlay, yearsPerSecond: v } }); }, speed);
     await page.evaluate(() => (window as any).__mapmaker.allLists());
   });
 

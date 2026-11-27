@@ -15,6 +15,7 @@ import { LooksPanel } from '../panels/Looks.tsx';
 import { EffectsPanel } from '../panels/Effects.tsx';
 import { GroupsPanel, TypesPanel, BranchesPanel, StatisticsPanel } from '../panels/TimelinePanels.tsx';
 import { EventTablePanel } from '../panels/EventTable.tsx';
+import { TimeBar } from '../components/TimeBar.tsx';
 import { presents } from './studios.ts';
 import { VIEWER, type PanelId } from './dock.ts';
 import { panelInfo } from './studios.ts';
@@ -53,6 +54,7 @@ export function PanelContent({ id }: { id: PanelId }) {
     case 'effects': return <EffectsPanel />;
     case 'properties': return <Inspector />;
     case 'timeline': return <Timeline head={<DateBar />} />;
+    case 'timebar': return <TimeBar />;
     case 'shots': return <ShotsPanel />;
     case 'shot': return <ShotEditor />;
     case 'export': return <ShotEditor only="export" />;

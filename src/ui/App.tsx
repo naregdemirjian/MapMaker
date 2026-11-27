@@ -33,6 +33,7 @@ import { MergeDialog } from './components/SplitMerge.tsx';
 import { GiveRegionsDialog } from './components/Regions.tsx';
 import { ZonesDialog } from './components/Reach.tsx';
 import { ContextMenu, deleteEntitiesAsked, deleteEventsAsked } from './components/ContextMenu.tsx';
+import { HistoryPlayer } from './components/Timeline.tsx';
 
 export function App() {
   const s = useStore();
@@ -87,6 +88,7 @@ export function App() {
       {drawsOn(page) && <ToolOptions />}
       <DockArea />
       <StatusBar />
+      <HistoryPlayer />
       <EditPrompt />
       <AskDialog />
       <ContextMenu />

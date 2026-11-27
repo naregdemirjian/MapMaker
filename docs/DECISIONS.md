@@ -61,6 +61,36 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D244. History's compact time bar: one line of time under the map (S6, fourth part)
+
+- **Why.** The agreed drawing of the History studio: one line of time under the map, "the date, the event recorded
+  into, the changes near it. Organising events is Timeline's job."
+- **Where**: a panel of its own, "Time" (History's alone), under the tools, the lists, the map and Properties, the
+  width of the window, in place of the timeline in History's first layout. It docks, floats and closes like every
+  panel; the full timeline is still opened in History from the Window menu, and goes under the map, over the time bar
+  (`homeDock`: where a panel goes in a page whose first layout does not hold it, instead of floating).
+- **Its row** (`components/TimeBar.tsx`): the event what is drawn goes into, chosen from the events of the timeline
+  viewed by name and year, or none (the drawing then asks, as before); chosen, it is recorded into from its start
+  unless the date viewed is within it, a drawing tool in hand (`store.recordInto`, also behind Draw in History); "+
+  Event" (the New event dialog, recording into the new event as History does); the date viewed with the steps to the
+  changes before and after it and Compare; play, its speed and going round; "Open Timeline ↗" (the Timeline studio).
+- **Its strip**: the changes near the date as ticks, the event recorded into (red, as on the timeline) or else the one
+  chosen (its type's colour; dashed while planned, D243) as a bar with its name where it fits, the date as a red line.
+  A click or a drag moves the date (drawn to the changes and the event's ends within a few pixels when Snap is on;
+  Alt goes without); the date under the pointer is shown while it hovers; the wheel zooms about the pointer (Shift:
+  along); a double-click shows the whole history. It shows the same stretch of time as the timeline.
+- **Playing history** no longer lives in the timeline: the app plays it once (`HistoryPlayer`), whether started from
+  the timeline, the time bar or Space, so it plays with no timeline open.
+- **Layouts kept**: a History layout kept from before keeps its timeline until Reset workspace (or Original layout).
+- **Not done (yet)**: the time bar in Map Studio (its drawing has a line of the map's own changes, for later).
+- **Tests.** Unit: History's first layout; the time bar History's alone; the timeline opened in History under the map
+  over the time bar, not floating; the time bar closed and opened again in its place. Interface: History as at first
+  with the time bar under the map and no timeline; a new event from the bar, recorded into; the strip showing it and the
+  changes; the whole history by a double-click; recording into none and into the event again, to its start; the wheel
+  zooming in; two clicks half the strip apart, the date's line where clicked; history played and paused with no
+  timeline open; Open Timeline; the timeline opened from the Window menu over the time bar; undone. (The steps written
+  before it keep the timeline in History, as they expect.)
+
 ### D243. Planned events: dashed on the timeline, drawn from History, a shot made of one (S6, third part)
 
 - **Why.** The drawings of the Timeline studio: a story planned first, its events dashed until something is drawn into

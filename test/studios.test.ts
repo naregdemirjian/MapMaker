@@ -2,8 +2,8 @@
 // kept of the layouts on this computer made valid again.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { STUDIOS, PAGES, PANELS, studioOf, presents, drawsOn, isPage, panelOn, defaultDock, cleanDocks, loadPage, type Page } from '../src/ui/shell/studios.ts';
-import { panelsOf, sameShape, stack, split, VIEWER, type DockNode } from '../src/ui/shell/dock.ts';
+import { STUDIOS, PAGES, PANELS, studioOf, presents, drawsOn, isPage, panelOn, defaultDock, homeDock, cleanDocks, loadPage, type Page } from '../src/ui/shell/studios.ts';
+import { panelsOf, sameShape, stack, split, openPanel, removePanel, VIEWER, type DockNode } from '../src/ui/shell/dock.ts';
 import { toolsFor, toolForKey, toolOnPage } from '../src/ui/tools.ts';
 import { World } from '../src/world-model/world.ts';
 import * as cmd from '../src/domain/commands.ts';
@@ -39,7 +39,7 @@ test('every panel has a name and the pages it opens in; the viewer opens everywh
 test('each page opens with its own layout, holding only panels it can hold, the viewer among them', () => {
   const want: Record<Page, string> = {
     map: '(([tools]@44 | [maps*,layers]@230 | [viewer*,gallery] | [properties]@350) / [timeline]@130)',
-    history: '(([tools]@44 | [layers,countries*,places,areas,events,maps,effects]@250 | [viewer] | ([properties] / [looks])@310) / [timeline]@190)',
+    history: '(([tools]@44 | [layers,countries*,places,areas,events,maps,effects]@250 | [viewer] | ([properties] / [looks])@310) / [timebar]@84)',
     timeline: '(([viewer]@200 / [groups*,types,branches,statistics])@290 | [timeline*,event-table] | ([properties] / [looks])@320)',
     looks: '((([countries*,layers,places,areas] / [effects]@300)@250 | [viewer] | ([looks] / [properties]@230)@380) / [timeline]@130)',
     shots: '(([shots]@250 | [viewer] | ([shot] / [looks*,effects])@330) / [shot-timeline]@150)',
@@ -54,6 +54,21 @@ test('each page opens with its own layout, holding only panels it can hold, the 
     for (const p of panels) assert.ok(panelOn(p, id), `${p} in ${id}`);
     assert.equal(new Set(panels).size, panels.length, `${id}: each panel once`);
   }
+});
+
+test('History\'s time bar (D244): History\'s alone; the timeline opened there goes under the map, over the time bar', () => {
+  assert.ok(panelOn('timebar', 'history') && !['map', 'timeline', 'looks', 'shots', 'export'].some((p) => panelOn('timebar', p as Page)));
+  assert.ok(panelOn('timeline', 'history'), 'the full timeline can still be opened in History');
+  // Not in History's first layout: placed where homeDock puts it, not floating.
+  const first = defaultDock('history');
+  const opened = openPanel(first, 'timeline', homeDock('history'));
+  assert.equal(sig(opened.root), '(([tools]@44 | [layers,countries*,places,areas,events,maps,effects]@250 | [viewer] | ([properties] / [looks])@310) / [timeline]@190 / [timebar]@84)');
+  assert.deepEqual(opened.floats, []);
+  // The time bar closed and opened again: back under the map.
+  const closed = removePanel(first, 'timebar');
+  assert.equal(sig(openPanel(closed, 'timebar', first).root), sig(first.root));
+  // The other pages: their first layouts.
+  for (const p of ['map', 'timeline', 'looks', 'shots', 'export'] as Page[]) assert.ok(sameShape(homeDock(p), defaultDock(p)), p);
 });
 
 test('the layouts kept, made valid page by page: nothing kept, the first layouts; a panel of another page dropped', () => {

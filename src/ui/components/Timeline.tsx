@@ -181,7 +181,6 @@ interface Laid {
  */
 export function Timeline({ head }: { head?: React.ReactNode }) {
   const s = useLive();
-  useHistoryPlayer();
   const ref = useRef<HTMLCanvasElement | null>(null);
   const wrap = useRef<HTMLDivElement | null>(null);
   const [w, setW] = useState(800);
@@ -719,6 +718,12 @@ export function useHistoryPlayer(): void {
     raf = requestAnimationFrame(tick);
     return () => { cancelAnimationFrame(raf); };
   }, [s.historyPlay.on, s.mode]);
+}
+
+/** Plays history wherever it is played from (D244: the timeline, History's time bar or Space), mounted once by the app. */
+export function HistoryPlayer(): null {
+  useHistoryPlayer();
+  return null;
 }
 
 /** An instant at the nearest midnight. */

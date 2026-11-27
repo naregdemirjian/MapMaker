@@ -38,7 +38,7 @@ import { setAssetBase } from '../render-engine/assets.ts';
 import { lonLatToVec, type Vec3 } from '../geo-kernel/vec.ts';
 import type { StrokeSettings } from '../render-engine/stroke.ts';
 
-import { type Page, type Studio, type Docks, PAGES, presents, studioOf, defaultDock, panelOn, panelInfo, loadDocks, saveDocks, loadPage, savePage } from './shell/studios.ts';
+import { type Page, type Studio, type Docks, PAGES, presents, studioOf, defaultDock, homeDock, panelOn, panelInfo, loadDocks, saveDocks, loadPage, savePage } from './shell/studios.ts';
 import { openPanel, removePanel, holderOf, type DockLayout, type PanelId } from './shell/dock.ts';
 import { toolOnPage } from './tools.ts';
 import type { TLTrack } from './timeline-layout.ts';
@@ -247,7 +247,13 @@ export class AppStore {
     this.set({});
   }
   /** A panel opened (or brought to the front) in the page worked in. */
-  openPanel(id: PanelId) { if (panelOn(id, this.pageNow())) this.setDock(openPanel(this.dockNow(), id, this.docks[this.pageNow()].saved ?? defaultDock(this.pageNow()))); }
+  openPanel(id: PanelId) {
+    const page = this.pageNow();
+    if (!panelOn(id, page)) return;
+    // (Where it lies at first, or where it goes in the page though not there at first: History's timeline, D244.)
+    const first = this.docks[page].saved ?? defaultDock(page);
+    this.setDock(openPanel(this.dockNow(), id, holderOf(first, id) ? first : homeDock(page)));
+  }
   /** A panel closed (the viewer stays: it can be moved, not closed). */
   closePanel(id: PanelId) { if (panelInfo(id)?.closable !== false) this.setDock(removePanel(this.dockNow(), id)); }
   /** Whether a panel is open in the page worked in. */
@@ -807,12 +813,22 @@ export class AppStore {
    * it), a drawing tool in hand.
    */
   drawInHistory(id: string) {
-    const e = this.world?.get('event', id);
-    if (!e) return;
+    if (!this.world?.get('event', id)) return;
+    this.setPage('history');
+    this.set({ selection: { kind: 'event', id }, multi: null });
+    this.recordInto(id);
+  }
+
+  /**
+   * What is drawn goes into an event without asking (D243, D244): from its start unless the date viewed is within it,
+   * a drawing tool in hand; or (null) into none, the drawing asking again.
+   */
+  recordInto(id: string | null) {
+    const e = id ? this.world?.get('event', id) : null;
+    if (!e) { this.set({ recordEventId: null }); return; }
     const start = fromStore(e.start_day, e.start_ms), end = e.end_day !== null ? fromStore(e.end_day, e.end_ms ?? 0) : start;
     const inside = compare(this.time, start) >= 0 && compare(this.time, end) <= 0;
-    this.setPage('history');
-    this.set({ selection: { kind: 'event', id }, multi: null, recordEventId: id, time: inside ? this.time : start, tool: this.tool === 'select' ? 'lasso' : this.tool });
+    this.set({ recordEventId: e.id, time: inside ? this.time : start, tool: this.tool === 'select' ? 'lasso' : this.tool });
   }
 
   /** A shot of an event (D243): its time (a month after a moment), the map as viewed, named for it; Presentation in front. */
