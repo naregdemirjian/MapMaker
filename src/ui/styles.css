@@ -631,6 +631,17 @@ label.indent { margin-left: 24px; }
 .et-shift { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 5px 8px; background: var(--panel2); border-bottom: 1px solid var(--line); }
 .et-shift input[type=number] { width: 70px; }
 .et-scroll { flex: 1; min-height: 0; overflow: auto; }
+/* The Looks studio's Parts panel (D248): the thing designed, its parts top to bottom, something else to design. */
+.look-parts { padding: 8px; overflow-y: auto; }
+.parts-head { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.parts-title { font-size: 15px; margin: 2px 0 8px; }
+.parts-sub { font-size: 12px; margin: 10px 0 4px; }
+.parts-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.part-row { width: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 5px 8px; text-align: left; background: var(--panel2); }
+.part-row .part-holds { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+/* A part's settings lit for a moment when it is chosen in the Parts panel. */
+@keyframes part-lit { from { box-shadow: 0 0 0 2px var(--accent2); } to { box-shadow: 0 0 0 2px transparent; } }
+.part-lit { animation: part-lit 1.4s ease-out; border-radius: 4px; }
 /* The outline of events (D247): rows indented by how deep they are held, a twisty for those holding others. */
 .event-outline-panel { display: flex; flex-direction: column; height: 100%; min-height: 0; outline: none; }
 .ol-scroll { flex: 1; min-height: 0; overflow: auto; padding-bottom: 8px; }

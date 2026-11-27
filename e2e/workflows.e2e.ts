@@ -5681,7 +5681,7 @@ try {
     for (let i = 0; i < 20 && (await steps()) > before; i++) { await page.getByTestId('undo').click(); await h.saved(); }
     assert.equal(await steps(), before);
     assert.deepEqual(await lookKinds(A), []);
-    // The Looks studio has it under the lists from the first.
+    // The Looks studio has it from the first (under the Looks panel, D248).
     await page.getByTestId('studio-looks').click();
     await page.getByTestId('reset-workspace').click();
     await page.getByTestId('effects-panel').waitFor();
@@ -6416,6 +6416,49 @@ try {
     assert.equal(await steps(), before);
     assert.equal(await store(`s.world.all('event').filter((e) => /Fords|Siege of Sel/.test(e.name)).length`), 0);
     await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null, multi: null }));
+    await page.getByTestId('studio-history').click();
+    await page.evaluate(() => (window as any).__mapmaker.allLists());
+  });
+
+  await h.step('The Looks studio as drawn (D248): the thing designed and its parts, top to bottom; a part brings its settings forward in the Looks panel, opened and lit; something else to design', async () => {
+    const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);
+    await page.getByTestId('studio-history').click();
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
+    await page.getByTestId('studio-looks').click();
+    await page.getByTestId('reset-workspace').click();
+    // As drawn: the parts at the left (before the lists), the stage, the Looks panel over the Effects panel; no timeline.
+    const parts = page.getByTestId('parts-panel');
+    await parts.waitFor();
+    await page.getByTestId('effects-panel').waitFor();
+    assert.equal(await page.locator('.timeline').count(), 0);
+    const pb = (await parts.boundingBox())!, lb = (await page.getByTestId('looks-panel').boundingBox())!, eb = (await page.getByTestId('effects-panel').boundingBox())!;
+    assert.ok(pb.x < lb.x && lb.y < eb.y && Math.abs(lb.x - eb.x) < 2, 'parts at the left; Looks over Effects at the right');
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
+    await page.getByTestId('parts-none').waitFor();
+    // A country chosen: its parts, top to bottom.
+    const idA = await store(`s.world.all('entity').find((e) => e.name === ${JSON.stringify(A)}).id`) as string;
+    await page.evaluate((id) => (window as any).__mapmaker.store.set({ selection: { kind: 'entity', id }, multi: null }), idA);
+    assert.match(await page.getByTestId('parts-title').innerText(), /Country/);
+    assert.deepEqual(await parts.locator('.parts-list').first().locator('.part-name').allInnerTexts(), ['Effects', 'Label', 'Border', 'Fill']);
+    assert.match(await page.getByTestId('part-fill').innerText(), /its colour, #[0-9a-f]{6}/);
+    // The label part: the Label group opened (folded before), scrolled to and lit.
+    const head = page.locator('.looks-panel [data-testid="group-head-entity:label"]');
+    if ((await head.getAttribute('aria-expanded')) === 'true') await head.click();
+    assert.equal(await head.getAttribute('aria-expanded'), 'false');
+    await page.getByTestId('part-label').click();
+    assert.equal(await head.getAttribute('aria-expanded'), 'true');
+    await page.waitForFunction(() => document.querySelector('.looks-panel [data-testid="group-entity:label"]')?.classList.contains('part-lit'));
+    // The border part: the fold of its borders opened within the look.
+    await page.getByTestId('part-border').click();
+    await page.waitForFunction(() => (document.querySelector('.looks-panel .country-borders') as HTMLDetailsElement | null)?.open === true);
+    await h.screenshot('looks-studio-parts');
+    // Something else to design: the layer viewed, its parts.
+    await page.getByTestId('parts-other-layer').click();
+    assert.equal(await store('s.selection.kind'), 'layer');
+    assert.match(await page.getByTestId('parts-title').innerText(), /Layer/);
+    await page.getByTestId('part-fill').click();
+    await page.locator('.looks-panel [data-testid="group-layer:fill"]').waitFor();
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
     await page.getByTestId('studio-history').click();
     await page.evaluate(() => (window as any).__mapmaker.allLists());
   });

@@ -54,6 +54,8 @@ export const PANELS: PanelInfo[] = [
   { id: 'calendar', title: 'Calendar', pages: ['timeline'], hint: 'The calendar the map viewed is dated in: the Gregorian, or one of its own (its months, leap years, eras, week and day)', minW: 240 },
   { id: 'event-outline', title: 'Outline', pages: ['timeline'], hint: 'The events as an outline, chapter by chapter: each under the longer one that holds it; folded, opened and gone through with the arrow keys', minW: 280 },
   { id: 'event-table', title: 'Table', pages: ['timeline'], hint: 'The events as a table: dates, names, types and groups changed in place; drawn or still to draw; a list read or written as a CSV file', minW: 320 },
+  // (The Looks studio's own, D248.)
+  { id: 'parts', title: 'Parts', pages: ['looks'], hint: 'The thing designed and its parts, top to bottom as they are drawn; a part chosen brings its settings forward in the Looks panel', minW: 200 },
   { id: 'shots', title: 'Shots', pages: SHOTS, hint: 'The shots of this project' },
   { id: 'shot', title: 'Shot', pages: ['shots'], hint: 'The settings of the shot chosen' },
   { id: 'export', title: 'Export', pages: ['export'], hint: 'What is exported, how and where' },
@@ -76,8 +78,8 @@ export function defaultDock(page: Page): DockLayout {
       // (The timeline takes the room; a small map follows the date above the studio's own panels, D241.)
       return { root: split('row', [split('col', [stack([VIEWER], 200), lists('groups', ['groups', 'types', 'branches', 'statistics', 'calendar'], 0)], 290), stack(['timeline', 'event-table', 'event-outline']), split('col', [stack(['properties']), stack(['looks'])], 320)]), floats: [] };
     case 'looks':
-      // (The Effects panel under the lists, beside the map and the Looks panel effects are dragged onto, D238.)
-      return { root: split('col', [split('row', [split('col', [lists('countries', ['countries', 'layers', 'places', 'areas'], 0), stack(['effects'], 300)], 250), stack([VIEWER]), split('col', [stack(['looks']), stack(['properties'], 230)], 380)]), stack(['timeline'], 130)]), floats: [] };
+      // (As drawn, D248: the thing's parts at the left, before the lists; the stage; its Looks over the Effects panel.)
+      return { root: split('row', [lists('parts', ['parts', 'countries', 'layers', 'places', 'areas'], 250), stack([VIEWER]), split('col', [stack(['looks']), stack(['effects'], 300)], 380)]), floats: [] };
     case 'shots':
       // (The Looks and Effects panels beside the shot, under its settings, D239.)
       return { root: split('col', [split('row', [stack(['shots'], 250), stack([VIEWER]), split('col', [stack(['shot']), stack(['looks', 'effects'])], 330)]), stack(['shot-timeline'], 150)]), floats: [] };

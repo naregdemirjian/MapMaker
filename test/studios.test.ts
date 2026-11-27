@@ -41,7 +41,7 @@ test('each page opens with its own layout, holding only panels it can hold, the 
     map: '(([tools]@44 | [maps*,layers]@230 | [viewer*,gallery] | [properties]@350) / [timeline]@130)',
     history: '(([tools]@44 | [layers,countries*,places,areas,events,maps,effects]@250 | [viewer] | ([properties] / [looks])@310) / [timebar]@84)',
     timeline: '(([viewer]@200 / [groups*,types,branches,statistics,calendar])@290 | [timeline*,event-table,event-outline] | ([properties] / [looks])@320)',
-    looks: '((([countries*,layers,places,areas] / [effects]@300)@250 | [viewer] | ([looks] / [properties]@230)@380) / [timeline]@130)',
+    looks: '([parts*,countries,layers,places,areas]@250 | [viewer] | ([looks] / [effects]@300)@380)',
     shots: '(([shots]@250 | [viewer] | ([shot] / [looks*,effects])@330) / [shot-timeline]@150)',
     export: '(([shots]@230 | [viewer] | [export]@380) / [shot-timeline]@110)',
   };

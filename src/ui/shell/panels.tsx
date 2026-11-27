@@ -17,6 +17,7 @@ import { GroupsPanel, TypesPanel, BranchesPanel, StatisticsPanel } from '../pane
 import { EventTablePanel } from '../panels/EventTable.tsx';
 import { CalendarPanel } from '../components/CalendarDialog.tsx';
 import { EventOutlinePanel } from '../panels/EventOutline.tsx';
+import { LookPartsPanel } from '../panels/LookParts.tsx';
 import { TimeBar } from '../components/TimeBar.tsx';
 import { presents } from './studios.ts';
 import { VIEWER, type PanelId } from './dock.ts';
@@ -68,6 +69,7 @@ export function PanelContent({ id }: { id: PanelId }) {
     case 'event-table': return <EventTablePanel />;
     case 'calendar': return <CalendarPanel />;
     case 'event-outline': return <EventOutlinePanel />;
+    case 'parts': return <LookPartsPanel />;
   }
   return null;
 }

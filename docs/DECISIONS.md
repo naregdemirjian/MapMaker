@@ -61,6 +61,31 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D248. The Looks studio as drawn: the thing designed and its parts (S7, first part)
+
+- **Why.** The agreed drawing of the Looks studio ("Looks: designing by hand"): at the left the thing designed and
+  "its parts, top to bottom", and "design something else"; the stage in the middle; at the right its Looks over the
+  Effects panel. The user left the Looks studio's design to us ("do as you wish for the looks studio").
+- **Layout** (its first): the Parts panel in front of the lists (Countries, Layers, Places, Areas as tabs behind it)
+  at the left, the map (the stage) in the middle, the Looks panel over the Effects panel at the right. No timeline
+  and no Properties at first (the drawing has neither: looks do not change with time here, and what a thing is
+  belongs to the other studios); both open from the Window menu.
+- **The Parts panel** (`panels/LookParts.tsx`): the thing chosen (on the map, in the lists, or below) by its name and
+  kind, and its parts in the order they are drawn, top first, each with what it holds now: a country's Effects (the
+  effects on, or "as its layer"), Label, Border, Fill (its colour, or a picture or a video); a group's Effects and
+  Labels; a layer's Borders and front lines, Fill and look; a person's Marker and Colour; a city's Showing and Colour;
+  an area's Look; an event's changes as they animate. A part chosen brings the Looks panel to the front with that
+  part's group opened (if folded), scrolled to and lit for a moment, and the fold within it opened (a country's own
+  look for its effects, its borders for the border).
+- **Design something else**: the thing's group (for a member), the layer viewed, a city, a person, an area, an event,
+  each one click.
+- **Next (S7)**: the stage (the thing alone or on the map, far, middle and near), then a stack of effects saved as an
+  effect. The drawings within a design (pen, shapes, text, brush) are S8.
+- **Tests.** Unit: the Looks studio's first layout. Interface: the layout (parts at the left, Looks over Effects, no
+  timeline); nothing chosen, what the panel is for; a country's four parts in order and its fill; the Label part
+  opening its folded group and lighting it; the Border part opening the fold of its borders; the layer viewed from
+  "Design something else", its parts.
+
 ### D247. The outline of events (S6, seventh part)
 
 - **Why.** The drawing of the Timeline studio has three views of the events, "Tracks", "Table" and "Outline", and the
