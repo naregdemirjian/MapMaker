@@ -17,6 +17,7 @@ import { placementMode } from './Characters.tsx';
 import { defaultEnd, typeSettings, type Spread } from '../../domain/event-types.ts';
 import { PLANET_PRESETS, planetParamsOf, type PlanetParams, type PlanetPreset } from '../../terrain/planet.ts';
 import { planetPreview } from '../../terrain/planet-preview.ts';
+import { drawsOn } from '../shell/studios.ts';
 
 /** A dialog over the app; `side`: at the right, the map left to be seen (what it asks about is drawn on the map, D222). */
 function Modal({ title, children, onClose, wide, side }: { title: string; children: React.ReactNode; onClose: () => void; wide?: boolean; side?: boolean }) {
@@ -314,7 +315,8 @@ export function NewEventDialog() {
   const [endTyped, setEndTyped] = useState(false);
   const follow = (t: string, st: Instant | null) => { if (!endTyped) setEnd(st ? defaultEnd(w, t, st) : null); };
   const [desc, setDesc] = useState('');
-  const [record, setRecord] = useState(true);
+  // (Recorded into as it is made where there is drawing; in the Timeline studio it is planned first, D243.)
+  const [record, setRecord] = useState(() => drawsOn(s.pageNow()));
   // A new event joins the groups the timeline is showing, so it does not disappear from view.
   const [groups, setGroups] = useState<string[]>(() => (s.eventFilter ?? []).filter((g) => g !== cmd.UNGROUPED));
   const close = () => s.set({ dialog: null });

@@ -61,6 +61,28 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D243. Planned events: dashed on the timeline, drawn from History, a shot made of one (S6, third part)
+
+- **Why.** The drawings of the Timeline studio: a story planned first, its events dashed until something is drawn into
+  them, "Draw in History" and "Make a shot" on an event, and a double-click on empty time for a new event.
+- **Planned**: an event with nothing drawn into it (no change of any kind, `eventFacts`, D242) is drawn on the timeline
+  as a dashed outline in its type's colour over the dark of the track (an event within a longer one too); its
+  Properties say "Planned: nothing is drawn into it yet"; the table marks it with a dashed box and "to draw".
+- **Draw in History ↗** (an event's Properties in the studios without drawing tools, where "Record into this event"
+  was): History in front, recording into the event (from its start unless the date viewed is within it), a drawing
+  tool in hand (`store.drawInHistory`). In History, "Record into this event" as before.
+- **Make a shot ↗** (an event's Properties, every studio): a shot of the event's time (a month from a moment), of the
+  map as viewed, named for the event, Presentation's Shots in front with it chosen (`store.shotOfEvent`, one undo step).
+- **A new event by a double-click** on empty time among the tracks (the New event dialog at that date); a double-click
+  on the ruler, a bar or the strip below fits the whole history, as every double-click did. In the Timeline studio the
+  New event dialog does not record into the new event (there is nothing to draw with there); elsewhere it does, as
+  before. The studio's status bar says so.
+- **Not done (yet)**: the studio's own tools (select a span, cut an event in two, markers, the hand), a track of the
+  map's statistics, a track of map changes (maps changing in events are parked).
+- **Tests.** Interface: a new event by a double-click under the tracks, at that date, not recorded into, planned in its
+  Properties with Draw in History in place of Record; a shot made of it, named for it from its start, in Presentation;
+  Draw in History from the Timeline studio, History in front and recording into it with a drawing tool; undone.
+
 ### D242. The table of events: the story planned as a list, changed in place, read and written as a CSV file (S6, second part)
 
 - **Why.** Agreed with the user (the drawing "Timeline: table" of the studios plan): beside the tracks, a table of

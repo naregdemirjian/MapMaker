@@ -7,10 +7,10 @@ import { Api, ApiError, type JournalState, type ProjectInfo, type BorderDraft } 
 import { flatten, anchorIndices, type Anchor } from './bezier-path.ts';
 import { World } from '../world-model/world.ts';
 import { Engine, parseJSON } from '../temporal-engine/engine.ts';
-import type { ShotSettings } from '../presentation/sequence.ts';
-import { takeLockedSkipped, updateSequence, type CommandResult } from '../domain/commands.ts';
+import { defaultShot, type ShotSettings } from '../presentation/sequence.ts';
+import { takeLockedSkipped, updateSequence, createSequence, type CommandResult } from '../domain/commands.ts';
 import { shotLooksAt, restyleOf, restyleDiffs, looksAfter, tracksOf, type Restyle, type LookTrack } from '../presentation/shot-looks.ts';
-import { type Instant, gregorian, toJSONValue, fromJSONValue, PRESENT_YEAR } from '../core-time/index.ts';
+import { type Instant, gregorian, toJSONValue, fromJSONValue, fromStore, add, compare, PRESENT_YEAR } from '../core-time/index.ts';
 import { type Camera, defaultCamera, flatCamera, PROJECTIONS } from '../render-engine/camera.ts';
 import { MapRenderer, VIEW_QUALITY } from '../render-engine/map-renderer.ts';
 import { loadViewSettings, saveViewSettings, DETAIL_TOLERANCE, type ViewSettings } from './view-settings.ts';
@@ -802,6 +802,33 @@ export class AppStore {
     if (!panelOn('looks', this.pageNow())) this.setPage('looks');
     this.openPanel('looks');
   }
+  /**
+   * An event drawn into (D243): History in front, recording into it (from its start unless the date viewed is within
+   * it), a drawing tool in hand.
+   */
+  drawInHistory(id: string) {
+    const e = this.world?.get('event', id);
+    if (!e) return;
+    const start = fromStore(e.start_day, e.start_ms), end = e.end_day !== null ? fromStore(e.end_day, e.end_ms ?? 0) : start;
+    const inside = compare(this.time, start) >= 0 && compare(this.time, end) <= 0;
+    this.setPage('history');
+    this.set({ selection: { kind: 'event', id }, multi: null, recordEventId: id, time: inside ? this.time : start, tool: this.tool === 'select' ? 'lasso' : this.tool });
+  }
+
+  /** A shot of an event (D243): its time (a month after a moment), the map as viewed, named for it; Presentation in front. */
+  shotOfEvent(id: string) {
+    const w = this.world, e = w?.get('event', id);
+    if (!w || !e) return;
+    const start = fromStore(e.start_day, e.start_ms);
+    const end = e.end_day !== null && e.end_day > e.start_day ? fromStore(e.end_day, e.end_ms ?? 0) : add(start, 30);
+    const settings = defaultShot(this.spaceId, this.camera, start, end);
+    if (this.branch !== MAIN_BRANCH) settings.branch = this.branch;
+    const sid = this.execute((wd) => ({ ...createSequence(wd, e.name, settings), label: `A shot of "${e.name}"` }));
+    if (!sid) return;
+    this.setPage('shots');
+    this.set({ shotId: sid, shotFrame: 0, presentCamera: null, playing: false });
+  }
+
   /**
    * The Timeline studio's own panels (D241): Groups, Types, Branches and Statistics brought to the front where the
    * page has them; elsewhere, what they hold in a dialog.

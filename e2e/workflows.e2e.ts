@@ -6016,6 +6016,52 @@ try {
     await page.evaluate(() => (window as any).__mapmaker.allLists());
   });
 
+  await h.step('Planned events (D243): a new event by a double-click on empty time, planned and dashed; a shot made of it; Draw in History records into it; undone', async () => {
+    const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);
+    const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
+    await page.getByTestId('studio-history').click();
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
+    const before = await steps();
+    await page.getByTestId('studio-timeline').click();
+    await page.getByTestId('reset-workspace').click();
+    await page.getByTestId('timeline').waitFor();
+    // A double-click on empty time, under the tracks: a new event there, planned (nothing recorded into it here).
+    const tb = (await page.getByTestId('timeline').boundingBox())!;
+    await page.mouse.dblclick(tb.x + tb.width / 2, tb.y + tb.height - 30);
+    await page.getByTestId('event-name').waitFor();
+    const at = await store('s.time.day') as number;
+    await page.getByTestId('event-name').fill('Siege of Sel');
+    await page.getByTestId('event-create').click();
+    await h.saved();
+    const id = await store(`s.world.all('event').find((e) => e.name === 'Siege of Sel').id`) as string;
+    assert.equal(await store(`s.world.get('event', ${JSON.stringify(id)}).start_day`), at, 'at the date double-clicked');
+    assert.equal(await store('s.recordEventId'), null, 'no recording in the Timeline studio');
+    await page.getByTestId('event-planned').waitFor();
+    assert.equal(await page.getByTestId('record-event').count(), 0, 'no drawing here: Draw in History instead');
+    await h.screenshot('planned-event');
+    // Make a shot of it: Presentation, a shot named for it over its time.
+    await page.getByTestId('make-shot').click();
+    await h.saved();
+    assert.equal(await store('s.pageNow()'), 'shots');
+    const shot = await store(`(() => { const r = s.world.get('sequence', s.shotId); const st = JSON.parse(r.settings); return { name: r.name, from: st.time[0].at[0] }; })()`) as { name: string; from: number };
+    assert.deepEqual(shot, { name: 'Siege of Sel', from: at });
+    // Back in the Timeline studio, Draw in History: History in front, recording into it.
+    await page.getByTestId('studio-timeline').click();
+    await page.evaluate((e) => (window as any).__mapmaker.store.set({ selection: { kind: 'event', id: e } }), id);
+    await page.getByTestId('draw-in-history').click();
+    assert.equal(await store('s.pageNow()'), 'history');
+    assert.equal(await store('s.recordEventId'), id);
+    assert.notEqual(await store('s.tool'), 'select', 'a drawing tool in hand');
+    await page.getByTestId('recording').waitFor();
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ recordEventId: null, tool: 'select' }));
+    // Undone, step by step.
+    for (let i = 0; i < 10 && (await steps()) > before; i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await steps(), before);
+    assert.equal(await store(`s.world.all('event').filter((e) => e.name === 'Siege of Sel').length`), 0);
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
+    await page.evaluate(() => (window as any).__mapmaker.allLists());
+  });
+
   await h.step('The menu bar: every command in a menu with its shortcut; the keyboard runs the same commands (D197)', async () => {
     const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);
     await page.getByTestId('studio-history').click();

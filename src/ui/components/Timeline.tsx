@@ -14,6 +14,7 @@ import type { MenuItem } from '../store.ts';
 import { nameMatches } from '../name-match.ts';
 import { changesAt, changeTime } from './ChangePanel.tsx';
 import { typeColor } from '../../domain/event-types.ts';
+import { eventFacts } from '../../domain/event-table.ts';
 
 /** Widths of event names on the timeline (one font), measured once each. */
 const labelWidths = new Map<string, number>();
@@ -284,6 +285,8 @@ export function Timeline({ head }: { head?: React.ReactNode }) {
       ctx.beginPath(); ctx.rect(0, RULER, w, tracksH); ctx.clip();
       ctx.translate(0, RULER - scrolled);
       const groupColor = new Map(world.all('event_group').map((g) => [g.id, g.color]));
+      // (Planned events, D243: nothing drawn into them yet, drawn as a dashed outline.)
+      const drawn = eventFacts(world);
       lay.tracks.forEach((t, i) => {
         if (t.y + t.height < scrolled || t.y > scrolled + tracksH) return;
         const color = lay.info.get(t.id)?.color ?? '#4f7ca8';
@@ -321,8 +324,17 @@ export function Timeline({ head }: { head?: React.ReactNode }) {
           const inactive = !!e.variant_group && !e.variant_active;
           const selected = s.selection?.kind === 'event' && s.selection.id === e.id;
           ctx.globalAlpha = (inactive ? 0.4 : 1) * (find && !nameMatches(e.name, find) ? 0.25 : 1);
-          ctx.fillStyle = s.recordEventId === e.id ? '#d1495b' : selected ? '#ffd166' : typeColor(world, e.type_id) ?? '#4f7ca8';
-          ctx.beginPath(); ctx.roundRect(b.x0, y, b.x1 - b.x0, BAR, 3); ctx.fill();
+          const colour = s.recordEventId === e.id ? '#d1495b' : selected ? '#ffd166' : typeColor(world, e.type_id) ?? '#4f7ca8';
+          const planned = !drawn.has(e.id);
+          if (planned) {
+            ctx.fillStyle = 'rgba(8,12,18,0.7)';
+            ctx.beginPath(); ctx.roundRect(b.x0, y, b.x1 - b.x0, BAR, 3); ctx.fill();
+            ctx.save(); ctx.setLineDash([4, 3]); ctx.lineWidth = 1.5; ctx.strokeStyle = colour;
+            ctx.beginPath(); ctx.roundRect(b.x0 + 0.75, y + 0.75, Math.max(1, b.x1 - b.x0 - 1.5), BAR - 1.5, 3); ctx.stroke(); ctx.restore();
+          } else {
+            ctx.fillStyle = colour;
+            ctx.beginPath(); ctx.roundRect(b.x0, y, b.x1 - b.x0, BAR, 3); ctx.fill();
+          }
           // The colours of its other groups, as stripes along the bar's top edge.
           const gs = cmd.groupsOfEvent(world, e.id).filter((g) => g !== t.id);
           gs.forEach((g, k) => { ctx.fillStyle = groupColor.get(g) ?? '#888'; const gw = (b.x1 - b.x0) / gs.length; ctx.fillRect(b.x0 + k * gw, y, gw, 3); });
@@ -330,7 +342,7 @@ export function Timeline({ head }: { head?: React.ReactNode }) {
             // (Inside at its start where there is room before the first event within it; else after it.)
             const label = inactive ? `${e.name} (inactive alternative)` : e.name, tw = nameWidth(label);
             const inside = (b.kids?.[0]?.x0 ?? b.x1) - b.x0 > tw + 8;
-            ctx.fillStyle = selected && inside ? '#1d1603' : '#e8eef4';
+            ctx.fillStyle = planned ? (selected ? '#ffd166' : '#e8eef4') : selected && inside ? '#1d1603' : '#e8eef4';
             ctx.fillText(label, inside ? Math.max(b.x0, 0) + 4 : b.x1 + 4, y + BAR / 2 + 1);
           }
           // The events inside it (D211): narrower bars within it, in their own colours, named where they fit.
@@ -341,10 +353,17 @@ export function Timeline({ head }: { head?: React.ReactNode }) {
             ctx.globalAlpha = (ke.variant_group && !ke.variant_active ? 0.4 : 1) * (find && !nameMatches(ke.name, find) ? 0.25 : 1);
             ctx.fillStyle = 'rgba(8,12,18,0.55)';
             ctx.fillRect(k.x0, y + 3, k.x1 - k.x0, BAR - 5);
-            ctx.fillStyle = s.recordEventId === ke.id ? '#d1495b' : kSel ? '#ffd166' : typeColor(world, ke.type_id) ?? '#7aa0c8';
-            ctx.fillRect(k.x0 + 1, y + 4, Math.max(1, k.x1 - k.x0 - 2), BAR - 7);
-            if (!kSel) { ctx.fillStyle = 'rgba(255,255,255,0.22)'; ctx.fillRect(k.x0 + 1, y + 4, Math.max(1, k.x1 - k.x0 - 2), BAR - 7); }
-            if (k.label) { ctx.fillStyle = kSel ? '#1d1603' : '#ffffff'; ctx.fillText(ke.name, k.x0 + 3, y + BAR / 2 + 1); }
+            const kColour = s.recordEventId === ke.id ? '#d1495b' : kSel ? '#ffd166' : typeColor(world, ke.type_id) ?? '#7aa0c8';
+            const kPlanned = !drawn.has(ke.id);
+            if (kPlanned) {
+              ctx.save(); ctx.setLineDash([3, 2]); ctx.lineWidth = 1; ctx.strokeStyle = kColour;
+              ctx.strokeRect(k.x0 + 1.5, y + 4.5, Math.max(1, k.x1 - k.x0 - 3), BAR - 8); ctx.restore();
+            } else {
+              ctx.fillStyle = kColour;
+              ctx.fillRect(k.x0 + 1, y + 4, Math.max(1, k.x1 - k.x0 - 2), BAR - 7);
+              if (!kSel) { ctx.fillStyle = 'rgba(255,255,255,0.22)'; ctx.fillRect(k.x0 + 1, y + 4, Math.max(1, k.x1 - k.x0 - 2), BAR - 7); }
+            }
+            if (k.label) { ctx.fillStyle = kSel && !kPlanned ? '#1d1603' : '#ffffff'; ctx.fillText(ke.name, k.x0 + 3, y + BAR / 2 + 1); }
           }
           ctx.globalAlpha = 1;
         }
@@ -590,7 +609,7 @@ export function Timeline({ head }: { head?: React.ReactNode }) {
         <GroupFilter />
         <button className="small" onClick={() => zoomBy(1.6)} title="Further out" aria-label="Zoom the timeline out" data-testid="timeline-zoom-out">−</button>
         <button className="small" onClick={() => zoomBy(1 / 1.6)} title="Closer in" aria-label="Zoom the timeline in" data-testid="timeline-zoom-in">+</button>
-        <button className="small" onClick={() => { store.fitTimeline(); store.notify(); }} title="The whole history (double-click the timeline)" data-testid="timeline-fit">Fit</button>
+        <button className="small" onClick={() => { store.fitTimeline(); store.notify(); }} title="The whole history (double-click the ruler)" data-testid="timeline-fit">Fit</button>
       </div>
       <div className="tl-body">
         <div className="tl-heads" style={{ width: HEADS }} onWheel={(e) => setScroll((v) => Math.max(0, Math.min(maxScroll, v + e.deltaY)))} data-testid="timeline-tracks">
@@ -623,7 +642,13 @@ export function Timeline({ head }: { head?: React.ReactNode }) {
             onPointerMove={onMove}
             onPointerUp={onUp}
             onPointerCancel={() => { drag.current = null; setPreview(null); }}
-            onDoubleClick={() => { store.fitTimeline(); store.notify(); }}
+            onDoubleClick={(e) => {
+              // Empty time on the tracks: a new event there (D243); the ruler, a bar or the strip below: the whole history.
+              const x = localX(e), y = localY(e);
+              const onTracks = y >= RULER && y < h - otherH;
+              if (onTracks && !barAt(lay.tracks, x, y - RULER + scrolled)) { store.setTime(timeAtYear(yearAt(x))); store.set({ dialog: 'new-event' }); return; }
+              store.fitTimeline(); store.notify();
+            }}
             onContextMenu={(e) => {
               e.preventDefault();
               const x = localX(e), y = localY(e);

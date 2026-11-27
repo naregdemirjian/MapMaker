@@ -40,6 +40,8 @@ import { StatisticsDialog } from '../components/StatisticsDialog.tsx';
 import { SettingsDialog } from '../components/Settings.tsx';
 import { branchName } from '../../temporal-engine/branches.ts';
 import { fmt, DateField, NumberField } from '../inputs.tsx';
+import { eventFacts } from '../../domain/event-table.ts';
+import { drawsOn } from '../shell/studios.ts';
 
 /**
  * The setting-up of the map being viewed: its geography, terrain and lakes, sea level, calendar, statistics,
@@ -371,10 +373,15 @@ function EventPanel({ id }: { id: string }) {
         <label>Starts<DateField value={start} onChange={(t) => t && s.execute((wd) => cmd.updateEvent(wd, id, { start: t }))} testId="event-panel-start" /></label>
         <label>Ends<DateField value={end} allowEmpty suggest={start} onChange={(t) => s.execute((wd) => cmd.updateEvent(wd, id, { end: t }))} testId="event-panel-end" /></label>
         <label title="When two events change the same place at the same instant, the higher precedence wins">Precedence<NumberField value={e.precedence} def={0} step={1} onCommit={(n) => s.execute((wd) => cmd.updateEvent(wd, id, { precedence: Math.round(n) }))} /></label>
+        {/* Planned (D243): nothing drawn into it yet, as the table and the timeline's dashed bar say. */}
+        {!eventFacts(s.world!).has(id) && <p className="muted small-text" data-testid="event-planned">Planned: nothing is drawn into it yet. Draw its changes in History.</p>}
         <div className="buttons">
           {s.recordEventId === id
             ? <button onClick={() => s.set({ recordEventId: null })}>Stop recording</button>
-            : <button onClick={() => s.set({ recordEventId: id, time: compare(s.time, start) < 0 ? start : s.time, tool: s.tool === 'select' ? 'lasso' : s.tool })} title="Every territory you draw goes into this event, without asking" data-testid="record-event">Record into this event</button>}
+            : drawsOn(s.pageNow())
+              ? <button onClick={() => s.set({ recordEventId: id, time: compare(s.time, start) < 0 ? start : s.time, tool: s.tool === 'select' ? 'lasso' : s.tool })} title="Every territory you draw goes into this event, without asking" data-testid="record-event">Record into this event</button>
+              : <button className="primary" onClick={() => s.drawInHistory(id)} title="History, with every territory you draw going into this event" data-testid="draw-in-history">Draw in History ↗</button>}
+          <button onClick={() => s.shotOfEvent(id)} title="A shot of its time, of the map as you see it, in Presentation" data-testid="make-shot">Make a shot ↗</button>
           <button onClick={() => s.setTime(start)}>Go to start</button>
           {end && <button onClick={() => s.setTime(end)}>Go to end</button>}
         </div>

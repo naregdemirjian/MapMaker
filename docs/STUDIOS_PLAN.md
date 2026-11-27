@@ -46,6 +46,7 @@ experience only: no new map features while this is built.
 5. **Looks in Presentation (S5)**: docked in Shots; everywhere or this shot only (D239); keyframes on any option, as
    tracks (D240). Done.
 6. **Timeline studio (S6)**: its own panels (groups, types, branches, statistics) and a small map following the date
-   (D241); the table of events (D242); its own tools; History's compact time bar.
+   (D241); the table of events (D242); planned events, Draw in History, a shot of an event (D243); History's compact
+   time bar; its own tools.
 7. **Looks studio (S7)**: the stage, the parts, saving a stack as an effect.
 8. **Designing by hand (S8)**: pen and shapes, text; then the brush.
