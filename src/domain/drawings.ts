@@ -93,6 +93,19 @@ export function drawingsOf(v: unknown): Drawing[] {
   return out;
 }
 
+/** A path's anchors without those that fall on the one before on the screen (a double-click's second press, D252). */
+export function withoutRepeats(anchors: DrawAnchor[], project: (ll: LL) => Pt | null, px = 2): DrawAnchor[] {
+  const out: DrawAnchor[] = [];
+  let prev: Pt | null = null;
+  for (const a of anchors) {
+    const q = project(a.p);
+    if (prev && q && Math.hypot(q[0] - prev[0], q[1] - prev[1]) <= px && !a.i && !a.o) continue;
+    out.push(a);
+    if (q) prev = q;
+  }
+  return out;
+}
+
 /** Whether a drawing shows anything: shown, at some strength, with a shape and a line or a fill to draw it with. */
 export const drawingShows = (d: Drawing) => d.on && d.opacity > 0 && d.shapes.length > 0 && (!!d.stroke || (!!d.fill && d.shapes.some((s) => s.closed)));
 

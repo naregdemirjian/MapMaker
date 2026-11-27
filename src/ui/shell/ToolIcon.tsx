@@ -18,6 +18,7 @@ export const TOOL_ICONS: Record<Tool, string> = {
   field: '<path d="M12 4c3 4 5 6 5 10a5 5 0 01-10 0c0-2 1-3 2-5 1 2 2 2 2 2 0-3 0-5 1-7z"/>',
   lanes: '<circle cx="5" cy="17" r="2"/><circle cx="19" cy="7" r="2"/><path d="M7 16l10-8"/>',
   systems: '<path d="M12 4l2 5 5 1-4 3 1 6-4-3-4 3 1-6-4-3 5-1z"/>',
+  'draw-pen': '<path d="M12 3l5.5 8.5L12 21l-5.5-9.5z"/><circle cx="12" cy="11.5" r="1.6"/><path d="M12 3v7"/>',
   shape: '<rect x="3.5" y="4" width="10" height="8" rx="0.5"/><ellipse cx="15" cy="15" rx="5.5" ry="4.5"/>',
 };
 

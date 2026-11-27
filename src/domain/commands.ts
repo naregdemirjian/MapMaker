@@ -593,6 +593,25 @@ export function addDrawingShape(world: World, id: string, drawingId: string | nu
   return { ...putDrawings(world, id, `Draw on ${e.name} (${d.name})`, list), result: into };
 }
 
+/** One of a drawing's shapes changed (D252: its points or handles moved). */
+export function updateDrawingShape(world: World, id: string, drawingId: string, index: number, shape: DrawShape): CommandResult {
+  const e = drawnOn(world, id);
+  const list = drawingsOfEntity(e), d = list.find((x) => x.id === drawingId);
+  if (!d) throw new Error('That drawing no longer exists.');
+  if (!d.shapes[index]) throw new Error('That shape is no longer in the drawing.');
+  const clean = shapeOf(shape);
+  if (!clean) throw new Error('That shape has too few points to draw.');
+  return putDrawings(world, id, `Reshape the drawing "${d.name}" of ${e.name}`, list.map((x) => (x.id === drawingId ? { ...x, shapes: x.shapes.map((s, k) => (k === index ? clean : s)) } : x)));
+}
+
+/** One of a drawing's shapes taken away (the drawing kept, even with none left: drawn into again). */
+export function removeDrawingShape(world: World, id: string, drawingId: string, index: number): CommandResult {
+  const e = drawnOn(world, id);
+  const list = drawingsOfEntity(e), d = list.find((x) => x.id === drawingId);
+  if (!d?.shapes[index]) throw new Error('That shape is no longer in the drawing.');
+  return putDrawings(world, id, `Take a shape away from the drawing "${d.name}"`, list.map((x) => (x.id === drawingId ? { ...x, shapes: x.shapes.filter((_, k) => k !== index) } : x)));
+}
+
 /** A drawing's name or looks changed (its shapes kept). */
 export function updateDrawing(world: World, id: string, drawingId: string, patch: Partial<Omit<Drawing, 'id' | 'shapes'>>): CommandResult {
   const e = drawnOn(world, id);

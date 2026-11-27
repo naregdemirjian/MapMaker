@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { World } from '../src/world-model/world.ts';
 import * as cmd from '../src/domain/commands.ts';
-import { drawingsOf, boxShape, screenPath, hitsShape, drawingAt, nextDrawingName, drawingShows, type Drawing, type LL, type Pt } from '../src/domain/drawings.ts';
+import { drawingsOf, boxShape, screenPath, hitsShape, drawingAt, nextDrawingName, drawingShows, withoutRepeats, type Drawing, type LL, type Pt } from '../src/domain/drawings.ts';
 
 // (A plain projection for the tests: a degree is ten pixels, north up.)
 const project = (ll: LL): Pt => [ll[0] * 10, 0 - ll[1] * 10];
@@ -107,4 +107,26 @@ test('a shape drawn into a new drawing, then into it again; its looks and name c
   assert.throws(() => cmd.addDrawingShape(world, c, null, shape), /Only a country/);
   assert.throws(() => cmd.addDrawingShape(world, a, 'gone', shape), /no longer exists/);
   assert.throws(() => cmd.updateDrawing(world, a, 'gone', { name: 'X' }), /no longer exists/);
+});
+
+test('the pen\'s path (D252): a point falling on the one before dropped (a double-click), a curve\'s kept', () => {
+  const a = (x: number, y: number, o?: LL) => ({ p: unproject([x, y]), ...(o ? { o } : {}) });
+  const path = [a(0, 0), a(100, 0), a(100.5, 0.5), a(200, 0), a(200, 1, unproject([250, 0]))];
+  assert.deepEqual(withoutRepeats(path, project).map((x) => project(x.p)), [[0, 0], [100, 0], [200, 0], [200, 1]]);
+});
+
+test('a drawing\'s shape reshaped and taken away (D252), the drawing kept', () => {
+  const { world, a } = project0();
+  const id = cmd.addDrawingShape(world, a, null, boxShape('rectangle', [0, 0], [40, 40], unproject)!).result;
+  cmd.addDrawingShape(world, a, id, boxShape('ellipse', [0, 0], [40, 40], unproject)!);
+  const moved = { kind: 'path' as const, closed: false, anchors: [{ p: [1, 1] as LL }, { p: [2, 2] as LL }] };
+  cmd.updateDrawingShape(world, a, id, 0, moved);
+  let d = cmd.drawingsOfEntity(world.get('entity', a))[0];
+  assert.deepEqual(d.shapes[0], moved);
+  assert.equal(d.shapes[1].anchors.length, 4, 'the other as it was');
+  cmd.removeDrawingShape(world, a, id, 0);
+  d = cmd.drawingsOfEntity(world.get('entity', a))[0];
+  assert.equal(d.shapes.length, 1);
+  assert.throws(() => cmd.updateDrawingShape(world, a, id, 5, moved), /no longer in the drawing/);
+  assert.throws(() => cmd.updateDrawingShape(world, a, id, 0, { kind: 'path', closed: false, anchors: [{ p: [0, 0] }] }), /too few points/);
 });

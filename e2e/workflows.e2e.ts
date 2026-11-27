@@ -6706,6 +6706,95 @@ try {
     await page.evaluate(() => (window as any).__mapmaker.allLists());
   });
 
+  await h.step('The pen on a country\'s design (D252): corners and a curve left open, a shape closed on its first point, a point taken back, a double-click; a point moved with Select, a corner again with Alt; undone', async () => {
+    const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);
+    const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
+    await page.getByTestId('studio-history').click();
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
+    await h.setDate('1650');
+    await page.getByTestId('studio-looks').click();
+    await page.getByTestId('reset-workspace').click();
+    await page.evaluate(([a, b]) => (window as any).__mapmaker.store.setCamera({ lon: (a[0] + b[0]) / 2, lat: (a[1] + b[1]) / 2, zoom: 1.5, rotation: 0, projection: 'equirectangular' }), [P.a, P.b]);
+    const idA = await store(`s.world.all('entity').find((e) => e.name === ${JSON.stringify(A)}).id`) as string;
+    await page.evaluate((id) => (window as any).__mapmaker.store.set({ selection: { kind: 'entity', id }, multi: null }), idA);
+    const before = await steps();
+    const pa = await h.toPage(P.a), pb = await h.toPage(P.b);
+    // (On the first country's land, beside its name.)
+    const q = (dx: number, dy: number): [number, number] => [pa[0] + 0.3 * (pb[0] - pa[0]) + dx, pa[1] + 12 + dy];
+    const shapes = () => store(`(JSON.parse(s.world.get('entity', ${JSON.stringify(idA)}).style || '{}').drawings ?? []).flatMap((d) => d.shapes)`) as Promise<Array<{ closed: boolean; anchors: Array<{ p: [number, number]; i?: unknown; o?: unknown }> }>>;
+    // The pen, by its key in the Looks studio.
+    await page.locator('body').click({ position: { x: 5, y: 5 } }).catch(() => undefined);
+    await page.keyboard.press('p');
+    assert.equal(await store('s.tool'), 'draw-pen');
+    assert.match((await page.getByTestId('status-hint').textContent())!, /^Pen \(P\)/);
+    // Three corners and a curve pulled out of the fourth, then Enter: a line, left open.
+    for (const [dx, dy] of [[-60, -40], [-20, -60], [20, -40]]) { const c = q(dx, dy); await page.mouse.click(c[0], c[1]); }
+    const c4 = q(60, -60);
+    await page.mouse.move(c4[0], c4[1]);
+    await page.mouse.down();
+    await page.mouse.move(c4[0] + 20, c4[1] + 10, { steps: 4 });
+    await page.mouse.up();
+    await page.keyboard.press('Enter');
+    await h.saved();
+    let all = await shapes();
+    assert.equal(all.length, 1);
+    assert.equal(all[0].closed, false, 'left open');
+    assert.equal(all[0].anchors.length, 4);
+    assert.ok(all[0].anchors[3].o && all[0].anchors[3].i && !all[0].anchors[0].o, 'three corners and a smooth point');
+    // Closed by a click on its first point, into the same drawing.
+    for (const [dx, dy] of [[-60, 30], [0, 60], [60, 30], [-60, 30]]) { const c = q(dx, dy); await page.mouse.click(c[0], c[1]); }
+    await h.saved();
+    all = await shapes();
+    assert.equal(all.length, 2);
+    assert.equal(all[1].closed, true);
+    assert.equal(all[1].anchors.length, 3);
+    // A point taken back with Backspace, then a double-click finishing it open.
+    const e1 = q(-80, 90), e2 = q(-40, 100), e3 = q(0, 90), e4 = q(40, 100);
+    await page.mouse.click(e1[0], e1[1]);
+    await page.mouse.click(e2[0], e2[1]);
+    await page.keyboard.press('Backspace');
+    await page.mouse.click(e3[0], e3[1]);
+    await page.mouse.dblclick(e4[0], e4[1]);
+    await h.saved();
+    all = await shapes();
+    assert.equal(all.length, 3);
+    assert.equal(all[2].closed, false);
+    assert.equal(all[2].anchors.length, 3, 'the point taken back, and the double-click\'s second press, not kept');
+    // (One undo step each: the last undone alone, and done again.)
+    await page.getByTestId('undo').click();
+    await h.saved();
+    assert.equal((await shapes()).length, 2);
+    await page.getByTestId('redo').click();
+    await h.saved();
+    assert.equal((await shapes()).length, 3);
+    await h.screenshot('looks-pen-paths');
+    // With Select, a point of the drawing chosen dragged along; Alt and a click on the smooth point: a corner.
+    await page.keyboard.press('v');
+    assert.equal(await store('s.tool'), 'select');
+    const c1 = q(-60, -40), lon0 = all[0].anchors[0].p[0];
+    await page.mouse.move(c1[0], c1[1]);
+    await page.mouse.down();
+    await page.mouse.move(c1[0] + 30, c1[1], { steps: 4 });
+    await page.mouse.up();
+    await h.saved();
+    all = await shapes();
+    assert.ok(all[0].anchors[0].p[0] > lon0, 'moved east');
+    assert.equal(await store('s.selection.id'), idA, 'the country still designed');
+    await page.keyboard.down('Alt');
+    await page.mouse.click(c4[0], c4[1]);
+    await page.keyboard.up('Alt');
+    await h.saved();
+    all = await shapes();
+    assert.ok(!all[0].anchors[3].o && !all[0].anchors[3].i, 'a corner again');
+    // Undone, step by step.
+    for (let i = 0; i < 10 && (await steps()) > before; i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await steps(), before);
+    assert.deepEqual(await shapes(), []);
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
+    await page.getByTestId('studio-history').click();
+    await page.evaluate(() => (window as any).__mapmaker.allLists());
+  });
+
   await h.step('The menu bar: every command in a menu with its shortcut; the keyboard runs the same commands (D197)', async () => {
     const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);
     await page.getByTestId('studio-history').click();

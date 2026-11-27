@@ -28,6 +28,7 @@ export const TOOLS: ToolInfo[] = [
   { id: 'disaster', key: 'D', group: 'land', name: 'Disasters', hint: 'Nuclear strikes, earthquakes, eruptions, floods, wildfires, meteor impacts and droughts: choose one and its size, then click the map. It is placed as an event from the date viewed, its conditions rising and fading by themselves (an impact leaves its crater in the terrain); one undo takes it all back.' },
   { id: 'field', key: 'F', group: 'land', name: 'Conditions', hint: 'Radiation, fire, smoke and ash, floods, destruction and heatmaps: click the map to place a source on a field layer from the date viewed (or in the event being recorded). It rises, lasts and fades by itself.' },
   { id: 'lanes', key: 'N', group: 'space', name: 'Lanes', hint: 'On a star map: click a star, then another: a lane between them (a route, a jump lane, a supply line) from the date viewed, belonging to the country or faction chosen. Recorded into an event with a length, it grows from the first star to the second over the event: an expedition or a fleet on its way.' },
+  { id: 'draw-pen', key: 'P', group: 'design', name: 'Pen', hint: 'Click for a corner, press and drag for a curve; click the line to add a point, drag points and handles to reshape (Alt: one handle alone). Click the first point to close the shape; Enter or a double-click finishes it open, as a line; Backspace takes back the last point; Esc gives up. Drawn on the design of the country chosen. With Select, the points of the drawing chosen are moved.' },
   { id: 'shape', key: 'U', group: 'design', name: 'Shapes', hint: 'Drag on the map for a rectangle or an ellipse (Shift: a square or a circle), drawn on the design of the country chosen: into its drawing chosen in Parts, or a new one. Fixed to the land; its borders cut it.' },
   { id: 'systems', key: 'S', group: 'space', name: 'Star systems', hint: 'On a star map: click a star to give it to the country or faction chosen, from the date viewed (or in the event being recorded); hold Ctrl and drag a box to give every star in it. Their realm glows around the stars they hold.' },
 ];
@@ -38,7 +39,7 @@ export const SPACE_TOOLS: string[] = ['select', 'systems', 'lanes'];
 /** The tools of the ground (D235): Map Studio's. Select is in every studio that draws; the rest are History's. */
 export const GROUND_TOOLS: string[] = ['sculpt'];
 /** The tools to design by hand (S8, D251): the Looks studio's, with Select. */
-export const DESIGN_TOOLS: string[] = ['shape'];
+export const DESIGN_TOOLS: string[] = ['draw-pen', 'shape'];
 /** The pages with tools to draw with, and which tools each has. */
 export type ToolPage = 'map' | 'history' | 'looks';
 export const toolOnPage = (id: string, page: ToolPage): boolean =>

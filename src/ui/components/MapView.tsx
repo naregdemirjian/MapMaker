@@ -45,12 +45,12 @@ import { smartInputFor } from '../smart-input.ts';
 import { reachAt } from './Reach.tsx';
 import { SmartAdjustPanel } from './SmartBrush.tsx';
 import { aloneWorld, keptBy } from '../stage.ts';
-import { boxShape, screenPath, traceSegs, drawingAt, type LL as DrawLL, type Pt as DrawPt } from '../../domain/drawings.ts';
+import { boxShape, screenPath, traceSegs, drawingAt, withoutRepeats, type LL as DrawLL, type Pt as DrawPt, type DrawAnchor } from '../../domain/drawings.ts';
 import { drawingNow } from '../panels/DrawingLooks.tsx';
 import { CompareBar } from './CompareBar.tsx';
 import type { AdjustState } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
-import { flatten, hitTest, splitPiece, moveAnchor, moveHandle, mirror, type Anchor } from '../bezier-path.ts';
+import { flatten, hitTest, splitPiece, moveAnchor, moveHandle, mirror, type Anchor, type Hit } from '../bezier-path.ts';
 
 type Drag =
   | { kind: 'none' }
@@ -72,6 +72,8 @@ type Drag =
   | { kind: 'erase'; points: Pt[] }
   // The Shapes tool's box (S8, D251), dragged out on the screen.
   | { kind: 'draw-box'; from: Pt; to: Pt; square: boolean }
+  // A point or a handle of the drawing chosen moved with Select (D252): its anchors as they were and as they are now.
+  | { kind: 'draw-edit'; owner: string; drawingId: string; shape: number; hit: Hit; start: DrawAnchor[]; now: DrawAnchor[]; closed: boolean; ll0: Pt; from: Pt; moved: number; alt: boolean }
   // A stroke of the sculpting brush (map positions; D98).
   | { kind: 'sculpt'; points: Pt[] }
   // A stroke of the Disasters tool's brush (map positions; D233): many disasters scattered along it.
@@ -943,13 +945,31 @@ export function MapView() {
     }
     const designed = !presentation && s.pageNow() === 'looks' ? drawingNow() : null;
     if (designed) {
+      const de = drag.current.kind === 'draw-edit' && drag.current.drawingId === designed.drawing.id ? drag.current : null;
+      const shapes = designed.drawing.shapes.map((sh, k) => (de && de.shape === k ? { ...sh, anchors: de.now } : sh));
+      const proj = (ll: Pt) => lonLatToScreen(v, ll[0], ll[1]) as DrawPt | null;
       ctx.save();
       ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]);
-      for (const sh of designed.drawing.shapes) {
-        const segs = screenPath(sh, (ll) => lonLatToScreen(v, ll[0], ll[1]) as DrawPt | null);
+      for (const sh of shapes) {
+        const segs = screenPath(sh, proj);
         if (segs) { ctx.beginPath(); traceSegs(ctx, segs, sh.closed); ctx.stroke(); }
       }
       ctx.restore();
+      // (Its points and handles, to be moved with Select, D252.)
+      if (s.tool === 'select') for (const sh of shapes) drawAnchors(ctx, sh.anchors, proj);
+    }
+    // The pen's path being drawn (D252), as it will be drawn: in the line's colour, its points and handles.
+    if (s.tool === 'draw-pen' && shape.current.length && !presentation) {
+      const proj = (ll: Pt) => lonLatToScreen(v, ll[0], ll[1]) as DrawPt | null;
+      const segs = shape.current.length > 1 ? screenPath({ kind: 'path', anchors: shape.current, closed: false }, proj) : null;
+      const colour = designed?.drawing.stroke?.color ?? s.drawNew.stroke?.color ?? '#ffffff';
+      ctx.save();
+      ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      if (segs) { ctx.beginPath(); traceSegs(ctx, segs, false); ctx.strokeStyle = 'rgba(10,16,24,0.6)'; ctx.lineWidth = 4; ctx.stroke(); ctx.strokeStyle = colour; ctx.lineWidth = 2; ctx.stroke(); }
+      const last = proj(shape.current[shape.current.length - 1].p);
+      if (cursor && last && drag.current.kind !== 'bz') { ctx.setLineDash([3, 4]); ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(last[0], last[1]); ctx.lineTo(cursor[0], cursor[1]); ctx.stroke(); }
+      ctx.restore();
+      drawAnchors(ctx, shape.current, proj);
     }
     // The Split tool's line: being drawn, or waiting for the click on the part that changes hands.
     const cutLine = drag.current.kind === 'cut' && drag.current.moved >= 4 ? toScreen(drag.current.points) : s.tool === 'split' && s.splitLine ? toScreen(s.splitLine) : null;
@@ -1135,7 +1155,7 @@ export function MapView() {
   }, [s.tool, s.spaceId, s.mode]);
 
   // Paths of curves (D232): the precise shape, and the border pen drawing curves.
-  const bzTarget = (): 'pen' | 'shape' | null => (presentation ? null : s.tool === 'polygon' ? 'shape' : s.tool === 'pen' && s.penCurves ? 'pen' : null);
+  const bzTarget = (): 'pen' | 'shape' | null => (presentation ? null : s.tool === 'polygon' || s.tool === 'draw-pen' ? 'shape' : s.tool === 'pen' && s.penCurves ? 'pen' : null);
   const bzAnchors = (t: 'pen' | 'shape'): Anchor[] => (t === 'shape' ? shape.current : store.draft && store.draft.spaceId === store.spaceId ? store.draft.curve ?? [] : []);
   const bzSet = (t: 'pen' | 'shape', a: Anchor[], edit: boolean) => { if (t === 'shape') { shape.current = a; shapeShown = a; force((n) => n + 1); } else store.penCurve(a, edit); };
   const bzProject = (ll: Pt) => lonLatToScreen(view, ll[0], ll[1]);
@@ -1296,6 +1316,17 @@ export function MapView() {
       } else drag.current = { kind: 'selbox', x: p[0], y: p[1], cx: p[0], cy: p[1], moved: 0 };
       return;
     }
+    // The drawing chosen in the Looks studio (D252): with Select, one of its points or handles picked up and moved.
+    if (!presentation && e.button === 0 && s.tool === 'select' && s.pageNow() === 'looks') {
+      const dn = drawingNow();
+      for (let k = (dn?.drawing.shapes.length ?? 0) - 1; dn && k >= 0; k--) {
+        const sh = dn.drawing.shapes[k], hit = hitTest(sh.anchors, sh.closed, bzProject, p);
+        if (!hit || hit.kind === 'piece') continue;
+        const ll = screenToLonLat(view, p[0], p[1]);
+        drag.current = { kind: 'draw-edit', owner: dn.owner, drawingId: dn.drawing.id, shape: k, hit, start: sh.anchors, now: sh.anchors, closed: sh.closed, ll0: (ll ?? [0, 0]) as Pt, from: p, moved: 0, alt: e.altKey };
+        return;
+      }
+    }
     // Select tool: a character's marker is picked up (dragged to move it, clicked to select it). (Not with Ctrl held:
     // Ctrl+click chooses the country there, D189, a city in it or not.)
     if (!presentation && e.button === 0 && s.tool === 'select' && !(e.ctrlKey || e.metaKey)) {
@@ -1375,6 +1406,16 @@ export function MapView() {
     }
     if (d.kind === 'cut') d.moved = Math.max(d.moved, Math.hypot(p[0] - d.x, p[1] - d.y));
     if (d.kind === 'draw-box') { d.to = p; d.square = e.shiftKey; force((n) => n + 1); return; }
+    if (d.kind === 'draw-edit') {
+      d.moved = Math.max(d.moved, Math.hypot(p[0] - d.from[0], p[1] - d.from[1]));
+      const ll = d.moved >= 3 ? screenToLonLat(view, p[0], p[1]) : null;
+      if (!ll || d.hit.kind === 'piece') return;
+      const i = d.hit.index, cur = d.start[i];
+      const next = d.hit.kind === 'anchor' ? moveAnchor(cur, ll[0] - d.ll0[0], ll[1] - d.ll0[1]) : moveHandle(cur, d.hit.which, [ll[0], ll[1]], e.altKey);
+      d.now = d.start.map((a, k) => (k === i ? next : a));
+      force((n) => n + 1);
+      return;
+    }
     if (s.tool === 'disaster' && s.disaster.many && !presentation) setCursor(p);
     if (d.kind === 'erase' || d.kind === 'feature' || d.kind === 'cut' || d.kind === 'sculpt' || d.kind === 'scatter') {
       const ll = screenToLonLat(view, p[0], p[1]);
@@ -1470,6 +1511,16 @@ export function MapView() {
       }
       return;
     }
+    if (d.kind === 'draw-edit') {
+      force((n) => n + 1);
+      let anchors = d.now;
+      if (d.moved < 3) {
+        if (!(d.alt && d.hit.kind === 'anchor')) return;
+        anchors = d.start.map((a, k) => (k === (d.hit as { index: number }).index ? { p: a.p } : a));
+      }
+      store.executeLooks((wd) => cmd.updateDrawingShape(wd, d.owner, d.drawingId, d.shape, { kind: 'path', anchors, closed: d.closed }));
+      return;
+    }
     if (d.kind === 'draw-box') {
       force((n) => n + 1);
       const made = boxShape(store.shapeKind, d.from, p, (q) => screenToLonLat(view, q[0], q[1]) as DrawLL | null, e.shiftKey);
@@ -1489,7 +1540,7 @@ export function MapView() {
     }
     // A path of curves (D232): a click on its first anchor closes it, and the shape or border is finished.
     if (d.kind === 'bz') {
-      if (d.closeOnUp && d.moved < 3) { if (d.target === 'shape') finishPolygon(); else finishDraft(); }
+      if (d.closeOnUp && d.moved < 3) { if (d.target === 'shape') { if (store.tool === 'draw-pen') finishDrawPath(true); else finishPolygon(); } else finishDraft(); }
       force((n) => n + 1);
       return;
     }
@@ -1707,6 +1758,20 @@ export function MapView() {
   }
   store.finishRiver = finishRiver;
 
+  /**
+   * The pen's path finished (D252): closed by a click on its first point, or left open (Enter, a double-click), its
+   * repeated points dropped (a double-click's second press), into the design of the country chosen.
+   */
+  function finishDrawPath(closed: boolean) {
+    const anchors = withoutRepeats(shape.current, (ll) => lonLatToScreen(view, ll[0], ll[1]) as DrawPt | null);
+    shape.current = []; shapeShown = [];
+    setCursor(null);
+    setBzHover('');
+    force((n) => n + 1);
+    if (anchors.length < 2) return;
+    store.drawShape({ kind: 'path', anchors, closed: closed && anchors.length >= 3 });
+  }
+
   function finishPolygon() {
     if (store.tool === 'feature') {
       const layer = store.world!.get('layer', store.featureLayerId);
@@ -1763,8 +1828,9 @@ export function MapView() {
       if (e.key === 'Escape') { setPolygon([]); shape.current = []; shapeShown = []; setCursor(null); drag.current = { kind: 'none' }; if (store.splitLine && !store.pending) store.set({ splitLine: null }); if (store.tool === 'regions' && !store.dialog && store.regionPicks.length) store.set({ regionPicks: [] }); if (store.pickOrigin) store.set({ pickOrigin: null }); force((n) => n + 1); }
       if (e.key === 'Enter' && store.tool === 'regions' && !store.dialog && store.regionPicks.length) store.set({ dialog: 'give-regions' });
       if (e.key === 'Enter' && (polygon.length || (store.tool === 'polygon' && shape.current.length))) finishPolygon();
+      if (e.key === 'Enter' && store.tool === 'draw-pen' && shape.current.length && !presentation) finishDrawPath(false);
       // The precise shape (D232): Backspace takes back its last point.
-      if (e.key === 'Backspace' && store.tool === 'polygon' && shape.current.length && !presentation) { e.preventDefault(); shape.current = shape.current.slice(0, -1); shapeShown = shape.current; force((n) => n + 1); }
+      if (e.key === 'Backspace' && (store.tool === 'polygon' || store.tool === 'draw-pen') && shape.current.length && !presentation) { e.preventDefault(); shape.current = shape.current.slice(0, -1); shapeShown = shape.current; force((n) => n + 1); }
       // The river pen (D220).
       if (store.riverDraft.length && store.tool === 'sculpt') {
         if (e.key === 'Enter' && store.riverDraft.length >= 2) { e.preventDefault(); finishRiver(); return; }
@@ -1809,6 +1875,7 @@ export function MapView() {
       }
       if (at >= 0 && ll) { store.execute((wd) => cmd.updateTerrainStamp(wd, store.spaceId, river.id, { path: [...river.path.slice(0, at + 1), [ll[0], ll[1]], ...river.path.slice(at + 1)] })); return; }
     }
+    if (s.tool === 'draw-pen' && shape.current.length) { finishDrawPath(false); return; }
     if (s.tool === 'polygon' || (s.tool === 'feature' && polygon.length)) { finishPolygon(); return; }
     if (s.tool === 'vertex' && s.world) {
       const p = local(e);

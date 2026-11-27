@@ -61,6 +61,27 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D252. The pen on a country's design; a drawing's points moved with Select (S8, second part)
+
+- **Why.** The drawing of the Looks studio: "Pen (P) · Click for a corner, drag for a curve. The drawing is a part of
+  this country's design", and "every part of a design can be edited here".
+- **The Pen** (P, the Looks studio's tool strip, between Select and Shapes) draws as the precise shape's pen (D232): a
+  click adds a corner, pressed and dragged the new point's handles are pulled out (a smooth point), a click on the line
+  adds a point there, points and handles are dragged to reshape the path while it is drawn (Alt: one handle alone).
+  A click on its first point closes it (a shape, filled if the drawing has a fill); **Enter or a double-click finishes
+  it open** (a line: hatching, a river of ink, a road); Backspace takes back the last point; Esc gives up. Into the
+  drawing chosen, or a new one, as Shapes (D251); one undo step. Shown as it will be drawn, in the line's colour.
+  (A double-click's second press falls on the point just made: such a point is dropped, `withoutRepeats`.)
+- **A drawing's points moved with Select**: with a drawing chosen in the Looks studio, its points and handles are
+  shown; one pressed and dragged moves (a point with its handles; a handle turning the other with it, Alt alone), shown
+  as it goes, kept when let go (`updateDrawingShape`, one undo step); Alt and a click on a point makes it a corner
+  again. The country stays the thing designed.
+- **Tests.** Unit: a point falling on the one before dropped and a curve's kept; a shape reshaped and taken away, the
+  drawing kept, a shape no longer there or of one point refused. Interface: P takes the pen in the Looks studio, its
+  hint in the status bar; three corners and a curve left open by Enter; a shape closed on its first point into the same
+  drawing; a point taken back by Backspace and a line finished by a double-click; one undo step each; a point dragged
+  east with Select, the country still designed; Alt and a click making the smooth point a corner; undone.
+
 ### D251. Drawings by hand, parts of a country's design: the Looks studio's tools, and Shapes (S8, first part)
 
 - **Why.** The plan and the drawing of the Looks studio: "Pen, shapes, brush and text are tools among the others", each

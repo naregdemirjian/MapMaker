@@ -77,7 +77,7 @@ export type DialogName =
 /** One line of a right-click menu: an action, a heading, or a divider. */
 export type MenuItem = { label: string; run: () => void; danger?: boolean; testId?: string; shortcut?: string; disabled?: boolean; checked?: boolean } | { heading: string } | 'divider';
 
-export type Tool = 'select' | 'lasso' | 'polygon' | 'pen' | 'vertex' | 'place' | 'erase' | 'feature' | 'split' | 'regions' | 'reach' | 'sculpt' | 'field' | 'disaster' | 'systems' | 'lanes' | 'shape';
+export type Tool = 'select' | 'lasso' | 'polygon' | 'pen' | 'vertex' | 'place' | 'erase' | 'feature' | 'split' | 'regions' | 'reach' | 'sculpt' | 'field' | 'disaster' | 'systems' | 'lanes' | 'shape' | 'draw-pen';
 export type Selection =
   | { kind: 'entity'; id: string }
   | { kind: 'event'; id: string }
