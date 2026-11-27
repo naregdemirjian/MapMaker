@@ -7042,6 +7042,60 @@ try {
     await page.evaluate(() => (window as any).__mapmaker.allLists());
   });
 
+  await h.step('The brush on a country\'s design (D256): B; a wavy stroke painted by hand, smoothed into a few curved points, in the line\'s colour and width; undone', async () => {
+    const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);
+    const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
+    await page.getByTestId('studio-history').click();
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
+    await h.setDate('1650');
+    await page.getByTestId('studio-looks').click();
+    await page.getByTestId('reset-workspace').click();
+    await page.evaluate(([a, b]) => (window as any).__mapmaker.store.setCamera({ lon: (a[0] + b[0]) / 2, lat: (a[1] + b[1]) / 2, zoom: 1.5, rotation: 0, projection: 'equirectangular' }), [P.a, P.b]);
+    const idA = await store(`s.world.all('entity').find((e) => e.name === ${JSON.stringify(A)}).id`) as string;
+    await page.evaluate((id) => (window as any).__mapmaker.store.set({ selection: { kind: 'entity', id }, multi: null }), idA);
+    const before = await steps();
+    const pa = await h.toPage(P.a), pb = await h.toPage(P.b);
+    const qa: [number, number] = [pa[0] + 0.3 * (pb[0] - pa[0]), pa[1] + 80];
+    const shapes = () => store(`(JSON.parse(s.world.get('entity', ${JSON.stringify(idA)}).style || '{}').drawings ?? []).flatMap((d) => d.shapes)`) as Promise<Array<{ closed: boolean; anchors: Array<{ o?: unknown }> }>>;
+    // The brush by its key; a thick white line.
+    await page.locator('body').click({ position: { x: 5, y: 5 } }).catch(() => undefined);
+    await page.keyboard.press('b');
+    assert.equal(await store('s.tool'), 'draw-brush');
+    if (!(await page.getByTestId('draw-stroke-on').isChecked())) await page.getByTestId('draw-stroke-on').check();
+    await page.getByTestId('draw-stroke-width').fill('12');
+    await page.getByTestId('draw-stroke-width').press('Enter');
+    await page.getByTestId('draw-stroke-color').fill('#ffffff');
+    // A wavy stroke, painted.
+    await page.mouse.move(qa[0] - 60, qa[1]);
+    await page.mouse.down();
+    for (let x = -60; x <= 60; x += 4) await page.mouse.move(qa[0] + x, qa[1] + 14 * Math.sin(x / 12));
+    await page.mouse.up();
+    await h.saved();
+    const all = await shapes();
+    assert.equal(all.length, 1);
+    assert.equal(all[0].closed, false, 'a line');
+    assert.ok(all[0].anchors.length >= 4 && all[0].anchors.length < 20, `smoothed into a few points (${all[0].anchors.length})`);
+    assert.ok(all[0].anchors.slice(1, -1).every((a) => !!a.o), 'curved through them');
+    const white = await page.evaluate((p) => {
+      const cv = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement;
+      const r = cv.getBoundingClientRect(), k = cv.width / r.width;
+      const d = cv.getContext('2d')!.getImageData(Math.round((p[0] - r.left - 60) * k), Math.round((p[1] - r.top - 20) * k), Math.round(120 * k), Math.round(40 * k)).data;
+      let n = 0;
+      for (let i = 0; i < d.length; i += 4) if (d[i] > 170 && d[i + 1] > 170 && d[i + 2] > 170) n++;
+      return n;
+    }, qa);
+    assert.ok(white > 200, `the stroke painted in white (${white} pixels)`);
+    await h.screenshot('looks-brush');
+    // Undone.
+    for (let i = 0; i < 12 && (await steps()) > before; i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await steps(), before);
+    assert.deepEqual(await shapes(), []);
+    await page.getByTestId('tool-select').click();
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null, drawNew: { stroke: { color: '#2b1d12', width: 2 }, fill: null } }));
+    await page.getByTestId('studio-history').click();
+    await page.evaluate(() => (window as any).__mapmaker.allLists());
+  });
+
   await h.step('The menu bar: every command in a menu with its shortcut; the keyboard runs the same commands (D197)', async () => {
     const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);
     await page.getByTestId('studio-history').click();

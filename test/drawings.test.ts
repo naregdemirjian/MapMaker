@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { World } from '../src/world-model/world.ts';
 import * as cmd from '../src/domain/commands.ts';
-import { drawingsOf, boxShape, screenPath, hitsShape, drawingAt, nextDrawingName, drawingShows, withoutRepeats, shapeOf, textBox, toPattern, toLand, drawingOf, type Drawing, type LL, type Pt, type PathShape } from '../src/domain/drawings.ts';
+import { drawingsOf, boxShape, screenPath, hitsShape, drawingAt, nextDrawingName, drawingShows, withoutRepeats, shapeOf, textBox, toPattern, toLand, drawingOf, simplifyLine, brushPath, type Drawing, type LL, type Pt, type PathShape } from '../src/domain/drawings.ts';
 
 // (A plain projection for the tests: a degree is ten pixels, north up.)
 const project = (ll: LL): Pt => [ll[0] * 10, 0 - ll[1] * 10];
@@ -176,4 +176,20 @@ test('effects on a drawing (D255): drop shadows and outer glows kept, others lef
   assert.deepEqual(d.effects.map((e) => e.kind), ['shadow', 'outer-glow']);
   const sh = d.effects[0] as { distance: number; color: string };
   assert.ok(sh.distance <= 200 && /^#[0-9a-f]{6}$/.test(sh.color), 'held to its range, a colour by default');
+});
+
+test('the brush (D256): a stroke made light, then smooth through its points; a straight stroke stays straight', () => {
+  const wavy: Pt[] = [];
+  for (let x = 0; x <= 200; x += 2) wavy.push([x, 20 * Math.sin(x / 30)]);
+  const light = simplifyLine(wavy, 1.5);
+  assert.ok(light.length < wavy.length / 3 && light.length >= 5, `${light.length} of ${wavy.length} points kept`);
+  for (const q of wavy) assert.ok(light.some((r) => Math.hypot(r[0] - q[0], r[1] - q[1]) < 30));
+  const straight = simplifyLine([[0, 0], [10, 0], [20, 0], [30, 0]], 1);
+  assert.deepEqual(straight, [[0, 0], [30, 0]]);
+  const path = brushPath(wavy, unproject)!;
+  assert.equal(path.closed, false);
+  assert.ok(!path.anchors[0].i && path.anchors[0].o && path.anchors.at(-1)!.i && !path.anchors.at(-1)!.o, 'handles inside the stroke only');
+  const segs = screenPath(path, project)!;
+  assert.deepEqual(segs.at(-1)!.to.map(Math.round), [200, Math.round(20 * Math.sin(200 / 30))]);
+  assert.equal(brushPath([[5, 5]], unproject), null);
 });

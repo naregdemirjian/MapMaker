@@ -61,6 +61,24 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D256. The brush on a country's design (S8, sixth and last part)
+
+- **Why.** The plan: "tools to design by hand (pen and shapes, text, brush last)"; the user did not need brush painting
+  much but asked for it to be kept.
+- **The Brush** (B, the Looks studio's tool strip): dragged on the map, it paints a stroke by hand in the line of the
+  drawing chosen (its colour and width, set in the options bar), into that drawing or a new one, as the other tools do;
+  shown in its colour and width as it is painted. Let go, the stroke is made light (its points kept within a pixel and a
+  half of it, Ramer–Douglas–Peucker) and smooth (curves through the points kept, their handles a sixth of the way
+  between the points either side, Catmull–Rom), as an open path of the drawing: then reshaped with Select like the pen's
+  paths (D252), cut by the borders, with the drawing's looks and effects. One undo step.
+- **The Looks studio's tools, as drawn**: Select, Pen, Shapes, Brush, Text. (The eraser, fill bucket and eyedropper of
+  the drawing are not made: a drawing's shapes are taken away in its Looks, its fill set there.)
+- **S8 is done**, and with it the plan of the five studios.
+- **Tests.** Unit: a wavy stroke made light, every point of it near what is kept; a straight one down to its ends; the
+  smooth path open, handles inside it only, ending where the stroke ended; nothing from one point. Interface: B takes
+  the brush; a thick white line; a wavy stroke painted: one open path of a few curved points, white in the pixels;
+  undone.
+
 ### D255. Effects on a drawing (S8, fifth part)
 
 - **Why.** The drawing of the Looks studio: in a drawing's Looks, "Effects on this drawing: Outer glow · Size 12; Drop

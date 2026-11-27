@@ -351,3 +351,43 @@ export function toLand(d: Drawing, unproject: (p: Pt) => LL | null, unit: number
   }
   return { ...d, mode: 'land', tile: null, shapes };
 }
+
+/** The points of a line kept within `tol` of it (Ramer, Douglas and Peucker): the brush's stroke made light (D256). */
+export function simplifyLine(pts: Pt[], tol: number): Pt[] {
+  if (pts.length <= 2) return pts.slice();
+  const keep = new Uint8Array(pts.length);
+  keep[0] = keep[pts.length - 1] = 1;
+  const stack: Array<[number, number]> = [[0, pts.length - 1]];
+  while (stack.length) {
+    const [a, b] = stack.pop()!;
+    const [x0, y0] = pts[a], [x1, y1] = pts[b], dx = x1 - x0, dy = y1 - y0, l = Math.hypot(dx, dy) || 1;
+    let far = -1, most = tol;
+    for (let k = a + 1; k < b; k++) {
+      const d = Math.abs((pts[k][0] - x0) * dy - (pts[k][1] - y0) * dx) / l;
+      if (d > most) { most = d; far = k; }
+    }
+    if (far >= 0) { keep[far] = 1; stack.push([a, far], [far, b]); }
+  }
+  return pts.filter((_, k) => keep[k]);
+}
+
+/**
+ * A brush's stroke as a smooth path (D256): its points, made light, joined by curves through them (Catmull-Rom, as
+ * handles a third of the way to the points either side), on the screen; turned into degrees by `unproject`.
+ */
+export function brushPath(pts: Pt[], unproject: (p: Pt) => LL | null, tol = 1.5): PathShape | null {
+  const p = simplifyLine(pts, tol);
+  if (p.length < 2) return null;
+  const anchors: DrawAnchor[] = [];
+  for (let k = 0; k < p.length; k++) {
+    const prev = p[Math.max(0, k - 1)], next = p[Math.min(p.length - 1, k + 1)];
+    const tx = (next[0] - prev[0]) / 6, ty = (next[1] - prev[1]) / 6;
+    const at = unproject(p[k]);
+    if (!at) return null;
+    const a: DrawAnchor = { p: at };
+    if (k > 0) { const i = unproject([p[k][0] - tx, p[k][1] - ty]); if (!i) return null; a.i = i; }
+    if (k < p.length - 1) { const o = unproject([p[k][0] + tx, p[k][1] + ty]); if (!o) return null; a.o = o; }
+    anchors.push(a);
+  }
+  return { kind: 'path', anchors, closed: false };
+}

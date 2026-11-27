@@ -45,7 +45,7 @@ import { smartInputFor } from '../smart-input.ts';
 import { reachAt } from './Reach.tsx';
 import { SmartAdjustPanel } from './SmartBrush.tsx';
 import { aloneWorld, keptBy } from '../stage.ts';
-import { boxShape, screenPath, traceSegs, drawingAt, withoutRepeats, textBox, hitsShape, type LL as DrawLL, type Pt as DrawPt, type DrawAnchor, type TextShape } from '../../domain/drawings.ts';
+import { boxShape, brushPath, screenPath, traceSegs, drawingAt, withoutRepeats, textBox, hitsShape, type LL as DrawLL, type Pt as DrawPt, type DrawAnchor, type TextShape } from '../../domain/drawings.ts';
 import { drawingNow } from '../panels/DrawingLooks.tsx';
 import { CompareBar } from './CompareBar.tsx';
 import type { AdjustState } from '../store.ts';
@@ -72,6 +72,8 @@ type Drag =
   | { kind: 'erase'; points: Pt[] }
   // The Shapes tool's box (S8, D251), dragged out on the screen.
   | { kind: 'draw-box'; from: Pt; to: Pt; square: boolean }
+  // The Brush's stroke (D256), as the pointer went (screen pixels).
+  | { kind: 'draw-stroke'; points: Pt[] }
   // A point or a handle of the drawing chosen moved with Select (D252): its anchors as they were and as they are now.
   | { kind: 'draw-edit'; owner: string; drawingId: string; shape: number; hit: Hit; start: DrawAnchor[]; now: DrawAnchor[]; closed: boolean; ll0: Pt; from: Pt; moved: number; alt: boolean; text: TextShape | null }
   // A stroke of the sculpting brush (map positions; D98).
@@ -964,6 +966,15 @@ export function MapView() {
       // (Its points and handles, to be moved with Select, D252; a text's place, D253.)
       if (s.tool === 'select') for (const sh of shapes) drawAnchors(ctx, sh.kind === 'text' ? [{ p: sh.at }] : sh.anchors, proj);
     }
+    // The Brush's stroke being painted (D256), in the line's colour and width.
+    if (drag.current.kind === 'draw-stroke' && drag.current.points.length > 1 && !presentation) {
+      const st = designed?.drawing.stroke ?? s.drawNew.stroke ?? { color: '#ffffff', width: 2 };
+      ctx.save();
+      ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      ctx.strokeStyle = st.color; ctx.lineWidth = Math.max(1, st.width * v.unit);
+      ctx.beginPath(); drag.current.points.forEach((q, i) => (i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]))); ctx.stroke();
+      ctx.restore();
+    }
     // The pen's path being drawn (D252), as it will be drawn: in the line's colour, its points and handles.
     if (s.tool === 'draw-pen' && shape.current.length && !presentation) {
       const proj = (ll: Pt) => lonLatToScreen(v, ll[0], ll[1]) as DrawPt | null;
@@ -1244,6 +1255,8 @@ export function MapView() {
       if (ll) { drag.current = { kind: 'sculpt', points: [ll] }; force((n) => n + 1); }
       return;
     }
+    // The Brush (S8, D256): a stroke painted by hand, on the design of the country chosen.
+    if (!presentation && e.button === 0 && s.tool === 'draw-brush') { drag.current = { kind: 'draw-stroke', points: [p] }; return; }
     // The Text tool (S8, D253): a click writes words there, on the design of the country chosen.
     if (!presentation && e.button === 0 && s.tool === 'draw-text') {
       const ll = screenToLonLat(view, p[0], p[1]);
@@ -1421,6 +1434,7 @@ export function MapView() {
     }
     if (d.kind === 'cut') d.moved = Math.max(d.moved, Math.hypot(p[0] - d.x, p[1] - d.y));
     if (d.kind === 'draw-box') { d.to = p; d.square = e.shiftKey; force((n) => n + 1); return; }
+    if (d.kind === 'draw-stroke') { const last = d.points[d.points.length - 1]; if (Math.hypot(p[0] - last[0], p[1] - last[1]) >= 2) { d.points.push(p); force((n) => n + 1); } return; }
     if (d.kind === 'draw-edit') {
       d.moved = Math.max(d.moved, Math.hypot(p[0] - d.from[0], p[1] - d.from[1]));
       const ll = d.moved >= 3 ? screenToLonLat(view, p[0], p[1]) : null;
@@ -1524,6 +1538,12 @@ export function MapView() {
         const id = shotCountryAt(sh, ll[0], ll[1]);
         store.set({ selection: id ? { kind: 'entity', id } : null, multi: null });
       }
+      return;
+    }
+    if (d.kind === 'draw-stroke') {
+      force((n) => n + 1);
+      const made = d.points.length > 1 ? brushPath(d.points, (q) => screenToLonLat(view, q[0], q[1]) as DrawLL | null) : null;
+      if (made) store.drawShape(made);
       return;
     }
     if (d.kind === 'draw-edit') {
