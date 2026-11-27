@@ -29,9 +29,10 @@ const launch = async (): Promise<{ app: ElectronApplication; page: Page }> => {
   });
   const page = await app.firstWindow();
   await page.waitForLoadState('domcontentloaded');
-  // (Every list open at once, each in a group of its own down the left, as these steps expect.)
+  // (Each page laid out as at first, the lists as tabs of one group, whatever an earlier run left on this computer: the
+  // window may be no taller than the screen, as on Windows, too short for every list in a group of its own.)
   await page.waitForFunction(() => !!(window as any).__mapmaker);
-  await page.evaluate(() => (window as any).__mapmaker.allLists());
+  await page.evaluate(() => { const m = (window as any).__mapmaker; for (const p of ['map', 'history', 'timeline', 'looks', 'shots', 'export']) m.store.setDock(m.dock.defaultDock(p), p); });
   return { app, page };
 };
 
@@ -68,11 +69,13 @@ try {
     await page.getByTestId('map-canvas').waitFor();
     assert.ok(existsSync(join(PROJECTS, 'Desktop Test.mapmaker', 'project.db')));
     await page.waitForFunction(() => (window as any).__mapmaker.store.basemap, null, { timeout: 20000 });
+    await page.getByTestId('dock-tab-countries').click();
     await page.getByRole('button', { name: '+ New' }).click();
     await page.getByTestId('new-entity-name').fill('Desktop Country');
     await page.getByTestId('new-entity-create').click();
     await page.getByTestId('entity-panel').waitFor();
     // Naming works in the desktop app (it has no browser prompt): a new layer.
+    await page.getByTestId('dock-tab-layers').click();
     await page.getByRole('button', { name: '+ Layer' }).click();
     await page.getByTestId('new-layer-name').fill('Religion');
     await page.getByTestId('new-layer-name').press('Enter');
@@ -148,6 +151,7 @@ try {
     await row.waitFor();
     await row.click();
     await page.getByTestId('map-canvas').waitFor();
+    await page.getByTestId('dock-tab-countries').click();
     await page.locator('.list-panel .row', { hasText: 'Desktop Country' }).waitFor();
     await capture(page, join(OUT, '02-reopened.png'));
   });
