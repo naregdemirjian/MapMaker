@@ -61,6 +61,34 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D242. The table of events: the story planned as a list, changed in place, read and written as a CSV file (S6, second part)
+
+- **Why.** Agreed with the user (the drawing "Timeline: table" of the studios plan): beside the tracks, a table of
+  the events, to plan a story as a list first and draw each event afterwards.
+- **Where**: a panel, "Table", tabbed with the timeline in the Timeline studio (the drawing's Tracks and Table).
+- **Rows** (`panels/EventTable.tsx`): the events of the timeline viewed, as the timeline's group filter shows them,
+  under their groups as chapters (in the groups' order, an event in several under the first, those in none last; each
+  heading with its years and how many), by date. Columns: drawn (✓) or planned (a dashed box: nothing drawn into it
+  yet), starts, ends, the name, the type, the groups, who it involves (the countries and people its changes are
+  about), its changes in words ("2 changes of land, 1 new name"), and how many shots show some of its time
+  (`domain/event-table.ts` `eventFacts`, `changesText`, `involvesText`, `shotsOver`). A name or a date is changed in
+  place by a double-click, the type chosen in its cell; each is one undo step. A click chooses the event (its start
+  becomes the date viewed), Ctrl and Shift choose several, right-click as in the lists.
+- **Its tools**: + Event; Shift dates… moves the events chosen together by years, months or days of the map's
+  calendar, each keeping its length and its changes recorded at dates of their own going with it (`cmd.shiftEvents`,
+  one undo step); Import a list reads a CSV file of events (Name, Starts, Ends, Type, Groups, the columns by their
+  names or in that order, dates in the map's calendar): they come in planned, of the type of their name, in the groups
+  they name (made when missing), one undo step for the list, and the lines that cannot be read are named
+  (`parseEventsCsv`, `cmd.importEvents`); Export the list writes the events listed as such a file (`eventsCsv`); a
+  filter by name.
+- **Not done**: rows dragged between chapters (a group changed in the event's Properties or its right-click menu
+  instead), "Change many…" (types and groups of several at once: the right-click menu adds the chosen to a group).
+- **Tests.** Unit: what an event holds (changes by kind, who, planned when none); the shots over an event; the list
+  written and read back, columns in another order or none, quotes, the lines that cannot be read; events moved
+  together with their dated changes; events added from a list with their types and groups. Interface: a list of two
+  read from a file, planned, one under a group made for it; a name and a start changed in place; the two chosen and
+  moved ten years later; the table written as a file holding them; undone.
+
 ### D241. The Timeline studio's own panels: Groups, Types, Branches and Statistics under a small map (S6, first part)
 
 - **Why.** Agreed with the user (the drawing "Timeline: tracks" of the studios plan): the Timeline studio has its own

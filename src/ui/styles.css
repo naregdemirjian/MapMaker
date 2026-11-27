@@ -594,6 +594,30 @@ label.indent { margin-left: 24px; }
 .branches-panel .branch-line { flex-wrap: wrap; }
 .branches-panel .branch-new { grid-template-columns: 1fr; }
 .statistics-panel .stat-editor .row label { min-width: 0; flex: 1 1 120px; }
+/* The table of events (D242). */
+.event-table-panel { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.et-tools { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 5px; padding: 5px 8px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.et-tools .file-button { margin: 0; }
+.et-tools .et-find { margin-left: auto; width: 170px; padding: 3px 7px; }
+.et-shift { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 5px 8px; background: var(--panel2); border-bottom: 1px solid var(--line); }
+.et-shift input[type=number] { width: 70px; }
+.et-scroll { flex: 1; min-height: 0; overflow: auto; }
+table.et { width: 100%; border-collapse: collapse; font-size: 12px; }
+table.et th { position: sticky; top: 0; z-index: 1; background: var(--panel); text-align: left; font-weight: 600; font-size: 10.5px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); padding: 5px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+table.et td { padding: 3px 8px; border-bottom: 1px solid var(--line2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; vertical-align: middle; }
+table.et tr.sel td { background: var(--sel); }
+table.et tr.dim td { color: var(--muted); }
+table.et tbody tr:not(.et-chapter):hover td { background: var(--hover-bg); }
+table.et tr.sel:hover td { background: var(--sel); }
+table.et .et-chapter td { background: var(--panel); padding: 6px 8px; border-bottom: 1px solid var(--line); }
+table.et .et-drawn { width: 18px; text-align: center; }
+table.et .et-yes { color: var(--ok); font-weight: 700; }
+table.et .et-planned { display: inline-block; width: 11px; height: 11px; border: 1.5px dashed var(--muted); border-radius: 2px; vertical-align: middle; }
+table.et .et-todo { color: var(--accent2); }
+table.et .et-date { min-width: 90px; }
+table.et .et-date .date-field, table.et .et-name input { min-width: 150px; }
+table.et .et-type select { padding: 1px 4px; font-size: 12px; max-width: 140px; }
+table.et .et-shots { text-align: right; }
 .type-color { display: flex; align-items: center; gap: 2px; }
 .type-length { display: flex; gap: 4px; }
 .type-length input { width: 56px; }

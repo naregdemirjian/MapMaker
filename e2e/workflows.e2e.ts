@@ -5222,7 +5222,7 @@ try {
     await page.getByTestId('reset-workspace').click();
     assert.equal(await store('s.pageNow()'), 'timeline');
     assert.equal(Math.round((await box('[data-testid="dock-stack-viewer"]')).height), 200);
-    assert.ok((await box('[data-testid="dock-stack-timeline"]')).height > 2 * (await box('[data-testid="dock-stack-viewer"]')).height, 'the timeline takes the room');
+    assert.ok((await box('[data-testid="dock-stack-timeline-event-table"]')).height > 2 * (await box('[data-testid="dock-stack-viewer"]')).height, 'the timeline (with the table, D242) takes the room');
     assert.equal(await page.getByTestId('tool-strip').count(), 0);
     assert.equal(await page.getByTestId('options-bar').count(), 0);
     assert.equal(await store('s.tool'), 'select');
@@ -5954,6 +5954,65 @@ try {
     assert.equal(await store(`s.world.all('branch').filter((b) => b.name === 'What if').length`), 0);
     await page.getByTestId('dock-tab-groups').click();
     await page.getByTestId('studio-history').click();
+    await page.evaluate(() => (window as any).__mapmaker.allLists());
+  });
+
+  await h.step('The table of events (D242): a list read from a file, planned under its group; a name and a date changed in place; two events moved together; the table written as a file; undone', async () => {
+    const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);
+    const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
+    await page.getByTestId('studio-history').click();
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
+    const before = await steps();
+    await page.getByTestId('studio-timeline').click();
+    await page.getByTestId('reset-workspace').click();
+    await page.getByTestId('dock-tab-event-table').click();
+    await page.getByTestId('event-table').waitFor();
+    const evOf = (name: string) => store(`(() => { const e = s.world.all('event').find((x) => x.name === ${JSON.stringify(name)}); return e ? { start: e.start_day, end: e.end_day, id: e.id } : null; })()`) as Promise<{ start: number; end: number | null; id: string } | null>;
+    const day = (text: string) => page.evaluate((t) => (window as any).__mapmaker.bench.gregorian.parse(t).instant.day, text) as Promise<number>;
+    // A list of two events read from a CSV file: planned (nothing drawn), the first under a group made for it.
+    await page.getByTestId('et-import').setInputFiles({ name: 'story.csv', mimeType: 'text/csv', buffer: Buffer.from('Name,Starts,Ends,Type,Groups\nSiege of Sel,1350,1351,,Campaigns\nTreaty of Sel,1 June 1356,24 June 1356,,\n') });
+    await h.saved();
+    await page.getByTestId('et-row-Siege of Sel').waitFor();
+    await page.getByTestId('et-chapter-Campaigns').waitFor();
+    assert.match((await page.getByTestId('et-row-Treaty of Sel').textContent())!, /to draw/, 'planned: nothing drawn yet');
+    assert.equal((await evOf('Treaty of Sel'))!.end, await day('24 June 1356'));
+    // A name changed in place, then its start.
+    await page.getByTestId('et-row-Treaty of Sel').locator('td.et-name').dblclick();
+    await page.getByTestId('et-edit-name').fill('Peace of Sel');
+    await page.getByTestId('et-edit-name').press('Enter');
+    await h.saved();
+    await page.getByTestId('et-row-Peace of Sel').locator('td.et-date').first().dblclick();
+    await page.getByTestId('et-edit-start').fill('2 June 1356');
+    await page.getByTestId('et-edit-start').press('Enter');
+    await h.saved();
+    assert.equal((await evOf('Peace of Sel'))!.start, await day('2 June 1356'));
+    await h.screenshot('event-table');
+    // The two chosen (a click, then Ctrl+click) and moved ten years later together, each keeping its length.
+    await page.getByTestId('et-row-Siege of Sel').locator('td.et-groups').click();
+    await page.getByTestId('et-row-Peace of Sel').locator('td.et-groups').click({ modifiers: ['Control'] });
+    assert.equal(((await store('s.chosen("event")')) as string[]).length, 2);
+    await page.getByTestId('et-shift').click();
+    await page.getByTestId('et-shift-n').fill('10');
+    await page.getByTestId('et-shift-apply').click();
+    await h.saved();
+    assert.equal((await evOf('Siege of Sel'))!.start, await day('1360'));
+    assert.equal((await evOf('Siege of Sel'))!.end, await day('1361'));
+    assert.equal((await evOf('Peace of Sel'))!.end, await day('24 June 1366'));
+    // The table written as a CSV file: read back, it holds them.
+    await page.evaluate(() => { const w = window as any; w.__urlOf = URL.createObjectURL; URL.createObjectURL = (b: Blob) => { w.__lastBlob = b; return w.__urlOf(b); }; });
+    await page.getByTestId('et-export').click();
+    const csv = await page.evaluate(async () => { const w = window as any; URL.createObjectURL = w.__urlOf; return (await w.__lastBlob.text()) as string; });
+    assert.match(csv, /^Name,Starts,Ends,Type,Groups\n/);
+    assert.match(csv, /\nPeace of Sel,2 June 1366,24 June 1366,/);
+    assert.match(csv, /\nSiege of Sel,1360,1361,[^,]*,Campaigns\n/);
+    // Undone, step by step.
+    for (let i = 0; i < 20 && (await steps()) > before; i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await steps(), before);
+    assert.equal(await evOf('Siege of Sel'), null);
+    assert.equal(await page.getByTestId('et-row-Siege of Sel').count(), 0);
+    await page.getByTestId('dock-tab-timeline').click();
+    await page.getByTestId('studio-history').click();
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null, multi: null }));
     await page.evaluate(() => (window as any).__mapmaker.allLists());
   });
 

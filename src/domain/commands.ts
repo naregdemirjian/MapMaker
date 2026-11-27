@@ -7,7 +7,7 @@ import { World, Tx, newId } from '../world-model/world.ts';
 import {
   Engine, canonicalFaces, leafDescendants, childrenMap, hashFaces, parseJSON, effectTime, eventStart, type Resolution, type TransitionSpec, type AnnexIntent, type PlaceIntent, type RenameIntent, type ShapeIntent, type RelateIntent, type SystemIntent, type LaneIntent, laneKey, type FeatureAnimStyle, isFeatureAnim,
 } from '../temporal-engine/engine.ts';
-import { type Instant, toStore, fromStore, NEG_INF, compare, isFiniteInstant, addMs, stepDate } from '../core-time/index.ts';
+import { type Instant, type Calendar, toStore, fromStore, NEG_INF, compare, isFiniteInstant, addMs, stepDate } from '../core-time/index.ts';
 import { branchAt, branchCuts, seenAt, branchName, branchAndBelow, branchLine } from '../temporal-engine/branches.ts';
 import {
   BASE_EVENT_ID, MAIN_BRANCH, SCHEMA_VERSION, baseEventOf, isBaseEvent, type RowDiff, type EffectRow, type EventRow, type EntityRow, type LayerKind, type FeatureRow, type RelationRow,
@@ -983,6 +983,60 @@ export function updateEvent(world: World, id: string, patch: Partial<EventInput>
       throw new Error('An event cannot end before it starts.');
     }
     tx.update('event', next);
+  });
+}
+
+/**
+ * Events moved together by an amount of the map's calendar (the table of events' Shift dates, D242): each keeps its
+ * length, and its changes recorded at dates of their own go with it. One undo step.
+ */
+export function shiftEvents(world: World, ids: string[], unit: 'day' | 'month' | 'year', n: number, cal?: Calendar): CommandResult {
+  const evs = ids.map((id) => world.get('event', id)).filter((e): e is EventRow => !!e && !isBaseEvent(e.id));
+  if (!evs.length) throw new Error('Choose the events to move first.');
+  if (!Number.isInteger(n) || n === 0) throw new Error('Move them by a whole number of days, months or years.');
+  const step = (t: Instant) => stepDate(t, unit, n, cal);
+  const chosen = new Set(evs.map((e) => e.id));
+  const dated = world.all('effect').filter((ef) => chosen.has(ef.event_id) && ef.at_day !== null);
+  const amount = `${Math.abs(n)} ${unit}${Math.abs(n) === 1 ? '' : 's'}`;
+  return run(world, `Move ${evs.length === 1 ? `"${evs[0].name}"` : `${evs.length} events`} ${amount} ${n > 0 ? 'later' : 'earlier'}`, (tx) => {
+    for (const e of evs) {
+      const [sd, sm] = toStore(step(fromStore(e.start_day, e.start_ms)));
+      const end = e.end_day !== null ? toStore(step(fromStore(e.end_day, e.end_ms ?? 0))) : null;
+      tx.update('event', { ...e, start_day: sd, start_ms: sm, end_day: end ? end[0] : null, end_ms: end ? end[1] : null });
+    }
+    for (const ef of dated) {
+      const [d, ms] = toStore(step(fromStore(ef.at_day!, ef.at_ms ?? 0)));
+      tx.update('effect', { ...ef, at_day: d, at_ms: ms });
+    }
+  });
+}
+
+/**
+ * Events from a list (the table of events' Import a list, D242), with nothing drawn into them yet: each of the type
+ * of its name (or a plain event) and in the groups it names, made when the project has none of that name. One undo
+ * step for the whole list.
+ */
+export function importEvents(world: World, list: Array<{ name: string; start: Instant; end: Instant | null; precision?: string; type?: string; groups?: string[] }>): CommandResult<string[]> {
+  if (!list.length) throw new Error('There are no events in that list.');
+  const types = new Map(world.all('event_type').map((t) => [t.name.toLowerCase(), t.id]));
+  return run(world, list.length === 1 ? `Add "${list[0].name}" from a list` : `Add ${list.length} events from a list`, (tx) => {
+    const groups = new Map(tx.world.all('event_group').map((g) => [g.name.toLowerCase(), g.id]));
+    const ids: string[] = [];
+    for (const e of list) {
+      const id = insertEventIn(tx, { name: e.name, start: e.start, end: e.end, precision: e.precision, type_id: (e.type && types.get(e.type.toLowerCase())) || undefined });
+      for (const name of e.groups ?? []) {
+        let g = groups.get(name.toLowerCase());
+        if (!g) {
+          const all = tx.world.all('event_group');
+          g = newId('grp');
+          tx.insert('event_group', { id: g, name, color: GROUP_COLORS[all.length % GROUP_COLORS.length], sort_order: all.reduce((m, x) => Math.max(m, x.sort_order), -1) + 1, created_seq: tx.world.nextSeq('event_group') });
+          groups.set(name.toLowerCase(), g);
+        }
+        insertMember(tx, g, id);
+      }
+      ids.push(id);
+    }
+    return ids;
   });
 }
 
