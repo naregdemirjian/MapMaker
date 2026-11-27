@@ -9,7 +9,7 @@ import { World } from '../world-model/world.ts';
 import { Engine, parseJSON } from '../temporal-engine/engine.ts';
 import { defaultShot, type ShotSettings } from '../presentation/sequence.ts';
 import { takeLockedSkipped, updateSequence, createSequence, addDrawingShape, drawingsOfEntity, removeDrawing, type CommandResult } from '../domain/commands.ts';
-import { NEW_DRAWING, type DrawShape, type DrawStroke, type ShapeKind } from '../domain/drawings.ts';
+import { NEW_DRAWING, NEW_TEXT, type DrawShape, type DrawStroke, type ShapeKind, type LL as DrawLL } from '../domain/drawings.ts';
 import { shotLooksAt, restyleOf, restyleDiffs, looksAfter, tracksOf, type Restyle, type LookTrack } from '../presentation/shot-looks.ts';
 import { type Instant, gregorian, toJSONValue, fromJSONValue, fromStore, add, compare, PRESENT_YEAR } from '../core-time/index.ts';
 import { type Camera, defaultCamera, flatCamera, PROJECTIONS } from '../render-engine/camera.ts';
@@ -77,7 +77,7 @@ export type DialogName =
 /** One line of a right-click menu: an action, a heading, or a divider. */
 export type MenuItem = { label: string; run: () => void; danger?: boolean; testId?: string; shortcut?: string; disabled?: boolean; checked?: boolean } | { heading: string } | 'divider';
 
-export type Tool = 'select' | 'lasso' | 'polygon' | 'pen' | 'vertex' | 'place' | 'erase' | 'feature' | 'split' | 'regions' | 'reach' | 'sculpt' | 'field' | 'disaster' | 'systems' | 'lanes' | 'shape' | 'draw-pen';
+export type Tool = 'select' | 'lasso' | 'polygon' | 'pen' | 'vertex' | 'place' | 'erase' | 'feature' | 'split' | 'regions' | 'reach' | 'sculpt' | 'field' | 'disaster' | 'systems' | 'lanes' | 'shape' | 'draw-pen' | 'draw-text';
 export type Selection =
   | { kind: 'entity'; id: string }
   | { kind: 'event'; id: string }
@@ -273,6 +273,8 @@ export class AppStore {
   shapeKind: ShapeKind = 'rectangle';
   /** The line and fill a new drawing is made with (until one is chosen, whose own the tools then use). */
   drawNew: { stroke: DrawStroke | null; fill: string | null } = { stroke: NEW_DRAWING.stroke, fill: NEW_DRAWING.fill };
+  /** How the Text tool writes (D253): the size, font, weight and slant of the next text. */
+  textStyle: { size: number; font: string; weight: number; italic: boolean } = { size: NEW_TEXT.size, font: NEW_TEXT.font, weight: NEW_TEXT.weight, italic: NEW_TEXT.italic };
   timelineFind = '';
   /** The timeline's tracks as last laid out (pixels from the left edge of its picture; `top`: where the first begins). Not watched. */
   timelineLaid: { tracks: TLTrack[]; top: number; span?: [number, number] | null } | null = null;
@@ -832,6 +834,14 @@ export class AppStore {
     const into = this.drawingId && drawingsOfEntity(e).some((d) => d.id === this.drawingId) ? this.drawingId : null;
     const id = this.executeLooks((wd) => addDrawingShape(wd, e.id, into, shape, { stroke: this.drawNew.stroke, fill: this.drawNew.fill }));
     if (id !== undefined && id !== this.drawingId) this.set({ drawingId: id });
+  }
+  /** Words written at a place with the Text tool (D253), asked for, then drawn as a shape is. */
+  async writeText(at: DrawLL) {
+    const sel = this.selection, w = this.lookWorld ?? this.world;
+    const e = sel?.kind === 'entity' && w ? w.get('entity', sel.id) : null;
+    if (!e || (e.type_id !== 'polity' && e.type_id !== 'faction')) { this.toast('Choose a country to write on its design: click it with Select, or choose it in the lists.'); return; }
+    const words = await this.askText('Text', `The words, written on the design of ${e.name}`, '', 'Write');
+    if (words) this.drawShape({ kind: 'text', at, text: words, ...this.textStyle, angle: 0 });
   }
   /** A drawing taken away from a country's design (D251); the country designed again. */
   removeDrawing(owner: string, id: string) {

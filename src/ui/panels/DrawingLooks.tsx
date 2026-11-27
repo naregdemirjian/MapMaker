@@ -7,7 +7,8 @@ import * as cmd from '../../domain/commands.ts';
 import { BLEND_MODES, BLEND_NAMES, type BlendMode } from '../../render-engine/country-look.ts';
 import { PropGroup } from '../shell/Group.tsx';
 import { NumberField } from '../inputs.tsx';
-import type { Drawing, DrawStroke } from '../../domain/drawings.ts';
+import { LABEL_FONTS } from '../../render-engine/label-style.ts';
+import type { Drawing, DrawStroke, TextShape } from '../../domain/drawings.ts';
 
 /** The drawing designed: of the country chosen, the one chosen in its parts (null: none, or no longer there). */
 export function drawingNow(s = store): { owner: string; drawing: Drawing } | null {
@@ -38,6 +39,22 @@ function LineAndFill({ stroke, fill, onStroke, onFill, prefix }: { stroke: DrawS
   );
 }
 
+/** A text's words, size, font, weight, slant and turn, as fields (D253); `set` changes them. */
+function TextFields({ t, set, prefix }: { t: Pick<TextShape, 'size' | 'font' | 'weight' | 'italic'> & Partial<Pick<TextShape, 'text' | 'angle'>>; set: (patch: Partial<TextShape>) => void; prefix: string }) {
+  return (
+    <span className="inline draw-field text-fields">
+      {t.text !== undefined && <input className="text-words" defaultValue={t.text} key={t.text} onBlur={(ev) => { const v = ev.target.value.trim(); if (v && v !== t.text) set({ text: v }); }} onKeyDown={(ev) => { if (ev.key === 'Enter') (ev.target as HTMLInputElement).blur(); }} title="Its words" data-testid={`${prefix}-words`} />}
+      <select value={t.font} onChange={(ev) => set({ font: ev.target.value })} title="Its font" data-testid={`${prefix}-font`}>
+        {(LABEL_FONTS.includes(t.font) ? LABEL_FONTS : [t.font, ...LABEL_FONTS]).map((f) => <option key={f} value={f}>{f}</option>)}
+      </select>
+      <NumberField value={t.size} min={4} max={400} step={1} def={28} onCommit={(n) => set({ size: n })} title="Its height, in pixels of a frame 1920 wide" testId={`${prefix}-size`} />
+      <button className={`small ${t.weight >= 600 ? 'on' : ''}`} aria-pressed={t.weight >= 600} onClick={() => set({ weight: t.weight >= 600 ? 400 : 700 })} title="Bold" data-testid={`${prefix}-bold`}><b>B</b></button>
+      <button className={`small ${t.italic ? 'on' : ''}`} aria-pressed={t.italic} onClick={() => set({ italic: !t.italic })} title="Italic" data-testid={`${prefix}-italic`}><i>I</i></button>
+      {t.angle !== undefined && <NumberField value={t.angle} min={-360} max={360} step={5} def={0} onCommit={(n) => set({ angle: n })} title="Turned by so many degrees, clockwise" testId={`${prefix}-angle`} />}
+    </span>
+  );
+}
+
 /** A drawing chosen in the Looks studio's parts: its looks, in the Looks panel. */
 export function DrawingLooks({ owner, drawing: d }: { owner: string; drawing: Drawing }) {
   const s = useStore();
@@ -63,6 +80,17 @@ export function DrawingLooks({ owner, drawing: d }: { owner: string; drawing: Dr
         <label className="check"><input type="checkbox" checked={d.on} onChange={(ev) => set({ on: ev.target.checked })} data-testid="drawing-on" /> Shown</label>
         <p className="muted small-text">{d.shapes.length === 1 ? 'One shape' : `${d.shapes.length} shapes`}, fixed to the land: the borders of {e.name} cut it.</p>
       </PropGroup>
+      {d.shapes.some((sh) => sh.kind === 'text') && (
+        <PropGroup id="drawing:texts" title="Texts">
+          {d.shapes.map((sh, k) => sh.kind !== 'text' ? null : (
+            <div key={k} className="drawing-text" data-testid={`drawing-text-${k}`}>
+              <TextFields t={sh} prefix={`drawing-text-${k}`} set={(patch) => s.executeLooks((wd) => cmd.updateDrawingShape(wd, owner, d.id, k, { ...sh, ...patch }))} />
+              <button className="small danger" onClick={() => s.executeLooks((wd) => cmd.removeDrawingShape(wd, owner, d.id, k))} title="Take this text away" data-testid={`drawing-text-${k}-remove`}>×</button>
+            </div>
+          ))}
+          <p className="muted small-text">In the fill's colour (the line's, with no fill), outlined by the line when there are both. With Select, drag a text to move it; double-click it to write it again.</p>
+        </PropGroup>
+      )}
       <div className="buttons">
         <button className="small" disabled={at >= list.length - 1} onClick={() => s.executeLooks((wd) => cmd.moveDrawing(wd, owner, d.id, 1))} title="Drawn after its other drawings: over them" data-testid="drawing-up">Bring forward</button>
         <button className="small" disabled={at <= 0} onClick={() => s.executeLooks((wd) => cmd.moveDrawing(wd, owner, d.id, -1))} title="Drawn before its other drawings: under them" data-testid="drawing-down">Send backward</button>
@@ -81,6 +109,7 @@ export function DrawToolOptions() {
   const designable = !!country && (country.type_id === 'polity' || country.type_id === 'faction');
   return (
     <div className="toolbar sub" data-testid="draw-options">
+      {s.tool === 'draw-text' && <TextFields t={s.textStyle} prefix="text" set={(patch) => s.set({ textStyle: { ...s.textStyle, ...patch } })} />}
       {s.tool === 'shape' && (
         <span className="seg" role="group" aria-label="Shape">
           {(['rectangle', 'ellipse'] as const).map((k) => (

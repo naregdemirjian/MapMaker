@@ -13,7 +13,16 @@ export type Pt = [number, number];
 export interface DrawAnchor { p: LL; i?: LL | null; o?: LL | null }
 /** A path of curves: straight where neither end of a piece has a handle; closed, it runs back to its first anchor. */
 export interface PathShape { kind: 'path'; anchors: DrawAnchor[]; closed: boolean }
-export type DrawShape = PathShape;
+/**
+ * Words drawn at a place (D253): centred on it, `size` pixels high in a frame 1920 wide, in a font of a weight, upright
+ * or italic, turned by `angle` degrees (clockwise on the screen). Fixed to the land at its place, as paths are.
+ */
+export interface TextShape { kind: 'text'; at: LL; text: string; size: number; font: string; weight: number; italic: boolean; angle: number }
+export type DrawShape = PathShape | TextShape;
+/** A new text's look (D253). */
+export const NEW_TEXT: Omit<TextShape, 'kind' | 'at' | 'text'> = { size: 28, font: 'Georgia', weight: 600, italic: false, angle: 0 };
+/** The longest words a text holds. */
+export const MOST_TEXT = 200;
 /** A line along a drawing's shapes: its colour, and its width in pixels of a frame 1920 wide. */
 export interface DrawStroke { color: string; width: number }
 
@@ -58,6 +67,13 @@ function anchorOf(v: unknown): DrawAnchor | null {
 /** A shape as kept, checked (null: not a shape this version knows, or one with too few points to draw). */
 export function shapeOf(v: unknown): DrawShape | null {
   const s = v as { kind?: unknown; anchors?: unknown; closed?: unknown } | null;
+  if (s?.kind === 'text') {
+    const t = v as Partial<Record<keyof TextShape, unknown>>;
+    const at = llOf(t.at), text = typeof t.text === 'string' ? t.text.trim().slice(0, MOST_TEXT) : '';
+    if (!at || !text) return null;
+    const font = typeof t.font === 'string' && t.font.trim() ? t.font.trim().slice(0, 60) : NEW_TEXT.font;
+    return { kind: 'text', at, text, size: num(t.size, 4, 400, NEW_TEXT.size), font, weight: Math.round(num(t.weight, 100, 900, NEW_TEXT.weight) / 100) * 100, italic: t.italic === true, angle: num(t.angle, -360, 360, 0) };
+  }
   if (!s || s.kind !== 'path' || !Array.isArray(s.anchors)) return null;
   const anchors = s.anchors.slice(0, MOST_ANCHORS).map(anchorOf).filter((a): a is DrawAnchor => !!a);
   if (anchors.length < 2) return null;
@@ -107,7 +123,23 @@ export function withoutRepeats(anchors: DrawAnchor[], project: (ll: LL) => Pt | 
 }
 
 /** Whether a drawing shows anything: shown, at some strength, with a shape and a line or a fill to draw it with. */
-export const drawingShows = (d: Drawing) => d.on && d.opacity > 0 && d.shapes.length > 0 && (!!d.stroke || (!!d.fill && d.shapes.some((s) => s.closed)));
+export const drawingShows = (d: Drawing) => d.on && d.opacity > 0 && d.shapes.length > 0 && (!!d.stroke || (!!d.fill && d.shapes.some((s) => s.kind === 'text' || s.closed)));
+
+/** The canvas's font for a text at `px` pixels high (D253). */
+export function textFont(t: TextShape, px: number): string {
+  const family = /[\s,]/.test(t.font) && !t.font.includes('"') ? `"${t.font}"` : t.font;
+  return `${t.italic ? 'italic ' : ''}${t.weight} ${px.toFixed(1)}px ${family}, Georgia, serif`;
+}
+
+/** About how wide a text is, as a share of its height (an average letter's width; for what lies under the pointer). */
+const TEXT_WIDTH = 0.56;
+/** A text's box on the screen: its middle, half its width and height, and its turn (null: its place off the map). */
+export function textBox(t: TextShape, project: (ll: LL) => Pt | null, unit: number): { at: Pt; hw: number; hh: number; angle: number } | null {
+  const at = project(t.at);
+  if (!at) return null;
+  const h = t.size * unit;
+  return { at, hw: (TEXT_WIDTH * h * Math.max(1, t.text.length)) / 2, hh: h / 2, angle: t.angle };
+}
 
 /** The name for a country's next drawing: "Drawing 1", "Drawing 2"… the first not taken. */
 export function nextDrawingName(list: Drawing[]): string {
@@ -206,7 +238,15 @@ export function segPoints(segs: Seg[], steps = 16): Pt[] {
  * Whether a point of the screen lies on a shape as drawn: inside it if it is closed and filled, or within `tol` pixels
  * of its line (half the line's width added).
  */
-export function hitsShape(s: PathShape, project: (ll: LL) => Pt | null, at: Pt, filled: boolean, half: number, tol = 5): boolean {
+export function hitsShape(s: DrawShape, project: (ll: LL) => Pt | null, at: Pt, filled: boolean, half: number, tol = 5, unit = 1): boolean {
+  if (s.kind === 'text') {
+    // (Within its box, turned with it.)
+    const b = textBox(s, project, unit);
+    if (!b) return false;
+    const a = (-b.angle * Math.PI) / 180, dx = at[0] - b.at[0], dy = at[1] - b.at[1];
+    const x = dx * Math.cos(a) - dy * Math.sin(a), y = dx * Math.sin(a) + dy * Math.cos(a);
+    return Math.abs(x) <= b.hw + tol && Math.abs(y) <= b.hh + tol;
+  }
   const segs = screenPath(s, project);
   if (!segs) return false;
   const pts = segPoints(segs);
@@ -228,7 +268,7 @@ export function drawingAt(list: Drawing[], project: (ll: LL) => Pt | null, at: P
     const d = list[k];
     if (!d.on) continue;
     const half = d.stroke ? (d.stroke.width * unit) / 2 : 0;
-    if (d.shapes.some((s) => hitsShape(s, project, at, !!d.fill, half))) return d;
+    if (d.shapes.some((s) => hitsShape(s, project, at, !!d.fill, half, 5, unit))) return d;
   }
   return null;
 }

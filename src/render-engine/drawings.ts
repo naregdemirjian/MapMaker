@@ -1,7 +1,8 @@
 // A country's drawings by hand (S8, D251), drawn over its fill and inside its edge (the canvas is clipped to its land
 // before): each drawing's shapes as paths on the screen, filled and stroked in its colours, then laid on at its opacity
 // and in its blend mode as one picture (where its line crosses its fill, the line shows as drawn, not mixed with it).
-import { screenPath, traceSegs, drawingShows, type Drawing, type LL, type Pt } from '../domain/drawings.ts';
+// Texts (D253) in the fill's colour (the line's, where there is no fill), outlined by the line where there are both.
+import { screenPath, traceSegs, drawingShows, textFont, type Drawing, type LL, type Pt, type TextShape } from '../domain/drawings.ts';
 import { compositeOf } from './country-look.ts';
 
 /**
@@ -14,13 +15,15 @@ export function paintDrawings(c: CanvasRenderingContext2D, tmp: CanvasRenderingC
     if (!drawingShows(d)) continue;
     const filled = new Path2D(), lined = new Path2D();
     let fills = false, lines = false;
+    const texts: TextShape[] = [];
     for (const s of d.shapes) {
+      if (s.kind === 'text') { texts.push(s); continue; }
       const segs = screenPath(s, project);
       if (!segs) continue;
       if (d.fill && s.closed) { traceSegs(filled, segs, true); fills = true; }
       if (d.stroke) { traceSegs(lined, segs, s.closed); lines = true; }
     }
-    if (!fills && !lines) continue;
+    if (!fills && !lines && !texts.length) continue;
     // (Laid on as it is, unless an opacity or a blend applies to its line and fill together.)
     const alone = d.opacity >= 1 && d.blend === 'normal';
     const on = alone ? c : tmp;
@@ -38,6 +41,21 @@ export function paintDrawings(c: CanvasRenderingContext2D, tmp: CanvasRenderingC
       on.lineJoin = 'round';
       on.lineCap = 'round';
       on.stroke(lined);
+    }
+    const ink = d.fill ?? d.stroke?.color;
+    for (const t of texts) {
+      const at = project(t.at);
+      if (!at || !ink) continue;
+      on.save();
+      on.translate(at[0], at[1]);
+      if (t.angle) on.rotate((t.angle * Math.PI) / 180);
+      on.font = textFont(t, t.size * unit);
+      on.textAlign = 'center';
+      on.textBaseline = 'middle';
+      if (d.fill && d.stroke) { on.strokeStyle = d.stroke.color; on.lineWidth = Math.max(0.5, 2 * d.stroke.width * unit); on.lineJoin = 'round'; on.strokeText(t.text, 0, 0); }
+      on.fillStyle = ink;
+      on.fillText(t.text, 0, 0);
+      on.restore();
     }
     on.restore();
     if (alone) continue;

@@ -199,7 +199,7 @@ export function ToolOptions() {
         </div>
       )}
     {s.tool === 'feature' && <FeatureToolOptions />}
-    {(s.tool === 'shape' || s.tool === 'draw-pen') && <DrawToolOptions />}
+    {(s.tool === 'shape' || s.tool === 'draw-pen' || s.tool === 'draw-text') && <DrawToolOptions />}
     {s.tool === 'sculpt' && <SculptToolOptions />}
     {s.tool === 'field' && <FieldToolOptions />}
     {s.tool === 'disaster' && <DisasterToolOptions />}

@@ -532,7 +532,9 @@ export function AskDialog() {
   const s = useStore();
   const a = s.ask;
   const [v, setV] = useState(a?.value ?? '');
-  useEffect(() => setV(a?.value ?? ''), [a]);
+  // (The words it opens with set as it opens, in the same drawing: not a moment later, with the field empty until then.)
+  const [asked, setAsked] = useState(a);
+  if (asked !== a) { setAsked(a); setV(a?.value ?? ''); }
   if (!a) return null;
   const done = (value: string | null) => { s.set({ ask: null }); a.resolve(value); };
   return (

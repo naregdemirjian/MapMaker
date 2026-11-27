@@ -61,6 +61,29 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D253. Text on a country's design (S8, third part)
+
+- **Why.** The plan and the drawing of the Looks studio: "Pen, shapes, brush and text are tools among the others".
+- **A text** is a shape of a drawing (`TextShape`): its words (up to 200 letters), the place it is centred on (in
+  degrees, fixed to the land like the drawing's paths), its height in pixels of a frame 1920 wide, a font (those of the
+  labels), bold or not, italic or not, and a turn in degrees. Drawn with its drawing: in the fill's colour (the line's
+  when there is no fill), outlined by the line when the drawing has both; at the drawing's opacity and blend, and cut
+  by the country's borders like the rest of it.
+- **The Text tool** (T, the Looks studio's tool strip): a click on the map asks for the words and writes them there,
+  into the drawing chosen or a new one, in the font, size, weight and slant set in the options bar (beside the line and
+  fill). One undo step.
+- **Changed**: in the Looks panel, a drawing holding texts lists them ("Texts"), each with its words, font, size, bold,
+  italic, turn, and × to take it away; with Select, a text of the drawing chosen is picked up anywhere on it and
+  dragged to another place, and a double-click writes it again. What lies under the pointer for a text is its box
+  (about 0.56 of its height a letter), turned with it.
+- **Fixed on the way**: the app's dialog that asks for a name or words opens with the ones it is given already in its
+  field (they were put there a moment after it opened, the field empty until then).
+- **Tests.** Unit: a text kept and checked (no words, off the world, size and weight held to range, the font by
+  default); its box, at its end, not below it, along it when turned upright; a drawing of a text shown with a line
+  alone, found under the pointer. Interface: T takes the tool; white words 48 pixels high in Georgia written by a
+  click and an answer, in the pixels there; one undo step; their words, size and turn changed in the Looks panel;
+  dragged east with Select; written again by a double-click; undone.
+
 ### D252. The pen on a country's design; a drawing's points moved with Select (S8, second part)
 
 - **Why.** The drawing of the Looks studio: "Pen (P) · Click for a corner, drag for a curve. The drawing is a part of

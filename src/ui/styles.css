@@ -641,6 +641,11 @@ label.indent { margin-left: 24px; }
 .draw-field input[type="number"] { width: 56px; margin: 0; flex: none; }
 .looks-panel .draw-field { display: flex; margin: 8px 0; }
 .drawing-of { margin-top: -4px; }
+/* Texts on a design (D253): their fields in a row, the words given the room. */
+.text-fields select { max-width: 130px; margin: 0; }
+.text-fields .text-words { flex: 1 1 8em; min-width: 6em; margin: 0; }
+.drawing-text { display: flex; align-items: center; gap: 6px; margin: 6px 0; }
+.drawing-text .text-fields { flex: 1; min-width: 0; flex-wrap: wrap; }
 /* The Looks studio's stage (D249): the thing designed over the map, alone or on it, far, middle or near. */
 .stage-bar { flex: none; display: flex; align-items: center; gap: 10px; padding: 4px 10px; background: var(--panel); border-bottom: 1px solid var(--line); min-width: 0; }
 .stage-bar .stage-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }

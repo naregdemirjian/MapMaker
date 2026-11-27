@@ -6795,6 +6795,97 @@ try {
     await page.evaluate(() => (window as any).__mapmaker.allLists());
   });
 
+  await h.step('Text on a country\'s design (D253): words written with the Text tool in a size and font, in the fill\'s colour; their words, size and turn changed in the Looks panel; moved with Select and written again by a double-click; undone', async () => {
+    const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);
+    const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
+    await page.getByTestId('studio-history').click();
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
+    await h.setDate('1650');
+    await page.getByTestId('studio-looks').click();
+    await page.getByTestId('reset-workspace').click();
+    await page.evaluate(([a, b]) => (window as any).__mapmaker.store.setCamera({ lon: (a[0] + b[0]) / 2, lat: (a[1] + b[1]) / 2, zoom: 1.5, rotation: 0, projection: 'equirectangular' }), [P.a, P.b]);
+    const idA = await store(`s.world.all('entity').find((e) => e.name === ${JSON.stringify(A)}).id`) as string;
+    await page.evaluate((id) => (window as any).__mapmaker.store.set({ selection: { kind: 'entity', id }, multi: null }), idA);
+    const before = await steps();
+    const pa = await h.toPage(P.a), pb = await h.toPage(P.b);
+    // (On the first country's land, beside its name.)
+    const c: [number, number] = [pa[0] + 0.3 * (pb[0] - pa[0]), pa[1] + 60];
+    const texts = () => store(`(JSON.parse(s.world.get('entity', ${JSON.stringify(idA)}).style || '{}').drawings ?? []).flatMap((d) => d.shapes).filter((x) => x.kind === 'text')`) as Promise<Array<{ text: string; size: number; font: string; angle: number; at: [number, number] }>>;
+    // How many pixels of a box about a point of the page are white, or nearly (laid on with the layer's opacity).
+    const white = (q: [number, number]) => page.evaluate((p) => {
+      const cv = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement;
+      const r = cv.getBoundingClientRect(), k = cv.width / r.width;
+      const d = cv.getContext('2d')!.getImageData(Math.round((p[0] - r.left) * k) - 60 * k, Math.round((p[1] - r.top) * k) - 25 * k, 120 * k, 50 * k).data;
+      let n = 0;
+      for (let i = 0; i < d.length; i += 4) if (d[i] > 170 && d[i + 1] > 170 && d[i + 2] > 170) n++;
+      return n;
+    }, q);
+    const w0 = await white(c);
+    // The Text tool by its key; white words, 48 pixels high, in Georgia.
+    await page.locator('body').click({ position: { x: 5, y: 5 } }).catch(() => undefined);
+    await page.keyboard.press('t');
+    assert.equal(await store('s.tool'), 'draw-text');
+    await page.getByTestId('draw-fill-on').check();
+    await page.getByTestId('draw-fill-color').fill('#ffffff');
+    await page.getByTestId('text-size').fill('48');
+    await page.getByTestId('text-size').press('Enter');
+    await page.getByTestId('text-font').selectOption('Georgia');
+    await page.mouse.click(c[0], c[1]);
+    await page.getByTestId('ask-input').fill('Aldmere');
+    await page.getByTestId('ask-ok').click();
+    await h.saved();
+    let all = await texts();
+    assert.equal(all.length, 1);
+    assert.equal(all[0].text, 'Aldmere');
+    assert.equal(all[0].size, 48);
+    assert.equal(all[0].font, 'Georgia');
+    // (One undo step: undone once, no text; done again.)
+    await page.getByTestId('undo').click();
+    await h.saved();
+    assert.equal((await texts()).length, 0);
+    await page.getByTestId('redo').click();
+    await h.saved();
+    for (let i = 0; i < 30 && (await white(c)) < w0 + 40; i++) await page.waitForTimeout(100);
+    assert.ok((await white(c)) >= w0 + 40, `its white words drawn there (${w0} white pixels before, ${await white(c)} now)`);
+    await h.screenshot('looks-text');
+    // In the Looks panel: its words, size and turn.
+    await page.getByTestId('drawing-text-0-words').fill('Aldmere Realm');
+    await page.getByTestId('drawing-text-0-words').press('Enter');
+    await h.saved();
+    await page.getByTestId('drawing-text-0-size').fill('60');
+    await page.getByTestId('drawing-text-0-size').press('Enter');
+    await h.saved();
+    await page.getByTestId('drawing-text-0-angle').fill('-15');
+    await page.getByTestId('drawing-text-0-angle').press('Enter');
+    await h.saved();
+    all = await texts();
+    assert.deepEqual([all[0].text, all[0].size, all[0].angle], ['Aldmere Realm', 60, -15]);
+    // With Select: dragged along, then written again by a double-click.
+    await page.getByTestId('tool-select').click();
+    assert.equal(await store('s.tool'), 'select');
+    const lon0 = all[0].at[0];
+    await page.mouse.move(c[0], c[1]);
+    await page.mouse.down();
+    await page.mouse.move(c[0] + 40, c[1] + 20, { steps: 4 });
+    await page.mouse.up();
+    await h.saved();
+    all = await texts();
+    assert.ok(all[0].at[0] > lon0, 'moved east');
+    await page.mouse.dblclick(c[0] + 40, c[1] + 20);
+    assert.equal(await page.getByTestId('ask-input').inputValue(), 'Aldmere Realm');
+    await page.getByTestId('ask-input').fill('Aldmere');
+    await page.getByTestId('ask-ok').click();
+    await h.saved();
+    assert.equal((await texts())[0].text, 'Aldmere');
+    // Undone, step by step.
+    for (let i = 0; i < 12 && (await steps()) > before; i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await steps(), before);
+    assert.deepEqual(await texts(), []);
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null, drawNew: { stroke: { color: '#2b1d12', width: 2 }, fill: null } }));
+    await page.getByTestId('studio-history').click();
+    await page.evaluate(() => (window as any).__mapmaker.allLists());
+  });
+
   await h.step('The menu bar: every command in a menu with its shortcut; the keyboard runs the same commands (D197)', async () => {
     const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);
     await page.getByTestId('studio-history').click();

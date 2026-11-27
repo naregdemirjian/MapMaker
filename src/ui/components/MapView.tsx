@@ -45,7 +45,7 @@ import { smartInputFor } from '../smart-input.ts';
 import { reachAt } from './Reach.tsx';
 import { SmartAdjustPanel } from './SmartBrush.tsx';
 import { aloneWorld, keptBy } from '../stage.ts';
-import { boxShape, screenPath, traceSegs, drawingAt, withoutRepeats, type LL as DrawLL, type Pt as DrawPt, type DrawAnchor } from '../../domain/drawings.ts';
+import { boxShape, screenPath, traceSegs, drawingAt, withoutRepeats, textBox, hitsShape, type LL as DrawLL, type Pt as DrawPt, type DrawAnchor, type TextShape } from '../../domain/drawings.ts';
 import { drawingNow } from '../panels/DrawingLooks.tsx';
 import { CompareBar } from './CompareBar.tsx';
 import type { AdjustState } from '../store.ts';
@@ -73,7 +73,7 @@ type Drag =
   // The Shapes tool's box (S8, D251), dragged out on the screen.
   | { kind: 'draw-box'; from: Pt; to: Pt; square: boolean }
   // A point or a handle of the drawing chosen moved with Select (D252): its anchors as they were and as they are now.
-  | { kind: 'draw-edit'; owner: string; drawingId: string; shape: number; hit: Hit; start: DrawAnchor[]; now: DrawAnchor[]; closed: boolean; ll0: Pt; from: Pt; moved: number; alt: boolean }
+  | { kind: 'draw-edit'; owner: string; drawingId: string; shape: number; hit: Hit; start: DrawAnchor[]; now: DrawAnchor[]; closed: boolean; ll0: Pt; from: Pt; moved: number; alt: boolean; text: TextShape | null }
   // A stroke of the sculpting brush (map positions; D98).
   | { kind: 'sculpt'; points: Pt[] }
   // A stroke of the Disasters tool's brush (map positions; D233): many disasters scattered along it.
@@ -946,17 +946,22 @@ export function MapView() {
     const designed = !presentation && s.pageNow() === 'looks' ? drawingNow() : null;
     if (designed) {
       const de = drag.current.kind === 'draw-edit' && drag.current.drawingId === designed.drawing.id ? drag.current : null;
-      const shapes = designed.drawing.shapes.map((sh, k) => (de && de.shape === k ? { ...sh, anchors: de.now } : sh));
+      const shapes = designed.drawing.shapes.map((sh, k) => (de && de.shape === k ? (sh.kind === 'text' ? { ...sh, at: de.now[0].p } : { ...sh, anchors: de.now }) : sh));
       const proj = (ll: Pt) => lonLatToScreen(v, ll[0], ll[1]) as DrawPt | null;
       ctx.save();
       ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]);
       for (const sh of shapes) {
+        if (sh.kind === 'text') {
+          const b = textBox(sh, proj, v.unit);
+          if (b) { ctx.save(); ctx.translate(b.at[0], b.at[1]); ctx.rotate((b.angle * Math.PI) / 180); ctx.strokeRect(-b.hw - 3, -b.hh - 3, 2 * b.hw + 6, 2 * b.hh + 6); ctx.restore(); }
+          continue;
+        }
         const segs = screenPath(sh, proj);
         if (segs) { ctx.beginPath(); traceSegs(ctx, segs, sh.closed); ctx.stroke(); }
       }
       ctx.restore();
-      // (Its points and handles, to be moved with Select, D252.)
-      if (s.tool === 'select') for (const sh of shapes) drawAnchors(ctx, sh.anchors, proj);
+      // (Its points and handles, to be moved with Select, D252; a text's place, D253.)
+      if (s.tool === 'select') for (const sh of shapes) drawAnchors(ctx, sh.kind === 'text' ? [{ p: sh.at }] : sh.anchors, proj);
     }
     // The pen's path being drawn (D252), as it will be drawn: in the line's colour, its points and handles.
     if (s.tool === 'draw-pen' && shape.current.length && !presentation) {
@@ -1238,6 +1243,12 @@ export function MapView() {
       if (ll) { drag.current = { kind: 'sculpt', points: [ll] }; force((n) => n + 1); }
       return;
     }
+    // The Text tool (S8, D253): a click writes words there, on the design of the country chosen.
+    if (!presentation && e.button === 0 && s.tool === 'draw-text') {
+      const ll = screenToLonLat(view, p[0], p[1]);
+      if (ll) void store.writeText([ll[0], ll[1]]);
+      return;
+    }
     // The Shapes tool (S8, D251): a box dragged out, a rectangle or an ellipse in it, into the design of the country chosen.
     if (!presentation && e.button === 0 && s.tool === 'shape') { drag.current = { kind: 'draw-box', from: p, to: p, square: e.shiftKey }; return; }
     // Border eraser: a stroke across borders.
@@ -1320,10 +1331,13 @@ export function MapView() {
     if (!presentation && e.button === 0 && s.tool === 'select' && s.pageNow() === 'looks') {
       const dn = drawingNow();
       for (let k = (dn?.drawing.shapes.length ?? 0) - 1; dn && k >= 0; k--) {
-        const sh = dn.drawing.shapes[k], hit = hitTest(sh.anchors, sh.closed, bzProject, p);
+        const sh = dn.drawing.shapes[k];
+        // (A text is picked up anywhere on it, by its place, D253.)
+        const anchors = sh.kind === 'text' ? [{ p: sh.at }] : sh.anchors;
+        const hit: Hit | null = sh.kind === 'text' ? (hitsShape(sh, bzProject, p, true, 0, 4, view.unit) ? { kind: 'anchor', index: 0 } : null) : hitTest(sh.anchors, sh.closed, bzProject, p);
         if (!hit || hit.kind === 'piece') continue;
         const ll = screenToLonLat(view, p[0], p[1]);
-        drag.current = { kind: 'draw-edit', owner: dn.owner, drawingId: dn.drawing.id, shape: k, hit, start: sh.anchors, now: sh.anchors, closed: sh.closed, ll0: (ll ?? [0, 0]) as Pt, from: p, moved: 0, alt: e.altKey };
+        drag.current = { kind: 'draw-edit', owner: dn.owner, drawingId: dn.drawing.id, shape: k, hit, start: anchors, now: anchors, closed: sh.kind === 'path' && sh.closed, ll0: (ll ?? [0, 0]) as Pt, from: p, moved: 0, alt: e.altKey, text: sh.kind === 'text' ? sh : null };
         return;
       }
     }
@@ -1515,10 +1529,11 @@ export function MapView() {
       force((n) => n + 1);
       let anchors = d.now;
       if (d.moved < 3) {
-        if (!(d.alt && d.hit.kind === 'anchor')) return;
+        if (!(d.alt && d.hit.kind === 'anchor') || d.text) return;
         anchors = d.start.map((a, k) => (k === (d.hit as { index: number }).index ? { p: a.p } : a));
       }
-      store.executeLooks((wd) => cmd.updateDrawingShape(wd, d.owner, d.drawingId, d.shape, { kind: 'path', anchors, closed: d.closed }));
+      const next = d.text ? { ...d.text, at: anchors[0].p } : { kind: 'path' as const, anchors, closed: d.closed };
+      store.executeLooks((wd) => cmd.updateDrawingShape(wd, d.owner, d.drawingId, d.shape, next));
       return;
     }
     if (d.kind === 'draw-box') {
@@ -1876,6 +1891,16 @@ export function MapView() {
       if (at >= 0 && ll) { store.execute((wd) => cmd.updateTerrainStamp(wd, store.spaceId, river.id, { path: [...river.path.slice(0, at + 1), [ll[0], ll[1]], ...river.path.slice(at + 1)] })); return; }
     }
     if (s.tool === 'draw-pen' && shape.current.length) { finishDrawPath(false); return; }
+    // A text of the drawing chosen, double-clicked with Select in the Looks studio (D253): its words written again.
+    if (s.tool === 'select' && s.pageNow() === 'looks') {
+      const dn = drawingNow(), p = local(e);
+      const k = dn ? dn.drawing.shapes.findIndex((sh) => sh.kind === 'text' && hitsShape(sh, bzProject, p, true, 0, 4, view.unit)) : -1;
+      const t = k >= 0 ? dn!.drawing.shapes[k] : null;
+      if (dn && t?.kind === 'text') {
+        void store.askText('Text', 'Its words', t.text, 'Write').then((words) => { if (words && words !== t.text) store.executeLooks((wd) => cmd.updateDrawingShape(wd, dn.owner, dn.drawing.id, k, { ...t, text: words })); });
+        return;
+      }
+    }
     if (s.tool === 'polygon' || (s.tool === 'feature' && polygon.length)) { finishPolygon(); return; }
     if (s.tool === 'vertex' && s.world) {
       const p = local(e);

@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { World } from '../src/world-model/world.ts';
 import * as cmd from '../src/domain/commands.ts';
-import { drawingsOf, boxShape, screenPath, hitsShape, drawingAt, nextDrawingName, drawingShows, withoutRepeats, type Drawing, type LL, type Pt } from '../src/domain/drawings.ts';
+import { drawingsOf, boxShape, screenPath, hitsShape, drawingAt, nextDrawingName, drawingShows, withoutRepeats, shapeOf, textBox, type Drawing, type LL, type Pt, type PathShape } from '../src/domain/drawings.ts';
 
 // (A plain projection for the tests: a degree is ten pixels, north up.)
 const project = (ll: LL): Pt => [ll[0] * 10, 0 - ll[1] * 10];
@@ -26,7 +26,7 @@ test('drawings kept and checked: what is not one dropped, numbers held to their 
   assert.equal(a.opacity, 1);
   assert.equal(a.blend, 'multiply');
   assert.equal(a.shapes.length, 1, 'a shape of one point dropped');
-  assert.deepEqual(a.shapes[0].anchors, [{ p: [1, 2] }, { p: [3, 4], i: [2, 4] }], 'a point off the world dropped, a handle that is not one too');
+  assert.deepEqual((a.shapes[0] as PathShape).anchors, [{ p: [1, 2] }, { p: [3, 4], i: [2, 4] }], 'a point off the world dropped, a handle that is not one too');
   assert.equal(b.blend, 'normal');
   assert.equal(b.on, false);
   assert.equal(b.name, 'Drawing');
@@ -123,10 +123,27 @@ test('a drawing\'s shape reshaped and taken away (D252), the drawing kept', () =
   cmd.updateDrawingShape(world, a, id, 0, moved);
   let d = cmd.drawingsOfEntity(world.get('entity', a))[0];
   assert.deepEqual(d.shapes[0], moved);
-  assert.equal(d.shapes[1].anchors.length, 4, 'the other as it was');
+  assert.equal((d.shapes[1] as PathShape).anchors.length, 4, 'the other as it was');
   cmd.removeDrawingShape(world, a, id, 0);
   d = cmd.drawingsOfEntity(world.get('entity', a))[0];
   assert.equal(d.shapes.length, 1);
   assert.throws(() => cmd.updateDrawingShape(world, a, id, 5, moved), /no longer in the drawing/);
   assert.throws(() => cmd.updateDrawingShape(world, a, id, 0, { kind: 'path', closed: false, anchors: [{ p: [0, 0] }] }), /too few points/);
+});
+
+test('texts (D253): kept and checked, a box to point at, turned with the text; a drawing of a text shown with a line alone', () => {
+  assert.equal(shapeOf({ kind: 'text', at: [10, 20], text: '   ' }), null, 'no words');
+  assert.equal(shapeOf({ kind: 'text', at: [10, 99], text: 'X' }), null, 'off the world');
+  const t = shapeOf({ kind: 'text', at: [10, 20], text: '  Aldmere  ', size: 9999, font: '', weight: 650, italic: 'yes', angle: 30 })!;
+  assert.deepEqual(t, { kind: 'text', at: [10, 20], text: 'Aldmere', size: 400, font: 'Georgia', weight: 700, italic: false, angle: 30 });
+  const flat = { ...(t as Extract<typeof t, { kind: 'text' }>), size: 20, angle: 0 };
+  const b = textBox(flat, project, 1)!;
+  assert.deepEqual(b.at, [100, -200]);
+  assert.ok(b.hw > 30 && b.hh === 10);
+  assert.equal(hitsShape(flat, project, [100 + b.hw - 2, -200], false, 0, 0), true, 'at its end');
+  assert.equal(hitsShape(flat, project, [100, -200 + 30], false, 0, 0), false, 'below it');
+  assert.equal(hitsShape({ ...flat, angle: 90 }, project, [100, -200 + b.hw - 2], false, 0, 0), true, 'turned upright: along it');
+  const d: Drawing = { id: 'x', name: 'Words', on: true, stroke: { color: '#000000', width: 1 }, fill: null, opacity: 1, blend: 'normal', shapes: [flat] };
+  assert.equal(drawingShows(d), true);
+  assert.equal(drawingAt([d], project, [100, -200], 1)?.id, 'x');
 });
