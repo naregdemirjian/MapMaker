@@ -30,6 +30,10 @@ try {
   await h.step('Create a project and draw a country with the precise shape tool', async () => {
     await page.getByTestId('project-name').fill('Workflows Test');
     await page.getByTestId('project-create').click();
+    // (A new project has no map yet: its first is chosen in Map Studio's gallery, D235. Drawn on in History.)
+    await page.getByTestId('new-map-earth').check();
+    await page.getByTestId('new-map-create').click();
+    await page.getByTestId('studio-history').click();
     await page.getByTestId('map-canvas').waitFor();
     // These countries are drawn over the Atlantic: keep their territory over the sea
     // (coastline clipping is checked in the vertical-slice test).
@@ -210,8 +214,9 @@ try {
   await h.step('A second world keeps its own map and history', async () => {
     await page.getByRole('button', { name: '+ Map' }).click();
     await page.getByPlaceholder('e.g. Aster Prime').fill('Aster');
-    await page.locator('.modal label', { hasText: 'Radius' }).locator('input').fill('3000');
+    await page.getByTestId('new-map-radius').fill('3000');
     await page.getByRole('button', { name: 'Create map' }).click();
+    await page.getByTestId('studio-history').click(); // (made in Map Studio, D235; drawn on in History)
     await page.waitForFunction(() => (window as any).__mapmaker.store.world.get('map_space', (window as any).__mapmaker.store.spaceId)?.name === 'Aster');
     assert.equal(await h.ownerAt(P.a, '1500'), null, 'Aster starts blank at the same coordinates');
     await h.newCountry(C);
@@ -1104,8 +1109,9 @@ try {
     // A map of its own, so nothing else is touched: Ostland holds it from the start; Westria takes the west in 1950.
     await page.getByRole('button', { name: '+ Map' }).click();
     await page.getByPlaceholder('e.g. Aster Prime').fill('Forks');
-    await page.locator('.modal label', { hasText: 'Radius' }).locator('input').fill('3000');
+    await page.getByTestId('new-map-radius').fill('3000');
     await page.getByRole('button', { name: 'Create map' }).click();
+    await page.getByTestId('studio-history').click(); // (made in Map Studio, D235; drawn on in History)
     await page.waitForFunction(() => (window as any).__mapmaker.store.world.get('map_space', (window as any).__mapmaker.store.spaceId)?.name === 'Forks');
     const ids = await page.evaluate(() => {
       const m = (window as any).__mapmaker, s = m.store, B = m.bench, cmd = B.commands;
@@ -1407,6 +1413,7 @@ try {
   await h.step('A map\'s own calendar (D149): started from a template, an era added; dates written, typed, stepped and chosen in it, in the shot preview too; the Gregorian again in one step', async () => {
     const keep = await page.evaluate(() => (window as any).__mapmaker.store.time);
     await h.setDate('1 January 1100');
+    await page.getByTestId('studio-map').click(); // (the map's setting-up is Map Studio's, D235)
     await page.locator('[data-testid^="map-row-"].sel').click(); // (the map itself in Properties)
     assert.equal(await page.getByTestId('open-calendar').innerText(), 'Calendar: Gregorian…');
     await page.getByTestId('open-calendar').click();
@@ -1420,6 +1427,7 @@ try {
     assert.equal(await page.getByTestId('calendar-problems').count(), 0);
     await page.getByTestId('calendar-use').click();
     await page.getByTestId('calendar-dialog').waitFor({ state: 'detached' });
+    await page.getByTestId('studio-map').click(); // (the map's setting-up is Map Studio's, D235)
     await page.locator('[data-testid^="map-row-"].sel').click(); // (the map itself in Properties)
     assert.equal(await page.getByTestId('open-calendar').innerText(), 'Calendar: Calendar of the Founding…');
     // (The date field writes its date afresh just after the calendar or the date changes: waited for, not read at once.)
@@ -1459,13 +1467,16 @@ try {
     await h.saved();
     assert.equal(await page.evaluate((id) => !!(window as any).__mapmaker.store.world.get('sequence', id), shotId), false);
     // The Gregorian again (one step); the date as it was, written as ever.
+    await page.getByTestId('studio-map').click(); // (the map's setting-up is Map Studio's, D235)
     await page.locator('[data-testid^="map-row-"].sel').click(); // (the map itself in Properties)
     await page.getByTestId('open-calendar').click();
     await page.getByTestId('calendar-use-gregorian').click();
+    await page.getByTestId('studio-map').click(); // (the map's setting-up is Map Studio's, D235)
     await page.locator('[data-testid^="map-row-"].sel').click(); // (the map itself in Properties)
     assert.equal(await page.getByTestId('open-calendar').innerText(), 'Calendar: Gregorian…');
     await dateIs(gregorian.format(W.fromCivil({ year: 120, month: 8, day: 36 }), 'day'));
     await page.evaluate((t) => (window as any).__mapmaker.store.setTime(t), keep);
+    await page.getByTestId('studio-history').click();
   });
 
   await h.step('Recording into an event: each change spreads until the next one recorded; the last then given two years of its own in the event\'s panel', async () => {
@@ -2358,6 +2369,7 @@ try {
     await page.getByTestId('new-map-name').fill('Old Town');
     await page.getByTestId('new-map-width').fill('10');
     await page.getByRole('button', { name: 'Create map' }).click();
+    await page.getByTestId('studio-history').click(); // (made in Map Studio, D235; drawn on in History)
     await page.waitForFunction(() => (window as any).__mapmaker.store.world.get('map_space', (window as any).__mapmaker.store.spaceId)?.name === 'Old Town');
     assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.camera.projection), 'flat', 'seen in plan');
     assert.equal(await page.getByTestId('basemap-toggle').count(), 0, 'no Earth geography for a flat map');
@@ -2705,6 +2717,7 @@ try {
     // Today's sea: the territory stops at the coast, so the North Sea shows the sea.
     assert.ok(diff(await pixelAt(sea), await pixelAt(land)) > 20, `the North Sea (${await pixelAt(sea)}) is not the land held (${await pixelAt(land)})`);
     // The sea 120 m lower from the date viewed: the North Sea is land, held by the country.
+    await page.getByTestId('studio-map').click(); // (the map's setting-up is Map Studio's, D235)
     await page.locator('[data-testid^="map-row-"].sel').click(); // (the map itself in Properties)
     await page.getByTestId('open-sea-level').click();
     await page.getByTestId('sea-add').click();
@@ -2722,6 +2735,7 @@ try {
     await h.saved();
     assert.equal(await steps(), before, 'each change was one step');
     await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastTerrain.seaLevel === 0);
+    await page.getByTestId('studio-history').click();
   });
 
   await h.step('A generated planet: chosen with a picture of it, made from its seed, land and sea drawn, territory ending at its coast; undone', async () => {
@@ -2739,6 +2753,7 @@ try {
     await page.waitForFunction(() => document.querySelector('[data-testid=planet-preview]')?.getAttribute('data-planet') === 'earthlike:7');
     await h.screenshot('planet-dialog');
     await page.getByTestId('new-map-create').click();
+    await page.getByTestId('studio-history').click(); // (made in Map Studio, D235; drawn on in History)
     await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastTerrain.colours, null, { timeout: 60000 });
     // An Earth-like planet takes the satellite look: its biomes worked out a moment after its heights (D100).
     await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastTerrain.cover, null, { timeout: 30000 });
@@ -2790,6 +2805,7 @@ try {
     await page.getByTestId('planet-preset-earthlike').click();
     await page.getByTestId('planet-seed').fill('7');
     await page.getByTestId('new-map-create').click();
+    await page.getByTestId('studio-history').click(); // (made in Map Studio, D235; drawn on in History)
     await page.waitForFunction(() => (window as any).__mapmaker.store.renderer.lastTerrain.cover, null, { timeout: 60000 });
     // Open sea: deep water 8° all round a place in the middle latitudes.
     const sea = await page.evaluate(() => {
@@ -2824,6 +2840,8 @@ try {
     };
     const seaPx = await pixelAt(sea!);
     // An outline drawn round the place: the sea inside it becomes land, rising inland.
+    // (The terrain tools are Map Studio's, D235.)
+    await page.getByTestId('studio-map').click();
     await page.getByTestId('tool-sculpt').click();
     await page.getByTestId('sculpt-brush').selectOption('coast-land');
     await page.getByTestId('sculpt-size').fill('150');
@@ -2881,6 +2899,7 @@ try {
     assert.equal(await steps(), before, 'each stroke was one step');
     await page.getByTestId('tool-select').click();
     await page.evaluate((w) => (window as any).__mapmaker.store.set({ spaceId: w.spaceId, layerId: w.layerId, selection: null }), was);
+    await page.getByTestId('studio-history').click();
   });
 
   await h.step('Brush tips and mountain ranges (D218): a hard round tip raises a plateau, not a dome; the tip kept with the stroke; a range has a crest and valleys down its sides; undone', async () => {
@@ -2900,6 +2919,8 @@ try {
       for (const q of pts.slice(1)) await page.mouse.move(q[0], q[1], { steps: 8 });
       await page.mouse.up();
     };
+    // (The terrain tools are Map Studio's, D235.)
+    await page.getByTestId('studio-map').click();
     await page.getByTestId('tool-sculpt').click();
     await page.getByTestId('sculpt-brush').selectOption('raise');
     await page.getByTestId('sculpt-size').fill('150');
@@ -2945,6 +2966,7 @@ try {
     await h.saved();
     assert.equal(await steps(), before, 'each stroke one step');
     await page.getByTestId('tool-select').click();
+    await page.getByTestId('studio-history').click();
   });
 
   await h.step('Sculpting: land painted into the North Sea in the base world; a dated stroke floods England from a date only; undone', async () => {
@@ -2978,6 +3000,8 @@ try {
       assert.ok(d <= 12, `${what} (${await pixelAt(ll)} against ${like})`);
     };
     // Land painted across the North Sea, in the base world: land at every date.
+    // (The terrain tools are Map Studio's, D235.)
+    await page.getByTestId('studio-map').click();
     await page.getByTestId('tool-sculpt').click();
     await page.getByTestId('sculpt-brush').selectOption('land');
     await page.getByTestId('sculpt-size').fill('120');
@@ -2999,6 +3023,7 @@ try {
     await h.setDate('1450');
     await waitColour(northSea, sea, 'the North Sea is sea again');
     await page.getByTestId('tool-select').click();
+    await page.getByTestId('studio-history').click();
   });
 
   await h.step('Conditions: a radiation layer; a source placed with a click from the date viewed, there while it lasts and not before or after; a plume carried east; hidden while working but presented; undone', async () => {
@@ -3995,6 +4020,7 @@ try {
     await page.getByTestId('new-map-stars-note').waitFor();
     await page.getByTestId('new-map-name').fill('Nearby stars');
     await page.getByRole('button', { name: 'Create map' }).click();
+    await page.getByTestId('studio-history').click(); // (made in Map Studio, D235; drawn on in History)
     await page.waitForFunction(() => { const s = (window as any).__mapmaker.store; return s.world.get('map_space', s.spaceId)?.kind === 'space'; });
     // The stars drawn: the Sun in the middle, Alpha Centauri somewhere around it.
     await page.waitForFunction(() => !!(window as any).__mapmaker.starToPage(71456));
@@ -4144,6 +4170,7 @@ try {
     await page.getByTestId('new-map-stars').check();
     await page.getByTestId('new-map-name').fill('Level stars');
     await page.getByRole('button', { name: 'Create map' }).click();
+    await page.getByTestId('studio-history').click(); // (made in Map Studio, D235; drawn on in History)
     await page.waitForFunction(() => !!(window as any).__mapmaker.starToPage(71456));
     // A turn left from the chart is not carried into three dimensions: Alpha Centauri stays where it was.
     const before = await hook<[number, number]>('starToPage', 71456);
@@ -4211,6 +4238,7 @@ try {
     await page.getByTestId('new-map-solar').check();
     await page.getByTestId('new-map-solar-note').waitFor();
     await page.getByRole('button', { name: 'Create map' }).click();
+    await page.getByTestId('studio-history').click(); // (made in Map Studio, D235; drawn on in History)
     await page.waitForFunction(() => { const s = (window as any).__mapmaker.store; const m = s.world.get('map_space', s.spaceId); return m?.kind === 'space' && JSON.parse(m.settings).space.catalogue === 'solar'; });
     // A new solar system (D208): true to scale and as photographed.
     const made = await page.evaluate(() => { const s = (window as any).__mapmaker.store; return JSON.parse(s.world.get('map_space', s.spaceId).settings).space; });
@@ -4392,6 +4420,7 @@ try {
     await page.getByTestId('new-map-invented-seed').fill('5');
     await page.getByTestId('new-map-name').fill('The Reach');
     await page.getByRole('button', { name: 'Create map' }).click();
+    await page.getByTestId('studio-history').click(); // (made in Map Studio, D235; drawn on in History)
     await page.waitForFunction(() => /150 invented stars within 50 light-years · seed 5/.test(document.querySelector('[data-testid=space-note]')?.textContent ?? ''));
     await page.waitForFunction(() => !!(window as any).__mapmaker.starToPage(1));
     const first = (await page.evaluate(() => (window as any).__mapmaker.starToPage(1))) as [number, number];
@@ -4423,6 +4452,7 @@ try {
     assert.match((await page.getByTestId('new-map-galaxy-note').textContent()) ?? '', /33 places/);
     await page.getByTestId('new-map-galaxy-systems').fill('400');
     await page.getByRole('button', { name: 'Create map' }).click();
+    await page.getByTestId('studio-history').click(); // (made in Map Studio, D235; drawn on in History)
     await page.waitForFunction(() => /The Milky Way · 400 star systems and 33 places · rings every 10,000 ly/.test(document.querySelector('[data-testid=space-note]')?.textContent ?? ''));
     // The galaxy's glow: its middle bright, the dark sky beyond its edge.
     await page.waitForFunction(() => !!(window as any).__mapmaker.starToPage(1));
@@ -4518,6 +4548,7 @@ try {
     await page.getByTestId('new-map-galaxy-arms').fill('2');
     await page.getByTestId('new-map-galaxy-seed').fill('3');
     await page.getByRole('button', { name: 'Create map' }).click();
+    await page.getByTestId('studio-history').click(); // (made in Map Studio, D235; drawn on in History)
     await page.waitForFunction(() => /A galaxy of your own · 600 star systems/.test(document.querySelector('[data-testid=space-note]')?.textContent ?? ''));
     await page.getByTestId('galaxy-again').click();
     await page.waitForFunction(() => { const s = (window as any).__mapmaker.store; return JSON.parse(s.world.get('map_space', s.spaceId).settings).space.galaxy.seed === 4; });
@@ -4535,6 +4566,7 @@ try {
     await page.getByTestId('new-map-stars').check();
     await page.getByTestId('new-map-name').fill('Looks');
     await page.getByRole('button', { name: 'Create map' }).click();
+    await page.getByTestId('studio-history').click(); // (made in Map Studio, D235; drawn on in History)
     await page.waitForFunction(() => !!(window as any).__mapmaker.starToPage(71456));
     const hook = <T,>(name: string, ...args: unknown[]) => page.evaluate(([n, a]) => (window as any).__mapmaker[n as string](...(a as unknown[])), [name, args] as const) as Promise<T>;
     const look = () => page.evaluate(() => { const s = (window as any).__mapmaker.store; return JSON.parse(s.world.get('map_space', s.spaceId).settings).space.look ?? null; });
@@ -4682,6 +4714,7 @@ try {
     await page.getByTestId('new-map-paleo').check();
     assert.match((await page.getByTestId('new-map-paleo-note').textContent()) ?? '', /540 million years ago to today/);
     await page.getByRole('button', { name: 'Create map' }).click();
+    await page.getByTestId('studio-history').click(); // (made in Map Studio, D235; drawn on in History)
     // At Pangaea, its moment named; the timeline over all of deep time.
     await page.waitForFunction(() => /250 million years ago · Permo-Triassic Boundary/.test(document.querySelector('[data-testid=paleo-note]')?.textContent ?? ''));
     assert.equal(await page.getByTestId('current-date').inputValue(), '250 million years ago');
@@ -5130,6 +5163,7 @@ try {
     assert.match(keys[2], /:0\.\d+$/, 'blended between two pictures');
     await h.screenshot('planet-studio-map');
     // Opened again, its settings are the map's.
+    await page.getByTestId('studio-map').click(); // (the map's setting-up is Map Studio's, D235)
     await page.locator('[data-testid^="map-row-"].sel').click(); // (the map itself in Properties)
     await page.getByTestId('open-planet-studio').click();
     await page.getByTestId('planet-studio').waitFor();
@@ -5139,6 +5173,7 @@ try {
     await page.getByTestId('undo').click();
     await h.saved();
     assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.name === 'Testa Prime')), false);
+    await page.getByTestId('studio-history').click();
   });
 
   await h.step('The studios: each page its own panels; panels dock, float, close and open again, resize; Save and Reset workspace (D196, D234)', async () => {
@@ -5230,6 +5265,8 @@ try {
     assert.equal(await sig(), `(([tools] | [layers,countries,places,areas,events,maps,properties] | [viewer]) / [timeline])`);
     await page.locator('.properties-panel').waitFor();
     assert.equal(await page.getByTestId('dock-tab-properties').getAttribute('aria-selected'), 'true');
+    // (The canvas takes its new size when the browser next reports it: waited for, not read at once.)
+    await page.waitForFunction((w) => document.querySelector('[data-testid="map-canvas"]')!.getBoundingClientRect().width > w, canvas0.width + 250, { timeout: 5000 }).catch(() => {});
     assert.ok((await box('[data-testid="map-canvas"]')).width > canvas0.width + 250, 'the map takes the room it left');
     // Dropped at the bottom edge of the map: a group of its own under the map.
     const map = await box('.viewer-panel');
@@ -5310,6 +5347,57 @@ try {
     await h.screenshot('studio-history-first');
     // (Every list open at once again for the steps after this one.)
     await page.evaluate(() => (window as any).__mapmaker.allLists());
+  });
+
+  await h.step('Map Studio (D235): New map opens its gallery of every kind of map; the map made there; the ground\'s tools and the map\'s setting-up are Map Studio\'s', async () => {
+    const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);
+    const tools = () => page.locator('[data-testid="tool-strip"] [data-testid^="tool-"]').evaluateAll((els) => els.map((e) => e.getAttribute('data-testid')).filter((t) => !t!.startsWith('tool-stack')));
+    await page.getByTestId('studio-history').click();
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
+    const earth = await store('s.spaceId') as string;
+    // History draws history: no terrain tool; Map Studio makes the ground: Select and the terrain, nothing else.
+    assert.ok(!(await tools()).includes('tool-sculpt') && (await tools()).includes('tool-lasso'));
+    await page.getByTestId('studio-map').click();
+    assert.deepEqual(await tools(), ['tool-select', 'tool-sculpt']);
+    await page.getByTestId('studio-history').click();
+    // Map › New map…: Map Studio, its gallery in front, the kinds of map by family.
+    await page.getByTestId('menu-map').click();
+    await page.getByTestId('command-new-map').click();
+    await page.getByTestId('map-gallery').waitFor();
+    assert.equal(await store('s.pageNow()'), 'map');
+    assert.equal(await page.getByTestId('dock-tab-gallery').getAttribute('aria-selected'), 'true');
+    assert.deepEqual(await page.locator('.map-gallery-section h4').allTextContents(), ['Planets', 'Ready-made places', 'Flat', 'Space']);
+    assert.ok(await page.locator('.map-card').count() >= 12, 'every kind of map');
+    // A card chosen shows its own settings.
+    await page.getByTestId('new-map-flat').check();
+    await page.getByTestId('new-map-width').waitFor();
+    await page.getByTestId('new-map-planet').check();
+    await page.getByTestId('planet-seed').waitFor();
+    assert.equal(await page.getByTestId('new-map-width').count(), 0);
+    await page.getByTestId('new-map-solar').check();
+    await page.getByTestId('new-map-solar-note').waitFor();
+    await h.screenshot('map-gallery');
+    // A blank world made: it is the map viewed, in front where the gallery was.
+    await page.getByTestId('new-map-round').check();
+    await page.getByTestId('new-map-name').fill('Gallery world');
+    await page.getByTestId('new-map-radius').fill('1200');
+    await page.getByTestId('new-map-create').click();
+    await page.waitForFunction(() => { const s = (window as any).__mapmaker.store; return s.world.get('map_space', s.spaceId)?.name === 'Gallery world'; });
+    assert.equal(await page.getByTestId('dock-tab-viewer').getAttribute('aria-selected'), 'true');
+    assert.equal(Math.round(await store(`s.world.get('map_space', s.spaceId).radius_m`) as number / 1000), 1200);
+    await page.getByTestId('map-canvas').waitFor();
+    // The map's setting-up in Properties here, a link to it elsewhere.
+    await page.getByTestId('map-row-Gallery world').click();
+    await page.getByTestId('map-setup').waitFor();
+    await page.getByTestId('studio-history').click();
+    assert.equal(await page.getByTestId('map-setup').count(), 0);
+    await page.getByTestId('map-setup-in-studio').waitFor();
+    // Undone: gone, the Earth viewed again.
+    await page.getByTestId('undo').click();
+    await h.saved();
+    assert.equal(await store(`s.world.all('map_space').some((m) => m.name === 'Gallery world')`), false);
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
+    assert.equal(await store('s.spaceId'), earth);
   });
 
   await h.step('The menu bar: every command in a menu with its shortcut; the keyboard runs the same commands (D197)', async () => {
@@ -5430,22 +5518,31 @@ try {
     // Whichever tool, the map keeps its size and place.
     assert.deepEqual(await box('.viewer-panel'), map0);
     await h.screenshot('tool-strip');
-    // A tool with many options (the river brush, in a narrow window): its second line lies over the top of the map,
-    // and the lists' tabs move down below it, never covered; its words of explanation keep to one line, whole on hovering.
+    // The ground's tools are Map Studio's (D235): in History, T takes nothing in hand.
+    await page.keyboard.press('t');
+    assert.equal(await tool(), 'erase', 'no terrain tool in History');
+    // A tool with many options (Map Studio's river brush, in a narrow window): its second line lies over the top of the
+    // map, and the lists' tabs move down below it, never covered; its words of explanation keep to one line, whole on
+    // hovering.
     const size = page.viewportSize()!;
     await page.setViewportSize({ width: 1100, height: size.height });
+    await page.getByTestId('studio-map').click();
+    const mapT = await box('.viewer-panel');
     await page.keyboard.press('t');
+    assert.equal(await tool(), 'sculpt');
     await page.getByTestId('sculpt-brush').selectOption('river');
     const bar = await box('[data-testid="options-bar"] .tool-options'), tabs = await box('[data-testid="dock-tab-maps"]');
     assert.ok(bar.height > 50, `the options take a second line (${bar.height})`);
     assert.ok(tabs.y >= bar.y + bar.height - 1.5, `the lists' tabs start below the options (${tabs.y} against ${bar.y + bar.height})`);
     const map1 = await box('.viewer-panel');
-    assert.deepEqual([map1.y, map1.height], [map0.y, map0.height], 'the map where it was, as high');
+    assert.deepEqual([map1.y, map1.height], [mapT.y, mapT.height], 'the map where it was, as high');
     const words = page.locator('[data-testid="options-bar"] .toolbar.sub > .muted').first();
     assert.ok((await words.boundingBox())!.height < 24 && /Draw a river/.test((await words.getAttribute('title')) ?? ''), 'the explanation on one line, whole in its tooltip');
     await h.screenshot('tool-options-two-lines');
     await page.setViewportSize(size);
-    await page.keyboard.press('e');
+    // Back in History, its own tool in hand again (each studio keeps its own).
+    await page.getByTestId('studio-history').click();
+    assert.equal(await tool(), 'erase');
     // A star map has its own tools, and a key of a tool it has not does nothing.
     await page.keyboard.press('v');
     assert.equal(await tool(), 'select');
@@ -5612,10 +5709,17 @@ try {
     // A layer of points has only its name and whether it is shown.
     await page.locator('[data-testid="layer-row"]', { hasText: 'Battles' }).locator('span').first().click();
     assert.deepEqual(await groups(), ['Layer']);
-    // Nothing selected (the map's row clicked): the map itself, with its setting-up, no longer under the list of maps (D202).
+    // Nothing selected (the map's row clicked): the map itself (D202); its setting-up is Map Studio's, a link leads there (D235).
     await page.getByTestId('map-row-Earth').click();
     await page.getByTestId('map-panel').waitFor();
+    assert.deepEqual(await groups(), ['This map', 'What is shown', 'Statistics', 'Speed of the working view', 'Getting started']);
+    assert.equal(await page.getByTestId('map-setup').count(), 0);
+    await page.getByTestId('map-setup-in-studio').click();
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.pageNow()), 'map');
+    await page.getByTestId('map-row-Earth').click();
+    await page.getByTestId('map-setup').waitFor();
     assert.deepEqual(await groups(), ['This map', 'What is shown', 'Sea level over time', 'Calendar', 'Statistics', 'Speed of the working view', 'Getting started']);
+    await page.getByTestId('studio-history').click();
     // The map's settings in place (D209): folded at first; opened, the window's contents, without its frame.
     assert.equal(await page.getByTestId('settings-dialog-inline').count(), 0);
     await page.getByTestId('group-head-map:speed').click();
@@ -5625,7 +5729,7 @@ try {
     await page.getByTestId('group-head-map:speed').click();
     assert.equal(await page.getByTestId('settings-dialog-inline').count(), 0);
     assert.equal(await page.locator('.list-panel [data-testid="open-calendar"]').count(), 0);
-    assert.match((await page.getByTestId('map-panel').getByTestId('open-calendar').innerText()), /^Calendar: /);
+    assert.equal(await page.getByTestId('map-panel').getByTestId('open-calendar').count(), 0, 'the calendar is set up in Map Studio');
     await h.screenshot('properties-map');
     await page.getByTestId('tool-select').click();
   });
@@ -5923,6 +6027,8 @@ try {
       await page.waitForTimeout(400);
     };
     await picture('before');
+    // (The terrain tools are Map Studio's, D235; the pictures before and after are both taken in History, the map the same size.)
+    await page.getByTestId('studio-map').click();
     await page.getByTestId('tool-sculpt').click();
     await page.getByTestId('sculpt-brush').selectOption('river');
     assert.equal(await page.getByTestId('sculpt-size').count() + await page.getByTestId('sculpt-strength').count(), 0, 'a river has no valley to size or cut');
@@ -5961,6 +6067,7 @@ try {
     // Nothing of the map changed but its water (D226): at each zoom, every pixel that differs from the map before is
     // bluer than it was (the river and its tributaries); no darker squares, no coast or relief changed.
     await h.chooseTool('select');
+    await page.getByTestId('studio-history').click();
     await picture('after');
     const diffs = await page.evaluate((n) => {
       const shots = (window as any).__riverShots, out: Array<{ water: number; other: number }> = [];
@@ -5976,6 +6083,7 @@ try {
       return out;
     }, views.length);
     for (const [v, d] of diffs.entries()) assert.ok(d.water > 15 && d.other <= 12, `view ${v}: its water drawn (${d.water} pixels) and nothing else changed (${d.other})`);
+    await page.getByTestId('studio-map').click();
     await page.getByTestId('tool-sculpt').click();
     // With the brush: a stroke kept as the points where it turns.
     await page.getByTestId('river-draw-brush').click();
@@ -6030,6 +6138,7 @@ try {
     assert.equal((await rivers()).length, 0);
     await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
     await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 0, lat: 20, zoom: 0, rotation: 0, projection: 'equirectangular' }));
+    await page.getByTestId('studio-history').click();
   });
 
   await h.step('Borders at the coast (D221): along the coastline by default, as drawn over the sea, or none; a country whose land carries on over the sea; undone', async () => {

@@ -61,6 +61,10 @@ try {
   await step('Create a project; it is written to the projects folder; Earth is drawn; a layer can be added', async () => {
     await page.getByTestId('project-name').fill('Desktop Test');
     await page.getByTestId('project-create').click();
+    // (A new project has no map yet: its first is chosen in Map Studio's gallery, D235. Drawn on in History.)
+    await page.getByTestId('new-map-earth').check();
+    await page.getByTestId('new-map-create').click();
+    await page.getByTestId('studio-history').click();
     await page.getByTestId('map-canvas').waitFor();
     assert.ok(existsSync(join(PROJECTS, 'Desktop Test.mapmaker', 'project.db')));
     await page.waitForFunction(() => (window as any).__mapmaker.store.basemap, null, { timeout: 20000 });

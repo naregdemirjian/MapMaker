@@ -46,6 +46,8 @@ export function MapChooser() {
     s.set({ spaceId: id, layerId: layer?.id ?? '', selection: null, presentCamera: null, ...(space !== SPACE_TOOLS.includes(s.tool) || s.tool === 'select' ? { tool: 'select' as const } : {}) });
     s.mapChanged(before);
   };
+  // (No map yet, D235: nothing to choose; the first is made in Map Studio.)
+  if (!spaces.length) return null;
   return (
     <span className="map-chooser">
       <select value={s.spaceId} onChange={(e) => switchSpace(e.target.value)} title="Which map you are looking at" data-testid="map-select">

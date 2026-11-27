@@ -59,7 +59,8 @@ function PenControls() {
 /** The tools, down the left edge: icons in groups, each with its key (D198). */
 export function ToolStrip() {
   const s = useStore();
-  const tools = toolsFor(s.world!, s.spaceId);
+  const page = s.pageNow();
+  const tools = toolsFor(s.world!, s.spaceId, page === 'map' ? 'map' : 'history');
   // Stacked tools take one place, at the first of them (D205).
   const slots: Array<{ tools: ToolInfo[]; stack: string | null }> = [];
   for (const t of tools) {

@@ -19,7 +19,7 @@ import { SeaLevelDialog } from './components/SeaLevelDialog.tsx';
 import { SkyLookDialog } from './components/SkyLook.tsx';
 import { SolarRowDialog } from './components/SolarRow.tsx';
 import { BorderShiftsDialog } from './components/BorderShifts.tsx';
-import { EditPrompt, NewWorldDialog, NewEventDialog, VersionsDialog, HealthDialog, DataSourcesDialog, ProjectPicker, OfflineNotice, AskDialog } from './components/Dialogs.tsx';
+import { EditPrompt, NewEventDialog, VersionsDialog, HealthDialog, DataSourcesDialog, ProjectPicker, OfflineNotice, AskDialog } from './components/Dialogs.tsx';
 import { PlanetStudio } from './components/PlanetStudio.tsx';
 import { LabelStyleDialog } from './components/LabelStyles.tsx';
 import { AddCountriesDialog } from './components/AddCountries.tsx';
@@ -46,8 +46,9 @@ export function App() {
         const c = commandForKey(e);
         if (c) { e.preventDefault(); c.run(store); return; }
         // A plain letter takes its tool in hand (while nothing is being drawn or asked, in a page that draws on the map).
-        if (drawsOn(store.pageNow()) && store.world && !store.dialog && !e.ctrlKey && !e.metaKey && !e.altKey && e.key.length === 1) {
-          const t = toolForKey(e.key, store.world, store.spaceId);
+        const page = store.pageNow();
+        if ((page === 'map' || page === 'history') && store.world && !store.dialog && !e.ctrlKey && !e.metaKey && !e.altKey && e.key.length === 1) {
+          const t = toolForKey(e.key, store.world, store.spaceId, page);
           if (t) { e.preventDefault(); store.set({ tool: t.id }); return; }
         }
       }
@@ -89,7 +90,6 @@ export function App() {
       <EditPrompt />
       <AskDialog />
       <ContextMenu />
-      {s.dialog === 'new-world' && <NewWorldDialog />}
       {s.dialog === 'planet-studio' && <PlanetStudio />}
       {s.dialog === 'new-event' && <NewEventDialog />}
       {s.dialog === 'new-layer' && <NewLayerDialog />}

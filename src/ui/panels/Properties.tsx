@@ -190,23 +190,36 @@ function InlineSettings({ id, title, dialog, children }: { id: string; title: st
   );
 }
 
-/** The map being viewed, in Properties when nothing is selected (D202): what it is, and its setting-up. */
+/**
+ * The map being viewed, in Properties when nothing is selected (D202): what it is, and in Map Studio its setting-up
+ * (D235: its geography, terrain and lakes, sea level and calendar are set up there only; elsewhere a link leads there).
+ */
 function MapPanel() {
   const s = useStore();
   const sp = s.world!.get('map_space', s.spaceId);
   if (!sp) return <QuickStart />;
+  const studio = s.pageNow() === 'map';
   return (
     <div className="panel" data-testid="map-panel">
       <h3>{sp.name}</h3>
       <PropGroup id="map:map" title="This map">
         <div className="muted">{isSpaceMap(sp) ? 'A map of space' : sp.kind === 'plane' ? `A flat map, ${(worldSettings(sp) as { widthKm?: number }).widthKm?.toLocaleString() ?? '?'} km wide` : `A globe, radius ${Math.round((sp.radius_m ?? 0) / 1000).toLocaleString()} km`}</div>
-        <div className="map-setup" data-testid="map-setup"><MapSetup /></div>
-        <button className="link" onClick={() => s.set({ dialog: 'show' })} data-testid="map-open-show" title="What the map shows while you work and in presentations and exports">What the map shows…</button>
+        {studio ? <>
+          <div className="map-setup" data-testid="map-setup"><MapSetup /></div>
+          <button className="link" onClick={() => s.set({ dialog: 'show' })} data-testid="map-open-show" title="What the map shows while you work and in presentations and exports">What the map shows…</button>
+        </> : <>
+          {basemapSourceOf(sp) === 'natural-earth' && (
+            <label className="check" title="Today's country borders as a drawing aid. Never exported.">
+              <input type="checkbox" data-testid="reference-borders-toggle" checked={s.referenceBorders} onChange={(e) => s.set({ referenceBorders: e.target.checked })} /> Present-day borders (guide)
+            </label>
+          )}
+          <button className="link pad-link" onClick={() => s.setPage('map')} data-testid="map-setup-in-studio" title="Its geography, terrain and lakes, sea level, calendar and data: in Map Studio">Set up this map in Map Studio…</button>
+        </>}
       </PropGroup>
       {/* The map's settings in place (D209), folded until opened; each also opens in its own window from the menus. */}
       {!isSpaceMap(sp) && <InlineSettings id="map:show" title="What is shown" dialog="show"><ShowDialog /></InlineSettings>}
-      {basemapSourceOf(sp) === 'natural-earth' && <InlineSettings id="map:sea" title="Sea level over time" dialog="sea-level"><SeaLevelDialog /></InlineSettings>}
-      {!isSpaceMap(sp) && <InlineSettings id="map:calendar" title="Calendar" dialog="calendar"><CalendarDialog /></InlineSettings>}
+      {studio && basemapSourceOf(sp) === 'natural-earth' && <InlineSettings id="map:sea" title="Sea level over time" dialog="sea-level"><SeaLevelDialog /></InlineSettings>}
+      {studio && !isSpaceMap(sp) && <InlineSettings id="map:calendar" title="Calendar" dialog="calendar"><CalendarDialog /></InlineSettings>}
       {!isSpaceMap(sp) && sp.kind !== 'plane' && <InlineSettings id="map:statistics" title="Statistics" dialog="statistics"><StatisticsDialog /></InlineSettings>}
       <InlineSettings id="map:speed" title="Speed of the working view" dialog="settings"><SettingsDialog /></InlineSettings>
       <PropGroup id="map:start" title="Getting started"><QuickStart /></PropGroup>

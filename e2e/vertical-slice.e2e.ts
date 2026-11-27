@@ -246,6 +246,24 @@ try {
     await page.getByTestId('project-name').fill('Vertical Slice Test');
     await screenshot('project-picker');
     await page.getByTestId('project-create').click();
+    // A new project has no map yet (D235): it opens in Map Studio on the gallery of maps; the map's own tab, and
+    // History's, say so and lead back to the gallery.
+    await page.getByTestId('map-gallery').waitFor();
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.pageNow()), 'map');
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').length), 0);
+    await screenshot('gallery-first-map');
+    await page.getByTestId('dock-tab-viewer').click();
+    await page.getByTestId('viewer-empty').waitFor();
+    await page.getByTestId('studio-history').click();
+    await page.getByTestId('viewer-empty').waitFor();
+    assert.equal(await page.getByTestId('map-select').count(), 0, 'no map to choose');
+    await page.getByTestId('viewer-empty-gallery').click();
+    await page.getByTestId('map-gallery').waitFor();
+    // Its first map, the Earth; drawn on in History.
+    assert.ok(await page.getByTestId('new-map-earth').isChecked(), 'the Earth chosen at first');
+    await page.getByTestId('new-map-earth').check();
+    await page.getByTestId('new-map-create').click();
+    await page.getByTestId('studio-history').click();
     await page.getByTestId('map-canvas').waitFor();
     assert.ok(existsSync(join(PROJECTS, 'Vertical Slice Test.mapmaker', 'project.db')), 'the project file was created on disk');
     await screenshot('new-project');
@@ -275,6 +293,7 @@ try {
     await page.locator('[data-testid^="map-row-"].sel').click(); // (the map itself in Properties)
     await page.getByTestId('reference-borders-toggle').check();
     await screenshot('present-day-borders-guide');
+    await page.getByTestId('studio-map').click(); // (the map's setting-up is Map Studio's, D235)
     await page.locator('[data-testid^="map-row-"].sel').click(); // (the map itself in Properties)
     await page.getByTestId('reference-borders-toggle').uncheck();
     await page.getByTestId('data-sources').click();
@@ -288,6 +307,7 @@ try {
     await page.evaluate(() => { const s = (window as any).__mapmaker.store; s.set({ selection: { kind: 'layer', id: s.layerId } }); }); // (the layer drawn on, shown in Properties)
     assert.ok(await page.getByTestId('clip-to-land').isChecked(), 'territory ends at the coast by default');
     await page.getByTestId('clip-to-land').uncheck();
+    await page.getByTestId('studio-history').click();
   });
 
   await step('Create a country and draw its territory', async () => {
@@ -844,6 +864,7 @@ try {
     // What is shown: its rules show more of today's cities than were added; they are offered and added (D188).
     const count = () => page.evaluate(() => (window as any).__mapmaker.store.world.all('entity').filter((e: any) => e.type_id === 'settlement').length) as Promise<number>;
     const before = await count();
+    await page.getByTestId('studio-map').click(); // (the map's setting-up is Map Studio's, D235)
     await page.locator('[data-testid^="map-row-"].sel').click(); // (the map itself in Properties)
     await page.getByTestId('open-show-lakes').click();
     await page.getByTestId('cities-shown-missing').waitFor({ timeout: 20000 });
@@ -863,6 +884,7 @@ try {
     for (let i = 0; i < 5; i++) await page.getByTestId('undo').click();
     await page.waitForFunction(() => !(window as any).__mapmaker.store.world.all('entity').some((e: any) => e.name === 'Yerevan'));
     await page.evaluate(() => (window as any).__mapmaker.store.setCamera({ lon: 0, lat: 0, zoom: 0, rotation: 0, projection: 'equirectangular' }));
+    await page.getByTestId('studio-history').click();
   });
 
   await step('A ready-made map (D175): Armenia and its neighbours, as photographed, with its countries, provinces, cities, built-up areas and a 4K shot', async () => {
@@ -875,6 +897,7 @@ try {
     await page.getByTestId('new-map-region-armenia').check();
     await page.getByTestId('new-map-region-note').waitFor();
     await page.getByTestId('new-map-create').click();
+    await page.getByTestId('studio-history').click(); // (made in Map Studio, D235; drawn on in History)
     await page.waitForFunction(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.name === 'Armenia and its neighbours') && !(window as any).__mapmaker.store.busy, undefined, { timeout: 60000 });
     const made = await page.evaluate(() => {
       const st = (window as any).__mapmaker.store, w = st.world;

@@ -61,6 +61,39 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D235. Map Studio: the gallery of maps, a project starts with none, the ground's tools and setting-up there only (S2)
+
+- **Why.** The plan agreed with the user (`docs/STUDIOS_PLAN.md`): Map Studio makes and sets up the ground; History
+  draws history on it. A new project should not take the Earth for granted, and the tools and settings of the ground
+  should not crowd the drawing of history.
+- **The gallery** (`components/MapGallery.tsx`, a panel of Map Studio, "New map", a tab beside the map): every kind of
+  map as a card, by family: Planets (the Earth; the Earth through time; a planet of your own; a simulated planet, in the
+  Planet Studio; a blank world), Ready-made places (the regions of D175), Flat (a plan), Space (the solar system, the
+  stars around the Sun, stars of your own, the Milky Way, a galaxy of your own). The card chosen shows its settings
+  under the cards (those of the New map dialog it replaces, the same names and fields); Create makes the map, which is
+  then the map viewed, its tab in front where the gallery was. Map › New map… and the Maps list's "+ Map" open it.
+- **A project starts with no map** (`seedProject(…, null)`; the service and its interface create projects without
+  one; the project picker asks only for a name). It opens in Map Studio with the gallery in front, the Earth chosen at
+  first. With no map, the map's tab (in every studio) says so and leads to the gallery, and the map chooser is not
+  shown. Projects made before keep their maps; examples are built with theirs.
+- **Each studio its own tools** (`tools.ts` `toolsFor(…, page)`, `toolForKey(…, page)`, `toolOnPage`): Map Studio has
+  Select and the terrain (with its brushes for water: rivers, land and sea), History everything else (territory,
+  borders, areas, lines and points, places, conditions and disasters; on star maps the systems and lanes). Each keeps
+  the tool last in hand there (taken up again on coming back). A disaster's crater is still made in History: it is an
+  event.
+- **The map's setting-up in Map Studio only** (Properties with nothing selected, `MapPanel`): there, as before, its
+  geography, terrain and lakes, sea level, calendar, statistics link, data sources and planet; elsewhere, what the map
+  is, the present-day borders guide (a drawing aid), what is shown, statistics, the working view's speed and getting
+  started, with a link "Set up this map in Map Studio…".
+- **Tests.** Unit: Map Studio's tools and History's, a key taken in one and not the other; a project seeded with no map,
+  its first made after; each page's first layout (Map Studio's map and gallery as tabs of one group). Interface: the
+  suites start by choosing the Earth in the gallery; a new project's gallery and empty map in Map Studio and History,
+  and the way back to the gallery (vertical slice); New map from the menu, the families of cards, a card's own settings,
+  a blank world made and viewed, its setting-up in Map Studio and a link from History, undone (workflows); the steps
+  that sculpt or set up the map go to Map Studio for it and back to History after (the rivers step draws there and takes
+  its pictures before and after both in History, the map the same size). The docking step of D234 waits for the map's canvas to take
+  the room left to it, as the browser reports it a moment later (the Windows run of D234 read it too early).
+
 ### D234. Five studios, and panels that dock as Premiere's (S1 of the studios plan)
 
 - **Why.** The interface was one arrangement of fixed columns with workspaces that only resized them (D196); the user

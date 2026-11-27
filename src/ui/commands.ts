@@ -68,7 +68,7 @@ export const COMMANDS: Command[] = [
   { id: 'guide-states', name: 'Guides: today\'s states and provinces', enabled: (s) => world(s) && !!space(s) && space(s)!.kind === 'sphere' && !isSpaceMap(space(s)), checked: (s) => s.guideStates, run: (s) => s.set({ guideStates: !s.guideStates }) },
   { id: 'compare', name: 'Compare two dates', enabled: world, checked: (s) => s.compare.on, run: (s) => s.set({ compare: { ...s.compare, on: !s.compare.on, time: s.compare.on ? s.compare.time : defaultCompareTime(s) } }) },
   // Map
-  { id: 'new-map', name: 'New map…', enabled: world, run: dialog('new-world') },
+  { id: 'new-map', name: 'New map…', run: (s) => s.openGallery() },
   { id: 'new-layer', name: 'New layer…', enabled: world, run: dialog('new-layer') },
   { id: 'add-countries', name: 'Add today\'s countries…', enabled: (s) => world(s) && earth(s), run: dialog('add-countries') },
   { id: 'add-cities', name: 'Add today\'s cities…', enabled: (s) => world(s) && earth(s), run: dialog('add-cities') },

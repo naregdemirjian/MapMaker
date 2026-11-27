@@ -4,6 +4,7 @@
 // planet used for a map whose land and sea follow its history on the map's time axis.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../store.ts';
+import { VIEWER } from '../shell/dock.ts';
 import * as cmd from '../../domain/commands.ts';
 import { definitionFromPreset, definitionProblems, PRESETS, type PlanetDefinition, type PresetId, type GeoEventKind, type GeoEvent } from '../../planet/model/definition.ts';
 import { derive, type Derived } from '../../planet/model/physics.ts';
@@ -379,6 +380,8 @@ export function PlanetStudio() {
     s.set({ spaceId: id, layerId: s.world!.all('layer').find((l) => l.space_id === id)?.id ?? '', selection: null });
     s.fitTimeline();
     s.setTime(gregorian.fromCivil({ year: PRESENT_YEAR }));
+    // (The map made: in front, where the gallery it was chosen in was, D235.)
+    s.openPanel(VIEWER);
     close();
   };
 

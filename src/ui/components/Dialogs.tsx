@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useStore, store, type PendingEdit } from '../store.ts';
 import { Api, type VersionInfo, type BackupInfo, type ProjectInfo } from '../api.ts';
 import * as cmd from '../../domain/commands.ts';
-import { type Instant, compare, fromStore, gregorian, PRESENT_YEAR } from '../../core-time/index.ts';
+import { type Instant, compare, fromStore } from '../../core-time/index.ts';
 import { isBaseEvent } from '../../world-model/schema.ts';
 import { eventsHere, listedHere } from '../events-here.ts';
 import type { TransitionSpec } from '../../temporal-engine/engine.ts';
@@ -17,9 +17,6 @@ import { placementMode } from './Characters.tsx';
 import { defaultEnd, typeSettings, type Spread } from '../../domain/event-types.ts';
 import { PLANET_PRESETS, planetParamsOf, type PlanetParams, type PlanetPreset } from '../../terrain/planet.ts';
 import { planetPreview } from '../../terrain/planet-preview.ts';
-import { spaceCamera } from '../../space/space-view.ts';
-import { REGION_MAPS } from '../../domain/region-maps.ts';
-import { makeRegionMap } from '../region-maps.ts';
 
 /** A dialog over the app; `side`: at the right, the map left to be seen (what it asks about is drawn on the map, D222). */
 function Modal({ title, children, onClose, wide, side }: { title: string; children: React.ReactNode; onClose: () => void; wide?: boolean; side?: boolean }) {
@@ -227,106 +224,8 @@ function VertexPrompt({ p }: { p: Extract<PendingEdit, { kind: 'vertex' }> }) {
   );
 }
 
-const WORLD_PRESETS = [
-  { name: 'Earth', km: 6371.0088 }, { name: 'Moon', km: 1737.4 }, { name: 'Mars', km: 3389.5 }, { name: 'Mercury', km: 2439.7 },
-  { name: 'Venus', km: 6051.8 }, { name: 'Ganymede', km: 2634.1 }, { name: 'Titan', km: 2574.7 },
-];
-
-export function NewWorldDialog() {
-  const s = useStore();
-  const [name, setName] = useState('');
-  const [km, setKm] = useState('6371');
-  const [earth, setEarth] = useState(false);
-  const [kind, setKind] = useState<'round' | 'paleo' | 'planet' | 'sim' | 'flat' | 'stars' | 'solar' | 'invented' | 'milkyway' | 'galaxy' | `region:${string}`>('round');
-  const [inv, setInv] = useState({ seed: newSeed(), count: 300, radiusLy: 50, shape: 'sphere' as 'sphere' | 'disc' });
-  const [gal, setGal] = useState({ seed: newSeed(), systems: 600, arms: 4, pitch: 14, radiusLy: 50000, bar: true });
-  const flat = kind === 'flat';
-  const [widthKm, setWidthKm] = useState('20');
-  const [planet, setPlanet] = useState<PlanetParams>(() => planetParamsOf({ seed: newSeed(), preset: 'earthlike' })!);
-  const close = () => s.set({ dialog: null });
-  const create = () => {
-    // A simulated planet (D156) is described in the Planet Studio, which makes its map.
-    if (kind === 'sim') { s.set({ dialog: 'planet-studio', studioSpaceId: null, studioName: name.trim() }); return; }
-    // A ready-made map of a region (D175).
-    if (kind.startsWith('region:')) { close(); void makeRegionMap(kind.slice(7)); return; }
-    const id = kind === 'milkyway' || kind === 'galaxy'
-      ? s.execute((w) => cmd.createSpaceMap(w, name.trim() || (kind === 'milkyway' ? 'The Milky Way' : 'A galaxy'), 'galaxy', undefined, { ...gal, kind: kind === 'milkyway' ? 'milkyway' : 'invented', seed: kind === 'milkyway' ? 1 : gal.seed }))
-      : kind === 'stars' || kind === 'solar' || kind === 'invented'
-      ? s.execute((w) => cmd.createSpaceMap(w, name.trim() || (kind === 'solar' ? 'The solar system' : kind === 'invented' ? 'Invented stars' : 'Nearby stars'), kind === 'stars' ? 'nearby' : kind, kind === 'invented' ? inv : undefined))
-      : flat
-      ? s.execute((w) => cmd.createFlatMap(w, name.trim() || 'New flat map', Number(widthKm)))
-      : kind === 'paleo'
-      ? s.execute((w) => cmd.createPaleoEarth(w, name.trim() || 'The Earth through time'))
-      : kind === 'planet'
-        ? s.execute((w) => cmd.createPlanet(w, name.trim() || 'New planet', Number(km), planet))
-        : s.execute((w) => cmd.createWorld(w, name.trim() || 'New map', Number(km), earth ? 'natural-earth' : 'none'));
-    if (id) {
-      const space = kind === 'stars' || kind === 'solar' || kind === 'invented' || kind === 'milkyway' || kind === 'galaxy';
-      s.set({ spaceId: id, layerId: s.world!.all('layer').find((l) => l.space_id === id)?.id ?? '', selection: null, ...(space ? { tool: 'select' as const } : {}) });
-      // A map of space opens looking down at its plane at an angle, all of it in view.
-      if (space) s.setCamera(spaceCamera());
-      // The Earth through geological time (D134): its timeline from 540 million years ago to today, at Pangaea.
-      if (kind === 'paleo') { s.fitTimeline(); s.setTime(gregorian.fromCivil({ year: PRESENT_YEAR - 250_000_000 })); }
-      close();
-    }
-  };
-  return (
-    <Modal title="New map" onClose={close} wide={kind === 'planet'}>
-      <p className="muted">Each map has its own geography, layers and territorial history; events and countries are shared by the whole project.</p>
-      <div className="choice-row">
-        <label className="check"><input type="radio" name="map-kind" checked={kind === 'round'} onChange={() => setKind('round')} /> Round: a planet or moon (Earth, another real body, or a blank one of your own)</label>
-        {REGION_MAPS.map((m) => <label key={m.id} className="check" title={m.about}><input type="radio" name="map-kind" checked={kind === `region:${m.id}`} onChange={() => setKind(`region:${m.id}`)} data-testid={`new-map-region-${m.id}`} /> Ready-made: {m.name}, as photographed from space, at the finest detail, with a 4K shot</label>)}
-        <label className="check"><input type="radio" name="map-kind" checked={kind === 'paleo'} onChange={() => setKind('paleo')} data-testid="new-map-paleo" /> The Earth through geological time: its continents, seas and mountains as they were, from 540 million years ago to today</label>
-        <label className="check"><input type="radio" name="map-kind" checked={kind === 'planet'} onChange={() => setKind('planet')} data-testid="new-map-planet" /> A planet of your own, generated: continents, seas and mountains from a seed</label>
-        <label className="check"><input type="radio" name="map-kind" checked={kind === 'sim'} onChange={() => setKind('sim')} data-testid="new-map-sim" /> A simulated planet: its star, orbit, interior, air and water described, its continents shaped by plate tectonics and erosion over its history (the Planet Studio)</label>
-        <label className="check"><input type="radio" name="map-kind" checked={flat} onChange={() => setKind('flat')} data-testid="new-map-flat" /> Flat: a city, a battlefield, a region (a plan, true to scale)</label>
-        <label className="check"><input type="radio" name="map-kind" checked={kind === 'stars'} onChange={() => setKind('stars')} data-testid="new-map-stars" /> The stars around the Sun: every known star within 50 light-years, in three dimensions</label>
-        <label className="check"><input type="radio" name="map-kind" checked={kind === 'solar'} onChange={() => setKind('solar')} data-testid="new-map-solar" /> The solar system: the Sun and the planets where they are on the date viewed</label>
-        <label className="check"><input type="radio" name="map-kind" checked={kind === 'invented'} onChange={() => setKind('invented')} data-testid="new-map-invented" /> Stars of your own: an invented star map, made from a seed</label>
-        <label className="check"><input type="radio" name="map-kind" checked={kind === 'milkyway'} onChange={() => setKind('milkyway')} data-testid="new-map-milkyway" /> The Milky Way: the whole galaxy, its arms and best-known places, with star systems to hold</label>
-        <label className="check"><input type="radio" name="map-kind" checked={kind === 'galaxy'} onChange={() => setKind('galaxy')} data-testid="new-map-galaxy" /> A galaxy of your own: spiral arms and star systems, made from a seed</label>
-      </div>
-      <label>Name<input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={flat ? 'e.g. Old Town' : kind === 'stars' ? 'e.g. Nearby stars' : kind === 'solar' ? 'e.g. The solar system' : kind === 'invented' ? 'e.g. The Veyran Reach' : kind === 'milkyway' ? 'e.g. The Milky Way' : kind === 'galaxy' ? 'e.g. The Far Spiral' : 'e.g. Aster Prime'} data-testid="new-map-name" /></label>
-      {kind === 'milkyway' || kind === 'galaxy' ? <>
-        <div className="two">
-          <label>Star systems<input type="number" min={0} max={5000} value={gal.systems} onChange={(e) => setGal({ ...gal, systems: Math.max(0, Math.min(5000, Number(e.target.value) || 0)) })} data-testid="new-map-galaxy-systems" /></label>
-          {kind === 'galaxy' && <>
-            <label>Arms<input type="number" min={1} max={8} value={gal.arms} onChange={(e) => setGal({ ...gal, arms: Math.max(1, Math.min(8, Number(e.target.value) || 1)) })} data-testid="new-map-galaxy-arms" /></label>
-            <label>Winding (degrees)<input type="number" min={4} max={40} value={gal.pitch} onChange={(e) => setGal({ ...gal, pitch: Math.max(4, Math.min(40, Number(e.target.value) || 4)) })} title="How far the arms open out: small, tightly wound; large, open" /></label>
-            <label>Radius (light-years)<input type="number" min={1000} max={500000} step={1000} value={gal.radiusLy} onChange={(e) => setGal({ ...gal, radiusLy: Math.max(1000, Math.min(500000, Number(e.target.value) || 1000)) })} /></label>
-            <label>Seed<input type="number" min={1} value={gal.seed} onChange={(e) => setGal({ ...gal, seed: Math.max(1, Math.round(Number(e.target.value) || 1)) })} data-testid="new-map-galaxy-seed" /></label>
-            <label className="check"><input type="checkbox" checked={gal.bar} onChange={(e) => setGal({ ...gal, bar: e.target.checked })} /> A bar across the middle</label>
-          </>}
-        </div>
-        <p className="muted" data-testid="new-map-galaxy-note">{kind === 'milkyway'
-          ? 'Its arms as mapped by radio astronomers, the Sun where it is, and 33 places (nebulae, clusters, remnants, notable stars, the black hole at the middle, the Magellanic Clouds), with star systems of your own along the arms to give to countries and factions and join with lanes.'
-          : 'A spiral galaxy made from the seed, with a home system half way out and star systems along its arms to give to countries and factions and join with lanes.'}</p>
-      </> : kind === 'invented' ? <>
-        <div className="two">
-          <label>Stars<input type="number" min={2} max={3000} value={inv.count} onChange={(e) => setInv({ ...inv, count: Math.max(2, Math.min(3000, Number(e.target.value) || 2)) })} data-testid="new-map-invented-count" /></label>
-          <label>Reaching (light-years)<input type="number" min={5} max={5000} value={inv.radiusLy} onChange={(e) => setInv({ ...inv, radiusLy: Math.max(5, Math.min(5000, Number(e.target.value) || 5)) })} data-testid="new-map-invented-radius" /></label>
-          <label>Seed<input type="number" min={1} value={inv.seed} onChange={(e) => setInv({ ...inv, seed: Math.max(1, Math.round(Number(e.target.value) || 1)) })} data-testid="new-map-invented-seed" /></label>
-          <label>Shape<select value={inv.shape} onChange={(e) => setInv({ ...inv, shape: e.target.value as 'sphere' | 'disc' })}><option value="sphere">A sphere round the home star</option><option value="disc">A flat disc</option></select></label>
-        </div>
-        <p className="muted" data-testid="new-map-invented-note">Stars round a home star, most of them red dwarfs as around the Sun, with names of their own (the faintest numbered). The same seed gives the same stars; held stars and lanes work as on the real map.</p>
-      </> : kind.startsWith('region:') ? <p className="muted" data-testid="new-map-region-note">{REGION_MAPS.find((m) => `region:${m.id}` === kind)?.about} The photographs (Sentinel-2 cloudless, about 10 m a pixel) and the finer heights (about 40 m) are downloaded as you close in or export, and kept on this computer.</p> : kind === 'sim' ? <p className="muted" data-testid="new-map-sim-note">The Planet Studio opens: choose a starting point (Earth-like, a supercontinent, a young volcanic world, a frozen or desert world, an ocean world, a tidally locked planet, a super-Earth, a hothouse…), change what you like step by step, see what follows (its year, gravity, sunlight, temperature, winds, interior) and why, simulate its history and explore it, then use it for a map whose land and sea follow its history through time.</p> : kind === 'paleo' ? <p className="muted" data-testid="new-map-paleo-note">The Earth's land and sea floor at 109 moments from 540 million years ago to today (the PALEOMAP PaleoDEMs of C. R. Scotese and N. Wright, 2018), changing steadily between them: Pangaea coming together and breaking up, oceans opening and closing, mountains rising; over the last 128,000 years the seas of the ice ages (land bridges where the sea was lower). Coasts are where the land meets the sea of each moment. Dates before 10,000 BCE are written as how long ago they were: type "250 Ma" or "21,000 years ago".</p> : kind === 'solar' ? <p className="muted" data-testid="new-map-solar-note">The planets and Pluto on their orbits, where they are on any date from their orbital elements (JPL): they move as the date changes. Give them to countries and factions, join them with lanes, as on a star map.</p> : kind === 'stars' ? <p className="muted" data-testid="new-map-stars-note">982 stars from the HYG database: real positions, colours by type, names. Drag to turn the view, scroll to zoom, click a star to see what it is.</p> : flat ? <>
-        <label>Width (km)<input type="number" min={0.01} max={5000} value={widthKm} onChange={(e) => setWidthKm(e.target.value)} data-testid="new-map-width" /></label>
-        <p className="muted">Borders on a flat map are straight lines; the scale bar reads in metres and kilometres.</p>
-      </> : <>
-        <label>Radius (km)<input type="number" value={km} onChange={(e) => setKm(e.target.value)} data-testid="new-map-radius" /></label>
-        {kind === 'round' && <>
-          <div className="presets">{WORLD_PRESETS.map((p) => <button key={p.name} className="small" onClick={() => { setName(p.name); setKm(String(p.km)); setEarth(p.name === 'Earth'); }}>{p.name}</button>)}</div>
-          <label className="check"><input type="checkbox" checked={earth} onChange={(e) => setEarth(e.target.checked)} data-testid="new-world-earth" /> Start with Earth's geography (land, lakes and coastlines)</label>
-        </>}
-        {kind === 'planet' && <PlanetChooser value={planet} onChange={setPlanet} />}
-      </>}
-      <div className="modal-actions"><button onClick={close}>Cancel</button><button className="primary" onClick={create} data-testid="new-map-create">{kind === 'sim' ? 'Open the Planet Studio' : 'Create map'}</button></div>
-    </Modal>
-  );
-}
-
 /** A seed for a new planet: any whole number from 1 to 999,999. */
-const newSeed = () => 1 + Math.floor(Math.random() * 999_999);
+export const newSeed = () => 1 + Math.floor(Math.random() * 999_999);
 
 /** The settings of a generated planet (D97), with a picture of it that follows them. */
 export function PlanetChooser({ value, onChange }: { value: PlanetParams; onChange: (p: PlanetParams) => void }) {
@@ -549,8 +448,6 @@ export function HealthDialog() {
 export function ProjectPicker() {
   const s = useStore();
   const [name, setName] = useState('');
-  const [worldName, setWorldName] = useState('Earth');
-  const [km, setKm] = useState('6371.0088');
   const [busy, setBusy] = useState(false);
   const [examples, setExamples] = useState<Array<{ id: string; name: string; about: string }>>([]);
   const [building, setBuilding] = useState('');
@@ -564,7 +461,7 @@ export function ProjectPicker() {
   const create = async () => {
     if (!name.trim()) { s.toast('Give the project a name.', 'error'); return; }
     setBusy(true);
-    try { await s.createProject(name.trim(), worldName.trim() || 'Earth', Number(km) || 6371); } catch (e) { s.toast((e as Error).message, 'error'); }
+    try { await s.createProject(name.trim()); } catch (e) { s.toast((e as Error).message, 'error'); }
     setBusy(false);
   };
   return (
@@ -582,11 +479,8 @@ export function ProjectPicker() {
           {!s.projects.length && <div className="muted">No projects yet.</div>}
         </div>
         <h3>New project</h3>
-        <label>Project name<input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. The Long Night" data-testid="project-name" /></label>
-        <div className="two">
-          <label>First map<input value={worldName} onChange={(e) => setWorldName(e.target.value)} /></label>
-          <label>Radius (km)<input type="number" value={km} onChange={(e) => setKm(e.target.value)} /></label>
-        </div>
+        <label>Project name<input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void create(); }} placeholder="e.g. The Long Night" data-testid="project-name" /></label>
+        <p className="muted small-note">It opens in Map Studio, where you choose its first map: the Earth, the Earth through time, a planet of your own, a plan, the stars…</p>
         <button className="primary" disabled={busy} onClick={create} data-testid="project-create">Create project</button>
         {examples.length > 0 && <>
           <h3>Examples</h3>

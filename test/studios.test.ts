@@ -4,6 +4,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { STUDIOS, PAGES, PANELS, studioOf, presents, drawsOn, isPage, panelOn, defaultDock, cleanDocks, loadPage, type Page } from '../src/ui/shell/studios.ts';
 import { panelsOf, sameShape, stack, split, VIEWER, type DockNode } from '../src/ui/shell/dock.ts';
+import { toolsFor, toolForKey, toolOnPage } from '../src/ui/tools.ts';
+import { World } from '../src/world-model/world.ts';
+import * as cmd from '../src/domain/commands.ts';
 
 /** A layout as it reads: rows (a|b), columns (a/b), groups [x,y] with the panel in front starred, sizes after @. */
 function sig(n: DockNode): string {
@@ -34,7 +37,7 @@ test('every panel has a name and the pages it opens in; the viewer opens everywh
 
 test('each page opens with its own layout, holding only panels it can hold, the viewer among them', () => {
   const want: Record<Page, string> = {
-    map: '(([tools]@44 | [maps*,layers]@230 | [viewer] | [properties]@350) / [timeline]@130)',
+    map: '(([tools]@44 | [maps*,layers]@230 | [viewer*,gallery] | [properties]@350) / [timeline]@130)',
     history: '(([tools]@44 | [layers,countries*,places,areas,events,maps]@250 | [viewer] | [properties]@310) / [timeline]@190)',
     timeline: '(([events*,countries,layers]@270 | [viewer] | [properties]@330) / [timeline]@340)',
     looks: '(([countries*,layers,places,areas]@250 | [viewer] | [properties]@340) / [timeline]@130)',
@@ -77,4 +80,30 @@ test('the layouts kept, made valid page by page: nothing kept, the first layouts
 test('a session opens on the page last worked in, never in Presentation; with nothing kept, History', () => {
   // (Here there is no storage at all: the default.)
   assert.equal(loadPage(), 'history');
+});
+
+test('Map Studio has the ground\'s tools, History the history\'s; Select both (D235)', () => {
+  const world = new World();
+  const earth = cmd.seedProject(world, 'Tools').result.spaceId;
+  assert.deepEqual(toolsFor(world, earth, 'map').map((t) => t.id), ['select', 'sculpt']);
+  const history = toolsFor(world, earth, 'history').map((t) => t.id);
+  assert.ok(!history.includes('sculpt') && history.includes('select') && history.includes('lasso') && history.includes('disaster') && history.includes('field'));
+  assert.equal(toolForKey('t', world, earth, 'map')?.id, 'sculpt');
+  assert.equal(toolForKey('t', world, earth, 'history'), null, 'no terrain in History');
+  assert.equal(toolForKey('b', world, earth, 'map'), null, 'no territory brush in Map Studio');
+  assert.equal(toolForKey('v', world, earth, 'map')?.id, 'select');
+  assert.ok(toolOnPage('select', 'map') && toolOnPage('select', 'history') && toolOnPage('pen', 'history') && !toolOnPage('pen', 'map'));
+});
+
+test('a project with no map yet: its first is chosen in Map Studio (D235)', () => {
+  const world = new World();
+  const seeded = cmd.seedProject(world, 'Empty', null);
+  assert.equal(seeded.result.spaceId, '');
+  assert.equal(world.all('map_space').length, 0);
+  assert.equal(world.all('layer').length, 0);
+  assert.ok(world.all('event').length >= 1, 'the base world is there');
+  // Its first map made afterwards, as the gallery does.
+  const id = cmd.createWorld(world, 'Earth', 6371.0088, 'natural-earth').result;
+  assert.equal(world.get('map_space', id)?.name, 'Earth');
+  assert.equal(world.all('layer').filter((l) => l.space_id === id && l.kind === 'partition').length, 1);
 });

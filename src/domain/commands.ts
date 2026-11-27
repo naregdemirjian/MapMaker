@@ -87,8 +87,11 @@ export function suggestColor(world: World): string {
 
 // ---------------------------------------------------------------- project and worlds
 
-/** Initial content of a new project: types, the base-world event and a first world. */
-export function seedProject(world: World, name: string, firstWorld = { name: 'Earth', radiusKm: 6371.0088 }): CommandResult<{ spaceId: string }> {
+/**
+ * Initial content of a new project: types, the base-world event and a first world (null: none, D235: the first map is
+ * chosen in Map Studio's gallery; its id is then '').
+ */
+export function seedProject(world: World, name: string, firstWorld: { name: string; radiusKm: number } | null = { name: 'Earth', radiusKm: 6371.0088 }): CommandResult<{ spaceId: string }> {
   return run(world, 'Create project', (tx) => {
     tx.insert('meta', { key: 'schema_version', value: String(SCHEMA_VERSION) });
     tx.insert('meta', { key: 'project_name', value: name });
@@ -101,7 +104,7 @@ export function seedProject(world: World, name: string, firstWorld = { name: 'Ea
       end_day: null, end_ms: null, precision: 'exact', precedence: 0, description: 'How the world is before any recorded event.',
       fields: '{}', presentation: '{}', created_seq: 0, variant_group: null, variant_active: 1,
     });
-    return { spaceId: createWorldIn(tx, firstWorld.name, firstWorld.radiusKm, 'natural-earth') };
+    return { spaceId: firstWorld ? createWorldIn(tx, firstWorld.name, firstWorld.radiusKm, 'natural-earth') : '' };
   });
 }
 

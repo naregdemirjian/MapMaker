@@ -33,6 +33,7 @@ export interface PanelInfo { id: PanelId; title: string; pages: Page[]; hint: st
 export const PANELS: PanelInfo[] = [
   { id: VIEWER, title: 'Map', pages: [...WORLD, ...SHOTS], hint: 'The map being viewed (in Presentation, the shot’s preview)', minW: 200, minH: 120, closable: false },
   { id: 'tools', title: 'Tools', pages: ['map', 'history'], hint: 'The tools to draw on the map with', minW: 40 },
+  { id: 'gallery', title: 'New map', pages: ['map'], hint: 'Every kind of map: choose one, set it up, create it', minW: 260 },
   { id: 'maps', title: 'Maps', pages: WORLD, hint: 'The maps of this project' },
   { id: 'layers', title: 'Layers', pages: WORLD, hint: 'The layers of the map being viewed: which are shown, which is drawn on' },
   { id: 'countries', title: 'Countries', pages: WORLD, hint: 'Countries and factions, and the groups they are kept in' },
@@ -55,7 +56,7 @@ export function defaultDock(page: Page): DockLayout {
   const lists = (front: PanelId, panels: PanelId[], width: number) => stack(panels, width, front);
   switch (page) {
     case 'map':
-      return { root: split('col', [split('row', [stack(['tools'], 44), lists('maps', ['maps', 'layers'], 230), stack([VIEWER]), stack(['properties'], 350)]), stack(['timeline'], 130)]), floats: [] };
+      return { root: split('col', [split('row', [stack(['tools'], 44), lists('maps', ['maps', 'layers'], 230), stack([VIEWER, 'gallery']), stack(['properties'], 350)]), stack(['timeline'], 130)]), floats: [] };
     case 'history':
       return { root: split('col', [split('row', [stack(['tools'], 44), lists('countries', ['layers', 'countries', 'places', 'areas', 'events', 'maps'], 250), stack([VIEWER]), stack(['properties'], 310)]), stack(['timeline'], 190)]), floats: [] };
     case 'timeline':

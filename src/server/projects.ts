@@ -40,7 +40,7 @@ export class ProjectRegistry {
     return join(this.root, safeFolderName(id) + EXT);
   }
 
-  create(name: string, firstWorld?: { name: string; radiusKm: number }): ProjectInfo {
+  create(name: string, firstWorld?: { name: string; radiusKm: number } | null): ProjectInfo {
     let id = safeFolderName(name);
     for (let i = 2; existsSync(this.dirOf(id)); i++) id = `${safeFolderName(name)} (${i})`;
     const dir = this.dirOf(id);

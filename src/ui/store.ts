@@ -36,8 +36,9 @@ import { setAssetBase } from '../render-engine/assets.ts';
 import { lonLatToVec, type Vec3 } from '../geo-kernel/vec.ts';
 import type { StrokeSettings } from '../render-engine/stroke.ts';
 
-import { type Page, type Studio, type Docks, PAGES, presents, drawsOn, studioOf, defaultDock, panelOn, panelInfo, loadDocks, saveDocks, loadPage, savePage } from './shell/studios.ts';
+import { type Page, type Studio, type Docks, PAGES, presents, studioOf, defaultDock, panelOn, panelInfo, loadDocks, saveDocks, loadPage, savePage } from './shell/studios.ts';
 import { openPanel, removePanel, holderOf, type DockLayout, type PanelId } from './shell/dock.ts';
+import { toolOnPage } from './tools.ts';
 import type { TLTrack } from './timeline-layout.ts';
 /** How freehand outlines are cleaned up, at first and when put back (D207). */
 export const DEFAULT_STROKE: StrokeSettings = { smoothness: 1, irregularity: 0, precision: 1.2, seed: 1 };
@@ -61,7 +62,6 @@ export type DialogName =
   | 'merge'
   | 'new-event'
   | 'new-layer'
-  | 'new-world'
   | 'planet-studio'
   | 'sea-level'
   | 'settings'
@@ -204,14 +204,15 @@ export class AppStore {
     return presents(p) ? 'history' : p;
   }
   studioNow(): Studio { return studioOf(this.pageNow()); }
-  /** The tool in hand before a page without tools was opened (taken up again on coming back). */
-  private toolBefore: Tool = 'select';
+  /** The tool last in hand in each page with tools (Map Studio's are the ground's, History's the history's, D235). */
+  private toolOf: Record<'map' | 'history', Tool> = { map: 'select', history: 'select' };
   setPage(p: Page) {
     const from = this.pageNow();
     if (!presents(p)) savePage(p);
-    // (In pages that do not draw on the map, the map only chooses and inspects: Select; the tool comes back after.)
-    const tool = !drawsOn(p) ? 'select' as const : drawsOn(from) ? this.tool : this.toolBefore;
-    if (drawsOn(from) && !drawsOn(p)) this.toolBefore = this.tool;
+    // (In pages that do not draw on the map, the map only chooses and inspects: Select. Each page that draws takes
+    // up again the tool last in hand there.)
+    if (from === 'map' || from === 'history') this.toolOf[from] = this.tool;
+    const tool: Tool = (p === 'map' || p === 'history') && toolOnPage(this.toolOf[p], p) ? this.toolOf[p] : 'select';
     const shots = presents(p) ? { presentPage: p as 'shots' | 'export' } : {};
     if (presents(p)) this.set({ page: p, ...shots, tool, ...(this.mode === 'present' ? {} : { mode: 'present' as const, historyPlay: { ...this.historyPlay, on: false } }) });
     else this.set({ page: p, tool, ...(this.mode === 'world' ? {} : { mode: 'world' as const, presentCamera: null, playing: false }) });
@@ -713,9 +714,16 @@ export class AppStore {
     this.notify();
   }
 
-  async createProject(name: string, worldName: string, radiusKm: number) {
-    const info = await Api.createProject(name, { name: worldName, radiusKm });
+  /** A new project (D235): with no map yet, opened in Map Studio with the gallery of maps in front. */
+  async createProject(name: string) {
+    const info = await Api.createProject(name, null);
     await this.openProject(info.id);
+    this.openGallery();
+  }
+  /** Map Studio's gallery of maps in front (New map). */
+  openGallery() {
+    this.setPage('map');
+    this.openPanel('gallery');
   }
 
   /** Open a project; if its file is damaged, offer to recover it from its newest healthy backup. */

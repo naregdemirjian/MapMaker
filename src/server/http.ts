@@ -198,7 +198,8 @@ export function createAppServer(opts: ServerOptions): { server: Server; registry
     if (parts.length === 2) {
       if (method === 'GET') return send(res, 200, registry.list());
       if (method === 'POST') {
-        const body = await json<{ name: string; world?: { name: string; radiusKm: number } }>(req);
+        // (world: null, a project with no map yet: its first is chosen in Map Studio's gallery, D235.)
+        const body = await json<{ name: string; world?: { name: string; radiusKm: number } | null }>(req);
         if (!body.name || !body.name.trim()) throw new HttpError(400, 'Give the project a name.');
         return send(res, 201, registry.create(body.name, body.world));
       }

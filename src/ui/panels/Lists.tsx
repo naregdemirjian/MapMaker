@@ -245,7 +245,7 @@ export function ListPanel({ list }: { list: ListKind }) {
         </div>
       )}
       <div className="lists">
-      {on('maps') && <Section title="Maps" onAdd={() => s.set({ dialog: 'new-world' })} addLabel="Map">
+      {on('maps') && <Section title="Maps" onAdd={() => s.openGallery()} addLabel="Map">
         {w.all('map_space').sort((a, b) => a.sort_order - b.sort_order).map((sp) => (
           <div key={sp.id} className={`row ${sp.id === s.spaceId ? 'sel' : ''}`} data-testid={`map-row-${sp.name}`} title="View this map, and show it in Properties" onClick={() => { const before = s.spaceId; s.set({ selection: null, spaceId: sp.id, layerId: w.all('layer').find((l) => l.space_id === sp.id && l.kind === 'partition')?.id ?? '' }); s.mapChanged(before); }}>
             {sp.name}<span className="muted"> · {sp.kind === 'plane' ? `flat, ${(worldSettings(sp) as { widthKm?: number }).widthKm?.toLocaleString() ?? '?'} km wide` : `radius ${Math.round((sp.radius_m ?? 0) / 1000).toLocaleString()} km`}</span>

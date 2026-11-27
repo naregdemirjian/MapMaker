@@ -1,5 +1,7 @@
 // The tools (D198): their names, what they do, the key that takes each in hand, and the group it stands in
-// on the tool strip. Which of them a map has depends on the map.
+// on the tool strip. Which of them a map has depends on the map, and on the studio worked in (D235): the ground's
+// (terrain and water) in Map Studio, the history's (land held, borders, places, areas, conditions and disasters) in
+// History; Select in both.
 import type { Tool } from './store.ts';
 import type { World } from '../world-model/world.ts';
 import { terrainSourceOf, isSpaceMap } from '../world-model/world-settings.ts';
@@ -32,14 +34,20 @@ export const TOOLS: ToolInfo[] = [
 /** The tools that work on a space map (D110); the others draw on the surface of a world. */
 export const SPACE_TOOLS: string[] = ['select', 'systems', 'lanes'];
 
-/** The tools a map has, in the order of the strip. */
-export function toolsFor(w: World, spaceId: string): ToolInfo[] {
+/** The tools of the ground (D235): Map Studio's. Select is in every studio that draws; the rest are History's. */
+export const GROUND_TOOLS: string[] = ['sculpt'];
+/** The pages with tools to draw with, and which tools each has. */
+export type ToolPage = 'map' | 'history';
+export const toolOnPage = (id: string, page: ToolPage): boolean => id === 'select' || (page === 'map') === GROUND_TOOLS.includes(id);
+
+/** The tools a map has in a page (Map Studio's or History's), in the order of the strip. */
+export function toolsFor(w: World, spaceId: string, page: ToolPage = 'history'): ToolInfo[] {
   const sp = w.get('map_space', spaceId), space = isSpaceMap(sp);
-  return TOOLS.filter((t) => (t.id !== 'sculpt' || terrainSourceOf(sp)) && ((t.id !== 'field' && t.id !== 'disaster') || sp?.kind === 'sphere')
+  return TOOLS.filter((t) => toolOnPage(t.id, page) && (t.id !== 'sculpt' || terrainSourceOf(sp)) && ((t.id !== 'field' && t.id !== 'disaster') || sp?.kind === 'sphere')
     && (!space || SPACE_TOOLS.includes(t.id)) && ((t.id !== 'systems' && t.id !== 'lanes') || space));
 }
 
-/** The tool a plain key takes in hand on a map, if it has one for it. */
-export function toolForKey(key: string, w: World, spaceId: string): ToolInfo | null {
-  return toolsFor(w, spaceId).find((t) => t.key.toLowerCase() === key.toLowerCase()) ?? null;
+/** The tool a plain key takes in hand on a map in a page, if it has one for it there. */
+export function toolForKey(key: string, w: World, spaceId: string, page: ToolPage = 'history'): ToolInfo | null {
+  return toolsFor(w, spaceId, page).find((t) => t.key.toLowerCase() === key.toLowerCase()) ?? null;
 }

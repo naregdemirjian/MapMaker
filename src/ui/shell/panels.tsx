@@ -10,13 +10,29 @@ import { ListPanel, type ListKind } from '../panels/Lists.tsx';
 import { Inspector } from '../panels/Properties.tsx';
 import { ToolStrip } from './Tools.tsx';
 import { DateBar } from './Bars.tsx';
+import { MapGallery } from '../components/MapGallery.tsx';
 import { presents } from './studios.ts';
 import { VIEWER, type PanelId } from './dock.ts';
 import { panelInfo } from './studios.ts';
 
 function Viewer() {
   const s = useStore();
-  return <div className="viewer-panel">{isSpaceMap(s.world!.get('map_space', s.spaceId)) ? <SpaceView /> : <MapView />}</div>;
+  const sp = s.world!.get('map_space', s.spaceId);
+  if (!sp) return <div className="viewer-panel"><NoMap /></div>;
+  return <div className="viewer-panel">{isSpaceMap(sp) ? <SpaceView /> : <MapView />}</div>;
+}
+
+/** A project with no map yet (D235): its first is chosen in Map Studio's gallery. */
+function NoMap() {
+  const s = useStore();
+  const studio = s.pageNow() === 'map';
+  return (
+    <div className="viewer-empty" data-testid="viewer-empty">
+      <h3>This project has no map yet</h3>
+      <p className="muted">{studio ? 'Choose its first in the gallery: the Earth, the Earth through time, a planet of your own, a plan of a city, the stars, a galaxy…' : 'Maps are made and set up in Map Studio, then drawn on here.'}</p>
+      <button className="primary" onClick={() => s.openGallery()} data-testid="viewer-empty-gallery">{studio ? 'Open the gallery' : 'Choose a map in Map Studio'}</button>
+    </div>
+  );
 }
 
 const LISTS: ListKind[] = ['maps', 'layers', 'countries', 'places', 'areas', 'events'];
@@ -27,6 +43,7 @@ export function PanelContent({ id }: { id: PanelId }) {
   if ((LISTS as string[]).includes(id)) return <ListPanel list={id as ListKind} />;
   switch (id) {
     case 'tools': return <ToolStrip />;
+    case 'gallery': return <MapGallery />;
     case 'properties': return <Inspector />;
     case 'timeline': return <Timeline head={<DateBar />} />;
     case 'shots': return <ShotsPanel />;

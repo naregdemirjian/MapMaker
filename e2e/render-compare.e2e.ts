@@ -48,6 +48,10 @@ try {
   await h.step('A project with countries across the world, and animated changes', async () => {
     await page.getByTestId('project-name').fill('Render compare');
     await page.getByTestId('project-create').click();
+    // (A new project has no map yet: its first is chosen in Map Studio's gallery, D235. Drawn on in History.)
+    await page.getByTestId('new-map-earth').check();
+    await page.getByTestId('new-map-create').click();
+    await page.getByTestId('studio-history').click();
     await page.getByTestId('map-canvas').waitFor();
     await page.waitForFunction(() => !!(window as any).__mapmaker.store.basemap);
     await page.addScriptTag({ path: refFile });
