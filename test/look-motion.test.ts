@@ -89,6 +89,12 @@ test('looks kept under names: replaced by name, given to several countries in on
   assert.equal(lookPresetsOf(file).length, 2, 'named looks only');
   assert.equal(cmd.importLookPresets(world, file).result, 2);
   assert.deepEqual(cmd.lookPresets(world).map((p) => [p.name, p.look.elevation]), [['Raised', 3], ['Glowing', 0]]);
+  // Renamed (D250): a name another one has refused.
+  const glowing = cmd.lookPresets(world)[1].id;
+  cmd.renameLookPreset(world, glowing, 'Soft glow');
+  assert.deepEqual(cmd.lookPresets(world).map((p) => p.name), ['Raised', 'Soft glow']);
+  assert.throws(() => cmd.renameLookPreset(world, glowing, 'raised'), /already kept/);
+  assert.throws(() => cmd.renameLookPreset(world, 'gone', 'X'), /no longer kept/);
   cmd.deleteLookPreset(world, cmd.lookPresets(world)[1].id);
   assert.deepEqual(cmd.lookPresets(world).map((p) => p.name), ['Raised']);
   assert.throws(() => cmd.importLookPresets(world, { presets: [] }), /no looks/);

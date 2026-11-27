@@ -645,6 +645,7 @@ label.indent { margin-left: 24px; }
 .parts-sub { font-size: 12px; margin: 10px 0 4px; }
 .parts-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
 .part-row { width: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 5px 8px; text-align: left; background: var(--panel2); }
+.parts-save { margin-top: 8px; }
 .part-row .part-holds { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 /* A part's settings lit for a moment when it is chosen in the Parts panel. */
 @keyframes part-lit { from { box-shadow: 0 0 0 2px var(--accent2); } to { box-shadow: 0 0 0 2px transparent; } }

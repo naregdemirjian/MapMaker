@@ -3,6 +3,7 @@
 // with what it holds now; a part chosen brings its settings forward in the Looks panel, opened and lit. Under them,
 // the way to design something else: the thing's group, the layer viewed, a city, a person, an area, an event.
 import { useStore, store } from '../store.ts';
+import type { CountryLook } from '../../render-engine/country-look.ts';
 import * as cmd from '../../domain/commands.ts';
 import { countryLookOf, EFFECT_NAMES } from '../../render-engine/country-look.ts';
 import { groupStyle, groupMembers } from '../../domain/group-looks.ts';
@@ -87,10 +88,31 @@ export function focusPart(p: Part) {
   }));
 }
 
+/** The stack of effects of the thing designed (a country's own look, a group's), if it has one. */
+function stackOf(w: World, sel: ReturnType<typeof useStore>['selection']): CountryLook | null {
+  if (sel?.kind === 'entity') { const e = w.get('entity', sel.id); return e && (e.type_id === 'polity' || e.type_id === 'faction') ? countryLookOf(cmd.entityStyle(e).look) : null; }
+  if (sel?.kind === 'group') { const g = w.get('entity_group', sel.id); return g ? groupStyle(g).look ?? null : null; }
+  return null;
+}
+
+/** The stack saved as an effect of its own (D250): in the Effects panel, under Saved by you, to give to anything. */
+async function saveAsEffect(look: CountryLook, of: string) {
+  const name = await store.askText('Save as an effect', 'Its name in the Effects panel (for example "Raised, gold edge")', of, 'Save');
+  if (!name) return;
+  const pid = store.execute((wd) => cmd.saveLookPreset(wd, name, look));
+  if (pid === undefined) return;
+  if (store.collapsed.includes('fx:saved')) store.toggleCollapsed('fx:saved');
+  store.openPanel('effects');
+  // (Scrolled to, where the folder runs on below the panel's edge.)
+  requestAnimationFrame(() => requestAnimationFrame(() => document.querySelector(`[data-testid="effect-saved:${pid}"]`)?.scrollIntoView({ block: 'nearest' })));
+  store.toast(`Saved as "${name.trim()}": in the Effects panel, under Saved by you.`);
+}
+
 export function LookPartsPanel() {
   const s = useStore();
   const w = s.lookWorld ?? s.world!;
   const what = partsOf(w, s.selection);
+  const stack = stackOf(w, s.selection);
   const sel = s.selection;
   // The ways to something else: its group (a member's), the layer viewed, the first city, person, area and event.
   const ent = sel?.kind === 'entity' ? w.get('entity', sel.id) : null;
@@ -124,6 +146,10 @@ export function LookPartsPanel() {
               </li>
             ))}
           </ul>
+          {(s.selection?.kind === 'entity' || s.selection?.kind === 'group') && what.kind !== 'City' && what.kind !== 'Person' && (
+            <button className="small parts-save" disabled={!stack?.effects.length} onClick={() => stack && void saveAsEffect(stack, `${what.name}'s look`)}
+              title={stack?.effects.length ? 'Its stack of effects (with its elevation and opacity) saved as an effect of its own, to give to anything' : 'It has no effects of its own to save yet'} data-testid="parts-save-effect">Save as an effect…</button>
+          )}
         </>
       ) : (
         <p className="muted" data-testid="parts-none">Choose something to design on the map or in the lists: a country, a group of them, a layer, a city or a person, an area, a line or a point, an event. Its parts are listed here, their settings in the Looks panel.</p>

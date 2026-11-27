@@ -61,6 +61,22 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D250. A design saved as an effect (S7, third and last part)
+
+- **Why.** The plan and the drawing of the Looks studio: "a stack tuned here is saved into the Effects panel as a new
+  effect" ("Save as an effect").
+- **Save as an effect…** (the Parts panel, for a country or a group with effects of its own): asks a name and keeps its
+  stack of effects, with its elevation and opacity, as a kept look (`saveLookPreset`, the same as Keep this look… in its
+  Looks: one of the same name is replaced); the Effects panel comes to the front with "Saved by you" open and scrolled
+  to it, where it is given like any effect, dragged onto things or double-clicked for what is chosen. Greyed while the thing has no effects
+  of its own.
+- **Saved effects managed** where they are: right-click one in the Effects panel to rename it (a name another one has is
+  refused, `renameLookPreset`) or forget it. Each one undo step.
+- **S7 is done**; the drawings within a design (pen, shapes, text, the brush) are S8.
+- **Tests.** Unit: a kept look renamed, a name in use refused, one no longer kept refused. Interface: nothing to save
+  without effects; an effect given and the stack saved under a name, under Saved by you; given to another country,
+  whose own look takes it; renamed and forgotten by its right-click menu; undone.
+
 ### D249. The Looks studio's stage: the thing alone or on the map, far, middle and near (S7, second part)
 
 - **Why.** The drawing of the Looks studio: over the stage, "Kingdom of Aldmere · Alone · On the map · Far · Middle ·

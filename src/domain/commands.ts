@@ -605,6 +605,15 @@ export function saveLookPreset(world: World, name: string, look: CountryLook): C
   return { ...r, result: id };
 }
 
+/** A kept look renamed (D250); a name another kept look has is refused. */
+export function renameLookPreset(world: World, id: string, name: string): CommandResult {
+  const list = lookPresets(world), p = list.find((x) => x.id === id), n = name.trim().slice(0, 80);
+  if (!p) throw new Error('That look is no longer kept.');
+  if (!n) throw new Error('Give the look a name.');
+  if (list.some((x) => x.id !== id && x.name.toLowerCase() === n.toLowerCase())) throw new Error(`A look is already kept as "${n}".`);
+  return putLookPresets(world, `Rename the look "${p.name}" to "${n}"`, list.map((x) => (x.id === id ? { ...x, name: n } : x)));
+}
+
 export function deleteLookPreset(world: World, id: string): CommandResult {
   const list = lookPresets(world), p = list.find((x) => x.id === id);
   if (!p) throw new Error('That look is no longer kept.');

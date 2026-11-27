@@ -3,7 +3,8 @@
 // Looks panel (the thing chosen there), or onto a row of the lists (a country, a group, a layer, an event); a
 // double-click or Enter gives it to what is chosen. Its settings are then in the Looks panel, like any other.
 import { useState } from 'react';
-import { useStore } from '../store.ts';
+import { useStore, store } from '../store.ts';
+import { openMenu } from '../components/ContextMenu.tsx';
 import * as cmd from '../../domain/commands.ts';
 import { catalogue, filterItems, FOLDERS, type EffectItem, type FolderId } from '../../render-engine/effects-catalogue.ts';
 import { chosenTargets, giveToChosen, targetsText } from '../effects.ts';
@@ -18,6 +19,14 @@ function EffectRow({ item }: { item: EffectItem }) {
       title={`${item.note}. Drag it onto a country on the map, into the Looks panel or onto a row of the lists; double-click to give it to what is chosen.`}
       onPointerDown={(ev) => startEffectDrag(item, ev)}
       onDoubleClick={() => giveToChosen(item)}
+      onContextMenu={item.folder === 'saved' ? (ev) => {
+        // (An effect saved by you, D250: renamed or forgotten.)
+        const id = item.id.slice('saved:'.length);
+        openMenu(ev, [
+          { label: 'Rename…', testId: 'saved-rename', run: async () => { const n = await store.askText('Rename the effect', 'Its name', item.name, 'Rename'); if (n) store.execute((w) => cmd.renameLookPreset(w, id, n)); } },
+          { label: 'Forget it', danger: true, testId: 'saved-forget', run: () => store.execute((w) => cmd.deleteLookPreset(w, id)) },
+        ], item.name);
+      } : undefined}
       onKeyDown={(ev) => { if (ev.key === 'Enter') { ev.preventDefault(); giveToChosen(item); } }}>
       <span className="fx-sign" aria-hidden="true">{SIGN[item.folder]}</span><span className="fx-name">{item.name}</span>
     </div>

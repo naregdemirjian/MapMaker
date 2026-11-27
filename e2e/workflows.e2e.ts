@@ -6522,6 +6522,60 @@ try {
     await page.evaluate(() => (window as any).__mapmaker.allLists());
   });
 
+  await h.step('A design saved as an effect (D250): a country\'s stack of effects saved from the Looks studio, under Saved by you; given to another country; renamed and forgotten; undone', async () => {
+    const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);
+    const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
+    await page.getByTestId('studio-history').click();
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
+    const before = await steps();
+    await page.getByTestId('studio-looks').click();
+    await page.getByTestId('reset-workspace').click();
+    const idOf = (name: string) => store(`s.world.all('entity').find((e) => e.name === ${JSON.stringify(name)}).id`) as Promise<string>;
+    const idA = await idOf(A), idB = await idOf(B);
+    const looks = () => store(`[${JSON.stringify(idA)}, ${JSON.stringify(idB)}].map((id) => JSON.parse(s.world.get('entity', id).style || '{}').look ?? null)`);
+    const looks0 = await looks();
+    const choose = (id: string) => page.evaluate((x) => (window as any).__mapmaker.store.set({ selection: { kind: 'entity', id: x }, multi: null }), id);
+    await choose(idA);
+    // With no effects of its own, nothing to save.
+    assert.equal(await page.getByTestId('parts-save-effect').isDisabled(), true);
+    await page.getByTestId('effect-countries:shadow').dblclick();
+    await h.saved();
+    assert.equal(await page.getByTestId('parts-save-effect').isDisabled(), false);
+    // Saved under a name: in the Effects panel, under Saved by you.
+    await page.getByTestId('parts-save-effect').click();
+    await page.getByTestId('ask-input').fill('Testa shadow');
+    await page.getByTestId('ask-ok').click();
+    await h.saved();
+    const pid = await store(`JSON.parse(s.world.get('meta', 'look_presets').value).find((p) => p.name === 'Testa shadow').id`) as string;
+    const saved = page.getByTestId(`effect-saved:${pid}`);
+    await saved.waitFor();
+    await h.screenshot('looks-saved-effect');
+    // Given to another country: its own look takes the stack.
+    await choose(idB);
+    await saved.dblclick();
+    await h.saved();
+    assert.deepEqual(await store(`JSON.parse(s.world.get('entity', ${JSON.stringify(idB)}).style).look.effects.map((e) => e.kind)`), ['shadow']);
+    // Renamed and forgotten, by its right-click menu.
+    await saved.click({ button: 'right' });
+    await page.getByTestId('saved-rename').click();
+    await page.getByTestId('ask-input').fill('Raised shadow');
+    await page.getByTestId('ask-ok').click();
+    await h.saved();
+    assert.match(await saved.innerText(), /Raised shadow/);
+    await saved.click({ button: 'right' });
+    await page.getByTestId('saved-forget').click();
+    await h.saved();
+    assert.equal(await saved.count(), 0);
+    // Undone, step by step.
+    for (let i = 0; i < 10 && (await steps()) > before; i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await steps(), before);
+    assert.deepEqual(await looks(), looks0, 'both countries\' looks as they were');
+    assert.equal(await store(`JSON.parse(s.world.get('meta', 'look_presets')?.value ?? '[]').some((p) => p.name === 'Testa shadow' || p.name === 'Raised shadow')`), false, 'nothing kept');
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
+    await page.getByTestId('studio-history').click();
+    await page.evaluate(() => (window as any).__mapmaker.allLists());
+  });
+
   await h.step('The menu bar: every command in a menu with its shortcut; the keyboard runs the same commands (D197)', async () => {
     const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);
     await page.getByTestId('studio-history').click();
