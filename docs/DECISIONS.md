@@ -61,6 +61,50 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D240. Keys in a shot: any number or colour of the Looks panel keyed at frames, each a track of the shot (S5, second part)
+
+- **Why.** Agreed with the user for S5: every option of the Looks panel can be keyframed, each keyframed option a track
+  of the shot, as in a video editor's effect controls.
+- **Model** (`presentation/shot-looks.ts`): a shot keeps its keyed settings (`ShotSettings.keys`): each a row (a country
+  or person or city, a group, a layer, an area) and the way to the setting, its colour or a value in its style
+  (`['style', 'look', 'effects', {where: {kind: 'shadow'}, nth: 0}, 'distance']`: an effect is found by its kind and
+  how many of that kind come before it, so adding, moving or removing others leaves its keys on it), with its keys
+  (frame, value, and how it goes on to the next: even, eased in and out, slow then fast, fast then slow, or held).
+  Between two keys a number goes from one value to the other at that pace, a colour is mixed, and a held value stays
+  until the next key; before the first key and after the last it keeps theirs. A label setting keyed for a country
+  without a label setting of its own gets one in the shot; a look it does not have of its own is never made by a key
+  (it would hide its layer's).
+- **Drawing**: the shot's view of the world at a frame has every keyed setting at its value there (`shotWorld(world,
+  restyle, keys, frame)`, `shotLooksAt`), for the preview, every exported frame (between frames too, for motion blur)
+  and SVG frames. A view has a revision of its own (the world's and a fraction), so pictures kept for the world, or
+  for another frame, are not taken for it.
+- **Keying** (`components/Keyed.tsx`): in Presentation, with a shot open and the Looks panel's changes going to this
+  shot only, every number and colour of how a thing is drawn has a diamond beside it: its colour; its look's elevation,
+  fill strength and each effect's numbers and colours; a layer's opacity, border width and front-line colour; border
+  styles' colours, widths, strengths, dashes, casings, ticks, softness and glows (a layer's and a pair of countries');
+  labels' opacity, spacing, colours, outline width and sizes; an area's or line's colour, fill and width; a marker's
+  size. Hollow (◇): not keyed; pressed, a key at the frame shown with the value now. Blue: keyed, no key at this frame;
+  pressed, a key here. Filled (◆): a key at this frame; pressed, it goes. Once keyed, a change made in the setting's
+  own field puts a key at the frame shown (the field being edited is marked, `store.keyEditing`: a command that tidies
+  the whole look, rounding another keyed value between its keys, adds no key for it); any other change of looks for the
+  shot goes to its own looks as in D239. Choices and on/off switches are not keyed (they would only jump: a fade is made
+  with a strength).
+- **Tracks** (`components/ShotKeys.tsx`, in the shot timeline under the shots): one per keyed setting, named "Kingdom
+  of Testa · Look · Drop shadow · Distance", its keys as diamonds along the shot's frames and the frame shown as a line
+  across them. A click or drag along a track goes through the frames; a diamond clicked goes to its frame and is
+  chosen; dragged, it moves (onto another key: that one replaced); Delete removes the one chosen; right-click: how it
+  goes on to the next key, go to it, remove it. The name chooses the thing (its looks in the Looks panel); ✕ stops
+  animating the setting. Each of these is one undo step. "Back to everywhere's" takes away a thing's keys with its
+  looks of its own, and the Looks panel says how many of its settings are animated.
+- **Tests.** Unit: keyed settings checked as stored; values between keys (eased, mixed, held, before and after); the
+  shot's view at frames (a colour, an effect found by its kind, a label setting made, a look not made, the same view at
+  the same frame, its own revision, the world unchanged, laid on the world and taken away); a change at a frame keying
+  the setting edited and no other, the rest the shot's own; keys added, replaced, moved, eased and removed.
+  Interface: no keys for changes that go everywhere; a colour keyed at the first frame and changed there, then at the
+  last frame chosen along its track; red at the first frame and green at the last in the preview's pixels, mixed
+  halfway; the last key dragged to the middle; the first held until it; a key removed with Delete; a drop shadow given
+  in the shot and its distance keyed, a second track; the colour's track removed; undone.
+
 ### D239. Looks in Presentation: the Looks and Effects panels beside the shot; everywhere or this shot only (S5, first part)
 
 - **Why.** Agreed with the user: in Presentation the Looks and Effects panels are docked beside the shot, and a change

@@ -6,26 +6,27 @@ import { useStore } from '../store.ts';
 import * as cmd from '../../domain/commands.ts';
 import { parseJSON } from '../../temporal-engine/engine.ts';
 import { NumberField } from '../inputs.tsx';
+import { Keyed, KeyPart, KeyThing } from './Keyed.tsx';
 import { DASHES, DASH_NAMES, DEFAULT_BORDER, layerBordersOf, pairKey, type BorderStyle, type DashKind, type LayerBorders } from '../../render-engine/border-look.ts';
 
 /** An editor of one border style. */
 export function BorderStyleEditor({ value, onChange, idPrefix }: { value: BorderStyle; onChange: (next: BorderStyle) => void; idPrefix: string }) {
   const set = (patch: Partial<BorderStyle>) => onChange({ ...value, ...patch });
   const n = (key: keyof BorderStyle, label: string, min: number, max: number, step: number, title?: string) => (
-    <label title={title}>{label}<NumberField min={min} max={max} step={step} value={value[key] as number} def={typeof DEFAULT_BORDER[key] === 'number' ? DEFAULT_BORDER[key] as number : undefined} onCommit={(x) => set({ [key]: x } as Partial<BorderStyle>)} testId={`${idPrefix}-${key}`} /></label>
+    <label title={title}>{label}<Keyed path={[key]} value={value[key]} label={label} testId={`${idPrefix}-${key}`}><NumberField min={min} max={max} step={step} value={value[key] as number} def={typeof DEFAULT_BORDER[key] === 'number' ? DEFAULT_BORDER[key] as number : undefined} onCommit={(x) => set({ [key]: x } as Partial<BorderStyle>)} testId={`${idPrefix}-${key}`} /></Keyed></label>
   );
   return (
     <div className="border-style effect-fields" data-testid={`${idPrefix}-style`}>
       <label title="Its colour (untick: the map's border colour)">Colour
         <span className="inline">
           <input type="checkbox" checked={value.color !== null} onChange={(e) => set({ color: e.target.checked ? '#101820' : null })} />
-          {value.color !== null && <input type="color" value={value.color} onChange={(e) => set({ color: e.target.value })} data-testid={`${idPrefix}-color`} />}
+          {value.color !== null && <Keyed path={['color']} value={value.color} label="Colour" testId={`${idPrefix}-color`}><input type="color" value={value.color} onChange={(e) => set({ color: e.target.value })} data-testid={`${idPrefix}-color`} /></Keyed>}
         </span>
       </label>
       <label title="Width (empty: the layer's border width)">Width
-        <NumberField min={0} max={40} step={0.25} value={value.width ?? 0} def={DEFAULT_BORDER.width ?? 0} onCommit={(x) => set({ width: x > 0 ? x : null })} testId={`${idPrefix}-width`} />
+        <Keyed path={['width']} value={value.width ?? undefined} label="Width" testId={`${idPrefix}-width`}><NumberField min={0} max={40} step={0.25} value={value.width ?? 0} def={DEFAULT_BORDER.width ?? 0} onCommit={(x) => set({ width: x > 0 ? x : null })} testId={`${idPrefix}-width`} /></Keyed>
       </label>
-      <label>Strength (%)<NumberField min={0} max={100} step={5} value={Math.round(value.opacity * 100)} def={Math.round(DEFAULT_BORDER.opacity * 100)} onCommit={(x) => set({ opacity: x / 100 })} /></label>
+      <label>Strength (%)<Keyed path={['opacity']} value={value.opacity} label="Strength (%)" testId={`${idPrefix}-opacity`}><NumberField min={0} max={100} step={5} value={Math.round(value.opacity * 100)} def={Math.round(DEFAULT_BORDER.opacity * 100)} onCommit={(x) => set({ opacity: x / 100 })} /></Keyed></label>
       <label>Dashes
         <select value={value.dash} onChange={(e) => set({ dash: e.target.value as DashKind })} data-testid={`${idPrefix}-dash`}>
           {DASHES.map((d) => <option key={d} value={d}>{DASH_NAMES[d]}</option>)}
@@ -35,13 +36,13 @@ export function BorderStyleEditor({ value, onChange, idPrefix }: { value: Border
       {value.dash !== 'solid' && n('march', 'Marching (px/s)', -400, 400, 5, 'The dashes move along the border as time on screen passes (0: still)')}
       {n('double', 'Double line gap', 0, 30, 0.5, 'Two lines with this gap between them (0: one line)')}
       {n('casing', 'Casing', 0, 30, 0.5, 'A wider line under it in another colour (0: none)')}
-      {value.casing > 0 && <label>Casing colour<input type="color" value={value.casingColor} onChange={(e) => set({ casingColor: e.target.value })} /></label>}
+      {value.casing > 0 && <label>Casing colour<Keyed path={['casingColor']} value={value.casingColor} label="Casing colour" testId={`${idPrefix}-casingColor`}><input type="color" value={value.casingColor} onChange={(e) => set({ casingColor: e.target.value })} /></Keyed></label>}
       {n('ticks', 'Ticks every (px)', 0, 200, 1, 'Short lines across it, as on old maps\' frontiers and railways (0: none)')}
       {value.ticks > 0 && n('tickLength', 'Tick length', 1, 40, 0.5)}
       {n('sketch', 'Hand-drawn', 0, 3, 1, 'Drawn as if by hand: up to three strokes a little apart')}
       {n('soft', 'Soft edge', 0, 40, 0.5, 'The line softened by so many pixels')}
       {n('glow', 'Glow', 0, 80, 1, 'A glow round the line (0: none)')}
-      {value.glow > 0 && <label>Glow colour<input type="color" value={value.glowColor} onChange={(e) => set({ glowColor: e.target.value })} /></label>}
+      {value.glow > 0 && <label>Glow colour<Keyed path={['glowColor']} value={value.glowColor} label="Glow colour" testId={`${idPrefix}-glowColor`}><input type="color" value={value.glowColor} onChange={(e) => set({ glowColor: e.target.value })} /></Keyed></label>}
     </div>
   );
 }
@@ -58,7 +59,11 @@ export function LayerBordersSection({ layerId }: { layerId: string }) {
   const part = (key: 'between' | 'coast', title: string) => (
     <details>
       <summary>{title}{b[key] ? ' (styled)' : ''}</summary>
-      <BorderStyleEditor value={b[key] ?? DEFAULT_BORDER} onChange={(v) => save({ ...b, [key]: v })} idPrefix={`border-${key}`} />
+      {b[key] ? (
+        <KeyPart path={['style', 'borders', key]} label={key === 'between' ? 'Borders between countries' : 'Borders against nobody'}>
+          <BorderStyleEditor value={b[key]!} onChange={(v) => save({ ...b, [key]: v })} idPrefix={`border-${key}`} />
+        </KeyPart>
+      ) : <BorderStyleEditor value={DEFAULT_BORDER} onChange={(v) => save({ ...b, [key]: v })} idPrefix={`border-${key}`} />}
       {b[key] && <button className="small" onClick={() => save({ ...b, [key]: null })}>Plain line again</button>}
     </details>
   );
@@ -93,7 +98,9 @@ export function CountryBordersSection({ id }: { id: string }) {
             <div className="effect-head"><strong>With {o?.name ?? '?'}</strong>
               <button className="small danger" onClick={() => save(b.pairs.filter((q) => pairKey(q.a, q.b) !== pairKey(p.a, p.b)))} title="An ordinary border again">✕</button>
             </div>
-            <BorderStyleEditor value={p.style} onChange={(v) => save(b.pairs.map((q) => (pairKey(q.a, q.b) === pairKey(p.a, p.b) ? { ...q, style: v } : q)))} idPrefix="pair" />
+            <KeyThing table="layer" id={layer.id} base={['style', 'borders', 'pairs', { where: { a: p.a, b: p.b }, nth: 0 }, 'style']} label={`Border of ${w.get('entity', p.a)?.name ?? '?'} and ${w.get('entity', p.b)?.name ?? '?'}`}>
+              <BorderStyleEditor value={p.style} onChange={(v) => save(b.pairs.map((q) => (pairKey(q.a, q.b) === pairKey(p.a, p.b) ? { ...q, style: v } : q)))} idPrefix="pair" />
+            </KeyThing>
           </div>
         );
       })}

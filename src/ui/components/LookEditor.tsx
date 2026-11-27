@@ -7,6 +7,8 @@ import { parseJSON } from '../../temporal-engine/engine.ts';
 import { mapLightOf, statisticsOf } from '../../world-model/world-settings.ts';
 import { groupStyle } from '../../domain/group-looks.ts';
 import { NumberField, DateField } from '../inputs.tsx';
+import { Keyed, KeyPart } from './Keyed.tsx';
+import type { PathStep } from '../../presentation/shot-looks.ts';
 import {
   BLEND_MODES, BLEND_NAMES, EFFECTS, EFFECT_DEFAULTS, EFFECT_KINDS, EFFECT_NAMES, PRESET_FILE_KIND, countryLookOf, layerLookOf, lookPresetsOf, takesMapLight,
   type BlendMode, type CountryLook, type Effect, type EffectKind, type LayerLook, type Motion, type Pulse, type Ease,
@@ -67,8 +69,11 @@ function EffectMotion({ e, onChange, idPrefix }: { e: Effect; onChange: (patch: 
 
 const EMPTY: CountryLook = { elevation: 0, opacity: 1, effects: [] };
 
-/** An editor of a look: `blend` for a layer's. */
-export function LookEditor({ value, onChange, blend, idPrefix }: { value: CountryLook | LayerLook; onChange: (next: CountryLook | LayerLook) => void; blend?: boolean; idPrefix: string }) {
+/**
+ * An editor of a look: `blend` for a layer's. `keyPath`: where the look is in its row's style, when it has it (its
+ * numbers and colours can then be keyed in a shot, D240).
+ */
+export function LookEditor({ value, onChange, blend, idPrefix, keyPath }: { value: CountryLook | LayerLook; onChange: (next: CountryLook | LayerLook) => void; blend?: boolean; idPrefix: string; keyPath?: PathStep[] }) {
   const s = useStore();
   const space = s.world?.get('map_space', s.spaceId);
   const statNames = statisticsOf(space).map((x) => x.name);
@@ -80,14 +85,16 @@ export function LookEditor({ value, onChange, blend, idPrefix }: { value: Countr
     [list[i], list[j]] = [list[j], list[i]];
     set({ effects: list });
   };
-  return (
+  // (The n-th effect of its kind: how a key finds it again, whatever is added or moved about it.)
+  const nth = (i: number) => value.effects.slice(0, i).filter((x) => x.kind === value.effects[i].kind).length;
+  const editor = (
     <div className="look-editor" data-testid={`${idPrefix}-look`}>
       <div className="two">
         <label title="Higher countries are drawn over lower ones and cast their shadows on them; countries of the same elevation never shade each other">Elevation
-          <NumberField min={-100} max={100} step={1} value={value.elevation} def={0} onCommit={(n) => set({ elevation: Math.round(n) })} testId={`${idPrefix}-elevation`} />
+          <Keyed path={['elevation']} value={value.elevation} label="Elevation" testId={`${idPrefix}-elevation`}><NumberField min={-100} max={100} step={1} value={value.elevation} def={0} onCommit={(n) => set({ elevation: Math.round(n) })} testId={`${idPrefix}-elevation`} /></Keyed>
         </label>
         <label title="How strongly the fill shows; its effects keep their own strength">Fill (%)
-          <NumberField min={0} max={100} step={5} value={Math.round(value.opacity * 100)} def={100} onCommit={(n) => set({ opacity: n / 100 })} testId={`${idPrefix}-fill-opacity`} />
+          <Keyed path={['opacity']} value={value.opacity} label="Fill (%)" testId={`${idPrefix}-fill-opacity`}><NumberField min={0} max={100} step={5} value={Math.round(value.opacity * 100)} def={100} onCommit={(n) => set({ opacity: n / 100 })} testId={`${idPrefix}-fill-opacity`} /></Keyed>
         </label>
       </div>
       {blend && (
@@ -110,11 +117,13 @@ export function LookEditor({ value, onChange, blend, idPrefix }: { value: Countr
               </span>
             </div>
             {e.on && (
+              <KeyPart path={['effects', { where: { kind: e.kind }, nth: nth(i) }]} label={EFFECT_NAMES[e.kind]}>
               <div className="effect-fields">
                 {EFFECTS[e.kind].fields.map((f) => {
                   const v = (e as unknown as Record<string, unknown>)[f.key];
                   const put = (x: unknown) => setEffect(i, { [f.key]: x } as Partial<Effect>);
-                  if (f.type === 'colour') return <label key={f.key}>{f.label}<input type="color" value={v as string} onChange={(ev) => put(ev.target.value)} data-testid={`${idPrefix}-${e.kind}-${f.key}`} /></label>;
+                  const tid = `${idPrefix}-${e.kind}-${f.key}`;
+                  if (f.type === 'colour') return <label key={f.key}>{f.label}<Keyed path={[f.key]} value={v} label={f.label} testId={tid}><input type="color" value={v as string} onChange={(ev) => put(ev.target.value)} data-testid={tid} /></Keyed></label>;
                   if (f.type === 'choice') return (
                     <label key={f.key}>{f.label}
                       <select value={v as string} onChange={(ev) => put(ev.target.value)} data-testid={`${idPrefix}-${e.kind}-${f.key}`}>
@@ -122,10 +131,11 @@ export function LookEditor({ value, onChange, blend, idPrefix }: { value: Countr
                       </select>
                     </label>
                   );
-                  if (f.type === 'percent') return <label key={f.key}>{f.label}<NumberField min={0} max={100} step={5} value={Math.round((v as number) * 100)} def={Math.round(((EFFECT_DEFAULTS[e.kind] as unknown as Record<string, number>)[f.key] ?? 0) * 100)} onCommit={(n) => put(n / 100)} testId={`${idPrefix}-${e.kind}-${f.key}`} /></label>;
-                  return <label key={f.key}>{f.label}<NumberField min={f.min} max={f.max} step={f.step} value={v as number} def={(EFFECT_DEFAULTS[e.kind] as unknown as Record<string, number>)[f.key]} onCommit={put} testId={`${idPrefix}-${e.kind}-${f.key}`} /></label>;
+                  if (f.type === 'percent') return <label key={f.key}>{f.label}<Keyed path={[f.key]} value={v} label={f.label} testId={tid}><NumberField min={0} max={100} step={5} value={Math.round((v as number) * 100)} def={Math.round(((EFFECT_DEFAULTS[e.kind] as unknown as Record<string, number>)[f.key] ?? 0) * 100)} onCommit={(n) => put(n / 100)} testId={tid} /></Keyed></label>;
+                  return <label key={f.key}>{f.label}<Keyed path={[f.key]} value={v} label={f.label} testId={tid}><NumberField min={f.min} max={f.max} step={f.step} value={v as number} def={(EFFECT_DEFAULTS[e.kind] as unknown as Record<string, number>)[f.key]} onCommit={put} testId={tid} /></Keyed></label>;
                 })}
               </div>
+              </KeyPart>
             )}
             {e.on && e.kind === 'extrude' && (
               <label className="slab-stat" title={'A statistic of this map: the slab is as tall as its share of the highest value. "{country}" stands for each country\'s name ("Population of {country}"), so one look raises every country by its own'}>Height from a statistic
@@ -146,6 +156,7 @@ export function LookEditor({ value, onChange, blend, idPrefix }: { value: Countr
       </label>
     </div>
   );
+  return keyPath ? <KeyPart path={keyPath} label="Look">{editor}</KeyPart> : editor;
 }
 
 /**
@@ -229,7 +240,7 @@ export function CountryLookSection({ id }: { id: string }) {
   return (
     <details className="country-look" open={!!own}>
       <summary>{own ? 'Look (its own)' : 'Look (as its layer)'}</summary>
-      <LookEditor value={own ?? EMPTY} onChange={(next) => s.executeLooks((w) => cmd.setCountryLook(w, id, next))} idPrefix="country" />
+      <LookEditor value={own ?? EMPTY} onChange={(next) => s.executeLooks((w) => cmd.setCountryLook(w, id, next))} idPrefix="country" keyPath={own ? ['style', 'look'] : undefined} />
       {own?.effects.some((x) => 'light' in x && x.light === 'map') && <MapLightField idPrefix="country" />}
       {own && <button className="small" onClick={() => s.executeLooks((w) => cmd.setCountryLook(w, id, null))} data-testid="country-look-reset">Look like its layer again</button>}
       <LookPresets current={own} idPrefix="country" useLabel={targets.length > 1 ? `Give the ${targets.length} chosen a kept look` : 'Give it a kept look'}
@@ -247,7 +258,7 @@ export function LayerLookSection({ layerId }: { layerId: string }) {
   return (
     <details className="layer-option layer-look">
       <summary>{look ? 'Look of its countries (set)' : 'Look of its countries'}</summary>
-      <LookEditor value={look ?? { ...EMPTY, blend: 'normal' }} blend onChange={(next) => s.executeLooks((w) => cmd.setLayerEffects(w, layerId, next as LayerLook))} idPrefix="layer" />
+      <LookEditor value={look ?? { ...EMPTY, blend: 'normal' }} blend onChange={(next) => s.executeLooks((w) => cmd.setLayerEffects(w, layerId, next as LayerLook))} idPrefix="layer" keyPath={look ? ['style', 'look'] : undefined} />
       <MapLightField idPrefix="layer" />
       {look && <button className="small" onClick={() => s.executeLooks((w) => cmd.setLayerEffects(w, layerId, null))}>No look</button>}
       <LookPresets current={look} idPrefix="layer" useLabel="Use a kept look" onUse={(kept) => s.executeLooks((w) => cmd.setLayerEffects(w, layerId, { ...kept, blend: look?.blend ?? 'normal' }))} />
@@ -267,7 +278,7 @@ export function GroupLookSection({ groupId }: { groupId: string }) {
   const look = groupStyle(g).look ?? null;
   return (
     <div className="group-look" data-testid="group-look-section">
-      <LookEditor value={look ?? EMPTY} onChange={(next) => s.executeLooks((w) => cmd.setGroupStyle(w, groupId, { look: next }))} idPrefix="group" />
+      <LookEditor value={look ?? EMPTY} onChange={(next) => s.executeLooks((w) => cmd.setGroupStyle(w, groupId, { look: next }))} idPrefix="group" keyPath={look ? ['style', 'look'] : undefined} />
       {look?.effects.some((x) => 'light' in x && x.light === 'map') && <MapLightField idPrefix="group" />}
       {look && <button className="small" onClick={() => s.executeLooks((w) => cmd.setGroupStyle(w, groupId, { look: null }))} data-testid="group-look-reset">No look for the group</button>}
       <LookPresets current={look} idPrefix="group" useLabel="Give the group a kept look" onUse={(kept) => s.executeLooks((w) => cmd.setGroupStyle(w, groupId, { look: kept }))} />

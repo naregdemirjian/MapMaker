@@ -43,8 +43,8 @@ experience only: no new map features while this is built.
 3. **Looks panel (S3), done (D236)**: fundamentals by kind of thing; Design opens it; looks leave Properties.
 4. **Effects panel (S4), done (D238, D237)**: every effect in folders, dragged onto things or into Looks; group looks
    as adjustment layers.
-5. **Looks in Presentation (S5)**: docked in Shots; everywhere or this shot only (done first, D239); keyframes on any
-   option, as tracks.
+5. **Looks in Presentation (S5)**: docked in Shots; everywhere or this shot only (D239); keyframes on any option, as
+   tracks (D240). Done.
 6. **Timeline studio (S6)**: its own tools and panels (groups, types, branches, statistics), a small map following
    the date, the table of events; History's compact time bar.
 7. **Looks studio (S7)**: the stage, the parts, saving a stack as an effect.

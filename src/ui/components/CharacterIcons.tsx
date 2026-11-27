@@ -7,6 +7,7 @@ import * as cmd from '../../domain/commands.ts';
 import { Api } from '../api.ts';
 import { ICONS, ICON_GROUPS, iconById, drawIcon, type IconDef } from '../../render-engine/icons.ts';
 import { assetUrl } from '../../render-engine/assets.ts';
+import { Keyed } from './Keyed.tsx';
 
 /** An icon of the set drawn as it shows on the map (plain, or on a disc of the colour). */
 export function IconPicture({ icon, color, look = 'plain', size = 32 }: { icon: IconDef; color: string; look?: 'plain' | 'badge'; size?: number }) {
@@ -97,8 +98,10 @@ export function CharacterIconSection({ id }: { id: string }) {
           <option value="badge">On a disc of its colour</option>
         </select></label>
         <label className="range-row">Size: <b>{sizeDrag ?? Math.round((icon.size ?? 1) * 100)}%</b>
+          <Keyed path={['style', 'icon', 'size']} value={icon.size ?? 1} label="Marker size" testId="icon-size">
           <input type="range" min={50} max={300} step={10} value={sizeDrag ?? Math.round((icon.size ?? 1) * 100)} onChange={(ev) => setSizeDrag(Number(ev.target.value))}
             onPointerUp={commitSize} onKeyUp={commitSize} onBlur={commitSize} data-testid="icon-size" />
+          </Keyed>
         </label>
         <label>Faces where it travels<select value={icon.turn ?? 'auto'} onChange={(ev) => save({ ...icon, turn: ev.target.value as NonNullable<cmd.CharacterIcon['turn']> })} data-testid="icon-turn">
           <option value="auto">{def ? (def.turn === 'rotate' ? 'Yes: turns to face the way it goes' : def.turn === 'mirror' ? 'Yes: faces east or west, the way it goes' : 'No (a sign stays upright)') : 'No'}</option>

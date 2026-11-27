@@ -16,6 +16,7 @@ import { DateField, fmt } from '../inputs.tsx';
 import { FieldTypeChoice } from './Fields.tsx';
 import { FIELD_TYPES, type FieldType } from '../../domain/fields.ts';
 import { PicturesSection } from './Pictures.tsx';
+import { Keyed } from './Keyed.tsx';
 
 const KIND_NAME: Record<FeatureKind, { one: string; many: string; example: string }> = {
   area: { one: 'area', many: 'Areas', example: 'claims, influence zones, occupied zones' },
@@ -258,10 +259,10 @@ export function FeatureLookSection({ id }: { id: string }) {
   return (
     <>
       <div className="look-grid">
-        <label className="inline">Colour <input type="color" value={own.color ?? color} onChange={(ev) => look({ color: ev.target.value })} data-testid="feature-color" /></label>
+        <label className="inline">Colour <Keyed path={['style', 'color']} value={own.color ?? color} label="Colour" testId="feature-color"><input type="color" value={own.color ?? color} onChange={(ev) => look({ color: ev.target.value })} data-testid="feature-color" /></Keyed></label>
         {own.color && <button className="small" onClick={() => look({ color: undefined } as FeatureStyle)} title={ownerColor ? "Use the colour of the country it belongs to" : "Use the layer's colour"}>{ownerColor ? "Country's colour" : "Layer's colour"}</button>}
         {kind === 'area' && <>
-          <label className="inline" title="0: outline only">Fill <input type="range" min={0} max={1} step={0.05} value={st.fillOpacity ?? 0.25} onChange={(ev) => look({ fillOpacity: Number(ev.target.value) })} /><RangeReset def={0.25} value={st.fillOpacity ?? 0.25} /></label>
+          <label className="inline" title="0: outline only">Fill <Keyed path={['style', 'fillOpacity']} value={st.fillOpacity ?? 0.25} label="Fill" testId="feature-fill"><input type="range" min={0} max={1} step={0.05} value={st.fillOpacity ?? 0.25} onChange={(ev) => look({ fillOpacity: Number(ev.target.value) })} /></Keyed><RangeReset def={0.25} value={st.fillOpacity ?? 0.25} /></label>
           <label className="inline">Pattern
             <select value={st.hatch ?? 'none'} onChange={(ev) => look({ hatch: ev.target.value as FeatureStyle['hatch'] })} data-testid="feature-hatch">
               <option value="none">None</option><option value="diagonal">Diagonal lines</option><option value="cross">Cross-hatched</option><option value="dots">Dots</option>
@@ -282,7 +283,7 @@ export function FeatureLookSection({ id }: { id: string }) {
           </label>
         )}
         {kind !== 'point' && <>
-          <label className="inline">{arrowLook ? 'Arrow width' : 'Line width'} <input type="number" min={0} max={arrowLook ? 200 : 20} step={arrowLook ? 1 : 0.5} value={st.width ?? 2} onChange={(ev) => look({ width: Math.max(0, Number(ev.target.value)) })} style={{ width: '4.5em' }} data-testid="feature-width" /></label>
+          <label className="inline">{arrowLook ? 'Arrow width' : 'Line width'} <Keyed path={['style', 'width']} value={st.width ?? 2} label={arrowLook ? 'Arrow width' : 'Line width'} testId="feature-width"><input type="number" min={0} max={arrowLook ? 200 : 20} step={arrowLook ? 1 : 0.5} value={st.width ?? 2} onChange={(ev) => look({ width: Math.max(0, Number(ev.target.value)) })} style={{ width: '4.5em' }} data-testid="feature-width" /></Keyed></label>
           {!arrowLook && <label className="inline">Line
             <select value={st.dash ?? 'solid'} onChange={(ev) => look({ dash: ev.target.value as FeatureStyle['dash'] })} data-testid="feature-dash">
               <option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option>

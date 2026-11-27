@@ -24,6 +24,7 @@ import { TransitionLookControls } from './TransitionLook.tsx';
 import { isBaseEvent, MAIN_BRANCH } from '../../world-model/schema.ts';
 import { branchTree, branchName } from '../../temporal-engine/branches.ts';
 import { audioPlayer, audioPeaks, drawWaveform } from '../audio-track.ts';
+import { ShotKeys } from './ShotKeys.tsx';
 import type { ShotAudio } from '../../presentation/sequence.ts';
 
 /**
@@ -688,6 +689,7 @@ export function ShotTimeline() {
       </div>
       <ShotClips />
       {shot.audio && <Waveform audio={shot.audio} seconds={shot.frames / shot.fps} at={s.shotFrame / shot.fps} />}
+      <ShotKeys />
     </div>
   );
 }

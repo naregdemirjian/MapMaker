@@ -6,6 +6,7 @@ import { NumberField } from '../inputs.tsx';
 import * as cmd from '../../domain/commands.ts';
 import { resolveLabelStyle, labelFont, labelText, LABEL_FONTS, DEFAULT_LABEL_STYLE, DEFAULT_CITY_STYLE, type LabelStyle, type CountryLabel, type CityStyle } from '../../render-engine/label-style.ts';
 import { groupStyle, labelWithGroup } from '../../domain/group-looks.ts';
+import { Keyed, KeyPart } from './Keyed.tsx';
 
 /** A slider that previews while dragging and saves once, when let go (one undo step). */
 export function Slider({ value, min, max, step, onCommit, format, testId, def }: { value: number; min: number; max: number; step: number; onCommit: (v: number) => void; format?: (v: number) => string; testId?: string; def?: number }) {
@@ -33,22 +34,22 @@ export function LabelStyleEditor({ value, onChange, idPrefix }: { value: LabelSt
         <label>Weight<select value={value.weight} onChange={(e) => onChange({ weight: Number(e.target.value) })} data-testid={`${idPrefix}-weight`}>
           <option value={300}>Light</option><option value={400}>Regular</option><option value={600}>Semibold</option><option value={700}>Bold</option><option value={900}>Black</option>
         </select></label>
-        <label>Opacity<Slider value={value.opacity} def={DEFAULT_LABEL_STYLE.opacity} min={0} max={1} step={0.05} onCommit={(v) => onChange({ opacity: v })} format={(v) => `${Math.round(v * 100)}%`} /></label>
+        <label>Opacity<Keyed path={['opacity']} value={value.opacity} label="Opacity" testId={`${idPrefix}-opacity`}><Slider value={value.opacity} def={DEFAULT_LABEL_STYLE.opacity} min={0} max={1} step={0.05} onCommit={(v) => onChange({ opacity: v })} format={(v) => `${Math.round(v * 100)}%`} /></Keyed></label>
       </div>
       <div className="checks">
         <label className="check"><input type="checkbox" checked={value.italic} onChange={(e) => onChange({ italic: e.target.checked })} /> Italic</label>
         <label className="check"><input type="checkbox" checked={value.uppercase} onChange={(e) => onChange({ uppercase: e.target.checked })} data-testid={`${idPrefix}-uppercase`} /> CAPITALS</label>
       </div>
-      <label>Letter spacing<Slider value={value.letterSpacing} def={DEFAULT_LABEL_STYLE.letterSpacing} min={-0.1} max={0.6} step={0.01} onCommit={(v) => onChange({ letterSpacing: v })} format={(v) => v.toFixed(2)} /></label>
+      <label>Letter spacing<Keyed path={['letterSpacing']} value={value.letterSpacing} label="Letter spacing" testId={`${idPrefix}-spacing`}><Slider value={value.letterSpacing} def={DEFAULT_LABEL_STYLE.letterSpacing} min={-0.1} max={0.6} step={0.01} onCommit={(v) => onChange({ letterSpacing: v })} format={(v) => v.toFixed(2)} /></Keyed></label>
       <div className="two">
-        <label>Colour<input type="color" value={value.color} onChange={(e) => onChange({ color: e.target.value })} data-testid={`${idPrefix}-color`} /></label>
-        <label>Outline colour<input type="color" value={value.haloColor} onChange={(e) => onChange({ haloColor: e.target.value })} /></label>
+        <label>Colour<Keyed path={['color']} value={value.color} label="Colour" testId={`${idPrefix}-color`}><input type="color" value={value.color} onChange={(e) => onChange({ color: e.target.value })} data-testid={`${idPrefix}-color`} /></Keyed></label>
+        <label>Outline colour<Keyed path={['haloColor']} value={value.haloColor} label="Outline colour" testId={`${idPrefix}-halo-color`}><input type="color" value={value.haloColor} onChange={(e) => onChange({ haloColor: e.target.value })} /></Keyed></label>
       </div>
-      <label>Outline width<Slider value={value.haloWidth} def={DEFAULT_LABEL_STYLE.haloWidth} min={0} max={0.5} step={0.01} onCommit={(v) => onChange({ haloWidth: v })} format={(v) => (v === 0 ? 'none' : v.toFixed(2))} /></label>
-      <label>Size<Slider value={value.sizeScale} def={DEFAULT_LABEL_STYLE.sizeScale} min={0.2} max={4} step={0.05} onCommit={(v) => onChange({ sizeScale: v })} format={(v) => `${Math.round(v * 100)}%`} testId={`${idPrefix}-size`} /></label>
+      <label>Outline width<Keyed path={['haloWidth']} value={value.haloWidth} label="Outline width" testId={`${idPrefix}-halo-width`}><Slider value={value.haloWidth} def={DEFAULT_LABEL_STYLE.haloWidth} min={0} max={0.5} step={0.01} onCommit={(v) => onChange({ haloWidth: v })} format={(v) => (v === 0 ? 'none' : v.toFixed(2))} /></Keyed></label>
+      <label>Size<Keyed path={['sizeScale']} value={value.sizeScale} label="Size" testId={`${idPrefix}-size`}><Slider value={value.sizeScale} def={DEFAULT_LABEL_STYLE.sizeScale} min={0.2} max={4} step={0.05} onCommit={(v) => onChange({ sizeScale: v })} format={(v) => `${Math.round(v * 100)}%`} testId={`${idPrefix}-size`} /></Keyed></label>
       <div className="two">
-        <label>Smallest (px)<input type="number" min={2} max={400} value={value.minSize} onChange={(e) => Number(e.target.value) > 0 && onChange({ minSize: Number(e.target.value) })} /></label>
-        <label>Largest (px)<input type="number" min={2} max={400} value={value.maxSize} onChange={(e) => Number(e.target.value) > 0 && onChange({ maxSize: Number(e.target.value) })} /></label>
+        <label>Smallest (px)<Keyed path={['minSize']} value={value.minSize} label="Smallest (px)" testId={`${idPrefix}-min-size`}><input type="number" min={2} max={400} value={value.minSize} onChange={(e) => Number(e.target.value) > 0 && onChange({ minSize: Number(e.target.value) })} /></Keyed></label>
+        <label>Largest (px)<Keyed path={['maxSize']} value={value.maxSize} label="Largest (px)" testId={`${idPrefix}-max-size`}><input type="number" min={2} max={400} value={value.maxSize} onChange={(e) => Number(e.target.value) > 0 && onChange({ maxSize: Number(e.target.value) })} /></Keyed></label>
       </div>
       <p className="muted">Sizes are in pixels of a 1920-wide frame; other sizes scale with the frame.</p>
     </div>
@@ -143,7 +144,7 @@ function LabelEditor({ own, fromGroup, groupName, name, save, group }: { own: Co
         {groupKeys.length > 0 && <p className="muted small-text">{groupKeys.length} setting{groupKeys.length === 1 ? '' : 's'} from the group "{groupName}"; a setting of its own wins.</p>}
         <details className="own-look" open={lookKeys.length > 0}>
           <summary>{group ? (lookKeys.length ? `Their look (${lookKeys.length} setting${lookKeys.length === 1 ? '' : 's'} differ from all labels)` : 'Their look (same as all labels)') : lookKeys.length ? `Own look (${lookKeys.length} setting${lookKeys.length === 1 ? '' : 's'} differ from all labels)` : 'Own look (same as all labels)'}</summary>
-          <LabelStyleEditor value={effective} onChange={(patch) => save({ ...own, ...patch })} idPrefix={group ? 'group-label' : 'country-label'} />
+          <KeyPart path={['style', 'label']} label="Label" make><LabelStyleEditor value={effective} onChange={(patch) => save({ ...own, ...patch })} idPrefix={group ? 'group-label' : 'country-label'} /></KeyPart>
           <div className="buttons">
             <button className="small" disabled={!lookKeys.length} onClick={() => save({ hidden: own.hidden, text: own.text })} data-testid="label-reset">{group ? 'The look of all labels' : 'Use the look of all labels'}</button>
             <button className="small" onClick={() => s.set({ dialog: 'label-style' })}>Edit the look of all labels…</button>

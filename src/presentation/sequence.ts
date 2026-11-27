@@ -156,6 +156,8 @@ export interface ShotSettings {
   spin?: number;
   /** Looks of this shot's own (D239): countries', groups' and layers' colours and styles as they are in it. See shot-looks.ts. */
   restyle?: import('./shot-looks.ts').Restyle;
+  /** Settings of those looks keyed at frames of the shot (D240), each a track of the shot. See shot-looks.ts. */
+  keys?: import('./shot-looks.ts').LookTrack[];
 }
 
 export type ExportFormat = 'png' | 'tiff' | 'tiff-zip' | 'mp4' | 'webm';

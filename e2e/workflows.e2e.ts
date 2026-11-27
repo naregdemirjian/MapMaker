@@ -5765,6 +5765,124 @@ try {
     await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null, looksScope: 'everywhere' }));
   });
 
+  await h.step('Keys in a shot (D240): a setting of looks keyed at frames, a track of the shot; drawn between its keys; a key moved, held, removed; a number of an effect keyed; undone', async () => {
+    const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);
+    const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
+    await page.getByTestId('studio-history').click();
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
+    await page.getByTestId('tool-select').click();
+    await h.setDate('1650');
+    await page.evaluate(([a, b]) => { const s = (window as any).__mapmaker.store; s.set({ selection: null }); s.setCamera({ lon: (a[0] + b[0]) / 2, lat: (a[1] + b[1]) / 2, zoom: 1.5, rotation: 0, projection: 'equirectangular' }); }, [P.a, P.b]);
+    const before = await steps();
+    const colourOf = (n: string) => store(`s.world.all('entity').find((e) => e.name === ${JSON.stringify(n)}).color`) as Promise<string>;
+    const own = await colourOf(A);
+    const aId = await store(`s.world.all('entity').find((e) => e.name === ${JSON.stringify(A)}).id`) as string;
+    await h.goto('shots');
+    await page.getByTestId('new-shot').click();
+    await page.getByTestId('shot-editor').waitFor();
+    await page.getByTestId('looks-panel').waitFor();
+    await page.waitForTimeout(400);
+    const shotId = await store('s.shotId') as string;
+    const last = (await store(`JSON.parse(s.world.get('sequence', s.shotId).settings).frames`) as number) - 1;
+    const keys = () => store(`(JSON.parse(s.world.get('sequence', ${JSON.stringify(shotId)}).settings).keys ?? []).map((t) => ({ label: t.label, keys: t.keys }))`) as Promise<Array<{ label: string; keys: Array<{ frame: number; value: string | number; ease: string }> }>>;
+    const qa = (await h.hook<[number, number]>('previewToPage', P.a[0], P.a[1]))!;
+    await page.mouse.click(qa[0], qa[1]);
+    await page.getByTestId('looks-entity').waitFor();
+    assert.equal(await page.getByTestId('entity-color-key').count(), 0, 'no keys for changes that go everywhere');
+    await page.getByTestId('looks-scope-shot').click();
+    // Frame 1: the colour keyed (◇ pressed), then changed in its field: the key takes the new value.
+    assert.equal(await store('s.shotFrame'), 0);
+    await page.getByTestId('entity-color-key').click();
+    await h.saved();
+    await page.getByTestId('shot-keys').waitFor();
+    assert.equal(await page.getByTestId('key-diamond').count(), 1);
+    await page.getByTestId('entity-color').fill('#cc0000');
+    await h.saved();
+    assert.deepEqual((await keys())[0].keys, [{ frame: 0, value: '#cc0000', ease: 'linear' }]);
+    assert.match((await page.getByTestId('entity-color-key').getAttribute('class'))!, /\bhere\b/);
+    // The last frame, chosen along the track: changed there, a second key.
+    const lane = page.getByTestId('key-lane').first();
+    const lb = (await lane.boundingBox())!;
+    await page.mouse.click(lb.x + lb.width - 1, lb.y + lb.height / 2);
+    await page.waitForFunction((f) => (window as any).__mapmaker.store.shotFrame === f, last);
+    await page.waitForTimeout(300);
+    assert.doesNotMatch((await page.getByTestId('entity-color-key').getAttribute('class'))!, /\bhere\b/, 'keyed, no key at this frame');
+    await page.getByTestId('entity-color').fill('#00cc44');
+    await h.saved();
+    assert.deepEqual((await keys())[0].keys.map((k) => [k.frame, k.value]), [[0, '#cc0000'], [last, '#00cc44']]);
+    assert.equal(await colourOf(A), own, 'the project\'s colour as it was');
+    assert.equal(await page.getByTestId('key-diamond').count(), 2);
+    assert.match((await page.getByTestId('key-track').getAttribute('data-name'))!, new RegExp(`${A} · Colour`));
+    // Drawn so: green at the last frame, red at the first, between the two halfway.
+    const share = (x: number, y: number, want: 'red' | 'green') => page.evaluate(([px, py, w]) => {
+      const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement, r = c.getBoundingClientRect(), k = c.width / r.width, R = Math.round(8 * k), D = 30;
+      let best = 0;
+      for (const [ox, oy] of [[0, 0], [0, D], [0, -D], [D, 0], [-D, 0]]) {
+        const d = c.getContext('2d')!.getImageData(Math.round(((px as number) + ox - r.left) * k) - R, Math.round(((py as number) + oy - r.top) * k) - R, 2 * R + 1, 2 * R + 1).data;
+        let n = 0, m = 0;
+        for (let i = 0; i < d.length; i += 4) { n++; if (w === 'green' ? d[i + 1] > 120 && d[i] < 90 && d[i + 2] < 120 : d[i] > 120 && d[i + 1] < 90 && d[i + 2] < 90) m++; }
+        best = Math.max(best, Math.round((100 * m) / n));
+      }
+      return best;
+    }, [x, y, want] as const);
+    const shows = async (want: 'red' | 'green') => { let v = await share(qa[0], qa[1], want); for (let i = 0; i < 30 && v < 80; i++) { await page.waitForTimeout(100); v = await share(qa[0], qa[1], want); } return v; };
+    assert.ok((await shows('green')) >= 80, 'green at the last frame');
+    await h.screenshot('keys-in-shot');
+    await page.mouse.click(lb.x + 1, lb.y + lb.height / 2);
+    await page.waitForFunction(() => (window as any).__mapmaker.store.shotFrame === 0);
+    assert.ok((await shows('red')) >= 80, 'red at the first');
+    const mid = Math.round(last / 2);
+    await page.evaluate((f) => (window as any).__mapmaker.store.set({ shotFrame: f }), mid);
+    const halfway = await store(`s.lookWorld.get('entity', ${JSON.stringify(aId)}).color`) as string;
+    const ch = (h0: string, i: number) => parseInt(h0.slice(i, i + 2), 16);
+    assert.ok(Math.abs(ch(halfway, 1) - 0xcc * (1 - mid / last)) <= 2 && Math.abs(ch(halfway, 3) - 0xcc * (mid / last)) <= 2, `mixed between its keys (${halfway})`);
+    // The last key dragged to the middle of the shot.
+    const diamonds = page.getByTestId('key-diamond');
+    const db = (await diamonds.nth(1).boundingBox())!;
+    await page.mouse.move(db.x + db.width / 2, db.y + db.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(lb.x + lb.width * 0.75, lb.y + lb.height / 2, { steps: 6 });
+    await page.mouse.move(lb.x + lb.width / 2, lb.y + lb.height / 2, { steps: 6 });
+    await page.mouse.up();
+    await h.saved();
+    const moved = (await keys())[0].keys;
+    assert.equal(moved.length, 2);
+    assert.ok(Math.abs(moved[1].frame - last / 2) <= 2, `moved to the middle (${moved[1].frame})`);
+    // The first key held until the next: halfway to it, still red.
+    await diamonds.first().click({ button: 'right' });
+    await page.getByTestId('key-ease-hold').click();
+    await h.saved();
+    assert.equal((await keys())[0].keys[0].ease, 'hold');
+    await page.evaluate((f) => (window as any).__mapmaker.store.set({ shotFrame: f }), Math.round(moved[1].frame / 2));
+    assert.equal(await store(`s.lookWorld.get('entity', ${JSON.stringify(aId)}).color`), '#cc0000');
+    // A key chosen and Delete: gone.
+    await diamonds.nth(1).click();
+    await page.keyboard.press('Delete');
+    await h.saved();
+    assert.equal((await keys())[0].keys.length, 1);
+    // A number of an effect keyed: a drop shadow given in this shot, its distance keyed, a second track.
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ shotFrame: 0 }));
+    const look = page.locator('[data-testid=looks-entity] details.country-look');
+    if (!(await look.evaluate((d) => (d as HTMLDetailsElement).open))) await look.locator('summary').click();
+    await page.getByTestId('country-add-effect').selectOption('shadow');
+    await h.saved();
+    await page.getByTestId('country-shadow-distance-key').click();
+    await h.saved();
+    assert.equal(await page.getByTestId('key-track').count(), 2);
+    assert.match((await keys())[1].label, /Look · Drop shadow · Distance/);
+    // Stopped animating: the colour's track gone with its key.
+    await page.getByTestId('key-track-remove').first().click();
+    await h.saved();
+    assert.equal(await page.getByTestId('key-track').count(), 1);
+    // Undone, step by step.
+    for (let i = 0; i < 30 && (await steps()) > before; i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await steps(), before);
+    assert.equal(await colourOf(A), own);
+    await page.getByTestId('studio-history').click();
+    await page.evaluate(() => (window as any).__mapmaker.allLists());
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null, looksScope: 'everywhere' }));
+  });
+
   await h.step('The menu bar: every command in a menu with its shortcut; the keyboard runs the same commands (D197)', async () => {
     const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);
     await page.getByTestId('studio-history').click();

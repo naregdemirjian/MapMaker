@@ -363,6 +363,27 @@ button.link.back { display: block; margin-bottom: 6px; }
 .timeline { height: 100%; background: var(--canvas-bg); position: relative; }
 .timeline canvas { display: block; cursor: col-resize; }
 .shot-timeline { display: flex; flex-direction: column; justify-content: center; }
+.shot-timeline:has(.shot-keys) { justify-content: flex-start; overflow-y: auto; }
+/* A shot's keyed settings as tracks (D240): a name, then its keys as diamonds along the shot's frames. */
+.shot-keys { display: flex; flex-direction: column; gap: 3px; padding: 2px 8px 6px; flex: none; }
+.key-track { display: flex; align-items: center; gap: 6px; height: 20px; }
+.key-track-head { flex: none; width: 260px; display: flex; align-items: center; gap: 4px; min-width: 0; }
+.key-track-name { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: left; font-size: 11.5px; color: var(--text2); padding: 0; }
+.key-track-remove { padding: 0 5px; font-size: 10px; line-height: 16px; }
+.key-lane { position: relative; flex: 1; height: 18px; background: var(--input-bg); border: 1px solid var(--line); border-radius: 3px; cursor: pointer; }
+.key-diamond { position: absolute; top: 50%; width: 10px; height: 10px; padding: 0; margin: 0; transform: translate(-50%, -50%) rotate(45deg); background: var(--accent); border: 1px solid #d9ecff; border-radius: 1px; cursor: ew-resize; z-index: 1; }
+.key-diamond:hover:not(:disabled) { background: #7bb8ea; border-color: #fff; }
+.key-diamond.chosen { background: var(--accent2); border-color: #fff; }
+.key-diamond.hold { border-radius: 0 50% 50% 50%; }
+.key-diamond.after { opacity: 0.45; }
+.key-lane-head { position: absolute; top: -2px; bottom: -2px; width: 2px; margin-left: -1px; background: #ff5c5c; pointer-events: none; }
+/* The key beside a setting of looks in a shot (D240): hollow, keyed (blue), a key at this frame (filled). */
+.keyed { display: flex; align-items: center; gap: 4px; margin-top: 3px; }
+label.inline .keyed, .inline > .keyed, .look-grid .keyed { display: inline-flex; margin-top: 0; }
+.keyed > input:not([type=color]):not([type=checkbox]), .keyed > .with-reset, .keyed > .slider { flex: 1; min-width: 0; }
+.key-button { flex: none; padding: 0 4px; line-height: 18px; font-size: 13px; color: var(--muted); background: transparent; border-color: transparent; }
+.key-button.animated { color: var(--accent); }
+.key-button.here { color: var(--accent); }
 .shot-controls { display: flex; align-items: center; gap: 8px; padding: 0 14px; width: 100%; }
 .frame-slider { flex: 1; width: auto !important; }
 .frame-info { white-space: nowrap; color: var(--muted); font-variant-numeric: tabular-nums; }

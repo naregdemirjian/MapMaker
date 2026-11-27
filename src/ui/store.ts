@@ -9,7 +9,7 @@ import { World } from '../world-model/world.ts';
 import { Engine, parseJSON } from '../temporal-engine/engine.ts';
 import type { ShotSettings } from '../presentation/sequence.ts';
 import { takeLockedSkipped, updateSequence, type CommandResult } from '../domain/commands.ts';
-import { shotWorld, restyleOf, restyleDiffs, restyleAfter, type Restyle } from '../presentation/shot-looks.ts';
+import { shotLooksAt, restyleOf, restyleDiffs, looksAfter, tracksOf, type Restyle, type LookTrack } from '../presentation/shot-looks.ts';
 import { type Instant, gregorian, toJSONValue, fromJSONValue, PRESENT_YEAR } from '../core-time/index.ts';
 import { type Camera, defaultCamera, flatCamera, PROJECTIONS } from '../render-engine/camera.ts';
 import { MapRenderer, VIEW_QUALITY } from '../render-engine/map-renderer.ts';
@@ -291,10 +291,31 @@ export class AppStore {
     return row && settings ? { id: row.id, settings } : null;
   }
 
-  /** The world as the Looks panel reads it (D239): with the shot's own looks when it changes those, else the world. */
+  /**
+   * The world as the Looks panel reads it (D239): with the shot's own looks when it changes those (and its keyed settings
+   * at the frame shown, D240), else the world.
+   */
   get lookWorld(): World | null {
     const sh = this.looksShot();
-    return sh && this.world ? shotWorld(this.world, restyleOf(sh.settings.restyle)) : this.world;
+    return sh && this.world ? shotLooksAt(this.world, sh.settings, this.shotFrame) : this.world;
+  }
+
+  /** The keyed setting whose field is being edited in the Looks panel (D240): a change made there puts a key at the frame. */
+  keyEditing: string | null = null;
+
+  /** The shot open (in Presentation): its row and settings. */
+  openShot(): { id: string; name: string; settings: ShotSettings } | null {
+    if (this.mode !== 'present' || !this.shotId || !this.world) return null;
+    const row = this.world.get('sequence', this.shotId);
+    const settings = row ? parseJSON<ShotSettings | null>(row.settings, null) : null;
+    return row && settings ? { id: row.id, name: row.name, settings } : null;
+  }
+
+  /** The shot open with its keyed settings changed (D240): one undo step. */
+  setShotKeys(next: LookTrack[], label: string): void {
+    const sh = this.openShot();
+    if (!sh) return;
+    this.execute((wd) => ({ ...updateSequence(wd, sh.id, { settings: { ...sh.settings, keys: next.length ? next : undefined } }), label }));
   }
 
   /**
@@ -306,8 +327,9 @@ export class AppStore {
     if (!sh) return this.execute(fn);
     const w = this.world, e = this.engine;
     if (!w || !e) return undefined;
-    const before = restyleOf(sh.settings.restyle);
-    const lay = restyleDiffs(w, before);
+    const before = restyleOf(sh.settings.restyle), tracks = tracksOf(sh.settings.keys), frame = this.shotFrame;
+    // (Laid as the shot shows them at the frame: a keyed setting changed gets a key there, D240.)
+    const lay = restyleDiffs(w, before, tracks, frame);
     let r: CommandResult<T>;
     w.applyDiffs(lay.apply);
     try {
@@ -320,9 +342,10 @@ export class AppStore {
     }
     w.applyDiffs(invertDiffs(r.diffs));
     w.applyDiffs(lay.undo);
-    let next: Restyle;
-    try { next = restyleAfter(before, r.diffs); } catch (err) { this.toast((err as Error).message, 'error'); this.notify(); return undefined; }
-    this.execute((wd) => ({ ...updateSequence(wd, sh.id, { settings: { ...sh.settings, restyle: next } }), label: `${r.label} (this shot only)` }));
+    let next: { restyle: Restyle; tracks: LookTrack[] };
+    try { next = looksAfter(before, tracks, r.diffs, frame, this.keyEditing); } catch (err) { this.toast((err as Error).message, 'error'); this.notify(); return undefined; }
+    const keyed = JSON.stringify(next.tracks) !== JSON.stringify(tracks);
+    this.execute((wd) => ({ ...updateSequence(wd, sh.id, { settings: { ...sh.settings, restyle: next.restyle, keys: next.tracks.length ? next.tracks : undefined } }), label: `${r.label} (${keyed ? `a key at frame ${frame + 1}` : 'this shot only'})` }));
     return r.result;
   }
   /** The ids chosen now: the several chosen, else the one selected (of that kind). */
