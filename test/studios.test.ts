@@ -41,7 +41,7 @@ test('each page opens with its own layout, holding only panels it can hold, the 
     history: '(([tools]@44 | [layers,countries*,places,areas,events,maps,effects]@250 | [viewer] | ([properties] / [looks])@310) / [timeline]@190)',
     timeline: '(([events*,countries,layers,effects]@270 | [viewer] | ([properties] / [looks])@330) / [timeline]@340)',
     looks: '((([countries*,layers,places,areas] / [effects]@300)@250 | [viewer] | ([looks] / [properties]@230)@380) / [timeline]@130)',
-    shots: '(([shots]@250 | [viewer] | [shot]@310) / [shot-timeline]@150)',
+    shots: '(([shots]@250 | [viewer] | ([shot] / [looks*,effects])@330) / [shot-timeline]@150)',
     export: '(([shots]@230 | [viewer] | [export]@380) / [shot-timeline]@110)',
   };
   for (const { id } of PAGES) {

@@ -97,12 +97,12 @@ function CityImportance({ id }: { id: string }) {
 /** A city shown however far out the map is seen (D229), where cities are otherwise left out zoomed out. */
 export function CityAlwaysShown({ id }: { id: string }) {
   const s = useStore();
-  const ent = s.world!.get('entity', id);
+  const ent = s.lookWorld!.get('entity', id);
   if (!ent) return null;
   const on = cmd.entityStyle(ent).alwaysShown === true;
   return (
     <label className="inline" title="Seen far out, cities are left out and only countries named, as maps online do. A city always shown keeps its dot and name at every scale.">
-      <input type="checkbox" checked={on} onChange={(e) => s.execute((wd) => cmd.setCityAlwaysShown(wd, id, e.target.checked))} data-testid="city-always-shown" /> Always shown, however far out
+      <input type="checkbox" checked={on} onChange={(e) => s.executeLooks((wd) => cmd.setCityAlwaysShown(wd, id, e.target.checked))} data-testid="city-always-shown" /> Always shown, however far out
     </label>
   );
 }

@@ -57,7 +57,8 @@ const lc = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
  * layer drawn on, where borders belong. Returns what was done, or why not.
  */
 export function give(item: EffectItem, targets: Target[]): { ok: boolean; message: string } {
-  const s = store, w = s.world;
+  // (Looks read and given as the Looks panel does: in Presentation, this shot's own when changing this shot only, D239.)
+  const s = store, w = s.lookWorld;
   if (!w) return { ok: false, message: 'Open a project first.' };
   if (!targets.length) return { ok: false, message: `Choose something to give “${item.name}” to (${receiversText(item)}), or drag it there.` };
   const first = targets[0];
@@ -76,19 +77,19 @@ export function give(item: EffectItem, targets: Target[]): { ok: boolean; messag
   switch (item.folder) {
     case 'countries': {
       if (recv === 'country') {
-        s.execute((wd) => cmd.setCountriesOwnLooks(wd, countries.map((id) => [id, withEffect(countryLookOf(cmd.entityStyle(wd.get('entity', id)).look), item.kind)] as [string, CountryLook]), `a ${lc(item.name)}`));
+        s.executeLooks((wd) => cmd.setCountriesOwnLooks(wd, countries.map((id) => [id, withEffect(countryLookOf(cmd.entityStyle(wd.get('entity', id)).look), item.kind)] as [string, CountryLook]), `a ${lc(item.name)}`));
         return done(`${item.name} given to ${where}.`);
       }
       if (first.kind === 'group') {
         const g = w.get('entity_group', first.id)!;
-        s.execute((wd) => cmd.setGroupStyle(wd, first.id, { look: withEffect(groupStyle(g).look ?? null, item.kind) }));
+        s.executeLooks((wd) => cmd.setGroupStyle(wd, first.id, { look: withEffect(groupStyle(g).look ?? null, item.kind) }));
         return done(`${item.name} given to ${where}: all of its members.`);
       }
       if (first.kind === 'layer') {
         const l = w.get('layer', first.id);
         if (!l || l.kind !== 'partition') return { ok: false, message: 'Effects of countries are for a layer of territory.' };
         const look = layerLookOf(parseJSON<{ look?: unknown }>(l.style, {}).look) ?? { ...EMPTY, blend: 'normal' as const };
-        s.execute((wd) => cmd.setLayerEffects(wd, first.id, withEffect(look, item.kind) as LayerLook));
+        s.executeLooks((wd) => cmd.setLayerEffects(wd, first.id, withEffect(look, item.kind) as LayerLook));
         return done(`${item.name} given to ${where}: its countries without a look of their own.`);
       }
       break;
@@ -97,14 +98,14 @@ export function give(item: EffectItem, targets: Target[]): { ok: boolean; messag
       const l = first.kind === 'layer' ? w.get('layer', first.id) : undefined;
       if (!l || l.kind !== 'partition') return { ok: false, message: 'Borders belong to a layer of territory.' };
       const b = layerBordersOf(parseJSON<{ borders?: unknown }>(l.style, {}).borders) ?? { between: null, coast: null, pairs: [] };
-      s.execute((wd) => cmd.setLayerBorders(wd, l.id, { ...b, between: item.id === 'borders:plain' ? null : borderWith(b.between, item.patch) }));
+      s.executeLooks((wd) => cmd.setLayerBorders(wd, l.id, { ...b, between: item.id === 'borders:plain' ? null : borderWith(b.between, item.patch) }));
       return done(`${item.name}: the borders between countries of “${l.name}”.`);
     }
     case 'labels': {
-      if (recv === 'country') { s.execute((wd) => cmd.setLabelsWith(wd, countries, item.patch, item.name)); return done(`${item.name}: the label of ${where}.`); }
+      if (recv === 'country') { s.executeLooks((wd) => cmd.setLabelsWith(wd, countries, item.patch, item.name)); return done(`${item.name}: the label of ${where}.`); }
       if (first.kind === 'group') {
         const g = w.get('entity_group', first.id)!;
-        s.execute((wd) => cmd.setGroupStyle(wd, first.id, { label: labelWith(groupStyle(g).label, item.patch) }));
+        s.executeLooks((wd) => cmd.setGroupStyle(wd, first.id, { label: labelWith(groupStyle(g).label, item.patch) }));
         return done(`${item.name}: the labels of ${where}.`);
       }
       break;
@@ -128,13 +129,13 @@ export function give(item: EffectItem, targets: Target[]): { ok: boolean; messag
       break;
     }
     case 'saved': {
-      if (recv === 'country') { s.execute((wd) => cmd.setCountriesLook(wd, countries, item.look, `the look “${item.name}”`)); return done(`The look “${item.name}” given to ${where}.`); }
-      if (first.kind === 'group') { s.execute((wd) => cmd.setGroupStyle(wd, first.id, { look: item.look })); return done(`The look “${item.name}” given to ${where}.`); }
+      if (recv === 'country') { s.executeLooks((wd) => cmd.setCountriesLook(wd, countries, item.look, `the look “${item.name}”`)); return done(`The look “${item.name}” given to ${where}.`); }
+      if (first.kind === 'group') { s.executeLooks((wd) => cmd.setGroupStyle(wd, first.id, { look: item.look })); return done(`The look “${item.name}” given to ${where}.`); }
       if (first.kind === 'layer') {
         const l = w.get('layer', first.id);
         if (!l || l.kind !== 'partition') return { ok: false, message: 'A look of countries is for a layer of territory.' };
         const blend = layerLookOf(parseJSON<{ look?: unknown }>(l.style, {}).look)?.blend ?? 'normal';
-        s.execute((wd) => cmd.setLayerEffects(wd, first.id, { ...item.look, blend }));
+        s.executeLooks((wd) => cmd.setLayerEffects(wd, first.id, { ...item.look, blend }));
         return done(`The look “${item.name}” given to ${where}.`);
       }
       break;

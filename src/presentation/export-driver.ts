@@ -17,6 +17,7 @@ import { encodeTiff, deflateInBrowser } from '../export/tiff.ts';
 import { eventsBoxOf, currentEvents, drawEventsBox } from './events-box.ts';
 import { eventShown, entityStyle } from '../domain/commands.ts';
 import { groupStyle } from '../domain/group-looks.ts';
+import { shotWorld, restyleOf } from './shot-looks.ts';
 import { isFeatureKind } from '../render-engine/feature-style.ts';
 import { preloadImages, prepareVideos } from '../render-engine/assets.ts';
 import { basemapSourceOf, loadBasemap, loadBasemapDetail, loadDatasetRecords, DEFAULT_BASEMAP_STYLE, type Basemap, type BasemapStyle } from '../render-engine/basemap.ts';
@@ -263,7 +264,9 @@ export async function detailForFrame(world: World, shot: ShotSettings, frame: nu
 }
 
 /** Render one frame of one pass into a 2D context of the given size (`detail`: from detailForFrame). */
-export function renderFrame(ctx: CanvasRenderingContext2D, renderer: MapRenderer, world: World, engine: Engine, shot: ShotSettings, frame: number, def: ExportPassDef, width: number, height: number, basemap: Basemap | null = null, ground: Ground | null = null, detail: CloseUp | null = null): void {
+export function renderFrame(ctx: CanvasRenderingContext2D, renderer: MapRenderer, world0: World, engine: Engine, shot: ShotSettings, frame: number, def: ExportPassDef, width: number, height: number, basemap: Basemap | null = null, ground: Ground | null = null, detail: CloseUp | null = null): void {
+  // (With the shot's own looks, D239.)
+  const world = shotWorld(world0, restyleOf(shot.restyle));
   const space = world.get('map_space', shot.spaceId);
   if (isSpaceMap(space)) { drawSpaceFrame(ctx, world, engine, shot, frame, def, width, height); return; }
   const { view, t, options, ls } = frameSetup(world, shot, frame, def, width, height, basemap, ground, detail, engine);
@@ -434,10 +437,11 @@ export async function runExport(o: {
   const terrain = await terrainFor(o.world, o.shot.spaceId, o.shot);
   // Pictures and videos: every picture loaded, and every video sought to its frame before drawing.
   // (Groups' fills too, D237: a group's picture fills its members without one of their own.)
-  const fills = [...o.world.all('entity').map((e) => entityStyle(e).fill), ...o.world.all('entity_group').map((g) => groupStyle(g).fill)].filter((f): f is NonNullable<typeof f> => !!f?.asset);
+  const looked = shotWorld(o.world, restyleOf(o.shot.restyle));
+  const fills = [...looked.all('entity').map((e) => entityStyle(e).fill), ...looked.all('entity_group').map((g) => groupStyle(g).fill)].filter((f): f is NonNullable<typeof f> => !!f?.asset);
   const videoFills = fills.filter((f) => f.kind === 'video').map((f) => ({ file: f.asset!, play: f }));
   // (and characters' own pictures used as their icons)
-  const iconPictures = o.world.all('entity').map((e) => entityStyle(e).icon?.asset);
+  const iconPictures = looked.all('entity').map((e) => entityStyle(e).icon?.asset);
   await preloadImages([eventsBoxOf(o.shot.eventsBox).image, ...fills.filter((f) => f.kind === 'image').map((f) => f.asset), ...iconPictures]);
   // Credit lines for the data drawn in these frames (written into the manifest and the guide).
   // (Close-up tiles credited whenever the map may use them: the Earth with finer heights close in, D101.)

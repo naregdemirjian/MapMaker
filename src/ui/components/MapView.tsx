@@ -20,6 +20,7 @@ import { processLasso, densify, orientInteriorLeft, signedArea, splitLoops, simp
 import { geoCentroid } from 'd3-geo';
 import { lonLatToVec, E7 } from '../../geo-kernel/vec.ts';
 import { cameraAt, timeAt, overlaysAt, drawOverlays, withStillCamera, unspun, moveOverlay, shotTransitions, trailsStart, type ShotSettings, type OverlayRect } from '../../presentation/sequence.ts';
+import { shotWorld, restyleOf } from '../../presentation/shot-looks.ts';
 import { transitionOptions, drawShotOverlays, lookStyles, overlayKeepOut } from '../../presentation/export-driver.ts';
 import { finishLook } from '../../presentation/looks.ts';
 import { parseJSON, slerpLonLat } from '../../temporal-engine/engine.ts';
@@ -244,14 +245,40 @@ function commitShotCamera(): void {
 let shownView: { view: View; preview: boolean } | null = null;
 export function shownMapView(): { view: View; preview: boolean } | null { return shownView; }
 
+/** The country (or faction) a shot shows at a place at the frame shown (D239): on the topmost of its layers holding it. */
+export function shotCountryAt(sh: ShotSettings, lon: number, lat: number): string | null {
+  const w = store.world, eng = store.engineFor(sh.branch);
+  if (!w || !eng) return null;
+  const t = timeAt(sh, store.shotFrame), at = lonLatToVec(lon, lat);
+  const shown = w.all('layer').filter((l) => l.space_id === store.spaceId && l.kind === 'partition' && (sh.layers.length ? sh.layers.includes(l.id) : l.visible)).sort((a, b) => b.sort_order - a.sort_order);
+  for (const l of shown) {
+    const id = eng.valueAtPoint(store.spaceId, l.id, at, t);
+    if (!id) continue;
+    const type = w.get('entity', id)?.type_id;
+    return type === 'polity' || type === 'faction' ? id : null;
+  }
+  return null;
+}
+
 /**
- * The country (or faction) drawn under a point of the page on the working map, if any (D238: an effect dragged from
- * the Effects panel is given to it). Null over the sea, outside the map, or in Presentation.
+ * The country (or faction) drawn under a point of the page, if any (D238: an effect dragged from the Effects panel is
+ * given to it): on the working map, or in Presentation on the shot's preview at the frame shown (D239). Null over the
+ * sea, or outside the map.
  */
 export function countryAtPage(pageX: number, pageY: number): string | null {
   const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement | null;
-  if (!c || store.mode !== 'world' || !store.engine || !store.world || !store.layerId) return null;
+  if (!c || !store.engine || !store.world) return null;
   const r = c.getBoundingClientRect();
+  if (store.mode === 'present') {
+    const sh = currentShot();
+    if (!sh) return null;
+    const fr = frameRect(sh, r.width, r.height), x = pageX - r.left - fr.x, y = pageY - r.top - fr.y;
+    if (x < 0 || y < 0 || x > fr.w || y > fr.h) return null;
+    const v = shownView && shownView.preview && shownView.view.width === fr.w && shownView.view.height === fr.h ? shownView.view : makeView(store.presentCamera ?? cameraAt(sh, store.shotFrame), fr.w, fr.h);
+    const ll = screenToLonLat(v, x, y);
+    return ll ? shotCountryAt(sh, ll[0], ll[1]) : null;
+  }
+  if (store.mode !== 'world' || !store.layerId) return null;
   let width = r.width;
   // (Two timelines or dates side by side, D150: the map is the left half.)
   if (store.compare.on && store.compare.side) width = Math.max(25, Math.floor((width - SIDE_GAP) / 2));
@@ -492,7 +519,7 @@ export function MapView() {
     const overlaid = shot ? (s.presentOverlay ? moveOverlay(shot, s.presentOverlay.id, s.presentOverlay.dx, s.presentOverlay.dy, s.presentOverlay.from) : shot) : null;
     const keepOut = overlaid && (namesOn || citiesOn) ? overlayKeepOut(s.world, overlaid, s.shotFrame, time, frame.w, frame.h, view, s.engineFor(overlaid.branch)) : undefined;
     try {
-      s.renderer.render(ctx, view, s.world, shot ? s.engineFor(shot.branch) : s.engine, s.spaceId, time, { passes, transparent: !!shot?.transparent, layerIds: layers, basemap, referenceBorders: !shot && s.referenceBorders, transitions: shot ? transitionOptions(shot, s.shotFrame) : undefined, mediaSeconds: shot ? s.shotFrame / shot.fps : 0, trails: !!shot?.trails, trailsSince: shot ? trailsStart(shot) : null, layout: { labels: namesOn && !namesHidden, cities: citiesOn }, moving: moving && vs.whileMoving === 'carry', holdNames: moving && vs.names === 'hold', fillAround, hurried, show, terrain, style: shotLook?.style, basemapStyle: shotLook?.basemap, keepOut });
+      s.renderer.render(ctx, view, shot ? shotWorld(s.world, restyleOf(shot.restyle)) : s.world, shot ? s.engineFor(shot.branch) : s.engine, s.spaceId, time, { passes, transparent: !!shot?.transparent, layerIds: layers, basemap, referenceBorders: !shot && s.referenceBorders, transitions: shot ? transitionOptions(shot, s.shotFrame) : undefined, mediaSeconds: shot ? s.shotFrame / shot.fps : 0, trails: !!shot?.trails, trailsSince: shot ? trailsStart(shot) : null, layout: { labels: namesOn && !namesHidden, cities: citiesOn }, moving: moving && vs.whileMoving === 'carry', holdNames: moving && vs.names === 'hold', fillAround, hurried, show, terrain, style: shotLook?.style, basemapStyle: shotLook?.basemap, keepOut });
     } catch (e) {
       console.error(e);
     }
@@ -1398,7 +1425,17 @@ export function MapView() {
     drag.current = { kind: 'none' };
     const p = local(e);
     // Framing the shot: the view dragged to becomes the shot's camera (still for the whole shot).
-    if (presentation && d.kind === 'pan') { if (d.moved >= 1) commitShotCamera(); return; }
+    if (presentation && d.kind === 'pan') {
+      if (d.moved >= 1) { commitShotCamera(); return; }
+      // A click on the preview (D239): the country there at the frame shown chosen, its looks in the Looks panel
+      // (the topmost of the shot's layers holding the place); nothing there, nothing chosen.
+      const sh = currentShot(), ll = e.button === 0 ? screenToLonLat(view, p[0], p[1]) : null;
+      if (sh && ll) {
+        const id = shotCountryAt(sh, ll[0], ll[1]);
+        store.set({ selection: id ? { kind: 'entity', id } : null, multi: null });
+      }
+      return;
+    }
     // While a line is shown adjusted (D148): a click pins a point (or takes a pin away); a drag only moves the map.
     if (d.kind === 'pan' && d.pin) { if (d.moved < 4) togglePin(p); return; }
     if (d.kind === 'erase') { eraseBorders(d.points, view); force((n) => n + 1); return; }

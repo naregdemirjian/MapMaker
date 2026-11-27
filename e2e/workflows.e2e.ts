@@ -5687,6 +5687,84 @@ try {
     await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null }));
   });
 
+  await h.step('Looks in Presentation (D239): the Looks and Effects panels beside the shot; a country chosen in its preview; a change for this shot only, drawn in it and not on the map worked on; back to everywhere\'s; undone', async () => {
+    const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);
+    const steps = async () => (await page.evaluate(() => (window as any).__mapmaker.store.journal.head)) as number;
+    await page.getByTestId('studio-history').click();
+    await page.getByTestId('map-select').selectOption({ label: 'Earth' });
+    await page.getByTestId('tool-select').click();
+    await h.setDate('1650');
+    await page.evaluate(([a, b]) => { const s = (window as any).__mapmaker.store; s.set({ selection: null }); s.setCamera({ lon: (a[0] + b[0]) / 2, lat: (a[1] + b[1]) / 2, zoom: 1.5, rotation: 0, projection: 'equirectangular' }); }, [P.a, P.b]);
+    const before = await steps();
+    const colourOf = (n: string) => store(`s.world.all('entity').find((e) => e.name === ${JSON.stringify(n)}).color`) as Promise<string>;
+    const own = await colourOf(A);
+    // A shot of 1650 over the two countries: the Looks and Effects panels beside it.
+    await h.goto('shots');
+    await page.getByTestId('new-shot').click();
+    await page.getByTestId('shot-editor').waitFor();
+    await page.getByTestId('looks-panel').waitFor();
+    await page.getByTestId('dock-tab-effects').waitFor();
+    await page.waitForTimeout(400);
+    // Clicked in the preview: the country there is chosen, its looks in the Looks panel; changes go everywhere at first.
+    const qa = (await h.hook<[number, number]>('previewToPage', P.a[0], P.a[1]))!;
+    await page.mouse.click(qa[0], qa[1]);
+    assert.equal(await store('s.world.get("entity", s.selection.id).name'), A);
+    await page.getByTestId('looks-entity').waitFor();
+    assert.match((await page.getByTestId('looks-scope-everywhere').getAttribute('class'))!, /\bon\b/);
+    // This shot only: its colour changed in the shot alone.
+    await page.getByTestId('looks-scope-shot').click();
+    await page.getByTestId('entity-color').fill('#00cc44');
+    await h.saved();
+    const shotId = await store('s.shotId') as string;
+    const restyle = () => store(`JSON.parse(s.world.get('sequence', ${JSON.stringify(shotId)}).settings).restyle ?? {}`) as Promise<{ entity?: Record<string, { color?: string }> }>;
+    const aId = await store(`s.world.all('entity').find((e) => e.name === ${JSON.stringify(A)}).id`) as string;
+    assert.equal((await restyle()).entity?.[aId]?.color, '#00cc44', 'kept with the shot');
+    assert.equal(await colourOf(A), own, 'the project\'s colour as it was');
+    // Drawn so in the preview: the clearest of five small patches about the place mostly green.
+    const greenAbout = (x: number, y: number) => page.evaluate(([px, py]) => {
+      const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement, r = c.getBoundingClientRect(), k = c.width / r.width, R = Math.round(8 * k), D = 30;
+      let best = 0;
+      for (const [ox, oy] of [[0, 0], [0, D], [0, -D], [D, 0], [-D, 0]]) {
+        const d = c.getContext('2d')!.getImageData(Math.round((px + ox - r.left) * k) - R, Math.round((py + oy - r.top) * k) - R, 2 * R + 1, 2 * R + 1).data;
+        let n = 0, m = 0;
+        for (let i = 0; i < d.length; i += 4) { n++; if (d[i + 1] > 120 && d[i] < 90 && d[i + 2] < 120) m++; }
+        best = Math.max(best, Math.round((100 * m) / n));
+      }
+      return best;
+    }, [x, y] as const);
+    let g = await greenAbout(qa[0], qa[1]);
+    for (let i = 0; i < 30 && g < 80; i++) { await page.waitForTimeout(100); g = await greenAbout(qa[0], qa[1]); }
+    assert.ok(g >= 80, `the shot shows it in the colour given it (${g}%)`);
+    await page.getByTestId('looks-shot-own').waitFor();
+    await h.screenshot('looks-this-shot');
+    // The map worked on, in History, keeps the project's colour.
+    await page.getByTestId('studio-history').click();
+    await page.waitForTimeout(400);
+    const qw = await h.toPage(P.a);
+    assert.ok((await greenAbout(qw[0], qw[1])) < 20, 'not on the map worked on');
+    // Back in the shot: back to everywhere's looks for it.
+    await h.goto('shots');
+    await page.getByTestId('looks-scope-shot').click();
+    await page.getByTestId('looks-shot-clear').click();
+    await h.saved();
+    assert.equal((await restyle()).entity?.[aId], undefined, 'the shot\'s own looks for it gone');
+    assert.equal(await page.getByTestId('looks-shot-own').count(), 0);
+    // Everywhere again: a change goes to the project, and so to every shot.
+    await page.getByTestId('looks-scope-everywhere').click();
+    await page.getByTestId('entity-color').fill('#00cc44');
+    await h.saved();
+    assert.equal(await colourOf(A), '#00cc44');
+    assert.deepEqual(await restyle(), {});
+    // Undone, step by step.
+    for (let i = 0; i < 20 && (await steps()) > before; i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await steps(), before);
+    assert.equal(await colourOf(A), own);
+    await page.getByTestId('studio-history').click();
+    // (Every list open at once again for the steps after this one.)
+    await page.evaluate(() => (window as any).__mapmaker.allLists());
+    await page.evaluate(() => (window as any).__mapmaker.store.set({ selection: null, looksScope: 'everywhere' }));
+  });
+
   await h.step('The menu bar: every command in a menu with its shortcut; the keyboard runs the same commands (D197)', async () => {
     const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);
     await page.getByTestId('studio-history').click();

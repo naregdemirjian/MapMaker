@@ -21,6 +21,7 @@ import { parcelGeometry } from '../render-engine/parcel-geometry.ts';
 import type { Arrangement } from '../geo-kernel/arrangement.ts';
 import { entityStyle } from '../domain/commands.ts';
 import { groupStyle, lookedEntity } from '../domain/group-looks.ts';
+import { shotWorld, restyleOf } from './shot-looks.ts';
 import { preloadImages, prepareVideos, imageNow, videoNow, drawImageFit } from '../render-engine/assets.ts';
 import { eventsBoxOf } from './events-box.ts';
 import { timeAt, type ShotSettings } from './sequence.ts';
@@ -157,7 +158,9 @@ export interface SvgFrame { svg: string; width: number; height: number; at: Inst
 
 /** One frame of a shot as an SVG document (see the top of this file). */
 export async function svgFrame(o: SvgFrameOptions): Promise<SvgFrame> {
-  const { world, engine, shot, frame } = o;
+  const { engine, shot, frame } = o;
+  // (With the shot's own looks, D239.)
+  const world = shotWorld(o.world, restyleOf(shot.restyle));
   const W = Math.max(16, Math.round(shot.width * (o.scale ?? 1))), H = Math.max(16, Math.round(shot.height * (o.scale ?? 1)));
   const space = world.get('map_space', shot.spaceId);
   const t = timeAt(shot, frame);

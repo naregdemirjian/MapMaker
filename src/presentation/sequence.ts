@@ -154,6 +154,8 @@ export interface ShotSettings {
    * view moves west); negative the other way. Absent or 0: still. Only for the globe.
    */
   spin?: number;
+  /** Looks of this shot's own (D239): countries', groups' and layers' colours and styles as they are in it. See shot-looks.ts. */
+  restyle?: import('./shot-looks.ts').Restyle;
 }
 
 export type ExportFormat = 'png' | 'tiff' | 'tiff-zip' | 'mp4' | 'webm';

@@ -14,6 +14,8 @@ import { CountryLabelSection, GroupLabelSection } from '../components/LabelStyle
 import { CountryFillSection, GroupFillSection } from '../components/CountryFill.tsx';
 import { CountryLookSection, LayerLookSection, GroupLookSection } from '../components/LookEditor.tsx';
 import { groupStyle, groupLooksPlain, groupMembers, lookedEntity } from '../../domain/group-looks.ts';
+import { restyleOf, restyled, withoutRestyle, type RestyleTable } from '../../presentation/shot-looks.ts';
+import type { ShotSettings } from '../../presentation/sequence.ts';
 import { CountryBordersSection, LayerBordersSection } from '../components/BorderEditor.tsx';
 import { CharacterIconSection } from '../components/CharacterIcons.tsx';
 import { CityAlwaysShown } from '../components/Characters.tsx';
@@ -39,17 +41,17 @@ function Hint() {
  */
 function EntityColour({ id }: { id: string }) {
   const s = useStore();
-  const w = s.world!;
+  const w = s.lookWorld!;
   const e = w.get('entity', id);
   if (!e) return null;
   const g = e.group_id ? w.get('entity_group', e.group_id) : undefined;
-  const set = (color: string) => s.execute((wd) => cmd.setEntityColor(wd, id, color));
+  const set = (color: string) => s.executeLooks((wd) => cmd.setEntityColor(wd, id, color));
   if (g && groupStyle(g).colorMembers) {
     const own = cmd.entityStyle(e).ownColor === true;
     return own ? (
       <label>Colour (its own)
         <span className="inline"><input type="color" value={e.color} onChange={(ev) => set(ev.target.value)} data-testid="entity-color" />
-          <button className="small" onClick={() => s.execute((wd) => cmd.setEntityColor(wd, id, null, false))} title={`Drawn in the colour of the group "${g.name}" again (its own is kept for when it leaves)`} data-testid="entity-group-color">The group's colour</button></span>
+          <button className="small" onClick={() => s.executeLooks((wd) => cmd.setEntityColor(wd, id, null, false))} title={`Drawn in the colour of the group "${g.name}" again (its own is kept for when it leaves)`} data-testid="entity-group-color">The group's colour</button></span>
       </label>
     ) : (
       <label title={`The group "${g.name}" draws its members in its colour; choosing one here gives it a colour of its own`}>Colour (the group's)
@@ -63,7 +65,7 @@ function EntityColour({ id }: { id: string }) {
 /** A member of a group with looks (D237): those looks are laid over its own; the way to them. */
 function GroupNote({ id }: { id: string }) {
   const s = useStore();
-  const w = s.world!;
+  const w = s.lookWorld!;
   const e = w.get('entity', id);
   const g = e?.group_id ? w.get('entity_group', e.group_id) : undefined;
   if (!g || groupLooksPlain(groupStyle(g))) return null;
@@ -77,12 +79,12 @@ function GroupNote({ id }: { id: string }) {
 
 function EntityLooks({ id }: { id: string }) {
   const s = useStore();
-  const e = s.world!.get('entity', id);
+  const e = s.lookWorld!.get('entity', id);
   if (!e) return <Hint />;
   const political = e.type_id === 'polity' || e.type_id === 'faction';
   return (
     <div className="panel" data-testid="looks-entity">
-      <h3><span className="swatch big" style={{ background: lookedEntity(s.world!, e).color }} /> {e.name}</h3>
+      <h3><span className="swatch big" style={{ background: lookedEntity(s.lookWorld!, e).color }} /> {e.name}</h3>
       <GroupNote id={id} />
       <PropGroup id="entity:fill" title={political ? 'Colour and fill' : 'Colour'}>
         <EntityColour id={id} />
@@ -102,7 +104,7 @@ function EntityLooks({ id }: { id: string }) {
  */
 function GroupLooks({ id }: { id: string }) {
   const s = useStore();
-  const w = s.world!;
+  const w = s.lookWorld!;
   const g = w.get('entity_group', id);
   if (!g) return <Hint />;
   const gs = groupStyle(g);
@@ -113,9 +115,9 @@ function GroupLooks({ id }: { id: string }) {
       <h3><span className="swatch big" style={{ background: g.color }} /> {g.name}</h3>
       <p className="muted">Laid over the looks of the {members.length === 1 ? 'one' : members.length} in it, as an adjustment layer: its effects are added to each one's own, and where one has a setting of its own, that wins. Choose one of them to change it alone.</p>
       <PropGroup id="group:fill" title={political ? 'Colour and fill' : 'Colour'}>
-        <label>Colour<input type="color" value={g.color} onChange={(ev) => s.execute((wd) => cmd.setEntityGroupColor(wd, id, ev.target.value))} data-testid="group-color" /></label>
+        <label>Colour<input type="color" value={g.color} onChange={(ev) => s.executeLooks((wd) => cmd.setEntityGroupColor(wd, id, ev.target.value))} data-testid="group-color" /></label>
         <label className="check" title="Those given a colour of their own (in their Looks) keep it">
-          <input type="checkbox" checked={!!gs.colorMembers} onChange={(ev) => s.execute((wd) => cmd.setGroupStyle(wd, id, { colorMembers: ev.target.checked }))} data-testid="group-color-members" /> Its members drawn in this colour
+          <input type="checkbox" checked={!!gs.colorMembers} onChange={(ev) => s.executeLooks((wd) => cmd.setGroupStyle(wd, id, { colorMembers: ev.target.checked }))} data-testid="group-color-members" /> Its members drawn in this colour
         </label>
         {political && <GroupFillSection groupId={id} />}
       </PropGroup>
@@ -127,7 +129,7 @@ function GroupLooks({ id }: { id: string }) {
 
 function LayerLooks({ id }: { id: string }) {
   const s = useStore();
-  const w = s.world!;
+  const w = s.lookWorld!;
   const layer = w.get('layer', id);
   if (!layer) return <Hint />;
   if (isFeatureKind(layer.kind) || layer.kind === 'field') {
@@ -140,7 +142,7 @@ function LayerLooks({ id }: { id: string }) {
       {layers.length > 0 && <PropGroup id="layer:fill" title="Fill and look">
         {layers.map((l) => (
           <label key={`fill-${l.id}`} className="inline layer-option" title="Stripes or dots let the layers under this one show through: for occupation, control or influence over the political map">Fill
-            <select value={parseJSON<{ fill?: string }>(l.style, {}).fill ?? 'solid'} onChange={(e) => s.execute((wd) => cmd.setLayerFill(wd, l.id, e.target.value as 'solid' | 'hatch' | 'cross' | 'dots'))} data-testid="layer-fill">
+            <select value={parseJSON<{ fill?: string }>(l.style, {}).fill ?? 'solid'} onChange={(e) => s.executeLooks((wd) => cmd.setLayerFill(wd, l.id, e.target.value as 'solid' | 'hatch' | 'cross' | 'dots'))} data-testid="layer-fill">
               <option value="solid">Solid</option>
               <option value="hatch">Stripes</option>
               <option value="cross">Crossed stripes</option>
@@ -152,8 +154,8 @@ function LayerLooks({ id }: { id: string }) {
           const st = parseJSON<{ fillOpacity?: number; borderWidth?: number }>(l.style, {});
           return (
             <div key={`look-${l.id}`} className="two layer-option">
-              <label title="How strongly the countries' colours cover the map under them, in shots and exports too">Opacity (%)<NumberField min={0} max={100} step={5} value={Math.round((st.fillOpacity ?? 0.78) * 100)} def={l.export_pass === 'political' ? 78 : 60} onCommit={(n) => s.execute((wd) => cmd.setLayerLook(wd, l.id, { fillOpacity: n / 100 }))} testId="layer-opacity" /></label>
-              <label title="The width of the borders between countries on this layer (pixels at 1920 wide)">Border width<NumberField min={0} max={20} step={0.25} value={st.borderWidth ?? 1.3} def={l.export_pass === 'political' ? 1.4 : 1} onCommit={(n) => s.execute((wd) => cmd.setLayerLook(wd, l.id, { borderWidth: n }))} testId="layer-border-width" /></label>
+              <label title="How strongly the countries' colours cover the map under them, in shots and exports too">Opacity (%)<NumberField min={0} max={100} step={5} value={Math.round((st.fillOpacity ?? 0.78) * 100)} def={l.export_pass === 'political' ? 78 : 60} onCommit={(n) => s.executeLooks((wd) => cmd.setLayerLook(wd, l.id, { fillOpacity: n / 100 }))} testId="layer-opacity" /></label>
+              <label title="The width of the borders between countries on this layer (pixels at 1920 wide)">Border width<NumberField min={0} max={20} step={0.25} value={st.borderWidth ?? 1.3} def={l.export_pass === 'political' ? 1.4 : 1} onCommit={(n) => s.executeLooks((wd) => cmd.setLayerLook(wd, l.id, { borderWidth: n }))} testId="layer-border-width" /></label>
             </div>
           );
         })}
@@ -165,13 +167,13 @@ function LayerLooks({ id }: { id: string }) {
           const st = parseJSON<{ fronts?: 'second' | 'first' | 'plain'; frontColor?: string }>(l.style, {});
           return (
             <label key={`fronts-${l.id}`} className="inline layer-option" title="Where two countries are at war (Relationships, in a country's panel), the border between them on this layer is drawn as a front line while the war lasts">Front lines
-              <select value={st.fronts ?? 'off'} onChange={(e) => s.execute((wd) => cmd.setLayerFronts(wd, l.id, e.target.value === 'off' ? null : e.target.value as 'second' | 'first' | 'plain'))} data-testid="layer-fronts">
+              <select value={st.fronts ?? 'off'} onChange={(e) => s.executeLooks((wd) => cmd.setLayerFronts(wd, l.id, e.target.value === 'off' ? null : e.target.value as 'second' | 'first' | 'plain'))} data-testid="layer-fronts">
                 <option value="off">None</option>
                 <option value="second" title="Where two countries are at war: teeth into the second of the war (as entered)">Teeth to the 2nd</option>
                 <option value="first" title="Where two countries are at war: teeth into the first of the war">Teeth to the 1st</option>
                 <option value="plain">No teeth</option>
               </select>
-              {st.fronts && <input type="color" value={st.frontColor ?? '#d62828'} onChange={(e) => s.execute((wd) => cmd.setLayerFronts(wd, l.id, st.fronts!, e.target.value))} title="The colour of the front lines" data-testid="layer-front-color" />}
+              {st.fronts && <input type="color" value={st.frontColor ?? '#d62828'} onChange={(e) => s.executeLooks((wd) => cmd.setLayerFronts(wd, l.id, st.fronts!, e.target.value))} title="The colour of the front lines" data-testid="layer-front-color" />}
             </label>
           );
         })}
@@ -182,7 +184,7 @@ function LayerLooks({ id }: { id: string }) {
 
 function FeatureLooks({ id }: { id: string }) {
   const s = useStore();
-  const f = s.world!.get('feature', id);
+  const f = s.lookWorld!.get('feature', id);
   if (!f) return <Hint />;
   return (
     <div className="panel" data-testid="looks-feature">
@@ -199,6 +201,7 @@ function EventLooks({ id }: { id: string }) {
   return (
     <div className="panel" data-testid="looks-event">
       <h3>{e.name}</h3>
+      {s.mode === 'present' && s.looksScope === 'shot' && <p className="muted small-text">An event's look is the same in every shot (a shot's own way of animating changes is in its settings, Transitions).</p>}
       <PropGroup id="event:look" title="Its changes as they animate">
         <label title="How its changes look when they animate, here and in every shot: as the shot's look, or a look of their own (a blitz in a film otherwise clean)">Look of its changes
           <select value={eventTransitionLook(e.presentation) ?? ''} onChange={(ev) => s.execute((wd) => cmd.setEventLook(wd, id, ev.target.value || null))} data-testid="event-look">
@@ -211,12 +214,52 @@ function EventLooks({ id }: { id: string }) {
   );
 }
 
+/** What is chosen, as a row a shot can have looks of its own for (D239). */
+function restyleTarget(sel: ReturnType<typeof useStore>['selection']): { table: RestyleTable; id: string } | null {
+  if (sel?.kind === 'entity') return { table: 'entity', id: sel.id };
+  if (sel?.kind === 'group') return { table: 'entity_group', id: sel.id };
+  if (sel?.kind === 'layer') return { table: 'layer', id: sel.id };
+  if (sel?.kind === 'feature') return { table: 'feature', id: sel.id };
+  return null;
+}
+
+/**
+ * In Presentation with a shot open (D239): where a change of looks goes, everywhere (the project) or to this shot
+ * only; and, when the shot has looks of its own for the thing chosen, the way back to everywhere's.
+ */
+function ScopeSwitch() {
+  const s = useStore();
+  if (s.mode !== 'present' || !s.shotId || !s.world) return null;
+  const row = s.world.get('sequence', s.shotId);
+  const settings = row ? parseJSON<ShotSettings | null>(row.settings, null) : null;
+  if (!row || !settings) return null;
+  const restyle = restyleOf(settings.restyle);
+  const target = restyleTarget(s.selection);
+  const own = !!target && restyled(restyle, target.table, target.id);
+  return (
+    <div className="looks-scope" data-testid="looks-scope">
+      <span className="muted">Changes go</span>
+      <span className="seg">
+        <button className={`small ${s.looksScope === 'everywhere' ? 'on' : ''}`} onClick={() => s.set({ looksScope: 'everywhere' })} title="To the project: every shot, and the map worked on" data-testid="looks-scope-everywhere">Everywhere</button>
+        <button className={`small ${s.looksScope === 'shot' ? 'on' : ''}`} onClick={() => s.set({ looksScope: 'shot' })} title={`To the shot "${row.name}" alone, kept with it`} data-testid="looks-scope-shot">This shot only</button>
+      </span>
+      {own && target && (
+        <p className="muted small-text" data-testid="looks-shot-own">
+          This shot has looks of its own for it{s.looksScope === 'everywhere' ? ', drawn in it over these' : ''}.{' '}
+          <button className="small link" onClick={() => s.execute((w) => ({ ...cmd.updateSequence(w, row.id, { settings: { ...settings, restyle: withoutRestyle(restyle, target.table, [target.id]) } }), label: 'Back to the looks of everywhere' }))} data-testid="looks-shot-clear">Back to everywhere's</button>
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** The Looks panel: the looks of the thing chosen. */
 export function LooksPanel() {
   const s = useStore();
   const sel = s.selection;
   return (
     <div className="looks-panel" data-testid="looks-panel" data-drop="looks">
+      <ScopeSwitch />
       {!sel && <Hint />}
       {sel?.kind === 'entity' && <EntityLooks id={sel.id} />}
       {sel?.kind === 'layer' && <LayerLooks id={sel.id} />}

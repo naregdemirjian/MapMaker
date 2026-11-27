@@ -8,13 +8,14 @@ import { give, chosenTargets, targetsText, type Target } from './effects.ts';
 import type { EffectItem } from '../render-engine/effects-catalogue.ts';
 
 /** What a point of the page offers an effect let go there: the things it would go to, and the element marked. */
-export function dropTargetAt(x: number, y: number): { targets: Target[]; el: Element; onMap: boolean } | null {
+export function dropTargetAt(x: number, y: number, item?: EffectItem): { targets: Target[]; el: Element; onMap: boolean } | null {
   const el = document.elementFromPoint(x, y)?.closest('[data-drop]');
   if (!el) return null;
   const d = el.getAttribute('data-drop') ?? '';
   if (d === 'map') {
-    // (In Presentation, the shot open; on the working map, the country under the point.)
-    if (store.mode === 'present') return { targets: store.shotId ? [{ kind: 'shot', id: store.shotId }] : [], el, onMap: true };
+    // (In Presentation, a shot's graphics and changes go to the shot open, D239; anything else to the country under the
+    // point, on the working map or the shot's preview.)
+    if (store.mode === 'present' && (item?.folder === 'graphics' || item?.folder === 'transitions')) return { targets: store.shotId ? [{ kind: 'shot', id: store.shotId }] : [], el, onMap: true };
     const id = countryAtPage(x, y);
     return { targets: id ? [{ kind: 'entity', id }] : [], el, onMap: true };
   }
@@ -41,7 +42,7 @@ export function startEffectDrag(item: EffectItem, ev: ReactPointerEvent<HTMLElem
     }
     ghost.style.left = `${e.clientX + 14}px`;
     ghost.style.top = `${e.clientY + 12}px`;
-    const t = dropTargetAt(e.clientX, e.clientY);
+    const t = dropTargetAt(e.clientX, e.clientY, item);
     const hover = t?.onMap && t.targets[0]?.kind === 'entity' ? t.targets[0].id : null;
     if (store.effectHover !== hover) store.set({ effectHover: hover });
     mark(t && !t.onMap ? t.el : null);
@@ -59,7 +60,7 @@ export function startEffectDrag(item: EffectItem, ev: ReactPointerEvent<HTMLElem
     mark(null);
     if (store.effectHover) store.set({ effectHover: null });
     if (!e || !dragged) return;
-    const t = dropTargetAt(e.clientX, e.clientY);
+    const t = dropTargetAt(e.clientX, e.clientY, item);
     if (!t) return;
     if (!t.targets.length) { store.toast(t.onMap ? `Let “${item.name}” go over a country.` : `Choose something first: “${item.name}” goes to what is chosen.`, 'error'); return; }
     const r = give(item, t.targets);

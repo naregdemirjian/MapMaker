@@ -220,20 +220,20 @@ function MapLightField({ idPrefix }: { idPrefix: string }) {
 /** A country's look of its own, in its panel. */
 export function CountryLookSection({ id }: { id: string }) {
   const s = useStore();
-  const e = s.world!.get('entity', id);
+  const e = s.lookWorld!.get('entity', id);
   if (!e) return null;
   const own = countryLookOf(cmd.entityStyle(e).look);
   // (A kept look goes to every country chosen, when several are.)
-  const chosen = s.chosen('entity').filter((x) => { const t = s.world!.get('entity', x)?.type_id; return t === 'polity' || t === 'faction'; });
+  const chosen = s.chosen('entity').filter((x) => { const t = s.lookWorld!.get('entity', x)?.type_id; return t === 'polity' || t === 'faction'; });
   const targets = chosen.includes(id) ? chosen : [id];
   return (
     <details className="country-look" open={!!own}>
       <summary>{own ? 'Look (its own)' : 'Look (as its layer)'}</summary>
-      <LookEditor value={own ?? EMPTY} onChange={(next) => s.execute((w) => cmd.setCountryLook(w, id, next))} idPrefix="country" />
+      <LookEditor value={own ?? EMPTY} onChange={(next) => s.executeLooks((w) => cmd.setCountryLook(w, id, next))} idPrefix="country" />
       {own?.effects.some((x) => 'light' in x && x.light === 'map') && <MapLightField idPrefix="country" />}
-      {own && <button className="small" onClick={() => s.execute((w) => cmd.setCountryLook(w, id, null))} data-testid="country-look-reset">Look like its layer again</button>}
+      {own && <button className="small" onClick={() => s.executeLooks((w) => cmd.setCountryLook(w, id, null))} data-testid="country-look-reset">Look like its layer again</button>}
       <LookPresets current={own} idPrefix="country" useLabel={targets.length > 1 ? `Give the ${targets.length} chosen a kept look` : 'Give it a kept look'}
-        onUse={(look, name) => s.execute((w) => cmd.setCountriesLook(w, targets, look, `the look "${name}"`))} />
+        onUse={(look, name) => s.executeLooks((w) => cmd.setCountriesLook(w, targets, look, `the look "${name}"`))} />
     </details>
   );
 }
@@ -241,16 +241,16 @@ export function CountryLookSection({ id }: { id: string }) {
 /** The look of every country of a layer without one of its own, and how the layer is laid on the map. */
 export function LayerLookSection({ layerId }: { layerId: string }) {
   const s = useStore();
-  const l = s.world!.get('layer', layerId);
+  const l = s.lookWorld!.get('layer', layerId);
   if (!l) return null;
   const look = layerLookOf(parseJSON<{ look?: unknown }>(l.style, {}).look);
   return (
     <details className="layer-option layer-look">
       <summary>{look ? 'Look of its countries (set)' : 'Look of its countries'}</summary>
-      <LookEditor value={look ?? { ...EMPTY, blend: 'normal' }} blend onChange={(next) => s.execute((w) => cmd.setLayerEffects(w, layerId, next as LayerLook))} idPrefix="layer" />
+      <LookEditor value={look ?? { ...EMPTY, blend: 'normal' }} blend onChange={(next) => s.executeLooks((w) => cmd.setLayerEffects(w, layerId, next as LayerLook))} idPrefix="layer" />
       <MapLightField idPrefix="layer" />
-      {look && <button className="small" onClick={() => s.execute((w) => cmd.setLayerEffects(w, layerId, null))}>No look</button>}
-      <LookPresets current={look} idPrefix="layer" useLabel="Use a kept look" onUse={(kept) => s.execute((w) => cmd.setLayerEffects(w, layerId, { ...kept, blend: look?.blend ?? 'normal' }))} />
+      {look && <button className="small" onClick={() => s.executeLooks((w) => cmd.setLayerEffects(w, layerId, null))}>No look</button>}
+      <LookPresets current={look} idPrefix="layer" useLabel="Use a kept look" onUse={(kept) => s.executeLooks((w) => cmd.setLayerEffects(w, layerId, { ...kept, blend: look?.blend ?? 'normal' }))} />
     </details>
   );
 }
@@ -262,15 +262,15 @@ export function LayerLookSection({ layerId }: { layerId: string }) {
  */
 export function GroupLookSection({ groupId }: { groupId: string }) {
   const s = useStore();
-  const g = s.world!.get('entity_group', groupId);
+  const g = s.lookWorld!.get('entity_group', groupId);
   if (!g) return null;
   const look = groupStyle(g).look ?? null;
   return (
     <div className="group-look" data-testid="group-look-section">
-      <LookEditor value={look ?? EMPTY} onChange={(next) => s.execute((w) => cmd.setGroupStyle(w, groupId, { look: next }))} idPrefix="group" />
+      <LookEditor value={look ?? EMPTY} onChange={(next) => s.executeLooks((w) => cmd.setGroupStyle(w, groupId, { look: next }))} idPrefix="group" />
       {look?.effects.some((x) => 'light' in x && x.light === 'map') && <MapLightField idPrefix="group" />}
-      {look && <button className="small" onClick={() => s.execute((w) => cmd.setGroupStyle(w, groupId, { look: null }))} data-testid="group-look-reset">No look for the group</button>}
-      <LookPresets current={look} idPrefix="group" useLabel="Give the group a kept look" onUse={(kept) => s.execute((w) => cmd.setGroupStyle(w, groupId, { look: kept }))} />
+      {look && <button className="small" onClick={() => s.executeLooks((w) => cmd.setGroupStyle(w, groupId, { look: null }))} data-testid="group-look-reset">No look for the group</button>}
+      <LookPresets current={look} idPrefix="group" useLabel="Give the group a kept look" onUse={(kept) => s.executeLooks((w) => cmd.setGroupStyle(w, groupId, { look: kept }))} />
     </div>
   );
 }

@@ -61,6 +61,34 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D239. Looks in Presentation: the Looks and Effects panels beside the shot; everywhere or this shot only (S5, first part)
+
+- **Why.** Agreed with the user: in Presentation the Looks and Effects panels are docked beside the shot, and a change
+  of looks applies everywhere unless switched to "this shot only" (keyframes, each option a track, follow in S5's
+  second part).
+- **Shots page**: Shot settings at the right with the Looks and Effects panels under them, as tabs of one group. A click
+  on the shot's preview (not a drag, which frames the shot) chooses the country there at the frame shown (on the
+  topmost of the shot's layers holding the place: `MapView` `shotCountryAt`); a click on nothing chooses nothing.
+  Effects dragged onto the preview go to the country under the pointer (graphics and transitions to the shot).
+- **Everywhere or this shot only** (the Looks panel's head in Presentation with a shot open; `store.looksScope`,
+  everywhere at first): everywhere, a change goes to the project as before (every shot and the map worked on). This
+  shot only, it is kept with the shot: `ShotSettings.restyle` holds the rows it changed of countries (people, cities),
+  groups, layers and areas, their colour and style whole (`presentation/shot-looks.ts`). The change is made by the
+  same commands as everywhere, on the world with the shot's own rows laid on it for a moment and taken away again
+  (`store.executeLooks`, `restyleDiffs`, `restyleAfter`): what it changed is written into the shot (one undo step,
+  "… (this shot only)"); a change that makes or deletes things is refused for one shot. An event's look stays the
+  same in every shot (a shot's own way of animating changes is in its settings).
+- **Reading**: the shot is drawn through a view of the world in which those rows are the shot's (`shotWorld`, kept
+  while the shot's looks stay the same): the preview, exports (its pictures loaded before the first frame too) and
+  SVG frames. The Looks panel reads the same view while it changes this shot only (`store.lookWorld`), so it shows the
+  shot's looks; with the shot having looks of its own for the thing chosen it says so, with "Back to everywhere's".
+- **Tests.** Unit: a shot's looks checked as stored; the shot's view (its rows with the shot's colour and style, the
+  rest the world's, the world unchanged, the same view while nothing changes, a change of the world showing through);
+  a change for one shot kept as its rows over what it kept, the world as it was, a group's looks for the shot
+  reaching its members in the shot alone, making things refused, back to everywhere's. Interface: the panels beside a
+  new shot; a country chosen by a click in the preview; a colour for this shot only, kept with it, drawn in the preview
+  and not on the map worked on; back to everywhere's; a colour everywhere reaching the project; undone.
+
 ### D238. The Effects panel: every effect in folders, dragged onto things or into the Looks panel (S4, second part)
 
 - **Why.** Agreed with the user: an Effects panel holding every effect the software has, in folders, as in Premiere;

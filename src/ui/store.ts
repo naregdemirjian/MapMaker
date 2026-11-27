@@ -6,8 +6,10 @@ import { useSyncExternalStore } from 'react';
 import { Api, ApiError, type JournalState, type ProjectInfo, type BorderDraft } from './api.ts';
 import { flatten, anchorIndices, type Anchor } from './bezier-path.ts';
 import { World } from '../world-model/world.ts';
-import { Engine } from '../temporal-engine/engine.ts';
-import { takeLockedSkipped, type CommandResult } from '../domain/commands.ts';
+import { Engine, parseJSON } from '../temporal-engine/engine.ts';
+import type { ShotSettings } from '../presentation/sequence.ts';
+import { takeLockedSkipped, updateSequence, type CommandResult } from '../domain/commands.ts';
+import { shotWorld, restyleOf, restyleDiffs, restyleAfter, type Restyle } from '../presentation/shot-looks.ts';
 import { type Instant, gregorian, toJSONValue, fromJSONValue, PRESENT_YEAR } from '../core-time/index.ts';
 import { type Camera, defaultCamera, flatCamera, PROJECTIONS } from '../render-engine/camera.ts';
 import { MapRenderer, VIEW_QUALITY } from '../render-engine/map-renderer.ts';
@@ -30,7 +32,7 @@ import { terrainSourceOf, planetOf, isGeologicalMap, simOf, terrainLook } from '
 import { simTerrain, simParams, simCover, simCoverFrame, quickPlanetCover } from './planet-engine.ts';
 import { keyOf as contentKey } from '../planet/state/hash.ts';
 import type { PlanetDefinition } from '../planet/model/definition.ts';
-import { MAIN_BRANCH, isBaseEvent, type MapSpaceRow } from '../world-model/schema.ts';
+import { MAIN_BRANCH, isBaseEvent, invertDiffs, type MapSpaceRow } from '../world-model/schema.ts';
 import { DEFAULT_PERIOD, type PeriodSpec } from '../domain/history-view.ts';
 import { setAssetBase } from '../render-engine/assets.ts';
 import { lonLatToVec, type Vec3 } from '../geo-kernel/vec.ts';
@@ -275,6 +277,54 @@ export class AppStore {
   collapsed: string[] = [];
   /** An effect being dragged from the Effects panel (D238): the country under it on the map, outlined there. */
   effectHover: string | null = null;
+  /**
+   * In Presentation, where a change in the Looks panel goes (D239): everywhere (the project, every shot and the working
+   * map) or to the shot open only (kept in its settings, ShotSettings.restyle).
+   */
+  looksScope: 'everywhere' | 'shot' = 'everywhere';
+
+  /** The shot the Looks panel changes for itself alone (D239): in Presentation, with a shot open and This shot only chosen. */
+  looksShot(): { id: string; settings: ShotSettings } | null {
+    if (this.mode !== 'present' || this.looksScope !== 'shot' || !this.shotId || !this.world) return null;
+    const row = this.world.get('sequence', this.shotId);
+    const settings = row ? parseJSON<ShotSettings | null>(row.settings, null) : null;
+    return row && settings ? { id: row.id, settings } : null;
+  }
+
+  /** The world as the Looks panel reads it (D239): with the shot's own looks when it changes those, else the world. */
+  get lookWorld(): World | null {
+    const sh = this.looksShot();
+    return sh && this.world ? shotWorld(this.world, restyleOf(sh.settings.restyle)) : this.world;
+  }
+
+  /**
+   * A change of looks (D239): as execute, everywhere; for the shot alone, made on the world with the shot's own looks
+   * laid on it for a moment, then taken away again, what it changed kept in the shot's settings (one undo step).
+   */
+  executeLooks<T>(fn: (w: World, e: Engine) => CommandResult<T>): T | undefined {
+    const sh = this.looksShot();
+    if (!sh) return this.execute(fn);
+    const w = this.world, e = this.engine;
+    if (!w || !e) return undefined;
+    const before = restyleOf(sh.settings.restyle);
+    const lay = restyleDiffs(w, before);
+    let r: CommandResult<T>;
+    w.applyDiffs(lay.apply);
+    try {
+      r = fn(w, e);
+    } catch (err) {
+      w.applyDiffs(lay.undo);
+      this.toast((err as Error).message, 'error');
+      this.notify();
+      return undefined;
+    }
+    w.applyDiffs(invertDiffs(r.diffs));
+    w.applyDiffs(lay.undo);
+    let next: Restyle;
+    try { next = restyleAfter(before, r.diffs); } catch (err) { this.toast((err as Error).message, 'error'); this.notify(); return undefined; }
+    this.execute((wd) => ({ ...updateSequence(wd, sh.id, { settings: { ...sh.settings, restyle: next } }), label: `${r.label} (this shot only)` }));
+    return r.result;
+  }
   /** The ids chosen now: the several chosen, else the one selected (of that kind). */
   chosen(kind: 'entity' | 'event'): string[] {
     if (this.multi?.kind === kind && this.multi.ids.length) return this.multi.ids;

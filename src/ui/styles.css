@@ -212,6 +212,12 @@ table.shortcuts kbd { font: inherit; background: var(--panel2); border: 1px soli
 .effect-ghost { position: fixed; z-index: 3000; pointer-events: none; padding: 4px 9px; border-radius: 5px; background: #12324a; border: 1px solid #5ef2ff; color: #e8f6ff; font-size: 12px; white-space: nowrap; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45); }
 .effect-ghost.none { border-color: #6b7785; background: #1d2530; color: #b8c2cc; }
 .drop-here { outline: 2px solid #5ef2ff !important; outline-offset: -2px; background: rgba(94, 242, 255, 0.08) !important; }
+/* In Presentation (D239): where a change of looks goes, everywhere or this shot only. */
+.looks-scope { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--line, #2a3442); background: rgba(255, 255, 255, 0.02); }
+.looks-scope .seg { display: inline-flex; border: 1px solid #2e4a63; border-radius: 6px; overflow: hidden; }
+.looks-scope .seg button { border: 0; border-radius: 0; margin: 0; }
+.looks-scope .seg button.on { background: #2e6da4; color: #fff; }
+.looks-scope p { flex-basis: 100%; margin: 2px 0 0; }
 /* A member of a group with looks (D237): those looks are laid over its own. */
 .group-note { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin: 0 0 10px; padding: 6px 8px; border-radius: 6px; background: rgba(255, 209, 102, 0.08); border: 1px solid rgba(255, 209, 102, 0.25); font-size: 12px; line-height: 1.4; }
 .group-note .link { margin-left: auto; }

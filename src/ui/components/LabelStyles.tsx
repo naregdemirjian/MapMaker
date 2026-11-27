@@ -105,21 +105,21 @@ export function LabelStyleDialog({ onClose }: { onClose: () => void }) {
  */
 export function CountryLabelSection({ id }: { id: string }) {
   const s = useStore();
-  const w = s.world!;
+  const w = s.lookWorld!;
   const e = w.get('entity', id);
   const own: CountryLabel = cmd.entityStyle(e).label ?? {};
   const group = e?.group_id ? w.get('entity_group', e.group_id) : undefined;
   const fromGroup = group ? groupStyle(group).label : undefined;
   if (!e) return null;
-  return <LabelEditor own={own} fromGroup={fromGroup} groupName={group?.name} name={e.name} save={(next) => s.execute((wd) => cmd.setEntityStyle(wd, id, { label: next }))} />;
+  return <LabelEditor own={own} fromGroup={fromGroup} groupName={group?.name} name={e.name} save={(next) => s.executeLooks((wd) => cmd.setEntityStyle(wd, id, { label: next }))} />;
 }
 
 /** A group's label settings (D237): for every member's label, each setting a member has of its own winning. */
 export function GroupLabelSection({ groupId }: { groupId: string }) {
   const s = useStore();
-  const g = s.world!.get('entity_group', groupId);
+  const g = s.lookWorld!.get('entity_group', groupId);
   if (!g) return null;
-  return <LabelEditor group own={groupStyle(g).label ?? {}} name={g.name} save={(next) => s.execute((wd) => cmd.setGroupStyle(wd, groupId, { label: next }))} />;
+  return <LabelEditor group own={groupStyle(g).label ?? {}} name={g.name} save={(next) => s.executeLooks((wd) => cmd.setGroupStyle(wd, groupId, { label: next }))} />;
 }
 
 function LabelEditor({ own, fromGroup, groupName, name, save, group }: { own: CountryLabel; fromGroup?: CountryLabel; groupName?: string; name: string; save: (next: CountryLabel) => void; group?: boolean }) {

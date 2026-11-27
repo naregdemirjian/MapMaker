@@ -59,20 +59,21 @@ function FlagPicker({ onPick, onClose, current }: { onPick: (code: string) => vo
 /** A country's fill (D81, D82), in its Looks. */
 export function CountryFillSection({ id }: { id: string }) {
   const s = useStore();
-  const e = s.world!.get('entity', id);
+  const w = s.lookWorld!;
+  const e = w.get('entity', id);
   if (!e) return null;
   const fill = cmd.entityStyle(e).fill;
-  return <FillEditor fill={fill} swatch={lookedEntity(s.world!, e)} save={(next) => s.execute((wd) => cmd.setEntityStyle(wd, id, { fill: next }))} setShown={(on) => s.execute((wd) => cmd.setFillsShown(wd, [id], on))} />;
+  return <FillEditor fill={fill} swatch={lookedEntity(w, e)} save={(next) => s.executeLooks((wd) => cmd.setEntityStyle(wd, id, { fill: next }))} setShown={(on) => s.executeLooks((wd) => cmd.setFillsShown(wd, [id], on))} />;
 }
 
 /** A group's fill (D237): a picture or video filling each of its members without a fill of its own. */
 export function GroupFillSection({ groupId }: { groupId: string }) {
   const s = useStore();
-  const g = s.world!.get('entity_group', groupId);
+  const g = s.lookWorld!.get('entity_group', groupId);
   if (!g) return null;
   const fill = groupStyle(g).fill;
-  return <FillEditor group fill={fill} swatch={{ color: g.color, style: JSON.stringify({ fill }) }} save={(next) => s.execute((wd) => cmd.setGroupStyle(wd, groupId, { fill: next }))}
-    setShown={(on) => { if (fill) s.execute((wd) => cmd.setGroupStyle(wd, groupId, { fill: on ? { ...fill, off: undefined } : { ...fill, off: true } })); }} />;
+  return <FillEditor group fill={fill} swatch={{ color: g.color, style: JSON.stringify({ fill }) }} save={(next) => s.executeLooks((wd) => cmd.setGroupStyle(wd, groupId, { fill: next }))}
+    setShown={(on) => { if (fill) s.executeLooks((wd) => cmd.setGroupStyle(wd, groupId, { fill: on ? { ...fill, off: undefined } : { ...fill, off: true } })); }} />;
 }
 
 /** The editor of a fill: the colour, a flag, a picture or a video, and how it covers the land (a country's, or a group's for its members). */

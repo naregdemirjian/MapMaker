@@ -242,7 +242,7 @@ function AnimSelect({ kind, value, onChange, testId }: { kind: FeatureKind; valu
  */
 export function FeatureLookSection({ id }: { id: string }) {
   const s = useStore();
-  const w = s.world!;
+  const w = s.lookWorld!;
   const f = w.get('feature', id);
   if (!f) return null;
   const layer = w.get('layer', f.layer_id);
@@ -252,7 +252,7 @@ export function FeatureLookSection({ id }: { id: string }) {
   const st = featureStyle(kind, layer.style, f.style);
   const ownerColor = f.entity_id ? w.get('entity', f.entity_id)?.color ?? null : null;
   const color = featureColor(kind, layer.style, f.style, ownerColor);
-  const look = (patch: FeatureStyle) => s.execute((wd) => cmd.updateFeature(wd, id, { style: patch }));
+  const look = (patch: FeatureStyle) => s.executeLooks((wd) => cmd.updateFeature(wd, id, { style: patch }));
   const arrowLook = kind === 'line' && st.look === 'arrow';
   const owners = w.all('entity').filter((x) => x.type_id === 'polity' || x.type_id === 'faction').sort((a, b) => a.name.localeCompare(b.name));
   return (

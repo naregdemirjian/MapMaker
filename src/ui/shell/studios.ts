@@ -41,7 +41,7 @@ export const PANELS: PanelInfo[] = [
   { id: 'areas', title: 'Areas', pages: WORLD, hint: 'Areas, lines and points drawn on feature layers' },
   { id: 'events', title: 'Events', pages: WORLD, hint: 'The events of the timeline being viewed' },
   { id: 'properties', title: 'Properties', pages: WORLD, hint: 'What is selected (with nothing selected, the map)' },
-  { id: 'looks', title: 'Looks', pages: ['history', 'timeline', 'looks'], hint: 'How the thing chosen is drawn: its colour, fill, borders, label, marker (Design, Ctrl+D)', minW: 200 },
+  { id: 'looks', title: 'Looks', pages: ['history', 'timeline', 'looks', 'shots'], hint: 'How the thing chosen is drawn: its colour, fill, borders, label, marker (Design, Ctrl+D); in Shots, everywhere or this shot only', minW: 200 },
   { id: 'effects', title: 'Effects', pages: ['history', 'timeline', 'looks', 'shots'], hint: 'Every effect, in folders: drag one onto a country on the map, into the Looks panel or onto a row of the lists; double-click gives it to what is chosen', minW: 170 },
   { id: 'timeline', title: 'Timeline', pages: WORLD, hint: 'The date viewed, playing history, and the events on their tracks' },
   { id: 'shots', title: 'Shots', pages: SHOTS, hint: 'The shots of this project' },
@@ -67,7 +67,8 @@ export function defaultDock(page: Page): DockLayout {
       // (The Effects panel under the lists, beside the map and the Looks panel effects are dragged onto, D238.)
       return { root: split('col', [split('row', [split('col', [lists('countries', ['countries', 'layers', 'places', 'areas'], 0), stack(['effects'], 300)], 250), stack([VIEWER]), split('col', [stack(['looks']), stack(['properties'], 230)], 380)]), stack(['timeline'], 130)]), floats: [] };
     case 'shots':
-      return { root: split('col', [split('row', [stack(['shots'], 250), stack([VIEWER]), stack(['shot'], 310)]), stack(['shot-timeline'], 150)]), floats: [] };
+      // (The Looks and Effects panels beside the shot, under its settings, D239.)
+      return { root: split('col', [split('row', [stack(['shots'], 250), stack([VIEWER]), split('col', [stack(['shot']), stack(['looks', 'effects'])], 330)]), stack(['shot-timeline'], 150)]), floats: [] };
     case 'export':
       return { root: split('col', [split('row', [stack(['shots'], 230), stack([VIEWER]), stack(['export'], 380)]), stack(['shot-timeline'], 110)]), floats: [] };
   }

@@ -30,7 +30,7 @@ export function IconPicture({ icon, color, look = 'plain', size = 32 }: { icon: 
 
 export function CharacterIconSection({ id }: { id: string }) {
   const s = useStore();
-  const e = s.world!.get('entity', id);
+  const e = s.lookWorld!.get('entity', id);
   const [choosing, setChoosing] = useState(false);
   const [busy, setBusy] = useState(false);
   // The size while its slider is dragged; saved (one change to undo) on release.
@@ -38,7 +38,7 @@ export function CharacterIconSection({ id }: { id: string }) {
   if (!e) return null;
   const icon = cmd.entityStyle(e).icon ?? null;
   const def = iconById(icon?.set);
-  const save = (next: cmd.CharacterIcon | null) => s.execute((wd) => cmd.setEntityStyle(wd, id, { icon: next }));
+  const save = (next: cmd.CharacterIcon | null) => s.executeLooks((wd) => cmd.setEntityStyle(wd, id, { icon: next }));
   const keep = { look: icon?.look, size: icon?.size, turn: icon?.turn };
   const choose = (setId: string) => { save({ ...keep, set: setId }); setChoosing(false); };
   const upload = async (file: File | undefined) => {

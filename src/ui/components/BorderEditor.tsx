@@ -51,10 +51,10 @@ const bordersOfLayer = (style: string): LayerBorders => layerBordersOf(parseJSON
 /** A layer's borders: between countries, and against nobody (coasts and unclaimed land). */
 export function LayerBordersSection({ layerId }: { layerId: string }) {
   const s = useStore();
-  const l = s.world!.get('layer', layerId);
+  const l = s.lookWorld!.get('layer', layerId);
   if (!l) return null;
   const b = bordersOfLayer(l.style);
-  const save = (next: LayerBorders) => s.execute((w) => cmd.setLayerBorders(w, layerId, next));
+  const save = (next: LayerBorders) => s.executeLooks((w) => cmd.setLayerBorders(w, layerId, next));
   const part = (key: 'between' | 'coast', title: string) => (
     <details>
       <summary>{title}{b[key] ? ' (styled)' : ''}</summary>
@@ -75,14 +75,14 @@ export function LayerBordersSection({ layerId }: { layerId: string }) {
 /** Special borders between this country and others, on the layer being drawn on. */
 export function CountryBordersSection({ id }: { id: string }) {
   const s = useStore();
-  const w = s.world!;
+  const w = s.lookWorld!;
   const layer = w.get('layer', s.layerId);
   const [other, setOther] = useState('');
   if (!layer || layer.kind !== 'partition') return null;
   const b = bordersOfLayer(layer.style);
   const mine = b.pairs.filter((p) => p.a === id || p.b === id);
   const others = w.all('entity').filter((e) => (e.type_id === 'polity' || e.type_id === 'faction') && e.id !== id && !mine.some((p) => p.a === e.id || p.b === e.id)).sort((x, y) => x.name.localeCompare(y.name));
-  const save = (pairs: LayerBorders['pairs']) => s.execute((wd) => cmd.setLayerBorders(wd, layer.id, { ...b, pairs }));
+  const save = (pairs: LayerBorders['pairs']) => s.executeLooks((wd) => cmd.setLayerBorders(wd, layer.id, { ...b, pairs }));
   return (
     <details className="country-borders" open={mine.length > 0}>
       <summary>Special borders{mine.length ? ` (${mine.length})` : ''}</summary>
