@@ -141,28 +141,75 @@ export function runawayLimit(oceanFraction: number): number {
 
 /** Above this temperature (K) water is not a liquid under any pressure (its critical point). */
 export const WATER_CRITICAL_K = 647.1;
+/** Below this pressure (bar) water is not a liquid at any temperature (its triple point, 612 Pa, rounded as elsewhere). */
+export const WATER_TRIPLE_BAR = 0.006;
 
 /**
- * What has become of a planet's water (D259), from the share of the surface it would cover as seas:
+ * Whether a planet holds its air (D261): the "cosmic shoreline" of Zahnle and Catling (2017). Across the Solar System
+ * the worlds with air and those without are parted by one line: the sunlight a world gets against the fourth power of
+ * its escape speed. Mars lies just on the side with air (it has kept a little: the line is set a tenth below it);
+ * Mercury and the Moon are far on the airless side; Venus, the Earth, Titan and Pluto on the other. So the least
+ * escape speed (km/s) for the light a planet gets (in the Earth's):
+ */
+export const SHORELINE_KMS = 5.5;
+export const escapeNeededKmS = (insolationEarth: number): number => SHORELINE_KMS * Math.max(0, insolationEarth) ** 0.25;
+/**
+ * The planet's air as it is (D261): `held` where its escape speed is enough for the light it gets (or there is no
+ * air to lose); `kept`: not held, and kept by hand (`atmosphere.keep`). `escapeKmS` and `neededKmS` are what decided.
+ */
+export interface AirState { held: boolean; kept: boolean; none: boolean; escapeKmS: number; neededKmS: number }
+export function airState(d: PlanetDefinition): AirState {
+  const x = derive(d), neededKmS = escapeNeededKmS(x.insolationEarth), none = !(d.atmosphere.pressureBar > 0);
+  const held = none || x.escapeKmS >= neededKmS;
+  return { held, kept: !held && !!d.atmosphere.keep, none, escapeKmS: x.escapeKmS, neededKmS };
+}
+/** A definition with the air it has in fact (D261): none where the planet cannot hold it and it is not kept by hand. */
+export function withAirAsItIs(d: PlanetDefinition): PlanetDefinition {
+  const a = airState(d);
+  return a.held || a.kept ? d : { ...d, atmosphere: { ...d.atmosphere, pressureBar: 0 } };
+}
+
+/**
+ * Below this temperature (K) ice lasts on a surface under thin or no air (D261): in a vacuum about 120 K (colder than
+ * that it does not sublime away in the age of a planet: the icy moons of Jupiter; warmer, it does: Ceres, the Moon
+ * outside its shadowed craters); under a little air, which slows the vapour's leaving, up to about 180 K at the
+ * pressure of water's triple point (the polar caps of Mars).
+ */
+export const iceLastsBelowK = (pressureBar: number): number => 120 + 60 * Math.max(0, Math.min(1, pressureBar / WATER_TRIPLE_BAR));
+/** The year's mean temperature (K) of ice at the equator of a world with thin or no air: its own balance of sunlight (albedo 0.6) and heat lost. */
+export const iceAtEquatorK = (insolation: number): number => ((insolation * (1 - 0.6)) / (Math.PI * SIGMA)) ** 0.25;
+
+/**
+ * What has become of a planet's water (D259, D261), from the share of the surface it would cover as seas, on the
+ * planet with the air it has in fact:
  * - `none`: the planet was given none;
- * - `liquid`: seas;
+ * - `liquid`: seas (open, or under ice where it is cold: the climate says where);
  * - `boiled`: with the seas there the planet finds no balance at which they could stay. Either it takes in more
  *   sunlight than a planet with seas can give back as heat (`runawayLimit`; `cause` 'sunlight'), or its air holds so
  *   much heat already that the water vapour's share on top leaves no balance below the temperature above which water
  *   is no liquid at all (`cause` 'greenhouse'). The seas evaporate; high in the air the star's light breaks the vapour
  *   up and its hydrogen is lost to space, within some hundreds of millions of years (Kasting 1988; as Venus is
  *   thought to have lost its water). What is left is a dry planet.
+ * - `frozen`: too little air for water to be liquid (below its triple point's pressure), and cold enough, even at
+ *   the equator, for ice to last (`iceLastsBelowK`): the seas stand frozen where they are, as on the icy moons.
+ * - `sublimed`: too little air for liquid water, and too warm for ice to last where the sun is high: the seas have
+ *   gone into vapour, some of it lost to space, the rest frozen out where it is coldest (ice caps: the climate says
+ *   where, if anywhere). The planet is dry but for them, as Mars is.
  * `kept`: the water kept by hand where it would have boiled away (`water.keep`; not physical). `absorbed` and `limit`
  * (W/m²): the sunlight taken in with the seas there, and the most seas can stand; `withSeasK`: the surface's
- * temperature with the seas there.
+ * temperature with the seas there; `iceK` and `iceLastsK`: the equator's ice and the temperature below which it lasts.
  */
-export type WaterFate = 'none' | 'liquid' | 'boiled';
-export interface WaterState { fate: WaterFate; kept: boolean; cause: 'sunlight' | 'greenhouse' | null; absorbed: number; limit: number; withSeasK: number }
+export type WaterFate = 'none' | 'liquid' | 'boiled' | 'frozen' | 'sublimed';
+export interface WaterState { fate: WaterFate; kept: boolean; cause: 'sunlight' | 'greenhouse' | 'thin-air' | null; absorbed: number; limit: number; withSeasK: number; iceK: number; iceLastsK: number }
 export function waterState(d: PlanetDefinition, seaShare: number): WaterState {
   const share = Math.max(0, Math.min(1, seaShare));
   const x = derive({ ...d, water: { ...d.water, oceanFraction: share } });
-  if (!(share > 0) || !((d.water.depthKm ?? 1) > 0)) return { fate: 'none', kept: false, cause: null, absorbed: x.absorbed, limit: Infinity, withSeasK: x.surfaceK };
-  const limit = runawayLimit(share), common = { absorbed: x.absorbed, limit, withSeasK: x.surfaceK };
+  const ice = { iceK: iceAtEquatorK(x.insolation), iceLastsK: iceLastsBelowK(d.atmosphere.pressureBar) };
+  if (!(share > 0) || !((d.water.depthKm ?? 1) > 0)) return { fate: 'none', kept: false, cause: null, absorbed: x.absorbed, limit: Infinity, withSeasK: x.surfaceK, ...ice };
+  const limit = runawayLimit(share), common = { absorbed: x.absorbed, limit, withSeasK: x.surfaceK, ...ice };
+  // Too little air for liquid water: ice where it lasts, or gone into vapour (kept by hand, the seas stay).
+  if (d.atmosphere.pressureBar < WATER_TRIPLE_BAR && !d.water.keep) return { fate: ice.iceK < ice.iceLastsK ? 'frozen' : 'sublimed', kept: false, cause: 'thin-air', ...common };
+  if (d.atmosphere.pressureBar < WATER_TRIPLE_BAR) return { fate: 'liquid', kept: true, cause: 'thin-air', ...common };
   if (!x.runaway && !(x.surfaceK > WATER_CRITICAL_K)) return { fate: 'liquid', kept: false, cause: null, ...common };
   return { fate: d.water.keep ? 'liquid' : 'boiled', kept: !!d.water.keep, cause: x.runaway ? 'sunlight' : 'greenhouse', ...common };
 }

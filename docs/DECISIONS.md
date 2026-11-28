@@ -61,6 +61,61 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D261. Thin air and no air: a planet too small to hold its air; water that cannot be liquid (the Planet Studio's overhaul, step 4, second part)
+
+- **Why.** Measured on the second calculation (after D260): with a thousandth of a bar of air, or none, a planet kept
+  liquid seas on three quarters of its surface; a planet the size of the Moon kept the Earth's air; and far from its
+  star a frozen planet's temperatures were not numbers at all.
+- **Whether a planet holds its air** (`airState`, physics.ts): the "cosmic shoreline" of Zahnle and Catling (2017).
+  Across the Solar System one line parts the worlds with air from those without: the light a world gets against the
+  fourth power of its escape speed. A planet holds air where its escape speed is at least 5.5 km/s times the fourth
+  root of its sunlight (in the Earth's): the line set a tenth below Mars, which has kept a little. Checked against the
+  known worlds: Venus, the Earth, Mars, Titan and Pluto hold air; Mercury, the Moon and Ceres hold none. An Earth
+  loses its air inside about a quarter of the Earth's distance from a Sun-like star; a body the size of the Moon holds
+  none at the Earth's distance. Where the air is not held the planet has none (`withAirAsItIs`): the sea stage decides
+  it first and gives the pressure there is in fact, which every stage after it uses. **Kept by hand**
+  (`atmosphere.keep`): the air as given, said to be kept and why it would be gone.
+- **Water under too little air** (`waterState`): below the pressure of water's triple point (0.006 bar) water is ice
+  or vapour, never liquid. Then, by whether ice lasts where the sun is highest (the year's mean temperature of ice at
+  the equator, from its own balance of sunlight and heat lost, against the temperature below which ice does not
+  sublime away: 120 K in a vacuum, as on the icy moons against Ceres and the Moon; up to 180 K under a little air, as
+  at the poles of Mars):
+  - **frozen**: ice lasts everywhere: the seas stand frozen where they are (still at their level, still sea); the
+    land is bare rock, with no snow, for nothing falls. For a Sun-like star beyond about 3.9 AU.
+  - **sublimed**: ice does not last where the sun is high: the seas are gone into vapour, some lost to space, the
+    rest frozen out where it is coldest. The planet is dry (measured from its lowest ground), with **ice caps**
+    wherever the year's mean is colder than ice needs (the temperature stage gives them: none at the Earth's
+    distance; 1 % of the surface at 3 AU, 13 % at 3.6 AU with no air; at the poles alone on a planet like Mars with
+    a little water).
+  Kept by hand (the same switch as D259), the seas stay.
+- **The land of a frozen planet with air** is under ice only where some snow falls (5 mm of water a year or more);
+  where next to none does it is bare rock, as in Antarctica's dry valleys. At 1.25 AU nine tenths of the land is
+  under ice; at 3 AU and beyond, where nothing falls, it is bare between frozen seas.
+- **A fault of the climate under ice, found on the way** (mended for the second calculation only): the heat the
+  sea's currents carry was carried as on the Earth whatever the ice. On a planet far from its star that is more than
+  the planet takes in, and the temperatures ran below absolute zero and out of numbers. The currents now carry heat in
+  proportion to the open share of the sea (all of it while nine tenths are open, so an Earth is as it was; none under
+  a sea frozen from pole to pole), and no temperature goes below the coldest the model allows.
+- **In the Studio**: under the picture, a statement for the air ("Too small to keep its air: it has leaked away to
+  space. For the light it gets, a planet needs an escape speed of 5.5 km/s to hold air; this one has 2.4 km/s…",
+  with "Keep the air anyway") and one for the water ("Too little air for liquid water: the seas are gone…" with the
+  ice caps' share, or "…the seas stand frozen…"), each with the numbers that decided. The pressure's slider goes
+  down to no air at all. The sea's read-out says what became of it; the winds' says there are none without air.
+- **Measured**: no air at 1 AU: bare rock, −20 °C; at 3.6 AU: ice caps over 13 %; at 5.2 AU: seas frozen where they
+  stand between bare continents, −173 °C. A planet like Mars: its air held, −59 °C (Mars: −63); with a little water
+  and 0.005 bar, ice caps over 2 % of it, at its poles. The Earth's air on a planet the size of Mars at 1 AU: lost.
+- **Not in this part**: the day and the night of a world with thin or no air (its temperatures here are the year's,
+  with the day's sunlight spread evenly; next); frost that comes and goes with the seasons; on a planet whose seas
+  are gone the ice caps do not brighten the model's own balance (one pass). The air's kinds of gas play no part in
+  whether it is held.
+- **Tests**: `test/planet-cold.test.ts` (4 more): the line across the Solar System and a planet as given (held,
+  lost, kept by hand, close to the star, like Mars, the switch stored); water under too little air (where ice lasts,
+  gone into vapour, frozen, kept, none); planets with thin air or none (the same history; bare with no caps; ice caps
+  at 3.6 AU exactly where the year is colder than ice needs; frozen where they stand at 5.2 AU on the same sea, every
+  temperature a number; too small for its air; the air kept; like Mars, dry and with caps at its poles); a frozen
+  planet with air (no heat carried under the ice, the land bare where nothing falls, an Earth as it was).
+  Interface: "Thin air and no air in the Planet Studio".
+
 ### D260. Cold worlds: the sea frozen over drawn as ice; the planet's figures from the model its pictures are made with (the Planet Studio's overhaul, step 4, first part)
 
 - **Why.** Measured on the second calculation (after D259): moved away from its star, the planet's seas freeze over

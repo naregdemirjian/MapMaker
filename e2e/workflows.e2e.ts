@@ -5535,6 +5535,117 @@ try {
     assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.name === 'Cold Prime')), false);
     await page.getByTestId('studio-history').click();
   });
+  await h.step('Thin air and no air in the Planet Studio (D261): with no air the seas gone into vapour and said why, kept by hand and given back; far from the star, frozen where they stand; between, ice caps; a planet too small to hold its air, the air kept by hand; undone', async () => {
+    const text = async (id: string) => (await page.getByTestId(id).textContent()) ?? '';
+    await page.evaluate(() => {
+      const m = (window as any).__mapmaker, s = m.store;
+      const def = m.bench.planet.newDefinition('earthlike', 4);
+      def.simulation.spanMyr = 100;
+      const id = s.execute((w: any) => m.bench.commands.createSimPlanet(w, 'Bare Prime', def));
+      s.set({ spaceId: id, layerId: s.world.all('layer').find((l: any) => l.space_id === id)?.id ?? '', selection: null });
+    });
+    await h.saved();
+    await page.getByTestId('studio-map').click();
+    await page.locator('[data-testid^="map-row-"].sel').click();
+    await page.getByTestId('open-planet-studio').click();
+    await page.getByTestId('planet-studio').waitFor();
+    const drawnNow = () => page.evaluate(() => (document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement).dataset.drawn ?? '');
+    const redrawn = (was: string) => page.waitForFunction((w) => {
+      const d = (document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement)?.dataset.drawn ?? '';
+      return !document.querySelector('[data-testid=studio-status]') && !document.querySelector('[data-testid=studio-progress]') && d.startsWith('satellite:') && d !== w;
+    }, was, { timeout: 240_000 });
+    const seen = () => page.evaluate(() => {
+      const c = document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement, d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+      let blue = 0, white = 0, n = 0;
+      for (let k = 0; k < d.length; k += 4 * 37) { n++; if (d[k + 2] > d[k] + 30 && d[k + 2] > d[k + 1] + 15) blue++; if (d[k] > 190 && d[k + 1] > 200 && d[k + 2] > 200) white++; }
+      return { sea: blue / n, ice: white / n };
+    });
+    await redrawn('');
+    const earth = await seen(), first = await drawnNow();
+    assert.ok(earth.sea > 0.4, `open seas (${earth.sea.toFixed(2)})`);
+    assert.equal(await page.getByTestId('studio-fate').count() + await page.getByTestId('studio-air-fate').count(), 0);
+    // No air at all (the pressure's slider at its lowest place): no history made; water cannot be liquid, and at
+    // the Earth's distance its ice does not last either: the seas gone into vapour, the planet bare rock.
+    await page.getByTestId('studio-step-air').click();
+    await page.getByTestId('studio-control-pressure').fill('0');
+    assert.equal(await text('studio-air-note'), 'No air.');
+    await redrawn(first);
+    assert.equal(await page.getByTestId('studio-progress').count(), 0, 'no history made');
+    assert.match(await text('studio-fate'), /^Too little air for liquid water: the seas are gone\. Under less than 0\.006 bar of air water is ice or vapour, never liquid, and where the sun is high ice does not last here \(at the equator its year would be at -\d+ °C; ice lasts below -153 °C\)\. The water went into vapour; some was lost to space, and nowhere on the planet is cold enough to hold the rest as ice\./);
+    assert.equal(await text('studio-readout-sea'), 'none: gone into vapour for want of air');
+    assert.equal(await text('studio-readout-winds'), 'none: the planet has no air');
+    const bare = await seen(), airless = await drawnNow();
+    assert.ok(bare.sea < 0.005 && bare.ice < 0.005, `bare rock (${bare.sea.toFixed(3)} sea, ${bare.ice.toFixed(3)} ice)`);
+    await h.screenshot('planet-no-air');
+    // The seas kept by hand, and given back.
+    await page.getByTestId('studio-keep-water').check();
+    await redrawn(airless);
+    assert.match(await text('studio-fate'), /^The seas are kept by hand\. By the physics there would be none\. Under less than 0\.006 bar of air water is ice or vapour, never liquid\./);
+    assert.ok((await seen()).sea + (await seen()).ice > 0.5, 'seas again, open or under ice');
+    const kept = await drawnNow();
+    await page.getByTestId('studio-keep-water').uncheck();
+    await redrawn(kept);
+    assert.ok((await seen()).sea < 0.005);
+    // Far from the star (5.2 AU): ice lasts even at the equator, so the seas stand frozen where they were; the land
+    // is bare rock, with no snow on it.
+    const near = await drawnNow();
+    await page.getByTestId('studio-step-star').click();
+    await page.getByTestId('studio-control-distance').fill('895');
+    assert.equal(await text('studio-value-distance'), '5.207');
+    await redrawn(near);
+    assert.match(await text('studio-fate'), /^Too little air for liquid water: the seas stand frozen\. Under less than 0\.006 bar of air water is ice or vapour, never liquid\. Here ice lasts even where the sun is highest \(at the equator its year is at -\d+ °C; ice lasts below -153 °C\), so the seas are ice where they stood/);
+    assert.match(await text('studio-readout-sea'), /^\d+ % of the surface, frozen where it stands \(too little air for liquid water\)$/);
+    const icy = await seen(), frozen = await drawnNow();
+    assert.ok(icy.sea < 0.005 && icy.ice > 0.5 && icy.ice < 0.85, `the seas under ice, the land bare (${icy.ice.toFixed(2)} ice)`);
+    await h.screenshot('planet-icy-no-air');
+    // Between (3.6 AU): too warm at the equator for ice to last, not at the poles: ice caps.
+    await page.getByTestId('studio-control-distance').fill('836');
+    assert.equal(await text('studio-value-distance'), '3.609');
+    await redrawn(frozen);
+    await page.waitForFunction(() => /ice caps over/.test(document.querySelector('[data-testid=studio-fate]')?.textContent ?? ''), undefined, { timeout: 60_000 });
+    assert.match(await text('studio-fate'), /^Too little air for liquid water: the seas are gone\..* and the rest froze out where it is coldest: ice caps over \d+(\.\d)? % of the surface\./);
+    assert.match(await text('studio-readout-sea'), /^none: gone into vapour for want of air; ice caps on \d+(\.\d)? % of the surface$/);
+    const capped = await seen(), caps = await drawnNow();
+    assert.ok(capped.sea < 0.005 && capped.ice > 0.03 && capped.ice < 0.6, `ice caps (${capped.ice.toFixed(2)})`);
+    await h.screenshot('planet-ice-caps');
+    // Back at the Earth's distance with about the Earth's air: seas again.
+    await page.getByTestId('studio-control-distance').fill('630');
+    await page.getByTestId('studio-step-air').click();
+    await page.getByTestId('studio-control-pressure').fill('668');
+    assert.equal(await text('studio-value-pressure'), '1.0200');
+    assert.equal(await page.getByTestId('studio-air-note').count(), 0);
+    await redrawn(caps);
+    assert.equal(await page.getByTestId('studio-fate').count() + await page.getByTestId('studio-air-fate').count(), 0);
+    assert.ok((await seen()).sea > 0.4, 'open seas again');
+    // A planet too small to hold its air (about the Moon's size): the land made again (its size is of what the land
+    // is made from); its air leaked away, said with the line that decided, and with it its seas.
+    const full = await drawnNow();
+    await page.getByTestId('studio-step-planet').click();
+    await page.getByTestId('studio-control-radius').fill('49');
+    assert.equal(await text('studio-value-radius'), '1,740');
+    await redrawn(full);
+    const lost = await text('studio-air-fate');
+    assert.match(lost, /^Too small to keep its air: it has leaked away to space\. For the light it gets, a planet needs an escape speed of 5\.5 km\/s to hold air; this one has (\d\.\d) km\/s\. \(One line parts the worlds with air from those without across the Solar System/);
+    assert.ok(Number(lost.match(/this one has (\d\.\d) km/)![1]) < 5.5);
+    assert.match(await text('studio-fate'), /^Too little air for liquid water: the seas are gone\. Under less than 0\.006 bar of air water is ice or vapour, never liquid \(and this planet has lost its air\)/);
+    await page.getByTestId('studio-step-air').click();
+    assert.equal(await text('studio-air-note'), 'Lost: the planet is too small to hold air (said under the picture).');
+    const small = await drawnNow();
+    assert.ok((await seen()).sea < 0.005);
+    // Its air kept by hand: said so, and its seas there again (open or frozen, as its climate has them).
+    await page.getByTestId('studio-keep-air').check();
+    await redrawn(small);
+    assert.match(await text('studio-air-fate'), /^The air is kept by hand\. By the physics it would have leaked away to space\./);
+    assert.equal(await page.getByTestId('studio-air-note').count(), 0);
+    assert.match(await text('studio-readout-sea'), /^\d+ % of the surface under/);
+    assert.ok((await seen()).sea + (await seen()).ice > 0.3, 'seas again');
+    await page.getByTestId('studio-close').click();
+    await page.getByTestId('planet-studio').waitFor({ state: 'detached' });
+    await page.getByTestId('undo').click();
+    await h.saved();
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.name === 'Bare Prime')), false);
+    await page.getByTestId('studio-history').click();
+  });
   await h.step('The studios: each page its own panels; panels dock, float, close and open again, resize; Save and Reset workspace (D196, D234)', async () => {
     const box = async (sel: string) => (await page.locator(sel).first().boundingBox())!;
     const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);

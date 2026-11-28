@@ -51,8 +51,17 @@ export interface ClimateOptions {
    * was made; wider for the hottest and coldest worlds.
    */
   range?: [number, number];
-  /** False on a world with no water (D259): no snow and no sea ice, however cold; nothing brightens with the cold. */
-  frost?: boolean;
+  /**
+   * False on a world with no water (D259): no snow and no sea ice, however cold; nothing brightens with the cold.
+   * 'sea' (D261): the sea's ice only, no snow on land (seas frozen under air too thin for anything to fall).
+   */
+  frost?: boolean | 'sea';
+  /**
+   * The sea's currents carry heat only where the sea is open (D261): the heat they carry is taken in proportion to
+   * the open share of the sea (all of it while nine tenths are open, as the model was made on the Earth; none under
+   * a sea frozen from pole to pole, where it was still carried as on the Earth, more than a cold planet takes in).
+   */
+  iceStillsCurrents?: boolean;
   /**
    * On a world with no sea (D259), the height (m, on the heights' scale) at which its air has the pressure given:
    * its mean surface. The balance's temperatures hold there; ground above it is colder and ground below it warmer.
@@ -177,7 +186,7 @@ export function seasonalClimate(mesh: Mesh, def: PlanetDefinition, x: Derived, h
     let cold = 0;
     for (let m = 0; m < months; m++) {
       const t = monthly[m * n + c];
-      cold += heightM[c] >= 0 ? Math.max(0, Math.min(1, -t / 10)) : Math.max(0, Math.min(1, (-1.8 - t) / 8));
+      cold += heightM[c] >= 0 ? (opts.frost === 'sea' ? 0 : Math.max(0, Math.min(1, -t / 10))) : Math.max(0, Math.min(1, (-1.8 - t) / 8));
     }
     ice[c] = cold / months;
   }
@@ -222,11 +231,11 @@ function coarseClimate(mesh: Mesh, def: PlanetDefinition, x: Derived, land: Arra
   // Each cell's yearly mean (K), from the year before: ground whose year is cold enough keeps its snow, as an ice
   // sheet, through the summer (D165), instead of losing it whenever the summer sun warms it towards thawing.
   let annualK: Float64Array | null = null;
-  const frost = opts.frost !== false;
+  const frost = opts.frost !== false, snows = frost && opts.frost !== 'sea';
   const iceOf = (c: number, T: number) => {
     if (!frost) return { snow: 0, sea: 0, kept: 0 };
-    const tc = T - 273.15, kept = annualK ? Math.max(0, Math.min(1, (263.15 - annualK[c]) / 10)) : 0;
-    return { snow: Math.max(kept, Math.max(0, Math.min(1, -tc / 10))), sea: Math.max(0, Math.min(1, (-1.8 - tc) / 8)), kept };
+    const tc = T - 273.15, kept = snows && annualK ? Math.max(0, Math.min(1, (263.15 - annualK[c]) / 10)) : 0;
+    return { snow: snows ? Math.max(kept, Math.max(0, Math.min(1, -tc / 10))) : 0, sea: Math.max(0, Math.min(1, (-1.8 - tc) / 8)), kept };
   };
   const albedo = (c: number, T: number) => {
     const i = iceOf(c, T), l = land[c];
@@ -238,8 +247,8 @@ function coarseClimate(mesh: Mesh, def: PlanetDefinition, x: Derived, land: Arra
   // The albedo of a cell's land alone (its own clouds, its own snow from its own temperatures, D165).
   let annualL: Float64Array | null = null;
   const landAlbedo = (c: number, T: number) => {
-    const kept = frost && annualL ? Math.max(0, Math.min(1, (263.15 - annualL[c]) / 10)) : 0;
-    const snow = frost ? Math.max(kept, Math.max(0, Math.min(1, -(T - 273.15) / 10))) : 0;
+    const kept = snows && annualL ? Math.max(0, Math.min(1, (263.15 - annualL[c]) / 10)) : 0;
+    const snow = snows ? Math.max(kept, Math.max(0, Math.min(1, -(T - 273.15) / 10))) : 0;
     const snowA = 0.62 + snowCold * Math.max(kept, Math.max(0, Math.min(1, (273.15 - 10 - T) / 20)));
     return cloudL[c] * at.cloudAlbedo + (1 - cloudL[c]) * (rayleigh + (1 - rayleigh) ** 2 * (0.25 * (1 - snow) + snowA * snow));
   };
@@ -313,6 +322,14 @@ function coarseClimate(mesh: Mesh, def: PlanetDefinition, x: Derived, land: Arra
     }
   };
   const yearS = x.yearDays * 86_400;
+  // (D261) How much of the heat the sea's currents carry is carried: by the open share of the sea.
+  let carried = 1;
+  const currentsCarried = (temps: ArrayLike<number>): number => {
+    if (!opts.iceStillsCurrents) return 1;
+    let sea = 0, open = 0;
+    for (let c = 0; c < n; c++) { const s = (1 - land[c]) * area[c]; sea += s; open += s * (1 - iceOf(c, temps[c]).sea); }
+    return sea > 0 ? Math.min(1, open / sea / 0.9) : 1;
+  };
   let T: Float64Array = opts.initialK && opts.initialK.length === n ? Float64Array.from(opts.initialK) : new Float64Array(n).fill(opts.range ? Math.max(opts.range[0], Math.min(opts.range[1], x.surfaceK)) : Math.max(150, Math.min(700, x.surfaceK)));
   if (opts.initialK && opts.initialK.length === n) { annualK = Float64Array.from(opts.initialK); annualL = Float64Array.from(opts.initialK); }
   const ws = space(n), cold = !(opts.initialK && opts.initialK.length === n);
@@ -327,10 +344,11 @@ function coarseClimate(mesh: Mesh, def: PlanetDefinition, x: Derived, land: Arra
     const d0 = new Float64Array(n), r0 = new Float64Array(n);
     annualK = Float64Array.from(T); annualL = Float64Array.from(T);
     for (let it = 0; it < 40; it++) {
+      carried = currentsCarried(T);
       for (let c = 0; c < n; c++) {
         const Tc = T[c], a = albedo(c, Tc), o = olr(Tc), B = Math.max(0.5, (olr(Tc + 0.5) - o) / 0.5);
         d0[c] = B * area[c];
-        r0[c] = (Sbar[c] * (1 - a) - o + B * Tc + qflux[c]) * area[c];
+        r0[c] = (Sbar[c] * (1 - a) - o + B * Tc + carried * qflux[c]) * area[c];
       }
       const next = U > 0 ? solveGeneral(n, nbrStart, nbr, coef, d0, r0, T, ws, 1e-8) : solve(n, nbrStart, nbr, w, d0, r0, T, ws, 1e-8);
       let most = 0;
@@ -352,6 +370,7 @@ function coarseClimate(mesh: Mesh, def: PlanetDefinition, x: Derived, land: Arra
     monthSum.fill(0); monthCount.fill(0); monthSumL.fill(0);
     let abs = 0, emi = 0;
     const dt = yearS / steps;
+    carried = currentsCarried(annualK ?? T);
     for (let s = 0; s < steps; s++) {
       const m = Math.min(months - 1, Math.floor((s * months) / steps));
       for (let c = 0; c < n; c++) {
@@ -360,11 +379,12 @@ function coarseClimate(mesh: Mesh, def: PlanetDefinition, x: Derived, land: Arra
         const i = iceOf(c, Tc);
         const C = air + land[c] * 2e6 + (1 - land[c]) * ocean * (1 - 0.9 * i.sea);
         diag[c] = (C / dt + B) * area[c];
-        rhs[c] = ((C / dt) * Tc + Q - o + B * Tc + qflux[c]) * area[c];
+        rhs[c] = ((C / dt) * Tc + Q - o + B * Tc + carried * qflux[c]) * area[c];
         abs += Q * area[c]; emi += o * area[c];
       }
       windsFor(m);
       T = U > 0 ? solveGeneral(n, nbrStart, nbr, coef, diag, rhs, T, ws) : solve(n, nbrStart, nbr, w, diag, rhs, T, ws);
+      if (opts.range) for (let c = 0; c < n; c++) if (!(T[c] > lowK)) T[c] = lowK;
       // The land of each cell: its own sunlight, snow and heat capacity, the same heat carried in by the air as the
       // cell has (per square metre), and heat exchanged with the rest of the cell's air (implicit in its own
       // temperature). In a cell that is all land it is the cell's temperature.
@@ -377,6 +397,7 @@ function coarseClimate(mesh: Mesh, def: PlanetDefinition, x: Derived, land: Arra
         const t0 = TL[c], QL = f * sun.monthly[m * n + c] * (1 - landAlbedo(c, t0));
         const oL = olr(t0), BL = Math.max(0.5, (olr(t0 + 0.5) - oL) / 0.5);
         TL[c] = ((CL / dt) * t0 + QL - oL + BL * t0 + tr + kappa * T[c]) / (CL / dt + BL + kappa);
+        if (opts.range && !(TL[c] > lowK)) TL[c] = lowK;
       }
       for (let c = 0; c < n; c++) { monthSum[m * n + c] += T[c]; monthSumL[m * n + c] += TL[c]; }
       monthCount[m]++;

@@ -82,6 +82,11 @@ export interface AtmosphereSpec {
   /** How much of the sky clouds cover on average (0 to 1), and how bright they are. */
   clouds: number;
   cloudAlbedo: number;
+  /**
+   * Kept by hand (D261): the planet has this air though it is too small, for the light it gets, to hold any. Not
+   * physical, and said so wherever it shows; for fiction.
+   */
+  keep?: boolean;
 }
 
 export interface WaterSpec {
@@ -519,6 +524,7 @@ export function definitionOf(raw: unknown): PlanetDefinition | null {
     out.water.depthKm = fit(depth ?? waterForShare(out.water.oceanFraction, out.tectonics.continentalFraction), 'water.depthKm');
     out.water.oceanFraction = seaShareGuess(out.water.depthKm, Math.min(1, Math.max(0, out.tectonics.continentalFraction)));
     if (isObj(raw.water) && raw.water.keep === true) out.water.keep = true;
+    if (isObj(raw.atmosphere) && raw.atmosphere.keep === true) out.atmosphere.keep = true;
     delete out.history.climate;
     out.simulation.quality = 'preview';
   }

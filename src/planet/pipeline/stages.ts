@@ -13,7 +13,7 @@ import { hydrology } from '../water/hydrology.ts';
 import { iceSheets } from '../water/ice.ts';
 import { BIOME, BIOME_IDS, KOPPEN, SEA_ICE_FROM, biomeColour, biomeOf, customBiomeOf, hotSurface, koppen, rockColour, type BiomeId, type Place } from '../life/biomes.ts';
 import { toLevel } from '../mesh/transfer.ts';
-import { derive, waterState } from '../model/physics.ts';
+import { airState, derive, waterState, withAirAsItIs } from '../model/physics.ts';
 import { cellsAt, meshAt } from '../mesh/icosphere.ts';
 import { seaLevelForVolume } from '../water/sealevel.ts';
 import { rasterize } from '../mesh/transfer.ts';
@@ -189,6 +189,12 @@ const presentHeights = (inputs: ProductData, deps: Record<string, ProductData>, 
 const fromHeights = (p: StageParams, deps: string[]) => (p.heights ? deps.filter((d) => d !== 'tectonics') : p.sea ? deps.map((d) => (d === 'tectonics' ? 'sea' : d)) : deps);
 /** A definition with the share of sea its land and water give (D258), for the models that read the share. */
 const withSea = (def: PlanetDefinition, share: unknown): PlanetDefinition => (typeof share === 'number' ? { ...def, water: { ...def.water, oceanFraction: share } } : def);
+/**
+ * A definition as the planet is (D258, D261), for the models after the sea stage: with the share of sea its land and
+ * water give and the air it has in fact.
+ */
+const asItIs = (def: PlanetDefinition, share: unknown, pressureBar: unknown): PlanetDefinition =>
+  (typeof pressureBar === 'number' ? { ...withSea(def, share), atmosphere: { ...def.atmosphere, pressureBar } } : withSea(def, share));
 /** The heights given, as an input. */
 const givenHeights = (p: StageParams): ProductData => (p.heights ? { heights: p.heights } : {});
 
@@ -206,10 +212,15 @@ function joinClimate(parts: ProductData[], deps: Record<string, ProductData>, n:
   const annual = new Float32Array(n);
   for (let m = 0; m < 12; m++) for (let c = 0; c < n; c++) annual[c] += h.tempMonthly[m * n + c] / 12;
   return {
-    monthly: h.tempMonthly, annual, ice: t.ice, meanK: t.meanK, absorbed: t.absorbed, emitted: t.emitted, tropicsC: t.tropicsC, polesC: t.polesC, years: t.years,
+    monthly: h.tempMonthly, annual, ice: t.ice, ...(t.caps ? { caps: t.caps } : {}), meanK: t.meanK, absorbed: t.absorbed, emitted: t.emitted, tropicsC: t.tropicsC, polesC: t.polesC, years: t.years,
     precipMonthly: h.precipMonthly, precipAnnual: h.precipAnnual, currents: h.currents, windJan: h.windJan, windJul: h.windJul, meanPrecip: h.meanPrecip,
   };
 }
+
+/** The water stage's kind for an ice sheet (hydrology.ts WATER.ice). */
+const WATER_ICE = 9;
+/** The least snow in a year (mm of water) for frozen ground to lie under it (D261): with less it sublimes away, as in Antarctica's dry valleys. */
+const DRY_SNOW_MM = 5;
 
 const concat = (parts: Float32Array[]): Float32Array => {
   const out = new Float32Array(parts.reduce((s, p) => s + p.length, 0));
@@ -286,14 +297,17 @@ export const STAGES: Record<string, StageDef> = {
    * The water's fate (D259, physics.ts waterState) is decided here, from the share the seas would cover and the
    * sunlight the planet takes in with them there: where they would boil away, the planet is dry (`fate` 'boiled'),
    * as a planet given no water, unless the water is kept by hand (`kept`). `liquidShare` is the share the seas
-   * would cover; `cause`, `absorbed` and `limit` (W/m²) and `withSeasK` are what decided.
+   * would cover; `cause`, `absorbed` and `limit` (W/m²) and `withSeasK` are what decided. With too little air for
+   * liquid water (D261) the seas stand frozen where they are ('frozen': still at their level), or are gone into
+   * vapour ('sublimed': the planet dry, but for ice caps the climate may find). The air itself is judged first:
+   * a planet too small to hold it has none (`air` 'lost').
    */
   sea: {
     id: 'sea',
-    version: 2,
+    version: 3,
     deps: () => ['tectonics'],
     inputs: (def, p) => ({
-      level: p.level, frame: p.frame ?? -1, depthKm: def.water.depthKm ?? 0, keep: !!def.water.keep,
+      level: p.level, frame: p.frame ?? -1, depthKm: def.water.depthKm ?? 0, keep: !!def.water.keep, keepAir: !!def.atmosphere.keep,
       // (What decides whether seas can stand: the star, the orbit, the planet's body and its air.)
       state: climateInputs(def, { ...p, sea: true }),
       // (The sea's own rises on the timeline: 50 m for each unit of strength while they last.)
@@ -321,9 +335,13 @@ export const STAGES: Record<string, StageDef> = {
       };
       // The share the seas would cover, then what becomes of them (D259): boiled away, the planet is dry.
       const liquidShare = against(level);
-      const given = definitionOf(inputs.state)!;
+      // (First the air the planet has in fact, D261: none where it is too small to hold any.)
+      const read = definitionOf(inputs.state)!;
+      const asGiven = { ...read, atmosphere: { ...read.atmosphere, ...(inputs.keepAir ? { keep: true } : {}) } };
+      const air = airState(asGiven), given = withAirAsItIs(asGiven);
       const st = waterState({ ...given, water: { ...given.water, depthKm: depth, ...(inputs.keep ? { keep: true } : {}) } }, none ? 0 : liquidShare);
-      const dry = st.fate !== 'liquid';
+      // (Seas, open or under ice, stand at their level; without them the land is measured from its lowest ground.)
+      const dry = st.fate !== 'liquid' && st.fate !== 'frozen';
       if (dry && !none) level = lowest;
       const share = dry ? (none ? liquidShare : against(level)) : liquidShare;
       ctx.progress(1, 1);
@@ -332,6 +350,10 @@ export const STAGES: Record<string, StageDef> = {
         // (The kind of crust at each place then, for the colour of bare rock: D259.)
         crust: (T.kinds as Uint8Array).slice(f * n, (f + 1) * n),
         fate: st.fate, kept: st.kept, cause: st.cause, liquidShare: none ? 0 : liquidShare, absorbed: st.absorbed, limit: Number.isFinite(st.limit) ? st.limit : 0, withSeasK: st.withSeasK,
+        // (D261) The air as it is: held, lost to space or kept by hand, with what decided; the pressure there is in
+        // fact. And for water under too little air: the equator's ice against the temperature below which ice lasts.
+        air: air.none ? 'none' : air.held ? 'held' : air.kept ? 'kept' : 'lost', escapeKmS: air.escapeKmS, neededKmS: air.neededKmS, pressureBar: given.atmosphere.pressureBar,
+        iceK: st.iceK, iceLastsK: st.iceLastsK,
       };
     },
   },
@@ -349,7 +371,7 @@ export const STAGES: Record<string, StageDef> = {
     deps: (p) => fromHeights(p, ['tectonics']),
     inputs: (def, p) => ({ level: p.level, def: climateInputs(def, p), ...givenHeights(p) }),
     run: (inputs, deps, ctx) => {
-      const def = withSea(definitionOf(inputs.def)!, deps.sea?.share);
+      const def = asItIs(definitionOf(inputs.def)!, deps.sea?.share, deps.sea?.pressureBar);
       const mesh = meshAt(inputs.level as number), n = mesh.n;
       const heights = presentHeights(inputs, deps, n);
       // (Where the sea follows from the water, D259: any temperature a planet can have, from the cold of the outer
@@ -357,8 +379,12 @@ export const STAGES: Record<string, StageDef> = {
       const second: ClimateOptions = {};
       if (deps.sea) {
         second.range = [20, 10_000];
+        // (The sea's currents carry heat only where the sea is open, D261.)
+        second.iceStillsCurrents = true;
         // (Thin air hardly sets the ground's temperature with height: all of it from about a third of a bar.)
         second.lapseShare = Math.min(1, def.atmosphere.pressureBar / 0.3);
+        // (Seas frozen where they stand under too little air, D261: their ice, and no snow on the land.)
+        if (deps.sea.fate === 'frozen') second.frost = 'sea';
         if (deps.sea.dry) {
           second.frost = false;
           // (No sea: the air's pressure is that at the mean surface, and the temperatures are worked out for there.)
@@ -371,16 +397,22 @@ export const STAGES: Record<string, StageDef> = {
       ctx.progress(1, 1);
       // The planet's figures as the pictures have them (D260): the surface's mean temperature over the year (°C; the
       // model's own `meanK` is the sea-level one), and how much of the sea lies frozen for most of the year.
-      let surfaceC = 0, seaArea = 0, frozen = 0;
+      let surfaceC = 0, seaArea = 0, frozen = 0, capArea = 0;
+      // (D261) Where the seas are gone into vapour for want of air, what did not escape froze out where ice lasts:
+      // the places whose year is colder than that, the planet's ice caps.
+      const caps = deps.sea?.fate === 'sublimed' ? new Uint8Array(n) : null, lasts = (deps.sea?.iceLastsK as number) - 273.15;
       for (let c = 0; c < n; c++) {
         let t = 0;
         for (let m = 0; m < 12; m++) t += r.monthly[m * n + c] / 12;
         surfaceC += (t * mesh.area[c]) / (4 * Math.PI);
         if (heights[c] < 0) { seaArea += mesh.area[c]; if (r.ice[c] >= SEA_ICE_FROM) frozen += mesh.area[c]; }
+        if (caps && t < lasts) { caps[c] = 1; capArea += mesh.area[c]; }
       }
       return {
         monthly: r.monthly, dryWarm: r.dryWarm, ice: r.ice, meanK: r.meanK, absorbed: r.absorbed, emitted: r.emitted, tropicsC: r.tropicsC, polesC: r.polesC,
-        years: r.years, heights: heights.slice(), ...(deps.sea ? { seaShare: deps.sea.share, surfaceC, seaFrozen: seaArea > 0 && !deps.sea.dry ? frozen / seaArea : 0 } : {}),
+        years: r.years, heights: heights.slice(),
+        ...(deps.sea ? { seaShare: deps.sea.share, pressureBar: deps.sea.pressureBar, surfaceC, seaFrozen: seaArea > 0 && !deps.sea.dry ? frozen / seaArea : 0 } : {}),
+        ...(caps ? { caps, capShare: capArea / (4 * Math.PI) } : {}),
       };
     },
   },
@@ -398,7 +430,7 @@ export const STAGES: Record<string, StageDef> = {
     parts: () => 12,
     partSize: (items, workers) => Math.ceil(items / Math.max(1, Math.min(items, workers))),
     run: (inputs, deps, ctx, range) => {
-      const t = deps.temperature, def = withSea(definitionOf(inputs.def)!, t.seaShare), mesh = meshAt(inputs.level as number);
+      const t = deps.temperature, def = asItIs(definitionOf(inputs.def)!, t.seaShare, t.pressureBar), mesh = meshAt(inputs.level as number);
       const [a, b] = range ?? [0, 12];
       const months = Array.from({ length: b - a }, (_, i) => a + i);
       const part = rainMonths(mesh, def, derive(def), t.heights as Int16Array, t.monthly as Float32Array, 4, t.dryWarm as Float32Array, months);
@@ -419,7 +451,7 @@ export const STAGES: Record<string, StageDef> = {
     deps: (p) => fromHeights(p, ['tectonics', 'climate', 'insolation']),
     inputs: (def, p) => ({ level: p.level, def: climateInputs(def, p), ...givenHeights(p) }),
     run: (inputs, deps, ctx) => {
-      const def = withSea(definitionOf(inputs.def)!, deps.sea?.share);
+      const def = asItIs(definitionOf(inputs.def)!, deps.sea?.share, deps.sea?.pressureBar);
       const level = inputs.level as number, mesh = meshAt(level), n = mesh.n;
       const heights = Float64Array.from(presentHeights(inputs, deps, n));
       const x = derive(def);
@@ -473,6 +505,8 @@ export const STAGES: Record<string, StageDef> = {
       const rules = life.biomeSet === 'custom' ? [...life.customBiomes].sort((a, b) => a.priority - b.priority) : [];
       const second = !!deps.sea, dry = !!deps.sea?.dry, crust = deps.sea?.crust as Uint8Array | undefined;
       const frozenYear = deps.climate.ice as Float32Array;
+      // (D261) Under too little air for liquid water: seas frozen where they stand, or ice caps where the vapour froze out.
+      const thin = deps.sea?.fate === 'frozen', caps = deps.climate.caps as Uint8Array | undefined;
       const T = new Float64Array(12), P = new Float64Array(12);
       const place: Place = { temp: T, precip: P, pet: 0, height: 0, water: 0, ice: 0 };
       for (let c = 0; c < n; c++) {
@@ -483,7 +517,15 @@ export const STAGES: Record<string, StageDef> = {
         // decides first: molten rock, rock scorched dry, bare ground too hot for anything to grow.)
         let hot = -Infinity;
         for (let m = 0; m < 12; m++) if (T[m] > hot) hot = T[m];
-        const first: BiomeId = dry ? 'barren' : biomeOf(place);
+        // (Too little air for liquid water, D261: nothing rains or snows, so the land is bare rock; the seas, ice.
+        // A cap of ice where the planet's vapour froze out. And on a planet with air, D261: ground whose warmest
+        // month is below freezing is under ice only where some snow falls; where next to none does, it is bare.)
+        let wet = 0;
+        for (let m = 0; m < 12; m++) wet += P[m];
+        const told: BiomeId = dry ? (caps?.[c] ? 'ice' : 'barren') : biomeOf(place);
+        const first: BiomeId = !second || dry ? told
+          : thin ? (told === 'sea' ? 'seaIce' : 'barren')
+            : told === 'ice' && ice[c] <= 50 && kind[c] !== WATER_ICE && wet < DRY_SNOW_MM ? 'barren' : told;
         const heat = second && first !== 'sea' && first !== 'lake' ? hotSurface(hot) : null;
         // (The sea frozen over for most of the year, D260: still sea, drawn as ice.)
         // (And a lake frozen for most of the year: ice.)
