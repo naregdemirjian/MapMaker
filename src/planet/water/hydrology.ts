@@ -545,6 +545,8 @@ export interface HydrologyInput {
   /** Ice thickness per cell (m): ice-covered land sheds only its meltwater, `iceRunoff` (mm a year). */
   ice?: ArrayLike<number> | null;
   iceRunoff?: ArrayLike<number> | null;
+  /** A world with no sea at all (D258): no ground counts as sea, however low the gorges at its hollows' outlets cut. */
+  dry?: boolean;
 }
 
 export function hydrology(input: HydrologyInput): Hydrology {
@@ -555,7 +557,7 @@ export function hydrology(input: HydrologyInput): Hydrology {
   const area = new Float64Array(n);
   for (let c = 0; c < n; c++) area[c] = mesh.area[c] * R * R;
   const iced = (c: number) => !!input.ice && input.ice[c] > 50;
-  let ocean = straits(mesh, z, oceanMask(mesh, z));
+  let ocean = input.dry ? new Uint8Array(n) : straits(mesh, z, oceanMask(mesh, z));
   let land = new Uint8Array(n);
   for (let c = 0; c < n; c++) land[c] = ocean[c] ? 0 : 1;
   const balance = waterBalance(n, input.temp, input.precip, input.sun, land, input.yearDays / 12);
@@ -584,7 +586,7 @@ export function hydrology(input: HydrologyInput): Hydrology {
   }
   const joins = (c: number) => lakes.lakeOf[c] >= 0 && (lakes.surface[c] >= 0 || (deep[c] === 1 && lakes.surface[c] >= -STRAIT.near));
   let joined = false;
-  for (let c = 0; c < n; c++) {
+  if (!input.dry) for (let c = 0; c < n; c++) {
     if (ocean[c] || !(z[c] < 0)) continue;
     if (joins(c)) { joined = true; break; }
   }
@@ -677,6 +679,8 @@ export function hydrology(input: HydrologyInput): Hydrology {
   let lakeKm3 = 0, saltKm3 = 0;
   for (let c = 0; c < n; c++) {
     if (ocean[c]) { kind[c] = WATER.sea; continue; }
+    // (A world with no water at all, D258: its hollows hold none, and nothing of it is lake, marsh or salt.)
+    if (input.dry) continue;
     const d = lakes.lakeOf[c];
     if (d >= 0) {
       lakeDepth[c] = lakes.surface[c] - z[c];

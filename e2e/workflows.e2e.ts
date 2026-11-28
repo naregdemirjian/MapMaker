@@ -4971,7 +4971,7 @@ try {
     assert.equal(r.one.hash, r.now.hash, 'the same history in another worker');
   });
 
-  await h.step('The Planet Studio (D156): a simulated planet from the New map dialog, worked out by itself from the moment it opens and seen from space (D257); a preset explained; a slider moved and what follows; its history simulated in workers, its relief and plates through time; used for a map whose land and sea follow the history on its timeline; undone', async () => {
+  await h.step('The Planet Studio (D156): a simulated planet from the New map dialog, worked out by itself from the moment it opens and seen from space (D257), its sea from its water and its land unchanged by what the climate reads (D258); a preset explained; a slider moved and what follows; its history simulated in workers, its relief and plates through time; used for a map whose land and sea follow the history on its timeline; undone', async () => {
     await page.getByTestId('studio-history').click();
     await page.getByRole('button', { name: '+ Map' }).click();
     await page.getByTestId('new-map-sim').check();
@@ -4986,6 +4986,8 @@ try {
     assert.match(await text('studio-status'), /^Working out the planet…/);
     assert.equal(await page.getByTestId('studio-layer').inputValue(), 'satellite');
     assert.equal(await page.getByTestId('studio-simulate').count(), 0, 'nothing to press');
+    // (A new planet's seed is drawn at random: one seed here, so that the test is of the same planet every time.)
+    await page.getByTestId('studio-seed').fill('7');
     // A preset, explained; what follows from it.
     await page.getByTestId('studio-preset-young-volcanic').click();
     assert.match(await text('studio-explain'), /billion years old/);
@@ -5026,15 +5028,11 @@ try {
     await page.getByTestId('studio-status').waitFor();
     assert.match(await text('studio-status'), /^Working out the (planet|new land)…/);
     await settled('');
-    // (The history keeps the climate it was first made with, D161: here made again with the settings as they are
-    // now, so that this test's planet is the same whenever its first run began.)
-    if (await page.getByTestId('studio-rerun-climate').count()) {
-      const was = await drawnNow();
-      await page.getByTestId('studio-rerun-climate').click();
-      await settled(was);
-    }
+    // (A new planet is of the second calculation, D258: its history reads no climate, so there is none to give it.)
     assert.equal(await page.getByTestId('studio-rerun-climate').count(), 0);
     assert.equal(await page.getByTestId('studio-simulate').count(), 0, 'still nothing to press');
+    // Where the sea stands: from the planet's water, an amount, over the land as it is.
+    assert.match(await text('studio-readout-sea'), /^\d+ % of the surface under 1\.72 km of water \(the Earth's: 2\.62 km\)$/);
     assert.match(await text('studio-when'), /^Today/);
     assert.match(await text('studio-legend'), /^Today's land seen from space/);
     // Seen from space: the sea in blues over most of this planet, the land in its own colours, lit by its relief.
@@ -5079,6 +5077,50 @@ try {
     assert.equal(await text('studio-value-plates'), '16');
     await page.waitForFunction((was) => !document.querySelector('[data-testid=studio-status]') && (document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement).dataset.drawn === was, first, { timeout: 240_000 });
     assert.ok(differ(land0, await landOf()) < 0.001, 'the land as it was');
+    // The settings the land is made from carry a mark; the others none (D258).
+    assert.equal(await page.locator('label:has([data-testid=studio-control-plates]) .studio-land').count(), 1);
+    await page.getByTestId('studio-step-air').click();
+    assert.equal(await page.locator('label:has([data-testid=studio-control-clouds]) .studio-land').count(), 0);
+    assert.equal(await page.locator('label:has([data-testid=studio-control-water]) .studio-land').count(), 0);
+    assert.equal(await page.getByTestId('studio-control-ocean').count(), 0, 'no share of sea to set: it follows from the water');
+    // More water (D258): the same land under a higher sea, with no history made; what stands out of it stood out before.
+    const share = async () => Number((await text('studio-readout-sea')).match(/^(\d+) %/)?.[1] ?? NaN);
+    const share0 = await share();
+    await page.getByTestId('studio-control-water').fill('800');
+    assert.equal(await text('studio-value-water'), '6.14');
+    await page.waitForFunction((was) => { const d = (document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement).dataset.drawn ?? ''; return d.startsWith('satellite:') && d !== was; }, first, { timeout: 120_000 });
+    assert.equal(await page.getByTestId('studio-progress').count(), 0, 'no history made for the water');
+    assert.equal(await page.getByTestId('studio-status').count(), 0);
+    await page.waitForFunction((was) => Number((document.querySelector('[data-testid=studio-readout-sea]')?.textContent ?? '').match(/^(\d+) %/)?.[1] ?? NaN) > was, share0);
+    const flooded = await landOf();
+    let drowned = 0, risen = 0;
+    for (let i = 0; i < land0.length; i++) { if (land0[i] === '1' && flooded[i] === '0') drowned++; if (land0[i] === '0' && flooded[i] === '1') risen++; }
+    assert.ok(drowned > 20, `land drowned (${drowned} places)`);
+    // (Told by the picture's colours: along a shore a pixel or two changes colour with the land's cover, as the
+    // climate under more sea is another. The land itself under more water is checked cell by cell in the unit tests.)
+    assert.ok(risen <= land0.length * 0.005 && risen < drowned / 10, `nothing risen from the sea (${risen} places of ${land0.length}, ${drowned} drowned)`);
+    assert.match(await text('studio-water-note'), /^2\.34 × the Earth's water\. The sea covers \d+ % of the surface\.$/);
+    // No water at all: a dry world, all of it land with its relief (and, the plates no longer moving, other land).
+    await page.getByTestId('studio-control-water').fill('0');
+    assert.equal(await text('studio-value-water'), '0.00');
+    await page.getByTestId('studio-status').waitFor();
+    await settled(await drawnNow());
+    assert.equal(await text('studio-readout-sea'), 'none: all of the surface is land');
+    assert.match(await text('studio-readout-interior'), /a single rigid lid/);
+    const dry = await page.evaluate(() => {
+      const c = document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement, d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+      let sea = 0, all = 0;
+      const land = new Set<string>();
+      for (let k = 0; k < d.length; k += 4 * 7) { all++; if (d[k + 2] > d[k] + 30 && d[k + 2] > d[k + 1] + 15) sea++; else land.add(`${d[k] >> 3},${d[k + 1] >> 3},${d[k + 2] >> 3}`); }
+      return { sea: sea / all, land: land.size };
+    });
+    assert.ok(dry.sea < 0.02, `no sea (${dry.sea.toFixed(3)})`);
+    assert.ok(dry.land > 8, `its relief in the shading (${dry.land} tones)`);
+    await h.screenshot('planet-studio-dry');
+    // The water it had: the history made before is at hand, and its picture.
+    await page.getByTestId('studio-control-water').fill('523');
+    assert.equal(await text('studio-value-water'), '1.72');
+    await page.waitForFunction((was) => !document.querySelector('[data-testid=studio-status]') && (document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement).dataset.drawn === was, first, { timeout: 240_000 });
     // The other layers at every step: the relief of today, then the plates, then the plates 200 million years ago.
     await page.getByTestId('studio-layer').selectOption('elevation');
     await drawn('elevation:');
@@ -5112,7 +5154,11 @@ try {
     await h.screenshot('planet-studio-past-biomes');
     await page.getByTestId('studio-layer').selectOption('koppen');
     await drawn('koppen:');
-    assert.match(await text('studio-legend'), /^Today's \(this layer is worked out for the present alone\): Köppen-Geiger climates/);
+    // (D258: every layer of the climate, the water and the life at that moment; the crust's age for the present alone.)
+    assert.match(await text('studio-legend'), /^200 million years ago: Köppen-Geiger climates/);
+    await page.getByTestId('studio-layer').selectOption('crustAge');
+    await drawn('crustAge:');
+    assert.match(await text('studio-legend'), /^Today's \(this layer is worked out for the present alone\): Age of the crust/);
     await page.getByTestId('studio-frame').fill('8');
     assert.match(await text('studio-when'), /^Today/);
     // Today's climate over today's land and sea (D157): the year's mean, and the first and seventh months.
@@ -5202,6 +5248,7 @@ try {
     await h.screenshot('planet-studio-edit');
     await page.getByTestId('studio-compare').uncheck();
     // Used for a map: its land and sea follow the history on its timeline.
+    const seaShare = (await share()) / 100;
     await page.getByTestId('studio-use').click();
     await page.getByTestId('planet-studio').waitFor({ state: 'detached' });
     await page.waitForFunction(() => { const s = (window as any).__mapmaker.store; return !!s.terrainOf(s.world.get('map_space', s.spaceId)); }, null, { timeout: 180_000 });
@@ -5219,7 +5266,7 @@ try {
     assert.equal(r.radius, 6371000);
     assert.notEqual(r.keys[0], r.keys[1], 'another moment, other land and sea');
     assert.ok(r.differ > 100, 'the planet 150 million years ago differs');
-    assert.ok(Math.abs(r.land - 0.2) < 0.08, `the sea where the planet has it (${r.land.toFixed(2)} land)`);
+    assert.ok(Math.abs(r.land - (1 - seaShare)) < 0.04, `the sea where the planet's water puts it (${r.land.toFixed(2)} land; the studio's sea ${seaShare.toFixed(2)})`);
     assert.ok(r.start < -1.9e8, 'the timeline reaches back over the history');
     // Its land seen from space through its history (D167): today's biomes; 150 million years ago, that moment's own
     // (made when an earlier moment is first shown); 140 million years ago, the pictures either side blended.
@@ -5240,7 +5287,7 @@ try {
     await page.getByTestId('open-planet-studio').click();
     await page.getByTestId('planet-studio').waitFor();
     await page.getByTestId('studio-step-air').click();
-    assert.equal(await text('studio-value-ocean'), '0.80');
+    assert.equal(await text('studio-value-water'), '1.72');
     await page.getByTestId('studio-close').click();
     await page.getByTestId('undo').click();
     await h.saved();
@@ -5248,6 +5295,60 @@ try {
     await page.getByTestId('studio-history').click();
   });
 
+
+  await h.step('A planet of the first calculation in the Planet Studio (D258): kept as it was made; its sea a share of the surface, marked as making new land; its history keeping its climate until re-run with another; undone', async () => {
+    const text = async (id: string) => (await page.getByTestId(id).textContent()) ?? '';
+    // A map of a planet as planets were first made (none can be made so in the interface any more): put in the
+    // project as a map of one made then is.
+    await page.evaluate(() => {
+      const m = (window as any).__mapmaker, s = m.store;
+      const def = m.bench.planet.definitionFromPreset('earthlike', 4);
+      def.simulation.spanMyr = 100;
+      const id = s.execute((w: any) => m.bench.commands.createSimPlanet(w, 'Old Prime', def));
+      s.set({ spaceId: id, layerId: s.world.all('layer').find((l: any) => l.space_id === id)?.id ?? '', selection: null });
+    });
+    await h.saved();
+    await page.getByTestId('studio-map').click();
+    await page.locator('[data-testid^="map-row-"].sel').click();
+    await page.getByTestId('open-planet-studio').click();
+    await page.getByTestId('planet-studio').waitFor();
+    const drawnNow = () => page.evaluate(() => (document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement).dataset.drawn ?? '');
+    const settled = (was: string) => page.waitForFunction((w) => {
+      const d = (document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement)?.dataset.drawn ?? '';
+      return !document.querySelector('[data-testid=studio-status]') && !document.querySelector('[data-testid=studio-progress]') && d.startsWith('satellite:') && d !== w;
+    }, was, { timeout: 240_000 });
+    // Worked out by itself, as every planet is (D257), by the calculation it was made with.
+    await settled('');
+    assert.equal(await page.getByTestId('studio-readout-sea').count(), 0, 'no sea worked out from water');
+    // Its sea is a share of the surface, and one of the settings its land is made from; no amount of water.
+    await page.getByTestId('studio-step-air').click();
+    assert.equal(await text('studio-value-ocean'), '0.71');
+    assert.equal(await page.locator('label:has([data-testid=studio-control-ocean]) .studio-land').count(), 1);
+    assert.equal(await page.getByTestId('studio-control-water').count(), 0);
+    await page.getByTestId('studio-step-history').click();
+    assert.equal(await page.getByTestId('studio-control-quality').inputValue(), 'preview');
+    // Its history keeps the climate it was made with (D161): more carbon dioxide redraws today's climate on the same
+    // land, and the history is made again with it only when asked.
+    assert.equal(await page.getByTestId('studio-climate-note').count(), 0);
+    const first = await drawnNow();
+    await page.getByTestId('studio-step-air').click();
+    await page.getByTestId('studio-control-co2').fill('700');
+    await page.waitForFunction((was) => { const d = (document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement).dataset.drawn ?? ''; return d.startsWith('satellite:') && d !== was; }, first, { timeout: 120_000 });
+    assert.equal(await page.getByTestId('studio-progress').count(), 0);
+    assert.match(await text('studio-climate-note'), /the history's erosion and ice still follow those it was simulated with/);
+    const warm = await drawnNow();
+    await page.getByTestId('studio-rerun-climate').click();
+    await settled(warm);
+    assert.equal(await page.getByTestId('studio-climate-note').count(), 0);
+    await page.getByTestId('studio-close').click();
+    await page.getByTestId('planet-studio').waitFor({ state: 'detached' });
+    // (The map itself is of the first calculation still: its planet as it was stored.)
+    assert.equal(await page.evaluate(() => { const s = (window as any).__mapmaker.store; return JSON.parse(s.world.get('map_space', s.spaceId).settings).sim.definition.engine ?? null; }), null);
+    await page.getByTestId('undo').click();
+    await h.saved();
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.name === 'Old Prime')), false);
+    await page.getByTestId('studio-history').click();
+  });
   await h.step('The studios: each page its own panels; panels dock, float, close and open again, resize; Save and Reset workspace (D196, D234)', async () => {
     const box = async (sel: string) => (await page.locator(sel).first().boundingBox())!;
     const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);

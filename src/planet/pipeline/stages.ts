@@ -6,7 +6,7 @@
 // The same registry runs in the interface (to work out inputs and keys, and to join parts) and in the workers (to
 // run stages). A stage that works cell by cell can be run in parts: fixed ranges of cells, whatever the number of
 // workers, joined in order, so the result is the same bytes on one worker or on many.
-import { definitionOf, historyView, type PlanetDefinition } from '../model/definition.ts';
+import { definitionOf, historyView, referenceSea, withWaterGuess, type PlanetDefinition } from '../model/definition.ts';
 import { seasonalClimate } from '../climate/ebm.ts';
 import { joinRain, rainMonths, type RainMonths } from '../climate/hydroclimate.ts';
 import { hydrology } from '../water/hydrology.ts';
@@ -15,6 +15,7 @@ import { BIOME, BIOME_IDS, KOPPEN, biomeColour, biomeOf, customBiomeOf, koppen, 
 import { toLevel } from '../mesh/transfer.ts';
 import { derive } from '../model/physics.ts';
 import { cellsAt, meshAt } from '../mesh/icosphere.ts';
+import { seaLevelForVolume } from '../water/sealevel.ts';
 import { rasterize } from '../mesh/transfer.ts';
 import { insolationCells, sunlightOf, type Sunlight } from '../climate/insolation.ts';
 import { rasterizeNearest } from '../mesh/transfer.ts';
@@ -48,6 +49,13 @@ export interface StageParams {
    * alpha how much of what surrounds it is land (255 inland, 0 at sea; the coast runs where it passes 128).
    */
   land?: boolean;
+  /**
+   * The sea follows from the planet's water (D258, definitions of `engine` 2): the climate, water and life stages
+   * work on the land and sea of the sea stage, at the moment asked for (`frame`: one of the history's pictures;
+   * none or −1: the present), and `month` chooses the month of the layers that have months.
+   */
+  sea?: boolean;
+  month?: number;
 }
 
 export type ProductValue = FieldArray | number | string | boolean | null | ProductValue[] | { [k: string]: ProductValue };
@@ -113,9 +121,12 @@ export type LayerId = keyof typeof LAYERS;
 export const PAST_FIELDS: Partial<Record<LayerId, 'biome' | 'temp' | 'rain'>> = { biome: 'biome', temperature: 'temp', precipitation: 'rain' };
 /** Whether a picture of a layer is of an earlier moment (D167). */
 const pastOf = (p: StageParams) => !!PAST_FIELDS[p.layer ?? 'insolation'] && (p.frame ?? -1) >= 0;
+/** The stage a layer's picture is made from where the sea follows from the water (D258): the heights from the sea stage. */
+const layerStage = (layer: LayerId): string => (layer === 'elevation' ? 'sea' : LAYERS[layer].stage);
 
 /** What the tectonic history reads from a definition, for a history of `durationMyr` ending at the present. */
 export function tectonicParams(live: PlanetDefinition, level: number, durationMyr = 500): TectonicParams {
+  if (live.engine === 2) return geologyParams(live, level, durationMyr);
   // The history sees the climate settings it keeps, if it keeps them (D161).
   const def = historyView(live), x = derive(def);
   const D = Math.min(durationMyr, def.history.ageGyr * 1000);
@@ -136,20 +147,56 @@ export function tectonicParams(live: PlanetDefinition, level: number, durationMy
   };
 }
 
-/** The present's heights: given (D169), or the history's last picture. */
+/** The events of a history that act on its plates and crust (the others act on the climate and the sea alone). */
+const TECTONIC_EVENTS = new Set(['supercontinent', 'breakup', 'rift', 'collision', 'volcanic-period', 'lip', 'hotspot', 'impact', 'reorganisation']);
+
+/**
+ * What a history is made from where the sea follows from the water (D258): the planet's geology alone. Its seed, size
+ * and gravity, its interior's heat and regime, its plates, continents and hotspots, the events that move plates and
+ * build crust, and whether it has any water at all (water weakens the lithosphere, and rivers wear the land). Nothing
+ * of the star, the orbit, the tilt, the day, the air or the amount of water: changing those leaves the land as it is.
+ * The land is made against the sea its continents leave room for (`referenceSea`), under rain belts by latitude.
+ */
+function geologyParams(live: PlanetDefinition, level: number, durationMyr: number): TectonicParams {
+  // (Whether there is water at all is read from the amount, whatever share is kept beside it.)
+  const def = withWaterGuess(live), x = derive(def), wet = (def.water.depthKm ?? 0) > 0;
+  const D = Math.min(durationMyr, def.history.ageGyr * 1000);
+  const events = def.history.events
+    .filter((e) => TECTONIC_EVENTS.has(e.kind))
+    .map((e) => ({ kind: e.kind, start: D - e.startMa, end: D - e.startMa + Math.max(0, e.durationMyr), strength: e.strength, ...(e.at ? { at: e.at } : {}) }))
+    .filter((e) => e.end >= 0 && e.start <= D);
+  return {
+    level, seed: def.seed, radiusKm: def.body.radiusKm, gravity: x.gravity, plates: def.tectonics.plates,
+    vigor: def.tectonics.activity * Math.sqrt(Math.max(0, x.heatFlowEarth)), continentalFraction: def.tectonics.continentalFraction,
+    oceanFraction: referenceSea(def.tectonics.continentalFraction), regime: x.regime, hotspots: def.tectonics.hotspots, events,
+    // (A world with no water wears down far more slowly: wind and frost only.)
+    erodibility: wet ? 1 : 0.03, hadleyDeg: 30,
+  };
+}
+
+/** The present's heights: given (D169), the sea stage's (D258: at the moment asked for), or the history's last picture. */
 const presentHeights = (inputs: ProductData, deps: Record<string, ProductData>, n: number): Int16Array => {
   if (inputs.heights) return inputs.heights as Int16Array;
+  if (deps.sea) return deps.sea.heights as Int16Array;
   const all = deps.tectonics.heights as Int16Array;
   return all.subarray(all.length - n);
 };
-/** A stage's dependencies, without the history when the heights are given (D169). */
-const fromHeights = (p: StageParams, deps: string[]) => (p.heights ? deps.filter((d) => d !== 'tectonics') : deps);
+/**
+ * A stage's dependencies: without the history when the heights are given (D169); with the sea stage in the history's
+ * place where the sea follows from the water (D258).
+ */
+const fromHeights = (p: StageParams, deps: string[]) => (p.heights ? deps.filter((d) => d !== 'tectonics') : p.sea ? deps.map((d) => (d === 'tectonics' ? 'sea' : d)) : deps);
+/** A definition with the share of sea its land and water give (D258), for the models that read the share. */
+const withSea = (def: PlanetDefinition, share: unknown): PlanetDefinition => (typeof share === 'number' ? { ...def, water: { ...def.water, oceanFraction: share } } : def);
 /** The heights given, as an input. */
 const givenHeights = (p: StageParams): ProductData => (p.heights ? { heights: p.heights } : {});
 
-/** What the climate reads from a definition (and the water and life stages after it). */
-const climateInputs = (def: PlanetDefinition) =>
-  ({ star: def.star, orbit: def.orbit, body: def.body, atmosphere: def.atmosphere, water: def.water, history: { ageGyr: def.history.ageGyr, events: [] }, interior: def.interior }) as unknown as ProductData;
+/**
+ * What the climate reads from a definition (and the water and life stages after it). (Where the sea follows from the
+ * water, D258, not the water: its share comes with the land and sea, from the sea stage.)
+ */
+const climateInputs = (def: PlanetDefinition, p?: StageParams) =>
+  ({ star: def.star, orbit: def.orbit, body: def.body, atmosphere: def.atmosphere, ...(p?.sea ? {} : { water: def.water }), history: { ageGyr: def.history.ageGyr, events: [] }, interior: def.interior }) as unknown as ProductData;
 
 /** The climate's product: the temperatures with the months' rain joined in order (D168). */
 function joinClimate(parts: ProductData[], deps: Record<string, ProductData>, n: number): ProductData {
@@ -230,6 +277,43 @@ export const STAGES: Record<string, StageDef> = {
   },
 
   /**
+   * Where the sea stands (D258): the planet's water, an amount, fills the land's hollows from the lowest up, at the
+   * present or at one of the history's pictures (`frame`). Gives that moment's heights against its sea (m), the sea's
+   * level against the one the history kept (m), and its share of the surface. No water: the lowest ground is the
+   * datum, and all of it is land. The land itself is the history's, unchanged whatever the water.
+   */
+  sea: {
+    id: 'sea',
+    version: 1,
+    deps: () => ['tectonics'],
+    inputs: (def, p) => ({
+      level: p.level, frame: p.frame ?? -1, depthKm: def.water.depthKm ?? 0,
+      // (The sea's own rises on the timeline: 50 m for each unit of strength while they last.)
+      rises: def.history.events.filter((e) => e.kind === 'sea-level').map((e) => [e.startMa, e.durationMyr, e.strength]),
+    }),
+    run: (inputs, deps, ctx) => {
+      const T = deps.tectonics, mesh = meshAt(inputs.level as number), n = mesh.n, area = mesh.area;
+      const times = T.times as Float64Array, F = times.length, frame = inputs.frame as number, f = frame < 0 || frame >= F ? F - 1 : frame;
+      const H = T.heights as Int16Array, kept = (T.frameSea as Float64Array)[f];
+      // The land as it stands (km against the history's datum), then the water over it.
+      const h = new Float64Array(n);
+      let lowest = Infinity;
+      for (let c = 0; c < n; c++) { h[c] = H[f * n + c] / 1000 + kept; if (h[c] < lowest) lowest = h[c]; }
+      const depth = inputs.depthKm as number, dry = !(depth > 0);
+      let level = dry ? lowest : seaLevelForVolume(h, area, depth * 4 * Math.PI);
+      if (!dry) for (const [startMa, lasts, strength] of inputs.rises as number[][]) if (times[f] <= startMa + 1e-9 && times[f] > startMa - lasts - 1e-9) level += 0.05 * Math.max(0, strength);
+      const heights = new Int16Array(n);
+      let under = 0;
+      for (let c = 0; c < n; c++) {
+        heights[c] = Math.max(-32_000, Math.min(32_000, Math.round((h[c] - level) * 1000)));
+        if (heights[c] < 0) under += area[c];
+      }
+      ctx.progress(1, 1);
+      return { heights, level: (level - kept) * 1000, share: Math.min(1, under / (4 * Math.PI)), dry, ma: times[f] };
+    },
+  },
+
+  /**
    * The present's temperatures through the year (D157): the seasonal energy balance over the present land and sea of
    * the planet's history, with those heights (for the rain, D168). Reads only what the climate depends on (star,
    * orbit, body, air, water, age), so changing the air re-runs the climate alone.
@@ -238,16 +322,16 @@ export const STAGES: Record<string, StageDef> = {
     id: 'temperature',
     version: 1,
     deps: (p) => fromHeights(p, ['tectonics']),
-    inputs: (def, p) => ({ level: p.level, def: climateInputs(def), ...givenHeights(p) }),
+    inputs: (def, p) => ({ level: p.level, def: climateInputs(def, p), ...givenHeights(p) }),
     run: (inputs, deps, ctx) => {
-      const def = definitionOf(inputs.def)!;
+      const def = withSea(definitionOf(inputs.def)!, deps.sea?.share);
       const mesh = meshAt(inputs.level as number), n = mesh.n;
       const heights = presentHeights(inputs, deps, n);
       const r = seasonalClimate(mesh, def, derive(def), heights);
       ctx.progress(1, 1);
       return {
         monthly: r.monthly, dryWarm: r.dryWarm, ice: r.ice, meanK: r.meanK, absorbed: r.absorbed, emitted: r.emitted, tropicsC: r.tropicsC, polesC: r.polesC,
-        years: r.years, heights: heights.slice(),
+        years: r.years, heights: heights.slice(), ...(deps.sea ? { seaShare: deps.sea.share } : {}),
       };
     },
   },
@@ -261,11 +345,11 @@ export const STAGES: Record<string, StageDef> = {
     id: 'climate',
     version: 3,
     deps: () => ['temperature'],
-    inputs: (def, p) => ({ level: p.level, def: climateInputs(def) }),
+    inputs: (def, p) => ({ level: p.level, def: climateInputs(def, p) }),
     parts: () => 12,
     partSize: (items, workers) => Math.ceil(items / Math.max(1, Math.min(items, workers))),
     run: (inputs, deps, ctx, range) => {
-      const def = definitionOf(inputs.def)!, mesh = meshAt(inputs.level as number), t = deps.temperature;
+      const t = deps.temperature, def = withSea(definitionOf(inputs.def)!, t.seaShare), mesh = meshAt(inputs.level as number);
       const [a, b] = range ?? [0, 12];
       const months = Array.from({ length: b - a }, (_, i) => a + i);
       const part = rainMonths(mesh, def, derive(def), t.heights as Int16Array, t.monthly as Float32Array, 4, t.dryWarm as Float32Array, months);
@@ -284,9 +368,9 @@ export const STAGES: Record<string, StageDef> = {
     id: 'water',
     version: 1,
     deps: (p) => fromHeights(p, ['tectonics', 'climate', 'insolation']),
-    inputs: (def, p) => ({ level: p.level, def: climateInputs(def), ...givenHeights(p) }),
+    inputs: (def, p) => ({ level: p.level, def: climateInputs(def, p), ...givenHeights(p) }),
     run: (inputs, deps, ctx) => {
-      const def = definitionOf(inputs.def)!;
+      const def = withSea(definitionOf(inputs.def)!, deps.sea?.share);
       const level = inputs.level as number, mesh = meshAt(level), n = mesh.n;
       const heights = Float64Array.from(presentHeights(inputs, deps, n));
       const x = derive(def);
@@ -308,7 +392,7 @@ export const STAGES: Record<string, StageDef> = {
       for (let c = 0; c < n; c++) if (thickness[c] < 1) thickness[c] = 0;
       const w = hydrology({
         mesh, radiusKm: def.body.radiusKm, height: heights, temp, precip, sun: deps.insolation.monthly as Float32Array, yearDays: x.yearDays,
-        ice: thickness, iceRunoff: ice ? up(ice.runoff) : null,
+        ice: thickness, iceRunoff: ice ? up(ice.runoff) : null, ...(deps.sea?.dry ? { dry: true } : {}),
       });
       ctx.progress(2, 2);
       return {
@@ -338,15 +422,17 @@ export const STAGES: Record<string, StageDef> = {
       const kind = deps.water.kind as Uint8Array, ice = deps.water.ice as Float32Array, pet = deps.water.pet as Float32Array;
       const koppenOut = new Uint8Array(n), biome = new Uint8Array(n), custom = new Uint8Array(n), colour = new Uint8Array(3 * n);
       const rules = life.biomeSet === 'custom' ? [...life.customBiomes].sort((a, b) => a.priority - b.priority) : [];
+      const dry = !!deps.sea?.dry;
       const T = new Float64Array(12), P = new Float64Array(12);
       const place: Place = { temp: T, precip: P, pet: 0, height: 0, water: 0, ice: 0 };
       for (let c = 0; c < n; c++) {
         let most = 0;
         for (let m = 0; m < 12; m++) { T[m] = temp[m * n + c]; P[m] = precip[m * n + c]; if (sun[m * n + c] > sun[most * n + c]) most = m; }
         place.pet = pet[c]; place.height = heights[c]; place.water = kind[c]; place.ice = ice[c];
-        const b = biomeOf(place);
+        // (A world with no water at all, D258: bare rock everywhere, whatever its warmth.)
+        const b = dry ? 'barren' : biomeOf(place);
         biome[c] = BIOME_IDS.indexOf(b);
-        if (kind[c] !== 1) koppenOut[c] = 1 + KOPPEN.findIndex(([k]) => k === koppen(T, P, (most - 2 + 12) % 12));
+        if (kind[c] !== 1 && !dry) koppenOut[c] = 1 + KOPPEN.findIndex(([k]) => k === koppen(T, P, (most - 2 + 12) % 12));
         const own = rules.length && b !== 'sea' && b !== 'lake' ? customBiomeOf(place, rules) : null;
         const rgb = own ? own.color : biomeColour(b, life);
         if (own) custom[c] = 1 + rules.indexOf(own);
@@ -385,10 +471,11 @@ export const STAGES: Record<string, StageDef> = {
   cover: {
     id: 'cover',
     version: 2,
-    deps: (p) => ((p.frame ?? -1) >= 0 ? ['moment'] : ['biomes']),
+    // (Where the sea follows from the water, D258, the biomes are worked out at any moment: no stand-in for the past.)
+    deps: (p) => ((p.frame ?? -1) >= 0 && !p.sea ? ['moment'] : ['biomes']),
     inputs: (def, p) => ({
       level: p.level, width: p.width ?? 1024, height: p.height ?? 512,
-      ...((p.frame ?? -1) >= 0 ? { frame: p.frame!, life: def.life as unknown as ProductData } : {}),
+      ...((p.frame ?? -1) >= 0 && !p.sea ? { frame: p.frame!, life: def.life as unknown as ProductData } : {}),
       ...(p.land ? { land: true } : {}),
     }),
     run: (inputs, deps, ctx) => {
@@ -419,13 +506,26 @@ export const STAGES: Record<string, StageDef> = {
     id: 'raster',
     version: 3,
     // (An earlier moment of a layer the history's pictures show, from the history alone: D167.)
-    deps: (p) => [pastOf(p) ? 'moment' : LAYERS[p.layer ?? 'insolation'].stage],
-    inputs: (_def, p) => ({ level: p.level, width: p.width ?? 512, height: p.height ?? 256, layer: p.layer ?? 'insolation', frame: p.frame ?? -1 }),
+    deps: (p) => [p.sea ? layerStage(p.layer ?? 'insolation') : pastOf(p) ? 'moment' : LAYERS[p.layer ?? 'insolation'].stage],
+    inputs: (_def, p) => ({
+      level: p.level, width: p.width ?? 512, height: p.height ?? 256, layer: p.layer ?? 'insolation', frame: p.frame ?? -1,
+      ...(p.sea ? { sea: true, month: p.month ?? 0 } : {}),
+    }),
     run: (inputs, deps, ctx) => {
       const layer = LAYERS[inputs.layer as LayerId], past = PAST_FIELDS[inputs.layer as LayerId];
       const mesh = meshAt(inputs.level as number), n = mesh.n;
       let field: Float32Array | Int16Array | Uint8Array | Int8Array | Uint16Array;
-      if (past && (inputs.frame as number) >= 0) field = deps.moment[past] as Uint8Array | Int8Array | Uint16Array;
+      if (inputs.sea) {
+        // (D258) The heights against the sea are the sea stage's, at the moment asked for; the climate, water and life
+        // layers are that moment's own already; the history's own layers by moment, the monthly ones by month.
+        const stage = layerStage(inputs.layer as LayerId);
+        field = deps[stage][stage === 'sea' ? 'heights' : layer.field] as Float32Array | Int16Array | Uint8Array;
+        if (layer.frames && stage !== 'sea') {
+          const frames = field.length / n, f = (stage === 'tectonics' ? inputs.frame : inputs.month) as number;
+          const k = f < 0 || f >= frames ? frames - 1 : f;
+          field = field.subarray(k * n, (k + 1) * n);
+        }
+      } else if (past && (inputs.frame as number) >= 0) field = deps.moment[past] as Uint8Array | Int8Array | Uint16Array;
       else {
         field = deps[layer.stage][layer.field] as Float32Array | Int16Array | Uint8Array;
         if (layer.frames) {

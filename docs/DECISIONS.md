@@ -61,6 +61,64 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D258. The same land unless the geology changes; the sea from an amount of water (the Planet Studio's overhaul, step 2)
+
+- **Why.** Measured before the plan (docs/PLANET_STUDIO_PLAN.md): a planet's history read its climate (the star, the
+  orbit, the tilt, the day, the air) and its sea's share, and is touchy, so that making it again after a change of the
+  tilt, the carbon dioxide or the clouds alone moved land and sea on 34 to 44 % of the planet (two unrelated planets:
+  41 %); the same settings at two details gave different planets (38 %); the sea was a share of the surface that
+  nothing could change; and a planet with no sea had no relief at all (every height 32,000 m: the sea's level at
+  minus infinity, clamped).
+- **A second calculation**, `engine: 2` on a planet's definition. Planets made from now on are of it. A definition
+  without the mark is of the first (D152 to D170), read, made and shown exactly as before: maps made with it stay as
+  they are, and the Studio opens them with their own controls. (The user's answer 1: existing maps are not touched.)
+- **The history from the geology alone** (`geologyParams`, stages.ts): the seed, the size and gravity, the interior's
+  heat and regime, the plates, continents and hotspots, the age, the events that move plates and build crust, and
+  whether the planet has any water at all (water weakens the lithosphere: none, no plates moving; and rivers wear the
+  land: none, hardly worn). Nothing of the star, the orbit, the tilt, the day, the air, the amount of water or the
+  life. The land is made against the sea its continents leave room for (`referenceSea`: 0.71 of the surface for the
+  Earth's 0.4 of continental crust), under rain belts by latitude. The history's own code is untouched (the first
+  calculation's results are byte for byte the same); only what it is given differs.
+- **Water as an amount** (`water.depthKm`: its depth were it spread evenly over the whole planet; the Earth's 2.62 km).
+  A new stage, **sea**, fills the land's hollows with it from the lowest up (`seaLevelForVolume`, exact), at the
+  present or at any picture of the history: that moment's heights against its sea, the sea's level, its share of the
+  surface. No water: the lowest ground is the datum and all of it is land, **with its relief**. A great deal: all sea.
+  The sea's rises on the timeline act here (50 m a unit of strength). The same land under any amount: measured, the
+  heights differ by the sea's level alone.
+- **The climate, water and life on that land and sea**, at any moment: the stages take their heights and the sea's
+  share from the sea stage (in the history's place), so every one of their layers is a past picture's own when asked
+  for it (the first calculation needed a coarse stand-in, D167, and kept the lakes and Köppen classes for the present
+  alone). `frame` chooses the moment and `month` the month.
+- **A world with no water** has none of any kind: the water stage made lakes, marshes and salt flats in its hollows
+  from nothing (hidden before, such worlds having no hollows), and the biome rules made it an "ice sheet" where cold.
+  Now no hollow holds water and its surface is bare rock (the class existed and was never used).
+- **One detail** for every planet of the second calculation (cells about 240 km): the "Detail" choice made a different
+  planet, and is gone for them. Finer detail comes in stage 2 of the plan by refining this one result.
+- **The Studio.** The control is "Water (km deep, were it spread over the whole planet)", from none to 12 km; the sea's
+  share is a result, read in "What follows" ("71 % of the surface under 2.61 km of water") and under the control. The
+  settings the land is made from carry the mark **new land** (the radius, the mass, the heat, the plates, the activity,
+  the continents, the hotspots, the regime, the age, the span, the seed; the sea's share for planets of the first
+  calculation): changing one makes the land again in a few seconds; every other setting keeps the land and redraws at
+  once. "Re-run the history with this climate" is gone for the second calculation: its history reads no climate.
+- **Until the land is made** the physics reads a guess of the sea's share from the amount (`seaShareGuess`), kept in
+  step with the amount and the continents (`withWaterGuess`).
+- **Measured.** The Earth's water covers 74 % of a default planet at the test's detail. A history at the Studio's
+  detail in 6.2 s on one slow core (7.3 s with the climate in it).
+- **Not yet.** The oceans still neither boil nor freeze over (steps 3 and 4). A dried sea bed stands at the depth it
+  had under water (it would rise by about a third). Ice ages and greenhouse periods on the timeline do not act on the
+  second calculation's past climates yet. What an edit made is still measured against the history's own sea.
+- **Tests.** Unit (`test/planet-engine2.test.ts`): the definition (the amount, the guess, read back, out of range, the
+  first calculation as it was); what the land is made from (fourteen settings that leave the history's key, eleven
+  that change it; no water: no plates, hardly worn); the sea from the water (more water more sea, every place lower
+  against the higher sea, the land itself unchanged, the volume the one asked for, all sea under a deluge; the biomes'
+  sea the sea's; an earlier picture's own sea and biomes with no stand-in; a rise of the sea in its pictures alone); a
+  world with no water (all land, relief of kilometres, bare rock, no water of any kind, no rain); pictures by moment
+  and by month; a map keeping the planet as given. Interface: the sea's share read; the marks; more water drowning
+  land and raising none, with no history made; no water at all: a dry world with relief and no blue, the plates
+  stopped; back as it was; a past picture's Köppen classes its own and the crust's age today's; the map's land where
+  the water puts the sea; and a planet of the first calculation opened with its own controls, its history keeping its
+  climate until re-run.
+
 ### D257. A planet always on screen (the Planet Studio's overhaul, step 1)
 
 - **Why.** The user, on the simulated planet: sliders barely change how it looks; when something changes it cannot be

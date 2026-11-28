@@ -308,8 +308,8 @@ Each step follows the usual routine: tests, full check, decision record, docs, c
 | Step | Status | Notes |
 |---|---|---|
 | 1 A planet always on screen | Done (28 November 2026, D257) | Seen from space by default, made by itself on opening and after a change to what the land is made from, never out of date in silence; the layers at every step. Still the old calculation: frozen seas are drawn open, hot worlds keep their seas (steps 3 and 4) |
-| 2 Same land unless geology changes | Next | |
-| 3 Hot worlds | | |
+| 2 Same land unless geology changes | Done (28 November 2026, D258) | A second calculation for planets made from now on (older maps keep the first): the history from the geology alone; water an amount, the sea where it fills the land's hollows; a dry world with its relief; every climate layer at any moment; the settings that make new land marked. Still: seas neither boil nor freeze over |
+| 3 Hot worlds | Next | |
 | 4 Cold and airless worlds | | |
 | 5 "Why it looks like this" and "What changed" | | |
 | 6 Every slider earns its place | | |

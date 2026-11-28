@@ -85,8 +85,53 @@ export interface AtmosphereSpec {
 }
 
 export interface WaterSpec {
-  /** The share of the present surface under the sea (0: a dry world). */
+  /**
+   * The share of the present surface under the sea (0: a dry world). A setting of planets as first built; where the
+   * sea follows from the water (`engine` 2, D258) it is not one: a guess of the share is kept here until the land is
+   * made (`seaShareGuess`), and the stages work with the share the land and the water give.
+   */
   oceanFraction: number;
+  /**
+   * How much water the planet has (D258, `engine` 2): its depth, km, were it spread evenly over the whole planet
+   * (the Earth's: `EARTH_WATER_KM`). The sea stands where the land's hollows hold it.
+   */
+  depthKm?: number;
+}
+
+/** The Earth's water as an even layer over the whole planet, km (1.335 billion km³ of sea over 510 million km²). */
+export const EARTH_WATER_KM = 2.62;
+
+/**
+ * The share of the surface a planet's history keeps under its sea (D258): the sea filling the basins between its
+ * continents (0.71 for the Earth's 0.4 of continental crust). The land is made against this; the water then stands
+ * wherever its amount brings it, with the land unchanged.
+ */
+export const referenceSea = (continentalFraction: number) => Math.min(0.97, Math.max(0.3, 1 - 0.72 * continentalFraction));
+
+/**
+ * About what share of the surface an amount of water covers, before the land is known (D258): none for none, the
+ * history's share (`referenceSea`) for the Earth's amount, all of it for much more. A stand-in until the land is made.
+ */
+export function seaShareGuess(depthKm: number, continentalFraction: number): number {
+  if (!(depthKm > 0)) return 0;
+  const k = -Math.log(1 - referenceSea(continentalFraction)) / EARTH_WATER_KM;
+  return Math.min(1, 1 - Math.exp(-k * depthKm));
+}
+/**
+ * A definition of the second calculation with the share its amount of water is guessed to cover (D258): what the
+ * physics reads until the land is made. Kept so after every change of the water or the continents.
+ */
+export function withWaterGuess<T extends { engine?: 2; water: WaterSpec; tectonics: { continentalFraction: number } }>(d: T): T {
+  if (d.engine !== 2) return d;
+  const share = seaShareGuess(d.water.depthKm ?? 0, Math.min(1, Math.max(0, d.tectonics.continentalFraction)));
+  return share === d.water.oceanFraction ? d : { ...d, water: { ...d.water, oceanFraction: share } };
+}
+
+/** The amount of water that `seaShareGuess` gives a share for (0 for none; 30 km at most). */
+export function waterForShare(share: number, continentalFraction: number): number {
+  if (!(share > 0)) return 0;
+  const k = -Math.log(1 - referenceSea(continentalFraction)) / EARTH_WATER_KM;
+  return Math.min(30, -Math.log(Math.max(1e-6, 1 - Math.min(1, share))) / k);
 }
 
 export interface GeoEvent {
@@ -143,7 +188,9 @@ export const historyClimateDiffers = (d: PlanetDefinition) => !!d.history.climat
 export function withLandOf(now: PlanetDefinition, was: PlanetDefinition): PlanetDefinition {
   const body = { ...now.body, radiusKm: was.body.radiusKm };
   if (was.body.massEarths === undefined) delete body.massEarths; else body.massEarths = was.body.massEarths;
-  return { ...now, seed: was.seed, body, interior: was.interior, tectonics: was.tectonics, water: was.water, history: was.history, simulation: was.simulation };
+  // (Where the sea follows from the water, D258, the water is not what the land is made from: only whether there is any.)
+  const water = now.engine === 2 && ((now.water.depthKm ?? 0) > 0) === ((was.water.depthKm ?? 0) > 0) ? now.water : was.water;
+  return { ...now, seed: was.seed, body, interior: was.interior, tectonics: was.tectonics, water, history: was.history, simulation: was.simulation };
 }
 
 /** A biome of the user's own (D152 defines it; 14.9 classifies with it). */
@@ -174,6 +221,11 @@ export type PresetId =
 
 export interface PlanetDefinition {
   version: 1;
+  /**
+   * Which calculation makes the planet. None: as first built (D152 to D170), kept so that maps made with it stay as
+   * they are. 2 (D258): the history is made from the planet's geology alone, and the sea follows from its water.
+   */
+  engine?: 2;
   name: string;
   seed: number;
   preset: PresetId | 'custom';
@@ -199,7 +251,7 @@ const LIMITS = {
   'tectonics.plates': [2, 40], 'tectonics.activity': [0, 4], 'tectonics.continentalFraction': [0, 1], 'tectonics.hotspots': [0, 60],
   'atmosphere.pressureBar': [0, 300], 'atmosphere.co2': [0, 1], 'atmosphere.ch4': [0, 1], 'atmosphere.o2': [0, 1], 'atmosphere.ar': [0, 1],
   'atmosphere.clouds': [0, 1], 'atmosphere.cloudAlbedo': [0, 1],
-  'water.oceanFraction': [0, 1], 'history.ageGyr': [0.05, 13], 'simulation.spanMyr': [50, 4500],
+  'water.oceanFraction': [0, 1], 'water.depthKm': [0, 30], 'history.ageGyr': [0.05, 13], 'simulation.spanMyr': [50, 4500],
 } as const;
 
 const EARTH: Omit<PlanetDefinition, 'name' | 'seed' | 'preset'> = {
@@ -300,6 +352,24 @@ export function definitionFromPreset(id: PresetId, seed = 1, name = PRESETS[id].
   return { ...base, name, seed, preset: id };
 }
 
+/**
+ * A definition made by the second calculation (D258) from one of the first: its water the amount that gives about
+ * its share of sea, no climate kept with its history (the history does not read one), simulated at the one detail
+ * every planet of this calculation has.
+ */
+export function asEngine2(d: PlanetDefinition): PlanetDefinition {
+  if (d.engine === 2) return d;
+  const depthKm = Number(waterForShare(d.water.oceanFraction, d.tectonics.continentalFraction).toPrecision(3));
+  const { climate: _c, ...history } = d.history;
+  return {
+    ...d, engine: 2, water: { oceanFraction: seaShareGuess(depthKm, d.tectonics.continentalFraction), depthKm },
+    history: { ...history }, simulation: { ...d.simulation, quality: 'preview' },
+  };
+}
+
+/** A complete definition of the second calculation from a preset (D258). */
+export const newDefinition = (id: PresetId, seed = 1, name = PRESETS[id].name): PlanetDefinition => asEngine2(definitionFromPreset(id, seed, name));
+
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
 
@@ -341,6 +411,7 @@ export function definitionProblems(d: PlanetDefinition): string[] {
   check('atmosphere.clouds', a.clouds, 'The cloud cover');
   check('atmosphere.cloudAlbedo', a.cloudAlbedo, 'The clouds\' brightness');
   check('water.oceanFraction', d.water.oceanFraction, 'The ocean share');
+  check('water.depthKm', d.water.depthKm, 'The amount of water (km)');
   check('history.ageGyr', d.history.ageGyr, 'The age (billion years)');
   check('simulation.spanMyr', d.simulation.spanMyr, 'The span simulated (million years)');
   for (const e of d.history.events) {
@@ -435,6 +506,16 @@ export function definitionOf(raw: unknown): PlanetDefinition | null {
   out.tectonics.plates = Math.round(fit(out.tectonics.plates, 'tectonics.plates'));
   out.tectonics.hotspots = Math.round(fit(out.tectonics.hotspots, 'tectonics.hotspots'));
   out.water.oceanFraction = fit(out.water.oceanFraction, 'water.oceanFraction');
+  // The second calculation (D258): its water as an amount (the Earth's if none is readable), the share a guess from it;
+  // no climate kept with the history, one detail.
+  if (raw.engine === 2) {
+    out.engine = 2;
+    const depth = isObj(raw.water) ? num(raw.water.depthKm) : undefined;
+    out.water.depthKm = fit(depth ?? waterForShare(out.water.oceanFraction, out.tectonics.continentalFraction), 'water.depthKm');
+    out.water.oceanFraction = seaShareGuess(out.water.depthKm, Math.min(1, Math.max(0, out.tectonics.continentalFraction)));
+    delete out.history.climate;
+    out.simulation.quality = 'preview';
+  }
   out.history.ageGyr = fit(out.history.ageGyr, 'history.ageGyr');
   out.star.stars = out.star.stars.map((s) => ({ ...s, massSun: fit(s.massSun, 'star.massSun') }));
   if (out.star.arrangement === 'single') out.star.stars = out.star.stars.slice(0, 1);

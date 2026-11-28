@@ -72,11 +72,12 @@ async function preview(def: PlanetDefinition | PresetId, opts: { level?: number;
 export const planetBench = { preview, derive, definitionFromPreset, presets: Object.keys(PRESETS) as PresetId[] };
 
 /** The mesh level for a definition's quality: a preview (about 240 km cells on an Earth-sized planet) or standard (110 km). */
-export const simLevel = (def: PlanetDefinition) => (def.simulation.quality === 'preview' ? 5 : 6);
+export const simLevel = (def: PlanetDefinition) => (def.engine === 2 || def.simulation.quality === 'preview' ? 5 : 6);
 
 /** What a simulated planet's history is run with (D156): its level, the last `spanMyr` of it, a picture every 25 Myr. */
 export function simParams(def: PlanetDefinition): StageParams {
-  return { level: simLevel(def), durationMyr: Math.min(def.simulation.spanMyr ?? 500, def.history.ageGyr * 1000), frameEveryMyr: 25 };
+  // (Where the sea follows from the planet's water, D258: one detail for every planet, the land and sea from the sea stage.)
+  return { level: simLevel(def), durationMyr: Math.min(def.simulation.spanMyr ?? 500, def.history.ageGyr * 1000), frameEveryMyr: 25, ...(def.engine === 2 ? { sea: true } : {}) };
 }
 
 /** The size of the pictures a map of a simulated planet draws its land and sea from. */

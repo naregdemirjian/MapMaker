@@ -8,7 +8,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../store.ts';
 import { VIEWER } from '../shell/dock.ts';
 import * as cmd from '../../domain/commands.ts';
-import { definitionFromPreset, definitionProblems, PRESETS, type PlanetDefinition, type PresetId, type GeoEventKind, type GeoEvent } from '../../planet/model/definition.ts';
+import { definitionFromPreset, newDefinition, definitionProblems, PRESETS, EARTH_WATER_KM, type PlanetDefinition, type PresetId, type GeoEventKind, type GeoEvent } from '../../planet/model/definition.ts';
 import { derive, type Derived } from '../../planet/model/physics.ts';
 import { planetPipeline, simParams } from '../planet-engine.ts';
 import { colourLayer, seenFromSpace } from '../planet-colors.ts';
@@ -17,7 +17,7 @@ import { gregorian, PRESENT_YEAR } from '../../core-time/index.ts';
 import type { LayerId as EngineLayer, ProductData } from '../../planet/pipeline/stages.ts';
 import { explain, cellAt, type Explanation } from '../../planet/explain.ts';
 import { meshAt } from '../../planet/mesh/icosphere.ts';
-import { climateSnapshot, historyClimateDiffers, withLandOf } from '../../planet/model/definition.ts';
+import { climateSnapshot, historyClimateDiffers, withLandOf, withWaterGuess } from '../../planet/model/definition.ts';
 /** The studio's layers: the engine's, and the land seen from space (the cover stage's picture, D160). */
 type LayerId = EngineLayer | 'satellite';
 import { CancelledError } from '../../planet/worker/pool.ts';
@@ -69,6 +69,7 @@ const EXPLAIN: Record<string, string> = {
   co2: 'Carbon dioxide traps heat: more of it, warmer (Venus has 96 per cent and 92 bar: 460 °C).',
   clouds: 'More cloud reflects more light: cooler, though clouds also trap heat at night.',
   ocean: 'The share of the surface under the sea now. Water also weakens the lithosphere: without it plates rarely move.',
+  water: 'How much water the planet has, as its depth were it spread evenly over the whole planet (the Earth: 2.6 km). It fills the land\'s hollows from the lowest up: none leaves dry basins, a little makes seas in the deepest, the Earth\'s fills the oceans to the continents\' edges, more drowns the land to islands and then altogether. The land itself stays as it is (but with no water at all the plates do not move).',
   age: 'An older planet has a brighter star (stars brighten as they age) and a cooler interior.',
   span: 'How much of the planet\'s history is simulated (ending today): longer takes longer.',
 };
@@ -114,14 +115,20 @@ function SetByHand({ id, label, natural, value, unit, digits, min, max, onSet }:
   );
 }
 
+/** The mark of a setting the land is made from (D258): changing it makes the land again; all the others keep it. */
+function NewLand() {
+  return <span className="studio-land" title="The land is made from this: changing it makes new land, which takes a few seconds. Settings without this mark keep the land as it is.">new land</span>;
+}
+
 /** A labelled slider, linear or logarithmic, with its value. */
-function Slider({ id, label, value, min, max, step, log, unit, digits = 0, onChange, onFocus }: { id: string; label: string; value: number; min: number; max: number; step?: number; log?: boolean; unit?: string; digits?: number; onChange: (v: number) => void; onFocus: () => void }) {
-  const toPos = (v: number) => (log ? (Math.log(v) - Math.log(min)) / (Math.log(max) - Math.log(min)) : (v - min) / (max - min));
-  const fromPos = (p: number) => (log ? Math.exp(Math.log(min) + p * (Math.log(max) - Math.log(min))) : min + p * (max - min));
+function Slider({ id, label, value, min, max, step, log, curve, unit, digits = 0, land, onChange, onFocus }: { id: string; label: string; value: number; min: number; max: number; step?: number; log?: boolean; curve?: number; unit?: string; digits?: number; land?: boolean; onChange: (v: number) => void; onFocus: () => void }) {
+  // (`curve`: the value grows as that power of the slider's place, for settings that start at nothing and need room near it.)
+  const toPos = (v: number) => (log ? (Math.log(v) - Math.log(min)) / (Math.log(max) - Math.log(min)) : curve ? ((v - min) / (max - min)) ** (1 / curve) : (v - min) / (max - min));
+  const fromPos = (p: number) => (log ? Math.exp(Math.log(min) + p * (Math.log(max) - Math.log(min))) : min + (curve ? p ** curve : p) * (max - min));
   const round = (v: number) => (step ? Math.round(v / step) * step : v);
   return (
     <label className="studio-slider">
-      <span>{label}</span>
+      <span>{label}{land && <NewLand />}</span>
       <input type="range" min={0} max={1000} value={Math.round(toPos(value) * 1000)} data-testid={`studio-control-${id}`}
         onChange={(e) => { onFocus(); onChange(round(fromPos(Number(e.target.value) / 1000))); }} onFocus={onFocus} />
       <b data-testid={`studio-value-${id}`}>{fmt(value, digits)}{unit ? ` ${unit}` : ''}</b>
@@ -150,12 +157,16 @@ export function PlanetStudio() {
   const s = useStore();
   const editingId = s.studioSpaceId;
   const editing = editingId ? simOf(s.world?.get('map_space', editingId)) : null;
-  const [def, setDef] = useState<PlanetDefinition>(() => editing ?? definitionFromPreset('earthlike', newSeed()));
+  // (A new planet is of the second calculation, D258; a map's own planet stays of the calculation it was made with.)
+  const [def, setDef] = useState<PlanetDefinition>(() => editing ?? newDefinition('earthlike', newSeed()));
+  const second = def.engine === 2;
   const [name, setName] = useState(() => editing?.name ?? s.studioName ?? '');
   const [step, setStep] = useState<StepId>('star');
   const [focus, setFocus] = useState('');
   const [more, setMore] = useState(false);
-  const x = useMemo(() => derive(def), [def]);
+  // Where the sea stands on the land there is (D258): from the planet's water; its share is what the physics reads.
+  const [sea, setSea] = useState<{ share: number; level: number; dry: boolean } | null>(null);
+  const x = useMemo(() => derive(second && sea ? { ...def, water: { ...def.water, oceanFraction: sea.share } } : def), [def, second, sea]);
   const problems = useMemo(() => definitionProblems(def), [def]);
   // The simulated history shown, and what it was simulated from.
   const [run, setRun] = useState<{ def: PlanetDefinition; key: string; times: number[]; seaLevels: number[]; ice: number[] } | null>(null);
@@ -234,8 +245,8 @@ export function PlanetStudio() {
     return out;
   }, [run, pending]);
   const close = () => { abort.current?.abort(); s.set({ dialog: null, studioSpaceId: null }); };
-  const patch = (f: (d: PlanetDefinition) => void) => setDef((d) => { const n = structuredClone(d); f(n); n.preset = 'custom'; return n; });
-  const choosePreset = (id: PresetId) => { setDef(definitionFromPreset(id, def.seed)); setFocus(`preset:${id}`); };
+  const patch = (f: (d: PlanetDefinition) => void) => setDef((d) => { const n = structuredClone(d); f(n); n.preset = 'custom'; return withWaterGuess(n); });
+  const choosePreset = (id: PresetId) => { setDef(second ? newDefinition(id, def.seed) : definitionFromPreset(id, def.seed)); setFocus(`preset:${id}`); };
 
   const simulate = async (from: PlanetDefinition = def) => {
     abort.current?.abort();
@@ -247,7 +258,8 @@ export function PlanetStudio() {
     // The history keeps the climate settings it is simulated with (D161): later changes to the air or orbit then
     // recompute today's climate, water and life at once and leave the history until it is re-run with them. (Those it
     // already keeps stay, D257: made again for other land, it does not take another climate unasked.)
-    const d0: PlanetDefinition = from.history.climate ? from : { ...from, history: { ...from.history, climate: climateSnapshot(from) } };
+    // (A history of the second calculation reads no climate, D258: nothing to keep.)
+    const d0: PlanetDefinition = from.engine === 2 || from.history.climate ? from : { ...from, history: { ...from.history, climate: climateSnapshot(from) } };
     if (JSON.stringify(d0) !== JSON.stringify(def)) setDef(d0);
     const params = simParams(d0), pipe = planetPipeline();
     making.current = pipe.keyOf('tectonics', d0, params);
@@ -294,6 +306,14 @@ export function PlanetStudio() {
     }
   };
 
+  // Where the sea stands on the land there is (D258): asked of the sea stage whenever the land or the water changes.
+  useEffect(() => {
+    if (!second || !run) { setSea(null); return; }
+    let live = true;
+    planetPipeline().product('sea', shown, simParams(shown)).then((r) => { if (live) setSea({ share: r.data.share as number, level: r.data.level as number, dry: !!r.data.dry }); }, () => {});
+    return () => { live = false; };
+  }, [second, run, shown]);
+
   // The history made by itself (D257): at once on opening, and half a second after the last change to what the land
   // is made from (a run under way for other settings is dropped for it).
   const simulateNow = useRef(simulate);
@@ -331,6 +351,18 @@ export function PlanetStudio() {
         c.getContext('2d')!.putImageData(new ImageData(pixels as unknown as Uint8ClampedArray<ArrayBuffer>, c.width, c.height), 0, 0);
         setLegend(`${ago ? `The land ${ago}` : "Today's land"} seen from space: its biomes, its plants coloured after its star's light${want.life.vegetation === 'red-dwarf' ? ' (a red dwarf: dark red)' : want.life.vegetation === 'blue-star' ? ' (a hot star: yellow to orange)' : want.life.vegetation === 'none' ? ' (no plants: bare ground)' : ''}`);
         c.dataset.drawn = `${layer}:${earlier}:${r.key}`;
+      }, failed));
+      return () => { live = false; };
+    }
+    if (want.engine === 2) {
+      // (D258) Every layer is the moment's own, but the crust's that are kept for the present alone (and the sunlight).
+      const L = LAYERS[layer as EngineLayer], presentOnly = (L.stage === 'tectonics' && !L.frames) || layer === 'insolation';
+      draw(() => planetPipeline().product('raster', want, { ...base, layer, frame: presentOnly ? -1 : earlier, month }).then((r) => {
+        if (!live) return;
+        const { pixels, legend: text } = colourLayer(layer, r.data.raster as Float32Array, c.width, c.height, { min: r.data.min as number, max: r.data.max as number });
+        c.getContext('2d')!.putImageData(new ImageData(pixels as unknown as Uint8ClampedArray<ArrayBuffer>, c.width, c.height), 0, 0);
+        setLegend(earlier >= 0 && presentOnly && layer !== 'insolation' ? `Today's (this layer is worked out for the present alone): ${text}` : ago && !presentOnly ? `${ago}: ${text}` : text);
+        c.dataset.drawn = `${layer}:${monthly ? month : earlier}:${r.key}`;
       }, failed));
       return () => { live = false; };
     }
@@ -378,8 +410,11 @@ export function PlanetStudio() {
     try {
       const [t, cl, w, b] = await Promise.all(['tectonics', 'climate', 'water', 'biomes'].map((id) => pipe.product(id, want, p)));
       const mesh = meshAt(p.level), n = mesh.n, H = t.data.heights as Int16Array, K = t.data.kinds as Uint8Array, last = H.length / n - 1;
+      // (The heights against the sea as it stands: where the sea follows from the water, the sea stage's, D258.)
+      const stands = want.engine === 2 ? (await pipe.product('sea', want, p)).data : null;
+      const told = stands ? { ...want, water: { ...want.water, oceanFraction: stands.share as number } } : want;
       const text = explain({
-        mesh, def: want, x: derive(want), heights: H.subarray(last * n, (last + 1) * n), kinds: K.subarray(last * n, (last + 1) * n),
+        mesh, def: told, x: derive(told), heights: stands ? stands.heights as Int16Array : H.subarray(last * n, (last + 1) * n), kinds: K.subarray(last * n, (last + 1) * n),
         age: t.data.age as Float32Array, thickness: t.data.thickness as Float32Array, tags: t.data.tags as Uint8Array, boundary: t.data.boundary as Uint8Array, boundaryRate: t.data.boundaryRate as Float32Array,
         climate: cl.data as never, water: w.data as never, biomes: b.data as never,
       }, cellAt(mesh, lon, lat));
@@ -431,8 +466,11 @@ export function PlanetStudio() {
     close();
   };
 
-  const control = (id: string, label: string, value: number, set: (v: number) => void, o: { min: number; max: number; step?: number; log?: boolean; unit?: string; digits?: number }) =>
-    <Slider id={id} label={label} value={value} onChange={set} onFocus={() => setFocus(id)} {...o} />;
+  // The settings the land is made from (D258): marked, since changing one makes the land again. (The sea's share is
+  // one of them for planets of the first calculation; the amount of water of the second is not.)
+  const LAND = new Set(['radius', 'heat', 'plates', 'activity', 'continents', 'hotspots', 'core', 'age', 'span', ...(second ? [] : ['ocean'])]);
+  const control = (id: string, label: string, value: number, set: (v: number) => void, o: { min: number; max: number; step?: number; log?: boolean; curve?: number; unit?: string; digits?: number }) =>
+    <Slider id={id} label={label} value={value} onChange={set} onFocus={() => setFocus(id)} land={LAND.has(id)} {...o} />;
 
   const when = (f: number) => {
     if (!run) return '';
@@ -494,7 +532,7 @@ export function PlanetStudio() {
             {control('activity', 'Tectonic activity', def.tectonics.activity, (v) => patch((d) => { d.tectonics.activity = v; }), { min: 0, max: 3, digits: 2 })}
             {control('continents', 'Continental crust (share)', def.tectonics.continentalFraction, (v) => patch((d) => { d.tectonics.continentalFraction = v; }), { min: 0, max: 0.9, digits: 2 })}
             {control('hotspots', 'Hotspots', def.tectonics.hotspots, (v) => patch((d) => { d.tectonics.hotspots = Math.round(v); }), { min: 0, max: 40, step: 1 })}
-            <label className="studio-slider"><span>Regime</span>
+            <label className="studio-slider"><span>Regime<NewLand /></span>
               <select value={def.interior.regime} onChange={(e) => patch((d) => { d.interior.regime = e.target.value as PlanetDefinition['interior']['regime']; })} data-testid="studio-control-regime">
                 <option value="auto">As the physics suggests</option><option value="mobile-lid">Moving plates</option><option value="stagnant-lid">A single rigid lid</option><option value="episodic">Plates moving in bursts</option>
               </select></label>
@@ -505,7 +543,10 @@ export function PlanetStudio() {
             {control('pressure', 'Air at the surface (bar)', Math.max(0.001, def.atmosphere.pressureBar), (v) => patch((d) => { d.atmosphere.pressureBar = v; }), { min: 0.001, max: 100, log: true, digits: 3 })}
             {control('co2', 'Carbon dioxide (share)', Math.max(1e-6, def.atmosphere.co2), (v) => patch((d) => { d.atmosphere.co2 = v; }), { min: 1e-6, max: 0.97, log: true, digits: 5 })}
             {control('clouds', 'Cloud cover', def.atmosphere.clouds, (v) => patch((d) => { d.atmosphere.clouds = v; }), { min: 0, max: 1, digits: 2 })}
-            {control('ocean', 'Sea (share of the surface)', def.water.oceanFraction, (v) => patch((d) => { d.water.oceanFraction = v; }), { min: 0, max: 1, digits: 2 })}
+            {second
+              ? control('water', 'Water (km deep, were it spread over the whole planet)', def.water.depthKm ?? 0, (v) => patch((d) => { d.water.depthKm = v < 0.005 ? 0 : Number(v.toPrecision(3)); }), { min: 0, max: 12, curve: 3, digits: 2 })
+              : control('ocean', 'Sea (share of the surface)', def.water.oceanFraction, (v) => patch((d) => { d.water.oceanFraction = v; }), { min: 0, max: 1, digits: 2 })}
+            {second && <p className="muted" data-testid="studio-water-note">{(def.water.depthKm ?? 0) > 0 ? `${fmt((def.water.depthKm ?? 0) / EARTH_WATER_KM, 2)} × the Earth's water.` : 'No water: a dry world, and no plates moving.'} {sea && run ? (sea.dry ? 'All of the surface is land.' : `The sea covers ${fmt(100 * sea.share)} % of the surface.`) : ''}</p>}
           </>}
           {step === 'life' && <>
             <label className="studio-slider"><span>Plants</span>
@@ -534,10 +575,10 @@ export function PlanetStudio() {
           {step === 'history' && <>
             {control('age', 'Age (billion years)', def.history.ageGyr, (v) => patch((d) => { d.history.ageGyr = v; }), { min: 0.1, max: 10, log: true, digits: 2 })}
             {control('span', 'Simulated (million years)', def.simulation.spanMyr ?? 500, (v) => patch((d) => { d.simulation.spanMyr = Math.round(v / 10) * 10; }), { min: 50, max: 1500, log: true })}
-            <label className="studio-slider"><span>Detail</span>
+            {!second && <label className="studio-slider"><span>Detail<NewLand /></span>
               <select value={def.simulation.quality} onChange={(e) => patch((d) => { d.simulation.quality = e.target.value as PlanetDefinition['simulation']['quality']; })} data-testid="studio-control-quality">
                 <option value="preview">Preview (fast; cells about 240 km)</option><option value="standard">Standard (cells about 110 km; several times slower)</option>
-              </select></label>
+              </select></label>}
             <h4>Events</h4>
             {def.history.events.map((e, i) => (
               <div key={e.id} className="studio-event" data-testid={`studio-event-${i}`}>
@@ -594,14 +635,17 @@ export function PlanetStudio() {
             <p className="muted">The picture's layer is chosen over it, at every step. The planet's history is under the picture: drag its moment, or play it.</p>
             {['temperature', 'temperatureMonth', 'precipitation', 'precipitationMonth', 'currents', 'ice'].includes(layer) && <p className="muted">The climate of today over today's land and sea: a seasonal energy balance (D157), winds from the circulation cells, rain carried by them and raised by mountains, the sea's currents (D158, D159).</p>}
             {['koppen', 'biome', 'satellite'].includes(layer) && <p className="muted">Today's biomes (D160): Köppen-Geiger climates by Peel and others' rules; biomes by warmth and dryness (rain over the evaporation the warmth and sunlight allow), with wetlands, ice and mountains from the water and the heights; the planet's own biomes where they fit. Changing plants or biomes in step 5 redraws them at once.</p>}
-            {['temperature', 'precipitation', 'biome', 'satellite'].includes(layer) && <p className="muted" data-testid="studio-past-note">At an earlier moment, the temperature, rain and biomes are that moment's own (D167): the same climate worked out over its own land and sea, starting from the climate the history had then (no lakes or wetlands, which need today's water). The other climate, water and life layers are today's.</p>}
+            {second
+              ? <p className="muted" data-testid="studio-past-note">At an earlier moment, the sea, the climate, the water and the life are that moment's own (D258): the planet's water over the land as it stood then, and the same air and sunlight worked out over that land and sea. The crust's age, thickness and making are today's.</p>
+              : ['temperature', 'precipitation', 'biome', 'satellite'].includes(layer) && <p className="muted" data-testid="studio-past-note">At an earlier moment, the temperature, rain and biomes are that moment's own (D167): the same climate worked out over its own land and sea, starting from the climate the history had then (no lakes or wetlands, which need today's water). The other climate, water and life layers are today's.</p>}
             {['water', 'rivers', 'runoff', 'iceThickness'].includes(layer) && <p className="muted">Today's water (D159): what the rain leaves after evaporation runs off; hollows fill until they spill or their lakes evaporate all they get (salt lakes); rivers by how much water they carry; ice sheets grown in today's climate.</p>}
             <label className="studio-slider"><span>Name</span><input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Aster Prime" data-testid="studio-name" /></label>
             <button className="primary" onClick={use} disabled={problems.length > 0} data-testid="studio-use">{editingId ? 'Apply to this map' : 'Use this planet for a new map'}</button>
             <p className="muted">The map's land and sea follow the planet's simulated history on its timeline: today at the present, earlier dates further back.</p>
           </>}
           <label className="check studio-more"><input type="checkbox" checked={more} onChange={(e) => setMore(e.target.checked)} /> More settings</label>
-          <label className="studio-slider"><span>Seed</span><input type="number" min={1} value={def.seed} onChange={(e) => patch((d) => { d.seed = Math.max(1, Math.round(Number(e.target.value) || 1)); })} data-testid="studio-seed" /></label>
+          <p className="muted studio-land-note">Settings marked <NewLand /> make the planet's land again, which takes a few seconds. All the others keep the land as it is.</p>
+          <label className="studio-slider"><span>Seed<NewLand /></span><input type="number" min={1} value={def.seed} onChange={(e) => patch((d) => { d.seed = Math.max(1, Math.round(Number(e.target.value) || 1)); })} data-testid="studio-seed" /></label>
         </div>
       </nav>
       <main className="studio-main">
@@ -639,7 +683,7 @@ export function PlanetStudio() {
             ? <><progress value={progress} max={1} data-testid="studio-progress" /><button className="small" onClick={() => abort.current?.abort()} data-testid="studio-cancel">Cancel</button></>
             : (pending.count > 0 || (remake && halted)) && <button className="primary" onClick={() => simulate()} disabled={problems.length > 0} data-testid="studio-simulate">{run ? 'Simulate again' : 'Simulate the history'}</button>}
           {stale && progress === null && pending.count > 0 && <span className="warn-text" data-testid="studio-stale">{`${pending.count === 1 ? 'An edit is' : `${pending.count} edits are`} waiting: re-run the history (step 8) to work ${pending.count === 1 ? 'it' : 'them'} out.`}</span>}
-          {!stale && run && historyClimateDiffers(def) && progress === null && <span className="muted" data-testid="studio-climate-note">Today's climate, water and life follow the new settings; the history's erosion and ice still follow those it was simulated with. <button className="small" onClick={() => simulate({ ...def, history: { ...def.history, climate: undefined } })} data-testid="studio-rerun-climate">Re-run the history with this climate</button></span>}
+          {!second && !stale && run && historyClimateDiffers(def) && progress === null && <span className="muted" data-testid="studio-climate-note">Today's climate, water and life follow the new settings; the history's erosion and ice still follow those it was simulated with. <button className="small" onClick={() => simulate({ ...def, history: { ...def.history, climate: undefined } })} data-testid="studio-rerun-climate">Re-run the history with this climate</button></span>}
           <span className="muted">Simulated with simplified models: plate tectonics, isostasy, erosion and sediment where each moment's climate rains, ice on land and the sea's level from its water.</span>
         </div>
       </main>
@@ -653,6 +697,7 @@ export function PlanetStudio() {
           <dt>Year</dt><dd data-testid="studio-readout-year">{fmt(x.yearDays, 1)} days{def.orbit.yearDays !== undefined ? ` (set by hand; Kepler's law gives ${fmt(x.keplerYearDays, 1)})` : ''}</dd>
           <dt>Day</dt><dd data-testid="studio-readout-day">{x.tidallyLocked ? 'none: one side always faces the star' : `${fmt(x.solarDayHours, 1)} hours from noon to noon`}</dd>
           <dt>Gravity</dt><dd data-testid="studio-readout-gravity">{fmt(x.gravityEarth, 2)} g ({fmt(x.massEarths, 2)} Earth masses{def.body.massEarths !== undefined ? ', set by hand' : ''}, {fmt(x.densityKgM3 / 1000, 2)} t/m³)</dd>
+          {second && <><dt>Sea</dt><dd data-testid="studio-readout-sea">{!run || !sea ? 'where the water stands, once the land is made' : sea.dry ? 'none: all of the surface is land' : sea.share >= 0.9995 ? 'over all of the surface: no land stands out of it' : `${fmt(100 * sea.share)} % of the surface under ${fmt(def.water.depthKm ?? 0, 2)} km of water (the Earth's: ${EARTH_WATER_KM} km)`}</dd></>}
           <dt>Temperature</dt><dd data-testid="studio-readout-temperature">{fmt(x.surfaceK - 273.15)} °C on average (without air {fmt(x.equilibriumK - 273.15)} °C; greenhouse +{fmt(x.greenhouseK)} °C; albedo {fmt(x.albedo, 2)})</dd>
           <dt>Winds</dt><dd data-testid="studio-readout-winds">{x.cellsPerHemisphere} circulation cell{x.cellsPerHemisphere > 1 ? 's' : ''} a hemisphere; the tropics' cells reach {fmt(x.hadleyEdgeDeg)}°</dd>
           <dt>Interior</dt><dd data-testid="studio-readout-interior">heat flow {fmt(x.heatFlowEarth, 2)} × Earth's; {x.regime === 'mobile-lid' ? 'moving plates' : x.regime === 'stagnant-lid' ? 'a single rigid lid' : 'plates moving in bursts'}. {x.regimeReason}</dd>
