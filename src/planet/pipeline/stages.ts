@@ -7,13 +7,13 @@
 // run stages). A stage that works cell by cell can be run in parts: fixed ranges of cells, whatever the number of
 // workers, joined in order, so the result is the same bytes on one worker or on many.
 import { definitionOf, historyView, referenceSea, withWaterGuess, type PlanetDefinition } from '../model/definition.ts';
-import { seasonalClimate } from '../climate/ebm.ts';
+import { seasonalClimate, type ClimateOptions } from '../climate/ebm.ts';
 import { joinRain, rainMonths, type RainMonths } from '../climate/hydroclimate.ts';
 import { hydrology } from '../water/hydrology.ts';
 import { iceSheets } from '../water/ice.ts';
-import { BIOME, BIOME_IDS, KOPPEN, biomeColour, biomeOf, customBiomeOf, koppen, type Place } from '../life/biomes.ts';
+import { BIOME, BIOME_IDS, KOPPEN, biomeColour, biomeOf, customBiomeOf, hotSurface, koppen, rockColour, type BiomeId, type Place } from '../life/biomes.ts';
 import { toLevel } from '../mesh/transfer.ts';
-import { derive } from '../model/physics.ts';
+import { derive, waterState } from '../model/physics.ts';
 import { cellsAt, meshAt } from '../mesh/icosphere.ts';
 import { seaLevelForVolume } from '../water/sealevel.ts';
 import { rasterize } from '../mesh/transfer.ts';
@@ -21,6 +21,7 @@ import { insolationCells, sunlightOf, type Sunlight } from '../climate/insolatio
 import { rasterizeNearest } from '../mesh/transfer.ts';
 import { runHistory, type TectonicHistory } from '../tectonics/history.ts';
 import type { TectonicParams } from '../tectonics/state.ts';
+import { CRUST } from '../tectonics/plates.ts';
 import type { FieldArray } from '../state/codec.ts';
 import { momentColours, type Moment } from '../life/past.ts';
 import { momentPicture } from '../climate/paleo.ts';
@@ -281,13 +282,20 @@ export const STAGES: Record<string, StageDef> = {
    * present or at one of the history's pictures (`frame`). Gives that moment's heights against its sea (m), the sea's
    * level against the one the history kept (m), and its share of the surface. No water: the lowest ground is the
    * datum, and all of it is land. The land itself is the history's, unchanged whatever the water.
+   *
+   * The water's fate (D259, physics.ts waterState) is decided here, from the share the seas would cover and the
+   * sunlight the planet takes in with them there: where they would boil away, the planet is dry (`fate` 'boiled'),
+   * as a planet given no water, unless the water is kept by hand (`kept`). `liquidShare` is the share the seas
+   * would cover; `cause`, `absorbed` and `limit` (W/m²) and `withSeasK` are what decided.
    */
   sea: {
     id: 'sea',
-    version: 1,
+    version: 2,
     deps: () => ['tectonics'],
     inputs: (def, p) => ({
-      level: p.level, frame: p.frame ?? -1, depthKm: def.water.depthKm ?? 0,
+      level: p.level, frame: p.frame ?? -1, depthKm: def.water.depthKm ?? 0, keep: !!def.water.keep,
+      // (What decides whether seas can stand: the star, the orbit, the planet's body and its air.)
+      state: climateInputs(def, { ...p, sea: true }),
       // (The sea's own rises on the timeline: 50 m for each unit of strength while they last.)
       rises: def.history.events.filter((e) => e.kind === 'sea-level').map((e) => [e.startMa, e.durationMyr, e.strength]),
     }),
@@ -299,17 +307,32 @@ export const STAGES: Record<string, StageDef> = {
       const h = new Float64Array(n);
       let lowest = Infinity;
       for (let c = 0; c < n; c++) { h[c] = H[f * n + c] / 1000 + kept; if (h[c] < lowest) lowest = h[c]; }
-      const depth = inputs.depthKm as number, dry = !(depth > 0);
-      let level = dry ? lowest : seaLevelForVolume(h, area, depth * 4 * Math.PI);
-      if (!dry) for (const [startMa, lasts, strength] of inputs.rises as number[][]) if (times[f] <= startMa + 1e-9 && times[f] > startMa - lasts - 1e-9) level += 0.05 * Math.max(0, strength);
+      const depth = inputs.depthKm as number, none = !(depth > 0);
+      let level = none ? lowest : seaLevelForVolume(h, area, depth * 4 * Math.PI);
+      if (!none) for (const [startMa, lasts, strength] of inputs.rises as number[][]) if (times[f] <= startMa + 1e-9 && times[f] > startMa - lasts - 1e-9) level += 0.05 * Math.max(0, strength);
       const heights = new Int16Array(n);
-      let under = 0;
-      for (let c = 0; c < n; c++) {
-        heights[c] = Math.max(-32_000, Math.min(32_000, Math.round((h[c] - level) * 1000)));
-        if (heights[c] < 0) under += area[c];
-      }
+      const against = (datum: number) => {
+        let under = 0;
+        for (let c = 0; c < n; c++) {
+          heights[c] = Math.max(-32_000, Math.min(32_000, Math.round((h[c] - datum) * 1000)));
+          if (heights[c] < 0) under += area[c];
+        }
+        return Math.min(1, under / (4 * Math.PI));
+      };
+      // The share the seas would cover, then what becomes of them (D259): boiled away, the planet is dry.
+      const liquidShare = against(level);
+      const given = definitionOf(inputs.state)!;
+      const st = waterState({ ...given, water: { ...given.water, depthKm: depth, ...(inputs.keep ? { keep: true } : {}) } }, none ? 0 : liquidShare);
+      const dry = st.fate !== 'liquid';
+      if (dry && !none) level = lowest;
+      const share = dry ? (none ? liquidShare : against(level)) : liquidShare;
       ctx.progress(1, 1);
-      return { heights, level: (level - kept) * 1000, share: Math.min(1, under / (4 * Math.PI)), dry, ma: times[f] };
+      return {
+        heights, level: (level - kept) * 1000, share, dry, ma: times[f],
+        // (The kind of crust at each place then, for the colour of bare rock: D259.)
+        crust: (T.kinds as Uint8Array).slice(f * n, (f + 1) * n),
+        fate: st.fate, kept: st.kept, cause: st.cause, liquidShare: none ? 0 : liquidShare, absorbed: st.absorbed, limit: Number.isFinite(st.limit) ? st.limit : 0, withSeasK: st.withSeasK,
+      };
     },
   },
 
@@ -327,7 +350,22 @@ export const STAGES: Record<string, StageDef> = {
       const def = withSea(definitionOf(inputs.def)!, deps.sea?.share);
       const mesh = meshAt(inputs.level as number), n = mesh.n;
       const heights = presentHeights(inputs, deps, n);
-      const r = seasonalClimate(mesh, def, derive(def), heights);
+      // (Where the sea follows from the water, D259: any temperature a planet can have, from the cold of the outer
+      // system to rock that melts; and no snow or sea ice on a world with no water.)
+      const second: ClimateOptions = {};
+      if (deps.sea) {
+        second.range = [20, 10_000];
+        // (Thin air hardly sets the ground's temperature with height: all of it from about a third of a bar.)
+        second.lapseShare = Math.min(1, def.atmosphere.pressureBar / 0.3);
+        if (deps.sea.dry) {
+          second.frost = false;
+          // (No sea: the air's pressure is that at the mean surface, and the temperatures are worked out for there.)
+          let mean = 0;
+          for (let c = 0; c < n; c++) mean += (heights[c] * mesh.area[c]) / (4 * Math.PI);
+          second.datum = mean;
+        }
+      }
+      const r = seasonalClimate(mesh, def, derive(def), heights, second);
       ctx.progress(1, 1);
       return {
         monthly: r.monthly, dryWarm: r.dryWarm, ice: r.ice, meanK: r.meanK, absorbed: r.absorbed, emitted: r.emitted, tropicsC: r.tropicsC, polesC: r.polesC,
@@ -422,19 +460,31 @@ export const STAGES: Record<string, StageDef> = {
       const kind = deps.water.kind as Uint8Array, ice = deps.water.ice as Float32Array, pet = deps.water.pet as Float32Array;
       const koppenOut = new Uint8Array(n), biome = new Uint8Array(n), custom = new Uint8Array(n), colour = new Uint8Array(3 * n);
       const rules = life.biomeSet === 'custom' ? [...life.customBiomes].sort((a, b) => a.priority - b.priority) : [];
-      const dry = !!deps.sea?.dry;
+      const second = !!deps.sea, dry = !!deps.sea?.dry, crust = deps.sea?.crust as Uint8Array | undefined;
       const T = new Float64Array(12), P = new Float64Array(12);
       const place: Place = { temp: T, precip: P, pet: 0, height: 0, water: 0, ice: 0 };
       for (let c = 0; c < n; c++) {
         let most = 0;
         for (let m = 0; m < 12; m++) { T[m] = temp[m * n + c]; P[m] = precip[m * n + c]; if (sun[m * n + c] > sun[most * n + c]) most = m; }
         place.pet = pet[c]; place.height = heights[c]; place.water = kind[c]; place.ice = ice[c];
-        // (A world with no water at all, D258: bare rock everywhere, whatever its warmth.)
-        const b = dry ? 'barren' : biomeOf(place);
+        // (A world with no water, D258: bare rock everywhere. Where the sea follows from the water, D259, heat alone
+        // decides first: molten rock, rock scorched dry, bare ground too hot for anything to grow.)
+        let hot = -Infinity;
+        for (let m = 0; m < 12; m++) if (T[m] > hot) hot = T[m];
+        const first: BiomeId = dry ? 'barren' : biomeOf(place);
+        const heat = second && first !== 'sea' && first !== 'lake' ? hotSurface(hot) : null;
+        const b: BiomeId = heat ?? first;
         biome[c] = BIOME_IDS.indexOf(b);
         if (kind[c] !== 1 && !dry) koppenOut[c] = 1 + KOPPEN.findIndex(([k]) => k === koppen(T, P, (most - 2 + 12) % 12));
-        const own = rules.length && b !== 'sea' && b !== 'lake' ? customBiomeOf(place, rules) : null;
-        const rgb = own ? own.color : biomeColour(b, life);
+        const own = rules.length && b !== 'sea' && b !== 'lake' && !heat ? customBiomeOf(place, rules) : null;
+        let rgb = own ? own.color : b === 'scorched' || b === 'lava' ? rockColour(hot) : biomeColour(b, life);
+        if (crust && !own && (b === 'barren' || b === 'scorched' || b === 'lava')) {
+          // Bare rock by its crust (D259): the dark basalt of an ocean's floor, the paler rock of continents, as the
+          // Moon's dark plains lie among its bright highlands; lost in the rock's own glow as it nears melting.
+          const tone = crust[c] === CRUST.oceanic ? 0.76 : crust[c] === CRUST.arc ? 0.9 : 1.08, glow = Math.max(0, Math.min(1, (hot - 650) / 450));
+          const f = tone + (1 - tone) * glow;
+          rgb = [Math.min(255, Math.round(rgb[0] * f)), Math.min(255, Math.round(rgb[1] * f)), Math.min(255, Math.round(rgb[2] * f))];
+        }
         if (own) custom[c] = 1 + rules.indexOf(own);
         colour[3 * c] = rgb[0]; colour[3 * c + 1] = rgb[1]; colour[3 * c + 2] = rgb[2];
       }

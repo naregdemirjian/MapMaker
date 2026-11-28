@@ -61,6 +61,83 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D259. Hot worlds: what becomes of the water, and what heat makes of the land (the Planet Studio's overhaul, step 3)
+
+- **Why.** Measured before the plan and again on the second calculation (D258): moved towards its star, a planet kept
+  its seas on three quarters of its surface at 1,359 °C (0.9 AU), 2,515 °C (0.3 AU) and 6,229 °C (0.05 AU), with rain
+  and desert biomes; the physics knew the oceans would boil ("the temperatures shown assume the water somehow stays")
+  and did nothing about it. The user's third finding: "Even if I put the planet right next to its star, I still get
+  water, grass and islands."
+- **The water's fate** (`waterState`, physics.ts; decided in the **sea** stage, from the share of the surface the seas
+  would cover): **none** given; **liquid**; or **boiled away**, where with the seas there the planet finds no balance
+  at which they could stay. Two causes, both from the model the temperatures come from: more sunlight taken in than a
+  planet with seas can shed as heat (the Simpson-Nakajima limit, 282 W/m²; higher for a mostly dry planet, Abe et al.
+  2011), or air that holds so much heat already that the vapour of seas on top leaves no balance below water's critical
+  point (374 °C, above which it is no liquid under any pressure). The water is then lost to space (Kasting 1988, as
+  Venus is thought to have lost its own) and the planet is **dry**: the sea stage gives its land measured from its
+  lowest ground, as for a planet given no water, and everything after it follows as D258 made it for a dry world (no
+  rain, no rivers, lakes or ice, no life). **The land is the same**: the history is not made again (the planet's
+  geology is what it was given, with its water).
+  For the Earth's air the seas go at about 0.92 AU from a Sun-like star (a brighter star does it from farther), and
+  at about one part in a hundred of carbon dioxide at the Earth's distance. Both are within the range published
+  (0.95 to 0.99 AU; a moist greenhouse from a few thousand parts in a million), and are the reduced model's own
+  figures, not more.
+- **What is left is a dry planet at a dry planet's temperature**: with no vapour in the air, far cooler than what
+  boiled the seas (1 °C on average at 0.9 AU with the Earth's air; 200 °C at 0.3 AU; 1,220 °C at 0.03 AU). This is the
+  air as the user set it: a planet that lost its seas would in time gather carbon dioxide from its volcanoes, with no
+  rain to wash it out, and end like Venus; the air is the user's to set (the "Runaway hothouse" preset is that end).
+- **Kept by hand** (`water.keep`, the user's answer 3): the seas stay where they stood, said to be kept and why they
+  would have gone; the temperatures are those with them there. For fiction; never set by anything but its switch.
+- **What heat makes of the land** (`hotSurface`, biomes.ts; on planets of the second calculation, before any other
+  rule, by the mean of the warmest month): **bare ground** from 50 °C (photosynthesis fails; a hothouse's continental
+  interiors go bare while its coasts stay green), **scorched rock** from 100 °C, **molten rock** from 1,100 °C
+  (basalt melts). Two kinds added after the old ones (a stored biome's number means what it meant). Their colour is by
+  the temperature (`rockColour`): bare rock's own to 100 °C, darker as it is baked, its own glow from about 650 °C
+  (red, orange, yellow, white). Bare rock is also toned by its crust: the dark basalt of what were ocean floors, the
+  paler rock of continents (as the Moon's plains among its highlands), lost in the glow as the rock nears melting.
+- **Three faults of the climate on dry worlds, found on the way and mended for the second calculation only** (the
+  first calculation's code paths are as they were):
+  1. *Snow on a world with no water.* The energy balance brightened cold land as if snow lay on it, whatever the
+     water: a dry Earth came out at −60 °C against the −14 °C its own balance gives. No snow or sea ice now where
+     there is no water (`frost`).
+  2. *Every height a mountain.* A dry world's heights are measured from its lowest ground, and the model cooled all
+     of it by its height above that: 25 °C too cold on average. Its air's pressure is that at its **mean surface**:
+     the temperatures are worked out for there, ground above it colder, ground below it warmer (`datum`). Measured
+     after both: within 4 °C of the planet's own balance from 0.9 AU to 0.03 AU (a Venus-like planet 481 °C against
+     Venus's 464).
+  3. *Thin air cooling high ground.* The cooling with height is the air's doing: taken in proportion to the pressure
+     up to a third of a bar (`lapseShare`), so on thin air the ground's temperature is its own balance of sunlight
+     and heat lost.
+  The model's temperatures may also now reach from 20 K to 10,000 K (they stopped at 1,500 K).
+- **Temperatures in colour over the whole range** (`TEMPERATURE`, planet-colors.ts): as before between −50 and 50 °C;
+  colder, the violet darkening to black at absolute zero; hotter, dark red through purple and pink to white at
+  3,000 °C; no colour twice, and the legend says how the scale goes on. (60 °C and 2,000 °C were the same red.)
+- **In the Studio**: under the picture, what became of the water and why, with the numbers that decided ("Too much
+  sunlight for seas: they have boiled away. With seas the planet would take in 293 W/m² of its star's light; a planet
+  with seas can shed no more than 282 W/m² as heat…"), and the switch "Keep the seas anyway (for fiction: not what the
+  physics gives)". The sea's read-out says "none: boiled away (as seas the water would cover 69 % of the surface)";
+  the habitable zone and the plates are read for the planet with its seas (what the distance is judged against, and
+  what its land was made as), the temperature for the planet as it is. A place clicked on a dry world gives its height
+  above the planet's lowest ground, no talk of rain, and what heat made of it ("Molten rock: its warmest month reaches
+  1,304 °C, and basalt melts at about 1,100 °C").
+- **Measured** (one planet, Earth-like settings, only the distance changed; the same land in each): 1 AU 15 °C, seas
+  on 75 %; 0.95 AU 40 °C, seas, a tenth of the surface bare from heat; 0.9 AU seas boiled away, bare rock, 4 °C;
+  0.6 AU 64 °C, bare and scorched; 0.3 AU 199 °C, scorched; 0.1 AU 536 °C; 0.05 AU 868 °C, glowing; 0.03 AU molten.
+  A redraw in the Studio after moving the distance: 0.4 to 0.9 s on this machine.
+- **Not in this step**: seas that freeze over, thin and no air (step 4); the chain of causes and what changed, with the
+  tipping points marked on the sliders, and one source for the side panel's numbers (step 5: its temperature is still
+  the planet's balance as a whole, the picture's the model's); a planet so close to its star would be locked to it
+  (the setting is the user's, step 6); a map made from the planet is still coloured by height until step 8. The seas
+  are lost at once and wholly: no steam atmosphere while they go (it lasts some hundreds of millions of years).
+- **Tests**: `test/planet-hot.test.ts` (6): the water's fate (seas, too much sunlight, too strong a greenhouse, small
+  seas holding out, none, kept by hand, the switch stored for the second calculation only); what heat makes of the
+  land and the colour of hot rock; temperatures in colour; a planet moved towards its star (the same history and land
+  cell by cell, a hothouse, the seas boiled away with no rain, water or ice, scorched, molten, coloured by heat and
+  crust, a place explained); too strong a greenhouse, kept by hand, a planet like Venus, a dry planet's temperatures
+  (its mean, no snow, lowlands warmer than highlands); the first calculation as it was. Interface: "Hot worlds in the
+  Planet Studio" (the boiled planet with no history made, said why; kept and given back; scorched; the temperature
+  legend; molten and explained; too strong a greenhouse).
+
 ### D258. The same land unless the geology changes; the sea from an amount of water (the Planet Studio's overhaul, step 2)
 
 - **Why.** Measured before the plan (docs/PLANET_STUDIO_PLAN.md): a planet's history read its climate (the star, the

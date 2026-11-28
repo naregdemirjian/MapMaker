@@ -9,7 +9,7 @@ import type { Mesh } from './mesh/icosphere.ts';
 import { CRUST, TAG } from './tectonics/plates.ts';
 import { BOUNDARY } from './tectonics/state.ts';
 import { WATER } from './water/hydrology.ts';
-import { BIOME, BIOME_IDS, KOPPEN, seasonality } from './life/biomes.ts';
+import { BIOME, BIOME_IDS, KOPPEN, MOLTEN_FROM, SCORCHED_FROM, TOO_HOT_FOR_PLANTS, seasonality } from './life/biomes.ts';
 
 export interface ExplainData {
   mesh: Mesh;
@@ -17,6 +17,8 @@ export interface ExplainData {
   x: Derived;
   /** The present's heights (m above the sea), crust (kind, age Myr, thickness km, TAG bits) and boundaries (kind, km/Myr). */
   heights: ArrayLike<number>;
+  /** A world with no sea (D258, D259): its heights are above its lowest ground. */
+  dry?: boolean;
   kinds: ArrayLike<number>;
   age: ArrayLike<number>;
   thickness: ArrayLike<number>;
@@ -54,7 +56,7 @@ export function explain(d: ExplainData, c: number): Explanation {
   const lat = deg(mesh.lat[c]), lon = deg(mesh.lon[c]), h = d.heights[c];
   const sections: Explanation['sections'] = [];
   const where = `${fmt(Math.abs(lat), 1)}° ${lat >= 0 ? 'N' : 'S'}, ${fmt(Math.abs(lon), 1)}° ${lon >= 0 ? 'E' : 'W'}`;
-  const title = `${where}: ${h >= 0 ? `${fmt(h)} m above the sea` : `${fmt(-h)} m under the sea`}`;
+  const title = `${where}: ${d.dry ? `${fmt(h)} m above the planet's lowest ground` : h >= 0 ? `${fmt(h)} m above the sea` : `${fmt(-h)} m under the sea`}`;
 
   // The ground: its crust and what made it.
   const ground: string[] = [];
@@ -104,10 +106,11 @@ export function explain(d: ExplainData, c: number): Explanation {
       T[m] = d.climate.monthly[m * n + c]; P[m] = d.climate.precipMonthly[m * n + c];
       mean += T[m] / 12; year += P[m]; lo = Math.min(lo, T[m]); hi = Math.max(hi, T[m]);
     }
-    const lines = [`${fmt(mean, 1)} °C over the year (${fmt(lo)} to ${fmt(hi)} °C between its coldest and warmest months); ${fmt(year)} mm of rain and snow a year.`];
+    const lines = [`${fmt(mean, 1)} °C over the year (${fmt(lo)} to ${fmt(hi)} °C between its coldest and warmest months); ${d.dry ? 'no rain or snow: the planet has no water' : `${fmt(year)} mm of rain and snow a year`}.`];
     const a = Math.abs(lat), edge = x.hadleyEdgeDeg;
     const why: string[] = [];
-    if (x.tidallyLocked) why.push(lon > -60 && lon < 60 ? 'the side facing the star, where air rises' : 'the side turned from the star, where air sinks and cools');
+    // (A world with no water, D259: nothing of rain to explain.)
+    if (d.dry) { /* nothing */ } else if (x.tidallyLocked) why.push(lon > -60 && lon < 60 ? 'the side facing the star, where air rises' : 'the side turned from the star, where air sinks and cools');
     else {
       if (a < 12) why.push('the equator\'s convergence zone, where the trade winds meet and air rises: rain most of the year');
       else if (Math.abs(a - edge) < 9 && year < 600) why.push('the subtropical high at the edge of the tropics\' circulation: dry air sinking');
@@ -121,7 +124,7 @@ export function explain(d: ExplainData, c: number): Explanation {
       if (season > 0.6 && year > 300 && summer > 0.7 * year) why.push('a monsoon: the summer brings the rain');
       if (season > 0.6 && year > 200 && summer < 0.3 * year) why.push('winter rain and summer drought');
     }
-    const cur = d.climate.currents[c];
+    const cur = d.dry ? 0 : d.climate.currents[c];
     if (cur > 1) why.push(`a warm current offshore (${fmt(cur, 1)} K warmer)`);
     if (cur < -1) why.push(`a cold current offshore (${fmt(-cur, 1)} K cooler)`);
     if (why.length) lines.push(`Shaped by ${why.join('; ')}.`);
@@ -144,10 +147,17 @@ export function explain(d: ExplainData, c: number): Explanation {
   if (d.biomes && d.climate && h >= 0) {
     const k = d.biomes.koppen[c], id = BIOME_IDS[d.biomes.biome[c]];
     const lines: string[] = [];
+    let hottest = -Infinity;
+    for (let m = 0; m < 12; m++) hottest = Math.max(hottest, d.climate.monthly[m * n + c]);
     if (k) lines.push(`Köppen-Geiger ${KOPPEN[k - 1][0]}: ${KOPPEN[k - 1][1].toLowerCase()}.`);
     const own = d.biomes.custom[c];
     if (own) lines.push(`The planet's own biome "${d.biomes.customNames[own - 1]}", its conditions met here.`);
-    else if (id && id !== 'sea') {
+    else if (id === 'lava' || id === 'scorched' || (id === 'barren' && hottest >= TOO_HOT_FOR_PLANTS)) {
+      // (D259) What heat alone made of the ground.
+      lines.push(id === 'lava' ? `Molten rock: its warmest month reaches ${fmt(hottest)} °C, and basalt melts at about ${fmt(MOLTEN_FROM)} °C.`
+        : id === 'scorched' ? `Scorched rock: its warmest month reaches ${fmt(hottest)} °C; no water lies on ground hotter than ${SCORCHED_FROM} °C, and nothing lives there.`
+        : `Bare ground: its warmest month reaches ${fmt(hottest)} °C, and nothing grows above about ${TOO_HOT_FOR_PLANTS} °C.`);
+    } else if (id && id !== 'sea') {
       let year = 0;
       for (let m = 0; m < 12; m++) year += d.climate.precipMonthly[m * n + c];
       const pet = d.water?.pet[c] ?? 0;

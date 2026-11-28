@@ -139,6 +139,34 @@ export function runawayLimit(oceanFraction: number): number {
   return oceanFraction >= 0.3 ? 282 : 282 + (415 - 282) * (1 - oceanFraction / 0.3);
 }
 
+/** Above this temperature (K) water is not a liquid under any pressure (its critical point). */
+export const WATER_CRITICAL_K = 647.1;
+
+/**
+ * What has become of a planet's water (D259), from the share of the surface it would cover as seas:
+ * - `none`: the planet was given none;
+ * - `liquid`: seas;
+ * - `boiled`: with the seas there the planet finds no balance at which they could stay. Either it takes in more
+ *   sunlight than a planet with seas can give back as heat (`runawayLimit`; `cause` 'sunlight'), or its air holds so
+ *   much heat already that the water vapour's share on top leaves no balance below the temperature above which water
+ *   is no liquid at all (`cause` 'greenhouse'). The seas evaporate; high in the air the star's light breaks the vapour
+ *   up and its hydrogen is lost to space, within some hundreds of millions of years (Kasting 1988; as Venus is
+ *   thought to have lost its water). What is left is a dry planet.
+ * `kept`: the water kept by hand where it would have boiled away (`water.keep`; not physical). `absorbed` and `limit`
+ * (W/m²): the sunlight taken in with the seas there, and the most seas can stand; `withSeasK`: the surface's
+ * temperature with the seas there.
+ */
+export type WaterFate = 'none' | 'liquid' | 'boiled';
+export interface WaterState { fate: WaterFate; kept: boolean; cause: 'sunlight' | 'greenhouse' | null; absorbed: number; limit: number; withSeasK: number }
+export function waterState(d: PlanetDefinition, seaShare: number): WaterState {
+  const share = Math.max(0, Math.min(1, seaShare));
+  const x = derive({ ...d, water: { ...d.water, oceanFraction: share } });
+  if (!(share > 0) || !((d.water.depthKm ?? 1) > 0)) return { fate: 'none', kept: false, cause: null, absorbed: x.absorbed, limit: Infinity, withSeasK: x.surfaceK };
+  const limit = runawayLimit(share), common = { absorbed: x.absorbed, limit, withSeasK: x.surfaceK };
+  if (!x.runaway && !(x.surfaceK > WATER_CRITICAL_K)) return { fate: 'liquid', kept: false, cause: null, ...common };
+  return { fate: d.water.keep ? 'liquid' : 'boiled', kept: !!d.water.keep, cause: x.runaway ? 'sunlight' : 'greenhouse', ...common };
+}
+
 /**
  * The habitable zone around a star (Kopparapu et al. 2013, corrected coefficients): where a planet with Earth's
  * air could keep liquid water. Inner edge: the runaway greenhouse (closer in for a dry planet, as runawayLimit);

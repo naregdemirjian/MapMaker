@@ -25,6 +25,19 @@ const CRUST: RGB[] = [[20, 20, 20], [45, 95, 138], [184, 154, 106], [192, 80, 77
 /** Crust history bits, the most telling first: impact, flood basalt, suture, hotspot, accreted, rift, arc. */
 const TAGS: Array<[number, RGB]> = [[64, [240, 240, 240]], [4, [150, 40, 40]], [1, [150, 90, 200]], [8, [240, 210, 60]], [2, [230, 140, 50]], [16, [60, 200, 210]], [32, [210, 80, 80]]];
 
+/**
+ * Temperatures (°C) in colour (D259), over all a planet can have: as before between −50 and 50 °C (violet, blue, pale,
+ * green, yellow, orange, red); colder, the violet darkening to black at absolute zero; hotter, dark red through purple
+ * and pink to white at 3,000 °C. No colour is used twice, so 60 °C and 2,000 °C are told apart.
+ */
+export const TEMPERATURE: Array<[number, RGB]> = [
+  [-273, [0, 0, 0]], [-200, [14, 6, 34]], [-100, [36, 12, 72]],
+  [-50, [60, 20, 110]], [-25, [40, 80, 190]], [-5, [120, 190, 230]], [5, [210, 235, 220]], [15, [150, 210, 90]], [25, [240, 200, 60]], [35, [230, 110, 40]], [50, [170, 30, 30]],
+  [100, [120, 14, 60]], [200, [150, 24, 140]], [500, [214, 90, 214]], [1000, [238, 156, 238]], [2000, [250, 208, 250]], [3000, [255, 255, 255]],
+];
+/** The colour of a temperature (°C). */
+export const temperatureColour = (c: number): RGB => ramp(TEMPERATURE, c);
+
 export interface Legend { text: string }
 
 /** The sea by its depth (m, negative): pale over the shelves, dark over the deep. */
@@ -107,9 +120,8 @@ export function colourLayer(layer: LayerId, values: Float32Array, width: number,
     }
     legend = 'Water draining through: the brighter, the larger the river (where rain falls, by latitude)';
   } else if (layer === 'temperature' || layer === 'temperatureMonth') {
-    const TEMP: Array<[number, RGB]> = [[-50, [60, 20, 110]], [-25, [40, 80, 190]], [-5, [120, 190, 230]], [5, [210, 235, 220]], [15, [150, 210, 90]], [25, [240, 200, 60]], [35, [230, 110, 40]], [50, [170, 30, 30]]];
-    for (let k = 0; k < values.length; k++) put(k, ramp(TEMP, values[k]));
-    legend = `Temperature at the surface: ${Math.round(range.min)} °C to ${Math.round(range.max)} °C`;
+    for (let k = 0; k < values.length; k++) put(k, ramp(TEMPERATURE, values[k]));
+    legend = `Temperature at the surface: ${Math.round(range.min).toLocaleString('en')} °C to ${Math.round(range.max).toLocaleString('en')} °C${range.max > 50 ? ' (above 50 °C: dark red, then purple and pink, white at 3,000 °C)' : ''}${range.min < -50 ? ' (below −50 °C: violet darkening to black)' : ''}`;
   } else if (layer === 'precipitation' || layer === 'precipitationMonth') {
     const yearly = layer === 'precipitation';
     const RAIN: Array<[number, RGB]> = yearly

@@ -98,6 +98,10 @@ export const BIOME = {
   lake: { name: 'Lake', colour: [40, 90, 140], plants: 0 },
   saltFlat: { name: 'Salt flat', colour: [236, 228, 210], plants: 0 },
   barren: { name: 'Bare rock', colour: [118, 106, 96], plants: 0 },
+  // (D259) Ground too hot for water or life, and ground hot enough to melt; their colours here are those at the
+  // cooler end of each (rockColour gives the colour by the temperature).
+  scorched: { name: 'Scorched rock', colour: [92, 78, 70], plants: 0 },
+  lava: { name: 'Molten rock', colour: [232, 96, 24], plants: 0 },
 } as const;
 export type BiomeId = keyof typeof BIOME;
 export const BIOME_IDS = Object.keys(BIOME) as BiomeId[];
@@ -141,6 +145,41 @@ export function biomeOf(p: Place): BiomeId {
   if (ai < 0.5) return mat >= 20 ? 'savanna' : 'steppe';
   if (ai < 0.9) return 'savanna';
   return ai < 1.4 ? 'tropicalSeasonal' : 'rainforest';
+}
+
+/** Above this (°C, the warmest month's mean) nothing grows: photosynthesis fails near 50 °C (D259). */
+export const TOO_HOT_FOR_PLANTS = 50;
+/** Above this (°C) no water lies on the ground at the Earth's pressure: the rock is baked dry (D259). */
+export const SCORCHED_FROM = 100;
+/** Above this (°C) basalt, the commonest rock of a planet's crust, melts (D259). */
+export const MOLTEN_FROM = 1100;
+
+/**
+ * What heat alone makes of the land (D259), from the mean temperature of its warmest month (°C): molten rock, rock
+ * scorched dry, bare ground too hot for anything to grow; null where the heat decides nothing.
+ */
+export function hotSurface(hot: number): BiomeId | null {
+  return hot >= MOLTEN_FROM ? 'lava' : hot >= SCORCHED_FROM ? 'scorched' : hot >= TOO_HOT_FOR_PLANTS ? 'barren' : null;
+}
+
+const ROCK: Array<[number, [number, number, number]]> = [
+  [100, [118, 106, 96]], [250, [92, 78, 70]], [450, [64, 52, 50]], [650, [58, 36, 34]], [800, [110, 34, 22]], [950, [176, 52, 20]],
+  [1100, [232, 96, 24]], [1400, [252, 160, 52]], [2000, [255, 224, 150]], [3000, [255, 250, 235]],
+];
+/**
+ * The colour of bare rock by its temperature (°C, D259): bare rock's own up to 100 °C; darker as it is baked; from
+ * about 650 °C its own glow shows (red, then orange, yellow and white, as iron in a forge), brighter than anything
+ * it reflects once it melts.
+ */
+export function rockColour(tempC: number): [number, number, number] {
+  if (!(tempC > ROCK[0][0])) return [...ROCK[0][1]];
+  for (let i = 1; i < ROCK.length; i++) {
+    if (tempC <= ROCK[i][0]) {
+      const a = ROCK[i - 1], b = ROCK[i], t = (tempC - a[0]) / (b[0] - a[0]);
+      return [Math.round(a[1][0] + (b[1][0] - a[1][0]) * t), Math.round(a[1][1] + (b[1][1] - a[1][1]) * t), Math.round(a[1][2] + (b[1][2] - a[1][2]) * t)];
+    }
+  }
+  return [...ROCK[ROCK.length - 1][1]];
 }
 
 /** How seasonal a place's rain is: twice the difference between its wettest and driest months over the year's (0 even; 1 when that difference is half the year's or more). */

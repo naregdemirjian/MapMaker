@@ -944,3 +944,10 @@ body.number-scrubbing, body.number-scrubbing * { cursor: ns-resize !important; u
 /* The mark of a setting the land is made from (D258). */
 .studio-land { display: inline-block; margin-left: 6px; font-size: 10px; line-height: 14px; padding: 0 5px; border-radius: 8px; background: #3d3320; color: #e6c268; white-space: nowrap; cursor: help; }
 .studio-land-note { margin: 6px 0 0; font-size: 11px; }
+
+/* What has become of the planet's water (D259): said under the picture, with the switch to keep the seas by hand. */
+.studio-fate { margin: 6px 0 2px; padding: 8px 10px; border-left: 3px solid #e0763a; background: rgba(224, 118, 58, 0.1); border-radius: 4px; font-size: 13px; line-height: 1.45; }
+.studio-fate.kept { border-left-color: #c9a227; background: rgba(201, 162, 39, 0.1); }
+.studio-fate b { color: #f0b48c; }
+.studio-fate.kept b { color: #e6cf7a; }
+.studio-fate .check { display: block; margin-top: 6px; }

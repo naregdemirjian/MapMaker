@@ -3,7 +3,7 @@
 // the interface tests ask it through __mapmaker.bench.planet.
 import { WorkerPool, type WorkerLike } from '../planet/worker/pool.ts';
 import { Pipeline } from '../planet/pipeline/scheduler.ts';
-import { definitionFromPreset, PRESETS, type PlanetDefinition, type PresetId } from '../planet/model/definition.ts';
+import { definitionFromPreset, newDefinition, PRESETS, type PlanetDefinition, type PresetId } from '../planet/model/definition.ts';
 import { derive } from '../planet/model/physics.ts';
 import { sha256 } from '../planet/state/hash.ts';
 import type { LayerId, StageParams } from '../planet/pipeline/stages.ts';
@@ -69,7 +69,7 @@ async function preview(def: PlanetDefinition | PresetId, opts: { level?: number;
 }
 
 /** What the interface tests and benchmarks use. */
-export const planetBench = { preview, derive, definitionFromPreset, presets: Object.keys(PRESETS) as PresetId[] };
+export const planetBench = { preview, derive, definitionFromPreset, newDefinition, presets: Object.keys(PRESETS) as PresetId[] };
 
 /** The mesh level for a definition's quality: a preview (about 240 km cells on an Earth-sized planet) or standard (110 km). */
 export const simLevel = (def: PlanetDefinition) => (def.engine === 2 || def.simulation.quality === 'preview' ? 5 : 6);

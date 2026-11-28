@@ -9,7 +9,7 @@ import { useStore } from '../store.ts';
 import { VIEWER } from '../shell/dock.ts';
 import * as cmd from '../../domain/commands.ts';
 import { definitionFromPreset, newDefinition, definitionProblems, PRESETS, EARTH_WATER_KM, type PlanetDefinition, type PresetId, type GeoEventKind, type GeoEvent } from '../../planet/model/definition.ts';
-import { derive, type Derived } from '../../planet/model/physics.ts';
+import { derive, type Derived, type WaterFate } from '../../planet/model/physics.ts';
 import { planetPipeline, simParams } from '../planet-engine.ts';
 import { colourLayer, seenFromSpace } from '../planet-colors.ts';
 import { simOf } from '../../world-model/world-settings.ts';
@@ -75,6 +75,18 @@ const EXPLAIN: Record<string, string> = {
 };
 
 const newSeed = () => 1 + Math.floor(Math.random() * 999_999);
+
+/** What the sea stage says of the planet's water (D258, D259). */
+interface SeaState { share: number; level: number; dry: boolean; fate: WaterFate; kept: boolean; cause: 'sunlight' | 'greenhouse' | null; liquidShare: number; absorbed: number; limit: number; withSeasK: number }
+/** Why the seas boiled away, or would have were they not kept by hand (D259), with the numbers that decided. */
+function fateReason(sea: SeaState): string {
+  const why = sea.cause === 'greenhouse'
+    ? `With the vapour of seas added to this air, the surface finds no balance below ${fmt(sea.withSeasK - 273.15)} °C, and above 374 °C water is no liquid under any pressure.`
+    : `With seas the planet would take in ${fmt(sea.absorbed)} W/m² of its star's light; a planet with seas can shed no more than ${fmt(sea.limit)} W/m² as heat (a runaway greenhouse).`;
+  return sea.kept
+    ? `By the physics they would have boiled away. ${why} The temperatures shown are those with the seas there.`
+    : `${why} The water was lost to space within some hundreds of millions of years; what is left is dry rock, at the temperature of a planet with no water vapour in its air.`;
+}
 const fmt = (v: number, d = 0) => (Number.isFinite(v) ? v.toLocaleString('en', { maximumFractionDigits: d, minimumFractionDigits: d }) : '∞');
 
 /** What an estimate needs of a planet, from its history's product (D164). */
@@ -165,8 +177,16 @@ export function PlanetStudio() {
   const [focus, setFocus] = useState('');
   const [more, setMore] = useState(false);
   // Where the sea stands on the land there is (D258): from the planet's water; its share is what the physics reads.
-  const [sea, setSea] = useState<{ share: number; level: number; dry: boolean } | null>(null);
-  const x = useMemo(() => derive(second && sea ? { ...def, water: { ...def.water, oceanFraction: sea.share } } : def), [def, second, sea]);
+  // What has become of the water (D259): boiled away where seas could not stand, unless kept by hand.
+  const [sea, setSea] = useState<SeaState | null>(null);
+  const x = useMemo(() => {
+    const now = derive(second && sea ? { ...def, water: { ...def.water, oceanFraction: sea.share } } : def);
+    if (!second || !sea || sea.fate !== 'boiled') return now;
+    // (Boiled away: the temperatures are the dry planet's; the habitable zone and the plates are those of the planet
+    // with its seas, which is what the star's distance is judged against and what its land was made as.)
+    const wet = derive({ ...def, water: { ...def.water, oceanFraction: sea.liquidShare } });
+    return { ...now, habitableZone: wet.habitableZone, zone: wet.zone, regime: wet.regime, regimeReason: wet.regimeReason };
+  }, [def, second, sea]);
   const problems = useMemo(() => definitionProblems(def), [def]);
   // The simulated history shown, and what it was simulated from.
   const [run, setRun] = useState<{ def: PlanetDefinition; key: string; times: number[]; seaLevels: number[]; ice: number[] } | null>(null);
@@ -310,7 +330,13 @@ export function PlanetStudio() {
   useEffect(() => {
     if (!second || !run) { setSea(null); return; }
     let live = true;
-    planetPipeline().product('sea', shown, simParams(shown)).then((r) => { if (live) setSea({ share: r.data.share as number, level: r.data.level as number, dry: !!r.data.dry }); }, () => {});
+    planetPipeline().product('sea', shown, simParams(shown)).then((r) => {
+      const d = r.data;
+      if (live) setSea({
+        share: d.share as number, level: d.level as number, dry: !!d.dry, fate: d.fate as WaterFate, kept: !!d.kept, cause: (d.cause as SeaState['cause']) ?? null,
+        liquidShare: d.liquidShare as number, absorbed: d.absorbed as number, limit: d.limit as number, withSeasK: d.withSeasK as number,
+      });
+    }, () => {});
     return () => { live = false; };
   }, [second, run, shown]);
 
@@ -414,7 +440,7 @@ export function PlanetStudio() {
       const stands = want.engine === 2 ? (await pipe.product('sea', want, p)).data : null;
       const told = stands ? { ...want, water: { ...want.water, oceanFraction: stands.share as number } } : want;
       const text = explain({
-        mesh, def: told, x: derive(told), heights: stands ? stands.heights as Int16Array : H.subarray(last * n, (last + 1) * n), kinds: K.subarray(last * n, (last + 1) * n),
+        mesh, def: told, x: derive(told), heights: stands ? stands.heights as Int16Array : H.subarray(last * n, (last + 1) * n), ...(stands?.dry ? { dry: true } : {}), kinds: K.subarray(last * n, (last + 1) * n),
         age: t.data.age as Float32Array, thickness: t.data.thickness as Float32Array, tags: t.data.tags as Uint8Array, boundary: t.data.boundary as Uint8Array, boundaryRate: t.data.boundaryRate as Float32Array,
         climate: cl.data as never, water: w.data as never, biomes: b.data as never,
       }, cellAt(mesh, lon, lat));
@@ -546,7 +572,7 @@ export function PlanetStudio() {
             {second
               ? control('water', 'Water (km deep, were it spread over the whole planet)', def.water.depthKm ?? 0, (v) => patch((d) => { d.water.depthKm = v < 0.005 ? 0 : Number(v.toPrecision(3)); }), { min: 0, max: 12, curve: 3, digits: 2 })
               : control('ocean', 'Sea (share of the surface)', def.water.oceanFraction, (v) => patch((d) => { d.water.oceanFraction = v; }), { min: 0, max: 1, digits: 2 })}
-            {second && <p className="muted" data-testid="studio-water-note">{(def.water.depthKm ?? 0) > 0 ? `${fmt((def.water.depthKm ?? 0) / EARTH_WATER_KM, 2)} × the Earth's water.` : 'No water: a dry world, and no plates moving.'} {sea && run ? (sea.dry ? 'All of the surface is land.' : `The sea covers ${fmt(100 * sea.share)} % of the surface.`) : ''}</p>}
+            {second && <p className="muted" data-testid="studio-water-note">{(def.water.depthKm ?? 0) > 0 ? `${fmt((def.water.depthKm ?? 0) / EARTH_WATER_KM, 2)} × the Earth's water.` : 'No water: a dry world, and no plates moving.'} {sea && run ? (sea.fate === 'boiled' ? 'Boiled away: all of the surface is land.' : sea.dry ? 'All of the surface is land.' : `The sea covers ${fmt(100 * sea.share)} % of the surface${sea.kept ? ' (kept by hand)' : ''}.`) : ''}</p>}
           </>}
           {step === 'life' && <>
             <label className="studio-slider"><span>Plants</span>
@@ -671,6 +697,13 @@ export function PlanetStudio() {
           {compare && previous && <div className="studio-picture"><canvas ref={before} width={720} height={360} className="studio-canvas" data-testid="studio-canvas-before" /><span className="muted">Before the last re-run</span></div>}
         </div>
         {previous && <label className="check"><input type="checkbox" checked={compare} onChange={(e) => setCompare(e.target.checked)} data-testid="studio-compare" /> Compare with the history before the last re-run</label>}
+        {second && run && sea && (sea.fate === 'boiled' || sea.kept) && (
+          <div className={`studio-fate ${sea.kept ? 'kept' : ''}`} data-testid="studio-fate">
+            <b>{sea.kept ? 'The seas are kept by hand.' : sea.cause === 'greenhouse' ? 'Too strong a greenhouse for seas: they have boiled away.' : 'Too much sunlight for seas: they have boiled away.'}</b>
+            <span>{' '}{fateReason(sea)}</span>
+            <label className="check"><input type="checkbox" checked={!!def.water.keep} onChange={(e) => patch((d) => { if (e.target.checked) d.water.keep = true; else delete d.water.keep; })} data-testid="studio-keep-water" /> Keep the seas anyway (for fiction: not what the physics gives)</label>
+          </div>
+        )}
         <div className="studio-legend muted" data-testid="studio-legend">{legend}</div>
         <div className="studio-time">
           <button className="small" disabled={!run} onClick={() => setPlaying(!playing)} data-testid="studio-play">{playing ? 'Pause' : 'Play'}</button>
@@ -697,7 +730,7 @@ export function PlanetStudio() {
           <dt>Year</dt><dd data-testid="studio-readout-year">{fmt(x.yearDays, 1)} days{def.orbit.yearDays !== undefined ? ` (set by hand; Kepler's law gives ${fmt(x.keplerYearDays, 1)})` : ''}</dd>
           <dt>Day</dt><dd data-testid="studio-readout-day">{x.tidallyLocked ? 'none: one side always faces the star' : `${fmt(x.solarDayHours, 1)} hours from noon to noon`}</dd>
           <dt>Gravity</dt><dd data-testid="studio-readout-gravity">{fmt(x.gravityEarth, 2)} g ({fmt(x.massEarths, 2)} Earth masses{def.body.massEarths !== undefined ? ', set by hand' : ''}, {fmt(x.densityKgM3 / 1000, 2)} t/m³)</dd>
-          {second && <><dt>Sea</dt><dd data-testid="studio-readout-sea">{!run || !sea ? 'where the water stands, once the land is made' : sea.dry ? 'none: all of the surface is land' : sea.share >= 0.9995 ? 'over all of the surface: no land stands out of it' : `${fmt(100 * sea.share)} % of the surface under ${fmt(def.water.depthKm ?? 0, 2)} km of water (the Earth's: ${EARTH_WATER_KM} km)`}</dd></>}
+          {second && <><dt>Sea</dt><dd data-testid="studio-readout-sea">{!run || !sea ? 'where the water stands, once the land is made' : sea.fate === 'boiled' ? `none: boiled away (as seas the water would cover ${fmt(100 * sea.liquidShare)} % of the surface)` : sea.dry ? 'none: all of the surface is land' : sea.share >= 0.9995 ? 'over all of the surface: no land stands out of it' : `${fmt(100 * sea.share)} % of the surface under ${fmt(def.water.depthKm ?? 0, 2)} km of water (the Earth's: ${EARTH_WATER_KM} km)`}</dd></>}
           <dt>Temperature</dt><dd data-testid="studio-readout-temperature">{fmt(x.surfaceK - 273.15)} °C on average (without air {fmt(x.equilibriumK - 273.15)} °C; greenhouse +{fmt(x.greenhouseK)} °C; albedo {fmt(x.albedo, 2)})</dd>
           <dt>Winds</dt><dd data-testid="studio-readout-winds">{x.cellsPerHemisphere} circulation cell{x.cellsPerHemisphere > 1 ? 's' : ''} a hemisphere; the tropics' cells reach {fmt(x.hadleyEdgeDeg)}°</dd>
           <dt>Interior</dt><dd data-testid="studio-readout-interior">heat flow {fmt(x.heatFlowEarth, 2)} × Earth's; {x.regime === 'mobile-lid' ? 'moving plates' : x.regime === 'stagnant-lid' ? 'a single rigid lid' : 'plates moving in bursts'}. {x.regimeReason}</dd>

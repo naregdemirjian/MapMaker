@@ -96,6 +96,11 @@ export interface WaterSpec {
    * (the Earth's: `EARTH_WATER_KM`). The sea stands where the land's hollows hold it.
    */
   depthKm?: number;
+  /**
+   * Kept by hand (D259): the water stays as seas where the planet's state would have removed it (boiled away). Not
+   * physical, and said so wherever it shows; for fiction.
+   */
+  keep?: boolean;
 }
 
 /** The Earth's water as an even layer over the whole planet, km (1.335 billion km³ of sea over 510 million km²). */
@@ -513,6 +518,7 @@ export function definitionOf(raw: unknown): PlanetDefinition | null {
     const depth = isObj(raw.water) ? num(raw.water.depthKm) : undefined;
     out.water.depthKm = fit(depth ?? waterForShare(out.water.oceanFraction, out.tectonics.continentalFraction), 'water.depthKm');
     out.water.oceanFraction = seaShareGuess(out.water.depthKm, Math.min(1, Math.max(0, out.tectonics.continentalFraction)));
+    if (isObj(raw.water) && raw.water.keep === true) out.water.keep = true;
     delete out.history.climate;
     out.simulation.quality = 'preview';
   }

@@ -5349,6 +5349,123 @@ try {
     assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.name === 'Old Prime')), false);
     await page.getByTestId('studio-history').click();
   });
+  await h.step('Hot worlds in the Planet Studio (D259): a planet moved towards its star on the same land; its seas boiled away and said why, kept by hand and given back; scorched, then molten; too strong a greenhouse; the temperatures\' colours beyond 50 °C; undone', async () => {
+    const text = async (id: string) => (await page.getByTestId(id).textContent()) ?? '';
+    // A planet of the second calculation with a seed of its own, put in the project as a map and opened in the studio.
+    await page.evaluate(() => {
+      const m = (window as any).__mapmaker, s = m.store;
+      const def = m.bench.planet.newDefinition('earthlike', 4);
+      def.simulation.spanMyr = 100;
+      const id = s.execute((w: any) => m.bench.commands.createSimPlanet(w, 'Hot Prime', def));
+      s.set({ spaceId: id, layerId: s.world.all('layer').find((l: any) => l.space_id === id)?.id ?? '', selection: null });
+    });
+    await h.saved();
+    await page.getByTestId('studio-map').click();
+    await page.locator('[data-testid^="map-row-"].sel').click();
+    await page.getByTestId('open-planet-studio').click();
+    await page.getByTestId('planet-studio').waitFor();
+    const drawnNow = () => page.evaluate(() => (document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement).dataset.drawn ?? '');
+    const redrawn = (was: string) => page.waitForFunction((w) => {
+      const d = (document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement)?.dataset.drawn ?? '';
+      return !document.querySelector('[data-testid=studio-status]') && !document.querySelector('[data-testid=studio-progress]') && d.startsWith('satellite:') && d !== w;
+    }, was, { timeout: 240_000 });
+    // What the picture shows: the share of it in the sea's blues, and its mean colour.
+    const seen = () => page.evaluate(() => {
+      const c = document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement, d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+      let blue = 0, r = 0, g = 0, b = 0, n = 0;
+      for (let k = 0; k < d.length; k += 4 * 37) { n++; r += d[k]; g += d[k + 1]; b += d[k + 2]; if (d[k + 2] > d[k] + 30 && d[k + 2] > d[k + 1] + 15) blue++; }
+      return { sea: blue / n, r: r / n, g: g / n, b: b / n };
+    });
+    const degrees = async () => Number((await text('studio-readout-temperature')).match(/^(-?[\d,]+) °C/)![1].replace(',', ''));
+    await redrawn('');
+    const earth = await seen(), first = await drawnNow();
+    assert.ok(earth.sea > 0.55 && earth.sea < 0.9, `mostly sea (${earth.sea.toFixed(2)})`);
+    assert.equal(await page.getByTestId('studio-fate').count(), 0, 'nothing to say of the water: seas, as given');
+    assert.match(await text('studio-readout-sea'), /^\d+ % of the surface under/);
+    assert.match(await text('studio-readout-zone'), /the planet is in it$/);
+    // Moved towards its star (0.9 AU): more sunlight than seas can stand. No history is made: the same land, now
+    // all of it dry; said under the picture with the numbers that decided.
+    await page.getByTestId('studio-step-star').click();
+    await page.getByTestId('studio-control-distance').fill('612');
+    assert.equal(await text('studio-value-distance'), '0.897');
+    await redrawn(first);
+    assert.equal(await page.getByTestId('studio-progress').count(), 0, 'no history made');
+    const fate = await text('studio-fate');
+    assert.match(fate, /^Too much sunlight for seas: they have boiled away\. With seas the planet would take in (\d+) W\/m² of its star's light; a planet with seas can shed no more than 282 W\/m² as heat \(a runaway greenhouse\)\. The water was lost to space/);
+    assert.ok(Number(fate.match(/take in (\d+) W/)![1]) > 282);
+    assert.match(await text('studio-readout-sea'), /^none: boiled away \(as seas the water would cover \d+ % of the surface\)$/);
+    assert.match(await text('studio-readout-zone'), /the planet is too close$/);
+    assert.match(await text('studio-readout-interior'), /moving plates/, 'the land is still the one its plates made');
+    const boiled = await seen(), dry = await drawnNow();
+    assert.ok(boiled.sea < 0.005, `no sea in the picture (${boiled.sea.toFixed(3)})`);
+    assert.ok(await degrees() < 40, `a dry planet's temperature (${await degrees()} °C)`);
+    await h.screenshot('planet-seas-boiled-away');
+    // Kept by hand, for fiction: the seas back where they stood, and said to be kept; given back to the physics.
+    await page.getByTestId('studio-keep-water').check();
+    await redrawn(dry);
+    assert.match(await text('studio-fate'), /^The seas are kept by hand\. By the physics they would have boiled away\. With seas the planet would take in \d+ W\/m²/);
+    assert.ok(Math.abs((await seen()).sea - earth.sea) < 0.03, 'the seas where they stood');
+    assert.match(await text('studio-readout-sea'), /^\d+ % of the surface under/);
+    const kept = await drawnNow();
+    await page.getByTestId('studio-keep-water').uncheck();
+    await redrawn(kept);
+    assert.match(await text('studio-fate'), /^Too much sunlight for seas/);
+    assert.ok((await seen()).sea < 0.005);
+    // Closer (0.3 AU): scorched rock, dark, at some two hundred degrees.
+    const before = await drawnNow();
+    await page.getByTestId('studio-control-distance').fill('436');
+    assert.equal(await text('studio-value-distance'), '0.300');
+    await redrawn(before);
+    const scorched = await seen();
+    assert.ok(scorched.sea < 0.005 && scorched.r < boiled.r - 15 && scorched.r > scorched.b, `darker, baked rock (${scorched.r.toFixed(0)}, ${scorched.g.toFixed(0)}, ${scorched.b.toFixed(0)} from ${boiled.r.toFixed(0)}, ${boiled.g.toFixed(0)}, ${boiled.b.toFixed(0)})`);
+    assert.ok(await degrees() > 150 && await degrees() < 260, `${await degrees()} °C`);
+    await h.screenshot('planet-scorched');
+    // Its temperatures in colour: the legend says how the scale goes on past 50 °C.
+    await page.getByTestId('studio-layer').selectOption('temperature');
+    await page.waitForFunction(() => ((document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement).dataset.drawn ?? '').startsWith('temperature:'), undefined, { timeout: 120_000 });
+    assert.match(await text('studio-legend'), /^Temperature at the surface: -?[\d,]+ °C to \d+ °C \(above 50 °C: dark red, then purple and pink, white at 3,000 °C\)/);
+    const hot = await seen();
+    assert.ok(hot.r > 120 && hot.b > 80 && hot.g < 90, `purples, not the reds of a warm Earth (${hot.r.toFixed(0)}, ${hot.g.toFixed(0)}, ${hot.b.toFixed(0)})`);
+    await page.getByTestId('studio-layer').selectOption('satellite');
+    await page.waitForFunction(() => ((document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement).dataset.drawn ?? '').startsWith('satellite:'), undefined, { timeout: 120_000 });
+    // Closer still (0.03 AU): rock that melts, glowing; a place clicked says why.
+    const cool = await drawnNow();
+    await page.getByTestId('studio-control-distance').fill('65');
+    assert.equal(await text('studio-value-distance'), '0.030');
+    await redrawn(cool);
+    const molten = await seen();
+    assert.ok(molten.r > 170 && molten.r > 2 * molten.b && molten.g > 60, `glowing (${molten.r.toFixed(0)}, ${molten.g.toFixed(0)}, ${molten.b.toFixed(0)})`);
+    assert.ok(await degrees() > 1000, `${await degrees()} °C`);
+    const box = (await page.getByTestId('studio-canvas').boundingBox())!;
+    await page.mouse.click(box.x + box.width * 0.5, box.y + box.height * 0.5);
+    await page.getByTestId('studio-card').waitFor();
+    assert.match(await text('studio-card'), /m above the planet's lowest ground/);
+    assert.match(await text('studio-card'), /Molten rock: its warmest month reaches [\d,]+ °C, and basalt melts at about 1,100 °C\./);
+    await h.screenshot('planet-molten');
+    await page.locator('[data-testid=studio-card] .close').click();
+    // Back at the Earth's distance: the seas as they were, nothing to say of them.
+    const lava = await drawnNow();
+    await page.getByTestId('studio-control-distance').fill('630');
+    assert.equal(await text('studio-value-distance'), '1.003');
+    await redrawn(lava);
+    assert.equal(await page.getByTestId('studio-fate').count(), 0);
+    assert.ok(Math.abs((await seen()).sea - earth.sea) < 0.01, 'the seas as they were');
+    const back = await drawnNow();
+    // Too strong a greenhouse (carbon dioxide at 4 % of the air): the seas gone though the sunlight is the Earth's.
+    await page.getByTestId('studio-step-air').click();
+    await page.getByTestId('studio-control-co2').fill('769');
+    assert.equal(await text('studio-value-co2'), '0.04016');
+    await redrawn(back);
+    assert.match(await text('studio-fate'), /^Too strong a greenhouse for seas: they have boiled away\. With the vapour of seas added to this air, the surface finds no balance below [\d,]+ °C, and above 374 °C water is no liquid under any pressure\./);
+    assert.ok((await seen()).sea < 0.005);
+    // Left without applying; the map undone.
+    await page.getByTestId('studio-close').click();
+    await page.getByTestId('planet-studio').waitFor({ state: 'detached' });
+    await page.getByTestId('undo').click();
+    await h.saved();
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.name === 'Hot Prime')), false);
+    await page.getByTestId('studio-history').click();
+  });
   await h.step('The studios: each page its own panels; panels dock, float, close and open again, resize; Save and Reset workspace (D196, D234)', async () => {
     const box = async (sel: string) => (await page.locator(sel).first().boundingBox())!;
     const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);
