@@ -969,3 +969,12 @@ body.number-scrubbing, body.number-scrubbing * { cursor: ns-resize !important; u
 .studio-changed ul { margin: 0 0 6px; padding-left: 16px; font-size: 12.5px; line-height: 1.45; }
 .studio-changed .check { font-size: 12.5px; }
 .studio-where { position: absolute; left: 0; top: 0; pointer-events: none; background: transparent; border-color: transparent; }
+
+/* A setting's tipping points (D265): bands under its slider, each from its mark to the end of its side, and in words. */
+.studio-marks { position: relative; display: block; height: 5px; margin: -1px 8px 1px; border-radius: 3px; background: rgba(255, 255, 255, 0.06); overflow: hidden; }
+.studio-zone { position: absolute; top: 0; bottom: 0; }
+.studio-zone.hot { background: #d9623a; }
+.studio-zone.cold { background: #7fb4e0; }
+.studio-zone.air { background: #8a8f98; }
+.studio-zone.thin { background: #b08ad8; }
+.studio-marks-text { display: block; color: var(--muted); font-size: 11.5px; line-height: 1.35; }

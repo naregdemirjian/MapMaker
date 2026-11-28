@@ -61,6 +61,42 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D265. Tipping points marked on the sliders (the Planet Studio's overhaul, step 5, last part)
+
+- **Why.** From the plan: "Tipping points marked on the sliders: coloured zones and ticks such as 'oceans boil beyond
+  here' and 'freezes over beyond here'." A slider's range holds several kinds of world, and nothing showed where one
+  ends and the next begins until the slider had been moved past it.
+- **The tipping points** (src/planet/tipping.ts): the values of a setting at which the planet becomes another kind of
+  world, on the planet as it is otherwise.
+  - *From the rules, at once* (`tippingPoints`: the very rules the pictures follow, D259 and D261, tried along the
+    setting's range by halving it): where the planet **loses its air** (along the distance, the star's mass and the
+    planet's radius), where its **seas boil away** (the distance, the star's mass, the carbon dioxide, the air's
+    pressure), and where there is **too little air for liquid water** (the pressure: 0.006 bar). None for what is
+    kept by hand; none for water on a planet given none.
+  - *From the climate, in the background* (where the **seas freeze over**, along the distance and the carbon
+    dioxide): the year's model is tried at a few values (five to eight), starting near where the planet's balance as
+    a whole falls to freezing, once the planet has settled and for the sliders in view; stopped when a setting moves.
+    A few seconds on this machine; said under the slider while it is being found.
+  For an Earth: no air inside 0.24 AU, seas boil away inside 0.93 AU, seas freeze over beyond 1.03 AU; seas boil
+  away above 1.03 Suns, no air above 1.72; no liquid water below 0.006 bar, seas boil away above 21 bar; seas boil
+  away above 1.3 % of carbon dioxide; no air below a radius of 3,650 km.
+- **On the sliders**: a band under each from its mark to the end of its side (orange where the seas boil away, blue
+  where they freeze over, grey where the air is lost, violet where there is too little air for water), placed by the
+  slider's own scale, with the marks in words beneath.
+- **In the read-outs**: "Open seas: from 0.93 AU (inside it they boil away) to 1.03 AU (beyond it they freeze over),
+  with this air and water. The zone above is the textbook's, for air that adjusts." The textbook's habitable zone
+  (0.98 to 1.69 AU for the Sun) stays beside it: it assumes a planet whose carbon dioxide rises as it cools, which a
+  planet with air set by hand does not do, and the two no longer contradict each other unexplained.
+- **Step 5 is done** with this: why the planet looks as it does (D263), what a change did (D264), and where along
+  each setting it would become another world.
+- **Not here**: marks for the tilt, the day and the water's amount (no kind of world ends along them); where a
+  planet thaws when carbon dioxide is added far out (the distance's mark moves as the carbon dioxide is changed).
+- **Tests**: `test/planet-tipping.test.ts` (4): finding where something changes along a range (by halving, in equal
+  ratios, awaited, stopped); an Earth's tipping points, each where the rule itself changes; other planets (no water,
+  no air, kept by hand, like Mars, small seas); where the seas freeze over, guessed and found from the climate.
+  Interface: the distance's and the star's marks and bands, the open seas' read-out (in "Hot worlds"); the
+  pressure's, the carbon dioxide's and the radius's marks (in "Thin air and no air").
+
 ### D264. "What changed": the figures before and after a change of the settings, and where on the picture (the Planet Studio's overhaul, step 5, second part)
 
 - **Why.** The user's second finding again: after a slider is moved the picture is another, and nothing said what the

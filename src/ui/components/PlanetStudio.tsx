@@ -12,6 +12,7 @@ import { definitionFromPreset, newDefinition, definitionProblems, PRESETS, EARTH
 import { derive, type Derived, type WaterFate } from '../../planet/model/physics.ts';
 import { SIGMA } from '../../planet/model/units.ts';
 import { familyOf, figuresOf, settingsChanged, whatChanged, whyItLooksSo, type Figures, type ModelFacts, type SeaFacts, type SettingChange } from '../../planet/why.ts';
+import { RANGES, boundaryAsync, freezeGuess, settingInWords, tippingPoints, withSetting, type Mark, type MarkedSetting } from '../../planet/tipping.ts';
 import { planetPipeline, simParams } from '../planet-engine.ts';
 import { colourLayer, seenFromSpace } from '../planet-colors.ts';
 import { simOf } from '../../world-model/world-settings.ts';
@@ -166,17 +167,26 @@ function NewLand() {
 }
 
 /** A labelled slider, linear or logarithmic, with its value. */
-function Slider({ id, label, value, min, max, step, log, curve, unit, digits = 0, land, onChange, onFocus }: { id: string; label: string; value: number; min: number; max: number; step?: number; log?: boolean; curve?: number; unit?: string; digits?: number; land?: boolean; onChange: (v: number) => void; onFocus: () => void }) {
+function Slider({ id, label, value, min, max, step, log, curve, unit, digits = 0, land, marks, seeking, onChange, onFocus }: { id: string; label: string; value: number; min: number; max: number; step?: number; log?: boolean; curve?: number; unit?: string; digits?: number; land?: boolean; marks?: Mark[]; seeking?: string; onChange: (v: number) => void; onFocus: () => void }) {
   // (`curve`: the value grows as that power of the slider's place, for settings that start at nothing and need room near it.)
   const toPos = (v: number) => (log ? (Math.log(v) - Math.log(min)) / (Math.log(max) - Math.log(min)) : curve ? ((v - min) / (max - min)) ** (1 / curve) : (v - min) / (max - min));
   const fromPos = (p: number) => (log ? Math.exp(Math.log(min) + p * (Math.log(max) - Math.log(min))) : min + (curve ? p ** curve : p) * (max - min));
   const round = (v: number) => (step ? Math.round(v / step) * step : v);
+  // (D265) The setting's tipping points: a band under the slider from each to the end of its side, and in words.
+  const place = (v: number) => 100 * Math.max(0, Math.min(1, toPos(Math.max(min, Math.min(max, v)))));
+  const bands = marks ? [...marks].sort((a, b) => (a.side === 'below' ? -a.at : a.at) - (b.side === 'below' ? -b.at : b.at)) : [];
   return (
     <label className="studio-slider">
       <span>{label}{land && <NewLand />}</span>
       <input type="range" min={0} max={1000} value={Math.round(toPos(value) * 1000)} data-testid={`studio-control-${id}`}
         onChange={(e) => { onFocus(); onChange(round(fromPos(Number(e.target.value) / 1000))); }} onFocus={onFocus} />
+      {bands.length > 0 && (
+        <span className="studio-marks" data-testid={`studio-marks-${id}`}>
+          {bands.map((m) => <i key={m.label} className={`studio-zone ${m.tone}`} title={m.label} data-at={m.at.toPrecision(4)} style={m.side === 'below' ? { left: 0, width: `${place(m.at)}%` } : { left: `${place(m.at)}%`, right: 0 }} />)}
+        </span>
+      )}
       <b data-testid={`studio-value-${id}`}>{fmt(value, digits)}{unit ? ` ${unit}` : ''}</b>
+      {(marks && marks.length > 0 || seeking) && <small className="studio-marks-text" data-testid={`studio-marks-text-${id}`}>{[...(marks ?? []).map((m) => m.label), ...(seeking ? [seeking] : [])].join(' · ')}</small>}
     </label>
   );
 }
@@ -403,6 +413,50 @@ export function PlanetStudio() {
     }
     settledAt.current = { def: model.of, summary: model.summary };
   }, [model]);
+  // (D265) Tipping points: where along a setting the planet becomes another kind of world. From the rules at once
+  // (the air lost, the seas boiled away, too little air for water); where the seas freeze over is found from the
+  // climate itself, tried at a few values in the background once the planet has settled, for the sliders in view.
+  const [freeze, setFreeze] = useState<{ of: PlanetDefinition; distance?: number | null; co2?: number | null } | null>(null);
+  const [seeking, setSeeking] = useState<'distance' | 'co2' | null>(null);
+  const liquidShare = sea?.liquidShare ?? 0;
+  const ruleMarks = useMemo(() => {
+    const out: Partial<Record<MarkedSetting, Mark[]>> = {};
+    if (!second || !run || !sea) return out;
+    const inView: MarkedSetting[] = step === 'star' ? ['distance', 'starMass'] : step === 'planet' ? ['radius'] : step === 'air' ? ['pressure', 'co2'] : [];
+    for (const k of new Set<MarkedSetting>(['distance', ...inView])) out[k] = tippingPoints(shown, liquidShare, k);
+    return out;
+  }, [second, run, sea, shown, liquidShare, step]);
+  useEffect(() => {
+    if (!model || !sea || !(step === 'star' || step === 'air')) return;
+    const setting = step === 'star' ? 'distance' as const : 'co2' as const, of = model.of;
+    if ((freeze && freeze.of === of && freeze[setting] !== undefined) || !((of.water.depthKm ?? 0) > 0) || of.water.keep || !(liquidShare > 0)) return;
+    const ac = new AbortController(), pipe = planetPipeline(), params = simParams(of);
+    const frozen = async (v: number) => ((await pipe.product('temperature', withSetting(of, setting, v), params, { signal: ac.signal })).data.seaFrozen as number) >= 0.995;
+    const timer = setTimeout(async () => {
+      setSeeking(setting);
+      try {
+        const [lo, hi] = RANGES[setting], boil = (ruleMarks[setting] ?? tippingPoints(of, liquidShare, setting)).find((m) => m.tone === 'hot')?.at;
+        let at: number | null = null;
+        if (setting === 'distance') {
+          // (Near where the planet's balance as a whole falls to freezing first; the whole range beyond the boiling if not there.)
+          const guess = freezeGuess(of, liquidShare, 'distance');
+          if (guess !== null) at = await boundaryAsync(Math.max(lo, guess / 1.15), Math.min(hi, guess * 1.15), frozen, { log: true, steps: 5, signal: ac.signal });
+          if (at === null && !ac.signal.aborted) at = await boundaryAsync(Math.max(lo, (boil ?? lo) * 1.001), hi, frozen, { log: true, steps: 8, signal: ac.signal });
+        } else at = await boundaryAsync(lo, Math.min(hi, (boil ?? hi) * 0.999), frozen, { log: true, steps: 8, signal: ac.signal });
+        if (!ac.signal.aborted) setFreeze((f) => ({ ...(f && f.of === of ? f : { of }), [setting]: at }));
+      } catch { /* (Stopped: the settings moved on.) */ }
+      if (!ac.signal.aborted) setSeeking(null);
+    }, 400);
+    return () => { clearTimeout(timer); ac.abort(); setSeeking(null); };
+  }, [model, step]);
+  const frozenFrom = freeze && freeze.of === shown ? freeze : null;
+  const marksOf = (id: string): Mark[] | undefined => {
+    if (!second || !(id in RANGES)) return undefined;
+    const k = id as MarkedSetting, out = [...(ruleMarks[k] ?? [])];
+    if (k === 'distance' && typeof frozenFrom?.distance === 'number') out.push({ at: frozenFrom.distance, side: 'above', tone: 'cold', label: `seas freeze over beyond ${settingInWords('distance', frozenFrom.distance)}` });
+    if (k === 'co2' && typeof frozenFrom?.co2 === 'number') out.push({ at: frozenFrom.co2, side: 'below', tone: 'cold', label: `seas freeze over below ${settingInWords('co2', frozenFrom.co2)}` });
+    return out.sort((a, b) => a.at - b.at);
+  };
   const over = useRef<HTMLCanvasElement | null>(null);
   const [whereShare, setWhereShare] = useState<number | null>(null);
   useEffect(() => {
@@ -592,7 +646,7 @@ export function PlanetStudio() {
   // one of them for planets of the first calculation; the amount of water of the second is not.)
   const LAND = new Set(['radius', 'heat', 'plates', 'activity', 'continents', 'hotspots', 'core', 'age', 'span', ...(second ? [] : ['ocean'])]);
   const control = (id: string, label: string, value: number, set: (v: number) => void, o: { min: number; max: number; step?: number; log?: boolean; curve?: number; unit?: string; digits?: number }) =>
-    <Slider id={id} label={label} value={value} onChange={set} onFocus={() => setFocus(id)} land={LAND.has(id)} {...o} />;
+    <Slider id={id} label={label} value={value} onChange={set} onFocus={() => setFocus(id)} land={LAND.has(id)} marks={marksOf(id)} seeking={seeking === id ? 'finding where the seas freeze over…' : undefined} {...o} />;
 
   const when = (f: number) => {
     if (!run) return '';
@@ -849,6 +903,12 @@ export function PlanetStudio() {
           <dt>Star</dt><dd data-testid="studio-readout-star">{x.stars[0].spectralClass}, {fmt(x.stars[0].teffK)} K, {fmt(x.luminositySun, 3)} × the Sun's light{def.star.stars.some((st) => st.luminositySun !== undefined || st.teffK !== undefined) ? ' (set by hand)' : ''}</dd>
           <dt>Sunlight</dt><dd data-testid="studio-readout-sunlight">{fmt(x.insolation)} W/m² ({fmt(x.insolationEarth, 2)} × Earth's)</dd>
           <dt>Habitable zone</dt><dd data-testid="studio-readout-zone">{fmt(x.habitableZone.inner, 2)} to {fmt(x.habitableZone.outer, 2)} AU: {x.zone === 'inside' ? 'the planet is in it' : x.zone === 'too-close' ? 'the planet is too close' : 'the planet is too far'}</dd>
+          {second && run && sea && (def.water.depthKm ?? 0) > 0 && !def.water.keep && (() => {
+            // (D265) Where this planet's seas stay open around this star, by its own rules and climate.
+            const boil = ruleMarks.distance?.find((m) => m.tone === 'hot')?.at, air = ruleMarks.distance?.find((m) => m.tone === 'air')?.at, inner = boil ?? air, outer = frozenFrom?.distance;
+            if (inner === undefined && typeof outer !== 'number') return null;
+            return <><dt>Open seas</dt><dd data-testid="studio-readout-seas">{inner !== undefined ? `from ${settingInWords('distance', inner)} (inside it ${boil !== undefined ? 'they boil away' : 'the air is lost'})` : 'from close to the star'}{typeof outer === 'number' ? ` to ${settingInWords('distance', outer)} (beyond it they freeze over)` : outer === null ? ', and not frozen over anywhere farther out' : '; how far out is found at "Star and orbit"'}, with this air and water. The zone above is the textbook's, for air that adjusts.</dd></>;
+          })()}
           <dt>Year</dt><dd data-testid="studio-readout-year">{fmt(x.yearDays, 1)} days{def.orbit.yearDays !== undefined ? ` (set by hand; Kepler's law gives ${fmt(x.keplerYearDays, 1)})` : ''}</dd>
           <dt>Day</dt><dd data-testid="studio-readout-day">{x.tidallyLocked ? 'none: one side always faces the star' : `${fmt(x.solarDayHours, 1)} hours from noon to noon`}</dd>
           <dt>Gravity</dt><dd data-testid="studio-readout-gravity">{fmt(x.gravityEarth, 2)} g ({fmt(x.massEarths, 2)} Earth masses{def.body.massEarths !== undefined ? ', set by hand' : ''}, {fmt(x.densityKgM3 / 1000, 2)} t/m³)</dd>

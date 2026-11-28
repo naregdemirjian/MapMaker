@@ -5397,6 +5397,16 @@ try {
     // Moved towards its star (0.9 AU): more sunlight than seas can stand. No history is made: the same land, now
     // all of it dry; said under the picture with the numbers that decided.
     await page.getByTestId('studio-step-star').click();
+    // (D265) The tipping points along the distance, banded under its slider and said in words: from the rules at once
+    // (the air lost, the seas boiled away), then where the seas freeze over, found from the climate in the background.
+    assert.match(await text('studio-marks-text-distance'), /^no air inside 0\.24 AU · seas boil away inside 0\.9\d AU/);
+    await page.waitForFunction(() => /^no air inside 0\.24 AU · seas boil away inside 0\.9\d AU · seas freeze over beyond 1\.0\d AU$/.test(document.querySelector('[data-testid=studio-marks-text-distance]')?.textContent ?? ''), undefined, { timeout: 240_000 });
+    assert.deepEqual(await page.locator('[data-testid=studio-marks-distance] .studio-zone').evaluateAll((els) => els.map((e) => e.className.replace('studio-zone ', '')).sort()), ['air', 'cold', 'hot']);
+    assert.match(await text('studio-marks-text-starMass'), /^seas boil away above 1\.0\d Suns · no air above 1\.\d\d Suns$/);
+    assert.match(await text('studio-readout-seas'), /^from 0\.9\d AU \(inside it they boil away\) to 1\.0\d AU \(beyond it they freeze over\), with this air and water\. The zone above is the textbook's, for air that adjusts\.$/);
+    // (The bands are where the slider's own places put them: the boiling's band ends left of the thumb at 1 AU.)
+    const bandEnd = await page.locator('[data-testid=studio-marks-distance] .studio-zone.hot').evaluate((e) => parseFloat((e as HTMLElement).style.width));
+    assert.ok(bandEnd > 55 && bandEnd < 63, `the boiling's band to ${bandEnd} % of the slider`);
     await page.getByTestId('studio-control-distance').fill('612');
     assert.equal(await text('studio-value-distance'), '0.897');
     await redrawn(first);
@@ -5659,10 +5669,15 @@ try {
     await redrawn(caps);
     assert.equal(await page.getByTestId('studio-fate').count() + await page.getByTestId('studio-air-fate').count(), 0);
     assert.ok((await seen()).sea > 0.4, 'open seas again');
+    // (D265) The air's tipping points: too little for liquid water, too much for seas; and along the carbon dioxide,
+    // where the seas boil away and (found from the climate) where they freeze over.
+    assert.match(await text('studio-marks-text-pressure'), /^no liquid water below 0\.006 bar · seas boil away above \d+\.\d bar$/);
+    await page.waitForFunction(() => /^seas freeze over below 0\.\d+ % · seas boil away above 1\.\d %$/.test(document.querySelector('[data-testid=studio-marks-text-co2]')?.textContent ?? ''), undefined, { timeout: 300_000 });
     // A planet too small to hold its air (about the Moon's size): the land made again (its size is of what the land
     // is made from); its air leaked away, said with the line that decided, and with it its seas.
     const full = await drawnNow();
     await page.getByTestId('studio-step-planet').click();
+    assert.match(await text('studio-marks-text-radius'), /^no air below 3,6\d0 km$/);
     await page.getByTestId('studio-control-radius').fill('49');
     assert.equal(await text('studio-value-radius'), '1,740');
     await redrawn(full);
