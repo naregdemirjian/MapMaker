@@ -68,6 +68,14 @@ export const Api = {
     if (!res.ok) throw new ApiError(res.status, body.error ?? `Upload failed (${res.status})`, body.code);
     return body;
   },
+  /** A simulated planet's foundation as kept with the project (D269), by the key of its definition; null if none is. */
+  foundation: async (id: string, key: string): Promise<Uint8Array | null> => {
+    const res = await fetch(`${p(id)}/foundations/${key}`);
+    if (res.status === 204) return null;
+    if (!res.ok) throw new ApiError(res.status, `The planet's kept data could not be read (${res.status})`);
+    return new Uint8Array(await res.arrayBuffer());
+  },
+  saveFoundation: (id: string, key: string, bytes: Uint8Array) => call<{ bytes: number; kept: number }>('PUT', `${p(id)}/foundations/${key}`, undefined, new Blob([bytes as BlobPart])),
   drafts: (id: string) => call<BorderDraft[]>('GET', `${p(id)}/drafts`),
   saveDrafts: (id: string, drafts: BorderDraft[]) => call<{ ok: boolean }>('PUT', `${p(id)}/drafts`, drafts),
   /** Write data files (GeoJSON, CSV) into a new folder of the project's exports. */

@@ -190,3 +190,9 @@ export async function deflateInBrowser(bytes: Uint8Array): Promise<Uint8Array> {
   const stream = new Blob([bytes as BlobPart]).stream().pipeThrough(new CompressionStream('deflate'));
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
+
+/** Reads back what `deflateInBrowser` (or zlib's deflate) wrote, with the browser's (or a worker's) DecompressionStream. */
+export async function inflateInBrowser(bytes: Uint8Array): Promise<Uint8Array> {
+  const stream = new Blob([bytes as BlobPart]).stream().pipeThrough(new DecompressionStream('deflate'));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}

@@ -30,7 +30,7 @@ import { ROUND_TIP } from '../terrain/sculpt.ts';
 import { DEFAULT_RIVER, type RiverSpec } from '../terrain/river-course.ts';
 import type { Biome } from '../terrain/biomes.ts';
 import { terrainSourceOf, planetOf, isGeologicalMap, simOf, terrainLook } from '../world-model/world-settings.ts';
-import { simTerrain, simParams, simCover, simCoverFrame, quickPlanetCover } from './planet-engine.ts';
+import { simTerrain, simParams, simCover, simCoverFrame, quickPlanetCover, setFoundationProject } from './planet-engine.ts';
 import { keyOf as contentKey } from '../planet/state/hash.ts';
 import type { PlanetDefinition } from '../planet/model/definition.ts';
 import { MAIN_BRANCH, isBaseEvent, invertDiffs, type MapSpaceRow, type EventRow } from '../world-model/schema.ts';
@@ -940,6 +940,7 @@ export class AppStore {
       this.engines = new Map();
       this.useBranch(MAIN_BRANCH);
       this.projectId = id;
+      setFoundationProject(id);
       setAssetBase(`/api/projects/${encodeURIComponent(id)}/assets/`, () => this.notify());
       this.projectDir = data.dir;
       this.journal = data.journal;
@@ -1081,6 +1082,7 @@ export class AppStore {
 
   closeProject() {
     this.projectId = null;
+    setFoundationProject(null);
     this.world = null;
     this.engine = null;
     this.engines = new Map();

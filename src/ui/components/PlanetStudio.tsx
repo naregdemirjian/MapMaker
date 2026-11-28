@@ -13,7 +13,7 @@ import { derive, type Derived, type WaterFate } from '../../planet/model/physics
 import { SIGMA } from '../../planet/model/units.ts';
 import { familyOf, figuresOf, settingsChanged, whatChanged, whyItLooksSo, type Figures, type ModelFacts, type SeaFacts, type SettingChange } from '../../planet/why.ts';
 import { RANGES, boundaryAsync, freezeGuess, settingInWords, tippingPoints, waterMarks, withSetting, type Mark, type MarkedSetting, type WaterTable } from '../../planet/tipping.ts';
-import { planetPipeline, simParams } from '../planet-engine.ts';
+import { foundationState, planetPipeline, simParams } from '../planet-engine.ts';
 import { colourLayer, seenFromSpace } from '../planet-colors.ts';
 import { simOf } from '../../world-model/world-settings.ts';
 import { gregorian, PRESENT_YEAR } from '../../core-time/index.ts';
@@ -830,6 +830,14 @@ export function PlanetStudio() {
             <label className="studio-slider"><span>Name</span><input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Aster Prime" data-testid="studio-name" /></label>
             <button className="primary" onClick={use} disabled={problems.length > 0} data-testid="studio-use">{editingId ? 'Apply to this map' : 'Use this planet for a new map'}</button>
             <p className="muted">The map's land and sea follow the planet's simulated history on its timeline: today at the present, earlier dates further back.</p>
+            {/* (D269) What is worked out for the planet at every point is kept with the project. */}
+            {second && (() => {
+              const state = editing ? foundationState(editing) : null;
+              return <p className="muted" data-testid="studio-kept-note">{state === 'kept'
+                ? 'This map\'s planet was read from the project, as it was made: nothing was worked out again. '
+                : state === 'made' ? 'This map\'s planet was worked out now and is kept with the project: next time it opens as it is. ' : ''}
+                What is worked out for a planet at every point (its land through its history, where its sea stands, its temperatures and rain by month, its winds, ice, rivers and lakes, its kinds of surface) is kept in the project's folder once the planet is used for a map. The planet then stays as it is whatever is improved in Map Maker later, until its settings are changed here.</p>;
+            })()}
           </>}
           <label className="check studio-more"><input type="checkbox" checked={more} onChange={(e) => setMore(e.target.checked)} /> More settings</label>
           <p className="muted studio-land-note">Settings marked <NewLand /> make the planet's land again, which takes a few seconds. All the others keep the land as it is.</p>

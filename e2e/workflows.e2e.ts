@@ -5885,6 +5885,96 @@ try {
     await page.getByTestId('studio-history').click();
   });
 
+  await h.step('A planet\'s data kept with the project (D269): worked out once and kept in the project\'s folder; the app closed and opened again, the planet read back as it was with nothing worked out; a place\'s figures by month; undone', async () => {
+    const text = async (id: string) => (await page.getByTestId(id).textContent()) ?? '';
+    const made = await page.evaluate(() => {
+      const m = (window as any).__mapmaker, s = m.store;
+      const def = m.bench.planet.newDefinition('earthlike', 6);
+      def.simulation.spanMyr = 100;
+      const id = s.execute((w: any) => m.bench.commands.createSimPlanet(w, 'Kept Prime', def));
+      s.set({ spaceId: id, layerId: s.world.all('layer').find((l: any) => l.space_id === id)?.id ?? '', selection: null });
+      return { id, project: s.projectId as string };
+    });
+    await h.saved();
+    // The planet as its map has it: its definition as stored, worked out for the map (its history and all that follows).
+    const planet = () => page.evaluate((id) => {
+      const m = (window as any).__mapmaker, s = m.store;
+      const def = JSON.parse(s.world.get('map_space', id).settings).sim.definition;
+      return { ready: !!s.simFor(def), ...m.bench.planet.foundation(def), runs: m.bench.planet.runs() as Record<string, number> };
+    }, made.id);
+    const digest = () => page.evaluate((id) => {
+      const m = (window as any).__mapmaker;
+      return m.bench.planet.digest(JSON.parse(m.store.world.get('map_space', id).settings).sim.definition) as Promise<{ heights: string; colour: string; temperature: string }>;
+    }, made.id);
+    await page.waitForFunction((id) => {
+      const m = (window as any).__mapmaker, s = m.store, def = JSON.parse(s.world.get('map_space', id).settings).sim.definition;
+      return !!s.simFor(def) && m.bench.planet.foundation(def).from !== null;
+    }, made.id, { timeout: 300_000 });
+    const first = await planet();
+    assert.equal(first.from, 'made', 'worked out now');
+    assert.match(first.key, /^[0-9a-f]{32}$/);
+    assert.ok((first.runs.tectonics ?? 0) >= 1 && (first.runs.biomes ?? 0) >= 1, JSON.stringify(first.runs));
+    const before = await digest();
+    // Kept in the project's folder, under the key of the planet's definition: a planet file of some megabytes.
+    const kept = async () => page.evaluate(async ({ project, key }) => {
+      const r = await fetch(`/api/projects/${encodeURIComponent(project)}/foundations/${key}`);
+      if (r.status !== 200) return { status: r.status, bytes: 0, magic: '' };
+      const b = new Uint8Array(await r.arrayBuffer());
+      return { status: r.status, bytes: b.length, magic: String.fromCharCode(b[0], b[1], b[2], b[3]) };
+    }, { project: made.project, key: first.key });
+    // (Written in the background once the planet is worked out.)
+    let file = await kept();
+    for (let i = 0; i < 240 && file.status !== 200; i++) { await page.waitForTimeout(500); file = await kept(); }
+    assert.equal(file.status, 200, 'kept');
+    assert.equal(file.magic, 'MMS1');
+    assert.ok(file.bytes > 500_000 && file.bytes < 40 * 2 ** 20, `${(file.bytes / 2 ** 20).toFixed(1)} MB kept`);
+    // (No other planet's is there.)
+    assert.equal(await page.evaluate(async (project) => (await fetch(`/api/projects/${encodeURIComponent(project)}/foundations/${'0'.repeat(32)}`)).status, made.project), 204);
+    // The app closed and opened again: the planet is read from its file. Nothing of it is worked out again (no
+    // history, no climate, no water, no biomes), and it is the same planet bit for bit.
+    await page.reload();
+    await page.locator('.project-row').first().click();
+    await page.getByTestId('map-canvas').waitFor();
+    await page.evaluate((id) => {
+      const s = (window as any).__mapmaker.store;
+      s.set({ spaceId: id, layerId: s.world.all('layer').find((l: any) => l.space_id === id)?.id ?? '', selection: null });
+    }, made.id);
+    await page.waitForFunction((id) => {
+      const m = (window as any).__mapmaker, s = m.store, def = JSON.parse(s.world.get('map_space', id).settings).sim.definition;
+      return !!s.simFor(def) && m.bench.planet.foundation(def).from !== null;
+    }, made.id, { timeout: 300_000 });
+    const again = await planet();
+    assert.equal(again.from, 'kept', 'read from the project');
+    assert.equal(again.key, first.key);
+    for (const stage of ['tectonics', 'insolation', 'temperature', 'climate', 'water', 'biomes']) assert.equal(again.runs[stage] ?? 0, 0, `${stage} not worked out again (${JSON.stringify(again.runs)})`);
+    assert.deepEqual(await digest(), before, 'the same planet, bit for bit');
+    assert.equal(((await planet()).runs.tectonics ?? 0) + ((await planet()).runs.climate ?? 0), 0);
+    // In the Studio: said so; and a place's card gives what is kept there, month by month.
+    await page.getByTestId('studio-map').click();
+    await page.locator('[data-testid^="map-row-"].sel').click();
+    await page.getByTestId('open-planet-studio').click();
+    await page.getByTestId('planet-studio').waitFor();
+    await page.waitForFunction(() => {
+      const d = (document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement)?.dataset.drawn ?? '';
+      return !document.querySelector('[data-testid=studio-status]') && !document.querySelector('[data-testid=studio-progress]') && d.startsWith('satellite:');
+    }, undefined, { timeout: 300_000 });
+    await page.getByTestId('studio-step-explore').click();
+    assert.match(await text('studio-kept-note'), /^This map's planet was read from the project, as it was made: nothing was worked out again\. What is worked out for a planet at every point .* is kept in the project's folder/);
+    const box = (await page.getByTestId('studio-canvas').boundingBox())!;
+    await page.mouse.click(box.x + box.width * 0.5, box.y + box.height * 0.5);
+    await page.getByTestId('studio-card').waitFor({ timeout: 120_000 });
+    const card = await text('studio-card');
+    assert.match(card, /By month \(twelfths of its year, from the northern midwinter\): (-?\d+, ){11}-?\d+ °C; rain and snow (\d+, ){11}\d+ mm\./);
+    assert.match(card, /Winds: (from the [a-z-]+ at \d+\.\d m\/s|calm) in the northern midwinter, (from the [a-z-]+ at \d+\.\d m\/s|calm) in its midsummer\./);
+    assert.equal(((await planet()).runs.tectonics ?? 0), 0, 'the Studio too shows the planet read');
+    await page.getByTestId('studio-close').click();
+    await page.getByTestId('planet-studio').waitFor({ state: 'detached' });
+    await page.getByTestId('undo').click();
+    await h.saved();
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.name === 'Kept Prime')), false);
+    await page.getByTestId('studio-history').click();
+  });
+
   await h.step('The studios: each page its own panels; panels dock, float, close and open again, resize; Save and Reset workspace (D196, D234)', async () => {
     const box = async (sel: string) => (await page.locator(sel).first().boundingBox())!;
     const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);

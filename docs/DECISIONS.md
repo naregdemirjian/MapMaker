@@ -61,6 +61,55 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D269. A planet's foundation: what is worked out at every point, kept with the project (the Planet Studio's overhaul, step 7)
+
+- **What was missing**: a simulated planet's map kept only the planet's settings. Every time the project was opened
+  the planet was worked out again from them (its history, then everything that follows), and by whatever the engine
+  was that day: an improvement to the engine would have changed every planet already made, under the borders drawn
+  on it.
+- **The foundation** (`src/planet/foundation.ts`): everything worked out for a planet of the second calculation,
+  gathered into one file:
+  - its land through its history (the heights, plates and kinds of crust at each of its pictures; today's crust
+    age and thickness, boundaries, sediment);
+  - where its sea stands, and what became of its water and its air;
+  - the sunlight, the temperatures and the rain and snow of each of twelve months, the winds of midwinter and
+    midsummer, the sea's currents, the days' high and nights' low where the ground has a day of its own;
+  - ice sheets, sea ice, rivers (their flow), lakes (their depth), wetlands, salt flats;
+  - the kind of surface, its Köppen class and its colour seen from space.
+  `pointData` gives all of it for one place.
+- **The file**: the engine's own format (MMS1, D152), each array kept exactly (no rounding: read back, every product
+  is the one that was made, bit for bit), the rest as JSON in its header. 1 MB for a test-size planet; some megabytes
+  for a planet as the Studio makes it (the interface test asks for between half a megabyte and forty).
+- **Where it is kept**: in the project's folder, `foundations/<key>.mmf`, the key being a hash of the planet's
+  definition (but for its name and the preset it came from, which do not change the planet) and of what it is
+  simulated with. *Not* of the engine's version: that is the point. Not in the project's history: it is derived
+  from the definition, so undo and redo find the foundation of whichever definition they return to. A project keeps
+  the last twelve used (a planet's earlier definitions among them); older ones are let go and would be made again.
+- **When**: a planet's map asks for its foundation before anything else (`simFoundation`). Kept in the project: it is
+  read and given to the pipeline (`Pipeline.adopt`), which then answers every request for those products with the
+  ones read and makes nothing; these are never dropped for room as the cache's are. Not kept: the planet is worked
+  out, given to the pipeline the same way, and written to the project in the background. ("None kept" is an
+  answer of the project's, not a fault: nothing is reported.) The Studio draws from the
+  same pipeline, so a planet opened there is the planet read.
+- **What stays the same, and what does not**: the planet today, at every point, stays as made for as long as its
+  settings stay. Its pictures (the map's heights and colours) are drawn from the foundation by today's drawing code.
+  Earlier moments' seas and climates are worked out from the kept history when shown (not kept: twenty times the
+  size). When a later engine needs something of a product that an old foundation does not hold, that is a change of
+  the file's format and wants a migration: a test names the stages' versions a foundation is made of, so that a
+  change to one is not made without looking at this.
+- **A place's card** (engine 2) now gives what is kept there as it is: the twelve months' temperatures and rain,
+  and the winds of midwinter and midsummer by where they blow from.
+- **In the Studio** ("Explore and use"): whether this map's planet was read from the project or worked out now, and
+  what is kept.
+- **Only for the second calculation**: a planet of the first is made as it was, by its own stages, each time.
+- **Tests**: `test/planet-foundation.test.ts` (5): the stages and versions a foundation is made of; what names a foundation; gathered, written and read back bit for
+  bit, within a few megabytes, what is not one refused, the data at a point; given to a pipeline (its products are
+  those read, nothing run, a map's pictures made from them without the history, kept whatever the cache drops, the
+  same planet under another name, another planet's refused, the last few sets kept); the project's keeping of the
+  files (by key, planet files only, written over, the last dozen used). Interface: a planet worked out and kept
+  (its file there), the app closed and opened again, the planet read back with no stage of its foundation run and
+  the same checksums; said in the Studio; a place's card by month.
+
 ### D268. Every slider earns its place, second part: a preset for each kind of world; the test of every slider (the Planet Studio's overhaul, step 6)
 
 - **A preset for each kind of world** the second calculation makes, offered in order (`WORLD_KINDS`) and called by

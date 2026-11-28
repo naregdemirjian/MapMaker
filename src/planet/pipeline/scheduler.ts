@@ -63,6 +63,12 @@ export class Pipeline {
   readonly cache: ProductCache;
   /** Products being made now, so two requests for the same one share the work. */
   private pending = new Map<string, Promise<ProductData>>();
+  /**
+   * Products given, not made (D269: a planet's foundation read from its file), by a name for the set they came in:
+   * asked for by their keys they are these, and they are never dropped for room as the cache's are. The last few
+   * sets given are kept.
+   */
+  private adopted = new Map<string, Map<string, ProductData>>();
 
   constructor(executor: Executor, cache = new ProductCache()) {
     this.executor = executor;
@@ -79,13 +85,26 @@ export class Pipeline {
     });
   }
 
+  /** Gives a set of products by their keys (D269); a set of the same name given before is replaced. */
+  adopt(set: string, products: Array<{ key: string; data: ProductData }>, keep = 3): void {
+    this.adopted.delete(set);
+    this.adopted.set(set, new Map(products.map((p) => [p.key, p.data])));
+    while (this.adopted.size > keep) this.adopted.delete(this.adopted.keys().next().value!);
+  }
+  /** Whether a set of products has been given (and is still kept). */
+  hasAdopted(set: string): boolean { return this.adopted.has(set); }
+  private given(key: string): ProductData | undefined {
+    for (const set of this.adopted.values()) { const d = set.get(key); if (d) return d; }
+    return undefined;
+  }
+
   /** A stage's product for a definition: from the cache, or made (with whatever it needs). */
   async product(stage: string, def: PlanetDefinition, params: StageParams, opts: ProductOptions = {}): Promise<Product> {
     const key = this.keyOf(stage, def, params);
     const t0 = performance.now();
     let started = false;
     for (;;) {
-      const hit = this.cache.get(key);
+      const hit = this.given(key) ?? this.cache.get(key);
       if (hit) return { key, stage, data: hit, cached: !started, ms: started ? performance.now() - t0 : 0 };
       let making = this.pending.get(key);
       const shared = !!making;

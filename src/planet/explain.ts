@@ -128,6 +128,20 @@ export function explain(d: ExplainData, c: number): Explanation {
     if (cur > 1) why.push(`a warm current offshore (${fmt(cur, 1)} K warmer)`);
     if (cur < -1) why.push(`a cold current offshore (${fmt(-cur, 1)} K cooler)`);
     if (why.length) lines.push(`Shaped by ${why.join('; ')}.`);
+    // (D269) The data kept at every point, as it is: each twelfth of the year, and the winds of midwinter and midsummer.
+    if (d.def.engine === 2) {
+      const list = (a: Float64Array) => Array.from(a, (v) => fmt(v)).join(', ');
+      lines.push(`By month (twelfths of its year, from the northern midwinter): ${list(T)} °C${d.dry ? '' : `; rain and snow ${list(P)} mm`}.`);
+      const wind = (w: ArrayLike<number>) => {
+        const ue = w[2 * c], vn = w[2 * c + 1], speed = Math.hypot(ue, vn);
+        if (!(speed >= 0.3)) return null;
+        // (Named by where it blows from, as winds are.)
+        const from = ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'][((Math.round(Math.atan2(-ue, -vn) / (Math.PI / 4)) % 8) + 8) % 8];
+        return `from the ${from} at ${fmt(speed, 1)} m/s`;
+      };
+      const jan = wind(d.climate.windJan), jul = wind(d.climate.windJul);
+      if (jan || jul) lines.push(`Winds: ${jan ?? 'calm'} in the northern midwinter, ${jul ?? 'calm'} in its midsummer.`);
+    }
     // (D262) With little or no air over it the ground follows the sun through the day.
     if (d.climate.dayHigh && d.climate.nightLow) lines.push(`With so little air over it the ground follows the sun: its days reach about ${fmt(d.climate.dayHigh[c])} °C and its nights fall to about ${fmt(d.climate.nightLow[c])} °C (each the year's mean).`);
     sections.push({ heading: 'Climate', lines });

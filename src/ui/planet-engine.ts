@@ -1,7 +1,10 @@
 // The interface's side of the planetary engine (Stage 14, D152): one pipeline whose stages run in a pool of
 // workers (dist/ui/planet-worker.js), made when first needed. The Planet Studio (14.5) asks it for products;
 // the interface tests ask it through __mapmaker.bench.planet.
-import { WorkerPool, type WorkerLike } from '../planet/worker/pool.ts';
+import { WorkerPool, type Executor, type WorkerLike } from '../planet/worker/pool.ts';
+import { adoptFoundation, decodeFoundation, encodeFoundation, foundationKey, gatherFoundation } from '../planet/foundation.ts';
+import { deflateInBrowser, inflateInBrowser } from '../planet/state/codec.ts';
+import { Api } from './api.ts';
 import { Pipeline } from '../planet/pipeline/scheduler.ts';
 import { definitionFromPreset, newDefinition, PRESETS, type PlanetDefinition, type PresetId } from '../planet/model/definition.ts';
 import { derive } from '../planet/model/physics.ts';
@@ -22,11 +25,56 @@ export const defaultWorkers = () => Math.max(1, Math.min(8, (navigator.hardwareC
 export const newWorker = (): WorkerLike => new Worker(new URL('planet-worker.js', document.baseURI), { type: 'module' }) as unknown as WorkerLike;
 
 let shared: Pipeline | null = null;
+/** How many times each stage has been run by the interface's pipeline since the page opened (for the tests, D269). */
+const stageRuns = new Map<string, number>();
 
 /** The interface's pipeline (its cache is kept while the page is open). */
 export function planetPipeline(): Pipeline {
-  if (!shared) shared = new Pipeline(new WorkerPool(newWorker, defaultWorkers()));
+  if (!shared) {
+    const pool = new WorkerPool(newWorker, defaultWorkers());
+    const counted: Executor = {
+      get size() { return pool.size; },
+      run: (task, args, opts) => { const stage = (args as { stage?: string }).stage ?? task; stageRuns.set(stage, (stageRuns.get(stage) ?? 0) + 1); return pool.run(task, args, opts); },
+      dispose: () => pool.dispose(),
+    };
+    shared = new Pipeline(counted);
+  }
   return shared;
+}
+
+/** The project whose planets' foundations are read and kept (D269): set by the store as a project opens and closes. */
+let foundationProject: string | null = null;
+export const setFoundationProject = (id: string | null): void => { foundationProject = id; };
+/** What became of a planet's foundation when it was last asked for, by its key: read from the project, or made (and kept). */
+const foundationFrom = new Map<string, 'kept' | 'made'>();
+
+/** What became of a planet's foundation this session (D269): read from the project, made (and kept), or not asked for yet. */
+export const foundationState = (def: PlanetDefinition): 'kept' | 'made' | null => (def.engine === 2 ? foundationFrom.get(foundationKey(def, simParams(def))) ?? null : null);
+
+/**
+ * A simulated planet's foundation (D269), for a planet of the second calculation: what was worked out for it at
+ * every point. Read from the project where it is kept there (the planet is then as it was made, with nothing
+ * simulated); otherwise made, given to the pipeline so that it stays, and kept with the project for next time.
+ */
+export async function simFoundation(def: PlanetDefinition, opts: { onProgress?: (share: number) => void; signal?: AbortSignal } = {}): Promise<'kept' | 'made' | 'none'> {
+  if (def.engine !== 2) return 'none';
+  const p = planetPipeline(), params = simParams(def), key = foundationKey(def, params), project = foundationProject;
+  if (p.hasAdopted(key)) return foundationFrom.get(key) ?? 'kept';
+  if (project) {
+    try {
+      const bytes = await Api.foundation(project, key);
+      if (bytes) {
+        adoptFoundation(p, def, params, await decodeFoundation(bytes, inflateInBrowser));
+        foundationFrom.set(key, 'kept');
+        return 'kept';
+      }
+    } catch { /* (Unreadable or damaged: made anew below, and written over.) */ }
+  }
+  const f = await gatherFoundation(p, def, params, { signal: opts.signal, onProgress: (d, t) => opts.onProgress?.(d / Math.max(1, t)) });
+  adoptFoundation(p, def, params, f);
+  foundationFrom.set(key, 'made');
+  if (project) void encodeFoundation(f, deflateInBrowser).then((bytes) => Api.saveFoundation(project, key, bytes)).catch(() => undefined);
+  return 'made';
 }
 
 export interface PreviewResult {
@@ -69,7 +117,17 @@ async function preview(def: PlanetDefinition | PresetId, opts: { level?: number;
 }
 
 /** What the interface tests and benchmarks use. */
-export const planetBench = { preview, derive, definitionFromPreset, newDefinition, presets: Object.keys(PRESETS) as PresetId[] };
+export const planetBench = {
+  preview, derive, definitionFromPreset, newDefinition, presets: Object.keys(PRESETS) as PresetId[],
+  /** (D269) How many times each stage has been run since the page opened; what became of a planet's foundation. */
+  runs: (): Record<string, number> => Object.fromEntries(stageRuns),
+  foundation: (def: PlanetDefinition): { key: string; from: 'kept' | 'made' | null } => { const key = foundationKey(def, simParams(def)); return { key, from: foundationFrom.get(key) ?? null }; },
+  /** The planet as the pipeline has it, in three checksums: its heights against its sea, its colours seen from space, its temperatures by month. */
+  digest: async (def: PlanetDefinition): Promise<{ heights: string; colour: string; temperature: string }> => {
+    const p = planetPipeline(), params = simParams(def), sum = (a: unknown) => { const v = a as Uint8Array; return sha256(new Uint8Array(v.buffer, v.byteOffset, v.byteLength)); };
+    return { heights: sum((await p.product('sea', def, params)).data.heights), colour: sum((await p.product('biomes', def, params)).data.colour), temperature: sum((await p.product('climate', def, params)).data.monthly) };
+  },
+};
 
 /** The mesh level for a definition's quality: a preview (about 240 km cells on an Earth-sized planet) or standard (110 km). */
 export const simLevel = (def: PlanetDefinition) => (def.engine === 2 || def.simulation.quality === 'preview' ? 5 : 6);
@@ -92,6 +150,8 @@ export async function simTerrain(def: PlanetDefinition, opts: { onProgress?: (sh
   const p = planetPipeline();
   const params = simParams(def);
   const key = p.keyOf('tectonics', def, params);
+  // (D269) Its foundation first: read from the project where kept, else made and kept (the history is part of it).
+  await simFoundation(def, { signal: opts.signal, onProgress: (share) => opts.onProgress?.(0.85 * share) });
   const history = await p.product('tectonics', def, params, { signal: opts.signal, onProgress: (d, t) => opts.onProgress?.((0.85 * d) / Math.max(1, t)) });
   const times = history.data.times as Float64Array, F = times.length;
   const grids: ElevationGrid[] = new Array(F);

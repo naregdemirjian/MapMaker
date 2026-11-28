@@ -8,6 +8,7 @@ import { spawn } from 'node:child_process';
 import { ProjectRegistry } from './projects.ts';
 import { startJob, writeFrame, writeEncodedFrame, writeEncodedTiff, writeSvgFrame, writeVideoBytes, repeatFrame, finishJob, type ExportJob, type ExportSettings } from '../export/writer.ts';
 import { saveAsset, serveAsset } from './assets.ts';
+import { FOUNDATION_LIMIT, readFoundation, saveFoundation } from './foundations.ts';
 import { EXAMPLES } from '../examples/index.ts';
 import type { RowDiff } from '../world-model/schema.ts';
 
@@ -236,6 +237,18 @@ export function createAppServer(opts: ServerOptions): { server: Server; registry
         return send(res, 201, { ...saved, url: `/api/projects/${encodeURIComponent(id)}/assets/${saved.file}` });
       }
       if (parts.length === 5 && method === 'GET') return serveAsset(db.dir, parts[4], req, res);
+    }
+    // A simulated planet's foundation (D269): what was worked out for it at every point, by the key of its definition.
+    if (action === 'foundations' && parts.length === 5) {
+      if (method === 'GET') {
+        const bytes = readFoundation(db.dir, parts[4]);
+        // (None kept is an answer, not a fault: the planet is then worked out and kept.)
+        if (!bytes) { res.writeHead(204, { 'cache-control': 'no-store' }); res.end(); return; }
+        res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': bytes.length, 'cache-control': 'no-store' });
+        res.end(bytes);
+        return;
+      }
+      if (method === 'PUT') return send(res, 200, saveFoundation(db.dir, parts[4], await readBody(req, FOUNDATION_LIMIT)));
     }
     if (action === 'undo' && method === 'POST') return send(res, 200, db.undo() ?? { diffs: [], journal: db.journalState() });
     if (action === 'redo' && method === 'POST') return send(res, 200, db.redo() ?? { diffs: [], journal: db.journalState() });
