@@ -2,7 +2,7 @@
 // the last few: the working view gets them a moment after the heights (the map is drawn without them
 // meanwhile), an export waits for them. (Rivers drawn on a map, D220, are drawn on their own: see river-course.ts.)
 import type { ElevationGrid } from './grid.ts';
-import { riversOf, type RiverLines } from './rivers.ts';
+import { riversOf, type RiverLines, type RiverRain } from './rivers.ts';
 import type { RiverShape } from './river-course.ts';
 
 const kept = new Map<string, RiverLines | 'working'>();
@@ -14,23 +14,26 @@ function keep(key: string, value: RiverLines | 'working'): void {
   while (kept.size > KEEP) kept.delete(kept.keys().next().value!);
 }
 
-/** The rivers of the heights named `key` if worked out; otherwise null, and `onReady` is called once they are. */
-export function riversSoon(grid: ElevationGrid, key: string, onReady: () => void): RiverLines | null {
-  const have = kept.get(key);
+/**
+ * The rivers of the heights named `key` if worked out; otherwise null, and `onReady` is called once they are.
+ * (`rain`, D271: the water that runs off the land, where it is known: the rivers follow it.)
+ */
+export function riversSoon(grid: ElevationGrid, key: string, onReady: () => void, rain: RiverRain | null = null): RiverLines | null {
+  const k = rain ? `${key}|rain:${rain.key}` : key, have = kept.get(k);
   if (have && have !== 'working') return have;
   if (!have) {
-    keep(key, 'working');
-    setTimeout(() => { keep(key, riversOf(grid)); onReady(); }, 0);
+    keep(k, 'working');
+    setTimeout(() => { keep(k, riversOf(grid, undefined, rain)); onReady(); }, 0);
   }
   return null;
 }
 
 /** The rivers of the heights named `key`, worked out now if need be. */
-export function riversNow(grid: ElevationGrid, key: string): RiverLines {
-  const have = kept.get(key);
+export function riversNow(grid: ElevationGrid, key: string, rain: RiverRain | null = null): RiverLines {
+  const k = rain ? `${key}|rain:${rain.key}` : key, have = kept.get(k);
   if (have && have !== 'working') return have;
-  const r = riversOf(grid);
-  keep(key, r);
+  const r = riversOf(grid, undefined, rain);
+  keep(k, r);
   return r;
 }
 

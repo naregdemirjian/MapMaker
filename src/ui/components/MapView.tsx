@@ -465,7 +465,11 @@ export function MapView() {
     const ground = needsGrid ? s.terrainOf(space, time) : null;
     const carved = ground ? sculpted(ground.grid, ground.key, strokes, (space?.radius_m ?? 6371008.8) / 1000) : null;
     // A planet's rivers (D99), worked out a moment after its heights (drawn without them meanwhile).
-    const rivers = carved && (planetOf(space) || simulated) && on('rivers') ? riversSoon(carved.grid, carved.key, () => store.notify()) : null;
+    // (A simulated planet of the second calculation, D271: its rivers follow the water that runs off its land at
+    // the moment shown; none are drawn until that is worked out.)
+    const simDef = simOf(space), follows = !!simDef && simDef.engine === 2;
+    const rain = follows && carved && on('rivers') ? s.simRunoffAt(simDef!, Number(/:paleo:(\d+(?:\.\d+)?)/.exec(ground!.key)?.[1] ?? 0)) : null;
+    const rivers = carved && (planetOf(space) || simulated) && on('rivers') ? (follows ? (rain ? riversSoon(carved.grid, carved.key, () => store.notify(), rain) : null) : riversSoon(carved.grid, carved.key, () => store.notify())) : null;
     riversDrawn.current = carved && on('rivers') ? carved.rivers : [];
     // The land's colours in the satellite look (D100): Earth's land cover, or a planet's biomes.
     // (With the biomes painted over it, D169.)

@@ -61,6 +61,88 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D271. The map uses the foundation: seen as from space, ice over frozen seas, rivers where water runs (the Planet Studio's overhaul, step 8)
+
+- **What was wrong**: the Studio showed a planet as its foundation has it, and the map made from it did not. The map
+  started coloured by height alone (blue under the sea's level, green low ground, brown and white high ground),
+  whatever the planet: a planet frozen from pole to pole had blue seas and green lowlands on its map, a scorched one
+  green lowlands. And its rivers were traced from the heights alone, so every planet's map had rivers, one where
+  nothing rains too.
+- **Seen as from space by default**: the map of a planet of the second calculation starts in the satellite look:
+  its land by what covers it (the colours of the Studio's "Seen from space": forest, grass, desert, ice sheet, bare,
+  scorched and molten rock), its sea by its depth, with relief. A planet of the first calculation's map starts by
+  its heights as before, and maps already made keep the look they have (it is changed in Map Studio as ever).
+- **Ice over frozen seas**: a frozen sea is still sea (D260): territories end at its coast, the heights say where
+  it is. The map draws it as ice. The cover made for a map (the cover stage's `ice`) holds the land's colours
+  alone, and in its fourth channel whether water standing at each place would lie frozen (`frozenWater`): a cell of
+  the sea by its own kind (open, or frozen for most of the year); a cell of land as the sea nearest it. The
+  renderer draws the sea by its depth and lays the ice's colour over it where that passes a half; in the working
+  view and in exports, and blended between the history's pictures as the colours are.
+  - *Why the land carries it too*: the map draws water wherever its ground lies below the sea's level. A hollow
+    inland, or a strait narrower than one of the planet's cells, is ground to the planet's climate and water on
+    the map; on a planet frozen over it was drawn as open water, dark dots on the ice. Where no land is around,
+    the colour is the ice's too.
+- **Rivers where water runs**: `riversOf(grid, share, rain)` follows the heights as before, and now adds up the
+  water that runs off each cell (the planet's own water balance, millimetres a year, times the cell's area) instead
+  of counting cells. The rivers drawn are, as before, the courses carrying the most (the top 1.5 % of the land's
+  cells), now by their flow, and none that carries under 150 m³/s (`RIVER_MIN_FLOW`): the great rivers rise where
+  it rains, a desert has none of its own, a world where nothing runs off has none.
+  Without a planet's run-off (a planet of the first calculation, the quick generator) rivers are as they were.
+  The run-off given is what runs *as water*: nothing from under an ice sheet, nothing off ground that no month
+  thaws (the raster stage's `liquid`). At an earlier moment of the history, that moment's own. No river is drawn
+  until the run-off is worked out (a moment after the map opens).
+- **Land and sea as the planet's water has them**: the map takes land and sea from its heights (water where the
+  ground lies below the sea's level), the planet from its water stage, and the two did not always agree. The water
+  finds the sea on ground whose hollows' outlets are notched (D166): a strait narrower than a cell joins a basin to
+  the sea, and its cell is sea to the planet while its mean height stands above the sea. On the map it was land, in
+  the sea's dark colour (the cover has no land colour there). On an Earth 7 cells of 10,242; on the desert world,
+  whose small seas lie in many basins, 210 of its 1,398 cells of sea. A map's heights (`shoreHeights`, the raster
+  stage's `shore`) now put every cell the water has as sea 50 m under the sea's level (`STRAIT_DEPTH_M`: shallow
+  water across the cell). Today's from the water stage itself, which the planet's foundation holds (asked for as
+  the present, so that nothing is worked out again on opening); an earlier moment's from the sea its heights alone
+  give the water's way, so that a history's pictures need no climate to be drawn.
+- **A world with no sea has none on its map**: a dry planet's heights are against its lowest ground, and its old
+  sea floor, flat at that level over wide plains, lay exactly at the height the renderer smooths the shore across:
+  the plains of the Mars-like and the airless world were drawn half as water, a dull blue, and would have cut
+  territories in two. The heights' picture says where the planet has no sea; the map's terrain carries it
+  (`ElevationGrid.noSea`, kept through sculpting and between a history's pictures); the renderer then draws and
+  masks everything as land (`u_dry`), and the land-and-sea mask reckoned from the heights does too. Only while the
+  map's own sea level is 0: a sea the user raises over such a world is a sea (`noSeaAt`).
+- **Faults the pictures and the tests found on the way**:
+  - the two above, seen on the sheet of each kind of world's map;
+  - a planet frozen over had a few rivers on its map: snow falling on ground that never thaws was counted as
+    water running off (hence `liquid`);
+  - the dark dots of open water on it (above);
+  - **ice was missing wherever the sea and the land are drawn as two pictures** (in every export, and in the
+    working view as soon as a country lies on the land): the sea's picture was not given the cover. Found by the
+    check of an exported frame added to the interface test.
+- **Measured** (the Studio's detail, seed 4; courses of river drawn): an Earth 198, an ice age 209, a planet locked
+  to its star 292 (along the edge of its day), an ocean world 63, a desert world 573 (four times an Earth's land,
+  and its far north and south are wet); a snowball, Venus's like, a scorched, a lava, Mars's like and an airless
+  world none. Opening a planet's map takes what it took (the heights' pictures of the earlier moments reckon the
+  sea from the heights: a few milliseconds each).
+- **Not done here**: what melts off an ice sheet is not given to the rivers below it (the water stage does not
+  keep it apart from what falls on the ice); a dry hollow below the sea's level far inland is drawn as water (the
+  map draws water wherever its ground lies below the sea; 10 cells on the desert world, none on the others tried);
+  lakes are drawn in their colour as land is, not as water; the coasts and the detail are the foundation's (cells
+  about 240 km across). The last three are Stage 2's work (steps 10 to 12). Noted for the foundation: on a world
+  with small seas the notched outlets join many basins to the sea by long straits (the 210 cells above), more
+  than a real desert world would have.
+- **Tests**: `test/planet-map.test.ts` (7): the look a new planet's map starts in, by calculation; the map's cover
+  (open sea, frozen sea, land by each; a planet frozen over with no open water and no sea-coloured pixel; a scorched
+  one with no ice; the plain and the land-alone covers as they were); `frozenWater` on a belt of land between an
+  open and a frozen sea; rivers by run-off on a made terrain (none where nothing runs off, none below a river's
+  flow, only out of the wet half, kept apart by the rain they followed; as they were without it); a planet's
+  run-off (none on a scorched or airless world, none on a frozen one though snow falls, less on a desert world,
+  an Earth's less only by its ice and frozen ground); a map's heights (every cell of the water's sea below the
+  sea's level and nothing else changed; without the water's word only what the water would say; more of the
+  picture under the sea than by the heights alone; a planet with no sea said to have none, for a map only); a
+  world with no sea (land while the map has raised no sea, kept through sculpting and between a history's
+  pictures). `e2e/workflows.e2e.ts` (1 more step): a new planet's map in the satellite look, green land and blue
+  sea, on screen and in an exported frame, with rivers; a frozen planet's map ice with no open water and no
+  rivers, on screen and exported; a scorched planet's with no sea, ice, plants or rivers; an airless planet's with
+  nothing bluish on it, on screen and exported; undone.
+
 ### D270. A fault of D268 mended: the "Ice age" preset froze the planet over at the Studio's own detail
 
 - **The fault** (seen on the sheet of pictures made for step 6, in what D268 had pushed): the "Ice age" preset opened

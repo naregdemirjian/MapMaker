@@ -15,7 +15,11 @@ import { BIOMES } from './biomes.ts';
  * A world's land cover: RGBA pixels (or a decoded picture), and a name for its content. The Earth's comes with
  * the picture of the whole planet as photographed (D138), drawn instead of it where the look asks for photographs.
  */
-export interface TerrainCover { width: number; height: number; pixels: Uint8Array | ImageBitmap; key: string; photo?: { pixels: ImageBitmap; key: string } | null }
+export interface TerrainCover {
+  width: number; height: number; pixels: Uint8Array | ImageBitmap; key: string; photo?: { pixels: ImageBitmap; key: string } | null;
+  /** (D271) Its alpha says whether water standing at each place would lie frozen (a simulated planet's): ice is drawn over the sea there. */
+  ice?: boolean;
+}
 
 export const EARTH_COVER_KEY = 'earth-cover-4096';
 let earth: Promise<TerrainCover> | null = null;
@@ -91,7 +95,7 @@ export function coverAt(set: CoverSet, age: number): TerrainCover | null {
   if (kept) { blends.delete(key); blends.set(key, kept); return kept; }
   const pa = A.pixels, pb = B.pixels, out = new Uint8Array(pa.length), wb = Math.round(q * 256), wa = 256 - wb;
   for (let i = 0; i < out.length; i++) out[i] = (pa[i] * wa + pb[i] * wb + 128) >> 8;
-  const c: TerrainCover = { width: A.width, height: A.height, pixels: out, key };
+  const c: TerrainCover = { width: A.width, height: A.height, pixels: out, key, ...(A.ice || B.ice ? { ice: true } : {}) };
   blends.set(key, c);
   while (blends.size > 4) blends.delete(blends.keys().next().value!);
   return c;
@@ -118,7 +122,7 @@ export function paintedCover(cover: TerrainCover, paint: readonly TerrainStamp[]
       for (let q = 0; q < 3; q++) px[4 * k + q] = Math.round(px[4 * k + q] + (rgb[q] - px[4 * k + q]) * a);
     });
   }
-  const out: TerrainCover = { width: W, height: H, pixels: px, key };
+  const out: TerrainCover = { width: W, height: H, pixels: px, key, ...(cover.ice ? { ice: true } : {}) };
   painted.set(key, out);
   while (painted.size > 4) painted.delete(painted.keys().next().value!);
   return out;

@@ -30,7 +30,8 @@ import { ROUND_TIP } from '../terrain/sculpt.ts';
 import { DEFAULT_RIVER, type RiverSpec } from '../terrain/river-course.ts';
 import type { Biome } from '../terrain/biomes.ts';
 import { terrainSourceOf, planetOf, isGeologicalMap, simOf, terrainLook } from '../world-model/world-settings.ts';
-import { simTerrain, simParams, simCover, simCoverFrame, quickPlanetCover, setFoundationProject } from './planet-engine.ts';
+import { simTerrain, simParams, simCover, simCoverFrame, simRunoff, quickPlanetCover, setFoundationProject } from './planet-engine.ts';
+import type { RiverRain } from '../terrain/rivers.ts';
 import { keyOf as contentKey } from '../planet/state/hash.ts';
 import type { PlanetDefinition } from '../planet/model/definition.ts';
 import { MAIN_BRANCH, isBaseEvent, invertDiffs, type MapSpaceRow, type EventRow } from '../world-model/schema.ts';
@@ -750,6 +751,35 @@ export class AppStore {
     ask(0);
     if (age > 0) for (let i = 1; i < s.ages.length; i++) ask(i);
     return coverAt(s, age);
+  }
+
+  /** The water running off simulated planets' land at each picture of their histories (D271), the last two planets'. */
+  private simRunoffs = new Map<string, Array<RiverRain | 'asked' | null>>();
+  /**
+   * The water that runs off a simulated planet's land at an age (million years ago), for its map's rivers: that of
+   * the history's picture nearest the moment, once worked out (asked for meanwhile; everything drawn again as it
+   * arrives). Null for a planet of the first calculation, whose rivers follow its heights alone.
+   */
+  simRunoffAt(def: PlanetDefinition, age: number): RiverRain | null {
+    if (def.engine !== 2) return null;
+    const sim = this.simFor(def);
+    if (!sim) return null;
+    const key = `sim-runoff:${contentKey({ def, params: simParams(def) })}`, ages = sim.set.ages;
+    let set = this.simRunoffs.get(key);
+    if (!set) {
+      set = ages.map(() => null);
+      this.simRunoffs.set(key, set);
+      while (this.simRunoffs.size > 2) this.simRunoffs.delete(this.simRunoffs.keys().next().value!);
+    }
+    let i = 0;
+    for (let k = 1; k < ages.length; k++) if (Math.abs(ages[k] - age) < Math.abs(ages[i] - age)) i = k;
+    const have = set[i], s = set;
+    if (have && have !== 'asked') return have;
+    if (!have) {
+      s[i] = 'asked';
+      simRunoff(def, { frame: simCoverFrame(i, ages.length) }).then((r) => { s[i] = r; this.notify(); }, () => { s[i] = null; });
+    }
+    return null;
   }
 
   /** Loads Earth's terrain unless it is there or on its way (everything is drawn again when it arrives). */

@@ -5975,6 +5975,110 @@ try {
     await page.getByTestId('studio-history').click();
   });
 
+  await h.step('The map uses the foundation (D271): a new planet\'s map seen as from space, green land and blue sea; a frozen planet\'s sea drawn as ice; rivers where it rains, none on a world with no rain; no water on a world with no sea; undone', async () => {
+    // (The map's picture: how much of it is the sea's blue, ice's white, plants' green.)
+    const seen = () => page.evaluate(() => {
+      const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement, d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+      let blue = 0, white = 0, green = 0, n = 0;
+      for (let k = 0; k < d.length; k += 4 * 53) {
+        n++;
+        if (d[k + 2] > d[k] + 25 && d[k + 2] > d[k + 1] + 10) blue++;
+        else if (d[k] > 185 && d[k + 1] > 195 && d[k + 2] > 200) white++;
+        else if (d[k + 1] > d[k] + 5 && d[k + 1] > d[k + 2] + 12) green++;
+      }
+      return { sea: blue / n, ice: white / n, green: green / n };
+    });
+    const make = (name: string, preset: string) => page.evaluate(({ name, preset }) => {
+      const m = (window as any).__mapmaker, s = m.store;
+      const def = m.bench.planet.newDefinition(preset, 4);
+      def.simulation.spanMyr = 100;
+      const id = s.execute((w: any) => m.bench.commands.createSimPlanet(w, name, def));
+      s.set({ spaceId: id, layerId: s.world.all('layer').find((l: any) => l.space_id === id)?.id ?? '', selection: null });
+      return id as string;
+    }, { name, preset });
+    const defOf = (id: string) => `JSON.parse(window.__mapmaker.store.world.get('map_space', ${JSON.stringify(id)}).settings)`;
+    // (The same of a frame of an export of the map in view: the whole planet, with what an export works out for it.
+    // A planet has no map of the Earth under it.)
+    const exported = () => page.evaluate(async () => {
+      const m = (window as any).__mapmaker, s = m.store, B = m.bench;
+      const shot = B.defaultShot(s.spaceId, { lon: 0, lat: 0, zoom: 0, rotation: 0, projection: 'equirectangular' }, s.time, s.time, 24, 0.5);
+      shot.width = 640; shot.height = 320; shot.overlays = []; shot.graticule = false;
+      const c = document.createElement('canvas'); c.width = 640; c.height = 320;
+      const ctx = c.getContext('2d', { willReadFrequently: true })!;
+      B.renderFrame(ctx, new B.MapRenderer(), s.world, s.engine, shot, 0, B.PASS_DEFS.find((d: any) => d.name === 'all'), 640, 320, null, await B.terrainFor(s.world, s.spaceId, shot));
+      const d = ctx.getImageData(0, 0, 640, 320).data;
+      let blue = 0, white = 0, green = 0, n = 0;
+      for (let k = 0; k < d.length; k += 4 * 7) {
+        n++;
+        // (Open sea is dark: the pale line round the map's edge is not it.)
+        if (d[k + 2] > d[k] + 25 && d[k + 2] > d[k + 1] + 10 && d[k] < 110) blue++;
+        else if (d[k] > 185 && d[k + 1] > 195 && d[k + 2] > 200) white++;
+        else if (d[k + 1] > d[k] + 5 && d[k + 1] > d[k + 2] + 12) green++;
+      }
+      return { sea: blue / n, ice: white / n, green: green / n };
+    });
+    // (Drawn with its cover: the planet's history made, its land seen from space at hand, and the picture settled.)
+    const drawn = async (id: string, ok: (p: { sea: number; ice: number; green: number }) => boolean) => {
+      await page.waitForFunction((id) => {
+        const m = (window as any).__mapmaker, s = m.store, def = JSON.parse(s.world.get('map_space', id).settings).sim.definition;
+        return !!s.simFor(def) && !!s.simCoverAt(def, 0);
+      }, id, { timeout: 300_000 });
+      let p = await seen();
+      for (let i = 0; i < 120 && !ok(p); i++) { await page.waitForTimeout(500); p = await seen(); }
+      return p;
+    };
+    // An Earth: seen as from space by default (its land by what covers it), green land, blue sea, ice at its poles.
+    const earthId = await make('Map Prime', 'earthlike');
+    await h.saved();
+    assert.equal(await page.evaluate(`${defOf(earthId)}.terrain.palette`), 'satellite');
+    const earth = await drawn(earthId, (p) => p.sea > 0.3 && p.green > 0.02);
+    assert.ok(earth.sea > 0.3 && earth.green > 0.02 && earth.ice < 0.3, `an Earth's map: ${JSON.stringify(earth)}`);
+    await h.screenshot('planet-map-earth');
+    const earthOut = await exported();
+    assert.ok(earthOut.sea > 0.3 && earthOut.green > 0.02 && earthOut.ice < 0.3, `an Earth exported: ${JSON.stringify(earthOut)}`);
+    // Its rivers follow the water that runs off its land.
+    const earthRivers = await page.evaluate(`window.__mapmaker.bench.planet.rivers(${defOf(earthId)}.sim.definition)`) as { rivers: number; runoff: number };
+    assert.ok(earthRivers.rivers > 5 && earthRivers.runoff > 20, JSON.stringify(earthRivers));
+    // A frozen planet: its sea is still sea (blue under no territory would be the sea's colour), drawn as ice.
+    const ballId = await make('Ice Prime', 'frozen');
+    await h.saved();
+    const ball = await drawn(ballId, (p) => p.ice > 0.6);
+    assert.ok(ball.ice > 0.6 && ball.sea < 0.005, `a frozen planet's map: ice over its sea, no open water (${JSON.stringify(ball)})`);
+    // (Snow falls on it, and no month thaws its ground: nothing runs, so no rivers.)
+    const ballRivers = await page.evaluate(`window.__mapmaker.bench.planet.rivers(${defOf(ballId)}.sim.definition)`) as { rivers: number; runoff: number };
+    assert.deepEqual(ballRivers, { rivers: 0, runoff: 0 });
+    await h.screenshot('planet-map-frozen');
+    const ballOut = await exported();
+    assert.ok(ballOut.ice > 0.6 && ballOut.sea < 0.005, `a frozen planet exported: ice over its sea (${JSON.stringify(ballOut)})`);
+    // A scorched planet: nothing rains, so no rivers; and no sea.
+    const dryId = await make('Dry Prime', 'scorched');
+    await h.saved();
+    const dry = await drawn(dryId, (p) => p.sea < 0.01 && p.ice < 0.01);
+    assert.ok(dry.sea < 0.01 && dry.ice < 0.01 && dry.green < 0.01, `a scorched planet's map: ${JSON.stringify(dry)}`);
+    const dryRivers = await page.evaluate(`window.__mapmaker.bench.planet.rivers(${defOf(dryId)}.sim.definition)`) as { rivers: number; runoff: number };
+    assert.deepEqual(dryRivers, { rivers: 0, runoff: 0 });
+    await h.screenshot('planet-map-scorched');
+    // A planet with no air and no water: its lowest plains lie at the level its heights are against, and are no
+    // shore: no water anywhere on its map, on screen or exported (they were drawn half as sea).
+    const bareId = await make('Bare Map Prime', 'airless');
+    await h.saved();
+    const bare = await drawn(bareId, (p) => p.sea < 0.005 && p.ice < 0.01);
+    assert.ok(bare.sea < 0.005 && bare.ice < 0.01 && bare.green < 0.01, `an airless planet's map: ${JSON.stringify(bare)}`);
+    const bareOut = await exported();
+    assert.ok(bareOut.sea < 0.005 && bareOut.ice < 0.01, `an airless planet exported: ${JSON.stringify(bareOut)}`);
+    // (Nothing of its picture is bluer than it is red: bare grey rock.)
+    const bluish = await page.evaluate(() => {
+      const c = document.querySelector('[data-testid=map-canvas]') as HTMLCanvasElement, d = c.getContext('2d')!.getImageData(Math.round(c.width * 0.3), Math.round(c.height * 0.35), Math.round(c.width * 0.4), Math.round(c.height * 0.3)).data;
+      let n = 0, blue = 0;
+      for (let k = 0; k < d.length; k += 4 * 11) { n++; if (d[k + 2] > d[k] + 12) blue++; }
+      return blue / n;
+    });
+    assert.ok(bluish < 0.01, `${(bluish * 100).toFixed(1)}% of the middle of an airless planet's map is bluish`);
+    await h.screenshot('planet-map-airless');
+    for (let i = 0; i < 4; i++) { await page.getByTestId('undo').click(); await h.saved(); }
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => /^(Map|Ice|Dry|Bare Map) Prime$/.test(m.name))), false);
+  });
+
   await h.step('The studios: each page its own panels; panels dock, float, close and open again, resize; Save and Reset workspace (D196, D234)', async () => {
     const box = async (sel: string) => (await page.locator(sel).first().boundingBox())!;
     const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);

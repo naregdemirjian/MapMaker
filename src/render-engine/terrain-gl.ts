@@ -9,7 +9,7 @@
 // the transform from the sheet to the picture, so a picture with room around the view, a turned
 // view or a picture for an export are all made the same way. One WebGL context serves every renderer;
 // each renderer keeps its last pictures (TerrainPictures).
-import type { ElevationGrid } from '../terrain/grid.ts';
+import { noSeaAt, type ElevationGrid } from '../terrain/grid.ts';
 import { PALETTES, rampUniform, LIGHT, EXAGGERATION, type TerrainLook } from '../terrain/look.ts';
 import type { TerrainCover } from '../terrain/cover.ts';
 import type { DetailGrid } from '../terrain/detail.ts';
@@ -136,6 +136,10 @@ uniform sampler2D u_override;
 uniform int u_useOverride;
 uniform sampler2D u_cover;
 uniform int u_useCover;
+// (D271) 1 where the cover's alpha says how much of the sea lies frozen: ice is drawn over it.
+uniform int u_coverIce;
+// (D271) 1 for a world with no sea: all of it land, whatever its heights against the sea's level.
+uniform int u_dry;
 uniform vec2 u_coverTex;
 uniform sampler2D u_detail;
 uniform int u_useDetail;
@@ -204,19 +208,19 @@ vec3 smoothHeight(sampler2D tex, vec2 size, vec2 su, bool round) {
 
 // The land cover between its cells, close in: its colours blended smoothly over the sixteen cells around a place
 // (a cubic B-spline), so that one kind of land gives way to the next in a soft curve, not in steps along the cells.
-vec3 smoothCover(vec2 uv) {
+vec4 smoothCover(vec2 uv) {
   vec2 tc = uv * u_coverTex - 0.5;
   vec2 i0 = floor(tc), f = tc - i0, f2 = f * f, f3 = f2 * f, g = 1.0 - f;
   vec4 wx = vec4(g.x * g.x * g.x, 3.0 * f3.x - 6.0 * f2.x + 4.0, -3.0 * f3.x + 3.0 * f2.x + 3.0 * f.x + 1.0, f3.x) / 6.0;
   vec4 wy = vec4(g.y * g.y * g.y, 3.0 * f3.y - 6.0 * f2.y + 4.0, -3.0 * f3.y + 3.0 * f2.y + 3.0 * f.y + 1.0, f3.y) / 6.0;
   ivec2 n = ivec2(u_coverTex), base = ivec2(i0) - 1;
-  vec3 c = vec3(0.0);
+  vec4 c = vec4(0.0);
   for (int b = 0; b < 4; b++) {
     int y = clamp(base.y + b, 0, n.y - 1);
     for (int a = 0; a < 4; a++) {
       int x = base.x + a;
       x -= n.x * int(floor(float(x) / float(n.x)));
-      c += wx[a] * wy[b] * texelFetch(u_cover, ivec2(x, y), 0).rgb;
+      c += wx[a] * wy[b] * texelFetch(u_cover, ivec2(x, y), 0);
     }
   }
   return c;
@@ -313,18 +317,20 @@ void main() {
     h = mix(byLine, e, over);
   }
   float rel = h - u_seaLevel;
+  // (A world with no sea, D271: its lowest ground lies at the level the heights are against, and is no shore.)
+  float relSea = u_dry == 1 ? 1.0e7 : rel;
   // How much of the pixel is land: the coast is smoothed over about a pixel. (How fast the height
   // changes from pixel to pixel is worked out from the slope of the terrain, not from neighbouring
   // pixels: that would depend on where the picture starts, and a kept picture with room around the
   // view must be the picture drawn afresh.)
   float perPixel = abs(dEdu * sgx.x + dEdv * sgx.y) + abs(dEdu * sgy.x + dEdv * sgy.y);
-  float landA = closeA >= 0.0 ? closeA : clamp(rel / max(perPixel, 1e-3) + 0.5, 0.0, 1.0);
+  float landA = closeA >= 0.0 ? closeA : clamp(relSea / max(perPixel, 1e-3) + 0.5, 0.0, 1.0);
   if (!ok) { outColor = vec4(0.0); return; }
   if (u_mode == 4) { outColor = vec4(landA); return; }
   if (u_mode == 6) {
     // (How many pixels inland the coast is: by the slope, as the edge is smoothed above; close in on the finer heights,
     // only the smoothed edge itself.)
-    float dpx = closeA >= 0.0 ? (closeA - 0.5) * 2.0 : rel / max(perPixel, 1e-3);
+    float dpx = closeA >= 0.0 ? (closeA - 0.5) * 2.0 : relSea / max(perPixel, 1e-3);
     // Where a coastline says what is land (the Earth at today's sea level), the height there is held at half a metre
     // whatever the ground does, and the slope tells nothing of how far the coast is: steep ground anywhere inland read
     // as "near the coast" and was drawn as coast (D227). There the band is drawn only where sculpting has made the
@@ -368,13 +374,20 @@ void main() {
   }
   // The land's colour: from its land cover in the satellite look (D100), else by its height.
   vec3 land = rampLand(max(rel, 0.0));
-  if (u_useCover == 1 && u_mode != 0) {
+  // (And over a frozen sea, its ice: D271.)
+  float seaIce = 0.0;
+  if (u_useCover == 1 && (u_mode != 0 || u_coverIce == 1)) {
     vec2 coverPerPx = (abs(gx) + abs(gy)) * u_coverTex;
     float coverClose = 1.0 - smoothstep(0.5, 1.0, max(coverPerPx.x, coverPerPx.y));
-    land = coverClose < 1.0 ? textureGrad(u_cover, uv, gx, gy).rgb : vec3(0.0);
-    if (coverClose > 0.0) land = mix(land, smoothCover(uv), coverClose);
+    vec4 cv = coverClose < 1.0 ? textureGrad(u_cover, uv, gx, gy) : vec4(0.0);
+    if (coverClose > 0.0) cv = mix(cv, smoothCover(uv), coverClose);
+    if (u_mode != 0) land = cv.rgb;
+    if (u_coverIce == 1) seaIce = smoothstep(0.35, 0.65, cv.a);
   }
-  vec3 col = u_mode == 1 ? land : u_mode == 0 ? rampSea(min(rel, 0.0)) : mix(rampSea(min(rel, 0.0)), land, landA);
+  vec3 water = rampSea(min(rel, 0.0));
+  // (Sea ice seen from space: near white, a little blue; its relief is the sea's, next to none.)
+  if (seaIce > 0.0) water = mix(water, vec3(0.878, 0.914, 0.941), seaIce);
+  vec3 col = u_mode == 1 ? land : u_mode == 0 ? water : mix(water, land, landA);
   // The Earth as photographed (D138): the picture of the whole planet, and over it the photographs of the
   // region in view where they are in (fading in over their picture's edge). Land and sea alike are the
   // photograph's wherever the terrain is today's: not where the sea of the moment has taken land or left it
@@ -400,7 +413,7 @@ void main() {
   outColor = vec4(col, 1.0);
 }`;
 
-const UNIFORMS = ['u_elev', 'u_tex', 'u_size', 'u_offset', 'u_inv', 'u_S', 'u_origin', 'u_lonRef', 'u_proj', 'u_mode', 'u_shadeTint', 'u_exag', 'u_seaRelief', 'u_light', 'u_sea', 'u_seaN', 'u_land', 'u_landN', 'u_seaLevel', 'u_band', 'u_mask', 'u_useMask', 'u_closeCoast', 'u_override', 'u_useOverride', 'u_cover', 'u_useCover', 'u_coverTex', 'u_detail', 'u_useDetail', 'u_detailBox', 'u_detailTex', 'u_world', 'u_useWorld', 'u_photo', 'u_usePhoto', 'u_photoBox'] as const;
+const UNIFORMS = ['u_elev', 'u_tex', 'u_size', 'u_offset', 'u_inv', 'u_S', 'u_origin', 'u_lonRef', 'u_proj', 'u_mode', 'u_shadeTint', 'u_exag', 'u_seaRelief', 'u_light', 'u_sea', 'u_seaN', 'u_land', 'u_landN', 'u_seaLevel', 'u_band', 'u_mask', 'u_useMask', 'u_closeCoast', 'u_override', 'u_useOverride', 'u_cover', 'u_useCover', 'u_coverIce', 'u_dry', 'u_coverTex', 'u_detail', 'u_useDetail', 'u_detailBox', 'u_detailTex', 'u_world', 'u_useWorld', 'u_photo', 'u_usePhoto', 'u_photoBox'] as const;
 type UniformName = (typeof UNIFORMS)[number];
 
 
@@ -684,6 +697,8 @@ class TerrainGL {
     gl.uniform1i(u.u_useOverride, over ? 1 : 0);
     gl.uniform1i(u.u_cover, 3);
     gl.uniform1i(u.u_useCover, cover ? 1 : 0);
+    gl.uniform1i(u.u_coverIce, cover?.ice ? 1 : 0);
+    gl.uniform1i(u.u_dry, noSeaAt(grid, sea.level) ? 1 : 0);
     const coverSize = cover ? this.coverSizes.get(cover.pixels) ?? [cover.width, cover.height] : [1, 1];
     gl.uniform2f(u.u_coverTex, coverSize[0], coverSize[1]);
     const rad = Math.PI / 180;

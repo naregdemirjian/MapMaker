@@ -177,7 +177,7 @@ export function applyStamps(base: ElevationGrid, all: readonly TerrainStamp[], r
   if (!touched.some((v) => v === 1)) return { grid: base, touched: null, rivers };
   const data = new Int16Array(W * H);
   for (let k = 0; k < data.length; k++) data[k] = touched[k] ? Math.max(-32768, Math.min(32767, Math.round(e[k] / step))) : base.data[k];
-  return { grid: { width: W, height: H, step, data }, touched, rivers, under: base };
+  return { grid: { width: W, height: H, step, data, ...(base.noSea ? { noSea: true } : {}) }, touched, rivers, under: base };
 }
 
 /** Unit vector of a place. */

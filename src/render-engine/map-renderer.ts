@@ -42,7 +42,7 @@ import { campaignArrow, smoothLine, lineLength, arrowBodyLength, marksAlong, cut
 import { shotProgress, eventScreenSeconds, eventTransitionLook, TRANSITION_LOOKS } from '../presentation/sequence.ts';
 import { iconById, iconOfStyle, unitOfStyle, drawIcon, type CharacterIcon, type RouteStyle } from './icons.ts';
 import { TerrainPictures, terrainDrawable, type TerrainFrame, type TerrainImageKind, type TerrainSea, type TerrainOverride } from './terrain-gl.ts';
-import { heightAt, type ElevationGrid } from '../terrain/grid.ts';
+import { heightAt, noSeaAt, type ElevationGrid } from '../terrain/grid.ts';
 import type { TerrainCover } from '../terrain/cover.ts';
 import { detailHeightAt, type DetailGrid } from '../terrain/detail.ts';
 import type { PhotoRegion } from '../terrain/photo.ts';
@@ -1853,9 +1853,10 @@ export class MapRenderer {
       part = [x0, y0, x1 - x0, y1 - y0];
     }
     const look = terrain.look ?? DEFAULT_TERRAIN_LOOK;
-    // (The sea's picture takes the cover too where the Earth is drawn as photographed, D138: its sea is the photograph's.)
+    // (The sea's picture takes the cover too where the Earth is drawn as photographed, D138: its sea is the photograph's;
+    // and where the cover says which of a planet's seas lie frozen, D271: their ice is drawn over them.)
     const coverOf = PALETTES[look.palette].cover ? terrain.cover ?? null : null;
-    const cover = kind === 'land' || kind === 'both' || (kind === 'sea' && look.photo && coverOf?.photo) ? coverOf : null;
+    const cover = kind === 'land' || kind === 'both' || (kind === 'sea' && ((look.photo && coverOf?.photo) || coverOf?.ice)) ? coverOf : null;
     const out = this.terrainPictures.image(terrain.grid, terrain.key, look, kind, frame, part, sea, terrain.override ?? null, cover, kind === 'override' ? null : terrain.detail ?? null, cover ? terrain.photo ?? null : null);
     if (!out) return;
     c.save();
@@ -5470,11 +5471,12 @@ export class MapRenderer {
     const k = `${key}|${seaLevel}`;
     let m = this.terrainMasks.get(k);
     if (!m) {
-      const W = Math.min(grid.width, 1440), H = W / 2;
+      // (A world with no sea, D271: all of it land.)
+      const W = Math.min(grid.width, 1440), H = W / 2, dry = noSeaAt(grid, seaLevel);
       const bits = new Uint8Array(W * H);
       for (let y = 0; y < H; y++) {
         const lat = 90 - ((y + 0.5) / H) * 180;
-        for (let x = 0; x < W; x++) bits[y * W + x] = heightAt(grid, -180 + ((x + 0.5) / W) * 360, lat) > seaLevel ? 1 : 0;
+        for (let x = 0; x < W; x++) bits[y * W + x] = dry || heightAt(grid, -180 + ((x + 0.5) / W) * 360, lat) > seaLevel ? 1 : 0;
       }
       m = new LandMask(W, H, bits);
       if (this.terrainMasks.size >= 6) this.terrainMasks.clear();

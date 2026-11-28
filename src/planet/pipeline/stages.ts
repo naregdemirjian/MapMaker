@@ -9,12 +9,12 @@
 import { definitionOf, historyView, referenceSea, withWaterGuess, type PlanetDefinition } from '../model/definition.ts';
 import { seasonalClimate, type ClimateOptions } from '../climate/ebm.ts';
 import { joinRain, rainMonths, type RainMonths } from '../climate/hydroclimate.ts';
-import { hydrology } from '../water/hydrology.ts';
+import { hydrology, notchOutlets, oceanMask, straits, WATER } from '../water/hydrology.ts';
 import { iceSheets } from '../water/ice.ts';
 import { BIOME, BIOME_IDS, KOPPEN, SEA_ICE_FROM, bareRockColour, biomeColour, biomeOf, customBiomeOf, hotSurface, koppen, rockColour, withoutPlants, type BiomeId, type Place } from '../life/biomes.ts';
 import { toLevel } from '../mesh/transfer.ts';
 import { airState, derive, groundAlbedo, opticalDepth, waterState, withAirAsItIs } from '../model/physics.ts';
-import { cellsAt, meshAt } from '../mesh/icosphere.ts';
+import { cellsAt, meshAt, type Mesh } from '../mesh/icosphere.ts';
 import { areasUnderForVolumes, seaLevelForVolume } from '../water/sealevel.ts';
 import { rasterize } from '../mesh/transfer.ts';
 import { insolationCells, sunlightOf, type Sunlight } from '../climate/insolation.ts';
@@ -51,6 +51,22 @@ export interface StageParams {
    * alpha how much of what surrounds it is land (255 inland, 0 at sea; the coast runs where it passes 128).
    */
   land?: boolean;
+  /**
+   * For the cover (D271, a map's): the land's colours alone as with `land`, and in each pixel's alpha whether water
+   * standing there would lie frozen for most of the year (`frozenWater`: the sea by its own kind, the land as the
+   * sea nearest it). The map draws its sea by its depth, and ice over it where this says so.
+   */
+  ice?: boolean;
+  /**
+   * For a picture of the water running off (D271, a map's rivers): only what runs off as water, none from under an
+   * ice sheet and none off ground that no month thaws.
+   */
+  liquid?: boolean;
+  /**
+   * For a picture of the heights where the sea follows from the water (D271, a map's): each place on the side of
+   * the sea's level its water puts it (`shoreHeights`); and said with it, where the planet has no sea at all.
+   */
+  shore?: boolean;
   /**
    * The sea follows from the planet's water (D258, definitions of `engine` 2): the climate, water and life stages
    * work on the land and sea of the sea stage, at the moment asked for (`frame`: one of the history's pictures;
@@ -123,8 +139,57 @@ export type LayerId = keyof typeof LAYERS;
 export const PAST_FIELDS: Partial<Record<LayerId, 'biome' | 'temp' | 'rain'>> = { biome: 'biome', temperature: 'temp', precipitation: 'rain' };
 /** Whether a picture of a layer is of an earlier moment (D167). */
 const pastOf = (p: StageParams) => !!PAST_FIELDS[p.layer ?? 'insolation'] && (p.frame ?? -1) >= 0;
+/** Whether a picture is of a map's heights with the water's shores (D271): the heights' layer, where the sea follows from the water. */
+const shoreOf = (p: StageParams) => !!p.shore && !!p.sea && (p.layer ?? 'insolation') === 'elevation';
 /** The stage a layer's picture is made from where the sea follows from the water (D258): the heights from the sea stage. */
 const layerStage = (layer: LayerId): string => (layer === 'elevation' ? 'sea' : LAYERS[layer].stage);
+
+/**
+ * Whether water standing at each cell would lie frozen (D271), 0 to 1: a cell of open sea 0, of frozen sea 1; a cell
+ * of land as the sea nearest it (ring by ring outward from the shores, each cell the mean of its neighbours already
+ * decided). A map draws water wherever its ground lies below the sea, a hollow inland too: on a planet frozen over
+ * that water is ice as its seas are. A world with no sea: 0 everywhere.
+ */
+export function frozenWater(mesh: Mesh, biome: ArrayLike<number>): Float32Array {
+  const n = mesh.n, sea = BIOME_IDS.indexOf('sea'), seaIce = BIOME_IDS.indexOf('seaIce');
+  const out = new Float32Array(n).fill(-1);
+  let ring: number[] = [];
+  for (let c = 0; c < n; c++) if (biome[c] === sea || biome[c] === seaIce) { out[c] = biome[c] === seaIce ? 1 : 0; ring.push(c); }
+  while (ring.length) {
+    const sum = new Map<number, [number, number]>();
+    for (const c of ring) {
+      for (let k = mesh.nbrStart[c]; k < mesh.nbrStart[c + 1]; k++) {
+        const j = mesh.nbr[k];
+        if (out[j] >= 0) continue;
+        const s = sum.get(j);
+        if (s) { s[0] += out[c]; s[1]++; } else sum.set(j, [out[c], 1]);
+      }
+    }
+    ring = [];
+    for (const [j, [s, k]] of sum) { out[j] = s / k; ring.push(j); }
+  }
+  for (let c = 0; c < n; c++) if (out[c] < 0) out[c] = 0;
+  return out;
+}
+
+/** How far below the sea's level a map's heights put a strait narrower than a cell (D271): shallow water. */
+export const STRAIT_DEPTH_M = 50;
+/**
+ * A planet's heights for its map (D271): the sea stage's, but that a cell the planet's water has as sea lies below
+ * the sea's level. The water finds the sea on ground whose hollows' outlets are notched (D166): a gorge or a strait
+ * narrower than a cell joins a basin to the sea, and its cell, sea to the water, stands above the sea's level by its
+ * mean height. A map draws water where its ground lies below the sea: left as it was, such a cell was land on the
+ * map and sea to the planet. `sea` is the water's own word for each cell where it is at hand (today's); without it,
+ * the sea the heights alone give the water's way (an earlier moment's, whose lakes are not worked out for this).
+ * Ground below the sea's level that the water has as land (a dry hollow inland) is left as it is.
+ */
+export function shoreHeights(mesh: Mesh, heights: ArrayLike<number>, sea: ArrayLike<number> | null = null): Float32Array {
+  const out = Float32Array.from(heights);
+  let wet = sea;
+  if (!wet) { const z = notchOutlets(mesh, heights); wet = straits(mesh, z, oceanMask(mesh, z)); }
+  for (let c = 0; c < mesh.n; c++) if (wet[c] && !(out[c] < 0)) out[c] = -STRAIT_DEPTH_M;
+  return out;
+}
 
 /** What the tectonic history reads from a definition, for a history of `durationMyr` ending at the present. */
 export function tectonicParams(live: PlanetDefinition, level: number, durationMyr = 500): TectonicParams {
@@ -654,7 +719,7 @@ export const STAGES: Record<string, StageDef> = {
     inputs: (def, p) => ({
       level: p.level, width: p.width ?? 1024, height: p.height ?? 512,
       ...((p.frame ?? -1) >= 0 && !p.sea ? { frame: p.frame!, life: def.life as unknown as ProductData } : {}),
-      ...(p.land ? { land: true } : {}),
+      ...(p.land ? { land: true } : {}), ...(p.ice ? { ice: true } : {}),
     }),
     run: (inputs, deps, ctx) => {
       const mesh = meshAt(inputs.level as number), n = mesh.n, w = inputs.width as number, h = inputs.height as number;
@@ -665,15 +730,22 @@ export const STAGES: Record<string, StageDef> = {
       // The land alone (D257): each pixel's colour from the land cells round it only, weighted as they are near, and
       // in its alpha how much of them is land; the sea's dark colour never reaches a shore.
       const biome = (inputs.frame !== undefined ? deps.moment.biome : deps.biomes.biome) as Uint8Array;
-      const sea = BIOME_IDS.indexOf('sea'), seaColour = BIOME.sea.colour;
-      const share = inputs.land ? rasterize(mesh, Float32Array.from(biome, (b) => (b === sea ? 0 : 1)), w, h) : null;
+      const sea = BIOME_IDS.indexOf('sea'), seaColour = BIOME.sea.colour, iceColour = BIOME.seaIce.colour;
+      // (D271: a frozen sea is sea, and its ice is not the land's colour: the map draws it over its sea.)
+      const seaIce = BIOME_IDS.indexOf('seaIce'), wet = (b: number) => b === sea || (!!inputs.ice && b === seaIce);
+      const share = inputs.land || inputs.ice ? rasterize(mesh, Float32Array.from(biome, (b) => (wet(b) ? 0 : 1)), w, h) : null;
+      const frozen = inputs.ice ? rasterize(mesh, frozenWater(mesh, biome), w, h) : null;
       for (let k = 0; k < 3; k++) {
         const ch = new Float32Array(n);
-        for (let c = 0; c < n; c++) ch[c] = share && biome[c] === sea ? 0 : colour[3 * c + k];
+        for (let c = 0; c < n; c++) ch[c] = share && wet(biome[c]) ? 0 : colour[3 * c + k];
         const r = rasterize(mesh, ch, w, h);
-        for (let i = 0; i < w * h; i++) out[4 * i + k] = Math.max(0, Math.min(255, Math.round(share ? (share[i] > 1e-3 ? r[i] / share[i] : seaColour[k]) : r[i])));
+        // (No land around: the sea's colour; for a map, D271, its ice's where it lies frozen. A map draws its sea by its
+        // depth, not by this; but a strait narrower than a cell is sea here and ground on the map.)
+        const none = (i: number) => (frozen ? seaColour[k] + (iceColour[k] - seaColour[k]) * Math.max(0, Math.min(1, frozen[i])) : seaColour[k]);
+        for (let i = 0; i < w * h; i++) out[4 * i + k] = Math.max(0, Math.min(255, Math.round(share ? (share[i] > 1e-3 ? r[i] / share[i] : none(i)) : r[i])));
       }
-      for (let i = 0; i < w * h; i++) out[4 * i + 3] = share ? Math.max(0, Math.min(255, Math.round(255 * share[i]))) : 255;
+      // (Alpha: whether water standing here would be frozen, for a map; how much of what is around is land; or nothing.)
+      for (let i = 0; i < w * h; i++) out[4 * i + 3] = Math.max(0, Math.min(255, Math.round(255 * (frozen ? frozen[i] : share ? share[i] : 1))));
       ctx.progress(1, 1);
       return { pixels: out, width: w, height: h };
     },
@@ -684,10 +756,14 @@ export const STAGES: Record<string, StageDef> = {
     id: 'raster',
     version: 3,
     // (An earlier moment of a layer the history's pictures show, from the history alone: D167.)
-    deps: (p) => [p.sea ? layerStage(p.layer ?? 'insolation') : pastOf(p) ? 'moment' : LAYERS[p.layer ?? 'insolation'].stage],
+    // (For a map's heights today, D271, the water's own word on what is sea: at hand with the planet's foundation.)
+    deps: (p) => [
+      p.sea ? layerStage(p.layer ?? 'insolation') : pastOf(p) ? 'moment' : LAYERS[p.layer ?? 'insolation'].stage,
+      ...(p.liquid ? ['climate'] : []), ...(shoreOf(p) && (p.frame ?? -1) < 0 ? ['water'] : []),
+    ],
     inputs: (_def, p) => ({
       level: p.level, width: p.width ?? 512, height: p.height ?? 256, layer: p.layer ?? 'insolation', frame: p.frame ?? -1,
-      ...(p.sea ? { sea: true, month: p.month ?? 0 } : {}),
+      ...(p.sea ? { sea: true, month: p.month ?? 0 } : {}), ...(p.liquid ? { liquid: true } : {}), ...(shoreOf(p) ? { shore: true } : {}),
     }),
     run: (inputs, deps, ctx) => {
       const layer = LAYERS[inputs.layer as LayerId], past = PAST_FIELDS[inputs.layer as LayerId];
@@ -712,12 +788,28 @@ export const STAGES: Record<string, StageDef> = {
           field = field.subarray(k * n, (k + 1) * n);
         }
       }
+      // (D271) The water that runs off as water, for a map's rivers: none off ground under an ice sheet (what melts
+      // of it is not kept apart), none where no month is above freezing (what falls there lies as snow).
+      if (inputs.liquid) {
+        const ice = deps.water.ice as Float32Array, temp = deps.climate.monthly as Float32Array;
+        field = Float32Array.from(field, (v, c) => {
+          if (ice[c] > 50) return 0;
+          for (let m = 0; m < 12; m++) if (temp[m * n + c] > 0) return v;
+          return 0;
+        });
+      }
+      // (D271) A map's heights: land and sea as the planet's water has them; a planet with no sea says so.
+      const noSea = !!inputs.shore && !!deps.sea.dry;
+      if (inputs.shore && !noSea) {
+        const kind = deps.water?.kind as Uint8Array | undefined;
+        field = shoreHeights(mesh, field, kind ? Uint8Array.from(kind, (k) => (k === WATER.sea ? 1 : 0)) : null);
+      }
       const w = inputs.width as number, h = inputs.height as number;
       const raster = layer.categories ? rasterizeNearest(mesh, field, w, h, new Float32Array(w * h)) : rasterize(mesh, field, w, h);
       let min = Infinity, max = -Infinity;
       for (let i = 0; i < raster.length; i++) { const v = raster[i]; if (v < min) min = v; if (v > max) max = v; }
       ctx.progress(1, 1);
-      return { raster, width: w, height: h, min, max, unit: layer.unit };
+      return { raster, width: w, height: h, min, max, unit: layer.unit, ...(noSea ? { noSea: true } : {}) };
     },
   },
 };

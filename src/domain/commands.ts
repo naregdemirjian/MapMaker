@@ -168,7 +168,9 @@ export function createSimPlanet(world: World, name: string, definition: PlanetDe
   return run(world, `Create planet "${name}"`, (tx) => {
     const id = createWorldIn(tx, name, def.body.radiusKm, 'none');
     const space = tx.world.get('map_space', id)!;
-    tx.update('map_space', { ...space, settings: JSON.stringify({ ...worldSettings(space), sim: { definition: canonicalDefinition({ ...def, name }) }, terrain: terrainLookOf({ palette: 'natural', relief: true, detail: false }) }) });
+    // (D271: a planet of the second calculation is seen as from space, its land by what covers it; one of the first
+    // is drawn by its heights, as its maps were made.)
+    tx.update('map_space', { ...space, settings: JSON.stringify({ ...worldSettings(space), sim: { definition: canonicalDefinition({ ...def, name }) }, terrain: terrainLookOf({ palette: def.engine === 2 ? 'satellite' : 'natural', relief: true, detail: false }) }) });
     return id;
   });
 }

@@ -43,10 +43,21 @@ class Heap {
 }
 
 /**
- * The rivers of a world. `share`: the share of the land that carries a river (by the water gathered
- * there): about 1.5% gives the main rivers of each continent and their larger branches.
+ * The water that runs off a world's land (D271), for rivers that follow its rain: millimetres a year on a grid laid
+ * like the heights (any size), with the planet's radius and the length of its year, so that the water gathered is a
+ * flow in cubic metres a second.
  */
-export function riversOf(grid: ElevationGrid, share = 0.015): RiverLines {
+export interface RiverRain { width: number; height: number; data: Float32Array; radiusKm: number; yearSeconds: number; key: string }
+/** The least flow (m³/s) drawn as a river where the rain is known (D271): about that of a middling river (the Thames carries 65, the Seine 500). */
+export const RIVER_MIN_FLOW = 150;
+
+/**
+ * The rivers of a world. `share`: the share of the land that carries a river (by the water gathered
+ * there): about 1.5% gives the main rivers of each continent and their larger branches. `rain` (D271): the water
+ * that runs off each place; given, each cell adds what runs off it (not the same everywhere), and only a flow of
+ * `RIVER_MIN_FLOW` or more is a river: none in a desert, none on a world where nothing rains.
+ */
+export function riversOf(grid: ElevationGrid, share = 0.015, rain: RiverRain | null = null): RiverLines {
   const { width: W, height: H, data, step } = grid, n = W * H;
   const receiver = new Int32Array(n).fill(-1);
   const filled = new Float32Array(n);
@@ -97,11 +108,20 @@ export function riversOf(grid: ElevationGrid, share = 0.015): RiverLines {
   }
   // Water gathers downstream: from the last cell reached (the highest) to the first.
   const water = new Float32Array(n);
-  for (let k = 0; k < n; k++) if (receiver[k] >= 0) water[k] = Math.cos(Math.PI / 2 - (((k / W) | 0) + 0.5) / H * Math.PI);
+  if (rain) {
+    // (Each cell's own run-off as a flow: mm a year over its area, in m³/s.)
+    const R = rain.radiusKm * 1000, cell = ((Math.PI / H) * R) * (((2 * Math.PI) / W) * R) / rain.yearSeconds / 1000;
+    for (let k = 0; k < n; k++) {
+      if (receiver[k] < 0) continue;
+      const j = (k / W) | 0, i = k - j * W;
+      const rj = Math.min(rain.height - 1, Math.floor(((j + 0.5) / H) * rain.height)), ri = Math.min(rain.width - 1, Math.floor(((i + 0.5) / W) * rain.width));
+      water[k] = Math.max(0, rain.data[rj * rain.width + ri]) * cell * Math.cos(Math.PI / 2 - ((j + 0.5) / H) * Math.PI);
+    }
+  } else for (let k = 0; k < n; k++) if (receiver[k] >= 0) water[k] = Math.cos(Math.PI / 2 - (((k / W) | 0) + 0.5) / H * Math.PI);
   for (let c = count - 1; c >= 0; c--) { const a = order[c], r = receiver[a]; if (r >= 0 && receiver[r] >= 0) water[r] += water[a]; }
   // A river where the water gathered is among the most of all land.
   const sorted = Float32Array.from(order.subarray(0, count), (a) => water[a]).sort();
-  const threshold = sorted[Math.max(0, Math.min(sorted.length - 1, Math.floor((1 - share) * sorted.length)))];
+  const threshold = Math.max(rain ? RIVER_MIN_FLOW : 0, sorted[Math.max(0, Math.min(sorted.length - 1, Math.floor((1 - share) * sorted.length)))]);
   const isRiver = (k: number) => receiver[k] >= 0 && water[k] >= threshold;
   // Sources: river cells no river cell flows into.
   const fed = new Uint8Array(n);

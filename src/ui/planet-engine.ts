@@ -18,6 +18,8 @@ import { sampleGrid } from '../planet/mesh/transfer.ts';
 import { climateOf } from '../terrain/biomes.ts';
 import type { PlanetParams } from '../terrain/planet.ts';
 import type { ElevationGrid } from '../terrain/grid.ts';
+import type { RiverRain } from '../terrain/rivers.ts';
+import { riversNow } from '../terrain/river-cache.ts';
 
 /** Workers for a pool: one fewer than the processor's threads (the interface keeps one), from one to eight. */
 export const defaultWorkers = () => Math.max(1, Math.min(8, (navigator.hardwareConcurrency || 2) - 1));
@@ -122,6 +124,11 @@ export const planetBench = {
   /** (D269) How many times each stage has been run since the page opened; what became of a planet's foundation. */
   runs: (): Record<string, number> => Object.fromEntries(stageRuns),
   foundation: (def: PlanetDefinition): { key: string; from: 'kept' | 'made' | null } => { const key = foundationKey(def, simParams(def)); return { key, from: foundationFrom.get(key) ?? null }; },
+  /** (D271) A planet's rivers on its map today: how many, from its heights and the water that runs off its land (as its map works them out). */
+  rivers: async (def: PlanetDefinition): Promise<{ rivers: number; runoff: number }> => {
+    const t = await simTerrain(def), rain = def.engine === 2 ? await simRunoff(def) : null;
+    return { rivers: riversNow(t.set.grids[0], `bench:${t.key}`, rain).lines.coordinates.length, runoff: rain ? rain.data.reduce((sum, v) => sum + Math.max(0, v), 0) / rain.data.length : NaN };
+  },
   /** The planet as the pipeline has it, in three checksums: its heights against its sea, its colours seen from space, its temperatures by month. */
   digest: async (def: PlanetDefinition): Promise<{ heights: string; colour: string; temperature: string }> => {
     const p = planetPipeline(), params = simParams(def), sum = (a: unknown) => { const v = a as Uint8Array; return sha256(new Uint8Array(v.buffer, v.byteOffset, v.byteLength)); };
@@ -159,10 +166,13 @@ export async function simTerrain(def: PlanetDefinition, opts: { onProgress?: (sh
   // Every picture at once (the pool shares them out); youngest first.
   await Promise.all(Array.from({ length: F }, async (_, i) => {
     const f = F - 1 - i;
-    const r = await p.product('raster', def, { ...params, width: SIM_WIDTH, height: SIM_HEIGHT, layer: 'elevation', frame: f }, { signal: opts.signal });
+    // (D271, the second calculation: land and sea as the planet's water has them, today's from its foundation, asked
+    // for as the present so that nothing of it is worked out again; and a planet with no sea said to have none.)
+    const shore = def.engine === 2 ? { shore: true } : {};
+    const r = await p.product('raster', def, { ...params, width: SIM_WIDTH, height: SIM_HEIGHT, layer: 'elevation', ...(shore.shore && i === 0 ? {} : { frame: f }), ...shore }, { signal: opts.signal });
     const src = r.data.raster as Float32Array, data = new Int16Array(src.length);
     for (let k = 0; k < src.length; k++) data[k] = Math.max(-32_000, Math.min(32_000, Math.round(src[k])));
-    grids[i] = { width: SIM_WIDTH, height: SIM_HEIGHT, step: 1, data };
+    grids[i] = { width: SIM_WIDTH, height: SIM_HEIGHT, step: 1, data, ...(r.data.noSea ? { noSea: true } : {}) };
     opts.onProgress?.(0.85 + (0.15 * ++done) / F);
   }));
   const ages = Array.from({ length: F }, (_, i) => times[F - 1 - i]);
@@ -174,10 +184,25 @@ export async function simTerrain(def: PlanetDefinition, opts: { onProgress?: (sh
  * A simulated planet's land seen from space (D160): its biomes' colours, laid like its heights' pictures; today's
  * (frame −1, the default), or at one of its history's earlier pictures, that moment's own (D167).
  */
-export async function simCover(def: PlanetDefinition, opts: { frame?: number; signal?: AbortSignal } = {}): Promise<{ width: number; height: number; pixels: Uint8Array }> {
+export async function simCover(def: PlanetDefinition, opts: { frame?: number; signal?: AbortSignal } = {}): Promise<{ width: number; height: number; pixels: Uint8Array; ice?: boolean }> {
   const frame = opts.frame ?? -1;
-  const r = await planetPipeline().product('cover', def, { ...simParams(def), width: SIM_WIDTH, height: SIM_HEIGHT, ...(frame >= 0 ? { frame } : {}) }, { signal: opts.signal });
-  return { width: r.data.width as number, height: r.data.height as number, pixels: r.data.pixels as Uint8Array };
+  // (D271, the second calculation: the land's colours alone, and in the alpha where the sea lies frozen.)
+  const ice = def.engine === 2;
+  const r = await planetPipeline().product('cover', def, { ...simParams(def), width: SIM_WIDTH, height: SIM_HEIGHT, ...(frame >= 0 ? { frame } : {}), ...(ice ? { ice: true } : {}) }, { signal: opts.signal });
+  return { width: r.data.width as number, height: r.data.height as number, pixels: r.data.pixels as Uint8Array, ...(ice ? { ice: true } : {}) };
+}
+
+/** The size of the picture of a simulated planet's run-off that its map's rivers follow (D271). */
+export const RUNOFF_WIDTH = 512, RUNOFF_HEIGHT = 256;
+
+/**
+ * The water that runs off a simulated planet's land (D271, the second calculation): today's (frame −1, the default)
+ * or at one of its history's earlier pictures, that moment's own; for the rivers of its map, which follow its rain.
+ */
+export async function simRunoff(def: PlanetDefinition, opts: { frame?: number; signal?: AbortSignal } = {}): Promise<RiverRain> {
+  const frame = opts.frame ?? -1, params = simParams(def);
+  const r = await planetPipeline().product('raster', def, { ...params, width: RUNOFF_WIDTH, height: RUNOFF_HEIGHT, layer: 'runoff', liquid: true, ...(frame >= 0 ? { frame } : {}) }, { signal: opts.signal });
+  return { width: RUNOFF_WIDTH, height: RUNOFF_HEIGHT, data: r.data.raster as Float32Array, radiusKm: def.body.radiusKm, yearSeconds: derive(def).yearDays * 86_400, key: r.key };
 }
 
 /**

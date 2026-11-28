@@ -21,7 +21,16 @@ export interface ElevationGrid {
   step: number;
   /** Heights in steps, row by row from the north-west corner. */
   data: Int16Array;
+  /**
+   * A world with no sea (D271: a simulated planet whose water is gone, or that never had any): none of this ground
+   * is under water, though its lowest lies at 0 (its heights are against its lowest ground). Drawn and reckoned as
+   * land everywhere while the map's own sea level is 0 (`noSeaAt`).
+   */
+  noSea?: boolean;
 }
+
+/** Whether a terrain has no sea at a sea level (D271): a dry world's, unless the map itself has raised a sea over it. */
+export const noSeaAt = (grid: ElevationGrid, seaLevel = 0): boolean => !!grid.noSea && seaLevel === 0;
 
 export const TERRAIN_MAGIC = 'MMT1';
 const HEADER = 16;
