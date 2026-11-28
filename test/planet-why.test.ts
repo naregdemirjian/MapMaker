@@ -7,7 +7,7 @@ import { derive } from '../src/planet/model/physics.ts';
 import { Pipeline } from '../src/planet/pipeline/scheduler.ts';
 import { LocalExecutor } from '../src/planet/worker/pool.ts';
 import { BIOME_IDS } from '../src/planet/life/biomes.ts';
-import { FAMILIES, FAMILY_IDS, familyOf, familyShares, figuresOf, surfaceInWords, whatChanged, whyItLooksSo, type ModelFacts, type SeaFacts } from '../src/planet/why.ts';
+import { FAMILIES, FAMILY_IDS, familyOf, familyShares, figuresOf, settingsChanged, surfaceInWords, whatChanged, whyItLooksSo, type ModelFacts, type SeaFacts } from '../src/planet/why.ts';
 
 const P = { level: 4, durationMyr: 200, frameEveryMyr: 25, sea: true } as const;
 const change = (d: PlanetDefinition, f: (d: PlanetDefinition) => void) => { const c = structuredClone(d); f(c); return c; };
@@ -110,4 +110,21 @@ test('what a change did: each figure that moved, before and after', async () => 
   // Nothing moved: nothing said. A small change: little said.
   assert.deepEqual(whatChanged(a, a), []);
   assert.ok(whatChanged(a, figuresOf(tilted.sea, tilted.model)).length <= 3);
+});
+
+test('the settings that differ between two planets: each by its name, with its value before and after', () => {
+  const d = newDefinition('earthlike', 4);
+  assert.deepEqual(settingsChanged(d, structuredClone(d)), []);
+  assert.deepEqual(settingsChanged(d, change(d, (c) => { c.orbit.semiMajorAu = 0.897; })), [{ name: 'Distance', before: '1.000 AU', after: '0.897 AU' }]);
+  assert.deepEqual(settingsChanged(d, change(d, (c) => { c.atmosphere.pressureBar = 0; c.atmosphere.co2 = 0.04; })), [
+    { name: 'Air', before: '1.01 bar', after: 'none' }, { name: 'Carbon dioxide', before: '0.042 %', after: '4.0 %' },
+  ]);
+  assert.deepEqual(settingsChanged(d, change(d, (c) => { c.water.keep = true; c.life.vegetation = 'none'; c.body.tiltDeg = 60; })), [
+    { name: 'Tilt', before: '23.4°', after: '60.0°' }, { name: 'Seas kept by hand', before: 'no', after: 'yes' }, { name: 'Plants', before: 'earth', after: 'none' },
+  ]);
+  assert.deepEqual(settingsChanged(d, change(d, (c) => { c.water.depthKm = 6.14; c.tectonics.plates = 20; c.seed = 9; })), [
+    { name: 'Water', before: '2.61 km', after: '6.14 km' }, { name: 'Plates', before: '12', after: '20' }, { name: 'Seed', before: '4', after: '9' },
+  ]);
+  // Something the sliders do not set (a planet's own biomes): said to be other settings.
+  assert.deepEqual(settingsChanged(d, change(d, (c) => { c.name = 'Another'; })), [{ name: 'Other settings', before: '', after: '' }]);
 });

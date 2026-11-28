@@ -61,6 +61,29 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D264. "What changed": the figures before and after a change of the settings, and where on the picture (the Planet Studio's overhaul, step 5, second part)
+
+- **Why.** The user's second finding again: after a slider is moved the picture is another, and nothing said what the
+  move did. (From the plan: "after every slider move, the before and after figures (temperature, sea, ice, desert,
+  forest) and a button that highlights the changed areas on the picture".)
+- **What changed**, in the Studio's side panel under "Why it looks like this", once the planet is worked out for the
+  settings as they are now, against the planet as it was last worked out:
+  - *the settings that differ*, each by its name with its value before and after ("Distance: 1.000 AU → 0.897 AU";
+    several when several were moved before the planet settled; `settingsChanged`, why.ts);
+  - *the planet's figures that moved* (`whatChanged`): the mean temperature, the shares of open sea, ice, forest,
+    grass and scrub, desert and bare rock, the rain and snow; each with its value before and after, those that
+    moved by less than half a degree, half a hundredth of the planet or a few millimetres left out; "Nothing you
+    would see" when none did;
+  - *where*: a switch marks over the picture every place whose surface is now of another family than before (in
+    yellow, over what is drawn), and says how much of the planet that is (by area, not by the picture's pixels).
+    The two planets' kinds of surface are the biomes stage's own, of the settings before and after (the earlier
+    ones still in the products kept).
+- The figures are gathered with the chain's (D263), from the same products, in one request: the sea, temperature,
+  climate and biomes of the settings shown.
+- **Tests**: `test/planet-why.test.ts` (1 more): the settings that differ, by name and value. Interface: in "Hot
+  worlds in the Planet Studio", the distance's change said with the temperature, sea, forest and bare rock before
+  and after, and the whole planet marked.
+
 ### D263. "Why it looks like this": the chain of causes from the star to the surface (the Planet Studio's overhaul, step 5, first part)
 
 - **Why.** The user's second finding: "When something does change, I can't tell why." The Studio explained single

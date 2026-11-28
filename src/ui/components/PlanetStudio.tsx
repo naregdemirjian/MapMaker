@@ -11,7 +11,7 @@ import * as cmd from '../../domain/commands.ts';
 import { definitionFromPreset, newDefinition, definitionProblems, PRESETS, EARTH_WATER_KM, type PlanetDefinition, type PresetId, type GeoEventKind, type GeoEvent } from '../../planet/model/definition.ts';
 import { derive, type Derived, type WaterFate } from '../../planet/model/physics.ts';
 import { SIGMA } from '../../planet/model/units.ts';
-import { whyItLooksSo, type ModelFacts } from '../../planet/why.ts';
+import { familyOf, figuresOf, settingsChanged, whatChanged, whyItLooksSo, type Figures, type ModelFacts, type SeaFacts, type SettingChange } from '../../planet/why.ts';
 import { planetPipeline, simParams } from '../planet-engine.ts';
 import { colourLayer, seenFromSpace } from '../planet-colors.ts';
 import { simOf } from '../../world-model/world-settings.ts';
@@ -223,7 +223,7 @@ export function PlanetStudio() {
   const problems = useMemo(() => definitionProblems(def), [def]);
   // The planet's figures as its pictures have them (D260): the year's mean temperature at the surface, the sunlight
   // taken in, how much of the sea lies frozen; from the model the pictures are made with, for the settings shown.
-  const [figures, setFigures] = useState<(ModelFacts & { of: PlanetDefinition }) | null>(null);
+  const [figures, setFigures] = useState<(ModelFacts & { of: PlanetDefinition; summary: Figures }) | null>(null);
   // The simulated history shown, and what it was simulated from.
   const [run, setRun] = useState<{ def: PlanetDefinition; key: string; times: number[]; seaLevels: number[]; ice: number[] } | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
@@ -376,17 +376,65 @@ export function PlanetStudio() {
     }, () => {});
     // (D263: with the rain and each kind of surface's share, from the climate and biomes the picture is made of.)
     const pipe = planetPipeline(), params = simParams(shown);
-    Promise.all([pipe.product('temperature', shown, params), pipe.product('climate', shown, params), pipe.product('biomes', shown, params)]).then(([t, c, b]) => {
-      if (live) setFigures({
-        of: shown, surfaceC: t.data.surfaceC as number, absorbed: t.data.absorbed as number, seaFrozen: t.data.seaFrozen as number, capShare: (t.data.capShare as number | undefined) ?? 0,
+    Promise.all([pipe.product('sea', shown, params), pipe.product('temperature', shown, params), pipe.product('climate', shown, params), pipe.product('biomes', shown, params)]).then(([w, t, c, b]) => {
+      if (!live) return;
+      const facts: ModelFacts = {
+        surfaceC: t.data.surfaceC as number, absorbed: t.data.absorbed as number, seaFrozen: t.data.seaFrozen as number, capShare: (t.data.capShare as number | undefined) ?? 0,
         ...(t.data.dayHigh ? { dayC: t.data.dayC as number, nightC: t.data.nightC as number } : {}),
         rainMm: c.data.meanPrecip as number, shares: b.data.shares as Float32Array,
-      });
+      };
+      setFigures({ of: shown, ...facts, summary: figuresOf(w.data as unknown as SeaFacts, facts) });
     }, () => {});
     return () => { live = false; };
   }, [second, run, shown]);
   // (Only for the settings as they are: until they are worked out, the planet's balance as a whole stands in.)
   const model = second && run && figures && figures.of === shown ? figures : null;
+  // (D264) What changed: the planet's figures for the settings before the last change against those now, once the
+  // new ones are worked out; and, asked for, where on the picture the surface is of another kind.
+  const settledAt = useRef<{ def: PlanetDefinition; summary: Figures } | null>(null);
+  const [changed, setChanged] = useState<{ from: PlanetDefinition; to: PlanetDefinition; settings: SettingChange[]; lines: string[] } | null>(null);
+  const [where, setWhere] = useState(false);
+  useEffect(() => {
+    if (!model) return;
+    const was = settledAt.current;
+    if (was && was.def !== model.of) {
+      const settings = settingsChanged(was.def, model.of);
+      if (settings.length) setChanged({ from: was.def, to: model.of, settings, lines: whatChanged(was.summary, model.summary) });
+    }
+    settledAt.current = { def: model.of, summary: model.summary };
+  }, [model]);
+  const over = useRef<HTMLCanvasElement | null>(null);
+  const [whereShare, setWhereShare] = useState<number | null>(null);
+  useEffect(() => {
+    const c = over.current;
+    if (!c) return;
+    const g = c.getContext('2d')!;
+    g.clearRect(0, 0, c.width, c.height);
+    setWhereShare(null);
+    if (!where || !changed) return;
+    let live = true;
+    const pipe = planetPipeline(), of = (d: PlanetDefinition) => pipe.product('raster', d, { ...simParams(d), width: c.width, height: c.height, layer: 'biome', frame: -1, month: 0 });
+    Promise.all([of(changed.from), of(changed.to)]).then(([a, b]) => {
+      if (!live) return;
+      const A = a.data.raster as Float32Array, B = b.data.raster as Float32Array, img = g.createImageData(c.width, c.height);
+      let n = 0, area = 0, all = 0;
+      for (let j = 0; j < c.height; j++) {
+        // (Each row counts by its share of the globe: less towards the poles.)
+        const wgt = Math.cos(((j + 0.5) / c.height - 0.5) * Math.PI);
+        for (let i = 0; i < c.width; i++) {
+          const k = j * c.width + i;
+          all += wgt;
+          if (familyOf(A[k]) === familyOf(B[k])) continue;
+          img.data[4 * k] = 255; img.data[4 * k + 1] = 214; img.data[4 * k + 2] = 10; img.data[4 * k + 3] = 150;
+          n++; area += wgt;
+        }
+      }
+      g.putImageData(img, 0, 0);
+      c.dataset.marked = String(n);
+      setWhereShare(area / all);
+    }, () => {});
+    return () => { live = false; };
+  }, [where, changed]);
 
   // The history made by itself (D257): at once on opening, and half a second after the last change to what the land
   // is made from (a run under way for other settings is dropped for it).
@@ -736,6 +784,8 @@ export function PlanetStudio() {
         <div className={`studio-pictures ${compare && previous ? 'two' : ''}`}>
           <div className={`studio-picture ${run && (working || pending.count > 0) && layer !== 'insolation' ? 'behind' : ''}`}>
             <canvas ref={canvas} width={720} height={360} className="studio-canvas" data-testid="studio-canvas" onClick={explainAt} title={run ? (step === 'edit' ? 'Click to choose the place for an edit' : 'Click a place: why is it as it is?') : ''} />
+            {/* (D264) Where the surface is of another kind than before the last change: marked over the picture. */}
+            <canvas ref={over} width={720} height={360} className="studio-canvas studio-where" data-testid="studio-where-canvas" style={{ display: where && changed ? 'block' : 'none' }} />
             {card && (
               <div className="studio-card" style={{ left: Math.min(card.left, 420), top: Math.min(card.top, 160) }} data-testid="studio-card">
                 <button className="close small" onClick={() => setCard(null)} aria-label="Close">×</button>
@@ -780,6 +830,17 @@ export function PlanetStudio() {
               {whyItLooksSo(shown, x, sea, model).map((w) => <li key={w.key} data-testid={`studio-why-${w.key}`}><span>{w.cause}</span><b>{w.effect}</b></li>)}
               {!model && <li className="muted" data-testid="studio-why-waiting">Working out its climate…</li>}
             </ol>
+          </div>
+        )}
+        {/* (D264) What the last change of the settings did, once it is worked out. */}
+        {second && run && changed && (
+          <div className="studio-changed" data-testid="studio-changed">
+            <h3>What changed</h3>
+            <p className="studio-changed-what" data-testid="studio-changed-what">{changed.settings.map((c) => (c.before || c.after ? `${c.name}: ${c.before} → ${c.after}` : c.name)).join('; ')}</p>
+            {changed.lines.length
+              ? <ul>{changed.lines.map((l) => <li key={l}>{l}</li>)}</ul>
+              : <p className="muted" data-testid="studio-changed-nothing">Nothing you would see: the planet's temperature, seas, ice and cover are as they were.</p>}
+            <label className="check"><input type="checkbox" checked={where} onChange={(e) => setWhere(e.target.checked)} data-testid="studio-changed-where" /> Mark on the picture where the surface changed{where && whereShare !== null ? ` (${whereShare < 0.005 && whereShare > 0 ? 'under 1' : fmt(100 * whereShare)} % of the planet)` : ''}</label>
           </div>
         )}
         <h3>What follows</h3>

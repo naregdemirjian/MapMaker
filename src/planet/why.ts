@@ -150,3 +150,43 @@ export function whatChanged(before: Figures, after: Figures): string[] {
   if (Math.abs(after.rainMm - before.rainMm) >= Math.max(10, 0.03 * before.rainMm)) out.push(`Rain and snow ${num(before.rainMm)} → ${num(after.rainMm)} mm a year`);
   return out;
 }
+
+/** A setting that differs between two definitions: its name and its value in each, in words. */
+export interface SettingChange { name: string; before: string; after: string }
+const SETTINGS: Array<[string, (d: PlanetDefinition) => number | string | boolean | undefined, (v: number) => string]> = [
+  ['The star\'s mass', (d) => d.star.stars[0].massSun, (v) => `${num(v, 2)} Suns`],
+  ['Distance', (d) => d.orbit.semiMajorAu, (v) => `${num(v, 3)} AU`],
+  ['Eccentricity', (d) => d.orbit.eccentricity, (v) => num(v, 3)],
+  ['Tilt', (d) => d.body.tiltDeg, (v) => `${num(v, 1)}°`],
+  ['Day', (d) => d.body.dayHours, (v) => `${num(v, 1)} hours`],
+  ['Locked to its star', (d) => String(d.body.tidallyLocked), () => ''],
+  ['Radius', (d) => d.body.radiusKm, (v) => `${num(v)} km`],
+  ['Air', (d) => d.atmosphere.pressureBar, (v) => (v > 0 ? `${num(v, v < 0.1 ? 4 : 2)} bar` : 'none')],
+  ['Carbon dioxide', (d) => d.atmosphere.co2, (v) => `${num(100 * v, v < 0.01 ? 3 : 1)} %`],
+  ['Methane', (d) => d.atmosphere.ch4, (v) => `${num(100 * v, 4)} %`],
+  ['Cloud cover', (d) => d.atmosphere.clouds, (v) => num(v, 2)],
+  ['The clouds\' brightness', (d) => d.atmosphere.cloudAlbedo, (v) => num(v, 2)],
+  ['Air kept by hand', (d) => (d.atmosphere.keep ? 'yes' : 'no'), () => ''],
+  ['Water', (d) => d.water.depthKm ?? d.water.oceanFraction, (v) => `${num(v, 2)} km`],
+  ['Seas kept by hand', (d) => (d.water.keep ? 'yes' : 'no'), () => ''],
+  ['Plants', (d) => d.life.vegetation, () => ''],
+  ['The interior\'s heat', (d) => d.interior.heatProduction, (v) => num(v, 2)],
+  ['Plates', (d) => d.tectonics.plates, (v) => num(v)],
+  ['Tectonic activity', (d) => d.tectonics.activity, (v) => num(v, 2)],
+  ['Continents', (d) => d.tectonics.continentalFraction, (v) => num(v, 2)],
+  ['Hotspots', (d) => d.tectonics.hotspots, (v) => num(v)],
+  ['Age', (d) => d.history.ageGyr, (v) => `${num(v, 2)} billion years`],
+  ['Seed', (d) => d.seed, (v) => String(v)],
+];
+/** The settings that differ between two definitions (those the Studio's sliders set), each with its value before and after. */
+export function settingsChanged(a: PlanetDefinition, b: PlanetDefinition): SettingChange[] {
+  const out: SettingChange[] = [];
+  for (const [name, get, say] of SETTINGS) {
+    const x = get(a), y = get(b);
+    if (x === y) continue;
+    const word = (v: number | string | boolean | undefined) => (typeof v === 'number' ? say(v) : String(v ?? 'none'));
+    out.push({ name, before: word(x), after: word(y) });
+  }
+  if (!out.length && JSON.stringify(a) !== JSON.stringify(b)) out.push({ name: 'Other settings', before: '', after: '' });
+  return out;
+}

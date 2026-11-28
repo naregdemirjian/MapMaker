@@ -5410,6 +5410,22 @@ try {
     assert.match(await why('water'), /^With seas it would take in \d+ W\/m²; a planet with seas can shed no more than 282The seas boiled away and the water was lost to space$/);
     assert.equal(await why('rain'), 'No water to fallNo rain or snow');
     assert.match(await why('surface'), /Bare rock everywhere$/);
+    // (D264) What changed: the setting moved, with the planet's figures before and after; and where the surface is
+    // of another kind, marked over the picture (here nearly everywhere: sea, forest and ice all gone to rock).
+    await page.getByTestId('studio-changed').waitFor({ timeout: 120_000 });
+    assert.equal(await text('studio-changed-what'), 'Distance: 1.000 AU → 0.897 AU');
+    const moved = await page.locator('[data-testid=studio-changed] li').allTextContents();
+    assert.ok(moved.some((l) => /^Temperature 1\d °C → -?\d+ °C$/.test(l)) && moved.some((l) => /^Open sea \d+ % → none$/.test(l)) && moved.some((l) => /^Forest \d+ % → none$/.test(l)) && moved.some((l) => /^Bare rock none → 100 %$/.test(l)), moved.join(' | '));
+    assert.equal(await page.getByTestId('studio-where-canvas').isVisible(), false);
+    await page.getByTestId('studio-changed-where').check();
+    await page.waitForFunction(() => Number((document.querySelector('[data-testid=studio-where-canvas]') as HTMLCanvasElement)?.dataset.marked ?? 0) > 100_000, undefined, { timeout: 60_000 });
+    assert.match((await page.locator('[data-testid=studio-changed] .check').textContent()) ?? '', /Mark on the picture where the surface changed \((9\d|100) % of the planet\)$/);
+    assert.equal(await page.getByTestId('studio-where-canvas').isVisible(), true);
+    const marks = await page.evaluate(() => { const c = document.querySelector('[data-testid=studio-where-canvas]') as HTMLCanvasElement, d = c.getContext('2d')!.getImageData(c.width / 2, c.height / 2, 1, 1).data; return [d[0], d[1], d[2], d[3]]; });
+    assert.ok(marks[0] > 250 && Math.abs(marks[1] - 214) <= 3 && marks[2] < 16 && marks[3] === 150, `marked in the middle of the picture (${marks})`);
+    await h.screenshot('planet-what-changed');
+    await page.getByTestId('studio-changed-where').uncheck();
+    assert.equal(await page.getByTestId('studio-where-canvas').isVisible(), false);
     const boiled = await seen(), dry = await drawnNow();
     assert.ok(boiled.sea < 0.005, `no sea in the picture (${boiled.sea.toFixed(3)})`);
     assert.ok(await degrees() < 40, `a dry planet's temperature (${await degrees()} °C)`);
