@@ -5386,6 +5386,14 @@ try {
     assert.equal(await page.getByTestId('studio-fate').count(), 0, 'nothing to say of the water: seas, as given');
     assert.match(await text('studio-readout-sea'), /^\d+ % of the surface under/);
     assert.match(await text('studio-readout-zone'), /the planet is in it$/);
+    // (D263) Why it looks like this: the chain from its star to its surface, each link its cause and what follows
+    // (the last links once the climate is worked out for the settings shown).
+    const why = async (key: string) => { await page.getByTestId('studio-why-surface').waitFor({ timeout: 120_000 }); return text(`studio-why-${key}`); };
+    assert.equal(await why('light'), 'A G2 star 1.00 × as bright as the Sun, 1.00 AU awaySunlight 1.00 × the Earth\'s (1,361 W/m²)');
+    assert.match(await why('water'), /^2\.6\d km of water \(1\.00 × the Earth's\) filling the land's hollowsSeas on \d+ % of the surface, \d+ % of them under ice$/);
+    assert.match(await why('warmth'), /its air holds in 3\d °C of warmth1\d °C on average$/);
+    assert.match(await why('surface'), /Open sea \d+ %, .*forest \d+ %/);
+    assert.deepEqual(await page.locator('[data-testid=studio-why] li').evaluateAll((els) => els.map((e) => e.getAttribute('data-testid'))), ['studio-why-light', 'studio-why-air', 'studio-why-water', 'studio-why-warmth', 'studio-why-rain', 'studio-why-surface']);
     // Moved towards its star (0.9 AU): more sunlight than seas can stand. No history is made: the same land, now
     // all of it dry; said under the picture with the numbers that decided.
     await page.getByTestId('studio-step-star').click();
@@ -5399,6 +5407,9 @@ try {
     assert.match(await text('studio-readout-sea'), /^none: boiled away \(as seas the water would cover \d+ % of the surface\)$/);
     assert.match(await text('studio-readout-zone'), /the planet is too close$/);
     assert.match(await text('studio-readout-interior'), /moving plates/, 'the land is still the one its plates made');
+    assert.match(await why('water'), /^With seas it would take in \d+ W\/m²; a planet with seas can shed no more than 282The seas boiled away and the water was lost to space$/);
+    assert.equal(await why('rain'), 'No water to fallNo rain or snow');
+    assert.match(await why('surface'), /Bare rock everywhere$/);
     const boiled = await seen(), dry = await drawnNow();
     assert.ok(boiled.sea < 0.005, `no sea in the picture (${boiled.sea.toFixed(3)})`);
     assert.ok(await degrees() < 40, `a dry planet's temperature (${await degrees()} °C)`);
@@ -5520,6 +5531,9 @@ try {
     assert.match(await text('studio-fate'), /^Too cold for open seas: they are frozen over\. The planet takes in \d+ W\/m² of its star's light; its ice sends back most of the rest \(albedo 0\.[5-8]\d\), which keeps it frozen: -\d+ °C on average\. The seas are still there under the ice/);
     assert.equal(await page.getByTestId('studio-keep-water').count(), 0, 'nothing removed, nothing to keep');
     assert.match(await text('studio-readout-sea'), new RegExp(`^${share} % of the surface under .*; all of it frozen over$`));
+    await page.getByTestId('studio-why-surface').waitFor({ timeout: 120_000 });
+    assert.match(await text('studio-why-water'), /Seas on \d+ % of the surface, all of them frozen over$/);
+    assert.match(await text('studio-why-warmth'), /it sends back [56]\d % of its light: ice and cloud/);
     const frozen = await seen();
     assert.ok(frozen.sea < 0.01 && frozen.ice > 0.9, `ice from pole to pole (${frozen.sea.toFixed(3)} sea, ${frozen.ice.toFixed(2)} ice)`);
     assert.ok(await modelled() < -35, `${await modelled()} °C`);
@@ -5576,6 +5590,7 @@ try {
     assert.match(await text('studio-fate'), /^Too little air for liquid water: the seas are gone\. Under less than 0\.006 bar of air water is ice or vapour, never liquid, and where the sun is high ice does not last here \(at the equator its year would be at -\d+ °C; ice lasts below -153 °C\)\. The water went into vapour; some was lost to space, and nowhere on the planet is cold enough to hold the rest as ice\./);
     assert.equal(await text('studio-readout-sea'), 'none: gone into vapour for want of air');
     assert.equal(await text('studio-readout-winds'), 'none: the planet has no air');
+    assert.equal(await text('studio-why-air'), 'Given no airNo air: nothing to hold heat or carry it');
     // (D262) With no air the ground follows the sun: its days and its nights, read from the model; a place says so.
     await page.waitForFunction(() => /its days reach/.test(document.querySelector('[data-testid=studio-readout-temperature]')?.textContent ?? ''), undefined, { timeout: 60_000 });
     const days = (await text('studio-readout-temperature')).match(/^-?\d+ °C on average over the year \(without air -?\d+ °C; no greenhouse to speak of; albedo 0\.\d\d\); at the equator its days reach (-?\d+) °C and its nights fall to (-?\d+) °C$/)!;

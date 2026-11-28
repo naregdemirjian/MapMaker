@@ -11,6 +11,7 @@ import * as cmd from '../../domain/commands.ts';
 import { definitionFromPreset, newDefinition, definitionProblems, PRESETS, EARTH_WATER_KM, type PlanetDefinition, type PresetId, type GeoEventKind, type GeoEvent } from '../../planet/model/definition.ts';
 import { derive, type Derived, type WaterFate } from '../../planet/model/physics.ts';
 import { SIGMA } from '../../planet/model/units.ts';
+import { whyItLooksSo, type ModelFacts } from '../../planet/why.ts';
 import { planetPipeline, simParams } from '../planet-engine.ts';
 import { colourLayer, seenFromSpace } from '../planet-colors.ts';
 import { simOf } from '../../world-model/world-settings.ts';
@@ -222,7 +223,7 @@ export function PlanetStudio() {
   const problems = useMemo(() => definitionProblems(def), [def]);
   // The planet's figures as its pictures have them (D260): the year's mean temperature at the surface, the sunlight
   // taken in, how much of the sea lies frozen; from the model the pictures are made with, for the settings shown.
-  const [figures, setFigures] = useState<{ of: PlanetDefinition; surfaceC: number; absorbed: number; seaFrozen: number; capShare: number; dayC?: number; nightC?: number } | null>(null);
+  const [figures, setFigures] = useState<(ModelFacts & { of: PlanetDefinition }) | null>(null);
   // The simulated history shown, and what it was simulated from.
   const [run, setRun] = useState<{ def: PlanetDefinition; key: string; times: number[]; seaLevels: number[]; ice: number[] } | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
@@ -373,8 +374,14 @@ export function PlanetStudio() {
         air: d.air as SeaState['air'], escapeKmS: d.escapeKmS as number, neededKmS: d.neededKmS as number, pressureBar: d.pressureBar as number, iceK: d.iceK as number, iceLastsK: d.iceLastsK as number,
       });
     }, () => {});
-    planetPipeline().product('temperature', shown, simParams(shown)).then((r) => {
-      if (live) setFigures({ of: shown, surfaceC: r.data.surfaceC as number, absorbed: r.data.absorbed as number, seaFrozen: r.data.seaFrozen as number, capShare: (r.data.capShare as number | undefined) ?? 0, ...(r.data.dayHigh ? { dayC: r.data.dayC as number, nightC: r.data.nightC as number } : {}) });
+    // (D263: with the rain and each kind of surface's share, from the climate and biomes the picture is made of.)
+    const pipe = planetPipeline(), params = simParams(shown);
+    Promise.all([pipe.product('temperature', shown, params), pipe.product('climate', shown, params), pipe.product('biomes', shown, params)]).then(([t, c, b]) => {
+      if (live) setFigures({
+        of: shown, surfaceC: t.data.surfaceC as number, absorbed: t.data.absorbed as number, seaFrozen: t.data.seaFrozen as number, capShare: (t.data.capShare as number | undefined) ?? 0,
+        ...(t.data.dayHigh ? { dayC: t.data.dayC as number, nightC: t.data.nightC as number } : {}),
+        rainMm: c.data.meanPrecip as number, shares: b.data.shares as Float32Array,
+      });
     }, () => {});
     return () => { live = false; };
   }, [second, run, shown]);
@@ -765,6 +772,16 @@ export function PlanetStudio() {
         </div>
       </main>
       <aside className="studio-side">
+        {/* (D263) The chain of causes from the star to the surface, with the numbers that decided each link. */}
+        {second && run && sea && (
+          <div className="studio-why" data-testid="studio-why">
+            <h3>Why it looks like this</h3>
+            <ol>
+              {whyItLooksSo(shown, x, sea, model).map((w) => <li key={w.key} data-testid={`studio-why-${w.key}`}><span>{w.cause}</span><b>{w.effect}</b></li>)}
+              {!model && <li className="muted" data-testid="studio-why-waiting">Working out its climate…</li>}
+            </ol>
+          </div>
+        )}
         <h3>What follows</h3>
         <OrbitDiagram def={def} x={x} />
         <dl className="studio-readouts">

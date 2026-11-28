@@ -61,6 +61,38 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D263. "Why it looks like this": the chain of causes from the star to the surface (the Planet Studio's overhaul, step 5, first part)
+
+- **Why.** The user's second finding: "When something does change, I can't tell why." The Studio explained single
+  settings and single places, and (since D259 to D261) said under the picture what became of the air and the water;
+  nothing said, in one place and in order, why the planet as a whole looks as it does.
+- **The chain** (`whyItLooksSo`, src/planet/why.ts): six links, each a cause and what follows from it, with the numbers
+  that decided, read from the same products the picture is made of (the sea, temperature, climate and biomes stages:
+  nothing is worked out twice or estimated apart):
+  1. *the light*: the star and the distance, so much sunlight;
+  2. *the air*: the planet's gravity against the light it gets, so its air is held, lost, kept by hand or was never
+     given; its pressure and carbon dioxide;
+  3. *the water*: how much, and what became of it (seas on so much of the surface and how much of them under ice;
+     boiled away, with the sunlight taken in against what seas can shed; gone into vapour or frozen where it stands
+     for want of air; kept by hand; none given);
+  4. *the warmth*: the sunlight taken in and the share sent back, what the air holds in, so the mean temperature (and
+     the days and nights of ground with little air);
+  5. *the rain*: where the air's vapour comes from, so much rain and snow a year, or none and why;
+  6. *the surface*: what decides it (plants where warm and wet enough, too cold for anything but ice, no rain so
+     nothing grows, too hot for water to lie, hot enough to melt rock, no life given), and what covers the planet in a
+     few words ("Open sea 70 %, forest 9 %, ice 8 %, grass and scrub 7 %, desert 5 %"; "Bare rock everywhere").
+  The first three links are there as soon as the land is; the last three once the climate is worked out for the
+  settings shown ("Working out its climate…" until then).
+- **The surface in a few words**: every kind of surface belongs to one of eight families (open sea, ice, forest, grass
+  and scrub, desert, bare rock, scorched rock, molten rock); the biomes stage gives each kind's share of the planet
+  (`shares`), where the sea follows from the water. `figuresOf` and `whatChanged` (the planet's figures in a few
+  numbers, and what moved between two states, in words) are made here too, for the next part.
+- **In the Studio**: "Why it looks like this" at the top of the side panel, above "What follows".
+- **Tests**: `test/planet-why.test.ts` (3): the families (each kind in exactly one; the words); the chain for an
+  Earth, link by link, and with its seas boiled away, frozen over, with no air, too small for its air, scorched, with
+  no life given, and before its climate is worked out; what a change did. Interface: the chain read in the Studio for
+  an Earth, the planet with its seas boiled away, frozen over, and with no air.
+
 ### D262. The day and night of a world with little or no air (the Planet Studio's overhaul, step 4, last part)
 
 - **Why.** Under thick air the ground's temperature hardly changes between day and night. With thin air or none it is

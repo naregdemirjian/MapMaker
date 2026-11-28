@@ -953,3 +953,11 @@ body.number-scrubbing, body.number-scrubbing * { cursor: ns-resize !important; u
 .studio-fate .check { display: block; margin-top: 6px; }
 .studio-fate.cold { border-left-color: #7fb4e0; background: rgba(127, 180, 224, 0.1); }
 .studio-fate.cold b { color: #b9d8f2; }
+
+/* Why the planet looks as it does (D263): each link's cause, then what follows from it. */
+.studio-why { margin-bottom: 14px; }
+.studio-why ol { list-style: none; margin: 6px 0 0; padding: 0; }
+.studio-why li { padding: 5px 0 6px 12px; border-left: 2px solid #2f6f9f; margin-left: 4px; font-size: 12.5px; line-height: 1.4; }
+.studio-why li span { display: block; color: #9aa4b1; }
+.studio-why li b { display: block; color: #e6edf3; }
+.studio-why li b::before { content: '→ '; color: #5aa9e6; }

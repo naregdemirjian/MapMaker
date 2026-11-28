@@ -577,7 +577,10 @@ export const STAGES: Record<string, StageDef> = {
         colour[3 * c] = rgb[0]; colour[3 * c + 1] = rgb[1]; colour[3 * c + 2] = rgb[2];
       }
       ctx.progress(1, 1);
-      return { koppen: koppenOut, biome, custom, colour, customNames: rules.map((r) => r.name) };
+      // (D263) Each kind of surface's share of the planet, for saying what it is like and what a change did.
+      const shares = new Float32Array(BIOME_IDS.length), area = meshAt(level).area;
+      if (second) for (let c = 0; c < n; c++) shares[biome[c]] += area[c] / (4 * Math.PI);
+      return { koppen: koppenOut, biome, custom, colour, customNames: rules.map((r) => r.name), ...(second ? { shares } : {}) };
     },
   },
 
