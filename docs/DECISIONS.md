@@ -61,6 +61,51 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D257. A planet always on screen (the Planet Studio's overhaul, step 1)
+
+- **Why.** The user, on the simulated planet: sliders barely change how it looks; when something changes it cannot be
+  told why; extreme settings still give water, green and islands. Inspected and measured (docs/PLANET_STUDIO_PLAN.md,
+  approved on 28 November 2026 with its defaults): the Studio's picture was empty until "Simulate" was pressed, was by
+  default the relief coloured by height alone (blue below the sea, green low ground: no star, orbit, air or life setting
+  reaches it), and froze on the old planet after any change to what the history reads. Step 1 of 14 makes the picture
+  honest and always there; the calculation itself is still the old one (steps 2 to 4 change it).
+- **Seen from space first.** The Studio opens on the layer "Seen from space": the land in its own colours, lit from the
+  north-west by its relief, the sea by its depth (`seenFromSpace`, ui/planet-colors.ts). The cover stage takes a new
+  parameter, `land`: the land's colours from land cells alone (never run into the sea's dark blue along a shore), and
+  in each pixel's alpha how much of what surrounds it is land; the coast is drawn where that passes one half. Without
+  the parameter the cover is byte for byte what it was (maps' satellite look unchanged).
+- **Made by itself.** The history is simulated at once when the Studio opens, and again half a second after the last
+  change to what the land is made from (the run under way for the settings before is dropped). There is no button to
+  press for it. Events placed on the timeline still wait for their one re-run (D163), and a run cancelled or failed
+  waits to be asked for: only then is "Simulate" offered.
+- **Never out of date in silence.** While the land asked for is not made yet (being worked out, or edits waiting), the
+  picture is of the land there is with every other setting as it is now (`withLandOf`: the seed, size and mass,
+  interior and plates, water, history and its kept climate from the last run; the star, orbit, tilt, day, air and life
+  as they are), dimmed, with a line over it saying what it waits for: "Working out the new land… Until then the picture
+  is of the land before the change". (Before: frozen on the last run's settings, every slider ignored.)
+- **The history keeps the climate it has** (D161) when made again for other land: only "Re-run the history with this
+  climate" gives it another. (Before: every "Simulate again" took the climate of the moment, so a change of plates also
+  brought whatever the air or the orbit had become.)
+- **The layers at every step**: the layer and the month are chosen over the picture, not in step 7 alone; a run no
+  longer moves the Studio to step 7 ("Explore and use"). One picture is worked out at a time, the latest wanted next: a
+  slider dragged does not queue a picture for every position.
+- **The scheduler**: a product being made for a request that is then cancelled is made again for the others waiting
+  for it (they got the cancellation before). Found when "Re-run the history with this climate" was followed by the
+  history's own start.
+- **Measured here** (one slow core): the first picture 9.5 s after opening; a change of the tilt redrawn in 1.9 s; new
+  land after a change of the plates in 10.5 s. (Steps 2 and after bring the fast settings under a second.)
+- **Not yet.** The amount of sea is still its slider's share whatever the temperature (a frozen world's seas are drawn
+  open, a furnace's stay): steps 2 to 4. The side panel's temperature is still the quick estimate: step 5.
+- **Tests.** Unit (`test/planet-picture.test.ts`): the cover of the land alone (nothing of it at sea, all of it inland
+  with the plain cover's colours, a shore's pixels within the land's colours where the plain cover is darker; the
+  plain cover as it was); seen from space (a slope facing the light brighter, the sea darker with depth, the coast at
+  half land); the land of one definition with the settings of another (the same history's key, the climate's another);
+  a product wanted by two requests when the first is cancelled. Interface (the Planet Studio's step): "Working out the
+  planet…" on opening with nothing to press; the planet seen from space when it is done, the sea in blues and the land
+  in many colours; the cloud cover redrawn on the same land with no history made; the plates made into other land by
+  itself, said over the picture; back as it was, the earlier history and picture at hand; the layers chosen at another
+  step; the rest as before.
+
 ### D256. The brush on a country's design (S8, sixth and last part)
 
 - **Why.** The plan: "tools to design by hand (pen and shapes, text, brush last)"; the user did not need brush painting

@@ -11,7 +11,7 @@ import { seasonalClimate } from '../climate/ebm.ts';
 import { joinRain, rainMonths, type RainMonths } from '../climate/hydroclimate.ts';
 import { hydrology } from '../water/hydrology.ts';
 import { iceSheets } from '../water/ice.ts';
-import { BIOME_IDS, KOPPEN, biomeColour, biomeOf, customBiomeOf, koppen, type Place } from '../life/biomes.ts';
+import { BIOME, BIOME_IDS, KOPPEN, biomeColour, biomeOf, customBiomeOf, koppen, type Place } from '../life/biomes.ts';
 import { toLevel } from '../mesh/transfer.ts';
 import { derive } from '../model/physics.ts';
 import { cellsAt, meshAt } from '../mesh/icosphere.ts';
@@ -43,6 +43,11 @@ export interface StageParams {
    * generated planet's own land and sea): the climate, water and life stages work on them.
    */
   heights?: Int16Array;
+  /**
+   * For the cover (D257): the land's colours alone, never mixed with the sea's along the coast, and in each pixel's
+   * alpha how much of what surrounds it is land (255 inland, 0 at sea; the coast runs where it passes 128).
+   */
+  land?: boolean;
 }
 
 export type ProductValue = FieldArray | number | string | boolean | null | ProductValue[] | { [k: string]: ProductValue };
@@ -384,6 +389,7 @@ export const STAGES: Record<string, StageDef> = {
     inputs: (def, p) => ({
       level: p.level, width: p.width ?? 1024, height: p.height ?? 512,
       ...((p.frame ?? -1) >= 0 ? { frame: p.frame!, life: def.life as unknown as ProductData } : {}),
+      ...(p.land ? { land: true } : {}),
     }),
     run: (inputs, deps, ctx) => {
       const mesh = meshAt(inputs.level as number), n = mesh.n, w = inputs.width as number, h = inputs.height as number;
@@ -391,13 +397,18 @@ export const STAGES: Record<string, StageDef> = {
         ? momentColours(deps.moment as unknown as Moment, inputs.life as unknown as PlanetDefinition['life'])
         : deps.biomes.colour as Uint8Array;
       const out = new Uint8Array(4 * w * h);
+      // The land alone (D257): each pixel's colour from the land cells round it only, weighted as they are near, and
+      // in its alpha how much of them is land; the sea's dark colour never reaches a shore.
+      const biome = (inputs.frame !== undefined ? deps.moment.biome : deps.biomes.biome) as Uint8Array;
+      const sea = BIOME_IDS.indexOf('sea'), seaColour = BIOME.sea.colour;
+      const share = inputs.land ? rasterize(mesh, Float32Array.from(biome, (b) => (b === sea ? 0 : 1)), w, h) : null;
       for (let k = 0; k < 3; k++) {
         const ch = new Float32Array(n);
-        for (let c = 0; c < n; c++) ch[c] = colour[3 * c + k];
+        for (let c = 0; c < n; c++) ch[c] = share && biome[c] === sea ? 0 : colour[3 * c + k];
         const r = rasterize(mesh, ch, w, h);
-        for (let i = 0; i < w * h; i++) out[4 * i + k] = Math.max(0, Math.min(255, Math.round(r[i])));
+        for (let i = 0; i < w * h; i++) out[4 * i + k] = Math.max(0, Math.min(255, Math.round(share ? (share[i] > 1e-3 ? r[i] / share[i] : seaColour[k]) : r[i])));
       }
-      for (let i = 0; i < w * h; i++) out[4 * i + 3] = 255;
+      for (let i = 0; i < w * h; i++) out[4 * i + 3] = share ? Math.max(0, Math.min(255, Math.round(255 * share[i]))) : 255;
       ctx.progress(1, 1);
       return { pixels: out, width: w, height: h };
     },

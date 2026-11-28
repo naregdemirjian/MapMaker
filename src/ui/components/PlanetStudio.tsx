@@ -2,6 +2,8 @@
 // the planet, its interior and plates, its air and water, its history), what follows from them worked out and
 // explained as they move, its history simulated in workers and explored layer by layer through time, and the
 // planet used for a map whose land and sea follow its history on the map's time axis.
+// A planet always on screen (D257): seen from space from the moment the studio opens, its history made by itself
+// whenever what the land is made from changes, and what the picture waits for said over it.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../store.ts';
 import { VIEWER } from '../shell/dock.ts';
@@ -9,13 +11,13 @@ import * as cmd from '../../domain/commands.ts';
 import { definitionFromPreset, definitionProblems, PRESETS, type PlanetDefinition, type PresetId, type GeoEventKind, type GeoEvent } from '../../planet/model/definition.ts';
 import { derive, type Derived } from '../../planet/model/physics.ts';
 import { planetPipeline, simParams } from '../planet-engine.ts';
-import { colourLayer } from '../planet-colors.ts';
+import { colourLayer, seenFromSpace } from '../planet-colors.ts';
 import { simOf } from '../../world-model/world-settings.ts';
 import { gregorian, PRESENT_YEAR } from '../../core-time/index.ts';
 import type { LayerId as EngineLayer, ProductData } from '../../planet/pipeline/stages.ts';
 import { explain, cellAt, type Explanation } from '../../planet/explain.ts';
 import { meshAt } from '../../planet/mesh/icosphere.ts';
-import { climateSnapshot, historyClimateDiffers } from '../../planet/model/definition.ts';
+import { climateSnapshot, historyClimateDiffers, withLandOf } from '../../planet/model/definition.ts';
 /** The studio's layers: the engine's, and the land seen from space (the cover stage's picture, D160). */
 type LayerId = EngineLayer | 'satellite';
 import { CancelledError } from '../../planet/worker/pool.ts';
@@ -25,7 +27,7 @@ import { followCrust, distanceKm } from '../../planet/reconstruct.ts';
 import { LAYERS, PAST_FIELDS } from '../../planet/pipeline/stages.ts';
 
 type StepId = 'star' | 'planet' | 'interior' | 'air' | 'life' | 'history' | 'explore' | 'edit';
-const STEPS: Array<[StepId, string]> = [['star', '1 Star and orbit'], ['planet', '2 Planet'], ['interior', '3 Interior and plates'], ['air', '4 Air and water'], ['life', '5 Life and biomes'], ['history', '6 History'], ['explore', '7 Simulate and explore'], ['edit', '8 Edit']];
+const STEPS: Array<[StepId, string]> = [['star', '1 Star and orbit'], ['planet', '2 Planet'], ['interior', '3 Interior and plates'], ['air', '4 Air and water'], ['life', '5 Life and biomes'], ['history', '6 History'], ['explore', '7 Explore and use'], ['edit', '8 Edit']];
 const LAYER_NAMES: Array<[LayerId, string]> = [
   ['elevation', 'Relief'], ['plates', 'Plates'], ['boundaries', 'Plate boundaries'], ['crust', 'Kind of crust'], ['crustAge', 'Age of the crust'],
   ['crustThickness', 'Thickness of the crust'], ['history', 'What made the crust'], ['sediment', 'Sediment'], ['drainage', 'Rivers (water draining)'],
@@ -159,7 +161,10 @@ export function PlanetStudio() {
   const [run, setRun] = useState<{ def: PlanetDefinition; key: string; times: number[]; seaLevels: number[]; ice: number[] } | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
   const abort = useRef<AbortController | null>(null);
-  const [layer, setLayer] = useState<LayerId>('elevation');
+  // (The history being made now, by its key: it is not begun again for the same settings, D257.)
+  const making = useRef<string | null>(null);
+  // (The planet as seen from space first, D257: the picture that follows every setting.)
+  const [layer, setLayer] = useState<LayerId>('satellite');
   const [frame, setFrame] = useState(-1);
   // (For the temperature by month: which twelfth of the year, from the time Earth's calendar starts it.)
   const [month, setMonth] = useState(0);
@@ -168,6 +173,27 @@ export function PlanetStudio() {
   const canvas = useRef<HTMLCanvasElement>(null), before = useRef<HTMLCanvasElement>(null);
   const keyNow = useMemo(() => planetPipeline().keyOf('tectonics', def, simParams(def)), [def]);
   const stale = !!run && run.key !== keyNow;
+  // A planet always on screen (D257). The history is made by itself: on opening, and a moment after the last change
+  // to what the land is made from. (Events placed on the timeline aside: those wait for their one re-run, D163.)
+  const landKey = useMemo(() => planetPipeline().keyOf('tectonics', run ? { ...def, history: { ...def.history, events: run.def.history.events } } : def, simParams(def)), [def, run]);
+  const remake = !run || landKey !== run.key;
+  // (A run cancelled or failed: nothing is made again until asked, or until the settings change.)
+  const [halted, setHalted] = useState(false);
+  // What the pictures are of: the settings as they are; while the land they ask for is not made yet (being worked
+  // out, or edits waiting), the land there is with every other setting as it is now.
+  const shown = useMemo(() => {
+    if (!run || !stale) return def;
+    const mixed = withLandOf(def, run.def);
+    return planetPipeline().keyOf('tectonics', mixed, simParams(mixed)) === run.key ? mixed : run.def;
+  }, [def, run, stale]);
+  // (One picture worked out at a time, the latest wanted next: a slider dragged does not queue a picture per step.)
+  const drawing = useRef<{ busy: boolean; next: (() => Promise<void>) | null }>({ busy: false, next: null });
+  const draw = (job: () => Promise<void>) => {
+    const d = drawing.current;
+    if (d.busy) { d.next = job; return; }
+    d.busy = true;
+    void job().catch(() => {}).finally(() => { d.busy = false; const next = d.next; d.next = null; if (next) draw(next); });
+  };
   // Stage 14.10 (D161): a place's explanation, an edit's place and kind, its consequences, the run before the last.
   const [card, setCard] = useState<{ left: number; top: number; text: Explanation } | null>(null);
   // The place chosen for an edit, and the moment (Ma) of the picture it was chosen on (D164).
@@ -216,12 +242,15 @@ export function PlanetStudio() {
     const ac = new AbortController();
     abort.current = ac;
     setProgress(0);
+    setHalted(false);
     setCard(null);
     // The history keeps the climate settings it is simulated with (D161): later changes to the air or orbit then
-    // recompute today's climate, water and life at once and leave the history until it is re-run with them.
-    const d0: PlanetDefinition = { ...from, history: { ...from.history, climate: climateSnapshot(from) } };
+    // recompute today's climate, water and life at once and leave the history until it is re-run with them. (Those it
+    // already keeps stay, D257: made again for other land, it does not take another climate unasked.)
+    const d0: PlanetDefinition = from.history.climate ? from : { ...from, history: { ...from.history, climate: climateSnapshot(from) } };
     if (JSON.stringify(d0) !== JSON.stringify(def)) setDef(d0);
     const params = simParams(d0), pipe = planetPipeline();
+    making.current = pipe.keyOf('tectonics', d0, params);
     try {
       // The history shown so far, if it is still at hand, to go on from where the changes begin (D163): its last
       // checkpoint before the earliest (the history itself checks that nothing else changed).
@@ -238,12 +267,12 @@ export function PlanetStudio() {
       const def = d0;
       setRun({ def, key: r.key, times, seaLevels: Array.from((r.data.seaLevels as Float32Array | undefined) ?? []), ice: Array.from((r.data.iceVolumes as Float32Array | undefined) ?? []) });
       setFrame(times.length - 1);
-      if (layer === 'insolation') setLayer('elevation');
-      if (step !== 'edit') setStep('explore');
     } catch (e) {
+      // (Cancelled for a newer run: that one goes on. Otherwise nothing more is made until asked.)
+      if (abort.current === ac) setHalted(true);
       if (!(e instanceof CancelledError)) s.toast((e as Error).message, 'error');
     } finally {
-      if (abort.current === ac) { abort.current = null; setProgress(null); }
+      if (abort.current === ac) { abort.current = null; making.current = null; setProgress(null); }
     }
   };
 
@@ -265,40 +294,57 @@ export function PlanetStudio() {
     }
   };
 
+  // The history made by itself (D257): at once on opening, and half a second after the last change to what the land
+  // is made from (a run under way for other settings is dropped for it).
+  const simulateNow = useRef(simulate);
+  simulateNow.current = simulate;
+  useEffect(() => {
+    if (!remake || problems.length || making.current === keyNow) return;
+    const id = setTimeout(() => void simulateNow.current(), run ? 500 : 0);
+    return () => clearTimeout(id);
+  }, [landKey, remake, problems.length]);
+
   // The picture: the layer at the moment chosen (sunlight needs no history).
+  const of = layer === 'insolation' ? def : shown;
   useEffect(() => {
     let live = true;
     const c = canvas.current;
     if (!c) return;
-    // While the history still holds for the settings (D161), every layer follows the settings as they are now: the
-    // climate, water and life are worked out again at once; otherwise the pictures stay those of the last history.
-    const want = run && layer !== 'insolation' ? (stale ? run.def : def) : def;
-    if (layer !== 'insolation' && !run) { const g = c.getContext('2d')!; g.fillStyle = '#10171f'; g.fillRect(0, 0, c.width, c.height); setLegend('Simulate the history to see its layers.'); return; }
+    // Every layer follows the settings as they are now (D161, D257): the climate, water and life are worked out again
+    // at once, on the land there is.
+    const want = of;
+    if (layer !== 'insolation' && !run) { const g = c.getContext('2d')!; g.fillStyle = '#10171f'; g.fillRect(0, 0, c.width, c.height); setLegend(''); delete c.dataset.drawn; return; }
     const monthly = layer === 'temperatureMonth' || layer === 'precipitationMonth';
     const base = { ...simParams(want), width: c.width, height: c.height };
     // An earlier moment of the history (D167): the layers its pictures show are that moment's own; the rest are today's.
     const F = run?.times.length ?? 0, earlier = frame >= 0 && frame < F - 1 ? frame : -1;
     const ago = earlier >= 0 && run ? `${fmt(run.times[earlier])} million years ago` : '';
+    const failed = (e: Error) => { if (live && !(e instanceof CancelledError)) s.toast(e.message, 'error'); };
     if (layer === 'satellite') {
-      planetPipeline().product('cover', want, { ...base, ...(earlier >= 0 ? { frame: earlier } : {}) }).then((r) => {
+      // Seen from space (D257): the land's own colours lit by its relief, the sea by its depth.
+      draw(() => Promise.all([
+        planetPipeline().product('cover', want, { ...base, land: true, ...(earlier >= 0 ? { frame: earlier } : {}) }),
+        planetPipeline().product('raster', want, { ...base, layer: 'elevation', frame: earlier }),
+      ]).then(([r, relief]) => {
         if (!live) return;
-        c.getContext('2d')!.putImageData(new ImageData(new Uint8ClampedArray(r.data.pixels as Uint8Array), c.width, c.height), 0, 0);
-        setLegend(`${ago ? `The land ${ago}` : "Today's land"} seen from space: its biomes, its plants coloured after its star's light${def.life.vegetation === 'red-dwarf' ? ' (a red dwarf: dark red)' : def.life.vegetation === 'blue-star' ? ' (a hot star: yellow to orange)' : def.life.vegetation === 'none' ? ' (no plants: bare ground)' : ''}`);
+        const pixels = seenFromSpace(r.data.pixels as Uint8Array, relief.data.raster as Float32Array, c.width, c.height);
+        c.getContext('2d')!.putImageData(new ImageData(pixels as unknown as Uint8ClampedArray<ArrayBuffer>, c.width, c.height), 0, 0);
+        setLegend(`${ago ? `The land ${ago}` : "Today's land"} seen from space: its biomes, its plants coloured after its star's light${want.life.vegetation === 'red-dwarf' ? ' (a red dwarf: dark red)' : want.life.vegetation === 'blue-star' ? ' (a hot star: yellow to orange)' : want.life.vegetation === 'none' ? ' (no plants: bare ground)' : ''}`);
         c.dataset.drawn = `${layer}:${earlier}:${r.key}`;
-      }, (e: Error) => { if (live) s.toast(e.message, 'error'); });
+      }, failed));
       return () => { live = false; };
     }
     const past = !!PAST_FIELDS[layer as EngineLayer], throughTime = !monthly && (past || LAYERS[layer as EngineLayer].frames);
-    const shown = monthly ? month : past ? earlier : frame;
-    planetPipeline().product('raster', want, { ...base, layer, frame: shown }).then((r) => {
+    const which = monthly ? month : past ? earlier : frame;
+    draw(() => planetPipeline().product('raster', want, { ...base, layer, frame: which }).then((r) => {
       if (!live) return;
       const { pixels, legend: text } = colourLayer(layer, r.data.raster as Float32Array, c.width, c.height, { min: r.data.min as number, max: r.data.max as number });
       c.getContext('2d')!.putImageData(new ImageData(pixels as unknown as Uint8ClampedArray<ArrayBuffer>, c.width, c.height), 0, 0);
       setLegend(earlier >= 0 && !throughTime && layer !== 'insolation' ? `Today's (this layer is worked out for the present alone): ${text}` : past && ago ? `${ago}: ${text}` : text);
-      c.dataset.drawn = `${layer}:${shown}:${r.key}`;
-    }, (e: Error) => { if (live) s.toast(e.message, 'error'); });
+      c.dataset.drawn = `${layer}:${which}:${r.key}`;
+    }, failed));
     return () => { live = false; };
-  }, [run, layer, frame, month, stale ? null : def]);
+  }, [run, layer, frame, month, of]);
 
   // The picture before the last change, beside it (D161).
   useEffect(() => {
@@ -328,7 +374,7 @@ export function PlanetStudio() {
       setPlace({ at: [Math.round(lon * 10) / 10, Math.round(lat * 10) / 10], ma });
       return;
     }
-    const want = stale ? run.def : def, p = simParams(want), pipe = planetPipeline();
+    const want = shown, p = simParams(want), pipe = planetPipeline();
     try {
       const [t, cl, w, b] = await Promise.all(['tectonics', 'climate', 'water', 'biomes'].map((id) => pipe.product(id, want, p)));
       const mesh = meshAt(p.level), n = mesh.n, H = t.data.heights as Int16Array, K = t.data.kinds as Uint8Array, last = H.length / n - 1;
@@ -399,6 +445,14 @@ export function PlanetStudio() {
     return (t === 0 ? 'Today' : `${fmt(t)} million years ago`) + extra + iceText;
   };
   const frames = run?.times.length ?? 0;
+  // Never out of date in silence (D257): what the picture is waiting for, said over it.
+  const working = progress !== null || (remake && !halted && problems.length === 0);
+  const percent = progress !== null && progress > 0 ? ` ${Math.round(100 * progress)} %` : '';
+  const status = problems.length ? `These settings cannot be worked out: ${problems[0]}`
+    : working ? (run ? `Working out the new land…${percent} Until then the picture is of the land before the change, with every other setting as it is now.` : `Working out the planet…${percent}`)
+    : pending.count > 0 ? `${pending.count === 1 ? 'An edit is' : `${pending.count} edits are`} waiting: the picture is of the planet before ${pending.count === 1 ? 'it' : 'them'}.`
+    : remake ? (run ? 'The land has not been worked out for these settings: the picture is of the land before the change.' : 'The planet has not been worked out yet.')
+    : '';
 
   return (
     <div className="studio" role="dialog" aria-label="Planet Studio" data-testid="planet-studio">
@@ -537,12 +591,9 @@ export function PlanetStudio() {
             </div>}
           </>}
           {step === 'explore' && <>
-            <label className="studio-slider"><span>Layer</span>
-              <select value={layer} onChange={(e) => { setLayer(e.target.value as LayerId); setCard(null); }} data-testid="studio-layer">{LAYER_NAMES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
-            {(layer === 'temperatureMonth' || layer === 'precipitationMonth') && <label className="studio-slider"><span>Month</span>
-              <select value={month} onChange={(e) => setMonth(Number(e.target.value))} data-testid="studio-month">{MONTHS.map((l, i) => <option key={l} value={i}>{l}{i === 0 ? ' (January on an Earth-like orbit)' : i === 6 ? ' (July)' : ''}</option>)}</select></label>}
+            <p className="muted">The picture's layer is chosen over it, at every step. The planet's history is under the picture: drag its moment, or play it.</p>
             {['temperature', 'temperatureMonth', 'precipitation', 'precipitationMonth', 'currents', 'ice'].includes(layer) && <p className="muted">The climate of today over today's land and sea: a seasonal energy balance (D157), winds from the circulation cells, rain carried by them and raised by mountains, the sea's currents (D158, D159).</p>}
-            {['koppen', 'biome', 'satellite'].includes(layer) && <p className="muted">Today's biomes (D160): Köppen-Geiger climates by Peel and others' rules; biomes by warmth and dryness (rain over the evaporation the warmth and sunlight allow), with wetlands, ice and mountains from the water and the heights; the planet's own biomes where they fit. Changing plants or biomes in step 4 redraws them at once.</p>}
+            {['koppen', 'biome', 'satellite'].includes(layer) && <p className="muted">Today's biomes (D160): Köppen-Geiger climates by Peel and others' rules; biomes by warmth and dryness (rain over the evaporation the warmth and sunlight allow), with wetlands, ice and mountains from the water and the heights; the planet's own biomes where they fit. Changing plants or biomes in step 5 redraws them at once.</p>}
             {['temperature', 'precipitation', 'biome', 'satellite'].includes(layer) && <p className="muted" data-testid="studio-past-note">At an earlier moment, the temperature, rain and biomes are that moment's own (D167): the same climate worked out over its own land and sea, starting from the climate the history had then (no lakes or wetlands, which need today's water). The other climate, water and life layers are today's.</p>}
             {['water', 'rivers', 'runoff', 'iceThickness'].includes(layer) && <p className="muted">Today's water (D159): what the rain leaves after evaporation runs off; hollows fill until they spill or their lakes evaporate all they get (salt lakes); rivers by how much water they carry; ice sheets grown in today's climate.</p>}
             <label className="studio-slider"><span>Name</span><input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Aster Prime" data-testid="studio-name" /></label>
@@ -554,8 +605,16 @@ export function PlanetStudio() {
         </div>
       </nav>
       <main className="studio-main">
+        <div className="studio-layerbar">
+          <label>Showing
+            <select value={layer} onChange={(e) => { setLayer(e.target.value as LayerId); setCard(null); }} data-testid="studio-layer">{LAYER_NAMES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
+          {(layer === 'temperatureMonth' || layer === 'precipitationMonth') && <label>Month
+            <select value={month} onChange={(e) => setMonth(Number(e.target.value))} data-testid="studio-month">{MONTHS.map((l, i) => <option key={l} value={i}>{l}{i === 0 ? ' (January on an Earth-like orbit)' : i === 6 ? ' (July)' : ''}</option>)}</select></label>}
+        </div>
+        {/* (Its line is always there, so the picture does not move as it comes and goes.) */}
+        <div className="studio-statusline">{status && <span className={`studio-status ${working ? 'working' : ''}`} data-testid="studio-status">{status}</span>}</div>
         <div className={`studio-pictures ${compare && previous ? 'two' : ''}`}>
-          <div className="studio-picture">
+          <div className={`studio-picture ${run && (working || pending.count > 0) && layer !== 'insolation' ? 'behind' : ''}`}>
             <canvas ref={canvas} width={720} height={360} className="studio-canvas" data-testid="studio-canvas" onClick={explainAt} title={run ? (step === 'edit' ? 'Click to choose the place for an edit' : 'Click a place: why is it as it is?') : ''} />
             {card && (
               <div className="studio-card" style={{ left: Math.min(card.left, 420), top: Math.min(card.top, 160) }} data-testid="studio-card">
@@ -575,10 +634,11 @@ export function PlanetStudio() {
           <span data-testid="studio-when">{when(frame)}</span>
         </div>
         <div className="studio-run">
-          {progress === null
-            ? <button className="primary" onClick={() => simulate()} disabled={problems.length > 0} data-testid="studio-simulate">{run ? 'Simulate again' : 'Simulate the history'}</button>
-            : <><progress value={progress} max={1} data-testid="studio-progress" /><button className="small" onClick={() => abort.current?.abort()} data-testid="studio-cancel">Cancel</button></>}
-          {stale && progress === null && <span className="warn-text" data-testid="studio-stale">{pending.count > 0 ? `${pending.count === 1 ? 'An edit is' : `${pending.count} edits are`} waiting: re-run the history (step 8) to work ${pending.count === 1 ? 'it' : 'them'} out.` : 'The settings have changed since this history was simulated.'}</span>}
+          {/* The history is made by itself (D257); asked for by hand only for edits waiting, or after a run was stopped. */}
+          {progress !== null
+            ? <><progress value={progress} max={1} data-testid="studio-progress" /><button className="small" onClick={() => abort.current?.abort()} data-testid="studio-cancel">Cancel</button></>
+            : (pending.count > 0 || (remake && halted)) && <button className="primary" onClick={() => simulate()} disabled={problems.length > 0} data-testid="studio-simulate">{run ? 'Simulate again' : 'Simulate the history'}</button>}
+          {stale && progress === null && pending.count > 0 && <span className="warn-text" data-testid="studio-stale">{`${pending.count === 1 ? 'An edit is' : `${pending.count} edits are`} waiting: re-run the history (step 8) to work ${pending.count === 1 ? 'it' : 'them'} out.`}</span>}
           {!stale && run && historyClimateDiffers(def) && progress === null && <span className="muted" data-testid="studio-climate-note">Today's climate, water and life follow the new settings; the history's erosion and ice still follow those it was simulated with. <button className="small" onClick={() => simulate({ ...def, history: { ...def.history, climate: undefined } })} data-testid="studio-rerun-climate">Re-run the history with this climate</button></span>}
           <span className="muted">Simulated with simplified models: plate tectonics, isostasy, erosion and sediment where each moment's climate rains, ice on land and the sea's level from its water.</span>
         </div>

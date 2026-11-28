@@ -4971,7 +4971,7 @@ try {
     assert.equal(r.one.hash, r.now.hash, 'the same history in another worker');
   });
 
-  await h.step('The Planet Studio (D156): a simulated planet from the New map dialog; a preset explained; a slider moved and what follows; its history simulated in workers, its relief and plates through time; used for a map whose land and sea follow the history on its timeline; undone', async () => {
+  await h.step('The Planet Studio (D156): a simulated planet from the New map dialog, worked out by itself from the moment it opens and seen from space (D257); a preset explained; a slider moved and what follows; its history simulated in workers, its relief and plates through time; used for a map whose land and sea follow the history on its timeline; undone', async () => {
     await page.getByTestId('studio-history').click();
     await page.getByRole('button', { name: '+ Map' }).click();
     await page.getByTestId('new-map-sim').check();
@@ -4980,6 +4980,12 @@ try {
     await page.getByTestId('new-map-create').click();
     await page.getByTestId('planet-studio').waitFor();
     const text = async (id: string) => (await page.getByTestId(id).textContent()) ?? '';
+    // A planet always on screen (D257): worked out by itself from the moment the studio opens, seen from space; what
+    // the picture waits for is said over it, and there is no button to press for it.
+    await page.getByTestId('studio-status').waitFor();
+    assert.match(await text('studio-status'), /^Working out the planet…/);
+    assert.equal(await page.getByTestId('studio-layer').inputValue(), 'satellite');
+    assert.equal(await page.getByTestId('studio-simulate').count(), 0, 'nothing to press');
     // A preset, explained; what follows from it.
     await page.getByTestId('studio-preset-young-volcanic').click();
     assert.match(await text('studio-explain'), /billion years old/);
@@ -5008,9 +5014,73 @@ try {
     await page.getByTestId('studio-step-history').click();
     await page.getByTestId('studio-control-span').fill('408');
     assert.equal(await text('studio-value-span'), '200');
-    // Simulated in workers: the relief of today, then the plates, then the plates 200 million years ago.
-    await page.getByTestId('studio-simulate').click();
+    // Simulated in workers, by itself (D257): half a second after the last change to what the land is made from, the
+    // history is made again (the run for the settings before dropped); the planet seen from space when it is done.
     const drawn = (prefix: string) => page.waitForFunction((p) => ((document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement)?.dataset.drawn ?? '').startsWith(p), prefix, { timeout: 180_000 });
+    const drawnNow = () => page.evaluate(() => (document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement).dataset.drawn ?? '');
+    // (Nothing waited for any more, and the planet seen from space drawn anew since `was`.)
+    const settled = (was: string) => page.waitForFunction((w) => {
+      const d = (document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement)?.dataset.drawn ?? '';
+      return !document.querySelector('[data-testid=studio-status]') && !document.querySelector('[data-testid=studio-progress]') && d.startsWith('satellite:') && d !== w;
+    }, was, { timeout: 240_000 });
+    await page.getByTestId('studio-status').waitFor();
+    assert.match(await text('studio-status'), /^Working out the (planet|new land)…/);
+    await settled('');
+    // (The history keeps the climate it was first made with, D161: here made again with the settings as they are
+    // now, so that this test's planet is the same whenever its first run began.)
+    if (await page.getByTestId('studio-rerun-climate').count()) {
+      const was = await drawnNow();
+      await page.getByTestId('studio-rerun-climate').click();
+      await settled(was);
+    }
+    assert.equal(await page.getByTestId('studio-rerun-climate').count(), 0);
+    assert.equal(await page.getByTestId('studio-simulate').count(), 0, 'still nothing to press');
+    assert.match(await text('studio-when'), /^Today/);
+    assert.match(await text('studio-legend'), /^Today's land seen from space/);
+    // Seen from space: the sea in blues over most of this planet, the land in its own colours, lit by its relief.
+    const seen = await page.evaluate(() => {
+      const c = document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement, d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+      let sea = 0, all = 0;
+      const land = new Set<string>();
+      for (let k = 0; k < d.length; k += 4 * 7) { all++; if (d[k + 2] > d[k] + 30 && d[k + 2] > d[k + 1] + 15) sea++; else land.add(`${d[k] >> 3},${d[k + 1] >> 3},${d[k + 2] >> 3}`); }
+      return { sea: sea / all, land: land.size };
+    });
+    assert.ok(seen.sea > 0.5 && seen.sea < 0.95, `the sea in blue over most of it (${seen.sea.toFixed(2)})`);
+    assert.ok(seen.land > 30, `the land in many colours (${seen.land})`);
+    await h.screenshot('planet-studio-space');
+    // Where the picture has land and where sea, as a string to compare.
+    const landOf = () => page.evaluate(() => {
+      const c = document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement, d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+      let s = '';
+      for (let k = 0; k < d.length; k += 4 * 53) s += d[k + 2] > d[k] + 30 && d[k + 2] > d[k + 1] + 15 ? '0' : '1';
+      return s;
+    });
+    const differ = (a: string, b: string) => { let n = 0; for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) n++; return n / a.length; };
+    const first = await drawnNow(), land0 = await landOf();
+    // A setting only the climate reads (the cloud cover): the picture drawn again on the same land, no history made.
+    await page.getByTestId('studio-step-air').click();
+    await page.getByTestId('studio-control-clouds').fill('800');
+    await page.waitForFunction((was) => { const d = (document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement).dataset.drawn ?? ''; return d.startsWith('satellite:') && d !== was; }, first, { timeout: 120_000 });
+    assert.equal(await page.getByTestId('studio-progress').count(), 0, 'no history made for the clouds');
+    assert.equal(await page.getByTestId('studio-status').count(), 0);
+    assert.ok(differ(land0, await landOf()) < 0.02, `the same land and sea under another climate (${differ(land0, await landOf()).toFixed(3)})`);
+    await page.getByTestId('studio-control-clouds').fill('500');
+    await page.waitForFunction((was) => (document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement).dataset.drawn === was, first, { timeout: 120_000 });
+    // A setting the land is made from (the plates): the land made again by itself, said over the picture meanwhile.
+    await page.getByTestId('studio-step-interior').click();
+    await page.getByTestId('studio-control-plates').fill('650');
+    assert.equal(await text('studio-value-plates'), '20');
+    await page.getByTestId('studio-status').waitFor();
+    assert.match(await text('studio-status'), /^Working out the new land….*the picture is of the land before the change/);
+    await settled(first);
+    assert.ok(differ(land0, await landOf()) > 0.1, `other land and sea (${differ(land0, await landOf()).toFixed(3)})`);
+    // Back as it was: the history made before is still at hand, and its picture.
+    await page.getByTestId('studio-control-plates').fill('500');
+    assert.equal(await text('studio-value-plates'), '16');
+    await page.waitForFunction((was) => !document.querySelector('[data-testid=studio-status]') && (document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement).dataset.drawn === was, first, { timeout: 240_000 });
+    assert.ok(differ(land0, await landOf()) < 0.001, 'the land as it was');
+    // The other layers at every step: the relief of today, then the plates, then the plates 200 million years ago.
+    await page.getByTestId('studio-layer').selectOption('elevation');
     await drawn('elevation:');
     assert.match(await text('studio-when'), /^Today/);
     assert.match(await text('studio-legend'), /Height above the sea/);
@@ -5029,7 +5099,9 @@ try {
     });
     assert.ok(colours >= 6, `plates in their colours (${colours})`);
     // That moment's own climate and life (D167): its biomes and its land seen from space, worked out from the climate
-    // it had over its own land and sea; a layer kept for today alone says so. Then back to today.
+    // it had over its own land and sea; a layer kept for today alone says so. Then back to today. (What the layers
+    // are made from is told in the Explore step; the layers themselves are chosen at any step.)
+    await page.getByTestId('studio-step-explore').click();
     await page.getByTestId('studio-layer').selectOption('biome');
     await drawn('biome:0:');
     assert.match(await text('studio-legend'), /^200 million years ago: Biomes: [a-z ,]+…$/);

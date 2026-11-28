@@ -134,6 +134,18 @@ export function historyView(d: PlanetDefinition): PlanetDefinition {
 /** Whether a history was simulated with other climate settings than the definition's now. */
 export const historyClimateDiffers = (d: PlanetDefinition) => !!d.history.climate && JSON.stringify(d.history.climate) !== JSON.stringify(climateSnapshot(d));
 
+/**
+ * A definition with the land of `was` and everything else as `now` (D257): what a history is made from (the seed,
+ * the planet's size and mass, its interior and plates, its water, its history with the climate it keeps, how it is
+ * simulated) taken from `was`; the star, the orbit, the tilt and day, the air and the life from `now`. For showing
+ * the land there is with the settings as they are, while the land they ask for is still being made.
+ */
+export function withLandOf(now: PlanetDefinition, was: PlanetDefinition): PlanetDefinition {
+  const body = { ...now.body, radiusKm: was.body.radiusKm };
+  if (was.body.massEarths === undefined) delete body.massEarths; else body.massEarths = was.body.massEarths;
+  return { ...now, seed: was.seed, body, interior: was.interior, tectonics: was.tectonics, water: was.water, history: was.history, simulation: was.simulation };
+}
+
 /** A biome of the user's own (D152 defines it; 14.9 classifies with it). */
 export interface CustomBiome {
   id: string;

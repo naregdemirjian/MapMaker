@@ -4,7 +4,7 @@
 import type { PlanetDefinition } from '../model/definition.ts';
 import { keyOf } from '../state/hash.ts';
 import { transferablesOf } from '../worker/protocol.ts';
-import type { Executor, RunOptions } from '../worker/pool.ts';
+import { CancelledError, type Executor, type RunOptions } from '../worker/pool.ts';
 import { ENGINE_VERSION, STAGES, type ProductData, type StageParams } from './stages.ts';
 
 /** Cells per part when a stage runs in parts: fixed, so the parts (and the result) never depend on the workers. */
@@ -82,17 +82,32 @@ export class Pipeline {
   /** A stage's product for a definition: from the cache, or made (with whatever it needs). */
   async product(stage: string, def: PlanetDefinition, params: StageParams, opts: ProductOptions = {}): Promise<Product> {
     const key = this.keyOf(stage, def, params);
-    const hit = this.cache.get(key);
-    if (hit) return { key, stage, data: hit, cached: true, ms: 0 };
     const t0 = performance.now();
-    let making = this.pending.get(key);
-    if (!making) {
-      making = this.make(stage, def, params, opts).finally(() => this.pending.delete(key));
-      this.pending.set(key, making);
+    let started = false;
+    for (;;) {
+      const hit = this.cache.get(key);
+      if (hit) return { key, stage, data: hit, cached: !started, ms: started ? performance.now() - t0 : 0 };
+      let making = this.pending.get(key);
+      const shared = !!making;
+      if (!making) {
+        const mine: Promise<ProductData> = this.make(stage, def, params, opts).finally(() => { if (this.pending.get(key) === mine) this.pending.delete(key); });
+        making = mine;
+        this.pending.set(key, mine);
+      }
+      started = true;
+      try {
+        const data = await making;
+        this.cache.set(key, data);
+        return { key, stage, data, cached: false, ms: performance.now() - t0 };
+      } catch (e) {
+        // Being made for another request, which was cancelled (D257): this one goes on, and makes it itself.
+        if (shared && e instanceof CancelledError && !opts.signal?.aborted) {
+          if (this.pending.get(key) === making) this.pending.delete(key);
+          continue;
+        }
+        throw e;
+      }
     }
-    const data = await making;
-    this.cache.set(key, data);
-    return { key, stage, data, cached: false, ms: performance.now() - t0 };
   }
 
   private async make(stage: string, def: PlanetDefinition, params: StageParams, opts: ProductOptions): Promise<ProductData> {

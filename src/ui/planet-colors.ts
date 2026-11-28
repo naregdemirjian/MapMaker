@@ -27,6 +27,35 @@ const TAGS: Array<[number, RGB]> = [[64, [240, 240, 240]], [4, [150, 40, 40]], [
 
 export interface Legend { text: string }
 
+/** The sea by its depth (m, negative): pale over the shelves, dark over the deep. */
+const SEA_DEPTH: Array<[number, RGB]> = [[-7000, [8, 22, 52]], [-4000, [13, 33, 72]], [-1500, [20, 48, 98]], [-200, [30, 68, 122]], [0, [44, 92, 146]]];
+
+/**
+ * The planet seen from space (D257): the land in its own colours (a cover made with `land`: never mixed with the
+ * sea's, and in each pixel's alpha how much of what surrounds it is land), lit from the north-west by its relief;
+ * the sea by its depth; the coast where the land's share passes one half, softened over a pixel or two.
+ */
+export function seenFromSpace(cover: ArrayLike<number>, heights: ArrayLike<number>, width: number, height: number): Uint8ClampedArray {
+  const out = new Uint8ClampedArray(width * height * 4);
+  for (let j = 0; j < height; j++) for (let i = 0; i < width; i++) {
+    const k = j * width + i, v = heights[k];
+    const land = Math.max(0, Math.min(1, (cover[4 * k + 3] - 104) / 48));
+    let r = 0, g = 0, b = 0;
+    if (land > 0) {
+      // Slopes facing the light (the ground rising to the east and to the south of them) are brighter.
+      const e = heights[j * width + ((i + 1) % width)], s = heights[Math.min(height - 1, j + 1) * width + i];
+      const shade = Math.max(0.65, Math.min(1.3, 1 + ((e - v) + (s - v)) * 0.0004));
+      r = cover[4 * k] * shade; g = cover[4 * k + 1] * shade; b = cover[4 * k + 2] * shade;
+    }
+    if (land < 1) {
+      const c = ramp(SEA_DEPTH, Math.min(0, v));
+      r = r * land + c[0] * (1 - land); g = g * land + c[1] * (1 - land); b = b * land + c[2] * (1 - land);
+    }
+    out[4 * k] = r; out[4 * k + 1] = g; out[4 * k + 2] = b; out[4 * k + 3] = 255;
+  }
+  return out;
+}
+
 /** Pixels for a layer's picture (RGBA), and a line saying what the colours mean. */
 export function colourLayer(layer: LayerId, values: Float32Array, width: number, height: number, range: { min: number; max: number }): { pixels: Uint8ClampedArray; legend: string } {
   const out = new Uint8ClampedArray(width * height * 4);

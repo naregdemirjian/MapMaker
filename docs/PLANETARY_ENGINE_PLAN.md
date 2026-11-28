@@ -5,6 +5,10 @@ for before any code: what exists, what must change, which scientific models to u
 how it will be made fast, how it will be tested, and the order of work. Progress against it is recorded at the
 end (section 14) and in DECISIONS (from D152).
 
+**From 28 November 2026 the Planet Studio is being rebuilt on this engine**: see `docs/PLANET_STUDIO_PLAN.md` (what
+was found wrong with the simulated planet as built here, and the plan of a foundation that reacts and a full-detail
+map; DECISIONS from D257).
+
 ## Contents
 
 1. Summary
