@@ -5049,11 +5049,13 @@ try {
     // Where the picture has land and where sea, as a string to compare.
     const landOf = () => page.evaluate(() => {
       const c = document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement, d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+      // (Open sea 0, land 1; ice 2, on land or on the sea, D260: it comes and goes with the climate, not with the land.)
       let s = '';
-      for (let k = 0; k < d.length; k += 4 * 53) s += d[k + 2] > d[k] + 30 && d[k + 2] > d[k + 1] + 15 ? '0' : '1';
+      for (let k = 0; k < d.length; k += 4 * 53) s += d[k + 2] > d[k] + 30 && d[k + 2] > d[k + 1] + 15 ? '0' : d[k] > 190 && d[k + 1] > 200 && d[k + 2] > 200 ? '2' : '1';
       return s;
     });
-    const differ = (a: string, b: string) => { let n = 0; for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) n++; return n / a.length; };
+    // (Places that are open sea in one picture and land in the other.)
+    const differ = (a: string, b: string) => { let n = 0; for (let i = 0; i < a.length; i++) if (a[i] !== b[i] && a[i] !== '2' && b[i] !== '2') n++; return n / a.length; };
     const first = await drawnNow(), land0 = await landOf();
     // A setting only the climate reads (the cloud cover): the picture drawn again on the same land, no history made.
     await page.getByTestId('studio-step-air').click();
@@ -5379,7 +5381,8 @@ try {
     const degrees = async () => Number((await text('studio-readout-temperature')).match(/^(-?[\d,]+) °C/)![1].replace(',', ''));
     await redrawn('');
     const earth = await seen(), first = await drawnNow();
-    assert.ok(earth.sea > 0.55 && earth.sea < 0.9, `mostly sea (${earth.sea.toFixed(2)})`);
+    // (Open sea: the polar seas are under ice for most of the year, D260.)
+    assert.ok(earth.sea > 0.4 && earth.sea < 0.9, `mostly open sea (${earth.sea.toFixed(2)})`);
     assert.equal(await page.getByTestId('studio-fate').count(), 0, 'nothing to say of the water: seas, as given');
     assert.match(await text('studio-readout-sea'), /^\d+ % of the surface under/);
     assert.match(await text('studio-readout-zone'), /the planet is in it$/);
@@ -5404,7 +5407,9 @@ try {
     await page.getByTestId('studio-keep-water').check();
     await redrawn(dry);
     assert.match(await text('studio-fate'), /^The seas are kept by hand\. By the physics they would have boiled away\. With seas the planet would take in \d+ W\/m²/);
-    assert.ok(Math.abs((await seen()).sea - earth.sea) < 0.03, 'the seas where they stood');
+    // (All of them open in that heat: as much blue as before and the polar seas' ice besides.)
+    const keptSeas = (await seen()).sea;
+    assert.ok(keptSeas > earth.sea - 0.03 && keptSeas < 0.9, `the seas where they stood (${keptSeas.toFixed(2)})`);
     assert.match(await text('studio-readout-sea'), /^\d+ % of the surface under/);
     const kept = await drawnNow();
     await page.getByTestId('studio-keep-water').uncheck();
@@ -5464,6 +5469,70 @@ try {
     await page.getByTestId('undo').click();
     await h.saved();
     assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.name === 'Hot Prime')), false);
+    await page.getByTestId('studio-history').click();
+  });
+  await h.step('Cold worlds in the Planet Studio (D260): a planet moved away from its star on the same land; its seas frozen over from pole to pole, drawn as ice and said why; the temperature the model\'s own; undone', async () => {
+    const text = async (id: string) => (await page.getByTestId(id).textContent()) ?? '';
+    await page.evaluate(() => {
+      const m = (window as any).__mapmaker, s = m.store;
+      const def = m.bench.planet.newDefinition('earthlike', 4);
+      def.simulation.spanMyr = 100;
+      const id = s.execute((w: any) => m.bench.commands.createSimPlanet(w, 'Cold Prime', def));
+      s.set({ spaceId: id, layerId: s.world.all('layer').find((l: any) => l.space_id === id)?.id ?? '', selection: null });
+    });
+    await h.saved();
+    await page.getByTestId('studio-map').click();
+    await page.locator('[data-testid^="map-row-"].sel').click();
+    await page.getByTestId('open-planet-studio').click();
+    await page.getByTestId('planet-studio').waitFor();
+    const drawnNow = () => page.evaluate(() => (document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement).dataset.drawn ?? '');
+    const redrawn = (was: string) => page.waitForFunction((w) => {
+      const d = (document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement)?.dataset.drawn ?? '';
+      return !document.querySelector('[data-testid=studio-status]') && !document.querySelector('[data-testid=studio-progress]') && d.startsWith('satellite:') && d !== w;
+    }, was, { timeout: 240_000 });
+    const seen = () => page.evaluate(() => {
+      const c = document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement, d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+      let blue = 0, white = 0, n = 0;
+      for (let k = 0; k < d.length; k += 4 * 37) { n++; if (d[k + 2] > d[k] + 30 && d[k + 2] > d[k + 1] + 15) blue++; if (d[k] > 190 && d[k + 1] > 200 && d[k + 2] > 200) white++; }
+      return { sea: blue / n, ice: white / n };
+    });
+    // The temperature read from the model the pictures are made with, once it is worked out for the settings shown.
+    const modelled = async () => {
+      await page.waitForFunction(() => /over the year/.test(document.querySelector('[data-testid=studio-readout-temperature]')?.textContent ?? ''), undefined, { timeout: 120_000 });
+      return Number((await text('studio-readout-temperature')).match(/^(-?[\d,]+) °C on average over the year \(without air -?[\d,]+ °C; (greenhouse \+[\d,]+ °C|no greenhouse to speak of); albedo \d\.\d\d\)$/)![1].replace(',', ''));
+    };
+    await redrawn('');
+    const earth = await seen(), first = await drawnNow(), mild = await modelled();
+    assert.ok(earth.sea > 0.5 && earth.ice < 0.25, `open seas, ice at the poles (${earth.sea.toFixed(2)} sea, ${earth.ice.toFixed(2)} ice)`);
+    assert.ok(mild > 5 && mild < 25, `${mild} °C`);
+    assert.equal(await page.getByTestId('studio-fate').count(), 0);
+    // Moved away from its star (1.25 AU): no history made; frozen over from pole to pole, the ice drawn where the
+    // sea was, and said why under the picture. The sea is still there, and its share what it was.
+    const share = (await text('studio-readout-sea')).match(/^(\d+) % of the surface/)![1];
+    await page.getByTestId('studio-step-star').click();
+    await page.getByTestId('studio-control-distance').fill('665');
+    assert.equal(await text('studio-value-distance'), '1.247');
+    await redrawn(first);
+    assert.equal(await page.getByTestId('studio-progress').count(), 0, 'no history made');
+    await page.getByTestId('studio-fate').waitFor();
+    assert.match(await text('studio-fate'), /^Too cold for open seas: they are frozen over\. The planet takes in \d+ W\/m² of its star's light; its ice sends back most of the rest \(albedo 0\.[5-8]\d\), which keeps it frozen: -\d+ °C on average\. The seas are still there under the ice/);
+    assert.equal(await page.getByTestId('studio-keep-water').count(), 0, 'nothing removed, nothing to keep');
+    assert.match(await text('studio-readout-sea'), new RegExp(`^${share} % of the surface under .*; all of it frozen over$`));
+    const frozen = await seen();
+    assert.ok(frozen.sea < 0.01 && frozen.ice > 0.9, `ice from pole to pole (${frozen.sea.toFixed(3)} sea, ${frozen.ice.toFixed(2)} ice)`);
+    assert.ok(await modelled() < -35, `${await modelled()} °C`);
+    await h.screenshot('planet-frozen-over');
+    // Back where it was: open seas again.
+    const cold = await drawnNow();
+    await page.getByTestId('studio-control-distance').fill('630');
+    await redrawn(cold);
+    assert.equal(await page.getByTestId('studio-fate').count(), 0);
+    assert.ok(Math.abs((await seen()).sea - earth.sea) < 0.02, 'open seas again');
+    await page.getByTestId('studio-close').click();
+    await page.getByTestId('planet-studio').waitFor({ state: 'detached' });
+    await page.getByTestId('undo').click();
+    await h.saved();
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.name === 'Cold Prime')), false);
     await page.getByTestId('studio-history').click();
   });
   await h.step('The studios: each page its own panels; panels dock, float, close and open again, resize; Save and Reset workspace (D196, D234)', async () => {

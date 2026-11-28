@@ -102,6 +102,8 @@ export const BIOME = {
   // cooler end of each (rockColour gives the colour by the temperature).
   scorched: { name: 'Scorched rock', colour: [92, 78, 70], plants: 0 },
   lava: { name: 'Molten rock', colour: [232, 96, 24], plants: 0 },
+  // (D260) The sea frozen over for most of the year: still sea (nothing stands on it), drawn as ice.
+  seaIce: { name: 'Sea ice', colour: [224, 233, 240], plants: 0 },
 } as const;
 export type BiomeId = keyof typeof BIOME;
 export const BIOME_IDS = Object.keys(BIOME) as BiomeId[];
@@ -147,6 +149,8 @@ export function biomeOf(p: Place): BiomeId {
   return ai < 1.4 ? 'tropicalSeasonal' : 'rainforest';
 }
 
+/** The share of the year the sea lies frozen from which it is drawn as ice (D260). */
+export const SEA_ICE_FROM = 0.5;
 /** Above this (°C, the warmest month's mean) nothing grows: photosynthesis fails near 50 °C (D259). */
 export const TOO_HOT_FOR_PLANTS = 50;
 /** Above this (°C) no water lies on the ground at the Earth's pressure: the rock is baked dry (D259). */

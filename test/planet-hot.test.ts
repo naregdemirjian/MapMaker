@@ -87,7 +87,7 @@ test('what heat makes of the land, and the colour of hot rock', () => {
   assert.equal(hotSurface(MOLTEN_FROM - 1), 'scorched');
   assert.equal(hotSurface(MOLTEN_FROM), 'lava');
   // The new kinds are added after the old: a stored biome's number means what it meant.
-  assert.deepEqual(BIOME_IDS.slice(-3), ['barren', 'scorched', 'lava']);
+  assert.deepEqual(BIOME_IDS.slice(19, 22), ['barren', 'scorched', 'lava']);
   assert.equal(id('barren'), 19);
   // Bare rock's own colour up to 100 °C; darker as it is baked; then its own glow, brighter and yellower as it heats.
   assert.deepEqual(rockColour(20), [...BIOME.barren.colour]);

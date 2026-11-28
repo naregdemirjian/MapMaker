@@ -10,6 +10,7 @@ import { VIEWER } from '../shell/dock.ts';
 import * as cmd from '../../domain/commands.ts';
 import { definitionFromPreset, newDefinition, definitionProblems, PRESETS, EARTH_WATER_KM, type PlanetDefinition, type PresetId, type GeoEventKind, type GeoEvent } from '../../planet/model/definition.ts';
 import { derive, type Derived, type WaterFate } from '../../planet/model/physics.ts';
+import { SIGMA } from '../../planet/model/units.ts';
 import { planetPipeline, simParams } from '../planet-engine.ts';
 import { colourLayer, seenFromSpace } from '../planet-colors.ts';
 import { simOf } from '../../world-model/world-settings.ts';
@@ -188,6 +189,9 @@ export function PlanetStudio() {
     return { ...now, habitableZone: wet.habitableZone, zone: wet.zone, regime: wet.regime, regimeReason: wet.regimeReason };
   }, [def, second, sea]);
   const problems = useMemo(() => definitionProblems(def), [def]);
+  // The planet's figures as its pictures have them (D260): the year's mean temperature at the surface, the sunlight
+  // taken in, how much of the sea lies frozen; from the model the pictures are made with, for the settings shown.
+  const [figures, setFigures] = useState<{ of: PlanetDefinition; surfaceC: number; absorbed: number; seaFrozen: number } | null>(null);
   // The simulated history shown, and what it was simulated from.
   const [run, setRun] = useState<{ def: PlanetDefinition; key: string; times: number[]; seaLevels: number[]; ice: number[] } | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
@@ -337,8 +341,14 @@ export function PlanetStudio() {
         liquidShare: d.liquidShare as number, absorbed: d.absorbed as number, limit: d.limit as number, withSeasK: d.withSeasK as number,
       });
     }, () => {});
+    planetPipeline().product('temperature', shown, simParams(shown)).then((r) => {
+      if (live) setFigures({ of: shown, surfaceC: r.data.surfaceC as number, absorbed: r.data.absorbed as number, seaFrozen: r.data.seaFrozen as number });
+    }, () => {});
     return () => { live = false; };
   }, [second, run, shown]);
+  // (Only for the settings as they are: until they are worked out, the planet's balance as a whole stands in.)
+  const model = second && run && figures && figures.of === shown ? figures : null;
+  const snowball = !!model && !!sea && sea.fate === 'liquid' && model.seaFrozen >= 0.995;
 
   // The history made by itself (D257): at once on opening, and half a second after the last change to what the land
   // is made from (a run under way for other settings is dropped for it).
@@ -697,6 +707,12 @@ export function PlanetStudio() {
           {compare && previous && <div className="studio-picture"><canvas ref={before} width={720} height={360} className="studio-canvas" data-testid="studio-canvas-before" /><span className="muted">Before the last re-run</span></div>}
         </div>
         {previous && <label className="check"><input type="checkbox" checked={compare} onChange={(e) => setCompare(e.target.checked)} data-testid="studio-compare" /> Compare with the history before the last re-run</label>}
+        {snowball && model && (
+          <div className="studio-fate cold" data-testid="studio-fate">
+            <b>Too cold for open seas: they are frozen over.</b>
+            <span>{' '}The planet takes in {fmt(model.absorbed)} W/m² of its star's light; its ice sends back most of the rest (albedo {fmt(1 - model.absorbed / (x.insolation / 4), 2)}), which keeps it frozen: {fmt(model.surfaceC)} °C on average. The seas are still there under the ice, and still sea for whatever is drawn on a map of it. A stronger greenhouse (more carbon dioxide in the air) can keep seas open this far from the star.</span>
+          </div>
+        )}
         {second && run && sea && (sea.fate === 'boiled' || sea.kept) && (
           <div className={`studio-fate ${sea.kept ? 'kept' : ''}`} data-testid="studio-fate">
             <b>{sea.kept ? 'The seas are kept by hand.' : sea.cause === 'greenhouse' ? 'Too strong a greenhouse for seas: they have boiled away.' : 'Too much sunlight for seas: they have boiled away.'}</b>
@@ -730,8 +746,14 @@ export function PlanetStudio() {
           <dt>Year</dt><dd data-testid="studio-readout-year">{fmt(x.yearDays, 1)} days{def.orbit.yearDays !== undefined ? ` (set by hand; Kepler's law gives ${fmt(x.keplerYearDays, 1)})` : ''}</dd>
           <dt>Day</dt><dd data-testid="studio-readout-day">{x.tidallyLocked ? 'none: one side always faces the star' : `${fmt(x.solarDayHours, 1)} hours from noon to noon`}</dd>
           <dt>Gravity</dt><dd data-testid="studio-readout-gravity">{fmt(x.gravityEarth, 2)} g ({fmt(x.massEarths, 2)} Earth masses{def.body.massEarths !== undefined ? ', set by hand' : ''}, {fmt(x.densityKgM3 / 1000, 2)} t/m³)</dd>
-          {second && <><dt>Sea</dt><dd data-testid="studio-readout-sea">{!run || !sea ? 'where the water stands, once the land is made' : sea.fate === 'boiled' ? `none: boiled away (as seas the water would cover ${fmt(100 * sea.liquidShare)} % of the surface)` : sea.dry ? 'none: all of the surface is land' : sea.share >= 0.9995 ? 'over all of the surface: no land stands out of it' : `${fmt(100 * sea.share)} % of the surface under ${fmt(def.water.depthKm ?? 0, 2)} km of water (the Earth's: ${EARTH_WATER_KM} km)`}</dd></>}
-          <dt>Temperature</dt><dd data-testid="studio-readout-temperature">{fmt(x.surfaceK - 273.15)} °C on average (without air {fmt(x.equilibriumK - 273.15)} °C; greenhouse +{fmt(x.greenhouseK)} °C; albedo {fmt(x.albedo, 2)})</dd>
+          {second && <><dt>Sea</dt><dd data-testid="studio-readout-sea">{!run || !sea ? 'where the water stands, once the land is made' : sea.fate === 'boiled' ? `none: boiled away (as seas the water would cover ${fmt(100 * sea.liquidShare)} % of the surface)` : sea.dry ? 'none: all of the surface is land' : sea.share >= 0.9995 ? 'over all of the surface: no land stands out of it' : `${fmt(100 * sea.share)} % of the surface under ${fmt(def.water.depthKm ?? 0, 2)} km of water (the Earth's: ${EARTH_WATER_KM} km)${model && model.seaFrozen >= 0.995 ? '; all of it frozen over' : model && model.seaFrozen >= 0.02 ? `; ${fmt(100 * model.seaFrozen)} % of it frozen over for most of the year` : ''}`}</dd></>}
+          {/* (D260) From the model the pictures are made with, once it is worked out: the surface's mean over the year. */}
+          <dt>Temperature</dt><dd data-testid="studio-readout-temperature">{model
+            ? (() => {
+              const bare = (model.absorbed / SIGMA) ** 0.25, held = model.surfaceC + 273.15 - bare;
+              return `${fmt(model.surfaceC)} °C on average over the year (without air ${fmt(bare - 273.15)} °C; ${held >= 0.5 ? `greenhouse +${fmt(held)} °C` : 'no greenhouse to speak of'}; albedo ${fmt(1 - model.absorbed / (x.insolation / 4), 2)})`;
+            })()
+            : `${fmt(x.surfaceK - 273.15)} °C on average (without air ${fmt(x.equilibriumK - 273.15)} °C; greenhouse +${fmt(x.greenhouseK)} °C; albedo ${fmt(x.albedo, 2)})`}</dd>
           <dt>Winds</dt><dd data-testid="studio-readout-winds">{x.cellsPerHemisphere} circulation cell{x.cellsPerHemisphere > 1 ? 's' : ''} a hemisphere; the tropics' cells reach {fmt(x.hadleyEdgeDeg)}°</dd>
           <dt>Interior</dt><dd data-testid="studio-readout-interior">heat flow {fmt(x.heatFlowEarth, 2)} × Earth's; {x.regime === 'mobile-lid' ? 'moving plates' : x.regime === 'stagnant-lid' ? 'a single rigid lid' : 'plates moving in bursts'}. {x.regimeReason}</dd>
         </dl>

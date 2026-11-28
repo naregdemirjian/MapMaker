@@ -25,7 +25,7 @@ export interface ExplainData {
   tags: ArrayLike<number>;
   boundary: ArrayLike<number>;
   boundaryRate: ArrayLike<number>;
-  climate?: { monthly: ArrayLike<number>; precipMonthly: ArrayLike<number>; currents: ArrayLike<number>; windJan: ArrayLike<number>; windJul: ArrayLike<number> } | null;
+  climate?: { monthly: ArrayLike<number>; precipMonthly: ArrayLike<number>; currents: ArrayLike<number>; windJan: ArrayLike<number>; windJul: ArrayLike<number>; ice?: ArrayLike<number> } | null;
   water?: { kind: ArrayLike<number>; discharge: ArrayLike<number>; lakeDepth: ArrayLike<number>; ice: ArrayLike<number>; pet: ArrayLike<number> } | null;
   biomes?: { koppen: ArrayLike<number>; biome: ArrayLike<number>; custom: ArrayLike<number>; customNames: string[] } | null;
 }
@@ -134,7 +134,8 @@ export function explain(d: ExplainData, c: number): Explanation {
   // Water.
   if (d.water) {
     const w = d.water.kind[c], lines: string[] = [];
-    if (d.water.ice[c] > 50) lines.push(`Under an ice sheet ${fmt(d.water.ice[c])} m thick, built where snow outlasts the summer.`);
+    if (d.biomes && BIOME_IDS[d.biomes.biome[c]] === 'seaIce') lines.push(`The sea here lies frozen${d.climate?.ice ? ` for ${fmt(100 * d.climate.ice[c])} % of the year` : ' for most of the year'}: sea ice. It is still sea: nothing stands on it.`);
+    else if (d.water.ice[c] > 50) lines.push(`Under an ice sheet ${fmt(d.water.ice[c])} m thick, built where snow outlasts the summer.`);
     else if (w === WATER.lake) lines.push(`A lake ${fmt(d.water.lakeDepth[c])} m deep: its hollow fills until it spills on towards the sea.`);
     else if (w === WATER.saltLake) lines.push(`A salt lake ${fmt(d.water.lakeDepth[c])} m deep with no outlet: its surface evaporates all that flows in.`);
     else if (w === WATER.saltFlat) lines.push('A salt flat: a closed basin too dry to hold a lake.');

@@ -61,6 +61,44 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D260. Cold worlds: the sea frozen over drawn as ice; the planet's figures from the model its pictures are made with (the Planet Studio's overhaul, step 4, first part)
+
+- **Why.** Measured on the second calculation (after D259): moved away from its star, the planet's seas freeze over
+  from pole to pole from about 1.04 AU (the model's own figure: 7 % less sunlight than the Earth's, within the range
+  published for the Earth), and were still drawn as open blue sea, as at −137 °C (3 AU) and −199 °C (10 AU). And the
+  side panel's temperature was the planet's balance as a whole, worked out without knowing where the ice lies: −6 °C
+  at 1.1 AU beside pictures of a planet at −42 °C.
+- **Sea ice** (a kind of surface, added after the old ones): where the sea lies frozen for half the year or more (the
+  climate's own count of it, `ice`), on planets of the second calculation. It is **still sea**: the sea stage's
+  heights and share are what they were, so nothing drawn on a map of the planet stands on it; it is **drawn as ice**.
+  A lake frozen for most of the year is ice too. Seen from space the sea's ice lies flat (not lit by the relief of
+  the sea floor under it), and the land beside the sea is lit against the sea's level, not its floor.
+- **The planet's figures as its pictures have them**: the temperature stage also gives the surface's mean
+  temperature over the year (`surfaceC`: the mean of what the temperature layer shows; the model's own `meanK` is the
+  sea-level one) and the share of the sea frozen for most of the year (`seaFrozen`), where the sea follows from the
+  water. In the Studio the **Temperature** read-out is from them once they are worked out for the settings shown
+  ("13 °C on average over the year (without air −20 °C; greenhouse +33 °C; albedo 0.31)": the Earth's own figures,
+  from the sunlight the model takes in), and the planet's balance as a whole stands in until then; the **Sea**
+  read-out says how much of it is frozen over.
+- **Frozen over, said under the picture**: "Too cold for open seas: they are frozen over. The planet takes in
+  97 W/m² of its star's light; its ice sends back most of the rest (albedo 0.56), which keeps it frozen: −59 °C on
+  average. The seas are still there under the ice, and still sea for whatever is drawn on a map of it. A stronger
+  greenhouse (more carbon dioxide in the air) can keep seas open this far from the star." The last is measured: at
+  1.25 AU a tenth of the air as carbon dioxide gives open seas at 24 °C; at 1.1 AU four parts in a thousand, 6 °C.
+  Nothing is removed, so there is no switch to keep anything.
+- **Measured** (one planet, only the distance changed): 1 AU 15 °C, 6 % of the sea frozen for most of the year
+  (the polar seas); 1.02 AU 9 °C, 11 %; 1.04 AU −34 °C, all of it; 1.25 AU −58 °C; 2 AU −105 °C.
+- **The Studio's interface tests** tell land from open sea in the picture and leave ice out of the count (it comes
+  and goes with the climate, on land and on the sea, not with the land).
+- **Not in this part** (the rest of step 4): thin air and no air (water that cannot be liquid, a planet too small
+  to hold its air, the day and night of an airless world); the land of a frozen planet is ice whatever snow falls on
+  it. On a map made from the planet the sea's ice is not drawn yet (step 8).
+- **Tests**: `test/planet-cold.test.ts` (3): sea ice (the polar seas of an Earth, all towards the poles; from pole
+  to pole at 1.25 AU on the same land and the same sea, the land under ice, its colours and the land's cover, a place
+  on it explained; the surface's mean); seen from space (ice over the sea flat, the land lit against the sea's
+  level); the first calculation as it was. Interface: "Cold worlds in the Planet Studio" (moved away with no history
+  made, frozen over and said why, the sea's read-out, the temperature the model's own, open seas again).
+
 ### D259. Hot worlds: what becomes of the water, and what heat makes of the land (the Planet Studio's overhaul, step 3)
 
 - **Why.** Measured before the plan and again on the second calculation (D258): moved towards its star, a planet kept

@@ -57,7 +57,8 @@ export function seenFromSpace(cover: ArrayLike<number>, heights: ArrayLike<numbe
     if (land > 0) {
       // Slopes facing the light (the ground rising to the east and to the south of them) are brighter.
       const e = heights[j * width + ((i + 1) % width)], s = heights[Math.min(height - 1, j + 1) * width + i];
-      const shade = Math.max(0.65, Math.min(1.3, 1 + ((e - v) + (s - v)) * 0.0004));
+      // (Below the sea's level it is the sea's ice that shows, D260: flat, not lit by the sea floor's relief.)
+      const shade = v < 0 ? 1 : Math.max(0.65, Math.min(1.3, 1 + ((Math.max(0, e) - v) + (Math.max(0, s) - v)) * 0.0004));
       r = cover[4 * k] * shade; g = cover[4 * k + 1] * shade; b = cover[4 * k + 2] * shade;
     }
     if (land < 1) {

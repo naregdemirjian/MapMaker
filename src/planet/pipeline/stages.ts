@@ -11,7 +11,7 @@ import { seasonalClimate, type ClimateOptions } from '../climate/ebm.ts';
 import { joinRain, rainMonths, type RainMonths } from '../climate/hydroclimate.ts';
 import { hydrology } from '../water/hydrology.ts';
 import { iceSheets } from '../water/ice.ts';
-import { BIOME, BIOME_IDS, KOPPEN, biomeColour, biomeOf, customBiomeOf, hotSurface, koppen, rockColour, type BiomeId, type Place } from '../life/biomes.ts';
+import { BIOME, BIOME_IDS, KOPPEN, SEA_ICE_FROM, biomeColour, biomeOf, customBiomeOf, hotSurface, koppen, rockColour, type BiomeId, type Place } from '../life/biomes.ts';
 import { toLevel } from '../mesh/transfer.ts';
 import { derive, waterState } from '../model/physics.ts';
 import { cellsAt, meshAt } from '../mesh/icosphere.ts';
@@ -344,6 +344,8 @@ export const STAGES: Record<string, StageDef> = {
   temperature: {
     id: 'temperature',
     version: 1,
+    // (Where the sea follows from the water, its product also says the surface's mean and the sea's frozen share:
+    // those products are asked for under other keys, the sea stage's version being part of them.)
     deps: (p) => fromHeights(p, ['tectonics']),
     inputs: (def, p) => ({ level: p.level, def: climateInputs(def, p), ...givenHeights(p) }),
     run: (inputs, deps, ctx) => {
@@ -367,9 +369,18 @@ export const STAGES: Record<string, StageDef> = {
       }
       const r = seasonalClimate(mesh, def, derive(def), heights, second);
       ctx.progress(1, 1);
+      // The planet's figures as the pictures have them (D260): the surface's mean temperature over the year (°C; the
+      // model's own `meanK` is the sea-level one), and how much of the sea lies frozen for most of the year.
+      let surfaceC = 0, seaArea = 0, frozen = 0;
+      for (let c = 0; c < n; c++) {
+        let t = 0;
+        for (let m = 0; m < 12; m++) t += r.monthly[m * n + c] / 12;
+        surfaceC += (t * mesh.area[c]) / (4 * Math.PI);
+        if (heights[c] < 0) { seaArea += mesh.area[c]; if (r.ice[c] >= SEA_ICE_FROM) frozen += mesh.area[c]; }
+      }
       return {
         monthly: r.monthly, dryWarm: r.dryWarm, ice: r.ice, meanK: r.meanK, absorbed: r.absorbed, emitted: r.emitted, tropicsC: r.tropicsC, polesC: r.polesC,
-        years: r.years, heights: heights.slice(), ...(deps.sea ? { seaShare: deps.sea.share } : {}),
+        years: r.years, heights: heights.slice(), ...(deps.sea ? { seaShare: deps.sea.share, surfaceC, seaFrozen: seaArea > 0 && !deps.sea.dry ? frozen / seaArea : 0 } : {}),
       };
     },
   },
@@ -461,6 +472,7 @@ export const STAGES: Record<string, StageDef> = {
       const koppenOut = new Uint8Array(n), biome = new Uint8Array(n), custom = new Uint8Array(n), colour = new Uint8Array(3 * n);
       const rules = life.biomeSet === 'custom' ? [...life.customBiomes].sort((a, b) => a.priority - b.priority) : [];
       const second = !!deps.sea, dry = !!deps.sea?.dry, crust = deps.sea?.crust as Uint8Array | undefined;
+      const frozenYear = deps.climate.ice as Float32Array;
       const T = new Float64Array(12), P = new Float64Array(12);
       const place: Place = { temp: T, precip: P, pet: 0, height: 0, water: 0, ice: 0 };
       for (let c = 0; c < n; c++) {
@@ -473,10 +485,12 @@ export const STAGES: Record<string, StageDef> = {
         for (let m = 0; m < 12; m++) if (T[m] > hot) hot = T[m];
         const first: BiomeId = dry ? 'barren' : biomeOf(place);
         const heat = second && first !== 'sea' && first !== 'lake' ? hotSurface(hot) : null;
-        const b: BiomeId = heat ?? first;
+        // (The sea frozen over for most of the year, D260: still sea, drawn as ice.)
+        // (And a lake frozen for most of the year: ice.)
+        const b: BiomeId = heat ?? (second && frozenYear[c] >= SEA_ICE_FROM ? (first === 'sea' ? 'seaIce' : first === 'lake' ? 'ice' : first) : first);
         biome[c] = BIOME_IDS.indexOf(b);
         if (kind[c] !== 1 && !dry) koppenOut[c] = 1 + KOPPEN.findIndex(([k]) => k === koppen(T, P, (most - 2 + 12) % 12));
-        const own = rules.length && b !== 'sea' && b !== 'lake' && !heat ? customBiomeOf(place, rules) : null;
+        const own = rules.length && b !== 'sea' && b !== 'seaIce' && b !== 'lake' && !heat ? customBiomeOf(place, rules) : null;
         let rgb = own ? own.color : b === 'scorched' || b === 'lava' ? rockColour(hot) : biomeColour(b, life);
         if (crust && !own && (b === 'barren' || b === 'scorched' || b === 'lava')) {
           // Bare rock by its crust (D259): the dark basalt of an ocean's floor, the paler rock of continents, as the

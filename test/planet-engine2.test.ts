@@ -132,10 +132,11 @@ test('the sea from the water: the same land under more or less of it; a dry worl
   const all = await sea(25);
   assert.equal(all.share, 1);
   // The climate, water and life stages on the sea stage's land and sea: as much sea among the biomes as the sea has.
-  const seaId = BIOME_IDS.indexOf('sea');
+  // (Open or under ice for most of the year, D260: sea either way.)
+  const seaId = BIOME_IDS.indexOf('sea'), iceId = BIOME_IDS.indexOf('seaIce');
   const biomes = (await p.product('biomes', change(d, (x) => { x.water.depthKm = 1; }), P)).data.biome as Uint8Array;
   let seaCells = 0;
-  for (let c = 0; c < n; c++) if (biomes[c] === seaId) seaCells += mesh.area[c];
+  for (let c = 0; c < n; c++) if (biomes[c] === seaId || biomes[c] === iceId) seaCells += mesh.area[c];
   assert.ok(Math.abs(seaCells / (4 * Math.PI) - (seas[1].share as number)) < 0.03, `biomes' sea ${(seaCells / (4 * Math.PI)).toFixed(3)}, the sea's ${(seas[1].share as number).toFixed(3)}`);
   // An earlier picture of the history: its own sea from the same water, its own biomes, no stand-in needed.
   const then = await sea(EARTH_WATER_KM, { frame: 0 });

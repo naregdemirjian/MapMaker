@@ -951,3 +951,5 @@ body.number-scrubbing, body.number-scrubbing * { cursor: ns-resize !important; u
 .studio-fate b { color: #f0b48c; }
 .studio-fate.kept b { color: #e6cf7a; }
 .studio-fate .check { display: block; margin-top: 6px; }
+.studio-fate.cold { border-left-color: #7fb4e0; background: rgba(127, 180, 224, 0.1); }
+.studio-fate.cold b { color: #b9d8f2; }
