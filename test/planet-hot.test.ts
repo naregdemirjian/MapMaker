@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { definitionFromPreset, newDefinition, definitionOf, type PlanetDefinition } from '../src/planet/model/definition.ts';
-import { derive, runawayLimit, waterState, WATER_CRITICAL_K } from '../src/planet/model/physics.ts';
+import { SEA_LIMIT_MARGIN, derive, seaLimit, waterState } from '../src/planet/model/physics.ts';
 import { Pipeline } from '../src/planet/pipeline/scheduler.ts';
 import { LocalExecutor } from '../src/planet/worker/pool.ts';
 import { STAGES } from '../src/planet/pipeline/stages.ts';
@@ -40,7 +40,10 @@ test('the water\'s fate: seas where they can stand; boiled away under too much s
   assert.equal(earth.kept, false);
   assert.equal(earth.cause, null);
   assert.ok(earth.absorbed > 228 && earth.absorbed < 248, `${earth.absorbed} W/m²`);
-  assert.equal(earth.limit, 282);
+  // (The most a planet with seas can shed under this air, D266: near the 282 W/m² known for the Earth's; what
+  // seas can stand is that, less the little by which the year's model tips first.)
+  assert.ok(seaLimit(d, 0.71) > 270 && seaLimit(d, 0.71) < 284, `${seaLimit(d, 0.71)} W/m²`);
+  assert.equal(earth.limit, seaLimit(d, 0.71) - SEA_LIMIT_MARGIN);
   // A little closer: hotter, the seas still there. Closer again: more sunlight than seas can stand.
   assert.equal(waterState(change(d, (c) => { c.orbit.semiMajorAu = 0.95; }), 0.71).fate, 'liquid');
   const close = waterState(change(d, (c) => { c.orbit.semiMajorAu = 0.9; }), 0.71);
@@ -49,16 +52,17 @@ test('the water\'s fate: seas where they can stand; boiled away under too much s
   assert.ok(close.absorbed > close.limit);
   // A brighter star does the same from the Earth's distance.
   assert.equal(waterState(change(d, (c) => { c.star.stars[0].massSun = 1.3; }), 0.71).fate, 'boiled');
-  // A hundred times the carbon dioxide: no more sunlight than the Earth's, but with the vapour of seas on top the
-  // surface finds no balance below the temperature above which water is no liquid at all.
+  // A hundred times the carbon dioxide: no more sunlight than the Earth's, but this air holds so much heat in already
+  // that a planet with seas under it can shed less than this one takes in.
   const thick = waterState(change(d, (c) => { c.atmosphere.co2 = 0.04; }), 0.71);
   assert.equal(thick.fate, 'boiled');
   assert.equal(thick.cause, 'greenhouse');
-  assert.ok(thick.absorbed < thick.limit && thick.withSeasK > WATER_CRITICAL_K, `${thick.absorbed} W/m², ${thick.withSeasK} K`);
+  assert.ok(thick.limit < 225 && thick.absorbed > thick.limit && thick.absorbed < earth.limit, `takes in ${thick.absorbed} W/m², can shed ${thick.limit}`);
   // Ten times: a hothouse, with its seas.
   assert.equal(waterState(change(d, (c) => { c.atmosphere.co2 = 0.004; }), 0.71).fate, 'liquid');
-  // Small seas hold out closer in than oceans (Abe et al. 2011): the limit is higher for a mostly dry planet.
-  assert.ok(runawayLimit(0.1) > runawayLimit(0.5));
+  // Small seas hold out closer in than oceans (Abe et al. 2011): with less vapour the limit is far higher (about
+  // 415 W/m² for a nearly dry planet there; the same order here).
+  assert.ok(seaLimit(d, 0.1) > 380 && seaLimit(d, 0.1) > seaLimit(d, 0.5) + 80, `${seaLimit(d, 0.1)} against ${seaLimit(d, 0.5)} W/m²`);
   assert.equal(waterState(change(d, (c) => { c.orbit.semiMajorAu = 0.9; c.atmosphere.clouds = 0.6; }), 0.08).fate, 'liquid');
   // No water given: none to lose.
   assert.equal(waterState(change(d, (c) => { c.water.depthKm = 0; }), 0).fate, 'none');
@@ -158,7 +162,7 @@ test('a planet moved towards its star: the same land; a hothouse, then its seas 
   assert.equal(boiled.sea.dry, true);
   assert.equal(boiled.sea.share, 0);
   assert.equal(boiled.sea.liquidShare, earth.sea.share);
-  assert.ok((boiled.sea.absorbed as number) > (boiled.sea.limit as number) && boiled.sea.limit === 282);
+  assert.ok((boiled.sea.absorbed as number) > (boiled.sea.limit as number) && (boiled.sea.limit as number) > 265 && (boiled.sea.limit as number) < 282);
   const hw = earth.sea.heights as Int16Array, hd = boiled.sea.heights as Int16Array;
   let lo = Infinity, hi = -Infinity, lowest = Infinity;
   for (let c = 0; c < n; c++) { const by = hd[c] - hw[c]; lo = Math.min(lo, by); hi = Math.max(hi, by); lowest = Math.min(lowest, hd[c]); }
@@ -259,6 +263,28 @@ test('too strong a greenhouse; the seas kept by hand; a planet like Venus; a dry
     if (h[c] < meanH - 1500) { low += t; lowN++; } else if (h[c] > meanH + 1500) { high += t; highN++; }
   }
   assert.ok(lowN > 5 && highN > 5 && low / lowN > high / highN + 5, `lowlands ${low / lowN} °C, highlands ${high / highN} °C`);
+});
+
+test('never seas over a furnace: wherever the seas are said to stand, the year\'s model finds a balance with them (D266)', async () => {
+  // Along the three settings that bring a planet to the limit, by small steps across it: where the rule says the seas
+  // stand, the year's model (whose tropics are hotter than the planet as a whole) settles below the heat of an oven;
+  // where it says they are gone, the planet is dry. (Before: between 0.926 and 0.948 AU, between 0.8 and 1.2 % of
+  // carbon dioxide and between 0.1 and 0.25 of cloud cover, seas were drawn on a planet the model had at 1,300 °C.)
+  const p = new Pipeline(new LocalExecutor()), d = newDefinition('earthlike', 4);
+  const tried: Array<[string, PlanetDefinition]> = [
+    ...[0.96, 0.95, 0.945, 0.94, 0.935, 0.93, 0.925, 0.92].map((au): [string, PlanetDefinition] => [`${au} AU`, change(d, (c) => { c.orbit.semiMajorAu = au; })]),
+    ...[0.003, 0.005, 0.007, 0.009, 0.0105, 0.012, 0.015].map((co2): [string, PlanetDefinition] => [`${100 * co2} % of carbon dioxide`, change(d, (c) => { c.atmosphere.co2 = co2; })]),
+    ...[0.3, 0.25, 0.2, 0.15, 0.1, 0].map((clouds): [string, PlanetDefinition] => [`cloud cover ${clouds}`, change(d, (c) => { c.atmosphere.clouds = clouds; })]),
+  ];
+  let stand = 0, gone = 0, hottest = -Infinity;
+  for (const [name, def] of tried) {
+    const sea = (await p.product('sea', def, P)).data, T = (await p.product('temperature', def, P)).data;
+    if (sea.fate === 'liquid') { stand++; hottest = Math.max(hottest, T.surfaceC as number); assert.ok((T.surfaceC as number) < 110, `${name}: seas, and ${T.surfaceC} °C`); }
+    else { gone++; assert.equal(sea.fate, 'boiled', name); assert.equal(sea.dry, true); assert.ok((T.surfaceC as number) < 60, `${name}: dry, ${T.surfaceC} °C`); }
+  }
+  assert.ok(stand >= 11 && gone >= 7, `${stand} with seas, ${gone} without`);
+  // (Up to the limit the planet is a hothouse: far warmer than the Earth, its seas still there.)
+  assert.ok(hottest > 55 && hottest < 110, `the hottest with seas: ${hottest} °C`);
 });
 
 test('the first calculation as it was: its seas whatever the heat, none of the new kinds of ground', async () => {

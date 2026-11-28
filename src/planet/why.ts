@@ -88,7 +88,7 @@ export function whyItLooksSo(def: PlanetDefinition, x: Derived, sea: SeaFacts, m
   else if (sea.fate === 'boiled') out.push({
     key: 'water',
     cause: sea.cause === 'greenhouse'
-      ? `With seas, their vapour on top of this air's greenhouse leaves no balance below ${num(sea.withSeasK - 273.15)} °C (water is no liquid above 374 °C)`
+      ? `Its air holds so much heat in that with seas it could shed no more than ${num(sea.limit)} W/m²; it would take in ${num(sea.absorbed)}`
       : `With seas it would take in ${num(sea.absorbed)} W/m²; a planet with seas can shed no more than ${num(sea.limit)}`,
     effect: 'The seas boiled away and the water was lost to space',
   });

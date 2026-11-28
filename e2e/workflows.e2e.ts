@@ -5412,12 +5412,14 @@ try {
     await redrawn(first);
     assert.equal(await page.getByTestId('studio-progress').count(), 0, 'no history made');
     const fate = await text('studio-fate');
-    assert.match(fate, /^Too much sunlight for seas: they have boiled away\. With seas the planet would take in (\d+) W\/m² of its star's light; a planet with seas can shed no more than 282 W\/m² as heat \(a runaway greenhouse\)\. The water was lost to space/);
-    assert.ok(Number(fate.match(/take in (\d+) W/)![1]) > 282);
+    assert.match(fate, /^Too much sunlight for seas: they have boiled away\. With seas the planet would take in (\d+) W\/m² of its star's light; a planet with seas can shed no more than (\d+) W\/m² as heat \(a runaway greenhouse\)\. The water was lost to space/);
+    // (More taken in than seas can stand: the limit near the 282 W/m² known for the Earth's air, D266.)
+    const [, takes, sheds] = fate.match(/take in (\d+) W.*no more than (\d+) W/)!.map(Number);
+    assert.ok(takes > sheds && sheds > 265 && sheds < 282, `${takes} against ${sheds} W/m²`);
     assert.match(await text('studio-readout-sea'), /^none: boiled away \(as seas the water would cover \d+ % of the surface\)$/);
     assert.match(await text('studio-readout-zone'), /the planet is too close$/);
     assert.match(await text('studio-readout-interior'), /moving plates/, 'the land is still the one its plates made');
-    assert.match(await why('water'), /^With seas it would take in \d+ W\/m²; a planet with seas can shed no more than 282The seas boiled away and the water was lost to space$/);
+    assert.match(await why('water'), /^With seas it would take in \d+ W\/m²; a planet with seas can shed no more than 27\dThe seas boiled away and the water was lost to space$/);
     assert.equal(await why('rain'), 'No water to fallNo rain or snow');
     assert.match(await why('surface'), /Bare rock everywhere$/);
     // (D264) What changed: the setting moved, with the planet's figures before and after; and where the surface is
@@ -5500,7 +5502,10 @@ try {
     await page.getByTestId('studio-control-co2').fill('769');
     assert.equal(await text('studio-value-co2'), '0.04016');
     await redrawn(back);
-    assert.match(await text('studio-fate'), /^Too strong a greenhouse for seas: they have boiled away\. With the vapour of seas added to this air, the surface finds no balance below [\d,]+ °C, and above 374 °C water is no liquid under any pressure\./);
+    const strong = await text('studio-fate');
+    assert.match(strong, /^Too strong a greenhouse for seas: they have boiled away\. This air holds so much heat in already that a planet with seas under it can shed no more than (\d+) W\/m² as heat; with seas this one would take in (\d+) W\/m² of its star's light \(a runaway greenhouse\)\./);
+    const [, most, taken] = strong.match(/no more than (\d+) W.*take in (\d+) W/)!.map(Number);
+    assert.ok(taken > most && most < 230 && taken < 250, `${taken} against ${most} W/m²`);
     assert.ok((await seen()).sea < 0.005);
     // Left without applying; the map undone.
     await page.getByTestId('studio-close').click();

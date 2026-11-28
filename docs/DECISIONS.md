@@ -61,6 +61,41 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D266. A fault of D259 mended: seas were drawn over a furnace just short of the boiling limit
+
+- **The fault** (found by the slider test begun for step 6, in what D259 had pushed): the seas' fate was decided from
+  the planet's balance as a whole, the pictures from the year's model, and the two did not tip at the same place. The
+  year's model has hot tropics, which passed the point of no return first and took the planet with them. Measured: for
+  an Earth between 0.926 and 0.948 AU, between 0.8 and 1.2 % of carbon dioxide, and between 0.1 and 0.25 of cloud
+  cover, the rule said "seas" and the model had the planet at about 1,300 °C: blue seas beside molten land. (The
+  pictures sent for step 3 were at 0.949 and 0.897 AU, either side of the band.)
+- **Why the model ran away early**: the heat a planet sheds was the fitted formula σT⁴ / (1 + ¾τ) as it stands, whose
+  vapour term grows faster than T⁴ beyond about 60 °C, so that the heat shed *falls* again as the surface warms
+  further. A place past that point could only heat up without end. The limit the formula stands for does not fall: a
+  moist air sheds no more than about 282 W/m² however hot its surface, and no less.
+- **One ceiling for both**:
+  - `seaLimit` (physics.ts): the most a planet with seas can shed under its air: the most the formula reaches between
+    the cold and water's critical point. 275 W/m² for an Earth (known: about 282); less under more carbon dioxide
+    (250 at 0.5 %, 238 at 1.1 %); far more with small seas (over 400: Abe and others' nearly dry planets, which keep
+    their seas much closer in; the separate allowance for them is no longer needed).
+  - *The seas' fate*: boiled away where the planet with its seas takes in more than that, less 3 W/m² (the little by
+    which the year's model tips before the balance as a whole). One rule for the two causes of D259: "too much
+    sunlight", or "too strong a greenhouse" where with no more carbon dioxide and methane than the Earth's the seas
+    would stand under the same light. The statement under the picture gives the limit as it is for this air.
+  - *The year's model* (`ceiling`, for the second calculation): the heat shed does not fall once it has reached its
+    most; it stays there until the formula passes it again at rock-melting heat. A planet's tropics past the limit get
+    hotter and send their heat elsewhere, and the planet tips only when it takes in more than the limit as a whole.
+- **Measured after**: moved inward an Earth warms steadily (32 °C at 0.96 AU, 40 at 0.95, 46 at 0.945, 54 at 0.94,
+  65 at 0.935) and loses its seas at 0.93 AU; with carbon dioxide 33 °C at 0.3 %, 52 at 0.7 %, 65 at 0.9 %, gone at
+  1.1 %; with cloud cover 32 °C at 0.3, 50 at 0.2, gone at 0.1. Nowhere seas over a furnace.
+- **Still to do** (step 6): cloud cover at nothing boils an Earth, for the model's clouds only send light back and
+  hold no heat in; a planet with little water freezes solid at the Earth's distance, for snow lies on its land as
+  on a wet planet's.
+- **Tests**: `test/planet-hot.test.ts` (1 more): by small steps across the limit along the distance, the carbon
+  dioxide and the cloud cover (21 planets), wherever the seas are said to stand the year's model settles below
+  110 °C, and wherever they are gone the planet is dry; the limit near 282 W/m², lower under carbon dioxide, far
+  higher with small seas. The statements' numbers in the interface tests.
+
 ### D265. Tipping points marked on the sliders (the Planet Studio's overhaul, step 5, last part)
 
 - **Why.** From the plan: "Tipping points marked on the sliders: coloured zones and ticks such as 'oceans boil beyond

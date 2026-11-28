@@ -89,7 +89,7 @@ function fateReason(sea: SeaState): string {
   const thin = `Under less than 0.006 bar of air water is ice or vapour, never liquid${sea.air === 'lost' ? ' (and this planet has lost its air)' : ''}.`;
   const why = sea.cause === 'thin-air' ? thin
     : sea.cause === 'greenhouse'
-      ? `With the vapour of seas added to this air, the surface finds no balance below ${fmt(sea.withSeasK - 273.15)} °C, and above 374 °C water is no liquid under any pressure.`
+      ? `This air holds so much heat in already that a planet with seas under it can shed no more than ${fmt(sea.limit)} W/m² as heat; with seas this one would take in ${fmt(sea.absorbed)} W/m² of its star's light (a runaway greenhouse).`
       : `With seas the planet would take in ${fmt(sea.absorbed)} W/m² of its star's light; a planet with seas can shed no more than ${fmt(sea.limit)} W/m² as heat (a runaway greenhouse).`;
   if (sea.kept) return sea.cause === 'thin-air' ? `By the physics there would be none. ${why}` : `By the physics they would have boiled away. ${why} The temperatures shown are those with the seas there.`;
   return `${why} The water was lost to space within some hundreds of millions of years; what is left is dry rock, at the temperature of a planet with no water vapour in its air.`;

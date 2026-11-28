@@ -64,7 +64,7 @@ test('the chain of causes: an Earth; its seas boiled away; frozen over; with no 
   assert.match(whyItLooksSo(d, earth.x, earth.sea, null)[2].effect, /^Seas on 7\d % of the surface$/);
   // Moved towards its star: the seas boiled away, with the numbers that decided; no rain; bare rock.
   const hot = await facts(p, change(d, (c) => { c.orbit.semiMajorAu = 0.9; }));
-  assert.match(link(hot.why, 'water').cause, /^With seas it would take in 29\d W\/m²; a planet with seas can shed no more than 282$/);
+  assert.match(link(hot.why, 'water').cause, /^With seas it would take in 29\d W\/m²; a planet with seas can shed no more than 27\d$/);
   assert.equal(link(hot.why, 'water').effect, 'The seas boiled away and the water was lost to space');
   assert.deepEqual([link(hot.why, 'rain').cause, link(hot.why, 'rain').effect], ['No water to fall', 'No rain or snow']);
   assert.equal(link(hot.why, 'surface').effect, 'Bare rock everywhere');

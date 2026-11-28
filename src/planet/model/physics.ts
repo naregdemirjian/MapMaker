@@ -145,6 +145,27 @@ export const WATER_CRITICAL_K = 647.1;
 export const WATER_TRIPLE_BAR = 0.006;
 
 /**
+ * The most heat a planet with seas can shed (W/m², D266): as it warms, more vapour rises into its air and holds more
+ * of its heat in, until the heat it sheds stops growing however hot it gets (the Simpson-Nakajima limit: about
+ * 282 W/m² under the Earth's air; Goldblatt and others 2013). Here: the most σT⁴ / (1 + ¾τ) reaches between the
+ * cold and water's critical point with this air's own greenhouse and the vapour of seas over `seaShare` of the
+ * surface: 280 W/m² for the Earth's; less under more carbon dioxide (its air already holds heat in); more with small
+ * seas (less vapour: a nearly dry planet keeps its seas much closer to its star, as Abe and others 2011 found).
+ * Taking in more than this, a planet has no balance at which its seas could stay.
+ */
+export function seaLimit(d: PlanetDefinition, seaShare: number): number {
+  const wet = { ...d, water: { ...d.water, oceanFraction: Math.max(0, Math.min(1, seaShare)) } };
+  let most = 0;
+  for (let T = 250; T <= WATER_CRITICAL_K; T += 1) most = Math.max(most, (SIGMA * T ** 4) / (1 + 0.75 * opticalDepth(wet, T).total));
+  return most;
+}
+/**
+ * How near the limit (W/m²) the seas are taken as lost (D266): the year's model, with its hot tropics, tips a little
+ * before the planet's balance as a whole does.
+ */
+export const SEA_LIMIT_MARGIN = 3;
+
+/**
  * Whether a planet holds its air (D261): the "cosmic shoreline" of Zahnle and Catling (2017). Across the Solar System
  * the worlds with air and those without are parted by one line: the sunlight a world gets against the fourth power of
  * its escape speed. Mars lies just on the side with air (it has kept a little: the line is set a tenth below it);
@@ -184,20 +205,20 @@ export const iceAtEquatorK = (insolation: number): number => ((insolation * (1 -
  * planet with the air it has in fact:
  * - `none`: the planet was given none;
  * - `liquid`: seas (open, or under ice where it is cold: the climate says where);
- * - `boiled`: with the seas there the planet finds no balance at which they could stay. Either it takes in more
- *   sunlight than a planet with seas can give back as heat (`runawayLimit`; `cause` 'sunlight'), or its air holds so
- *   much heat already that the water vapour's share on top leaves no balance below the temperature above which water
- *   is no liquid at all (`cause` 'greenhouse'). The seas evaporate; high in the air the star's light breaks the vapour
- *   up and its hydrogen is lost to space, within some hundreds of millions of years (Kasting 1988; as Venus is
- *   thought to have lost its water). What is left is a dry planet.
+ * - `boiled`: with the seas there the planet takes in more sunlight than a planet with seas can shed as heat under
+ *   this air (`seaLimit`, D266), so it finds no balance at which they could stay: because of the sunlight (`cause`
+ *   'sunlight'), or because its air holds so much heat already that the limit is low (`cause` 'greenhouse': with no
+ *   more carbon dioxide and methane in it than the Earth's has, the seas would stand). The seas evaporate; high in the air the star's light
+ *   breaks the vapour up and its hydrogen is lost to space, within some hundreds of millions of years (Kasting 1988;
+ *   as Venus is thought to have lost its water). What is left is a dry planet.
  * - `frozen`: too little air for water to be liquid (below its triple point's pressure), and cold enough, even at
  *   the equator, for ice to last (`iceLastsBelowK`): the seas stand frozen where they are, as on the icy moons.
  * - `sublimed`: too little air for liquid water, and too warm for ice to last where the sun is high: the seas have
  *   gone into vapour, some of it lost to space, the rest frozen out where it is coldest (ice caps: the climate says
  *   where, if anywhere). The planet is dry but for them, as Mars is.
  * `kept`: the water kept by hand where it would have boiled away (`water.keep`; not physical). `absorbed` and `limit`
- * (W/m²): the sunlight taken in with the seas there, and the most seas can stand; `withSeasK`: the surface's
- * temperature with the seas there; `iceK` and `iceLastsK`: the equator's ice and the temperature below which it lasts.
+ * (W/m²): the sunlight taken in with the seas there, and the most seas can stand under this air; `withSeasK`: the
+ * surface's temperature with the seas there, as the planet's balance as a whole has it; `iceK` and `iceLastsK`: the equator's ice and the temperature below which it lasts.
  */
 export type WaterFate = 'none' | 'liquid' | 'boiled' | 'frozen' | 'sublimed';
 export interface WaterState { fate: WaterFate; kept: boolean; cause: 'sunlight' | 'greenhouse' | 'thin-air' | null; absorbed: number; limit: number; withSeasK: number; iceK: number; iceLastsK: number }
@@ -206,12 +227,16 @@ export function waterState(d: PlanetDefinition, seaShare: number): WaterState {
   const x = derive({ ...d, water: { ...d.water, oceanFraction: share } });
   const ice = { iceK: iceAtEquatorK(x.insolation), iceLastsK: iceLastsBelowK(d.atmosphere.pressureBar) };
   if (!(share > 0) || !((d.water.depthKm ?? 1) > 0)) return { fate: 'none', kept: false, cause: null, absorbed: x.absorbed, limit: Infinity, withSeasK: x.surfaceK, ...ice };
-  const limit = runawayLimit(share), common = { absorbed: x.absorbed, limit, withSeasK: x.surfaceK, ...ice };
+  // (The most seas can stand: the limit, less the little by which the year's model tips before it.)
+  const limit = seaLimit(d, share) - SEA_LIMIT_MARGIN, common = { absorbed: x.absorbed, limit, withSeasK: x.surfaceK, ...ice };
   // Too little air for liquid water: ice where it lasts, or gone into vapour (kept by hand, the seas stay).
   if (d.atmosphere.pressureBar < WATER_TRIPLE_BAR && !d.water.keep) return { fate: ice.iceK < ice.iceLastsK ? 'frozen' : 'sublimed', kept: false, cause: 'thin-air', ...common };
   if (d.atmosphere.pressureBar < WATER_TRIPLE_BAR) return { fate: 'liquid', kept: true, cause: 'thin-air', ...common };
-  if (!x.runaway && !(x.surfaceK > WATER_CRITICAL_K)) return { fate: 'liquid', kept: false, cause: null, ...common };
-  return { fate: d.water.keep ? 'liquid' : 'boiled', kept: !!d.water.keep, cause: x.runaway ? 'sunlight' : 'greenhouse', ...common };
+  if (!(x.absorbed > limit)) return { fate: 'liquid', kept: false, cause: null, ...common };
+  // (The air's doing where, with no more carbon dioxide and methane in it than the Earth's has, the seas would stand
+  // under the same light.)
+  const a = d.atmosphere, plain = seaLimit({ ...d, atmosphere: { ...a, co2: Math.min(a.co2, 4.2e-4), ch4: Math.min(a.ch4, 1.9e-6) } }, share) - SEA_LIMIT_MARGIN;
+  return { fate: d.water.keep ? 'liquid' : 'boiled', kept: !!d.water.keep, cause: x.absorbed > plain ? 'sunlight' : 'greenhouse', ...common };
 }
 
 /**

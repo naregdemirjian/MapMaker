@@ -380,6 +380,8 @@ export const STAGES: Record<string, StageDef> = {
       const second: ClimateOptions = {};
       if (deps.sea) {
         second.range = [20, 10_000];
+        // (The heat shed stays at its most once it reaches it: the planet tips where its seas' fate says, D266.)
+        second.ceiling = true;
         // (The sea's currents carry heat only where the sea is open, D261.)
         second.iceStillsCurrents = true;
         // (Thin air hardly sets the ground's temperature with height: all of it from about a third of a bar.)

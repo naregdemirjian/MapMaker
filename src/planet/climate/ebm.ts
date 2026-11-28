@@ -57,6 +57,14 @@ export interface ClimateOptions {
    */
   frost?: boolean | 'sea';
   /**
+   * The heat shed does not fall again once it has reached its most (D266): the fitted formula's fall beyond that
+   * (the vapour's share growing faster than T⁴) is taken as level, as the limit it stands for is, until the formula
+   * rises past it again at rock-melting heat. So a planet's tropics passing the limit get hotter and send their
+   * heat elsewhere, and the planet tips only when it takes in more than the limit as a whole: the very rule its
+   * seas' fate is decided by (physics.ts seaLimit).
+   */
+  ceiling?: boolean;
+  /**
    * The sea's currents carry heat only where the sea is open (D261): the heat they carry is taken in proportion to
    * the open share of the sea (all of it while nine tenths are open, as the model was made on the Earth; none under
    * a sea frozen from pole to pole, where it was still carried as on the Earth, more than a cold planet takes in).
@@ -260,9 +268,10 @@ function coarseClimate(mesh: Mesh, def: PlanetDefinition, x: Derived, land: Arra
   const OLR_FROM = 50, OLR_STEP = 0.05, OLR_N = Math.ceil((2000 - OLR_FROM) / OLR_STEP) + 2;
   const olrTable = new Float64Array(OLR_N);
   for (let i = 0; i < OLR_N; i++) olrTable[i] = olrOf(OLR_FROM + i * OLR_STEP);
+  if (opts.ceiling) for (let i = 1; i < OLR_N; i++) if (olrTable[i] < olrTable[i - 1]) olrTable[i] = olrTable[i - 1];
   const olr = (T: number) => {
     const u = (T - OLR_FROM) / OLR_STEP;
-    if (!(u >= 0 && u < OLR_N - 1)) return olrOf(T);
+    if (!(u >= 0 && u < OLR_N - 1)) return opts.ceiling && u >= OLR_N - 1 ? Math.max(olrOf(T), olrTable[OLR_N - 1]) : olrOf(T);
     const i = Math.floor(u), t = u - i;
     return olrTable[i] + (olrTable[i + 1] - olrTable[i]) * t;
   };
