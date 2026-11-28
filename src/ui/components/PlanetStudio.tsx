@@ -8,7 +8,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../store.ts';
 import { VIEWER } from '../shell/dock.ts';
 import * as cmd from '../../domain/commands.ts';
-import { definitionFromPreset, newDefinition, definitionProblems, PRESETS, EARTH_WATER_KM, type PlanetDefinition, type PresetId, type GeoEventKind, type GeoEvent } from '../../planet/model/definition.ts';
+import { definitionFromPreset, newDefinition, definitionProblems, PRESETS, WORLD_KINDS, EARTH_WATER_KM, type PlanetDefinition, type PresetId, type GeoEventKind, type GeoEvent } from '../../planet/model/definition.ts';
 import { derive, type Derived, type WaterFate } from '../../planet/model/physics.ts';
 import { SIGMA } from '../../planet/model/units.ts';
 import { familyOf, figuresOf, settingsChanged, whatChanged, whyItLooksSo, type Figures, type ModelFacts, type SeaFacts, type SettingChange } from '../../planet/why.ts';
@@ -66,7 +66,7 @@ const EXPLAIN: Record<string, string> = {
   heat: 'More heat from radioactivity inside: faster plates, more volcanoes, more mountain building; too little and the plates stop (a stagnant lid).',
   plates: 'About how many plates the lithosphere starts broken into; they split and weld as the history goes on.',
   activity: 'How vigorous plate motion is, beyond what the interior\'s heat gives.',
-  continents: 'How much of the surface the continents\' crust covers at the start (shelves included).',
+  continents: 'How much of the surface the continents\' crust covers at the start (shelves included). The water is the same whatever the crust: with little continental crust it covers nearly everything; with a great deal, the deep basins left are too small to hold it and it floods the continents\' low ground.',
   hotspots: 'Mantle plumes: they build island chains on moving plates, and huge shields on a stagnant lid.',
   pressure: 'More air: a stronger greenhouse, gentler temperature differences, more scattered light; none: the surface bakes by day and freezes by night.',
   co2: 'Carbon dioxide traps heat: more of it, warmer (Venus has 96 per cent and 92 bar: 460 °C).',
@@ -408,14 +408,17 @@ export function PlanetStudio() {
   const [changed, setChanged] = useState<{ from: PlanetDefinition; to: PlanetDefinition; settings: SettingChange[]; lines: string[] } | null>(null);
   const [where, setWhere] = useState(false);
   useEffect(() => {
-    if (!model) return;
+    // (D268: only the planet as the settings have it is a state to compare. While the land they ask for is being
+    // made the picture is of the land before under the other settings as they are now: a preset chosen is then
+    // compared with the planet before it, not with that in-between.)
+    if (!model || stale) return;
     const was = settledAt.current;
     if (was && was.def !== model.of) {
       const settings = settingsChanged(was.def, model.of);
-      if (settings.length) setChanged({ from: was.def, to: model.of, settings, lines: whatChanged(was.summary, model.summary) });
+      if (settings.length) setChanged({ from: was.def, to: model.of, settings, lines: whatChanged(was.summary, model.summary, settings) });
     }
     settledAt.current = { def: model.of, summary: model.summary };
-  }, [model]);
+  }, [model, stale]);
   // (D265) Tipping points: where along a setting the planet becomes another kind of world. From the rules at once
   // (the air lost, the seas boiled away, too little air for water); where the seas freeze over is found from the
   // climate itself, tried at a few values in the background once the planet has settled, for the sliders in view.
@@ -679,8 +682,9 @@ export function PlanetStudio() {
       <header className="studio-head">
         <h2>Planet Studio{editing ? `: ${editing.name}` : ''}</h2>
         <div className="studio-presets">
-          {(Object.keys(PRESETS) as PresetId[]).map((id) => (
-            <button key={id} className={`small ${def.preset === id ? 'on' : ''}`} title={PRESETS[id].about} onClick={() => choosePreset(id)} data-testid={`studio-preset-${id}`}>{PRESETS[id].name}</button>
+          {/* (D268) The second calculation offers the kinds of world in order, each by what it gives; the first, its own as they were. */}
+          {(second ? WORLD_KINDS : (Object.keys(PRESETS) as PresetId[]).filter((id) => !PRESETS[id].second)).map((id) => (
+            <button key={id} className={`small ${def.preset === id ? 'on' : ''}`} title={PRESETS[id].about} onClick={() => choosePreset(id)} data-testid={`studio-preset-${id}`}>{second ? PRESETS[id].kind ?? PRESETS[id].name : PRESETS[id].name}</button>
           ))}
         </div>
         <button className="close" onClick={close} aria-label="Close" data-testid="studio-close">×</button>

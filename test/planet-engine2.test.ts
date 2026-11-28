@@ -36,11 +36,12 @@ test('the definition: water as an amount, the share a guess until the land is ma
   assert.ok(Math.abs(d.water.depthKm! - EARTH_WATER_KM) < 0.02, `${d.water.depthKm} km`);
   assert.equal(d.history.climate, undefined);
   assert.deepEqual(definitionProblems(d), []);
-  // The presets' seas, as amounts: none for the dry ones, less for the desert, the Earth's for the ocean world
-  // (there the continents are what is missing).
+  // The presets' seas, as amounts: none for the dry ones, a fiftieth of the Earth's for the desert (D268), the
+  // Earth's for the ocean world (there the continents are what is missing).
   assert.equal(newDefinition('inactive').water.depthKm, 0);
   assert.equal(newDefinition('hothouse').water.depthKm, 0);
-  assert.ok(newDefinition('desert').water.depthKm! > 0.1 && newDefinition('desert').water.depthKm! < 0.8);
+  assert.equal(newDefinition('desert').water.depthKm, 0.05);
+  assert.ok(newDefinition('desert').water.oceanFraction > 0 && newDefinition('desert').water.oceanFraction < 0.1, 'its share guessed from its amount');
   assert.ok(Math.abs(newDefinition('ocean').water.depthKm! - EARTH_WATER_KM) < 0.3);
   // Stored and read back: the same; an amount out of range brought within it; no amount readable, the share's.
   const back = definitionOf(JSON.parse(JSON.stringify(canonicalDefinition(d))))!;

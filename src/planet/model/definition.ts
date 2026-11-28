@@ -227,7 +227,9 @@ export interface LifeSpec {
 
 export type PresetId =
   | 'earthlike' | 'supercontinent' | 'young-volcanic' | 'high-tectonic' | 'inactive'
-  | 'frozen' | 'desert' | 'ocean' | 'tidally-locked' | 'super-earth' | 'hothouse';
+  | 'frozen' | 'desert' | 'ocean' | 'tidally-locked' | 'super-earth' | 'hothouse'
+  // (D268) Kinds of world only the second calculation makes.
+  | 'ice-age' | 'scorched' | 'lava' | 'airless';
 
 export interface PlanetDefinition {
   version: 1;
@@ -279,13 +281,19 @@ const EARTH: Omit<PlanetDefinition, 'name' | 'seed' | 'preset'> = {
 };
 
 type Patch = { [K in keyof typeof EARTH]?: Partial<(typeof EARTH)[K]> };
-const preset = (name: string, about: string, patch: Patch) => ({ name, about, patch });
+/**
+ * A preset: what it changes of the Earth's settings. `kind` (D268): the kind of world it gives under the second
+ * calculation, in a word or two, where its name says something else; `second`: only the second calculation makes
+ * it (the first keeps seas and Earth-like ground whatever the heat or the air).
+ */
+export interface Preset { name: string; about: string; patch: Patch; kind?: string; second?: boolean }
+const preset = (name: string, about: string, patch: Patch, more: { kind?: string; second?: boolean } = {}): Preset => ({ name, about, patch, ...more });
 
 /**
  * Scientifically coherent starting points. Each changes what makes the difference and keeps the rest Earth's;
  * `about` says what to expect and why.
  */
-export const PRESETS: Record<PresetId, { name: string; about: string; patch: Patch }> = {
+export const PRESETS: Record<PresetId, Preset> = {
   earthlike: preset('Earth-like', 'A Sun-like star, an Earth-sized planet in the middle of the habitable zone, oceans over two thirds, moving plates.', {}),
   supercontinent: preset('Ancient supercontinent', 'Earth-like, with the continents gathered into one: a vast dry interior, one world ocean, monsoons at its edges.', {
     history: { ageGyr: 4.54, events: [{ id: 'pangaea', kind: 'supercontinent', startMa: 120, durationMyr: 120, strength: 1 }] },
@@ -310,17 +318,17 @@ export const PRESETS: Record<PresetId, { name: string; about: string; patch: Pat
     atmosphere: { pressureBar: 0.0063, co2: 0.95, ch4: 0, o2: 0.0013, ar: 0.019, clouds: 0.02, cloudAlbedo: 0.3 },
     water: { oceanFraction: 0 },
     life: { vegetation: 'none' },
-  }),
+  }, { kind: 'Mars-like' }),
   frozen: preset('Frozen world', 'Earth-like but farther from its star: ice spreads from the poles until it reflects most of the light.', {
     orbit: { semiMajorAu: 1.25 },
     water: { oceanFraction: 0.65 },
-  }),
+  }, { kind: 'Snowball' }),
   desert: preset('Desert world', 'Little water and a warmer orbit: small seas, wide deserts, rain only near coasts and mountains. With so little water the oceans do not boil away this close in.', {
     orbit: { semiMajorAu: 0.9 },
     tectonics: { continentalFraction: 0.6 },
     atmosphere: { pressureBar: 0.8, co2: 3e-3, clouds: 0.25 },
     water: { oceanFraction: 0.1 },
-  }),
+  }, { kind: 'Hot desert' }),
   ocean: preset('Ocean world', 'Water over almost everything: island arcs and hotspot chains, a mild, even climate.', {
     tectonics: { continentalFraction: 0.04, hotspots: 18 },
     water: { oceanFraction: 0.97 },
@@ -332,7 +340,7 @@ export const PRESETS: Record<PresetId, { name: string; about: string; patch: Pat
     atmosphere: { pressureBar: 1.3, co2: 2e-3 },
     water: { oceanFraction: 0.6 },
     life: { vegetation: 'red-dwarf' },
-  }),
+  }, { kind: 'Locked to its star' }),
   'super-earth': preset('High-gravity super-Earth', 'Half again Earth\'s size and over four times its mass: nearly double gravity, lower mountains, deeper air, a hotter interior; a little farther from its star, as its thick air holds more heat.', {
     orbit: { semiMajorAu: 1.1 },
     body: { radiusKm: 9500 },
@@ -349,8 +357,48 @@ export const PRESETS: Record<PresetId, { name: string; about: string; patch: Pat
     atmosphere: { pressureBar: 92, co2: 0.965, ch4: 0, o2: 0, ar: 7e-5, clouds: 1, cloudAlbedo: 0.77 },
     water: { oceanFraction: 0 },
     life: { vegetation: 'none' },
-  }),
+  }, { kind: 'Venus-like' }),
+  // (D268) The kinds of world the second calculation makes and the presets above did not cover.
+  'ice-age': preset('Ice age', 'An Earth a little farther from its star with less carbon dioxide in its air (180 parts in a million, as in the Earth\'s last ice age): some degrees colder, ice sheets and frozen seas reaching far from the poles, the seas still open.', {
+    orbit: { semiMajorAu: 1.015 },
+    atmosphere: { co2: 1.8e-4 },
+  }, { second: true }),
+  scorched: preset('Scorched world', 'An Earth at less than half its distance from the star: five times the sunlight, far more than seas can stand. They boiled away long ago and the water was lost to space; what is left is dry rock hotter than boiling water, under the air it still holds.', {
+    orbit: { semiMajorAu: 0.45 },
+    life: { vegetation: 'none' },
+  }, { second: true }),
+  lava: preset('Lava world', 'So close to its star that the star\'s tides have stopped its turning and its light has stripped its air and water away: the face that always looks at the star is molten rock, the other dark and cold.', {
+    orbit: { semiMajorAu: 0.03, eccentricity: 0 },
+    body: { tiltDeg: 0, tidallyLocked: 'auto' },
+    atmosphere: { pressureBar: 0 },
+    water: { oceanFraction: 0 },
+    life: { vegetation: 'none' },
+  }, { second: true }),
+  airless: preset('Airless world', 'A small body like the Moon: too little gravity to hold any air, no water, no moving plates. Its ground follows the sun: far hotter than boiling water by day, colder than any place on Earth by night.', {
+    body: { radiusKm: 1737, tiltDeg: 1.5, dayHours: 655.7 },
+    interior: { heatProduction: 0.3, coreFraction: 0.02, regime: 'stagnant-lid' },
+    tectonics: { plates: 2, activity: 0.05, continentalFraction: 0.2, hotspots: 2 },
+    atmosphere: { pressureBar: 0, clouds: 0 },
+    water: { oceanFraction: 0 },
+    life: { vegetation: 'none' },
+  }, { second: true }),
 };
+
+/**
+ * The presets in the order the second calculation offers them (D268): the kinds of world first, from the Earth
+ * outward to the cold and inward to the hot, then the worlds without air, then the Earth-like ones that differ in
+ * their geology.
+ */
+export const WORLD_KINDS: PresetId[] = [
+  'earthlike', 'ice-age', 'frozen', 'desert', 'ocean', 'tidally-locked', 'hothouse', 'scorched', 'lava', 'inactive', 'airless',
+  'supercontinent', 'young-volcanic', 'high-tectonic', 'super-earth',
+];
+/**
+ * What a preset sets otherwise under the second calculation (D268), where the sea follows from an amount of water:
+ * a desert world has a fiftieth of the Earth's water (the share of sea the first calculation was given, a tenth of
+ * the surface, takes that little over its land).
+ */
+const SECOND_WATER_KM: Partial<Record<PresetId, number>> = { desert: 0.05 };
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
@@ -378,7 +426,10 @@ export function asEngine2(d: PlanetDefinition): PlanetDefinition {
 }
 
 /** A complete definition of the second calculation from a preset (D258). */
-export const newDefinition = (id: PresetId, seed = 1, name = PRESETS[id].name): PlanetDefinition => asEngine2(definitionFromPreset(id, seed, name));
+export function newDefinition(id: PresetId, seed = 1, name = PRESETS[id].name): PlanetDefinition {
+  const d = asEngine2(definitionFromPreset(id, seed, name)), km = SECOND_WATER_KM[id];
+  return km === undefined ? d : withWaterGuess({ ...d, water: { ...d.water, depthKm: km } });
+}
 
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);

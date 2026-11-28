@@ -195,6 +195,17 @@ export function withoutPlants(b: BiomeId): BiomeId {
   return b === 'steppe' || b === 'desert' ? 'desert' : b === 'tundra' ? 'polarDesert' : 'barren';
 }
 
+/**
+ * The colour of bare rock by the air over it (D268, bar): under air, rock and dust weathered brown (BIOME.barren);
+ * under none, the dark grey dust of the Moon and Mercury, about half as bright (as its albedo: physics.ts
+ * groundAlbedo); between them up to the air of Mars.
+ */
+export const AIRLESS_ROCK: [number, number, number] = [84, 83, 82];
+export function bareRockColour(pressureBar: number): [number, number, number] {
+  const t = Math.max(0, Math.min(1, pressureBar / 0.006)), c = BIOME.barren.colour;
+  return [Math.round(AIRLESS_ROCK[0] + (c[0] - AIRLESS_ROCK[0]) * t), Math.round(AIRLESS_ROCK[1] + (c[1] - AIRLESS_ROCK[1]) * t), Math.round(AIRLESS_ROCK[2] + (c[2] - AIRLESS_ROCK[2]) * t)];
+}
+
 const ROCK: Array<[number, [number, number, number]]> = [
   [100, [118, 106, 96]], [250, [92, 78, 70]], [450, [64, 52, 50]], [650, [58, 36, 34]], [800, [110, 34, 22]], [950, [176, 52, 20]],
   [1100, [232, 96, 24]], [1400, [252, 160, 52]], [2000, [255, 224, 150]], [3000, [255, 250, 235]],

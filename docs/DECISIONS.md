@@ -61,6 +61,60 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D268. Every slider earns its place, second part: a preset for each kind of world; the test of every slider (the Planet Studio's overhaul, step 6)
+
+- **A preset for each kind of world** the second calculation makes, offered in order (`WORLD_KINDS`) and called by
+  what it gives (`kind`): Earth-like, Ice age, Snowball, Hot desert, Ocean world, Locked to its star, Venus-like,
+  Scorched world, Lava world, Mars-like, Airless world; then the Earth-like ones that differ in their geology
+  (ancient supercontinent, young volcanic, highly tectonic, high-gravity super-Earth).
+  - *New* (`second`: not offered to a planet of the first calculation, which keeps seas and Earth-like ground
+    whatever the heat or the air): **Ice age** (1.015 AU, carbon dioxide at 180 parts in a million: 6 °C, ice over
+    14 %); **Scorched world** (0.45 AU: its seas boiled away, 114 °C, scorched rock everywhere, its air held);
+    **Lava world** (0.03 AU: the star's tides have locked it, its air and water are gone; the face under the star
+    molten over 42 % of the planet, the other dark cold rock); **Airless world** (the Moon's size and day: -67 °C,
+    107 °C by day and -176 °C by night).
+  - *The desert world* has a fiftieth of the Earth's water under the second calculation (the tenth of the surface
+    under sea that the first was given takes that little over its land): 22 °C, seas over 13 %, desert 40 %, bare
+    ground too hot for plants 27 %. With the water it had (a third of a kilometre) it was a steam bath with a metre
+    of rain.
+  - The others as they were: under the second calculation the frozen world is a snowball (-60 °C, its seas frozen
+    from pole to pole), the geologically inactive one is Mars's like (-67 °C, bare rock under thin air), the
+    runaway hothouse Venus's (461 °C).
+- **Bare rock by the air over it** (`bareRockColour`): the test of the presets found Mars's like and the airless
+  world alike in everything the picture shows (bare rock, -67 °C). Under no air bare rock is the dark grey dust of
+  the Moon and Mercury, about half as bright as rock weathered under air (as its albedo, D267); scorched rock under
+  no air is as dark until its own glow shows.
+- **The test of every slider** (`test/planet-every-slider.test.ts`), the user's first finding made a standing test:
+  each setting from its lowest to its highest, the others an Earth's.
+  - The 14 that keep the land (the star's mass, distance, eccentricity, tilt, day, locked, air, carbon dioxide,
+    cloud cover, water, plants and their colour, the clouds' brightness, methane): the planet is of another kind
+    over at least a fifth of its surface (most over half; the plants' colour: another colour over 15 %), on the
+    same land cell for cell.
+  - The 9 the land is made from (radius, the interior's heat, plates, tectonic activity, continents, hotspots, age,
+    seed, the core's share): other land (a fifth or more of the surface between land and sea) or another world.
+  - Each is named in "What changed" by its own name, with at least one figure that moved.
+  - Measured (share of the planet of another kind, lowest against highest): the star's mass 100 %, distance 100 %,
+    eccentricity 100 %, tilt 31 %, day 40 %, locked 36 %, air 72 %, carbon dioxide 99 %, cloud cover 34 %, water
+    98 %, no plants 21 %, radius 100 %, heat 46 %, plates 48 %, activity 44 %, hotspots 39 %, age 98 %, seed 43 %.
+  - *Continental crust*: none and nine tenths both leave little land (6 % apart), for the water is the same
+    whatever the crust: with a great deal of continental crust the deep basins left are too small to hold it, and
+    it floods the continents' low ground. Right, and now said under the slider; the test takes the middle against
+    the highest.
+  - *The season at the nearest point* does next to nothing on a round orbit (it matters with the eccentricity): it
+    stays under "More".
+- **"What changed" in full**: scorched rock and molten rock are figures of their own (they were counted with bare
+  rock, so no air against a hundred bar said only the temperature); a change of the plants' colour alone says so
+  (it read "Nothing you would see" over a fifth of the planet repainted); the settings under "More" and those set
+  by hand have their names (they read "Other settings"). And it is said against the planet as it was before the
+  change: while new land is being made the picture is of the land before under the other settings as they are
+  now, and that in-between was taken as the state to compare with, so a preset chosen read "Nothing you would
+  see" once its land arrived.
+- **Tests**: `test/planet-presets.test.ts` (2): every preset offered once, in order, the new kinds for the second
+  calculation only, each stored and read back, the first calculation's as they were; the eleven kinds each give
+  their kind (seas' fate, air, temperature, the surface's families) and no two are alike.
+  `test/planet-every-slider.test.ts` (3): as above. Interface: the kinds offered in order by what they give; a
+  scorched, an airless and a lava world chosen and seen; the first calculation's presets as they were.
+
 ### D267. Every slider earns its place, first part: the cloud cover, the water and the plants (the Planet Studio's overhaul, step 6)
 
 - **Found by the slider test** (each fast setting at its lowest, middle and highest, and what the planet is like at
@@ -115,8 +169,8 @@ Follows from D2. The test drives the real interface exactly as a person would.
   15 °C; 6 km and more: sea over all but the ice at the poles, 22 °C. No plants: forest 9 % and grass 11 % become
   bare rock 16 % and desert 8 % (with the 3 % there was).
 - **Not done here** (said so that it is not taken as done): the cloud cover is still a setting of its own, the same
-  whatever the water (a real planet with small seas would have less cloud, and be some degrees warmer than shown);
-  presets for each kind of world, the test of every slider in one run and the sheets of pictures are the next parts.
+  whatever the water (a real planet with small seas would have less cloud, and be some degrees warmer than shown).
+  Presets for each kind of world and the test of every slider in one run: D268.
 - **Tests**: `test/planet-sliders.test.ts` (6): the clouds' hold on heat (its sign and size, less in the cold, none
   without water or in the first calculation; an Earth warmer under a clear sky and not boiled; the mark nearer the
   star); bare ground's albedo and day-heated ground; no plants and cold deserts by the rules; an Earth under a clear

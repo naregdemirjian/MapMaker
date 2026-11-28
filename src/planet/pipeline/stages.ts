@@ -11,7 +11,7 @@ import { seasonalClimate, type ClimateOptions } from '../climate/ebm.ts';
 import { joinRain, rainMonths, type RainMonths } from '../climate/hydroclimate.ts';
 import { hydrology } from '../water/hydrology.ts';
 import { iceSheets } from '../water/ice.ts';
-import { BIOME, BIOME_IDS, KOPPEN, SEA_ICE_FROM, biomeColour, biomeOf, customBiomeOf, hotSurface, koppen, rockColour, withoutPlants, type BiomeId, type Place } from '../life/biomes.ts';
+import { BIOME, BIOME_IDS, KOPPEN, SEA_ICE_FROM, bareRockColour, biomeColour, biomeOf, customBiomeOf, hotSurface, koppen, rockColour, withoutPlants, type BiomeId, type Place } from '../life/biomes.ts';
 import { toLevel } from '../mesh/transfer.ts';
 import { airState, derive, groundAlbedo, opticalDepth, waterState, withAirAsItIs } from '../model/physics.ts';
 import { cellsAt, meshAt } from '../mesh/icosphere.ts';
@@ -564,6 +564,7 @@ export const STAGES: Record<string, StageDef> = {
       const rules = life.biomeSet === 'custom' ? [...life.customBiomes].sort((a, b) => a.priority - b.priority) : [];
       const second = !!deps.sea, dry = !!deps.sea?.dry, crust = deps.sea?.crust as Uint8Array | undefined;
       const frozenYear = deps.climate.ice as Float32Array, lifeless = life.vegetation === 'none';
+      const bareRock = second ? bareRockColour(deps.sea.pressureBar as number) : null;
       // (D261) Under too little air for liquid water: seas frozen where they stand, or ice caps where the vapour froze out.
       const thin = deps.sea?.fate === 'frozen', caps = deps.climate.caps as Uint8Array | undefined, dayHigh = deps.climate.dayHigh as Float32Array | undefined;
       const T = new Float64Array(12), P = new Float64Array(12);
@@ -598,13 +599,16 @@ export const STAGES: Record<string, StageDef> = {
         biome[c] = BIOME_IDS.indexOf(b);
         if (kind[c] !== 1 && !dry) koppenOut[c] = 1 + KOPPEN.findIndex(([k]) => k === koppen(T, P, (most - 2 + 12) % 12));
         const own = rules.length && b !== 'sea' && b !== 'seaIce' && b !== 'lake' && !heat ? customBiomeOf(place, rules) : null;
-        let rgb = own ? own.color : b === 'scorched' || b === 'lava' ? rockColour(hot) : biomeColour(iced, life);
+        // (Bare rock by the air over it, D268: dark grey under none.)
+        let rgb = own ? own.color : b === 'scorched' || b === 'lava' ? rockColour(hot) : second && iced === 'barren' ? bareRock! : biomeColour(iced, life);
         if (crust && !own && b === iced && (b === 'barren' || b === 'scorched' || b === 'lava')) {
           // Bare rock by its crust (D259): the dark basalt of an ocean's floor, the paler rock of continents, as the
           // Moon's dark plains lie among its bright highlands; lost in the rock's own glow as it nears melting.
           const tone = crust[c] === CRUST.oceanic ? 0.76 : crust[c] === CRUST.arc ? 0.9 : 1.08, glow = Math.max(0, Math.min(1, (hot - 650) / 450));
           const f = tone + (1 - tone) * glow;
-          rgb = [Math.min(255, Math.round(rgb[0] * f)), Math.min(255, Math.round(rgb[1] * f)), Math.min(255, Math.round(rgb[2] * f))];
+          // (Scorched rock under no air is as dark as its bare rock, D268, until its own glow shows.)
+          const dark = b === 'barren' || !bareRock ? [1, 1, 1] : [0, 1, 2].map((k) => { const d = bareRock[k] / BIOME.barren.colour[k]; return d + (1 - d) * glow; });
+          rgb = [Math.min(255, Math.round(rgb[0] * f * dark[0])), Math.min(255, Math.round(rgb[1] * f * dark[1])), Math.min(255, Math.round(rgb[2] * f * dark[2]))];
         }
         if (own) custom[c] = 1 + rules.indexOf(own);
         colour[3 * c] = rgb[0]; colour[3 * c + 1] = rgb[1]; colour[3 * c + 2] = rgb[2];

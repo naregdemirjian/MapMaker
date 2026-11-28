@@ -5319,6 +5319,9 @@ try {
       const d = (document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement)?.dataset.drawn ?? '';
       return !document.querySelector('[data-testid=studio-status]') && !document.querySelector('[data-testid=studio-progress]') && d.startsWith('satellite:') && d !== w;
     }, was, { timeout: 240_000 });
+    // (Its presets as they were, D268: by their names, none of the kinds only the second calculation makes.)
+    assert.equal(await page.getByTestId('studio-preset-lava').count() + await page.getByTestId('studio-preset-ice-age').count(), 0);
+    assert.equal(await text('studio-preset-inactive'), 'Geologically inactive');
     // Worked out by itself, as every planet is (D257), by the calculation it was made with.
     await settled('');
     assert.equal(await page.getByTestId('studio-readout-sea').count(), 0, 'no sea worked out from water');
@@ -5798,6 +5801,87 @@ try {
     await page.getByTestId('undo').click();
     await h.saved();
     assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.name === 'Slider Prime')), false);
+    await page.getByTestId('studio-history').click();
+  });
+
+  await h.step('A preset for each kind of world (D268): offered in order by what each gives; a scorched world, its seas boiled away; an airless one, dark grey rock following the sun; a lava world, one face molten; undone', async () => {
+    const text = async (id: string) => (await page.getByTestId(id).textContent()) ?? '';
+    await page.evaluate(() => {
+      const m = (window as any).__mapmaker, s = m.store;
+      const def = m.bench.planet.newDefinition('earthlike', 4);
+      def.simulation.spanMyr = 100;
+      const id = s.execute((w: any) => m.bench.commands.createSimPlanet(w, 'Kinds Prime', def));
+      s.set({ spaceId: id, layerId: s.world.all('layer').find((l: any) => l.space_id === id)?.id ?? '', selection: null });
+    });
+    await h.saved();
+    await page.getByTestId('studio-map').click();
+    await page.locator('[data-testid^="map-row-"].sel').click();
+    await page.getByTestId('open-planet-studio').click();
+    await page.getByTestId('planet-studio').waitFor();
+    const drawnNow = () => page.evaluate(() => (document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement).dataset.drawn ?? '');
+    const redrawn = (was: string) => page.waitForFunction((w) => {
+      const d = (document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement)?.dataset.drawn ?? '';
+      return !document.querySelector('[data-testid=studio-status]') && !document.querySelector('[data-testid=studio-progress]') && d.startsWith('satellite:') && d !== w;
+    }, was, { timeout: 300_000 });
+    // (The picture's colours: how much of it is sea, how much glows as molten rock, how grey its land is.)
+    const seen = () => page.evaluate(() => {
+      const c = document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement, d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+      let blue = 0, glow = 0, grey = 0, n = 0;
+      for (let k = 0; k < d.length; k += 4 * 37) {
+        n++;
+        if (d[k + 2] > d[k] + 30 && d[k + 2] > d[k + 1] + 15) blue++;
+        else if (d[k] > 170 && d[k] > d[k + 2] + 70) glow++;
+        else if (Math.abs(d[k] - d[k + 2]) < 10 && d[k] < 150) grey++;
+      }
+      return { sea: blue / n, glow: glow / n, grey: grey / n };
+    });
+    const surface = async (re: RegExp) => { await page.waitForFunction((src) => new RegExp(src, 'i').test(document.querySelector('[data-testid=studio-why-surface]')?.textContent ?? ''), re.source, { timeout: 300_000 }); return text('studio-why-surface'); };
+    await redrawn('');
+    // The kinds of world, in order, each called by what it gives.
+    assert.deepEqual(await page.locator('[data-testid^="studio-preset-"]').allTextContents(), [
+      'Earth-like', 'Ice age', 'Snowball', 'Hot desert', 'Ocean world', 'Locked to its star', 'Venus-like', 'Scorched world', 'Lava world', 'Mars-like', 'Airless world',
+      'Ancient supercontinent', 'Young volcanic world', 'Highly tectonic', 'High-gravity super-Earth',
+    ]);
+    // A scorched world: said what to expect, then worked out by itself; its seas boiled away, all of it scorched rock.
+    let was = await drawnNow();
+    await page.getByTestId('studio-preset-scorched').click();
+    assert.match(await text('studio-explain'), /five times the sunlight/);
+    await redrawn(was);
+    assert.match(await text('studio-fate'), /^Too much sunlight for seas/);
+    assert.match(await surface(/scorched rock everywhere/), /over 100 °C/);
+    assert.ok((await seen()).sea < 0.005, 'no sea');
+    await h.screenshot('planet-studio-scorched-world');
+    // An airless world: nothing holds air; dark grey rock whose days and nights are far apart.
+    was = await drawnNow();
+    await page.getByTestId('studio-preset-airless').click();
+    assert.match(await text('studio-explain'), /like the Moon/);
+    await redrawn(was);
+    await surface(/bare rock everywhere/);
+    await page.waitForFunction(() => /its days reach/.test(document.querySelector('[data-testid=studio-readout-temperature]')?.textContent ?? ''), undefined, { timeout: 120_000 });
+    const days = (await text('studio-readout-temperature')).match(/at the equator its days reach (-?\d+) °C and its nights fall to (-?\d+) °C$/)!;
+    assert.ok(Number(days[1]) > 90 && Number(days[2]) < -150, `${days[1]} °C by day, ${days[2]} °C by night`);
+    const moon = await seen();
+    assert.ok(moon.grey > 0.9 && moon.sea < 0.005, `grey rock all over (${JSON.stringify(moon)})`);
+    await h.screenshot('planet-studio-airless-world');
+    // A lava world: one face molten under a star that never sets, the other dark.
+    was = await drawnNow();
+    await page.getByTestId('studio-preset-lava').click();
+    assert.match(await text('studio-explain'), /stopped its turning/);
+    await redrawn(was);
+    assert.match(await surface(/molten rock \d+ %/), /bare rock \d+ %/i);
+    // What changed is said against the planet before the preset was chosen (the airless world), all of it: the
+    // settings that keep the land and those it is made from, and what moved.
+    await page.waitForFunction(() => /Molten rock none → \d+ %/.test(document.querySelector('[data-testid=studio-changed]')?.textContent ?? ''), undefined, { timeout: 300_000 });
+    assert.match(await text('studio-changed-what'), /Distance: 1\.000 AU → 0\.030 AU.*Radius: 1,737 km → 6,371 km.*Plates: 2 → 12/);
+    assert.match(await text('studio-changed'), /Temperature -6\d °C → 6\d\d °C[\s\S]*Bare rock 100 % → \d+ %/);
+    const lava = await seen();
+    assert.ok(lava.glow > 0.2 && lava.glow < 0.7 && lava.grey > 0.2, `one face glowing, the other dark (${JSON.stringify(lava)})`);
+    await h.screenshot('planet-studio-lava-world');
+    await page.getByTestId('studio-close').click();
+    await page.getByTestId('planet-studio').waitFor({ state: 'detached' });
+    await page.getByTestId('undo').click();
+    await h.saved();
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.name === 'Kinds Prime')), false);
     await page.getByTestId('studio-history').click();
   });
 

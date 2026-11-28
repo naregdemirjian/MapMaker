@@ -129,17 +129,18 @@ export function whyItLooksSo(def: PlanetDefinition, x: Derived, sea: SeaFacts, m
 }
 
 /** A planet's figures in a few numbers: for saying what a change did. */
-export interface Figures { meanC: number; sea: number; ice: number; forest: number; grass: number; desert: number; rock: number; rainMm: number }
+export interface Figures { meanC: number; sea: number; ice: number; forest: number; grass: number; desert: number; rock: number; scorched: number; molten: number; rainMm: number }
 export function figuresOf(sea: SeaFacts, model: ModelFacts): Figures {
   const fam = familyShares(model.shares);
-  return { meanC: model.surfaceC, sea: fam.sea, ice: fam.ice, forest: fam.forest, grass: fam.grass, desert: fam.desert, rock: fam.rock + fam.scorched + fam.molten, rainMm: sea.fate === 'liquid' ? model.rainMm : 0 };
+  return { meanC: model.surfaceC, sea: fam.sea, ice: fam.ice, forest: fam.forest, grass: fam.grass, desert: fam.desert, rock: fam.rock, scorched: fam.scorched, molten: fam.molten, rainMm: sea.fate === 'liquid' ? model.rainMm : 0 };
 }
 
 /**
  * What changed between two states of a planet, in words: each figure that moved by more than a little, with its
- * value before and after. Empty when nothing did.
+ * value before and after. Empty when nothing did. (`settings`, D268: the settings that differ; where no figure moved
+ * and the plants' colour is among them, that is what changed.)
  */
-export function whatChanged(before: Figures, after: Figures): string[] {
+export function whatChanged(before: Figures, after: Figures, settings: SettingChange[] = []): string[] {
   const out: string[] = [];
   if (Math.abs(after.meanC - before.meanC) >= 0.5) out.push(`Temperature ${num(before.meanC)} °C → ${num(after.meanC)} °C`);
   const share = (name: string, a: number, b: number) => { if (Math.abs(b - a) >= 0.005) out.push(`${name} ${a < 0.005 ? 'none' : `${pct(a)} %`} → ${b < 0.005 ? 'none' : `${pct(b)} %`}`); };
@@ -149,7 +150,11 @@ export function whatChanged(before: Figures, after: Figures): string[] {
   share('Grass and scrub', before.grass, after.grass);
   share('Desert', before.desert, after.desert);
   share('Bare rock', before.rock, after.rock);
+  share('Scorched rock', before.scorched, after.scorched);
+  share('Molten rock', before.molten, after.molten);
   if (Math.abs(after.rainMm - before.rainMm) >= Math.max(10, 0.03 * before.rainMm)) out.push(`Rain and snow ${num(before.rainMm)} → ${num(after.rainMm)} mm a year`);
+  const plants = settings.find((c) => c.name === 'Plants');
+  if (!out.length && plants && plants.after !== 'none' && before.forest + before.grass > 0.005) out.push(`The colour of its plants: ${plants.before} → ${plants.after}`);
   return out;
 }
 
@@ -159,10 +164,15 @@ const SETTINGS: Array<[string, (d: PlanetDefinition) => number | string | boolea
   ['The star\'s mass', (d) => d.star.stars[0].massSun, (v) => `${num(v, 2)} Suns`],
   ['Distance', (d) => d.orbit.semiMajorAu, (v) => `${num(v, 3)} AU`],
   ['Eccentricity', (d) => d.orbit.eccentricity, (v) => num(v, 3)],
+  ['The season at the nearest point', (d) => d.orbit.perihelionDeg, (v) => `${num(v)}°`],
+  ['The year, set by hand', (d) => d.orbit.yearDays, (v) => `${num(v, 1)} days`],
+  ['The star\'s light, set by hand', (d) => d.star.stars[0].luminositySun, (v) => `${num(v, 3)} × the Sun\'s`],
+  ['The star\'s surface temperature, set by hand', (d) => d.star.stars[0].teffK, (v) => `${num(v)} K`],
   ['Tilt', (d) => d.body.tiltDeg, (v) => `${num(v, 1)}°`],
   ['Day', (d) => d.body.dayHours, (v) => `${num(v, 1)} hours`],
   ['Locked to its star', (d) => String(d.body.tidallyLocked), () => ''],
   ['Radius', (d) => d.body.radiusKm, (v) => `${num(v)} km`],
+  ['The mass, set by hand', (d) => d.body.massEarths, (v) => `${num(v, 2)} Earths`],
   ['Air', (d) => d.atmosphere.pressureBar, (v) => (v > 0 ? `${num(v, v < 0.1 ? 4 : 2)} bar` : 'none')],
   ['Carbon dioxide', (d) => d.atmosphere.co2, (v) => `${num(100 * v, v < 0.01 ? 3 : 1)} %`],
   ['Methane', (d) => d.atmosphere.ch4, (v) => `${num(100 * v, 4)} %`],
@@ -172,12 +182,15 @@ const SETTINGS: Array<[string, (d: PlanetDefinition) => number | string | boolea
   ['Water', (d) => d.water.depthKm ?? d.water.oceanFraction, (v) => `${num(v, 2)} km`],
   ['Seas kept by hand', (d) => (d.water.keep ? 'yes' : 'no'), () => ''],
   ['Plants', (d) => ({ earth: 'green', 'red-dwarf': 'dark red', 'blue-star': 'yellow to orange', none: 'none' })[d.life.vegetation], () => ''],
+  ['Biomes', (d) => (d.life.biomeSet === 'custom' ? 'the planet\'s own' : 'the Earth\'s'), () => ''],
   ['The interior\'s heat', (d) => d.interior.heatProduction, (v) => num(v, 2)],
+  ['The core\'s share', (d) => d.interior.coreFraction, (v) => num(v, 2)],
   ['Plates', (d) => d.tectonics.plates, (v) => num(v)],
   ['Tectonic activity', (d) => d.tectonics.activity, (v) => num(v, 2)],
   ['Continents', (d) => d.tectonics.continentalFraction, (v) => num(v, 2)],
   ['Hotspots', (d) => d.tectonics.hotspots, (v) => num(v)],
   ['Age', (d) => d.history.ageGyr, (v) => `${num(v, 2)} billion years`],
+  ['Simulated', (d) => d.simulation.spanMyr ?? 500, (v) => `${num(v)} million years`],
   ['Seed', (d) => d.seed, (v) => String(v)],
 ];
 /** The settings that differ between two definitions (those the Studio's sliders set), each with its value before and after. */
