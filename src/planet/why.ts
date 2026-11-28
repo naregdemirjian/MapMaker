@@ -119,9 +119,11 @@ export function whyItLooksSo(def: PlanetDefinition, x: Derived, sea: SeaFacts, m
   const fam = familyShares(model.shares), living = fam.forest + fam.grass;
   const cause = fam.molten > 0.5 ? 'Hot enough to melt rock (from 1,100 °C)'
     : fam.scorched > 0.5 ? 'Too hot for water to lie on the ground (over 100 °C)'
-      : living > 0.01 ? (def.life.vegetation === 'none' ? 'Warmth and rain enough for plants, but no life given' : 'Plants where it is warm and wet enough, ice where it is cold, desert where it is dry')
+      : living > 0.01 ? 'Plants where it is warm and wet enough, ice where it is cold, desert where it is dry'
         : fam.ice > 0.5 ? 'Too cold for anything but ice'
-          : !wet ? 'No rain, so nothing grows and nothing wears the rock' : 'Too cold or too hot for plants';
+          : !wet ? 'No rain, so nothing grows and nothing wears the rock'
+            // (D267: a planet given no plants has bare ground where they would have grown.)
+            : def.life.vegetation === 'none' && model.surfaceC > -15 && model.surfaceC < 45 ? 'Warmth and rain enough for plants, but no life given' : 'Too cold or too hot for plants';
   out.push({ key: 'surface', cause, effect: surfaceInWords(model.shares) });
   return out;
 }
@@ -169,7 +171,7 @@ const SETTINGS: Array<[string, (d: PlanetDefinition) => number | string | boolea
   ['Air kept by hand', (d) => (d.atmosphere.keep ? 'yes' : 'no'), () => ''],
   ['Water', (d) => d.water.depthKm ?? d.water.oceanFraction, (v) => `${num(v, 2)} km`],
   ['Seas kept by hand', (d) => (d.water.keep ? 'yes' : 'no'), () => ''],
-  ['Plants', (d) => d.life.vegetation, () => ''],
+  ['Plants', (d) => ({ earth: 'green', 'red-dwarf': 'dark red', 'blue-star': 'yellow to orange', none: 'none' })[d.life.vegetation], () => ''],
   ['The interior\'s heat', (d) => d.interior.heatProduction, (v) => num(v, 2)],
   ['Plates', (d) => d.tectonics.plates, (v) => num(v)],
   ['Tectonic activity', (d) => d.tectonics.activity, (v) => num(v, 2)],

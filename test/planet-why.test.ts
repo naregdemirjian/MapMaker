@@ -120,7 +120,7 @@ test('the settings that differ between two planets: each by its name, with its v
     { name: 'Air', before: '1.01 bar', after: 'none' }, { name: 'Carbon dioxide', before: '0.042 %', after: '4.0 %' },
   ]);
   assert.deepEqual(settingsChanged(d, change(d, (c) => { c.water.keep = true; c.life.vegetation = 'none'; c.body.tiltDeg = 60; })), [
-    { name: 'Tilt', before: '23.4°', after: '60.0°' }, { name: 'Seas kept by hand', before: 'no', after: 'yes' }, { name: 'Plants', before: 'earth', after: 'none' },
+    { name: 'Tilt', before: '23.4°', after: '60.0°' }, { name: 'Seas kept by hand', before: 'no', after: 'yes' }, { name: 'Plants', before: 'green', after: 'none' },
   ]);
   assert.deepEqual(settingsChanged(d, change(d, (c) => { c.water.depthKm = 6.14; c.tectonics.plates = 20; c.seed = 9; })), [
     { name: 'Water', before: '2.61 km', after: '6.14 km' }, { name: 'Plates', before: '12', after: '20' }, { name: 'Seed', before: '4', after: '9' },

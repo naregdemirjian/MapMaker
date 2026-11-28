@@ -85,8 +85,8 @@ test('planets with little or no air: their days and nights, their lower mean, gr
     for (let c = 0; c < n; c++) share.set(BIOME_IDS[biome[c]], (share.get(BIOME_IDS[biome[c]]) ?? 0) + A[c] / (4 * Math.PI));
     return { T, Cl, B, of: (b: keyof typeof BIOME) => share.get(b) ?? 0 };
   };
-  // Like the Moon (its size, no water, its long day): about 90 °C by day and −175 °C by night at the equator, some
-  // −70 °C on average (the Moon: about −75), bare rock.
+  // Like the Moon (its size, no water, its long day): about 105 °C by day and −175 °C by night at the equator, some
+  // −70 °C on average (the Moon: about −75), bare rock (its days too short a heat to scorch it, D267).
   const moonDef = change(d, (c) => { c.body.radiusKm = 1737; c.water.depthKm = 0; c.body.dayHours = 655.7; c.body.tiltDeg = 1.5; });
   const moon = await figures(moonDef);
   assert.ok((moon.T.dayC as number) > 75 && (moon.T.dayC as number) < 115 && (moon.T.nightC as number) > -195 && (moon.T.nightC as number) < -160, `the Moon's like: ${moon.T.dayC} and ${moon.T.nightC} °C`);
@@ -103,10 +103,10 @@ test('planets with little or no air: their days and nights, their lower mean, gr
   // The same body with the Earth's short day: milder nights, a higher mean.
   const spun = await figures(change(moonDef, (c) => { c.body.dayHours = 24; }));
   assert.ok((spun.T.nightC as number) > (moon.T.nightC as number) + 25 && (spun.T.surfaceC as number) > (moon.T.surfaceC as number) + 10, `${spun.T.nightC} °C nights, ${spun.T.surfaceC} °C on average`);
-  // Like Mercury: scorched by its days (about 315 °C on the model's bare rock, brighter than Mercury's own), though
-  // its year's mean is mild.
+  // Like Mercury: scorched by its days (about 340 °C on ground as dark as an airless world's, D267; Mercury's own:
+  // about 350 °C at its mean distance), though its year's mean is mild.
   const mercury = await figures(change(d, (c) => { c.body.radiusKm = 2440; c.water.depthKm = 0; c.atmosphere.pressureBar = 0; c.orbit.semiMajorAu = 0.387; c.body.dayHours = 1407.6; c.body.tiltDeg = 0; }));
-  assert.ok((mercury.T.dayC as number) > 290 && (mercury.T.dayC as number) < 330 && (mercury.T.nightC as number) < -150 && (mercury.T.surfaceC as number) < 100, `${mercury.T.dayC}, ${mercury.T.nightC}, ${mercury.T.surfaceC} °C`);
+  assert.ok((mercury.T.dayC as number) > 320 && (mercury.T.dayC as number) < 360 && (mercury.T.nightC as number) < -150 && (mercury.T.surfaceC as number) < 100, `${mercury.T.dayC}, ${mercury.T.nightC}, ${mercury.T.surfaceC} °C`);
   assert.ok(mercury.of('scorched') > 0.9, `${mercury.of('scorched')} scorched`);
   // Like Mars: about 0 °C by day and −100 °C by night.
   const mars = await figures(newDefinition('inactive', 4));

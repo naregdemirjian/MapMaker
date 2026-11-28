@@ -119,8 +119,18 @@ export interface Place {
   ice: number;
 }
 
-/** The biome of a place by the Earth's rules. */
-export function biomeOf(p: Place): BiomeId {
+/**
+ * Rain under this share of what could evaporate (the aridity index) leaves ground too dry even for scrub (D267): the
+ * UN's "hyper-arid" lands are those under 0.05, its "arid" under 0.2; scrub gives out about halfway between.
+ */
+export const BARE_DESERT_AI = 0.1;
+
+/**
+ * The biome of a place by the Earth's rules. `coldDeserts` (D267, the second calculation): cold land too dry even
+ * for scrub is desert, as the Gobi and the Taklamakan are, where the rules as first made had steppe and scrub
+ * wherever it is cold and dry.
+ */
+export function biomeOf(p: Place, coldDeserts = false): BiomeId {
   if (p.water === WATER.sea) return 'sea';
   if (p.ice > 50 || p.water === WATER.ice) return 'ice';
   if (p.water === WATER.lake || p.water === WATER.saltLake) return 'lake';
@@ -132,6 +142,7 @@ export function biomeOf(p: Place): BiomeId {
   if (hot < 10) return p.height > 1500 && Math.abs(mat) < 40 && mat > -12 ? 'alpine' : map < 150 ? 'polarDesert' : 'tundra';
   if (p.water === WATER.wetland || p.water === WATER.floodplain || p.water === WATER.delta) return mat >= 20 ? 'swamp' : 'wetland';
   const ai = p.pet > 0 ? map / p.pet : map > 0 ? 10 : 0;
+  if (coldDeserts && mat < 10 && ai < BARE_DESERT_AI) return 'desert';
   if (mat < 3) return ai < 0.25 ? 'steppe' : 'boreal';
   if (mat < 18) {
     if (ai < 0.2) return mat < 10 ? 'steppe' : 'desert';
@@ -155,15 +166,33 @@ export const SEA_ICE_FROM = 0.5;
 export const TOO_HOT_FOR_PLANTS = 50;
 /** Above this (°C) no water lies on the ground at the Earth's pressure: the rock is baked dry (D259). */
 export const SCORCHED_FROM = 100;
+/**
+ * Ground that only its days heat (little or no air, D262) is scorched from this (°C, the day's high; D267): past the
+ * boiling of water only for some hours, with cold ground a hand's depth below, it is not baked through. So the
+ * Moon's equator (about 120 °C at noon) is bare rock, and Mercury's (over 400 °C) scorched.
+ */
+export const SCORCHED_BY_DAY_FROM = 200;
 /** Above this (°C) basalt, the commonest rock of a planet's crust, melts (D259). */
 export const MOLTEN_FROM = 1100;
 
 /**
- * What heat alone makes of the land (D259), from the mean temperature of its warmest month (°C): molten rock, rock
- * scorched dry, bare ground too hot for anything to grow; null where the heat decides nothing.
+ * What heat alone makes of the land (D259), from the mean temperature of its warmest month (°C) and, where the
+ * ground has a day of its own (D262), its days' high: molten rock, rock scorched dry, bare ground too hot for
+ * anything to grow; null where the heat decides nothing.
  */
-export function hotSurface(hot: number): BiomeId | null {
-  return hot >= MOLTEN_FROM ? 'lava' : hot >= SCORCHED_FROM ? 'scorched' : hot >= TOO_HOT_FOR_PLANTS ? 'barren' : null;
+export function hotSurface(hot: number, dayHigh = -Infinity): BiomeId | null {
+  const peak = Math.max(hot, dayHigh);
+  return peak >= MOLTEN_FROM ? 'lava' : hot >= SCORCHED_FROM || dayHigh >= SCORCHED_BY_DAY_FROM ? 'scorched' : peak >= TOO_HOT_FOR_PLANTS ? 'barren' : null;
+}
+
+/**
+ * The kind of land a place is on a planet with no plants (D267): where plants would have made a forest, a grassland
+ * or a marsh there is bare ground; where they would have been thin (steppe, tundra), desert, warm or polar. What is
+ * not the plants' doing (sea, ice, lakes, salt, rock, desert) stays.
+ */
+export function withoutPlants(b: BiomeId): BiomeId {
+  if (!(BIOME[b].plants > 0)) return b;
+  return b === 'steppe' || b === 'desert' ? 'desert' : b === 'tundra' ? 'polarDesert' : 'barren';
 }
 
 const ROCK: Array<[number, [number, number, number]]> = [

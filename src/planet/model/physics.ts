@@ -287,18 +287,37 @@ export function airProperties(d: PlanetDefinition, gravity: number, surfaceK: nu
 }
 
 /**
+ * How much clouds add to the air's hold on heat (D267): the Earth's clouds send back about 26 W/m² of the heat its
+ * surface gives off, while turning away about 47 W/m² of sunlight (Stephens and others 2012). In the opacity's terms:
+ * a planet with seas and no cloud at all loses 0.21 of it, a wholly clouded one gains as much. Counted from half
+ * cover, as the rest of the opacity is fitted to the Earth with that; of water clouds only, so by the water there is
+ * to make them, and less in cold air that holds little vapour.
+ */
+export const CLOUD_HOLD = 0.42;
+/**
+ * The albedo of bare ground (D267): 0.25 under air (soil, sand and rock weathered by air and water: the Earth's
+ * deserts, Mars's dust); 0.12 with none, where the ground is dust darkened by the star's wind and by small impacts
+ * (the Moon's 0.11, Mercury's 0.09). Between them up to the air of Mars (0.006 bar). For the second calculation.
+ */
+export const groundAlbedo = (pressureBar: number): number => 0.12 + 0.13 * Math.max(0, Math.min(1, pressureBar / WATER_TRIPLE_BAR));
+
+/**
  * Grey optical depth of the air in the thermal infrared (simplified, calibrated): carbon dioxide's grows with its
  * partial pressure and with pressure broadening (fitted through Earth, Mars and Venus: τ = 4.26 p_CO2^0.391
  * P^0.382, bar); methane's with the square root of its amount; water vapour's with temperature at about a third of
  * the Clausius-Clapeyron rate (its effect grows roughly with the logarithm of the vapour), where there is water.
+ * For the second calculation (D267) the clouds' share too (`cloud`, CLOUD_HOLD): more than half the sky clouded
+ * holds more heat in, less than half lets more out.
  */
-export function opticalDepth(d: PlanetDefinition, surfaceK: number): { co2: number; ch4: number; h2o: number; total: number } {
+export function opticalDepth(d: PlanetDefinition, surfaceK: number): { co2: number; ch4: number; h2o: number; cloud?: number; total: number } {
   const a = d.atmosphere, P = a.pressureBar;
   const co2 = P > 0 && a.co2 > 0 ? 4.26 * (a.co2 * P) ** 0.391 * P ** 0.382 : 0;
   const ch4 = P > 0 && a.ch4 > 0 ? 0.04 * Math.sqrt((a.ch4 * P) / 1.9e-6) : 0;
   const water = d.water.oceanFraction > 0 && P > 0.006 ? Math.min(1, Math.sqrt(d.water.oceanFraction / 0.71)) * Math.min(1, P ** 0.5) : 0;
   const h2o = water > 0 ? 0.62 * water * Math.exp(Math.min(8, 0.0237 * (surfaceK - 288))) : 0;
-  return { co2, ch4, h2o, total: co2 + ch4 + h2o };
+  if (d.engine !== 2 || !(water > 0)) return { co2, ch4, h2o, total: co2 + ch4 + h2o };
+  const cloud = CLOUD_HOLD * water * (a.clouds - 0.5) * Math.min(1, Math.exp(0.0237 * (surfaceK - 288)));
+  return { co2, ch4, h2o, cloud, total: co2 + ch4 + h2o + cloud };
 }
 
 // ---------------------------------------------------------------- everything derived
@@ -336,7 +355,7 @@ export interface Derived {
   albedo: number;
   equilibriumK: number;
   surfaceK: number;
-  tau: { co2: number; ch4: number; h2o: number; total: number };
+  tau: { co2: number; ch4: number; h2o: number; cloud?: number; total: number };
   greenhouseK: number;
   /** Sunlight absorbed, W/m² averaged over the sphere. */
   absorbed: number;
@@ -393,7 +412,7 @@ export function derive(d: PlanetDefinition): Derived {
   const rayleigh = 0.5 * (1 - Math.exp((-0.125 * (at.pressureBar * 1e5) / gravity) / 10_330));
   const albedoAt = (T: number) => {
     const ice = clamp((263 - T) / 30, 0, 1) * (ocean > 0 ? Math.min(1, 0.3 + ocean) : 0.05);
-    const ground = ocean * 0.06 + (1 - ocean) * 0.25;
+    const ground = ocean * 0.06 + (1 - ocean) * (d.engine === 2 ? groundAlbedo(at.pressureBar) : 0.25);
     const surface = ground * (1 - ice) + 0.6 * ice;
     const clear = rayleigh + (1 - rayleigh) ** 2 * surface;
     const cover = at.pressureBar > 0 ? at.clouds : 0;

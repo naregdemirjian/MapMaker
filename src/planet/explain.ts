@@ -168,6 +168,8 @@ export function explain(d: ExplainData, c: number): Explanation {
       for (let m = 0; m < 12; m++) year += d.climate.precipMonthly[m * n + c];
       const pet = d.water?.pet[c] ?? 0;
       lines.push(`${BIOME[id].name}${pet > 0 ? `: rain is ${fmt(year / pet, 2)} of what the warmth and sunlight could evaporate` : ''}.`);
+      // (D267) A planet given no plants: bare ground where the climate would have grown them.
+      if (d.def.engine === 2 && d.def.life.vegetation === 'none' && !d.dry && id === 'barren' && hottest < TOO_HOT_FOR_PLANTS) lines[lines.length - 1] += ' The planet was given no plants: where they would grow the ground is bare.';
     }
     if (lines.length) sections.push({ heading: 'Life', lines });
   }

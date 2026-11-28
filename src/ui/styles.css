@@ -977,4 +977,5 @@ body.number-scrubbing, body.number-scrubbing * { cursor: ns-resize !important; u
 .studio-zone.cold { background: #7fb4e0; }
 .studio-zone.air { background: #8a8f98; }
 .studio-zone.thin { background: #b08ad8; }
+.studio-zone.sea { background: #2f6fb5; }
 .studio-marks-text { display: block; color: var(--muted); font-size: 11.5px; line-height: 1.35; }

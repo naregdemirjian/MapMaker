@@ -65,6 +65,15 @@ export interface ClimateOptions {
    */
   ceiling?: boolean;
   /**
+   * Snow needs water to fall (D267): how much of cold land lies under snow, by the water there is to make it. 1 by
+   * default (a planet with the Earth's seas); less on a planet with small seas, whose cold land is mostly bare. So
+   * such a planet brightens less as it cools and is slower to freeze over (Abe and others 2011; Kodama and others
+   * 2019: a planet with little water stays unfrozen in far less light than one covered by sea).
+   */
+  snow?: number;
+  /** The albedo of bare ground (D267): 0.25 by default; darker on a world with no air (physics.ts groundAlbedo). */
+  ground?: number;
+  /**
    * The sea's currents carry heat only where the sea is open (D261): the heat they carry is taken in proportion to
    * the open share of the sea (all of it while nine tenths are open, as the model was made on the Earth; none under
    * a sea frozen from pole to pole, where it was still carried as on the Earth, more than a cold planet takes in).
@@ -73,6 +82,8 @@ export interface ClimateOptions {
   /**
    * On a world with no sea (D259), the height (m, on the heights' scale) at which its air has the pressure given:
    * its mean surface. The balance's temperatures hold there; ground above it is colder and ground below it warmer.
+   * Also on a world with small seas (D267), whose air lies mostly over its land: a height between its sea's level
+   * and its mean surface; its seas keep their own temperatures.
    */
   datum?: number;
   /**
@@ -179,11 +190,12 @@ export function seasonalClimate(mesh: Mesh, def: PlanetDefinition, x: Derived, h
     for (let c = 0; c < n; c++) {
       const h = heightM[c];
       let t: number;
-      if (opts.datum !== undefined) {
-        // (No sea, D259: heights against the mean surface, the broad part of them at the slower rate both ways.)
+      if (opts.datum !== undefined && h >= 0) {
+        // (No sea, D259: heights against the mean surface, the broad part of them at the slower rate both ways.
+        // With small seas, D267: the land's heights likewise, at the rate of frozen ground where it is frozen.)
         const hh = h - opts.datum, b = broad[c] - opts.datum;
         const wide = hh >= 0 ? Math.max(0, Math.min(hh, b)) : Math.min(0, Math.max(hh, b));
-        t = fineL[c] - (lapse * (plateau * wide + (hh - wide))) / 1000 + warm[c];
+        t = fineL[c] - (lapse * ((opts.frost === false ? plateau : frozen[c]) * wide + (hh - wide))) / 1000 + warm[c];
       } else t = h >= 0 ? fineL[c] - (lapse * (frozen[c] * Math.min(h, broad[c]) + Math.max(0, h - broad[c]))) / 1000 + warm[c] : fineS[c];
       monthly[m * n + c] = t;
       annual[c] += t / months;
@@ -240,31 +252,37 @@ function coarseClimate(mesh: Mesh, def: PlanetDefinition, x: Derived, land: Arra
   // sheet, through the summer (D165), instead of losing it whenever the summer sun warms it towards thawing.
   let annualK: Float64Array | null = null;
   const frost = opts.frost !== false, snows = frost && opts.frost !== 'sea';
+  // (D267) Snow by the water there is to fall as it; the bare ground's own albedo.
+  const fall = opts.snow ?? 1, bare = opts.ground ?? 0.25;
   const iceOf = (c: number, T: number) => {
     if (!frost) return { snow: 0, sea: 0, kept: 0 };
-    const tc = T - 273.15, kept = snows && annualK ? Math.max(0, Math.min(1, (263.15 - annualK[c]) / 10)) : 0;
-    return { snow: snows ? Math.max(kept, Math.max(0, Math.min(1, -tc / 10))) : 0, sea: Math.max(0, Math.min(1, (-1.8 - tc) / 8)), kept };
+    const tc = T - 273.15, kept = snows && annualK ? fall * Math.max(0, Math.min(1, (263.15 - annualK[c]) / 10)) : 0;
+    return { snow: snows ? Math.max(kept, fall * Math.max(0, Math.min(1, -tc / 10))) : 0, sea: Math.max(0, Math.min(1, (-1.8 - tc) / 8)), kept };
   };
   const albedo = (c: number, T: number) => {
     const i = iceOf(c, T), l = land[c];
     // (Snow brightens as it gets colder and drier: 0.62 at −10 °C to 0.8 at −30 °C and below, as on the ice sheets.)
     const snowA = 0.62 + snowCold * Math.max(i.kept, Math.max(0, Math.min(1, (273.15 - 10 - T) / 20)));
-    const surface = l * (0.25 * (1 - i.snow) + snowA * i.snow) + (1 - l) * (0.06 * (1 - i.sea) + 0.62 * i.sea);
+    const surface = l * (bare * (1 - i.snow) + snowA * i.snow) + (1 - l) * (0.06 * (1 - i.sea) + 0.62 * i.sea);
     return cloud[c] * at.cloudAlbedo + (1 - cloud[c]) * (rayleigh + (1 - rayleigh) ** 2 * surface);
   };
   // The albedo of a cell's land alone (its own clouds, its own snow from its own temperatures, D165).
   let annualL: Float64Array | null = null;
   const landAlbedo = (c: number, T: number) => {
-    const kept = snows && annualL ? Math.max(0, Math.min(1, (263.15 - annualL[c]) / 10)) : 0;
-    const snow = snows ? Math.max(kept, Math.max(0, Math.min(1, -(T - 273.15) / 10))) : 0;
+    const kept = snows && annualL ? fall * Math.max(0, Math.min(1, (263.15 - annualL[c]) / 10)) : 0;
+    const snow = snows ? Math.max(kept, fall * Math.max(0, Math.min(1, -(T - 273.15) / 10))) : 0;
     const snowA = 0.62 + snowCold * Math.max(kept, Math.max(0, Math.min(1, (273.15 - 10 - T) / 20)));
-    return cloudL[c] * at.cloudAlbedo + (1 - cloudL[c]) * (rayleigh + (1 - rayleigh) ** 2 * (0.25 * (1 - snow) + snowA * snow));
+    return cloudL[c] * at.cloudAlbedo + (1 - cloudL[c]) * (rayleigh + (1 - rayleigh) ** 2 * (bare * (1 - snow) + snowA * snow));
   };
   // (The air's opacity to heat as physics.ts works it out, its parts that do not change with the temperature taken out
   // once; at 288 K the water vapour's factor is 1, so its part there is its coefficient. Read from a table every
   // twentieth of a kelvin, between its values: within a part in a billion, D168.)
   const tau0 = opticalDepth(def, 288), dryTau = tau0.co2 + tau0.ch4, wet = tau0.h2o;
-  const olrOf = (T: number) => (SIGMA * T ** 4) / (1 + 0.75 * (dryTau + wet * Math.exp(Math.min(8, 0.0237 * (T - 288)))));
+  // (D267, the second calculation: the clouds' share of the opacity, less in cold air; physics.ts opticalDepth.)
+  const cloudTau = tau0.cloud ?? 0;
+  const olrOf = cloudTau !== 0
+    ? (T: number) => (SIGMA * T ** 4) / (1 + 0.75 * (dryTau + wet * Math.exp(Math.min(8, 0.0237 * (T - 288))) + cloudTau * Math.min(1, Math.exp(0.0237 * (T - 288)))))
+    : (T: number) => (SIGMA * T ** 4) / (1 + 0.75 * (dryTau + wet * Math.exp(Math.min(8, 0.0237 * (T - 288)))));
   const OLR_FROM = 50, OLR_STEP = 0.05, OLR_N = Math.ceil((2000 - OLR_FROM) / OLR_STEP) + 2;
   const olrTable = new Float64Array(OLR_N);
   for (let i = 0; i < OLR_N; i++) olrTable[i] = olrOf(OLR_FROM + i * OLR_STEP);

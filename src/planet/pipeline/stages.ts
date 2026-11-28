@@ -11,11 +11,11 @@ import { seasonalClimate, type ClimateOptions } from '../climate/ebm.ts';
 import { joinRain, rainMonths, type RainMonths } from '../climate/hydroclimate.ts';
 import { hydrology } from '../water/hydrology.ts';
 import { iceSheets } from '../water/ice.ts';
-import { BIOME, BIOME_IDS, KOPPEN, SEA_ICE_FROM, biomeColour, biomeOf, customBiomeOf, hotSurface, koppen, rockColour, type BiomeId, type Place } from '../life/biomes.ts';
+import { BIOME, BIOME_IDS, KOPPEN, SEA_ICE_FROM, biomeColour, biomeOf, customBiomeOf, hotSurface, koppen, rockColour, withoutPlants, type BiomeId, type Place } from '../life/biomes.ts';
 import { toLevel } from '../mesh/transfer.ts';
-import { airState, derive, opticalDepth, waterState, withAirAsItIs } from '../model/physics.ts';
+import { airState, derive, groundAlbedo, opticalDepth, waterState, withAirAsItIs } from '../model/physics.ts';
 import { cellsAt, meshAt } from '../mesh/icosphere.ts';
-import { seaLevelForVolume } from '../water/sealevel.ts';
+import { areasUnderForVolumes, seaLevelForVolume } from '../water/sealevel.ts';
 import { rasterize } from '../mesh/transfer.ts';
 import { insolationCells, sunlightOf, type Sunlight } from '../climate/insolation.ts';
 import { cycleAt, dayCycles, dayShare, groundInertia } from '../climate/diurnal.ts';
@@ -195,7 +195,8 @@ const withSea = (def: PlanetDefinition, share: unknown): PlanetDefinition => (ty
  * water give and the air it has in fact.
  */
 const asItIs = (def: PlanetDefinition, share: unknown, pressureBar: unknown): PlanetDefinition =>
-  (typeof pressureBar === 'number' ? { ...withSea(def, share), atmosphere: { ...def.atmosphere, pressureBar } } : withSea(def, share));
+  // (Marked as the second calculation's, D267: its physics has what the first's must not change by.)
+  (typeof pressureBar === 'number' ? { ...withSea(def, share), engine: 2, atmosphere: { ...def.atmosphere, pressureBar } } : withSea(def, share));
 /** The heights given, as an input. */
 const givenHeights = (p: StageParams): ProductData => (p.heights ? { heights: p.heights } : {});
 
@@ -218,6 +219,9 @@ function joinClimate(parts: ProductData[], deps: Record<string, ProductData>, n:
   };
 }
 
+/** The most water the Studio's slider gives (km, spread evenly) and how many amounts up to it the sea stage tries (D267). */
+export const WATER_MOST_KM = 12;
+const WATER_STEPS = 48;
 /** The water stage's kind for an ice sheet (hydrology.ts WATER.ice). */
 const WATER_ICE = 9;
 /** The least snow in a year (mm of water) for frozen ground to lie under it (D261): with less it sublimes away, as in Antarctica's dry valleys. */
@@ -305,7 +309,7 @@ export const STAGES: Record<string, StageDef> = {
    */
   sea: {
     id: 'sea',
-    version: 3,
+    version: 4,
     deps: () => ['tectonics'],
     inputs: (def, p) => ({
       level: p.level, frame: p.frame ?? -1, depthKm: def.water.depthKm ?? 0, keep: !!def.water.keep, keepAir: !!def.atmosphere.keep,
@@ -338,16 +342,26 @@ export const STAGES: Record<string, StageDef> = {
       const liquidShare = against(level);
       // (First the air the planet has in fact, D261: none where it is too small to hold any.)
       const read = definitionOf(inputs.state)!;
-      const asGiven = { ...read, atmosphere: { ...read.atmosphere, ...(inputs.keepAir ? { keep: true } : {}) } };
+      const asGiven: PlanetDefinition = { ...read, engine: 2, atmosphere: { ...read.atmosphere, ...(inputs.keepAir ? { keep: true } : {}) } };
       const air = airState(asGiven), given = withAirAsItIs(asGiven);
       const st = waterState({ ...given, water: { ...given.water, depthKm: depth, ...(inputs.keep ? { keep: true } : {}) } }, none ? 0 : liquidShare);
       // (Seas, open or under ice, stand at their level; without them the land is measured from its lowest ground.)
       const dry = st.fate !== 'liquid' && st.fate !== 'frozen';
       if (dry && !none) level = lowest;
       const share = dry ? (none ? liquidShare : against(level)) : liquidShare;
+      // (D267) The water's amount against the share it would cover over this land, for the amounts the water's
+      // slider can give, and the amount at which the last land goes under: where along that slider the planet
+      // becomes another kind of world.
+      const depths = new Float32Array(WATER_STEPS), shares = new Float32Array(WATER_STEPS);
+      let highest = -Infinity, toDrown = 0;
+      for (let c = 0; c < n; c++) if (h[c] > highest) highest = h[c];
+      for (let c = 0; c < n; c++) toDrown += ((highest - h[c]) * area[c]) / (4 * Math.PI);
+      for (let i = 0; i < WATER_STEPS; i++) depths[i] = WATER_MOST_KM * ((i + 1) / WATER_STEPS) ** 3;
+      const under = areasUnderForVolumes(h, area, Float64Array.from(depths, (km) => km * 4 * Math.PI));
+      for (let i = 0; i < WATER_STEPS; i++) shares[i] = Math.min(1, under[i] / (4 * Math.PI));
       ctx.progress(1, 1);
       return {
-        heights, level: (level - kept) * 1000, share, dry, ma: times[f],
+        heights, level: (level - kept) * 1000, share, dry, ma: times[f], depths, shares, drownsKm: toDrown,
         // (The kind of crust at each place then, for the colour of bare rock: D259.)
         crust: (T.kinds as Uint8Array).slice(f * n, (f + 1) * n),
         fate: st.fate, kept: st.kept, cause: st.cause, liquidShare: none ? 0 : liquidShare, absorbed: st.absorbed, limit: Number.isFinite(st.limit) ? st.limit : 0, withSeasK: st.withSeasK,
@@ -386,6 +400,11 @@ export const STAGES: Record<string, StageDef> = {
         second.iceStillsCurrents = true;
         // (Thin air hardly sets the ground's temperature with height: all of it from about a third of a bar.)
         second.lapseShare = Math.min(1, def.atmosphere.pressureBar / 0.3);
+        // (Snow needs water to fall, D267: less of cold land lies under it the smaller the seas, by their share
+        // against the Earth's. Bare ground under no air is dark dust.)
+        const share = deps.sea.share as number;
+        second.snow = Math.min(1, share / 0.71);
+        second.ground = groundAlbedo(def.atmosphere.pressureBar);
         // (Seas frozen where they stand under too little air, D261: their ice, and no snow on the land.)
         if (deps.sea.fate === 'frozen') second.frost = 'sea';
         if (deps.sea.dry) {
@@ -394,6 +413,14 @@ export const STAGES: Record<string, StageDef> = {
           let mean = 0;
           for (let c = 0; c < n; c++) mean += (heights[c] * mesh.area[c]) / (4 * Math.PI);
           second.datum = mean;
+        } else if (share < 0.5) {
+          // (Small seas, D267: the air lies mostly over the land, so its pressure is that at a height between the
+          // sea's level and the mean surface, the nearer the mean surface the smaller the seas; from half the
+          // planet under sea, at the sea's level as on the Earth. So a planet losing its last seas does not grow
+          // colder the deeper its sea sinks in its basins.)
+          let mean = 0;
+          for (let c = 0; c < n; c++) mean += (Math.max(0, heights[c]) * mesh.area[c]) / (4 * Math.PI);
+          second.datum = (1 - share / 0.5) * mean;
         }
       }
       const r = seasonalClimate(mesh, def, derive(def), heights, second);
@@ -406,7 +433,7 @@ export const STAGES: Record<string, StageDef> = {
       if (thin > 0 && !x.tidallyLocked && Number.isFinite(x.solarDayHours) && x.solarDayHours > 0) {
         const sun = sunlightOf(def, x), tau = opticalDepth(def, 288), hold = 1 + 0.75 * (tau.co2 + tau.ch4);
         const day = x.solarDayHours * 3600, inertia = groundInertia(def.atmosphere.pressureBar);
-        const rock = dayCycles(sun, 0.25, day, inertia, hold), ice = deps.sea.fate === 'frozen' ? dayCycles(sun, 0.62, day, inertia, hold) : rock;
+        const rock = dayCycles(sun, groundAlbedo(def.atmosphere.pressureBar), day, inertia, hold), ice = deps.sea.fate === 'frozen' ? dayCycles(sun, 0.62, day, inertia, hold) : rock;
         dayHigh = new Float32Array(n); nightLow = new Float32Array(n);
         const open = deps.sea.fate === 'liquid';
         let band = 0;
@@ -536,7 +563,7 @@ export const STAGES: Record<string, StageDef> = {
       const koppenOut = new Uint8Array(n), biome = new Uint8Array(n), custom = new Uint8Array(n), colour = new Uint8Array(3 * n);
       const rules = life.biomeSet === 'custom' ? [...life.customBiomes].sort((a, b) => a.priority - b.priority) : [];
       const second = !!deps.sea, dry = !!deps.sea?.dry, crust = deps.sea?.crust as Uint8Array | undefined;
-      const frozenYear = deps.climate.ice as Float32Array;
+      const frozenYear = deps.climate.ice as Float32Array, lifeless = life.vegetation === 'none';
       // (D261) Under too little air for liquid water: seas frozen where they stand, or ice caps where the vapour froze out.
       const thin = deps.sea?.fate === 'frozen', caps = deps.climate.caps as Uint8Array | undefined, dayHigh = deps.climate.dayHigh as Float32Array | undefined;
       const T = new Float64Array(12), P = new Float64Array(12);
@@ -549,26 +576,30 @@ export const STAGES: Record<string, StageDef> = {
         // decides first: molten rock, rock scorched dry, bare ground too hot for anything to grow.)
         let hot = -Infinity;
         for (let m = 0; m < 12; m++) if (T[m] > hot) hot = T[m];
-        // (With little or no air the ground is as hot as its days make it, D262: its days' high decides.)
+        // (With little or no air the ground is as hot as its days make it, D262: its days' high decides with it.)
+        const warmest = hot;
         if (dayHigh && dayHigh[c] > hot) hot = dayHigh[c];
         // (Too little air for liquid water, D261: nothing rains or snows, so the land is bare rock; the seas, ice.
         // A cap of ice where the planet's vapour froze out. And on a planet with air, D261: ground whose warmest
         // month is below freezing is under ice only where some snow falls; where next to none does, it is bare.)
         let wet = 0;
         for (let m = 0; m < 12; m++) wet += P[m];
-        const told: BiomeId = dry ? (caps?.[c] ? 'ice' : 'barren') : biomeOf(place);
+        const told: BiomeId = dry ? (caps?.[c] ? 'ice' : 'barren') : biomeOf(place, second);
         const first: BiomeId = !second || dry ? told
           : thin ? (told === 'sea' ? 'seaIce' : 'barren')
             : told === 'ice' && ice[c] <= 50 && kind[c] !== WATER_ICE && wet < DRY_SNOW_MM ? 'barren' : told;
-        const heat = second && first !== 'sea' && first !== 'lake' ? hotSurface(hot) : null;
+        const heat = second && first !== 'sea' && first !== 'lake' ? hotSurface(warmest, dayHigh ? dayHigh[c] : -Infinity) : null;
         // (The sea frozen over for most of the year, D260: still sea, drawn as ice.)
         // (And a lake frozen for most of the year: ice.)
-        const b: BiomeId = heat ?? (second && frozenYear[c] >= SEA_ICE_FROM ? (first === 'sea' ? 'seaIce' : first === 'lake' ? 'ice' : first) : first);
+        const iced: BiomeId = heat ?? (second && frozenYear[c] >= SEA_ICE_FROM ? (first === 'sea' ? 'seaIce' : first === 'lake' ? 'ice' : first) : first);
+        // (D267) A planet with no plants has none of the kinds of land plants make: its dry land is desert, the rest
+        // bare ground, coloured by what the climate would have grown there (the wetter, the more weathered).
+        const b: BiomeId = second && lifeless ? withoutPlants(iced) : iced;
         biome[c] = BIOME_IDS.indexOf(b);
         if (kind[c] !== 1 && !dry) koppenOut[c] = 1 + KOPPEN.findIndex(([k]) => k === koppen(T, P, (most - 2 + 12) % 12));
         const own = rules.length && b !== 'sea' && b !== 'seaIce' && b !== 'lake' && !heat ? customBiomeOf(place, rules) : null;
-        let rgb = own ? own.color : b === 'scorched' || b === 'lava' ? rockColour(hot) : biomeColour(b, life);
-        if (crust && !own && (b === 'barren' || b === 'scorched' || b === 'lava')) {
+        let rgb = own ? own.color : b === 'scorched' || b === 'lava' ? rockColour(hot) : biomeColour(iced, life);
+        if (crust && !own && b === iced && (b === 'barren' || b === 'scorched' || b === 'lava')) {
           // Bare rock by its crust (D259): the dark basalt of an ocean's floor, the paler rock of continents, as the
           // Moon's dark plains lie among its bright highlands; lost in the rock's own glow as it nears melting.
           const tone = crust[c] === CRUST.oceanic ? 0.76 : crust[c] === CRUST.arc ? 0.9 : 1.08, glow = Math.max(0, Math.min(1, (hot - 650) / 450));

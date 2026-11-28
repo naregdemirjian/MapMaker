@@ -5708,6 +5708,99 @@ try {
     assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.name === 'Bare Prime')), false);
     await page.getByTestId('studio-history').click();
   });
+  await h.step('Every slider earns its place (D267): a clear sky makes an Earth a hothouse with its seas; the water\'s slider says where the last land goes under; no plants leaves bare ground, said in the chain and in what changed; little water, a cold dry world that keeps its small seas; undone', async () => {
+    const text = async (id: string) => (await page.getByTestId(id).textContent()) ?? '';
+    await page.evaluate(() => {
+      const m = (window as any).__mapmaker, s = m.store;
+      const def = m.bench.planet.newDefinition('earthlike', 4);
+      def.simulation.spanMyr = 100;
+      const id = s.execute((w: any) => m.bench.commands.createSimPlanet(w, 'Slider Prime', def));
+      s.set({ spaceId: id, layerId: s.world.all('layer').find((l: any) => l.space_id === id)?.id ?? '', selection: null });
+    });
+    await h.saved();
+    await page.getByTestId('studio-map').click();
+    await page.locator('[data-testid^="map-row-"].sel').click();
+    await page.getByTestId('open-planet-studio').click();
+    await page.getByTestId('planet-studio').waitFor();
+    const drawnNow = () => page.evaluate(() => (document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement).dataset.drawn ?? '');
+    const redrawn = (was: string) => page.waitForFunction((w) => {
+      const d = (document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement)?.dataset.drawn ?? '';
+      return !document.querySelector('[data-testid=studio-status]') && !document.querySelector('[data-testid=studio-progress]') && d.startsWith('satellite:') && d !== w;
+    }, was, { timeout: 240_000 });
+    const back = (to: string) => page.waitForFunction((w) => !document.querySelector('[data-testid=studio-status]') && (document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement)?.dataset.drawn === w, to, { timeout: 240_000 });
+    const seen = () => page.evaluate(() => {
+      const c = document.querySelector('[data-testid=studio-canvas]') as HTMLCanvasElement, d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+      let blue = 0, white = 0, green = 0, n = 0;
+      for (let k = 0; k < d.length; k += 4 * 37) {
+        n++;
+        if (d[k + 2] > d[k] + 30 && d[k + 2] > d[k + 1] + 15) blue++;
+        else if (d[k] > 190 && d[k + 1] > 200 && d[k + 2] > 200) white++;
+        else if (d[k + 1] > d[k] + 6 && d[k + 1] > d[k + 2] + 12) green++;
+      }
+      return { sea: blue / n, ice: white / n, green: green / n };
+    });
+    const why = async (key: string) => { await page.getByTestId('studio-why-surface').waitFor({ timeout: 240_000 }); return text(`studio-why-${key}`); };
+    const meanC = async () => Number((await text('studio-readout-temperature')).match(/^(-?\d+) °C on average/)?.[1] ?? NaN);
+    await redrawn('');
+    const first = await drawnNow(), earth = await seen();
+    assert.ok(earth.sea > 0.4 && earth.green > 0.03, `an Earth: seas and green land (${JSON.stringify(earth)})`);
+    assert.match(await why('surface'), /Plants where it is warm and wet enough/);
+    const earthC = await meanC();
+    assert.ok(earthC > 8 && earthC < 22, `${earthC} °C`);
+    // The water's slider says where along it the planet becomes another kind of world: no land left above so much.
+    await page.getByTestId('studio-step-air').click();
+    assert.match(await text('studio-marks-text-water'), /^no land above \d+\.\d km$/);
+    assert.equal(await page.locator('[data-testid=studio-marks-water] .studio-zone.sea').count(), 1);
+    // (An Earth where it is keeps its seas under any sky: the cloud cover has no mark.)
+    assert.equal(await page.getByTestId('studio-marks-text-clouds').count(), 0);
+    // A clear sky: more light taken in, but more heat let out too; a hothouse with its seas, not a planet boiled dry.
+    await page.getByTestId('studio-control-clouds').fill('0');
+    assert.equal(await text('studio-value-clouds'), '0.00');
+    await redrawn(first);
+    assert.equal(await page.getByTestId('studio-fate').count(), 0, 'its seas stand');
+    assert.ok((await seen()).sea > 0.4);
+    await page.waitForFunction((was) => Number((document.querySelector('[data-testid=studio-readout-temperature]')?.textContent ?? '').match(/^(-?\d+) °C on average/)?.[1] ?? NaN) > was + 20, earthC, { timeout: 240_000 });
+    assert.ok((await meanC()) < 70, `${await meanC()} °C under a clear sky`);
+    await page.getByTestId('studio-changed').waitFor({ timeout: 240_000 });
+    assert.equal(await text('studio-changed-what'), 'Cloud cover: 0.50 → 0.00');
+    await page.getByTestId('studio-control-clouds').fill('500');
+    await back(first);
+    // No plants: the land they covered is bare ground and desert, in the picture, the chain and what changed.
+    await page.getByTestId('studio-step-life').click();
+    await page.getByTestId('studio-control-vegetation').selectOption('none');
+    await redrawn(first);
+    const bare = await seen();
+    assert.ok(bare.green < 0.005 && Math.abs(bare.sea - earth.sea) < 0.02, `no green, the same seas (${JSON.stringify(bare)})`);
+    await page.waitForFunction(() => /no life given/.test(document.querySelector('[data-testid=studio-why-surface]')?.textContent ?? ''), undefined, { timeout: 240_000 });
+    const surface = await why('surface');
+    assert.match(surface, /Warmth and rain enough for plants, but no life given/);
+    assert.ok(/bare rock \d+ %/i.test(surface) && !/forest|grass/i.test(surface), surface);
+    await page.waitForFunction(() => /^Plants: green → none$/.test(document.querySelector('[data-testid=studio-changed-what]')?.textContent ?? ''), undefined, { timeout: 240_000 });
+    assert.match(await text('studio-changed'), /Forest \d+ % → none[\s\S]*Bare rock none → \d+ %/);
+    await page.getByTestId('studio-control-vegetation').selectOption('earth');
+    await back(first);
+    // Little water (a tenth of a kilometre, were it spread evenly): small seas, a colder and far drier world, its
+    // cold land mostly bare; not a ball of ice.
+    await page.getByTestId('studio-step-air').click();
+    await page.getByTestId('studio-control-water').fill('200');
+    assert.equal(await text('studio-value-water'), '0.10');
+    await redrawn(first);
+    assert.equal(await page.getByTestId('studio-fate').count(), 0);
+    const little = await seen();
+    assert.ok(little.sea > 0.01 && little.sea < 0.3 && little.ice < 0.6, `small open seas, no ball of ice (${JSON.stringify(little)})`);
+    await page.waitForFunction((was) => Number((document.querySelector('[data-testid=studio-readout-temperature]')?.textContent ?? '').match(/^(-?\d+) °C on average/)?.[1] ?? NaN) < was - 8, earthC, { timeout: 240_000 });
+    assert.ok((await meanC()) > -30, `${await meanC()} °C with little water`);
+    await page.waitForFunction(() => /desert \d+ %/i.test(document.querySelector('[data-testid=studio-why-surface]')?.textContent ?? ''), undefined, { timeout: 240_000 });
+    assert.match(await text('studio-changed-what'), /^Water: 2\.61 km → 0\.10 km$/);
+    await h.screenshot('planet-studio-little-water');
+    await page.getByTestId('studio-close').click();
+    await page.getByTestId('planet-studio').waitFor({ state: 'detached' });
+    await page.getByTestId('undo').click();
+    await h.saved();
+    assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.name === 'Slider Prime')), false);
+    await page.getByTestId('studio-history').click();
+  });
+
   await h.step('The studios: each page its own panels; panels dock, float, close and open again, resize; Save and Reset workspace (D196, D234)', async () => {
     const box = async (sel: string) => (await page.locator(sel).first().boundingBox())!;
     const store = (f: string) => page.evaluate(`(() => { const s = window.__mapmaker.store; return ${f}; })()`);

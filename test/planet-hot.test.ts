@@ -274,7 +274,8 @@ test('never seas over a furnace: wherever the seas are said to stand, the year\'
   const tried: Array<[string, PlanetDefinition]> = [
     ...[0.96, 0.95, 0.945, 0.94, 0.935, 0.93, 0.925, 0.92].map((au): [string, PlanetDefinition] => [`${au} AU`, change(d, (c) => { c.orbit.semiMajorAu = au; })]),
     ...[0.003, 0.005, 0.007, 0.009, 0.0105, 0.012, 0.015].map((co2): [string, PlanetDefinition] => [`${100 * co2} % of carbon dioxide`, change(d, (c) => { c.atmosphere.co2 = co2; })]),
-    ...[0.3, 0.25, 0.2, 0.15, 0.1, 0].map((clouds): [string, PlanetDefinition] => [`cloud cover ${clouds}`, change(d, (c) => { c.atmosphere.clouds = clouds; })]),
+    // (The clouds a little nearer the star, D267: at the Earth's distance a clear sky no longer boils the seas.)
+    ...[0.4, 0.3, 0.25, 0.2, 0.15, 0.1, 0].map((clouds): [string, PlanetDefinition] => [`cloud cover ${clouds} at 0.97 AU`, change(d, (c) => { c.atmosphere.clouds = clouds; c.orbit.semiMajorAu = 0.97; })]),
   ];
   let stand = 0, gone = 0, hottest = -Infinity;
   for (const [name, def] of tried) {

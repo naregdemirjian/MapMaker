@@ -61,6 +61,70 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D267. Every slider earns its place, first part: the cloud cover, the water and the plants (the Planet Studio's overhaul, step 6)
+
+- **Found by the slider test** (each fast setting at its lowest, middle and highest, and what the planet is like at
+  each): three settings did the wrong thing or nothing.
+  - *Cloud cover at nothing boiled an Earth.* The model's clouds only turned light away; they held no heat in.
+  - *A tenth of the Earth's water froze the planet solid* (-46 °C; a hundredth, -55 °C). Less water gives less
+    vapour, so a weaker greenhouse: that much is right. But snow then lay on all its cold land as on a wet planet's,
+    the planet brightened, and it tipped into a ball of ice. Published work says the opposite of small-sea planets:
+    with less snow and less cloud they stay unfrozen in far less light than a planet covered by sea (Abe and others
+    2011; Kodama and others 2019).
+  - *"No plants" changed colours only.* A lifeless planet still had "boreal forest" and "grassland" as its kinds
+    of land, in the read-outs, the chain and a place's card.
+- **Clouds hold heat in as well** (`CLOUD_HOLD`, physics.ts `opticalDepth`): the Earth's clouds turn away about
+  47 W/m² of sunlight and send back about 26 W/m² of the surface's heat (Stephens and others 2012). In the air's
+  opacity: a planet with seas and no cloud loses 0.21 of it, a wholly clouded one gains as much; counted from half
+  cover (the rest is fitted to the Earth with that), by the water there is to make cloud of, less in cold air. A
+  dry planet's cloud cover is haze or dust: it only turns light away, as before. The limit on what a planet with
+  seas can shed (D266) follows: 295 W/m² under a clear sky, 259 under a covered one.
+- **Snow needs water to fall** (`snow`, ebm.ts): the share of cold land under snow goes by the sea's share of the
+  surface against the Earth's (all of it from the Earth's 71 %; a tenth of it with seas over 7 %). So a planet with
+  small seas brightens little as it cools.
+- **The air's pressure on a planet with small seas** is that at a height between its sea's level and its mean
+  surface, the nearer the mean surface the smaller the seas (from half the planet under sea: at the sea's level, as
+  on the Earth). Otherwise a planet losing its seas grew colder only because its sea sank deeper into its basins
+  and all its land counted as high ground.
+- **Bare ground under no air is dark** (`groundAlbedo`): 0.12 (the Moon's 0.11, Mercury's 0.09: dust darkened by
+  the star's wind and small impacts) against 0.25 under air (the Earth's deserts, Mars's dust), between them up to
+  the air of Mars. The days of airless bodies come out as measured: like the Moon 107 °C at the equator (the Moon:
+  about 120; was 92), like Mercury 339 °C (Mercury: about 350 at its mean distance; was 315).
+- **Ground heated only by its days is scorched from 200 °C** (`SCORCHED_BY_DAY_FROM`), not from 100: past the
+  boiling of water for some hours, with cold ground a hand's depth below, it is not baked through. Without this the
+  darker ground would have made a third of a body like the Moon "scorched rock".
+- **No plants** (`withoutPlants`, the biomes stage): where plants would have made a forest, a grassland or a marsh
+  the land is bare rock; where they would have been thin (steppe), desert; tundra, polar desert. The colours stay
+  those the climate leaves (the wetter, the more weathered). Said in the chain ("Warmth and rain enough for plants,
+  but no life given") and of a place ("The planet was given no plants: where they would grow the ground is bare").
+- **Cold land too dry even for scrub is desert** (`BARE_DESERT_AI`, rain under a tenth of what could evaporate):
+  the rules as first made had "steppe and cold desert scrub" wherever it is cold and dry, so a nearly waterless
+  planet read as two fifths "grass and scrub".
+- **The sliders say where the planet tips** (as D265's):
+  - *Water*: "no land above 7.1 km" (the amount that drowns the last land: beyond it the slider changes nothing,
+    which is why its upper part seemed dead), and nearer the star "seas boil away above 1.2 km" (at 0.9 AU: small
+    seas stand where wide ones boil, for wide seas give more vapour). The sea stage gives, for 48 amounts along the
+    slider, the share of the surface each would cover over this land (one sorting of the heights).
+  - *Cloud cover*: "seas boil away below 21 % of cloud" (at 0.97 AU); none for an Earth where it is.
+- **Only for the second calculation**: the physics reads the definition's mark (`engine` 2), which the stages after
+  the sea now carry; the first calculation's results are as they were (its tests unchanged). The sea stage's
+  version is 4.
+- **Measured** (an Earth otherwise): cloud cover 0, 49 °C with its seas and 2,600 mm of rain; 0.5, 15 °C; 1, 1 °C
+  with a seventh of its sea frozen. Water 0.03 km: seas over 8 % of the surface, -10 °C, 51 mm of rain, desert over
+  47 %, ice 16 %; 0.1 km: 13 % sea, -10 °C; 0.3 km: 26 % sea, -7 °C; 1 km: half sea, 4 °C; 2.6 km (the Earth's):
+  15 °C; 6 km and more: sea over all but the ice at the poles, 22 °C. No plants: forest 9 % and grass 11 % become
+  bare rock 16 % and desert 8 % (with the 3 % there was).
+- **Not done here** (said so that it is not taken as done): the cloud cover is still a setting of its own, the same
+  whatever the water (a real planet with small seas would have less cloud, and be some degrees warmer than shown);
+  presets for each kind of world, the test of every slider in one run and the sheets of pictures are the next parts.
+- **Tests**: `test/planet-sliders.test.ts` (6): the clouds' hold on heat (its sign and size, less in the cold, none
+  without water or in the first calculation; an Earth warmer under a clear sky and not boiled; the mark nearer the
+  star); bare ground's albedo and day-heated ground; no plants and cold deserts by the rules; an Earth under a clear
+  and a covered sky; the amount of water (small seas not frozen over, mostly desert, on the same land; an ocean
+  world; the table and the marks); a planet given no plants (its families, its chain, a place's card).
+  `test/planet-hot.test.ts`, `test/planet-day.test.ts`, `test/planet-why.test.ts` follow. Interface: a step of its
+  own (the marks, a clear sky, no plants in the picture, the chain and what changed, little water).
+
 ### D266. A fault of D259 mended: seas were drawn over a furnace just short of the boiling limit
 
 - **The fault** (found by the slider test begun for step 6, in what D259 had pushed): the seas' fate was decided from
@@ -88,9 +152,9 @@ Follows from D2. The test drives the real interface exactly as a person would.
 - **Measured after**: moved inward an Earth warms steadily (32 °C at 0.96 AU, 40 at 0.95, 46 at 0.945, 54 at 0.94,
   65 at 0.935) and loses its seas at 0.93 AU; with carbon dioxide 33 °C at 0.3 %, 52 at 0.7 %, 65 at 0.9 %, gone at
   1.1 %; with cloud cover 32 °C at 0.3, 50 at 0.2, gone at 0.1. Nowhere seas over a furnace.
-- **Still to do** (step 6): cloud cover at nothing boils an Earth, for the model's clouds only send light back and
-  hold no heat in; a planet with little water freezes solid at the Earth's distance, for snow lies on its land as
-  on a wet planet's.
+- **Left for step 6** (done in D267): cloud cover at nothing boiled an Earth, for the model's clouds only sent
+  light back and held no heat in; a planet with little water froze solid at the Earth's distance, for snow lay on
+  its land as on a wet planet's.
 - **Tests**: `test/planet-hot.test.ts` (1 more): by small steps across the limit along the distance, the carbon
   dioxide and the cloud cover (21 planets), wherever the seas are said to stand the year's model settles below
   110 °C, and wherever they are gone the planet is dry; the limit near 282 W/m², lower under carbon dioxide, far

@@ -29,3 +29,22 @@ export function seaLevelForVolume(h: ArrayLike<number>, area: ArrayLike<number>,
   }
   return (volume + ZA) / A;
 }
+
+/**
+ * For each of `volumes` (ascending): the area under the sea when it stands at the level that holds that volume
+ * (D267; one sorting of the heights for all of them). In the units of `area`.
+ */
+export function areasUnderForVolumes(h: ArrayLike<number>, area: ArrayLike<number>, volumes: ArrayLike<number>): Float64Array {
+  const n = h.length, out = new Float64Array(volumes.length);
+  if (n === 0) return out;
+  const order = Array.from({ length: n }, (_, i) => i).sort((a, b) => h[a] - h[b]);
+  let k = 0, A = area[order[0]], ZA = h[order[0]] * area[order[0]];
+  for (let v = 0; v < volumes.length; v++) {
+    const volume = volumes[v];
+    if (!(volume > 0)) continue;
+    // (Cells 0..k under water hold L·A − ZA at a level L: on to the next cell while the volume reaches above it.)
+    while (k + 1 < n && h[order[k + 1]] * A - ZA < volume) { k++; A += area[order[k]]; ZA += h[order[k]] * area[order[k]]; }
+    out[v] = A;
+  }
+  return out;
+}

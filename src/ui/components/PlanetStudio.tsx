@@ -12,7 +12,7 @@ import { definitionFromPreset, newDefinition, definitionProblems, PRESETS, EARTH
 import { derive, type Derived, type WaterFate } from '../../planet/model/physics.ts';
 import { SIGMA } from '../../planet/model/units.ts';
 import { familyOf, figuresOf, settingsChanged, whatChanged, whyItLooksSo, type Figures, type ModelFacts, type SeaFacts, type SettingChange } from '../../planet/why.ts';
-import { RANGES, boundaryAsync, freezeGuess, settingInWords, tippingPoints, withSetting, type Mark, type MarkedSetting } from '../../planet/tipping.ts';
+import { RANGES, boundaryAsync, freezeGuess, settingInWords, tippingPoints, waterMarks, withSetting, type Mark, type MarkedSetting, type WaterTable } from '../../planet/tipping.ts';
 import { planetPipeline, simParams } from '../planet-engine.ts';
 import { colourLayer, seenFromSpace } from '../planet-colors.ts';
 import { simOf } from '../../world-model/world-settings.ts';
@@ -27,7 +27,7 @@ import { CancelledError } from '../../planet/worker/pool.ts';
 import { estimateEdit, measureEdits, type Estimate, type Figure, type HistoryData, type PlanetFacts } from '../../planet/consequences.ts';
 import type { TectonicParams } from '../../planet/tectonics/state.ts';
 import { followCrust, distanceKm } from '../../planet/reconstruct.ts';
-import { LAYERS, PAST_FIELDS } from '../../planet/pipeline/stages.ts';
+import { LAYERS, PAST_FIELDS, WATER_MOST_KM } from '../../planet/pipeline/stages.ts';
 
 type StepId = 'star' | 'planet' | 'interior' | 'air' | 'life' | 'history' | 'explore' | 'edit';
 const STEPS: Array<[StepId, string]> = [['star', '1 Star and orbit'], ['planet', '2 Planet'], ['interior', '3 Interior and plates'], ['air', '4 Air and water'], ['life', '5 Life and biomes'], ['history', '6 History'], ['explore', '7 Explore and use'], ['edit', '8 Edit']];
@@ -83,6 +83,8 @@ const newSeed = () => 1 + Math.floor(Math.random() * 999_999);
 interface SeaState {
   share: number; level: number; dry: boolean; fate: WaterFate; kept: boolean; cause: 'sunlight' | 'greenhouse' | 'thin-air' | null; liquidShare: number; absorbed: number; limit: number; withSeasK: number;
   air: 'none' | 'held' | 'lost' | 'kept'; escapeKmS: number; neededKmS: number; pressureBar: number; iceK: number; iceLastsK: number;
+  /** (D267) How much sea each amount of water gives over this land, and the amount that drowns the last of it. */
+  water: WaterTable;
 }
 /** Why the seas are gone, or would be were they not kept by hand (D259, D261), with the numbers that decided. */
 function fateReason(sea: SeaState): string {
@@ -382,6 +384,7 @@ export function PlanetStudio() {
         share: d.share as number, level: d.level as number, dry: !!d.dry, fate: d.fate as WaterFate, kept: !!d.kept, cause: (d.cause as SeaState['cause']) ?? null,
         liquidShare: d.liquidShare as number, absorbed: d.absorbed as number, limit: d.limit as number, withSeasK: d.withSeasK as number,
         air: d.air as SeaState['air'], escapeKmS: d.escapeKmS as number, neededKmS: d.neededKmS as number, pressureBar: d.pressureBar as number, iceK: d.iceK as number, iceLastsK: d.iceLastsK as number,
+        water: { depths: d.depths as Float32Array, shares: d.shares as Float32Array, drownsKm: d.drownsKm as number },
       });
     }, () => {});
     // (D263: with the rain and each kind of surface's share, from the climate and biomes the picture is made of.)
@@ -422,10 +425,12 @@ export function PlanetStudio() {
   const ruleMarks = useMemo(() => {
     const out: Partial<Record<MarkedSetting, Mark[]>> = {};
     if (!second || !run || !sea) return out;
-    const inView: MarkedSetting[] = step === 'star' ? ['distance', 'starMass'] : step === 'planet' ? ['radius'] : step === 'air' ? ['pressure', 'co2'] : [];
+    const inView: MarkedSetting[] = step === 'star' ? ['distance', 'starMass'] : step === 'planet' ? ['radius'] : step === 'air' ? ['pressure', 'co2', 'clouds'] : [];
     for (const k of new Set<MarkedSetting>(['distance', ...inView])) out[k] = tippingPoints(shown, liquidShare, k);
     return out;
   }, [second, run, sea, shown, liquidShare, step]);
+  // (D267) The water's own marks: from how much sea each amount gives over this land (the sea stage's).
+  const waterZones = useMemo(() => (second && run && sea && step === 'air' ? waterMarks(shown, sea.water, WATER_MOST_KM) : []), [second, run, sea, shown, step]);
   useEffect(() => {
     if (!model || !sea || !(step === 'star' || step === 'air')) return;
     const setting = step === 'star' ? 'distance' as const : 'co2' as const, of = model.of;
@@ -451,6 +456,7 @@ export function PlanetStudio() {
   }, [model, step]);
   const frozenFrom = freeze && freeze.of === shown ? freeze : null;
   const marksOf = (id: string): Mark[] | undefined => {
+    if (second && id === 'water') return waterZones;
     if (!second || !(id in RANGES)) return undefined;
     const k = id as MarkedSetting, out = [...(ruleMarks[k] ?? [])];
     if (k === 'distance' && typeof frozenFrom?.distance === 'number') out.push({ at: frozenFrom.distance, side: 'above', tone: 'cold', label: `seas freeze over beyond ${settingInWords('distance', frozenFrom.distance)}` });
@@ -722,7 +728,7 @@ export function PlanetStudio() {
             {control('co2', 'Carbon dioxide (share)', Math.max(1e-6, def.atmosphere.co2), (v) => patch((d) => { d.atmosphere.co2 = v; }), { min: 1e-6, max: 0.97, log: true, digits: 5 })}
             {control('clouds', 'Cloud cover', def.atmosphere.clouds, (v) => patch((d) => { d.atmosphere.clouds = v; }), { min: 0, max: 1, digits: 2 })}
             {second
-              ? control('water', 'Water (km deep, were it spread over the whole planet)', def.water.depthKm ?? 0, (v) => patch((d) => { d.water.depthKm = v < 0.005 ? 0 : Number(v.toPrecision(3)); }), { min: 0, max: 12, curve: 3, digits: 2 })
+              ? control('water', 'Water (km deep, were it spread over the whole planet)', def.water.depthKm ?? 0, (v) => patch((d) => { d.water.depthKm = v < 0.005 ? 0 : Number(v.toPrecision(3)); }), { min: 0, max: WATER_MOST_KM, curve: 3, digits: 2 })
               : control('ocean', 'Sea (share of the surface)', def.water.oceanFraction, (v) => patch((d) => { d.water.oceanFraction = v; }), { min: 0, max: 1, digits: 2 })}
             {second && <p className="muted" data-testid="studio-water-note">{(def.water.depthKm ?? 0) > 0 ? `${fmt((def.water.depthKm ?? 0) / EARTH_WATER_KM, 2)} × the Earth's water.` : 'No water: a dry world, and no plates moving.'} {sea && run ? (sea.fate === 'boiled' ? 'Boiled away: all of the surface is land.' : sea.fate === 'sublimed' ? 'Gone into vapour for want of air: all of the surface is land.' : sea.fate === 'frozen' ? `Frozen where it stands, over ${fmt(100 * sea.share)} % of the surface.` : sea.dry ? 'All of the surface is land.' : `The sea covers ${fmt(100 * sea.share)} % of the surface${sea.kept ? ' (kept by hand)' : ''}.`) : ''}</p>}
           </>}

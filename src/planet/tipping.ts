@@ -40,14 +40,14 @@ export interface Mark {
   at: number;
   /** Which side of `at` the label holds on: values below it or above it. */
   side: 'below' | 'above';
-  /** hot: the seas boil away; air: the air is lost; thin: too little air for liquid water; cold: the seas freeze over. */
-  tone: 'hot' | 'air' | 'thin' | 'cold';
+  /** hot: the seas boil away; air: the air is lost; thin: too little air for liquid water; cold: the seas freeze over; sea: no land left above the sea. */
+  tone: 'hot' | 'air' | 'thin' | 'cold' | 'sea';
   label: string;
 }
 
-export type MarkedSetting = 'distance' | 'starMass' | 'pressure' | 'co2' | 'radius';
+export type MarkedSetting = 'distance' | 'starMass' | 'pressure' | 'co2' | 'radius' | 'clouds';
 /** The ranges the Studio's sliders cover. */
-export const RANGES: Record<MarkedSetting, [number, number]> = { distance: [0.02, 10], starMass: [0.1, 3], pressure: [1e-4, 100], co2: [1e-6, 0.97], radius: [1000, 16_000] };
+export const RANGES: Record<MarkedSetting, [number, number]> = { distance: [0.02, 10], starMass: [0.1, 3], pressure: [1e-4, 100], co2: [1e-6, 0.97], radius: [1000, 16_000], clouds: [0, 1] };
 
 const set: Record<MarkedSetting, (d: PlanetDefinition, v: number) => PlanetDefinition> = {
   distance: (d, v) => ({ ...d, orbit: { ...d.orbit, semiMajorAu: v } }),
@@ -55,6 +55,7 @@ const set: Record<MarkedSetting, (d: PlanetDefinition, v: number) => PlanetDefin
   pressure: (d, v) => ({ ...d, atmosphere: { ...d.atmosphere, pressureBar: v } }),
   co2: (d, v) => ({ ...d, atmosphere: { ...d.atmosphere, co2: v } }),
   radius: (d, v) => ({ ...d, body: { ...d.body, radiusKm: v } }),
+  clouds: (d, v) => ({ ...d, atmosphere: { ...d.atmosphere, clouds: v } }),
 };
 /** A definition with one of the marked settings at another value. */
 export const withSetting = (d: PlanetDefinition, setting: MarkedSetting, v: number): PlanetDefinition => set[setting](d, v);
@@ -63,6 +64,7 @@ const num = (v: number, d: number) => v.toLocaleString('en', { maximumFractionDi
 const say: Record<MarkedSetting, (v: number) => string> = {
   distance: (v) => `${num(v, v < 0.1 ? 3 : 2)} AU`, starMass: (v) => `${num(v, 2)} Suns`, pressure: (v) => `${num(v, v < 0.1 ? 3 : 1)} bar`,
   co2: (v) => `${num(100 * v, v < 0.001 ? 3 : v < 0.1 ? 1 : 0)} %`, radius: (v) => `${num(Math.round(v / 10) * 10, 0)} km`,
+  clouds: (v) => `${num(100 * v, 0)} %`,
 };
 /** A setting's value in words, as its marks say it. */
 export const settingInWords = (setting: MarkedSetting, v: number): string => say[setting](v);
@@ -89,6 +91,10 @@ export function tippingPoints(def: PlanetDefinition, liquidShare: number, settin
       const at = from < to ? boundary(from, to, (v) => boiled(withSetting(def, setting, v)), { log: true }) : null;
       if (at !== null) out.push({ at, side: setting === 'starMass' ? 'above' : 'below', tone: 'hot', label: `seas boil away ${setting === 'starMass' ? 'above' : 'inside'} ${say[setting](at)}` });
     }
+  } else if (setting === 'clouds') {
+    // Too little cloud to turn the star's light away (D267): the seas boil away under a clearer sky.
+    const at = wet && def.atmosphere.pressureBar > 0 ? boundary(lo, hi, (v) => boiled(withSetting(def, setting, v))) : null;
+    if (at !== null) out.push({ at, side: 'below', tone: 'hot', label: `seas boil away below ${say.clouds(at)} of cloud` });
   } else if (wet) {
     // Too strong a greenhouse: more carbon dioxide, more air.
     const at = boundary(setting === 'pressure' ? WATER_TRIPLE_BAR : lo, hi, (v) => boiled(withSetting(def, setting, v)), { log: true });
@@ -110,4 +116,36 @@ export function freezeGuess(def: PlanetDefinition, liquidShare: number, setting:
     return derive({ ...d, water: { ...d.water, oceanFraction: liquidShare } }).surfaceK < 273.15 + 3;
   };
   return boundary(lo, hi, cold, { log: true });
+}
+
+/** The water's slider (D267): the amounts it gives (km, spread evenly) with the share of the surface each would cover over this planet's land, and the amount at which its last land goes under (the sea stage's). */
+export interface WaterTable { depths: ArrayLike<number>; shares: ArrayLike<number>; drownsKm: number }
+
+/** The share of the surface an amount of water would cover, between the table's amounts (none for none). */
+export function shareForWater(t: WaterTable, depthKm: number): number {
+  const n = t.depths.length;
+  if (!(depthKm > 0) || n === 0) return 0;
+  if (depthKm <= t.depths[0]) return (t.shares[0] * depthKm) / t.depths[0];
+  for (let i = 1; i < n; i++) if (depthKm <= t.depths[i]) return t.shares[i - 1] + ((t.shares[i] - t.shares[i - 1]) * (depthKm - t.depths[i - 1])) / (t.depths[i] - t.depths[i - 1]);
+  return t.shares[n - 1];
+}
+
+/**
+ * The marks of the water's slider (D267), on the planet as it is otherwise: the amount from which its seas boil away
+ * (the wider the seas, the more vapour and the less heat the planet can shed: a planet with small seas keeps them
+ * where one with wide seas loses them), and the amount from which no land is left above the sea.
+ */
+export function waterMarks(def: PlanetDefinition, t: WaterTable, most: number): Mark[] {
+  const out: Mark[] = [], km = (v: number) => `${num(v, v < 1 ? 2 : 1)} km`;
+  if (!def.water.keep && t.depths.length) {
+    const given = withAirAsItIs(def), boiled = (v: number) => waterState({ ...given, water: { ...given.water, depthKm: v } }, shareForWater(t, v)).fate === 'boiled';
+    const lo = Math.min(most, Math.max(0.005, Number(t.depths[0]) / 4));
+    if (boiled(lo)) out.push({ at: lo, side: 'above', tone: 'hot', label: 'seas boil away, however little the water' });
+    else {
+      const at = boundary(lo, most, boiled, { log: true });
+      if (at !== null) out.push({ at, side: 'above', tone: 'hot', label: `seas boil away above ${km(at)}` });
+    }
+  }
+  if (t.drownsKm > 0 && t.drownsKm <= most) out.push({ at: t.drownsKm, side: 'above', tone: 'sea', label: `no land above ${km(t.drownsKm)}` });
+  return out.sort((x, y) => x.at - y.at);
 }
