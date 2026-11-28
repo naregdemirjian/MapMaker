@@ -5438,14 +5438,16 @@ try {
     await page.getByTestId('studio-control-distance').fill('65');
     assert.equal(await text('studio-value-distance'), '0.030');
     await redrawn(cool);
+    // (This close its air is lost too, D261, and its days, hotter than its year's mean, decide its glow: D262.)
     const molten = await seen();
-    assert.ok(molten.r > 170 && molten.r > 2 * molten.b && molten.g > 60, `glowing (${molten.r.toFixed(0)}, ${molten.g.toFixed(0)}, ${molten.b.toFixed(0)})`);
-    assert.ok(await degrees() > 1000, `${await degrees()} °C`);
+    assert.ok(molten.r > 170 && molten.r > molten.b + 40 && molten.g > 60, `glowing (${molten.r.toFixed(0)}, ${molten.g.toFixed(0)}, ${molten.b.toFixed(0)})`);
+    assert.match(await text('studio-air-fate'), /^The planet cannot hold its air: it has leaked away to space\./);
+    assert.ok(await degrees() > 700, `${await degrees()} °C`);
     const box = (await page.getByTestId('studio-canvas').boundingBox())!;
     await page.mouse.click(box.x + box.width * 0.5, box.y + box.height * 0.5);
     await page.getByTestId('studio-card').waitFor();
     assert.match(await text('studio-card'), /m above the planet's lowest ground/);
-    assert.match(await text('studio-card'), /Molten rock: its warmest month reaches [\d,]+ °C, and basalt melts at about 1,100 °C\./);
+    assert.match(await text('studio-card'), /Molten rock: its days reach [\d,]+ °C, and basalt melts at about 1,100 °C\./);
     await h.screenshot('planet-molten');
     await page.locator('[data-testid=studio-card] .close').click();
     // Back at the Earth's distance: the seas as they were, nothing to say of them.
@@ -5535,7 +5537,7 @@ try {
     assert.equal(await page.evaluate(() => (window as any).__mapmaker.store.world.all('map_space').some((m: any) => m.name === 'Cold Prime')), false);
     await page.getByTestId('studio-history').click();
   });
-  await h.step('Thin air and no air in the Planet Studio (D261): with no air the seas gone into vapour and said why, kept by hand and given back; far from the star, frozen where they stand; between, ice caps; a planet too small to hold its air, the air kept by hand; undone', async () => {
+  await h.step('Thin air and no air in the Planet Studio (D261): with no air the seas gone into vapour and said why, its days and nights (D262), kept by hand and given back; far from the star, frozen where they stand; between, ice caps; a planet too small to hold its air, the air kept by hand; undone', async () => {
     const text = async (id: string) => (await page.getByTestId(id).textContent()) ?? '';
     await page.evaluate(() => {
       const m = (window as any).__mapmaker, s = m.store;
@@ -5574,6 +5576,15 @@ try {
     assert.match(await text('studio-fate'), /^Too little air for liquid water: the seas are gone\. Under less than 0\.006 bar of air water is ice or vapour, never liquid, and where the sun is high ice does not last here \(at the equator its year would be at -\d+ °C; ice lasts below -153 °C\)\. The water went into vapour; some was lost to space, and nowhere on the planet is cold enough to hold the rest as ice\./);
     assert.equal(await text('studio-readout-sea'), 'none: gone into vapour for want of air');
     assert.equal(await text('studio-readout-winds'), 'none: the planet has no air');
+    // (D262) With no air the ground follows the sun: its days and its nights, read from the model; a place says so.
+    await page.waitForFunction(() => /its days reach/.test(document.querySelector('[data-testid=studio-readout-temperature]')?.textContent ?? ''), undefined, { timeout: 60_000 });
+    const days = (await text('studio-readout-temperature')).match(/^-?\d+ °C on average over the year \(without air -?\d+ °C; no greenhouse to speak of; albedo 0\.\d\d\); at the equator its days reach (-?\d+) °C and its nights fall to (-?\d+) °C$/)!;
+    assert.ok(Number(days[1]) > 50 && Number(days[2]) < -100, `hot days and bitter nights (${days[1]} and ${days[2]} °C)`);
+    const spot = (await page.getByTestId('studio-canvas').boundingBox())!;
+    await page.mouse.click(spot.x + spot.width * 0.5, spot.y + spot.height * 0.5);
+    await page.getByTestId('studio-card').waitFor();
+    assert.match(await text('studio-card'), /With so little air over it the ground follows the sun: its days reach about \d+ °C and its nights fall to about -\d+ °C/);
+    await page.locator('[data-testid=studio-card] .close').click();
     const bare = await seen(), airless = await drawnNow();
     assert.ok(bare.sea < 0.005 && bare.ice < 0.005, `bare rock (${bare.sea.toFixed(3)} sea, ${bare.ice.toFixed(3)} ice)`);
     await h.screenshot('planet-no-air');
@@ -5625,11 +5636,11 @@ try {
     assert.equal(await text('studio-value-radius'), '1,740');
     await redrawn(full);
     const lost = await text('studio-air-fate');
-    assert.match(lost, /^Too small to keep its air: it has leaked away to space\. For the light it gets, a planet needs an escape speed of 5\.5 km\/s to hold air; this one has (\d\.\d) km\/s\. \(One line parts the worlds with air from those without across the Solar System/);
+    assert.match(lost, /^The planet cannot hold its air: it has leaked away to space\. For the light it gets, a planet needs an escape speed of 5\.5 km\/s to hold air; this one has (\d\.\d) km\/s\. \(One line parts the worlds with air from those without across the Solar System/);
     assert.ok(Number(lost.match(/this one has (\d\.\d) km/)![1]) < 5.5);
     assert.match(await text('studio-fate'), /^Too little air for liquid water: the seas are gone\. Under less than 0\.006 bar of air water is ice or vapour, never liquid \(and this planet has lost its air\)/);
     await page.getByTestId('studio-step-air').click();
-    assert.equal(await text('studio-air-note'), 'Lost: the planet is too small to hold air (said under the picture).');
+    assert.equal(await text('studio-air-note'), 'Lost: the planet cannot hold air (said under the picture).');
     const small = await drawnNow();
     assert.ok((await seen()).sea < 0.005);
     // Its air kept by hand: said so, and its seas there again (open or frozen, as its climate has them).

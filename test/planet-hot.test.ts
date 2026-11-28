@@ -192,10 +192,14 @@ test('a planet moved towards its star: the same land; a hothouse, then its seas 
   assert.ok(floors > n / 4 && lands > n / 10, `ocean floors and continents (${floors}, ${lands} cells)`);
   const molten = await planet(p, at(0.03));
   assert.ok(molten.of('lava') > 0.5 && molten.of('lava') + molten.of('scorched') > 0.999, `${molten.of('lava')}`);
-  assert.ok(molten.mean > 1000 && molten.mean < 1600, `${molten.mean} °C`);
-  // (Molten, the rock's own glow is all there is to see: no darker over the old ocean floors.)
+  // (This close its air is lost too, D261: its ground has its own days, far hotter than its year's mean, D262.)
+  assert.equal(molten.sea.air, 'lost');
+  assert.ok(molten.mean > 700 && molten.mean < 1600, `${molten.mean} °C`);
+  const days = molten.C.dayHigh as Float32Array;
+  assert.ok(days[mesh.lat.findIndex((l) => Math.abs(l) < 0.03)] > 1500);
+  // (Molten, the rock's own glow is all there is to see: no darker over the old ocean floors; by its days' heat.)
   const glow = molten.B.colour as Uint8Array;
-  for (let c = 0; c < n; c += 97) if (molten.hot[c] >= MOLTEN_FROM) assert.deepEqual([glow[3 * c], glow[3 * c + 1], glow[3 * c + 2]], rockColour(molten.hot[c]));
+  for (let c = 0; c < n; c += 97) if (days[c] >= MOLTEN_FROM) assert.deepEqual([glow[3 * c], glow[3 * c + 1], glow[3 * c + 2]], rockColour(Math.max(days[c], molten.hot[c])));
   // Each step hotter than the one before; all on the same land.
   assert.ok(scorched.mean > boiled.mean + 100 && molten.mean > scorched.mean + 500);
   assert.deepEqual([...(molten.sea.heights as Int16Array)], [...hd]);

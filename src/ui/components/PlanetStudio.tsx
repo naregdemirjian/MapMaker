@@ -100,7 +100,7 @@ interface Statement { key: string; tone: '' | 'kept' | 'cold'; headline: string;
 function statementsOf(sea: SeaState, model: { surfaceC: number; absorbed: number; seaFrozen: number; capShare: number } | null, insolation: number): Statement[] {
   const out: Statement[] = [];
   const line = `For the light it gets, a planet needs an escape speed of ${fmt(sea.neededKmS, 1)} km/s to hold air; this one has ${fmt(sea.escapeKmS, 1)} km/s. (One line parts the worlds with air from those without across the Solar System: Mars is just on the side with air, the Moon and Mercury far on the other.)`;
-  if (sea.air === 'lost') out.push({ key: 'air', tone: '', headline: 'Too small to keep its air: it has leaked away to space.', detail: line, keep: 'air' });
+  if (sea.air === 'lost') out.push({ key: 'air', tone: '', headline: 'The planet cannot hold its air: it has leaked away to space.', detail: line, keep: 'air' });
   if (sea.air === 'kept') out.push({ key: 'air', tone: 'kept', headline: 'The air is kept by hand.', detail: `By the physics it would have leaked away to space. ${line}`, keep: 'air' });
   const ice = `${fmt(sea.iceK - 273.15)} °C; ice lasts below ${fmt(sea.iceLastsK - 273.15)} °C`;
   if (sea.kept) out.push({ key: 'water', tone: 'kept', headline: 'The seas are kept by hand.', detail: fateReason(sea), keep: 'water' });
@@ -222,7 +222,7 @@ export function PlanetStudio() {
   const problems = useMemo(() => definitionProblems(def), [def]);
   // The planet's figures as its pictures have them (D260): the year's mean temperature at the surface, the sunlight
   // taken in, how much of the sea lies frozen; from the model the pictures are made with, for the settings shown.
-  const [figures, setFigures] = useState<{ of: PlanetDefinition; surfaceC: number; absorbed: number; seaFrozen: number; capShare: number } | null>(null);
+  const [figures, setFigures] = useState<{ of: PlanetDefinition; surfaceC: number; absorbed: number; seaFrozen: number; capShare: number; dayC?: number; nightC?: number } | null>(null);
   // The simulated history shown, and what it was simulated from.
   const [run, setRun] = useState<{ def: PlanetDefinition; key: string; times: number[]; seaLevels: number[]; ice: number[] } | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
@@ -374,7 +374,7 @@ export function PlanetStudio() {
       });
     }, () => {});
     planetPipeline().product('temperature', shown, simParams(shown)).then((r) => {
-      if (live) setFigures({ of: shown, surfaceC: r.data.surfaceC as number, absorbed: r.data.absorbed as number, seaFrozen: r.data.seaFrozen as number, capShare: (r.data.capShare as number | undefined) ?? 0 });
+      if (live) setFigures({ of: shown, surfaceC: r.data.surfaceC as number, absorbed: r.data.absorbed as number, seaFrozen: r.data.seaFrozen as number, capShare: (r.data.capShare as number | undefined) ?? 0, ...(r.data.dayHigh ? { dayC: r.data.dayC as number, nightC: r.data.nightC as number } : {}) });
     }, () => {});
     return () => { live = false; };
   }, [second, run, shown]);
@@ -609,7 +609,7 @@ export function PlanetStudio() {
           {step === 'air' && <>
             {/* (D261) Down to no air at all: the slider's lowest place. */}
             {control('pressure', 'Air at the surface (bar)', Math.max(1e-4, def.atmosphere.pressureBar), (v) => patch((d) => { d.atmosphere.pressureBar = v <= 1.05e-4 ? 0 : Number(v.toPrecision(3)); }), { min: 1e-4, max: 100, log: true, digits: 4 })}
-            {second && (def.atmosphere.pressureBar <= 0 || (sea && run && sea.air === 'lost')) && <p className="muted" data-testid="studio-air-note">{def.atmosphere.pressureBar <= 0 ? 'No air.' : 'Lost: the planet is too small to hold air (said under the picture).'}</p>}
+            {second && (def.atmosphere.pressureBar <= 0 || (sea && run && sea.air === 'lost')) && <p className="muted" data-testid="studio-air-note">{def.atmosphere.pressureBar <= 0 ? 'No air.' : 'Lost: the planet cannot hold air (said under the picture).'}</p>}
             {control('co2', 'Carbon dioxide (share)', Math.max(1e-6, def.atmosphere.co2), (v) => patch((d) => { d.atmosphere.co2 = v; }), { min: 1e-6, max: 0.97, log: true, digits: 5 })}
             {control('clouds', 'Cloud cover', def.atmosphere.clouds, (v) => patch((d) => { d.atmosphere.clouds = v; }), { min: 0, max: 1, digits: 2 })}
             {second
@@ -779,7 +779,9 @@ export function PlanetStudio() {
           <dt>Temperature</dt><dd data-testid="studio-readout-temperature">{model
             ? (() => {
               const bare = (model.absorbed / SIGMA) ** 0.25, held = model.surfaceC + 273.15 - bare;
-              return `${fmt(model.surfaceC)} °C on average over the year (without air ${fmt(bare - 273.15)} °C; ${held >= 0.5 ? `greenhouse +${fmt(held)} °C` : 'no greenhouse to speak of'}; albedo ${fmt(1 - model.absorbed / (x.insolation / 4), 2)})`;
+              // (D262) With little or no air the ground follows the sun: its days and nights at the equator.
+              const days = model.dayC !== undefined && model.nightC !== undefined ? `; at the equator its days reach ${fmt(model.dayC)} °C and its nights fall to ${fmt(model.nightC)} °C` : '';
+              return `${fmt(model.surfaceC)} °C on average over the year (without air ${fmt(bare - 273.15)} °C; ${held >= 0.5 ? `greenhouse +${fmt(held)} °C` : 'no greenhouse to speak of'}; albedo ${fmt(1 - model.absorbed / (x.insolation / 4), 2)})${days}`;
             })()
             : `${fmt(x.surfaceK - 273.15)} °C on average (without air ${fmt(x.equilibriumK - 273.15)} °C; greenhouse +${fmt(x.greenhouseK)} °C; albedo ${fmt(x.albedo, 2)})`}</dd>
           <dt>Winds</dt><dd data-testid="studio-readout-winds">{second && sea && run && sea.pressureBar <= 0 ? 'none: the planet has no air' : `${x.cellsPerHemisphere} circulation cell${x.cellsPerHemisphere > 1 ? 's' : ''} a hemisphere; the tropics' cells reach ${fmt(x.hadleyEdgeDeg)}°`}</dd>

@@ -61,6 +61,53 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D262. The day and night of a world with little or no air (the Planet Studio's overhaul, step 4, last part)
+
+- **Why.** Under thick air the ground's temperature hardly changes between day and night. With thin air or none it is
+  on its own: as hot by day as the sunlight makes it, cooling towards space by night. The year's model spreads each
+  day's light evenly over the day, which is right under air and wrong without: a body like the Moon came out at
+  −20 °C on average with nothing said of its days (about 120 °C) or its nights (about −175 °C); and because heat is
+  lost as the fourth power of the temperature, such ground is far colder on average than ground lit evenly.
+- **The ground's own day** (`dayCycle`, climate/diurnal.ts): a column of layers heated from above (conduction,
+  implicit), their thickness in units of the depth the day's wave reaches, so that the ground's thermal inertia and
+  the length of the day are all that describe it; its surface takes in the sunlight of each moment of the day at
+  its latitude and season and loses σT⁴ (less what the air holds); run until the day repeats. The ground: the loose
+  dust of an airless world (thermal inertia 60, the Moon's about 50), firmer under thin air (250, as Mars's).
+  The heat lost at each step is found by Newton's method (one linear step from the cold of dawn overshoots, under
+  strong light far above what the sunlight can make); ground hot enough to fuse (from 700 K, rock by 1,100 K) holds
+  and carries heat as rock does, so a molten world's nights stay hot.
+  **Checked against the three bodies we know**: the Moon's equator 107 °C by day, −180 °C by night, 217 K on average
+  (measured: about 120, −175, 215 K); Mercury's 344 °C at its mean distance and 418 °C at its closest to the Sun
+  (the 430 °C it is known for), −177 °C by night; Mars's 5 and −100 °C (about 0 to 20 and −70 to −100).
+- **In the year's temperatures**: for each latitude and month the day's mean, high and low as shares of the
+  temperature of ground lit evenly (a table of 19 latitudes by 12 months, about 0.1 s to make); the month's
+  temperature at each place is lowered by that share, and the day's high and the night's low are kept for each
+  place (`dayHigh`, `nightLow`: the year's means of each). All of it under a hundredth of a bar of air, none from a
+  tenth (in between, in proportion); not on open sea (water holds the day's heat); not on a planet locked to its
+  star (it has no day: the year's model has its lit and its dark side); not where the sun does not rise.
+- **Ground scorched by its days**: with little or no air the day's high decides what heat makes of the ground
+  (D259), not the month's mean: a planet like Mercury is scorched rock (315 °C by day) though its year's mean is
+  mild.
+- **In the Studio**: the Temperature read-out adds "at the equator its days reach 92 °C and its nights fall to
+  −177 °C"; a place clicked says its own. (The air's statement of D261 now begins "The planet cannot hold its air":
+  an Earth close to its star loses its air too, and is not small.) The length of the day now matters on such worlds: a longer day, hotter
+  days, colder nights and a colder mean.
+- **Measured** (planets of the second calculation): the Moon's size with no air and its own day: −73 °C on average,
+  92 °C by day and −177 °C by night at the equator (the Moon: about −75 on average); the same with the Earth's day:
+  milder nights (−133 °C), −52 °C on average; like Mercury: 315 and −184 °C, scorched (the model's bare rock is
+  brighter than Mercury's, albedo 0.25 against 0.09: Mercury's own days are hotter); like Mars: 1 and −101 °C, −67 °C
+  on average (Mars: −63). An Earth at 0.03 AU (its air lost): molten, 1,813 °C by day and 226 °C by night.
+- **Not here**: bare rock's albedo is one figure (0.25, the Earth's deserts'); the dark dust of airless bodies would
+  make their days some tens of degrees hotter. The day's cycle under air of a tenth of a bar or more (small, and the air's doing); pictures of the
+  day's high and the night's low as layers (step 7, the data at every point); a place's day by the month.
+- **Tests**: `test/planet-day.test.ts` (4): the day's cycle (the Moon, Mercury and Mars within their measured
+  ranges; never a mean above the even one; longer days, colder nights and means; solid rock evening the day out;
+  towards the pole; no sun, nothing); the table (within bounds, the polar night, between rows); planets with little
+  or no air (the Moon's like, the same with a short day, Mercury's like scorched by its days, Mars's like, a place
+  explained, none under the Earth's air, half at 0.055 bar, none when locked); the first calculation as it was.
+  Interface: in "Thin air and no air in the Planet Studio", the days and nights read from the model and said of a
+  place.
+
 ### D261. Thin air and no air: a planet too small to hold its air; water that cannot be liquid (the Planet Studio's overhaul, step 4, second part)
 
 - **Why.** Measured on the second calculation (after D260): with a thousandth of a bar of air, or none, a planet kept

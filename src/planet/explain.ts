@@ -25,7 +25,7 @@ export interface ExplainData {
   tags: ArrayLike<number>;
   boundary: ArrayLike<number>;
   boundaryRate: ArrayLike<number>;
-  climate?: { monthly: ArrayLike<number>; precipMonthly: ArrayLike<number>; currents: ArrayLike<number>; windJan: ArrayLike<number>; windJul: ArrayLike<number>; ice?: ArrayLike<number> } | null;
+  climate?: { monthly: ArrayLike<number>; precipMonthly: ArrayLike<number>; currents: ArrayLike<number>; windJan: ArrayLike<number>; windJul: ArrayLike<number>; ice?: ArrayLike<number>; dayHigh?: ArrayLike<number>; nightLow?: ArrayLike<number> } | null;
   water?: { kind: ArrayLike<number>; discharge: ArrayLike<number>; lakeDepth: ArrayLike<number>; ice: ArrayLike<number>; pet: ArrayLike<number> } | null;
   biomes?: { koppen: ArrayLike<number>; biome: ArrayLike<number>; custom: ArrayLike<number>; customNames: string[] } | null;
 }
@@ -128,6 +128,8 @@ export function explain(d: ExplainData, c: number): Explanation {
     if (cur > 1) why.push(`a warm current offshore (${fmt(cur, 1)} K warmer)`);
     if (cur < -1) why.push(`a cold current offshore (${fmt(-cur, 1)} K cooler)`);
     if (why.length) lines.push(`Shaped by ${why.join('; ')}.`);
+    // (D262) With little or no air over it the ground follows the sun through the day.
+    if (d.climate.dayHigh && d.climate.nightLow) lines.push(`With so little air over it the ground follows the sun: its days reach about ${fmt(d.climate.dayHigh[c])} °C and its nights fall to about ${fmt(d.climate.nightLow[c])} °C (each the year's mean).`);
     sections.push({ heading: 'Climate', lines });
   }
 
@@ -150,14 +152,17 @@ export function explain(d: ExplainData, c: number): Explanation {
     const lines: string[] = [];
     let hottest = -Infinity;
     for (let m = 0; m < 12; m++) hottest = Math.max(hottest, d.climate.monthly[m * n + c]);
+    // (With little or no air it is the day's high that decides, D262.)
+    const byDay = !!d.climate.dayHigh && d.climate.dayHigh[c] > hottest, reach = byDay ? 'its days reach' : 'its warmest month reaches';
+    if (byDay) hottest = d.climate.dayHigh![c];
     if (k) lines.push(`Köppen-Geiger ${KOPPEN[k - 1][0]}: ${KOPPEN[k - 1][1].toLowerCase()}.`);
     const own = d.biomes.custom[c];
     if (own) lines.push(`The planet's own biome "${d.biomes.customNames[own - 1]}", its conditions met here.`);
     else if (id === 'lava' || id === 'scorched' || (id === 'barren' && hottest >= TOO_HOT_FOR_PLANTS)) {
       // (D259) What heat alone made of the ground.
-      lines.push(id === 'lava' ? `Molten rock: its warmest month reaches ${fmt(hottest)} °C, and basalt melts at about ${fmt(MOLTEN_FROM)} °C.`
-        : id === 'scorched' ? `Scorched rock: its warmest month reaches ${fmt(hottest)} °C; no water lies on ground hotter than ${SCORCHED_FROM} °C, and nothing lives there.`
-        : `Bare ground: its warmest month reaches ${fmt(hottest)} °C, and nothing grows above about ${TOO_HOT_FOR_PLANTS} °C.`);
+      lines.push(id === 'lava' ? `Molten rock: ${reach} ${fmt(hottest)} °C, and basalt melts at about ${fmt(MOLTEN_FROM)} °C.`
+        : id === 'scorched' ? `Scorched rock: ${reach} ${fmt(hottest)} °C; no water lies on ground hotter than ${SCORCHED_FROM} °C, and nothing lives there.`
+        : `Bare ground: ${reach} ${fmt(hottest)} °C, and nothing grows above about ${TOO_HOT_FOR_PLANTS} °C.`);
     } else if (id && id !== 'sea') {
       let year = 0;
       for (let m = 0; m < 12; m++) year += d.climate.precipMonthly[m * n + c];

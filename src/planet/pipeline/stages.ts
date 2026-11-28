@@ -13,11 +13,12 @@ import { hydrology } from '../water/hydrology.ts';
 import { iceSheets } from '../water/ice.ts';
 import { BIOME, BIOME_IDS, KOPPEN, SEA_ICE_FROM, biomeColour, biomeOf, customBiomeOf, hotSurface, koppen, rockColour, type BiomeId, type Place } from '../life/biomes.ts';
 import { toLevel } from '../mesh/transfer.ts';
-import { airState, derive, waterState, withAirAsItIs } from '../model/physics.ts';
+import { airState, derive, opticalDepth, waterState, withAirAsItIs } from '../model/physics.ts';
 import { cellsAt, meshAt } from '../mesh/icosphere.ts';
 import { seaLevelForVolume } from '../water/sealevel.ts';
 import { rasterize } from '../mesh/transfer.ts';
 import { insolationCells, sunlightOf, type Sunlight } from '../climate/insolation.ts';
+import { cycleAt, dayCycles, dayShare, groundInertia } from '../climate/diurnal.ts';
 import { rasterizeNearest } from '../mesh/transfer.ts';
 import { runHistory, type TectonicHistory } from '../tectonics/history.ts';
 import type { TectonicParams } from '../tectonics/state.ts';
@@ -212,7 +213,7 @@ function joinClimate(parts: ProductData[], deps: Record<string, ProductData>, n:
   const annual = new Float32Array(n);
   for (let m = 0; m < 12; m++) for (let c = 0; c < n; c++) annual[c] += h.tempMonthly[m * n + c] / 12;
   return {
-    monthly: h.tempMonthly, annual, ice: t.ice, ...(t.caps ? { caps: t.caps } : {}), meanK: t.meanK, absorbed: t.absorbed, emitted: t.emitted, tropicsC: t.tropicsC, polesC: t.polesC, years: t.years,
+    monthly: h.tempMonthly, annual, ice: t.ice, ...(t.caps ? { caps: t.caps } : {}), ...(t.dayHigh ? { dayHigh: t.dayHigh, nightLow: t.nightLow } : {}), meanK: t.meanK, absorbed: t.absorbed, emitted: t.emitted, tropicsC: t.tropicsC, polesC: t.polesC, years: t.years,
     precipMonthly: h.precipMonthly, precipAnnual: h.precipAnnual, currents: h.currents, windJan: h.windJan, windJul: h.windJul, meanPrecip: h.meanPrecip,
   };
 }
@@ -394,6 +395,34 @@ export const STAGES: Record<string, StageDef> = {
         }
       }
       const r = seasonalClimate(mesh, def, derive(def), heights, second);
+      // (D262) The day and night of ground with little or no air over it: its own balance at each moment of the day,
+      // which lowers the day's mean below that of ground lit evenly (what the year's model works out) and gives the
+      // day's high and the night's low. Not under air of a tenth of a bar or more, which evens the day out; not on
+      // open sea; not on a planet locked to its star (it has no day).
+      const x = derive(def), thin = deps.sea ? dayShare(def.atmosphere.pressureBar) : 0;
+      let dayHigh: Float32Array | null = null, nightLow: Float32Array | null = null, dayC = 0, nightC = 0;
+      if (thin > 0 && !x.tidallyLocked && Number.isFinite(x.solarDayHours) && x.solarDayHours > 0) {
+        const sun = sunlightOf(def, x), tau = opticalDepth(def, 288), hold = 1 + 0.75 * (tau.co2 + tau.ch4);
+        const day = x.solarDayHours * 3600, inertia = groundInertia(def.atmosphere.pressureBar);
+        const rock = dayCycles(sun, 0.25, day, inertia, hold), ice = deps.sea.fate === 'frozen' ? dayCycles(sun, 0.62, day, inertia, hold) : rock;
+        dayHigh = new Float32Array(n); nightLow = new Float32Array(n);
+        const open = deps.sea.fate === 'liquid';
+        let band = 0;
+        for (let c = 0; c < n; c++) {
+          const sea = heights[c] < 0 && !deps.sea.dry, tab = sea ? ice : rock, lat = mesh.lat[c];
+          for (let m = 0; m < 12; m++) {
+            const k = r.monthly[m * n + c] + 273.15;
+            // (Open or ice-covered sea under some air keeps its own even temperature: water holds the day's heat.)
+            const still = sea && open;
+            const mean = still ? 1 : 1 + thin * (cycleAt(tab.mean, tab.lats, m, lat) - 1);
+            const high = still ? 1 : 1 + thin * (cycleAt(tab.max, tab.lats, m, lat) - 1), low = still ? 1 : 1 + thin * (cycleAt(tab.min, tab.lats, m, lat) - 1);
+            r.monthly[m * n + c] = k * mean - 273.15;
+            dayHigh[c] += (k * high - 273.15) / 12; nightLow[c] += (k * low - 273.15) / 12;
+          }
+          if (Math.abs(lat) < 0.175) { band += mesh.area[c]; dayC += dayHigh[c] * mesh.area[c]; nightC += nightLow[c] * mesh.area[c]; }
+        }
+        dayC /= band || 1; nightC /= band || 1;
+      }
       ctx.progress(1, 1);
       // The planet's figures as the pictures have them (D260): the surface's mean temperature over the year (°C; the
       // model's own `meanK` is the sea-level one), and how much of the sea lies frozen for most of the year.
@@ -413,6 +442,7 @@ export const STAGES: Record<string, StageDef> = {
         years: r.years, heights: heights.slice(),
         ...(deps.sea ? { seaShare: deps.sea.share, pressureBar: deps.sea.pressureBar, surfaceC, seaFrozen: seaArea > 0 && !deps.sea.dry ? frozen / seaArea : 0 } : {}),
         ...(caps ? { caps, capShare: capArea / (4 * Math.PI) } : {}),
+        ...(dayHigh && nightLow ? { dayHigh, nightLow, dayC, nightC } : {}),
       };
     },
   },
@@ -506,7 +536,7 @@ export const STAGES: Record<string, StageDef> = {
       const second = !!deps.sea, dry = !!deps.sea?.dry, crust = deps.sea?.crust as Uint8Array | undefined;
       const frozenYear = deps.climate.ice as Float32Array;
       // (D261) Under too little air for liquid water: seas frozen where they stand, or ice caps where the vapour froze out.
-      const thin = deps.sea?.fate === 'frozen', caps = deps.climate.caps as Uint8Array | undefined;
+      const thin = deps.sea?.fate === 'frozen', caps = deps.climate.caps as Uint8Array | undefined, dayHigh = deps.climate.dayHigh as Float32Array | undefined;
       const T = new Float64Array(12), P = new Float64Array(12);
       const place: Place = { temp: T, precip: P, pet: 0, height: 0, water: 0, ice: 0 };
       for (let c = 0; c < n; c++) {
@@ -517,6 +547,8 @@ export const STAGES: Record<string, StageDef> = {
         // decides first: molten rock, rock scorched dry, bare ground too hot for anything to grow.)
         let hot = -Infinity;
         for (let m = 0; m < 12; m++) if (T[m] > hot) hot = T[m];
+        // (With little or no air the ground is as hot as its days make it, D262: its days' high decides.)
+        if (dayHigh && dayHigh[c] > hot) hot = dayHigh[c];
         // (Too little air for liquid water, D261: nothing rains or snows, so the land is bare rock; the seas, ice.
         // A cap of ice where the planet's vapour froze out. And on a planet with air, D261: ground whose warmest
         // month is below freezing is under ice only where some snow falls; where next to none does, it is bare.)
