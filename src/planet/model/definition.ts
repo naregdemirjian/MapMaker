@@ -359,8 +359,9 @@ export const PRESETS: Record<PresetId, Preset> = {
     life: { vegetation: 'none' },
   }, { kind: 'Venus-like' }),
   // (D268) The kinds of world the second calculation makes and the presets above did not cover.
-  'ice-age': preset('Ice age', 'An Earth a little farther from its star with less carbon dioxide in its air (180 parts in a million, as in the Earth\'s last ice age): some degrees colder, ice sheets and frozen seas reaching far from the poles, the seas still open.', {
-    orbit: { semiMajorAu: 1.015 },
+  'ice-age': preset('Ice age', 'An Earth with less carbon dioxide in its air (180 parts in a million, as in the Earth\'s last ice age): some degrees colder, its ice sheets and frozen seas reaching further from the poles, its seas still open. (A little less light as well and the planet freezes over: see the marks under the distance.)', {
+    // (D270: the carbon dioxide alone. With the orbit a little wider as well, 1.015 AU, the planet froze over at the
+    // Studio's own detail, whose lands run some degrees colder than the coarser ones the preset was tried on.)
     atmosphere: { co2: 1.8e-4 },
   }, { second: true }),
   scorched: preset('Scorched world', 'An Earth at less than half its distance from the star: five times the sunlight, far more than seas can stand. They boiled away long ago and the water was lost to space; what is left is dry rock hotter than boiling water, under the air it still holds.', {

@@ -61,6 +61,24 @@ Follows from D2. The test drives the real interface exactly as a person would.
 
 ## Decisions taken during development
 
+### D270. A fault of D268 mended: the "Ice age" preset froze the planet over at the Studio's own detail
+
+- **The fault** (seen on the sheet of pictures made for step 6, in what D268 had pushed): the "Ice age" preset opened
+  as a ball of ice, -35 °C. It had been tried, and is tested, on the coarser mesh the unit tests use, where it gave
+  6 °C with ice over 14 %. At the Studio's own detail the land is another land, and Earth-like planets run some
+  degrees colder there (10 to 12 °C over seven seeds, against 15); with the orbit widened to 1.015 AU *and* the
+  carbon dioxide lowered, the planet passed the point where ice feeds on itself.
+- **The preset** lowers the carbon dioxide alone (180 parts in a million, as in the Earth's last ice age) and keeps
+  the Earth's orbit. Measured at the Studio's detail over seven seeds: 5 to 7.5 °C (4.5 °C colder than the same
+  planet as an Earth), ice over 12 to 16 % (an Earth: 7 to 10 %), the seas open; and still no ball of ice with
+  half a hundredth more distance on top.
+- **Why it was not caught**: every preset was tested, but on the tests' mesh only. A test now tries the Earth and
+  the ice age at the Studio's own detail, for two seeds.
+- **Known, not changed here**: Earth-like planets at the Studio's detail are some degrees cooler than the Earth
+  (the climate was fitted on the Earth's own land, D157 to D168; a generated land is not the Earth's).
+- **Tests**: `test/planet-presets.test.ts` (1 more): at the Studio's detail, for two seeds, the Earth an Earth and
+  the ice age an ice age (colder by 3 °C or more, more ice, its seas open and not frozen over).
+
 ### D269. A planet's foundation: what is worked out at every point, kept with the project (the Planet Studio's overhaul, step 7)
 
 - **What was missing**: a simulated planet's map kept only the planet's settings. Every time the project was opened

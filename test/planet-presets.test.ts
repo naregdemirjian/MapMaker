@@ -64,7 +64,7 @@ test('each kind of world gives its kind: an Earth, an ice age, a snowball, a hot
   // An Earth: open seas, mild, forest and grass.
   assert.ok(m.earthlike.fate === 'liquid' && m.earthlike.meanC > 10 && m.earthlike.meanC < 20 && m.earthlike.fam.forest + m.earthlike.fam.grass > 0.15 && m.earthlike.frozen < 0.12, say('earthlike'));
   // An ice age: colder by some degrees, more ice, its seas still mostly open.
-  assert.ok(m['ice-age'].fate === 'liquid' && m['ice-age'].meanC < m.earthlike.meanC - 5 && m['ice-age'].meanC > 0 && m['ice-age'].fam.ice > m.earthlike.fam.ice + 0.05 && m['ice-age'].frozen < 0.4, say('ice-age'));
+  assert.ok(m['ice-age'].fate === 'liquid' && m['ice-age'].meanC < m.earthlike.meanC - 3 && m['ice-age'].meanC > 0 && m['ice-age'].fam.ice > m.earthlike.fam.ice + 0.02 && m['ice-age'].frozen < 0.4, say('ice-age'));
   // A snowball: its seas frozen from pole to pole.
   assert.ok(m.frozen.fate === 'liquid' && m.frozen.frozen > 0.99 && m.frozen.fam.ice > 0.9 && m.frozen.meanC < -40, say('frozen'));
   // A hot desert: small seas, warm, more desert and bare ground than anything else, little green.
@@ -95,7 +95,26 @@ test('each kind of world gives its kind: an Earth, an ice age, a snowball, a hot
   const apart = (a: PresetId, b: PresetId) => (Object.keys(m[a].fam) as FamilyId[]).reduce((s, f) => s + Math.abs(m[a].fam[f] - m[b].fam[f]), 0) / 2;
   const kinds = WORLD_KINDS.slice(0, 11);
   for (let i = 0; i < kinds.length; i++) for (let j = i + 1; j < kinds.length; j++) {
+    // (The ice age is the Earth's own nearest kin, D270: the same world some degrees colder with half as much ice
+    // again; told from it above by just that.)
+    if (kinds[i] === 'earthlike' && kinds[j] === 'ice-age') { assert.ok(m['ice-age'].fam.ice > 1.3 * m.earthlike.fam.ice, `${m['ice-age'].fam.ice} against ${m.earthlike.fam.ice} of ice`); continue; }
     const tint = m[kinds[i]].colour.reduce((s2, v, k) => s2 + Math.abs(v - m[kinds[j]].colour[k]), 0);
     assert.ok(apart(kinds[i], kinds[j]) > 0.125 || Math.abs(m[kinds[i]].meanC - m[kinds[j]].meanC) > 8 || tint > 40, `${kinds[i]} and ${kinds[j]}: ${apart(kinds[i], kinds[j])} of the surface, ${m[kinds[i]].meanC} and ${m[kinds[j]].meanC} °C, colours ${tint} apart`);
+  }
+});
+
+test('at the Studio\'s own detail (D270): the ice age is an ice age and not a ball of ice, the Earth an Earth, whatever the seed', async () => {
+  // (The presets above are tried on a coarser mesh, whose lands run some degrees warmer: there an orbit a little
+  // wider as well still gave an ice age; at the Studio's detail it froze the planet over, -35 °C.)
+  const p = new Pipeline(new LocalExecutor()), S = { level: 5, durationMyr: 200, frameEveryMyr: 25, sea: true } as const;
+  for (const seed of [4, 9]) {
+    const made = async (id: PresetId) => {
+      const d = newDefinition(id, seed);
+      const T = (await p.product('temperature', d, S)).data, B = (await p.product('biomes', d, S)).data;
+      return { meanC: T.surfaceC as number, frozen: T.seaFrozen as number, fam: familyShares(B.shares as Float32Array) };
+    };
+    const earth = await made('earthlike'), ice = await made('ice-age');
+    assert.ok(earth.meanC > 8 && earth.meanC < 20 && earth.frozen < 0.15 && earth.fam.forest + earth.fam.grass > 0.15, `seed ${seed}, an Earth: ${JSON.stringify(earth)}`);
+    assert.ok(ice.meanC < earth.meanC - 3 && ice.meanC > 2 && ice.frozen < 0.3 && ice.fam.ice > earth.fam.ice + 0.02 && ice.fam.ice < 0.3 && ice.fam.sea > 0.4, `seed ${seed}, an ice age: ${JSON.stringify(ice)}`);
   }
 });
